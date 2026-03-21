@@ -31,3 +31,6 @@ Thumbs.db
 *.bin
 *.log
 .obsidian/
+
+# Docs site (Tailwind Plus license — private repo)
+docs-site/
