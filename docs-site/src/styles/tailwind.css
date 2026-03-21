@@ -6,6 +6,16 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+  /* UA Console-inspired palette */
+  --color-apollo-green: #4ADE80;
+  --color-apollo-green-dim: #22C55E;
+  --color-apollo-amber: #F59E0B;
+  --color-apollo-surface: #1A1D23;
+  --color-apollo-panel: #22252B;
+  --color-apollo-border: #2E3238;
+  --color-apollo-text: #D4D4D8;
+  --color-apollo-text-dim: #71717A;
+
   --text-*: initial;
   --text-xs: 0.75rem;
   --text-xs--line-height: 1rem;

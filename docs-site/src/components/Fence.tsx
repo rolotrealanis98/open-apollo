@@ -7,13 +7,14 @@ export function Fence({
   children,
   language,
 }: {
-  children: string
+  children: React.ReactNode
   language: string
 }) {
+  const code = typeof children === 'string' ? children.trimEnd() : String(children ?? '')
   return (
     <Highlight
-      code={children.trimEnd()}
-      language={language}
+      code={code}
+      language={language ?? 'text'}
       theme={{ plain: {}, styles: [] }}
     >
       {({ className, style, tokens, getTokenProps }) => (

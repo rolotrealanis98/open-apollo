@@ -5,9 +5,9 @@ import { Icon } from '@/components/Icon'
 const styles = {
   note: {
     container:
-      'bg-sky-50 dark:bg-slate-800/60 dark:ring-1 dark:ring-slate-300/10',
-    title: 'text-sky-900 dark:text-sky-400',
-    body: 'text-sky-800 [--tw-prose-background:var(--color-sky-50)] prose-a:text-sky-900 prose-code:text-sky-900 dark:text-slate-300 dark:prose-code:text-slate-300',
+      'bg-emerald-50 dark:bg-emerald-950/30 dark:ring-1 dark:ring-emerald-500/20',
+    title: 'text-emerald-900 dark:text-emerald-400',
+    body: 'text-emerald-800 [--tw-prose-background:var(--color-emerald-50)] prose-a:text-emerald-900 prose-code:text-emerald-900 dark:text-zinc-300 dark:prose-code:text-zinc-300',
   },
   warning: {
     container:
