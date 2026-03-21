@@ -82,7 +82,7 @@ Write-Host "This is a template script. The WinRing0 download URL and SHA256" -Fo
 Write-Host "hash need to be filled in before this script can run." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "If you want to help set this up, please open an issue at:" -ForegroundColor Yellow
-Write-Host "  https://github.com/open-apollo/open-apollo/issues" -ForegroundColor Yellow
+Write-Host "  https://github.com/rolotrealanis98/open-apollo/issues" -ForegroundColor Yellow
 exit 1
 
 # ============================================================================

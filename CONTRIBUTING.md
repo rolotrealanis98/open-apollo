@@ -19,7 +19,7 @@ us understand what works and what needs fixing across the Apollo product line.
 
 1. Clone and build the driver:
    ```bash
-   git clone https://github.com/open-apollo/open-apollo.git
+   git clone https://github.com/rolotrealanis98/open-apollo.git
    cd open-apollo
    ./scripts/check-deps.sh
    cd driver && make
@@ -31,7 +31,7 @@ us understand what works and what needs fixing across the Apollo product line.
    ./scripts/device-probe.sh
    ```
 
-3. Submit the output as a [Device Report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) issue.
+3. Submit the output as a [Device Report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml) issue.
 
 Even if nothing works, the probe output tells us what we need to know about
 your hardware revision. Negative results are still valuable.

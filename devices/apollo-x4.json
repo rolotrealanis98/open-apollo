@@ -10,6 +10,6 @@
   "hiz": 2,
   "features": ["spdif", "adat"],
   "status": "verified",
-  "contributor": "@maintainer",
+  "contributor": "@rolotrealanis98",
   "notes": "First verified device. Full duplex audio, all sample rates, preamp controls working."
 }
