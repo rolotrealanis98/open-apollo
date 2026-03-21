@@ -70,7 +70,7 @@ python3 ua_mixer_daemon.py -v
 
 ## Documentation
 
-Full documentation at the [Open Apollo docs site](https://open-apollo.org) *(coming soon)*.
+Full documentation at the [Open Apollo docs site](https://open-apollo-docs.pages.dev/).
 
 ## Contributing
 
