@@ -380,7 +380,7 @@ static const char * const ua_x4_play_names[24] = {
 /*
  * Apollo x4 IO Descriptor SRAM Data
  *
- * Captured from warm boot BAR0 dump (2026-03-18).
+ * Captured from warm boot BAR0 dump.
  * Format: 6-word header + packed 16-bit channel pairs + 0x00FF00FF padding.
  *
  * Header layout:

@@ -2440,7 +2440,7 @@ class HardwareRouter:
         NOT present in readback:
             data[8]-[17]: Static 0xf0000000 — NOT audio meter data.
                           Audio meters must be computed in software from
-                          PCM samples (CMxMeter-equivalent logic).
+                          PCM samples (software meter computation).
         """
         rb = self.backend.get_hw_readback()
         if rb is None:
@@ -2507,7 +2507,7 @@ class HardwareRouter:
         # NOTE: rb_data[8]-[17] are NOT audio metering data.
         # Confirmed static 0xf0000000 even with live audio playing.
         # Audio meters must be computed in software from PCM samples
-        # in the DMA buffers (CMxMeter-equivalent logic), not read
+        # in the DMA buffers (software meter computation), not read
         # from hardware readback registers.  See docs/hw-readback-map.md
         # and docs/STATUS.md issue #32.
 

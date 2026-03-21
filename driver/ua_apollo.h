@@ -387,21 +387,21 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 /* Monitor parameter IDs (from hardware observation, ch_type=2) */
 #define UA_MON_PARAM_LEVEL      0x01  /* ch_idx=1, raw 8-bit (192+dB×2) */
 #define UA_MON_PARAM_MUTE       0x03  /* ch_idx=0, 2=muted/0=unmuted; also 1=mono */
-#define UA_MON_PARAM_SOURCE     0x04  /* ch_idx=1, 0=MIX/1=CUE1/2=CUE2 (CORRECTED 2026-02-22) */
+#define UA_MON_PARAM_SOURCE     0x04  /* ch_idx=1, 0=MIX/1=CUE1/2=CUE2 (CORRECTED) */
 #define UA_MON_PARAM_CUE1_MIX   0x05  /* ch_idx=0, 0=on/2=off (inverted!) */
 #define UA_MON_PARAM_CUE1_MONO  0x06  /* ch_idx=0, 1=on/0=off */
 #define UA_MON_PARAM_CUE2_MIX   0x07  /* ch_idx=0, 0=on/2=off */
 #define UA_MON_PARAM_CUE2_MONO  0x08  /* ch_idx=0, 1=on/0=off */
-#define UA_MON_PARAM_OUT_PAD_A  0x19  /* ch_idx=1, Line 1-2 pad, 1=on/0=off (VERIFIED 2026-02-20) */
-#define UA_MON_PARAM_OUT_PAD_B  0x1a  /* ch_idx=1, Line 3-4 pad, 1=on/0=off (VERIFIED 2026-02-20) */
+#define UA_MON_PARAM_OUT_PAD_A  0x19  /* ch_idx=1, Line 1-2 pad, 1=on/0=off (VERIFIED) */
+#define UA_MON_PARAM_OUT_PAD_B  0x1a  /* ch_idx=1, Line 3-4 pad, 1=on/0=off (VERIFIED) */
 #define UA_MON_PARAM_IDENTIFY   0x1d  /* ch_idx=0, identify/locate */
-#define UA_MON_PARAM_DIGITAL_MIRROR 0x1e /* ch_idx=9, 1=on/0=off (CORRECTED 2026-02-22) */
+#define UA_MON_PARAM_DIGITAL_MIRROR 0x1e /* ch_idx=9, 1=on/0=off (CORRECTED) */
 #define UA_MON_PARAM_DIGITAL_MODE 0x21 /* ch_idx=0, 0=S/PDIF/8=ADAT */
 #define UA_MON_PARAM_CUE1_MIRROR 0x2e /* ch_idx=9, output pair value */
 #define UA_MON_PARAM_CUE2_MIRROR 0x2f /* ch_idx=9, output pair value */
-#define UA_MON_PARAM_OUTPUT_REF 0x32  /* ch_idx=1, 0=+4dBu/1=-10dBV (CORRECTED 2026-02-20) */
+#define UA_MON_PARAM_OUTPUT_REF 0x32  /* ch_idx=1, 0=+4dBu/1=-10dBV (CORRECTED) */
 #define UA_MON_PARAM_MONO       0x36  /* setting[2] bit 17 — vendor driver property ID (NOT used by UA Mixer Engine) */
-#define UA_MON_PARAM_MIX_TO_MONO UA_MON_PARAM_MUTE /* VERIFIED 2026-02-20: uses param 0x03 value=1 */
+#define UA_MON_PARAM_MIX_TO_MONO UA_MON_PARAM_MUTE /* VERIFIED: uses param 0x03 value=1 */
 #define UA_MON_PARAM_HP1_SOURCE 0x3f  /* ch_idx=1, 0=CUE1/1=CUE2 */
 #define UA_MON_PARAM_HP2_SOURCE 0x40  /* ch_idx=1, 0=CUE1/1=CUE2 */
 #define UA_MON_PARAM_DIM_LEVEL  0x43  /* ch_idx=0, 1-7 stepped */

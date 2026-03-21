@@ -11,7 +11,7 @@ Usage:
     python3 test_client.py
 
     # Test against remote host
-    python3 test_client.py --host 192.168.1.100
+    python3 test_client.py --host <apollo-host>
 
     # Verbose mode (show all responses)
     python3 test_client.py -v

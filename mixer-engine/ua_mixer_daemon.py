@@ -1271,10 +1271,10 @@ def find_device_map() -> Path | None:
     if DEFAULT_DEVICE_MAP.exists():
         return DEFAULT_DEVICE_MAP
 
-    # Check ConsoleLink project
-    consolelink_map = Path.home() / "Documents/GitHub/ConsoleLink/UAD Console Network/device_maps/device_map_apollo_x4.json"
-    if consolelink_map.exists():
-        return consolelink_map
+    # Check alternate location
+    alt_map = Path.home() / "devices/device_map_apollo_x4.json"
+    if alt_map.exists():
+        return alt_map
 
     return None
 
@@ -1334,7 +1334,7 @@ Examples:
     if not device_map or not device_map.exists():
         log.error("Device map not found. Searched:")
         log.error("  %s", DEFAULT_DEVICE_MAP)
-        log.error("  ~/Documents/GitHub/ConsoleLink/.../device_map_apollo_x4.json")
+        log.error("  ~/devices/device_map_apollo_x4.json")
         log.error("Use --device-map to specify the path.")
         sys.exit(1)
 

@@ -596,7 +596,7 @@ int ua_mixer_write_setting_locked(struct ua_device *ua,
  * Called from the DSP service loop at 10 Hz.  Matches the hardware driver's
  * _flushCachedSettings which is called from GetReadback at ~33Hz.
  *
- * Windows BAR0 capture (2026-03-20) proves: val AND mask persist
+ * Windows BAR0 capture proves: val AND mask persist
  * across flushes. The DSP reads val/mask on every SEQ bump.
  * Do NOT clear mask after writing — gain requires persistent values.
  */
@@ -742,7 +742,7 @@ int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 
 	case UA_MON_PARAM_MUTE:
 		/*
-		 * Param 0x03 is 3-state (VERIFIED 2026-02-20):
+		 * Param 0x03 is 3-state (VERIFIED):
 		 *   value=0: normal stereo, unmuted → bits[17:16] = 00
 		 *   value=1: mono (MixToMono)       → bit 17 set
 		 *   value=2: muted                  → bit 16 set
@@ -765,7 +765,7 @@ int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 	case UA_MON_PARAM_MONO:
 		/*
 		 * Legacy hardware driver property ID 0x36. The UA Mixer Engine actually
-		 * sends param 0x03 value=1 for MixToMono (VERIFIED 2026-02-20).
+		 * sends param 0x03 value=1 for MixToMono (VERIFIED).
 		 * Keep this case for backward compatibility with any callers
 		 * using the old param ID.
 		 */
@@ -1894,10 +1894,10 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 * ua_boot_transport_start() programs all transport regs,
 		 * starts transport, does ACEFACE, and pulses DMA reset.
 		 *
-		 * Discovered 2026-03-01: just AX_CONTROL=0x20F alone is
+		 * Discovered via hardware observation: just AX_CONTROL=0x20F alone is
 		 * insufficient — all transport regs must be set first.
 		 *
-		 * IOMMU FIX (2026-03-09): ua_audio_preinit_dma() MUST be
+		 * IOMMU FIX: ua_audio_preinit_dma() MUST be
 		 * called before ua_boot_transport_start().  When transport
 		 * starts, the FPGA immediately begins audio DMA using the
 		 * SG table in BAR0 SRAM.  Without pre-allocation, all SG
@@ -2029,7 +2029,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 	 * mode but BREAKS playback (no audio output). Without it, DSP
 	 * stays in default passthrough mode where playback works.
 	 * Capture needs this write but it breaks playback.
-	 * (2026-03-18: confirmed playback broken with clock write)
+	 * (confirmed playback broken with clock write)
 	 */
 #if 0
 	if (ua_uses_audio_extension(ua->device_type) && ua->aceface_done) {
@@ -2428,4 +2428,4 @@ module_exit(ua_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_VERSION(DRIVER_VERSION);
-MODULE_AUTHOR("apollo-linux contributors");
+MODULE_AUTHOR("Open Apollo contributors");

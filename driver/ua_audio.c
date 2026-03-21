@@ -621,7 +621,7 @@ int ua_aceface_handshake(struct ua_device *ua)
  *
  * The FPGA ring buffer engine requires the FULL PrepareTransport
  * register sequence before it processes ring entries.  Discovered
- * 2026-03-01: just writing AX_CONTROL=0x20F is insufficient.
+ * via hardware observation: just writing AX_CONTROL=0x20F is insufficient.
  *
  * This encapsulates:
  *   1. Model channel count lookup
@@ -732,7 +732,7 @@ int ua_boot_transport_start(struct ua_device *ua)
 
 	/*
 	 * Give DMA engines time to stabilize after reset pulse.
-	 * Verified 2026-03-01: without this delay, FPGA ignores
+	 * Verified: without this delay, FPGA ignores
 	 * ring entries. 50ms is empirically sufficient.
 	 */
 	msleep(50);
@@ -846,7 +846,7 @@ static int ua_audio_connect(struct ua_device *ua)
 	 *
 	 * The hardware driver uses up to 20 retries × 9 polls × 100ms = ~18 seconds.
 	 *
-	 * CRITICAL FIX (2026-02-28): Use bank-shifted registers.
+	 * CRITICAL FIX: Use bank-shifted registers.
 	 *   ACEFACE target: 0xC02C (was 0xC004)
 	 *   Status poll:    0xC030 (was 0x22C0)
 	 */
@@ -1643,7 +1643,7 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
  *   Doorbell: write 4 to BAR0 + 0x2260
  *   Wait up to 2000ms for response
  *
- * CRITICAL FIX (2026-02-28): Previous code wrote to 0xC04C (no bank
+ * CRITICAL FIX: Previous code wrote to 0xC04C (no bank
  * shift) and polled 0x22C0 (transport status, NOT notification status).
  * ---------------------------------------------------------------- */
 
@@ -2064,7 +2064,7 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		 * silence.  After transport, playback passthrough
 		 * is already established and capture routing
 		 * activates correctly.
-		 * (Discovered 2026-03-18: ordering is critical)
+		 * (Discovered via hardware observation: ordering is critical)
 		 */
 		if (ua->aceface_done) {
 			/* Force source=0xC for internal clock — required for
@@ -2556,7 +2556,7 @@ static int ua_monitor_mono_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.monitor.mono)
 		return 0;
 
-	/* VERIFIED 2026-02-20: mono uses param 0x03 value=1 (same param as mute) */
+	/* VERIFIED: mono uses param 0x03 value=1 (same param as mute) */
 	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, newval ? 1 : 0);
 	if (ret)
 		return ret;
@@ -2817,7 +2817,7 @@ static int ua_output_ref_put(struct snd_kcontrol *kctl,
 	if ((int)idx == ua->audio.monitor.output_ref)
 		return 0;
 
-	/* VERIFIED 2026-02-20: OutputRef uses ch_idx=1 (was 0) */
+	/* VERIFIED: OutputRef uses ch_idx=1 (was 0) */
 	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_OUTPUT_REF, idx);
 	if (ret)
 		return ret;

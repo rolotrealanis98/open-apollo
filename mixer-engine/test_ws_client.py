@@ -7,7 +7,7 @@ Analogous to test_client.py (TCP) but uses the ws://4720 protocol.
 
 Usage:
     python3 test_ws_client.py
-    python3 test_ws_client.py --host 192.168.1.100
+    python3 test_ws_client.py --host <apollo-host>
     python3 test_ws_client.py -v --stay
 
 Requires: pip install websockets

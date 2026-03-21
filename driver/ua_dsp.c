@@ -333,7 +333,7 @@ int ua_dsp_rings_init(struct ua_device *ua)
 		 * CRITICAL: Pulse DMA reset with engines already enabled.
 		 * Without this, the FPGA ring buffer engine stays dormant
 		 * and ignores doorbells (POSITION stuck at 0).
-		 * Discovered empirically 2026-03-01: reset-while-enabled
+		 * Discovered empirically: reset-while-enabled
 		 * kicks the ring buffer DMA engine into active state.
 		 */
 		ua_write(ua, UA_REG_DMA_CTRL,
@@ -2824,7 +2824,7 @@ out_free:
  * The IO descriptor regions at 0xC1A4 (input) and 0xC2C4 (output)
  * tell the FPGA/DSP how to map DMA channels to audio signals.
  *
- * Hardware format (BAR0 dump captured 2026-03-18):
+ * Hardware format (from BAR0 dump):
  *   6-word header + packed 16-bit channel pairs + 0x00FF00FF padding
  *
  * Linux was writing raw 32-bit channel IDs with no header — wrong
@@ -2887,7 +2887,7 @@ int ua_dsp_send_routing(struct ua_device *ua)
  * ua_dsp_load_programs - Send DSP audio routing programs to DSP 0
  *
  * Loads the mixer core, output routing, and capture routing programs
- * captured from hardware observation (2026-03-18). These programs
+ * captured from hardware observation. These programs
  * tell the DSP how to route audio between preamp inputs, mix buses,
  * and DMA record/playback channels.
  *
