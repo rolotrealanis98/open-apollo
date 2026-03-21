@@ -1,0 +1,76 @@
+name: Device Report
+description: Submit a test report for your Apollo device
+title: "[Device Report] Apollo "
+labels: ["device-report"]
+body:
+  - type: dropdown
+    id: device-model
+    attributes:
+      label: Device Model
+      description: Which Apollo device are you testing?
+      options:
+        - Apollo x4
+        - Apollo x4 Gen 2
+        - Apollo x6
+        - Apollo x6 Gen 2
+        - Apollo x8
+        - Apollo x8 Gen 2
+        - Apollo x8p
+        - Apollo x8p Gen 2
+        - Apollo x16
+        - Apollo x16 Gen 2
+        - Apollo x16D
+        - Apollo Twin X
+        - Apollo Twin X Gen 2
+        - Apollo Solo
+        - Arrow
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Linux Distribution and Kernel Version
+      description: "e.g., Fedora 43 / 6.12.8-200.fc41.x86_64"
+      placeholder: "Distribution name and version / output of uname -r"
+    validations:
+      required: true
+
+  - type: textarea
+    id: probe-output
+    attributes:
+      label: Device Probe Output
+      description: "Paste the output of ./scripts/device-probe.sh here, or upload the generated JSON file."
+      render: json
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: what-works
+    attributes:
+      label: What Works
+      description: Check everything that works correctly on your device.
+      options:
+        - label: Driver loads successfully
+        - label: Audio playback
+        - label: Audio capture
+        - label: Preamp controls
+        - label: Monitor controls
+        - label: Sample rate switching
+
+  - type: textarea
+    id: what-doesnt-work
+    attributes:
+      label: What Doesn't Work
+      description: "Describe anything that doesn't work, including error messages or unexpected behavior."
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-notes
+    attributes:
+      label: Additional Notes
+      description: "Any other relevant information (Thunderbolt controller, BIOS settings, etc.)"
+    validations:
+      required: false
