@@ -37,11 +37,45 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: thunderbolt-version
+    attributes:
+      label: Thunderbolt Connection Type
+      description: How is the Apollo connected to your computer?
+      options:
+        - Thunderbolt 3 (built-in)
+        - Thunderbolt 4 (built-in)
+        - Thunderbolt 5 (built-in)
+        - USB4
+        - PCIe Thunderbolt add-in card
+        - Thunderbolt dock/hub (specify in notes)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: thunderbolt-controller
+    attributes:
+      label: Thunderbolt Controller
+      description: "Run: cat /sys/bus/thunderbolt/devices/0-0/device_name (or lspci | grep -i thunder)"
+      placeholder: "e.g., Intel JHL7540 / Intel Maple Ridge / AMD USB4"
+    validations:
+      required: false
+
+  - type: input
+    id: cable
+    attributes:
+      label: Cable Type
+      description: "What cable are you using? Brand/length/rating if known."
+      placeholder: "e.g., Apple TB3 0.8m / CalDigit TB4 2m / generic USB4 1m"
+    validations:
+      required: false
+
   - type: textarea
     id: probe-output
     attributes:
       label: Device Probe Output
-      description: "Paste the output of ./scripts/device-probe.sh here, or upload the generated JSON file."
+      description: "Paste the output of ./tools/contribute/device-probe.sh here, or upload the generated JSON file."
       render: json
     validations:
       required: true
@@ -55,9 +89,12 @@ body:
         - label: Driver loads successfully
         - label: Audio playback
         - label: Audio capture
-        - label: Preamp controls
-        - label: Monitor controls
+        - label: Preamp controls (gain, 48V, PAD)
+        - label: Monitor controls (volume, mute, dim)
         - label: Sample rate switching
+        - label: Headphone output
+        - label: S/PDIF I/O
+        - label: ADAT I/O
 
   - type: textarea
     id: what-doesnt-work
@@ -68,9 +105,18 @@ body:
       required: false
 
   - type: textarea
+    id: dmesg-output
+    attributes:
+      label: Relevant dmesg Output
+      description: "Run: dmesg | grep -i 'ua_apollo\\|thunderbolt\\|pci.*1fc9' — paste relevant lines."
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
     id: additional-notes
     attributes:
       label: Additional Notes
-      description: "Any other relevant information (Thunderbolt controller, BIOS settings, etc.)"
+      description: "Anything else — BIOS settings, daisy-chaining, dual-boot setup, etc."
     validations:
       required: false
