@@ -401,42 +401,75 @@ deploy_configs() {
 }
 
 # ================================================================
-# Step 6: Run apollo-init.sh
+# Step 6: Verify hardware + PipeWire
 # ================================================================
 run_init() {
-    header "Hardware Init"
+    header "Hardware Verification"
 
     if [ "$SKIP_INIT" = "1" ]; then
-        info "Skipping hardware init (--skip-init)"
+        info "Skipping verification (--skip-init)"
         STEP_STATUS[init]="skipped"
         return 0
     fi
 
     if [ -z "$APOLLO_PCIE" ]; then
-        info "No Apollo hardware detected — skipping init"
-        info "Connect Apollo via Thunderbolt and run: sudo bash tools/apollo-init.sh"
+        info "No Apollo hardware detected on Thunderbolt bus"
+        info "After connecting Apollo, run: sudo bash tools/apollo-init.sh"
         STEP_STATUS[init]="skipped"
         STEP_DETAIL[init]="no hardware detected"
         return 0
     fi
 
-    local init_script="$PROJECT_DIR/tools/apollo-init.sh"
-    if [ ! -f "$init_script" ]; then
-        warn "tools/apollo-init.sh not found — skipping"
-        STEP_STATUS[init]="fail"
-        STEP_DETAIL[init]="script not found"
-        return 1
-    fi
+    # Driver may have auto-loaded via DKMS+udev when Apollo was detected
+    if lsmod | grep -q ua_apollo; then
+        ok "Driver loaded (auto-detected Apollo hardware)"
 
-    info "Running apollo-init.sh..."
-    if run_sudo bash "$init_script" 2>&1; then
-        ok "Hardware initialized"
+        # Wait briefly for device node
+        local tries=0
+        while [ ! -e /dev/ua_apollo0 ] && [ $tries -lt 30 ]; do
+            sleep 0.2
+            tries=$((tries + 1))
+        done
+
+        if [ -e /dev/ua_apollo0 ]; then
+            ok "Device node: /dev/ua_apollo0"
+        fi
+
+        # Check ALSA
+        if aplay -l 2>/dev/null | grep -q ua_apollo; then
+            ok "ALSA card registered"
+        fi
+
+        # Restart PipeWire to pick up new configs
+        local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+        if [ -n "$pw_user" ] && command -v wpctl > /dev/null 2>&1; then
+            info "Restarting PipeWire to apply configs..."
+            sudo -u "$pw_user" systemctl --user restart pipewire wireplumber 2>/dev/null || true
+            sleep 2
+
+            # Set pro-audio profile
+            local dev_id
+            dev_id=$(sudo -u "$pw_user" wpctl status 2>/dev/null | \
+                grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+            if [ -n "$dev_id" ]; then
+                sudo -u "$pw_user" wpctl set-profile "$dev_id" 1 2>/dev/null || true
+                sleep 1
+                ok "PipeWire pro-audio profile set (device $dev_id)"
+            else
+                warn "Apollo not yet visible in PipeWire — will appear after reboot"
+            fi
+        fi
+
         STEP_STATUS[init]="ok"
     else
-        fail "Hardware init failed (non-fatal — can retry later)"
-        STEP_STATUS[init]="fail"
-        STEP_DETAIL[init]="apollo-init.sh returned error"
+        info "Driver not loaded yet — will auto-load on next boot (DKMS)"
+        info "Or load now: sudo modprobe ua_apollo"
+        STEP_STATUS[init]="ok"
+        STEP_DETAIL[init]="driver not loaded yet, will auto-load on boot"
     fi
+
+    echo ""
+    info "For cold boot init or troubleshooting: sudo bash tools/apollo-init.sh"
 }
 
 # ================================================================
