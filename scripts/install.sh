@@ -471,16 +471,22 @@ run_init() {
 
         # Restart PipeWire to pick up new configs
         local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-        if [ -n "$pw_user" ] && command -v wpctl > /dev/null 2>&1; then
+        local pw_uid
+        pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
+
+        if [ -n "$pw_user" ] && [ -n "$pw_uid" ] && command -v wpctl > /dev/null 2>&1; then
+            # Helper: run command as the PipeWire user with correct env
+            pw_run() { sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" "$@"; }
+
             info "Restarting PipeWire to apply configs..."
-            sudo -u "$pw_user" systemctl --user restart pipewire wireplumber 2>/dev/null || true
+            pw_run systemctl --user restart pipewire wireplumber 2>/dev/null || true
             sleep 3
 
             # Find Apollo device in PipeWire and set pro-audio profile
             local dev_id=""
             local retries=0
             while [ -z "$dev_id" ] && [ $retries -lt 5 ]; do
-                dev_id=$(sudo -u "$pw_user" wpctl status 2>/dev/null | \
+                dev_id=$(pw_run wpctl status 2>/dev/null | \
                     grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
                 [ -z "$dev_id" ] && sleep 1
                 retries=$((retries + 1))
@@ -490,9 +496,9 @@ run_init() {
                 # Try profiles until we get a sink
                 local profile_set=0
                 for profile in 1 2 3; do
-                    sudo -u "$pw_user" wpctl set-profile "$dev_id" "$profile" 2>/dev/null || true
+                    pw_run wpctl set-profile "$dev_id" "$profile" 2>/dev/null || true
                     sleep 1
-                    if sudo -u "$pw_user" wpctl status 2>/dev/null | grep -qi 'apollo.*sink\|apollo.*output'; then
+                    if pw_run wpctl status 2>/dev/null | grep -qi 'apollo.*sink\|apollo.*output'; then
                         ok "PipeWire output sink active (device $dev_id, profile $profile)"
                         profile_set=1
                         break
@@ -500,18 +506,17 @@ run_init() {
                 done
 
                 if [ $profile_set -eq 0 ]; then
-                    # Still set profile 1 as default
-                    sudo -u "$pw_user" wpctl set-profile "$dev_id" 1 2>/dev/null || true
+                    pw_run wpctl set-profile "$dev_id" 1 2>/dev/null || true
                     ok "PipeWire profile set (device $dev_id)"
                     info "If Apollo doesn't appear in Sound Settings, try: pavucontrol"
                 fi
 
                 # Set Apollo as default sink if possible
                 local sink_id
-                sink_id=$(sudo -u "$pw_user" wpctl status 2>/dev/null | \
+                sink_id=$(pw_run wpctl status 2>/dev/null | \
                     grep -i 'apollo.*sink\|apollo.*output' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
                 if [ -n "$sink_id" ]; then
-                    sudo -u "$pw_user" wpctl set-default "$sink_id" 2>/dev/null || true
+                    pw_run wpctl set-default "$sink_id" 2>/dev/null || true
                     ok "Apollo set as default audio output"
                 fi
             else

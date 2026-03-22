@@ -10,19 +10,23 @@
     PW_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
     [ -z "$PW_USER" ] && exit 0
 
-    export XDG_RUNTIME_DIR="/run/user/$(id -u "$PW_USER")"
+    PW_UID=$(id -u "$PW_USER" 2>/dev/null)
+    [ -z "$PW_UID" ] && exit 0
+
+    # All wpctl calls need XDG_RUNTIME_DIR to connect to PipeWire
+    pw_run() { sudo -u "$PW_USER" XDG_RUNTIME_DIR="/run/user/$PW_UID" "$@"; }
 
     # Find Apollo device ID in PipeWire
-    DEV_ID=$(sudo -u "$PW_USER" wpctl status 2>/dev/null | \
+    DEV_ID=$(pw_run wpctl status 2>/dev/null | \
         grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
     [ -z "$DEV_ID" ] && exit 0
 
     # Set pro-audio profile
-    sudo -u "$PW_USER" wpctl set-profile "$DEV_ID" 1 2>/dev/null
+    pw_run wpctl set-profile "$DEV_ID" 1 2>/dev/null
 
     # Set as default sink
     sleep 1
-    SINK_ID=$(sudo -u "$PW_USER" wpctl status 2>/dev/null | \
+    SINK_ID=$(pw_run wpctl status 2>/dev/null | \
         grep -i 'apollo.*sink\|apollo.*output' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
-    [ -n "$SINK_ID" ] && sudo -u "$PW_USER" wpctl set-default "$SINK_ID" 2>/dev/null
+    [ -n "$SINK_ID" ] && pw_run wpctl set-default "$SINK_ID" 2>/dev/null
 ) &
