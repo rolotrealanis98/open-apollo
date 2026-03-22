@@ -414,6 +414,18 @@ deploy_configs() {
         STEP_STATUS[configs]="fail"
         return 1
     fi
+
+    # Restart PipeWire/WirePlumber so new configs (especially device.profile) take effect
+    local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+    local pw_uid
+    pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
+    if [ -n "$pw_user" ] && [ -n "$pw_uid" ] && command -v wpctl > /dev/null 2>&1; then
+        info "Restarting PipeWire/WirePlumber to apply configs..."
+        sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+            systemctl --user restart pipewire wireplumber 2>/dev/null || true
+        sleep 3
+        ok "PipeWire restarted"
+    fi
 }
 
 # ================================================================
