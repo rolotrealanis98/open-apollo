@@ -3,16 +3,29 @@
 # Triggered by udev when Apollo PCI device appears.
 # Runs in background to avoid blocking udev.
 #
-# Flow: wait for driver → set pro-audio profile → create virtual I/O devices
+# Flow: wait for driver + PipeWire → set pro-audio profile → create virtual I/O devices
 
 (
-    sleep 8  # Wait for driver probe + PipeWire enumeration
+    # Wait for driver probe + PipeWire to discover the device
+    # Retry up to 30s (Apollo needs time for ACEFACE + PipeWire enumeration)
+    for i in $(seq 1 15); do
+        sleep 2
 
-    # Find the logged-in user running PipeWire
-    PW_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
+        # Find the logged-in user running PipeWire
+        PW_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
+        [ -z "$PW_USER" ] && continue
+
+        PW_UID=$(id -u "$PW_USER" 2>/dev/null)
+        [ -z "$PW_UID" ] && continue
+
+        # Check if Apollo is visible in PipeWire
+        if sudo -u "$PW_USER" XDG_RUNTIME_DIR="/run/user/$PW_UID" \
+            wpctl status 2>/dev/null | grep -q 'Apollo x4'; then
+            break
+        fi
+    done
+
     [ -z "$PW_USER" ] && exit 0
-
-    PW_UID=$(id -u "$PW_USER" 2>/dev/null)
     [ -z "$PW_UID" ] && exit 0
 
     # Helper: run command as the PipeWire user
