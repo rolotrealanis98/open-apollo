@@ -79,6 +79,7 @@ DISTRO="" DISTRO_ID="" PKG_MGR="" KERNEL="" ARCH="" RAM_MB="" CPU_MODEL=""
 SECURE_BOOT="" IOMMU="" PW_VER="" WP_VER="" PA_RUNNING=""
 EXISTING_CARDS="" SND_MODULES="" TB_CONTROLLER=""
 APOLLO_PCIE="" APOLLO_DEV_TYPE="" APOLLO_DEV_NAME=""
+NEEDS_REBOOT=0
 DMESG_APOLLO="" DMESG_TB="" DMESG_IOMMU=""
 DEPS_INSTALLED=""
 BUILD_WARNINGS=0
@@ -394,6 +395,56 @@ DKMSEOF
 }
 
 # ================================================================
+# Step 4b: Check IOMMU
+# ================================================================
+check_iommu() {
+    # Intel VT-d (DMAR) blocks BAR0 access unless iommu=pt is set.
+    # Without it, all register reads return 0xFFFFFFFF and the Apollo is unusable.
+    if ! dmesg 2>/dev/null | grep -qi 'DMAR\|IOMMU'; then
+        return 0  # No IOMMU, nothing to do
+    fi
+
+    if grep -q 'iommu=pt' /proc/cmdline 2>/dev/null; then
+        ok "IOMMU passthrough mode active"
+        return 0
+    fi
+
+    warn "IOMMU (Intel VT-d) detected without passthrough mode"
+    info "This will prevent the Apollo from working (BAR0 reads fail)"
+    echo ""
+
+    if [ -f /etc/default/grub ]; then
+        read -rp "Add iommu=pt to kernel command line? (requires reboot) [Y/n] " iommu_answer
+        if [[ ! "$iommu_answer" =~ ^[Nn] ]]; then
+            # Add iommu=pt to GRUB_CMDLINE_LINUX_DEFAULT
+            if grep -q 'iommu=pt' /etc/default/grub; then
+                ok "iommu=pt already in /etc/default/grub"
+            else
+                run_sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 iommu=pt"/' /etc/default/grub
+                ok "Added iommu=pt to /etc/default/grub"
+            fi
+
+            # Try update-grub (may fail in chroot/overlayroot)
+            if run_sudo update-grub 2>/dev/null; then
+                ok "GRUB updated"
+            elif run_sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null; then
+                ok "GRUB config regenerated"
+            else
+                warn "Could not update GRUB automatically"
+                info "Run manually: sudo update-grub"
+            fi
+
+            echo ""
+            warn "REBOOT REQUIRED for iommu=pt to take effect"
+            info "After reboot, run: sudo bash tools/apollo-init.sh"
+            NEEDS_REBOOT=1
+        fi
+    else
+        warn "No /etc/default/grub found — add 'iommu=pt' to your bootloader manually"
+    fi
+}
+
+# ================================================================
 # Step 5: Deploy configs
 # ================================================================
 deploy_configs() {
@@ -669,6 +720,7 @@ detect_distro
 check_install_deps || true
 build_driver       || true
 setup_dkms         || true
+check_iommu        || true
 deploy_configs     || true
 run_init           || true
 generate_report
@@ -688,7 +740,10 @@ for key in deps build dkms configs init; do
 done
 
 echo ""
-if [ "$ALL_OK" = true ]; then
+if [ "$NEEDS_REBOOT" = "1" ]; then
+    echo -e "${YELLOW}${BOLD}Installation complete — REBOOT REQUIRED (iommu=pt added).${NC}"
+    info "After reboot: sudo bash tools/apollo-init.sh"
+elif [ "$ALL_OK" = true ]; then
     echo -e "${GREEN}${BOLD}Installation complete.${NC}"
 else
     echo -e "${YELLOW}${BOLD}Installation finished with issues — see above.${NC}"
