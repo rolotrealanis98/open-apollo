@@ -683,6 +683,33 @@ else
 fi
 
 echo ""
+
+# --- Final PipeWire profile safety net ---
+# If Apollo is detected and we're running as sudo, make one last attempt
+# to set the profile in case the earlier step was skipped or failed.
+if [ -n "$APOLLO_PCIE" ] && [ "$SKIP_INIT" = "0" ] && command -v wpctl > /dev/null 2>&1; then
+    pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+    pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
+    if [ -n "$pw_user" ] && [ -n "$pw_uid" ]; then
+        # Check if Apollo has sinks yet
+        if ! sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl status 2>/dev/null | grep -qi 'apollo.*sink\|apollo.*pro'; then
+            dev_id=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl status 2>/dev/null | \
+                grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+            if [ -n "$dev_id" ]; then
+                info "Setting PipeWire pro-audio profile for Apollo (device $dev_id)..."
+                sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl set-profile "$dev_id" 1 2>/dev/null || true
+                sleep 2
+                sink_id=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl status 2>/dev/null | \
+                    grep -i 'apollo.*sink\|apollo.*pro' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+                if [ -n "$sink_id" ]; then
+                    sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl set-default "$sink_id" 2>/dev/null || true
+                    ok "Apollo x4 Pro is now your default audio output"
+                fi
+            fi
+        fi
+    fi
+fi
+
 info "Report: $REPORT_FILE"
 if [ -n "$APOLLO_PCIE" ] && [ "$SKIP_INIT" = "0" ]; then
     info "Init:   sudo bash $PROJECT_DIR/tools/apollo-init.sh --status"
