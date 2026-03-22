@@ -2,3 +2,6 @@
 # Deploy to: /etc/udev/rules.d/91-ua-apollo.rules
 ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x1a00", ATTR{device}=="0x0002", \
   RUN+="/usr/local/bin/open-apollo-profile-setup"
+
+# Allow non-root users to access the Apollo device node
+KERNEL=="ua_apollo[0-9]*", MODE="0666"
