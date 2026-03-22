@@ -13,7 +13,7 @@ Wire format:
 Type markers:
     Z = null, T = true, F = false
     i = int8, U = uint8, I = int16, l = int32, L = int64
-    D = float64 (big-endian IEEE 754)
+    D = float64 (little-endian, like all UA multi-byte types)
     S = string (length-prefixed)
     { = object start, [ = array start
     # = count marker (optimized containers)

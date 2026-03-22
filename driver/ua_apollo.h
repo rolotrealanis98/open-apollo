@@ -2,9 +2,9 @@
 /*
  * Universal Audio Apollo Thunderbolt - Linux PCIe Driver
  *
- * Copyright (c) 2026 Open Apollo contributors
+ * Copyright (c) 2026 open-apollo contributors
  *
- * Reverse-engineered from vendor driver analysis
+ * Reverse engineered from UAD2System.kext v11.8.1
  */
 
 #ifndef UA_APOLLO_H
@@ -33,8 +33,8 @@
 #define UA_SUBSYS_APOLLO_X4_QUAD        0x0011
 
 /*
- * Device type enum — reconstructed from vendor driver analysis and
- * device type lookup table at offset 0x3E840.
+ * UAD2DeviceType enum — reconstructed from CPcieDevice::Name() and
+ * _deviceTypeFromSerialNumber() lookup table at 0x3E840.
  *
  * v1 devices: type derived from FPGA rev register (0x2218) bits[31:28] - 1
  * v2 devices: type derived from ext_caps register (0x2234) bits[25:20] - 1,
@@ -63,9 +63,9 @@
 /*
  * AudioExtension vs legacy ring-buffer connect mechanism.
  *
- * From vendor driver analysis: a 40-bit bitmask at
+ * From kext CPcieDevice::Connect() disassembly: a 40-bit bitmask at
  * offset 0xe2dc determines which device types use _connectToDsps()
- * (ring buffer inline connect commands) vs the AudioExtension connect path
+ * (ring buffer inline connect commands) vs CPcieAudioExtension::Connect()
  * (ACEFACE register-based handshake at 0xC02C/0x2260, bank-shifted).
  *
  * Devices NOT in the bitmask use the AudioExtension path.
@@ -99,7 +99,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 
 /*
  * BAR0 Register Map
- * Extracted from vendor driver analysis.
+ * Extracted from CPcieDevice, CPcieIntrManager, CPcieRingBuffer disassembly.
  * All offsets from BAR0 base.
  */
 
@@ -111,7 +111,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_REG_EXT_CAPS         0x2234  /* Extended caps (v2 FW), DSP count bits[15:8] */
 #define UA_REG_SERIAL           0x2238  /* Serial number / device info */
 
-/* Interrupt Controller */
+/* Interrupt Controller (CPcieIntrManager) */
 #define UA_REG_DMA_CTRL         0x2200  /* DMA engine control (reset/enable bitmask) */
 #define UA_REG_IRQ_ENABLE       0x2204  /* IMR — interrupt mask register (low 32 vectors) */
 #define UA_REG_IRQ_STATUS       0x2208  /* ISR — interrupt status register (write-back to ack) */
@@ -126,7 +126,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_REG_EXT_IRQ_ENABLE   0x2268  /* IMR_HI — interrupt mask register (high 32 vectors) */
 
 /*
- * Audio Extension Transport Registers
+ * Audio Extension Transport Registers (CPcieAudioExtension)
  * These control DMA streaming, NOT the device mixer.
  */
 #define UA_REG_AX_BUF_SIZE      0x2240  /* Buffer frame size - 1 */
@@ -171,7 +171,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_REG_MIXER_SEQ_RD     0x380C  /* Mixer sequence counter (DSP readback) */
 #define UA_MIXER_SETTING_STRIDE 8       /* 2 × u32 per setting */
 #define UA_MIXER_NUM_SETTINGS   52      /* Total mixer settings (per SEL189) */
-#define UA_MIXER_BATCH_COUNT    38      /* Settings flushed per batch (vendor driver batch protocol) */
+#define UA_MIXER_BATCH_COUNT    38      /* Settings flushed per batch (kext CPcieDeviceMixer) */
 #define UA_REG_MIXER_LAST       0x3A5C  /* Last mixer setting register (setting 51, word 1) */
 
 /* CLI polling limits */
@@ -207,7 +207,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 /*
  * Notification / SRAM Registers
  *
- * CRITICAL: Bank Offset (from vendor driver analysis)
+ * CRITICAL: Bank Offset (from kext CPcieAudioExtension disassembly)
  *
  * Apollo x4 uses bank_shift = 0x0A.  Many notification/config registers
  * are accessed at:  BAR0 + bank_shift * 4 + base_offset
@@ -266,14 +266,14 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 /*
  * Interrupt Vector Numbers
  *
- * The vendor driver uses logical vector indices (0-71) mapped to hardware bit
+ * The kext uses logical vector indices (0-71) mapped to hardware bit
  * positions (0-63) via m_vectorMap[72].  Logical vectors 0x28, 0x46, 0x47
  * are used for audio, but their hardware bit positions need to be
- * determined from vendor driver analysis or hardware testing.
+ * determined from the live kext or by trial.
  *
  * For now, use the logical vector numbers for documentation.  The actual
  * hardware enable bits are set in ua_audio_enable_irqs() which tries
- * enabling common bit positions until we can dump the real vectorMap.
+ * enabling common bit positions until we can dump the real m_vectorMap.
  */
 #define UA_IRQ_VEC_NOTIFICATION 0x28    /* Audio extension notification (logical 40) */
 #define UA_IRQ_VEC_PERIODIC     0x46    /* Periodic timer (logical 70) */
@@ -296,7 +296,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_RING_WRITE_PTR       0x20    /* Host write pointer */
 #define UA_RING_READ_PTR        0x24    /* Read pointer / doorbell */
 #define UA_RING_DOORBELL        0x24    /* Write doorbell — triggers DSP processing */
-/* Note: UA_RING_READ_PTR (0x24) is actually the WRITE doorbell per vendor driver analysis */
+/* Note: UA_RING_READ_PTR (0x24) is actually the WRITE doorbell per kext RE */
 #define UA_RING_POSITION        0x28    /* HW current position */
 
 /* Ring buffer entry format */
@@ -350,11 +350,11 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_MAX_PREAMP_CH        8
 
 /*
- * Preamp parameter IDs (from hardware observation of SetMixerParam calls).
+ * Preamp parameter IDs (from DTrace SEL131 SetMixerParam captures).
  * These go through DSP mixer settings, NOT through ARM CLI.
  * chan_type=1, chan_idx=preamp channel, param_id=one of these.
  *
- * Verified via hardware observation:
+ * Verified via DTrace + live hardware:
  *   Mic/Line=0x00 (1=Line, 0=Mic)
  *   PAD=0x01 (on=1, off=0)
  *   48V=0x03 (on=1, off=0 — triggers ARM safety blink sequence)
@@ -366,7 +366,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_PREAMP_PARAM_MIC_LINE 0x00   /* 1=Line, 0=Mic */
 #define UA_PREAMP_PARAM_PAD     0x01
 #define UA_PREAMP_PARAM_48V     0x03
-#define UA_PREAMP_PARAM_LOWCUT  0x04    /* NOT HiZ! Verified via hardware observation */
+#define UA_PREAMP_PARAM_LOWCUT  0x04    /* NOT HiZ! Verified via DTrace */
 #define UA_PREAMP_PARAM_PHASE   0x05    /* Float: -1.0f=invert, +1.0f=normal */
 #define UA_PREAMP_PARAM_GAIN_A  0x06    /* Gain param A (1st write, dB-9) */
 #define UA_PREAMP_PARAM_GAIN_B  0x09    /* Gain param B (2nd write, dB-10) */
@@ -384,34 +384,105 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 /* ARM hardware ID encoding: channel index → hw_id */
 #define UA_ARM_HW_ID(ch)        ((ch) * 0x800)
 
-/* Monitor parameter IDs (from hardware observation, ch_type=2) */
-#define UA_MON_PARAM_LEVEL      0x01  /* ch_idx=1, raw 8-bit (192+dB×2) */
-#define UA_MON_PARAM_MUTE       0x03  /* ch_idx=0, 2=muted/0=unmuted; also 1=mono */
-#define UA_MON_PARAM_SOURCE     0x04  /* ch_idx=1, 0=MIX/1=CUE1/2=CUE2 (CORRECTED) */
+/*
+ * Monitor parameter IDs (from IOKit SEL131 captures + kext SetOtherParam
+ * disassembly, ch_type=2).  Grouped by DSP mixer setting index.
+ */
+
+/* --- Setting[0]: Output pad flags --- */
+#define UA_MON_PARAM_OUT_PAD_A  0x19  /* ch_idx=1, Line 1-2 pad, bool */
+#define UA_MON_PARAM_OUT_PAD_B  0x1a  /* ch_idx=1, Line 3-4 pad, bool */
+#define UA_MON_PARAM_OUT_PAD_C  0x1b  /* setting[0] bit30, bool */
+#define UA_MON_PARAM_OUT_PAD_D  0x1c  /* setting[0] bit31, bool */
+
+/* --- Setting[1]: SR convert + misc 3-bit fields --- */
+#define UA_MON_PARAM_UNKNOWN_13 0x13  /* setting[1] bits[30:28], 3-bit */
+#define UA_MON_PARAM_UNKNOWN_14 0x14  /* setting[1] bits[15:13], 3-bit */
+#define UA_MON_PARAM_SR_CONVERT 0x1f  /* ch_idx=1, S/PDIF SR converter, bool */
+
+/* --- Setting[2]: Monitor core (level/mute/dim/source/CUE) --- */
+#define UA_MON_PARAM_LEVEL      0x01  /* ch_idx=1, raw 8-bit (192+dB*2) */
+#define UA_MON_PARAM_HP1_VOL    0x02  /* ch_idx=1, HP1 volume, 8-bit */
+#define UA_MON_PARAM_MUTE       0x03  /* ch_idx=0, 2=muted/0=unmuted; 1=mono */
+#define UA_MON_PARAM_SOURCE     0x04  /* ch_idx=1, 0=MIX/1=CUE1/2=CUE2 */
 #define UA_MON_PARAM_CUE1_MIX   0x05  /* ch_idx=0, 0=on/2=off (inverted!) */
 #define UA_MON_PARAM_CUE1_MONO  0x06  /* ch_idx=0, 1=on/0=off */
 #define UA_MON_PARAM_CUE2_MIX   0x07  /* ch_idx=0, 0=on/2=off */
 #define UA_MON_PARAM_CUE2_MONO  0x08  /* ch_idx=0, 1=on/0=off */
-#define UA_MON_PARAM_OUT_PAD_A  0x19  /* ch_idx=1, Line 1-2 pad, 1=on/0=off (VERIFIED) */
-#define UA_MON_PARAM_OUT_PAD_B  0x1a  /* ch_idx=1, Line 3-4 pad, 1=on/0=off (VERIFIED) */
+#define UA_MON_PARAM_UNKNOWN_15 0x15  /* setting[2] bit28, bool */
+#define UA_MON_PARAM_DIM        0x44  /* ch_idx=0, 1=on/0=off, bit31 */
+
+/* --- Setting[4]: Mono (dev_type==3 ONLY, NOP on x4) --- */
+#define UA_MON_PARAM_MONO       0x36  /* kext property ID (NOT used on x4) */
+#define UA_MON_PARAM_MIX_TO_MONO UA_MON_PARAM_MUTE /* uses param 0x03 val=1 */
+
+/* --- Setting[6]: Mirror A / Identify / MirrorsToDigital --- */
+#define UA_MON_PARAM_UNKNOWN_0A 0x0a  /* setting[6] bits[9:8], 2-bit */
 #define UA_MON_PARAM_IDENTIFY   0x1d  /* ch_idx=0, identify/locate */
-#define UA_MON_PARAM_DIGITAL_MIRROR 0x1e /* ch_idx=9, 1=on/0=off (CORRECTED) */
+#define UA_MON_PARAM_DIGITAL_MIRROR 0x1e /* ch_idx=9, MirrorsToDigital */
+#define UA_MON_PARAM_CUE1_MIRROR 0x2e /* ch_idx=9, MirrorA value, 8-bit */
+
+/* --- Setting[7]: Mirror B / TBConfig / misc --- */
+#define UA_MON_PARAM_UNKNOWN_0F 0x0f  /* setting[7] bits[9:8], 2-bit */
+#define UA_MON_PARAM_UNKNOWN_20 0x20  /* setting[7] bit10, bool (flush) */
+#define UA_MON_PARAM_CUE2_MIRROR 0x2f /* ch_idx=9, MirrorB value, 8-bit */
+#define UA_MON_PARAM_UNKNOWN_45 0x45  /* setting[7] bit11, bool */
+#define UA_MON_PARAM_TB_CONFIG  0x47  /* ch_idx=0, talkback config, bit12 */
+#define UA_MON_PARAM_UNKNOWN_48 0x48  /* setting[7] bit13, bool */
+#define UA_MON_PARAM_UNKNOWN_63 0x63  /* setting[7] bit14, bool */
+
+/* --- Setting[8]: Digital out mode / CUE alt --- */
 #define UA_MON_PARAM_DIGITAL_MODE 0x21 /* ch_idx=0, 0=S/PDIF/8=ADAT */
-#define UA_MON_PARAM_CUE1_MIRROR 0x2e /* ch_idx=9, output pair value */
-#define UA_MON_PARAM_CUE2_MIRROR 0x2f /* ch_idx=9, output pair value */
-#define UA_MON_PARAM_OUTPUT_REF 0x32  /* ch_idx=1, 0=+4dBu/1=-10dBV (CORRECTED) */
-#define UA_MON_PARAM_MONO       0x36  /* setting[2] bit 17 — vendor driver property ID (NOT used by UA Mixer Engine) */
-#define UA_MON_PARAM_MIX_TO_MONO UA_MON_PARAM_MUTE /* VERIFIED: uses param 0x03 value=1 */
+#define UA_MON_PARAM_UNKNOWN_22 0x22  /* setting[8] bits[29:28], 2-bit */
+#define UA_MON_PARAM_CUE1_MIX_ALT 0x23 /* setting[8] bits[25:24], 2-bit */
+#define UA_MON_PARAM_UNKNOWN_24 0x24  /* setting[8] bits[31:30], 2-bit */
+#define UA_MON_PARAM_CUE2_MIX_ALT 0x25 /* setting[8] bits[27:26], 2-bit */
+
+/* --- Setting[11]: Mirror config / OutputRef --- */
+#define UA_MON_PARAM_MIRROR_CFG_A 0x2a /* setting[11] bit0, bool */
+#define UA_MON_PARAM_MIRROR_CFG_B 0x2b /* setting[11] bit1, bool */
+#define UA_MON_PARAM_MIRROR_CFG_C 0x2c /* setting[11] bit2, bool */
+#define UA_MON_PARAM_MIRROR_CFG_D 0x2d /* setting[11] bit3, bool */
+#define UA_MON_PARAM_UNKNOWN_30 0x30  /* setting[11] bits[23:16], 8-bit */
+#define UA_MON_PARAM_UNKNOWN_31 0x31  /* setting[11] bits[31:24], 8-bit */
+#define UA_MON_PARAM_OUTPUT_REF 0x32  /* ch_idx=1, 0=+4dBu/1=-10dBV */
+#define UA_MON_PARAM_UNKNOWN_33 0x33  /* setting[11] bit5, bool */
+#define UA_MON_PARAM_UNKNOWN_34 0x34  /* setting[11] bit6, bool */
+#define UA_MON_PARAM_UNKNOWN_35 0x35  /* setting[11] bit7, bool */
+
+/* --- Setting[12]: HP cue source --- */
 #define UA_MON_PARAM_HP1_SOURCE 0x3f  /* ch_idx=1, 0=CUE1/1=CUE2 */
 #define UA_MON_PARAM_HP2_SOURCE 0x40  /* ch_idx=1, 0=CUE1/1=CUE2 */
+
+/* --- Setting[13]: Talkback / misc --- */
+#define UA_MON_PARAM_UNKNOWN_3A 0x3a  /* setting[13] bits[29:28], 2-bit */
+#define UA_MON_PARAM_UNKNOWN_42 0x42  /* setting[13] bits[15:13], 3-bit */
+#define UA_MON_PARAM_TALKBACK   0x46  /* ch_idx=0, val=1 ON / val=0 OFF */
+
+/* --- Setting[14]: Dim level / misc --- */
 #define UA_MON_PARAM_DIM_LEVEL  0x43  /* ch_idx=0, 1-7 stepped */
-#define UA_MON_PARAM_DIM        0x44  /* ch_idx=0, 1=on/0=off */
-#define UA_MON_PARAM_TALKBACK   0x46  /* ch_idx=0, val=1 ON / val=0 OFF (verified via hardware observation) */
-#define UA_MON_PARAM_TB_CONFIG  0x47  /* ch_idx=0, talkback config */
+#define UA_MON_PARAM_UNKNOWN_49 0x49  /* setting[14] bit31, bool */
+#define UA_MON_PARAM_UNKNOWN_66 0x66  /* setting[14] bits[7:0], 8-bit */
+
+/* --- Setting[15]: Mirror enables / clock-HP routing --- */
+#define UA_MON_PARAM_UNKNOWN_38 0x38  /* setting[15] bits[6:0], 7-bit */
+#define UA_MON_PARAM_UNKNOWN_39 0x39  /* setting[15] bits[22:16], 7-bit */
 #define UA_MON_PARAM_MIRROR_ENABLE_A 0x3b /* ch_idx=9, CUE1 mirror enable */
 #define UA_MON_PARAM_MIRROR_ENABLE_B 0x3c /* ch_idx=9, CUE2 mirror enable */
-#define UA_MON_PARAM_SR_CONVERT    0x1f   /* ch_idx=1, S/PDIF SR converter */
+#define UA_MON_PARAM_UNKNOWN_3E 0x3e  /* setting[15] bit9, bool */
+#define UA_MON_PARAM_UNKNOWN_41 0x41  /* setting[15] bit7, bool */
+
+/* --- Setting[5]: Sound/config flags (type >= 0xa) --- */
+#define UA_MON_PARAM_UNKNOWN_67 0x67  /* setting[5] bit3, bool */
+#define UA_MON_PARAM_UNKNOWN_68 0x68  /* setting[5] bit4, bool */
+#define UA_MON_PARAM_UNKNOWN_87 0x87  /* setting[5] bit9, bool */
+
+/* --- Setting[35] (0x23): Channel config count --- */
+#define UA_MON_PARAM_CHAN_CFG   0x6a  /* setting[35] bits[4:0], 5-bit */
+
+/* --- NOP params (cache-only, no WriteSetting in kext) --- */
 #define UA_MON_PARAM_DSP_SPANNING  0x16   /* ch_idx=0, DSP pairing mode */
+/* 0x0b, 0x0c, 0x0d, 0x10, 0x11, 0x12, 0x17, 0x18, 0x26-0x29 */
 
 /* Clock mode values (from SEL163 SetClockMode) */
 #define UA_CLOCK_MODE_INTERNAL   0x00
@@ -422,7 +493,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_MON_MUTE_OFF         0
 
 /*
- * Complete Bus ID Map (verified via hardware observation)
+ * Complete Bus ID Map (verified via DTrace)
  * Used in SEL130 (SetMixerBusParam) for fader/pan/send control.
  */
 #define UA_BUS_ANALOG_IN(n)     (n)           /* 0x0000-0x0003 */
@@ -441,7 +512,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_BUS_COUNT            32
 
 /*
- * SEL130 sub-param IDs (verified via hardware observation)
+ * SEL130 sub-param IDs (verified via DTrace)
  * Each bus write uses one of these sub-parameters.
  */
 #define UA_BUS_SUB_MAIN         0  /* pan-adjusted mix coefficient */
@@ -475,7 +546,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 /* rb_data[3]: Preamp gain, 8 bits per channel */
 #define UA_RB_PREAMP_GAIN(data3, ch)     (((data3) >> ((ch)*8)) & 0xFF)
 
-/* Hardware Readback Registers (from vendor driver readback protocol) */
+/* Hardware Readback Registers (GetReadback in kext) */
 #define UA_REG_MIXER_RB_STATUS  0x3810  /* Readback: 1=ready, write 0 to re-arm */
 #define UA_REG_MIXER_RB_DATA    0x3814  /* Readback: 40 consecutive u32 words */
 #define UA_MIXER_RB_WORDS       40
@@ -494,7 +565,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_DEFAULT_PLAY_CH      2
 #define UA_DEFAULT_REC_CH       2
 
-/* Max buffer frame size (from vendor driver transport setup) */
+/* Max buffer frame size (from kext PrepareTransport) */
 #define UA_MAX_BUF_FRAMES       8192
 
 /* Clock source values (for clock_config low byte) */
@@ -665,8 +736,9 @@ struct ua_device {
 	bool dsps_connected;
 	bool aceface_done;          /* ACEFACE handshake completed */
 	bool plugins_activated;     /* Plugin chain sent to DSP */
+	bool skip_bus_coeff;        /* Skip BUS_COEFF in plugin chain */
 
-	/* Mixer batch write state (matches vendor driver batch protocol protocol) */
+	/* Mixer batch write state (matches kext CPcieDeviceMixer protocol) */
 	u32 mixer_val[UA_MIXER_BATCH_COUNT];   /* Cached setting values */
 	u32 mixer_mask[UA_MIXER_BATCH_COUNT];  /* Cached setting masks */
 	u32 mixer_seq_wr;                      /* Our cached SEQ_WR */
@@ -700,7 +772,7 @@ static inline void ua_write(struct ua_device *ua, u32 offset, u32 value)
 /*
  * Mixer setting register offset (3-range formula).
  *
- * From vendor driver analysis, settings live in
+ * From CPcieDeviceMixer::_writeSetting disassembly, settings live in
  * 3 non-contiguous ranges within the 0x3800 mixer window:
  *   Settings  0-15: base = 0x3800 + 0xB4 + index * 8
  *   Settings 16-31: base = 0x3800 + 0xBC + index * 8  (+8 gap)
@@ -730,7 +802,7 @@ static inline u32 ua_dsp_base(unsigned int dsp_idx)
 /*
  * Interrupt vector mapping — logical vector index → hardware bit position.
  *
- * The vendor driver maintains vectorMap[72] mapping logical
+ * The kext's CPcieIntrManager maintains m_vectorMap[72] mapping logical
  * vector indices to hardware bit positions (0-63).  In extended mode (v2):
  *
  *   DSP n (n=0..7) uses 5 logical slots at n*5, mapped to HW bits n*4..n*4+3
@@ -827,6 +899,7 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua);
 int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_connect_all(struct ua_device *ua);
 int ua_dsp_activate_plugin_chain(struct ua_device *ua);
+void ua_dump_mixer_sram(struct ua_device *ua, const char *label);
 int ua_dsp_test_dma_ref(struct ua_device *ua);
 int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 		      u32 cmd, u32 param, const void *data,
@@ -840,6 +913,7 @@ int ua_dsp_send_routing(struct ua_device *ua);
 int ua_dsp_load_programs(struct ua_device *ua);
 int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 			 u32 sub_param, u32 value_u32);
+int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
 void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
 			  u32 w0, u32 w1, u32 w2, u32 w3);

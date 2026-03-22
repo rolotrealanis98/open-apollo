@@ -2,9 +2,10 @@
 /*
  * Universal Audio Apollo Thunderbolt — Linux PCIe Driver
  *
- * Copyright (c) 2026 Open Apollo contributors
+ * Copyright (c) 2026 open-apollo contributors
  *
- * Reverse-engineered from vendor driver analysis and hardware observation.
+ * Reverse engineered from UAD2System.kext v11.8.1 (com.uaudio.driver.UAD2System)
+ * and UAD-2 SDK Support.framework.
  *
  * Core PCIe driver:
  *  - Probes UA devices on the PCIe bus (vendor 0x1A00)
@@ -84,7 +85,7 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	/*
 	 * Read ISR and mask with IMR — only process enabled vectors.
 	 *
-	 * The hardware driver does: pending = ReadReg(ISR) & enableMask
+	 * The kext does: pending = ReadReg(ISR) & enableMask
 	 * It never touches unmasked bits.  Acking unmasked DSP noise
 	 * bits (0x18c63) causes them to immediately re-set, generating
 	 * an MSI storm that overwhelms the Thunderbolt link.
@@ -102,7 +103,7 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 		return IRQ_NONE;
 	}
 
-	/* Ack ONLY the bits we're handling — one at a time per hardware driver pattern */
+	/* Ack ONLY the bits we're handling — one at a time per kext pattern */
 	if (status_lo)
 		ua_write(ua, UA_REG_IRQ_STATUS, status_lo);
 	if (status_hi)
@@ -133,7 +134,7 @@ static void ua_read_serial_type(struct ua_device *ua);
 
 /*
  * Reset DMA engines.
- * Mirrors hardware driver DMA reset sequence:
+ * Mirrors CPcieIntrManager::ResetDMAEngines():
  *   1. Read current DMA control
  *   2. Apply reset bitmask (differs between v1 and v2 firmware)
  *   3. Clear interrupt status
@@ -167,7 +168,7 @@ void ua_reset_dma(struct ua_device *ua)
 /*
  * Detect firmware version, device type, and DSP count.
  *
- * Mirrors hardware driver device detection logic:
+ * Mirrors CPcieDevice::Name() and GetCapabilities():
  *   - FPGA rev (0x2218) bit 31 clear → v1 firmware, type from bits[31:28]-1
  *   - FPGA rev bit 31 set → v2 firmware, read ext_caps (0x2234):
  *       bits[25:20] - 1 = device family index
@@ -213,7 +214,7 @@ static void ua_detect_capabilities(struct ua_device *ua)
 
 /*
  * Serial prefix → device type lookup table.
- * Extracted from hardware driver device type lookup table at offset 0x3E840.
+ * Extracted from _deviceTypeFromSerialNumber() data at kext offset 0x3E840.
  */
 struct ua_serial_entry {
 	char prefix[5]; /* 4-char ASCII serial prefix + NUL */
@@ -243,7 +244,7 @@ static const struct ua_serial_entry ua_serial_table[] = {
 
 /*
  * Read serial number from hardware and look up device type.
- * The hardware driver reads BAR0 + 0x20 through 0x2C (4 dwords = 16 bytes)
+ * The kext reads BAR0 + 0x20 through 0x2C (4 dwords = 16 bytes)
  * and matches the 4-byte ASCII prefix against the table.
  */
 static void ua_read_serial_type(struct ua_device *ua)
@@ -296,7 +297,7 @@ const char *ua_device_name(u32 device_type)
 
 /*
  * Verify DSP banks are accessible by reading their base registers.
- * Mirrors hardware driver DSP check logic.
+ * Mirrors CPcieDevice::_checkDSPs().
  */
 static int ua_check_dsps(struct ua_device *ua)
 {
@@ -314,7 +315,7 @@ static int ua_check_dsps(struct ua_device *ua)
 }
 
 /*
- * Program registers — mirrors hardware driver register programming:
+ * Program registers — mirrors CPcieDevice::ProgramRegisters():
  *   1. Verify FPGA revision matches cached value
  *   2. Reset DMA engines
  *   3. Clear interrupts
@@ -499,6 +500,14 @@ static int ua_cli_send_locked(struct ua_device *ua, const u8 *cmd_data,
 	u32 status, word;
 	unsigned int i, words, polls;
 
+	/*
+	 * CLI commands freeze the ARM MCU on Apollo x4.
+	 * All preamp control goes through DSP mixer settings (ioctl path).
+	 * Block ALL CLI access unconditionally.
+	 */
+	dev_dbg(&ua->pdev->dev, "CLI BLOCKED (would freeze ARM MCU)\n");
+	return -ENOSYS;
+
 	if (cmd_len == 0 || cmd_len > UA_CLI_CMD_BUF_SIZE)
 		return -EINVAL;
 
@@ -550,7 +559,7 @@ read_response:
  * If we bump SEQ_WR after writing only 1 setting, the DSP reads 37
  * uninitialized registers and crashes.
  *
- * Protocol (from hardware driver analysis):
+ * Protocol (from CPcieDeviceMixer::_flushCachedSettings disassembly):
  *   1. Maintain cached val/mask arrays for all 38 settings
  *   2. On setting change: merge into cache, mark dirty
  *   3. On service tick: if dirty AND SEQ_RD == cached SEQ_WR,
@@ -562,6 +571,35 @@ read_response:
  * Each caller provides a partial mask; the cache accumulates all
  * active fields.
  * ---------------------------------------------------------------- */
+
+/**
+ * ua_dump_mixer_sram - Log all 38 settings from BAR0 SRAM
+ * @ua: device
+ * @label: context label for the log message
+ *
+ * Reads both words of each setting directly from SRAM and logs them.
+ * Used to compare firmware-initialized state vs post-plugin-chain state.
+ */
+void ua_dump_mixer_sram(struct ua_device *ua, const char *label)
+{
+	u32 reg, wa, wb, seq_w, seq_r;
+	int i;
+
+	seq_w = ua_read(ua, UA_REG_MIXER_SEQ_WR);
+	seq_r = ua_read(ua, UA_REG_MIXER_SEQ_RD);
+	dev_info(&ua->pdev->dev,
+		 "SRAM dump [%s]: SEQ WR=%u RD=%u\n", label, seq_w, seq_r);
+
+	for (i = 0; i < UA_MIXER_NUM_SETTINGS; i++) {
+		reg = ua_mixer_setting_reg(i);
+		wa = ua_read(ua, reg);
+		wb = ua_read(ua, reg + 4);
+		if (wa || wb)
+			dev_info(&ua->pdev->dev,
+				 "  setting[%2d] @ 0x%04x: A=0x%08x B=0x%08x\n",
+				 i, reg, wa, wb);
+	}
+}
 
 int ua_mixer_write_setting_locked(struct ua_device *ua,
 				  unsigned int index,
@@ -593,11 +631,11 @@ int ua_mixer_write_setting_locked(struct ua_device *ua,
  * ua_mixer_flush_settings - Write all 38 settings + single SEQ bump
  * @ua: device (caller must hold ua->lock)
  *
- * Called from the DSP service loop at 10 Hz.  Matches the hardware driver's
+ * Called from the DSP service loop at 10 Hz.  Matches the kext's
  * _flushCachedSettings which is called from GetReadback at ~33Hz.
  *
- * Windows BAR0 capture proves: val AND mask persist
- * across flushes. The DSP reads val/mask on every SEQ bump.
+ * Windows BAR0 capture proves: val AND mask persist across flushes.
+ * The DSP reads val/mask on every SEQ bump.
  * Do NOT clear mask after writing — gain requires persistent values.
  */
 void ua_mixer_flush_settings(struct ua_device *ua)
@@ -617,8 +655,26 @@ void ua_mixer_flush_settings(struct ua_device *ua)
 	 * Write ALL 38 settings to SRAM registers.
 	 * Word A = (mask[15:0] << 16) | val[15:0]
 	 * Word B = (mask[31:16] << 16) | val[31:16]
+	 *
+	 * Windows BAR0 capture proves: val AND mask persist across flushes.
+	 * The DSP reads val/mask on every SEQ bump.
+	 * Do NOT clear mask after writing — gain requires persistent values.
+	 *
+	 * Word order tested: swapping words for settings 0-31
+	 * does NOT fix monitor. Single-setting[2] write with SEQ bump also
+	 * fails. Issue is DSP module activation, not word encoding.
 	 */
 	for (i = 0; i < UA_MIXER_BATCH_COUNT; i++) {
+		/*
+		 * Skip settings with no mask — preserves firmware defaults.
+		 * Kext _writeSetting checks dirty_mask and skips clean
+		 * settings (cbz at 0x4a63c). Firmware initializes settings
+		 * with default val/mask on boot; writing zeros here would
+		 * clear those defaults, breaking DSP module configuration
+		 * (e.g., monitor processing depends on preset defaults).
+		 */
+		if (!ua->mixer_mask[i])
+			continue;
 		reg = ua_mixer_setting_reg(i);
 		word_a = ((ua->mixer_mask[i] & 0xFFFF) << 16) |
 			 (ua->mixer_val[i] & 0xFFFF);
@@ -707,46 +763,90 @@ out:
 /**
  * ua_monitor_set_param - Set a monitor parameter via DSP mixer settings
  * @ua: device
- * @ch_idx: monitor channel index (from hardware observation)
+ * @ch_idx: monitor channel index (from IOKit captures)
  * @param_id: monitor parameter ID (UA_MON_PARAM_*)
- * @value: parameter value (raw encoding)
+ * @value: parameter value (raw IOKit encoding)
  *
- * Routes monitor params through DSP mixer setting 2.  All three active
- * monitor controls (level, mute, dim) share a single 32-bit setting word
- * at different bit positions — each write uses a per-param mask so it
- * doesn't clobber the other fields.
+ * Routes monitor params to the correct DSP mixer setting index with
+ * per-param bitmasks.  Multiple params share single 32-bit setting words
+ * at different bit positions -- each write uses a mask so it doesn't
+ * clobber the other fields.
  *
- * Bit layout of setting 2 (from hardware driver analysis):
- *   [7:0]   CRMonitorLevel  — raw 8-bit value (192 + dB × 2)
- *   [17:16] MonitorMute     — 2 = muted (bit 16 set), 0 = unmuted
- *   [31]    DimOn           — 1 = dim engaged
- *
- * MixToMono is NOT routed through DSP settings on Apollo x4 — the hardware driver
- * restricts it to device_type == 3 only.
+ * Setting index and bit layout from kext SetOtherParam disassembly
+ * (UAD2System.kext v11.8.1, arm64e).  See the complete mapping in
+ * plans/reports/hardware-re-260321-1301-setotherparam-setting-map.md
  *
  * Must be called with ua->lock held.
  */
-#define UA_MON_SETTING_IDX	2
-
 int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 			 u32 param_id, u32 value)
 {
+	unsigned int setting_idx;
 	u32 hw_val, hw_mask;
 
 	switch (param_id) {
-	case UA_MON_PARAM_LEVEL:
-		/* [7:0] raw 8-bit level (192 + dB × 2) */
+
+	/* ---- Setting[0]: Output pad flags ---- */
+
+	case UA_MON_PARAM_OUT_PAD_A:	/* 0x19 -> bit28 */
+		setting_idx = 0;
+		hw_val  = value ? BIT(28) : 0;
+		hw_mask = BIT(28);
+		break;
+	case UA_MON_PARAM_OUT_PAD_B:	/* 0x1a -> bit29 */
+		setting_idx = 0;
+		hw_val  = value ? BIT(29) : 0;
+		hw_mask = BIT(29);
+		break;
+	case UA_MON_PARAM_OUT_PAD_C:	/* 0x1b -> bit30 */
+		setting_idx = 0;
+		hw_val  = value ? BIT(30) : 0;
+		hw_mask = BIT(30);
+		break;
+	case UA_MON_PARAM_OUT_PAD_D:	/* 0x1c -> bit31 */
+		setting_idx = 0;
+		hw_val  = value ? BIT(31) : 0;
+		hw_mask = BIT(31);
+		break;
+
+	/* ---- Setting[1]: SR convert + misc 3-bit fields ---- */
+
+	case UA_MON_PARAM_UNKNOWN_13:	/* 0x13 -> bits[30:28] */
+		setting_idx = 1;
+		hw_val  = (value & 7) << 28;
+		hw_mask = 0x70000000;
+		break;
+	case UA_MON_PARAM_UNKNOWN_14:	/* 0x14 -> bits[15:13] */
+		setting_idx = 1;
+		hw_val  = (value & 7) << 13;
+		hw_mask = 0x0000E000;
+		break;
+	case UA_MON_PARAM_SR_CONVERT:	/* 0x1f -> bit31 */
+		setting_idx = 1;
+		hw_val  = value ? BIT(31) : 0;
+		hw_mask = BIT(31);
+		break;
+
+	/* ---- Setting[2]: Monitor core ---- */
+
+	case UA_MON_PARAM_LEVEL:	/* 0x01 -> bits[7:0] */
+		setting_idx = 2;
 		hw_val  = value & 0xFF;
 		hw_mask = 0x000000FF;
 		break;
-
-	case UA_MON_PARAM_MUTE:
+	case UA_MON_PARAM_HP1_VOL:	/* 0x02 -> bits[15:8] */
+		setting_idx = 2;
+		hw_val  = (value & 0xFF) << 8;
+		hw_mask = 0x0000FF00;
+		break;
+	case UA_MON_PARAM_MUTE:		/* 0x03 -> bits[17:16] */
 		/*
-		 * Param 0x03 is 3-state (VERIFIED):
-		 *   value=0: normal stereo, unmuted → bits[17:16] = 00
-		 *   value=1: mono (MixToMono)       → bit 17 set
-		 *   value=2: muted                  → bit 16 set
+		 * 3-state (VERIFIED via DTrace):
+		 *   value=0: unmuted, stereo -> bits[17:16] = 00
+		 *   value=1: mono (MixToMono) -> bit 17 set
+		 *   value=2: muted            -> bit 16 set
 		 */
+		setting_idx = 2;
 		if (value == UA_MON_MUTE_ON)       /* value == 2 */
 			hw_val = 0x00010000;       /* bit 16 = mute */
 		else if (value == 1)               /* MixToMono */
@@ -755,53 +855,387 @@ int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 			hw_val = 0;               /* unmuted, stereo */
 		hw_mask = 0x00030000;
 		break;
-
-	case UA_MON_PARAM_DIM:
-		/* [31] boolean */
-		hw_val  = value ? 0x80000000 : 0;
-		hw_mask = 0x80000000;
+	case UA_MON_PARAM_SOURCE:	/* 0x04 -> bit29 + bits[19:18] */
+		/*
+		 * MonitorSrc encoding: bit29 = (v >> 2) & 1,
+		 * bits[19:18] = v & 3.  For values 0-2 (MIX/CUE1/CUE2)
+		 * bit29 is always 0.
+		 */
+		setting_idx = 2;
+		hw_val  = ((value & 3) << 18) |
+			  (((value >> 2) & 1) << 29);
+		hw_mask = 0x200C0000;
+		break;
+	case UA_MON_PARAM_CUE1_MIX:	/* 0x05 -> bits[25:24] */
+		setting_idx = 2;
+		hw_val  = (value & 3) << 24;
+		hw_mask = 0x03000000;
+		break;
+	case UA_MON_PARAM_CUE1_MONO:	/* 0x06 -> bits[21:20] */
+		setting_idx = 2;
+		hw_val  = (value & 3) << 20;
+		hw_mask = 0x00300000;
+		break;
+	case UA_MON_PARAM_CUE2_MIX:	/* 0x07 -> bits[27:26] */
+		setting_idx = 2;
+		hw_val  = (value & 3) << 26;
+		hw_mask = 0x0C000000;
+		break;
+	case UA_MON_PARAM_CUE2_MONO:	/* 0x08 -> bits[23:22] */
+		setting_idx = 2;
+		hw_val  = (value & 3) << 22;
+		hw_mask = 0x00C00000;
+		break;
+	case UA_MON_PARAM_UNKNOWN_15:	/* 0x15 -> bit28 */
+		setting_idx = 2;
+		hw_val  = value ? BIT(28) : 0;
+		hw_mask = BIT(28);
+		break;
+	case UA_MON_PARAM_DIM:		/* 0x44 -> bit31 */
+		setting_idx = 2;
+		hw_val  = value ? BIT(31) : 0;
+		hw_mask = BIT(31);
+		break;
+	case UA_MON_PARAM_MONO:		/* 0x36 -> setting[4] full word */
+		/*
+		 * Legacy kext property ID 0x36.  Only works for
+		 * dev_type==3 (original Apollo).  On x4, mono is
+		 * handled via param 0x03 value=1 (MixToMono).
+		 * Keep for backward compat -- routes to setting[4].
+		 */
+		setting_idx = 4;
+		hw_val  = value;
+		hw_mask = 0xFFFFFFFF;
 		break;
 
-	case UA_MON_PARAM_MONO:
-		/*
-		 * Legacy hardware driver property ID 0x36. The UA Mixer Engine actually
-		 * sends param 0x03 value=1 for MixToMono (VERIFIED).
-		 * Keep this case for backward compatibility with any callers
-		 * using the old param ID.
-		 */
-		hw_val  = value ? 0x00020000 : 0;
-		hw_mask = 0x00020000;
+	/* ---- Setting[6]: Mirror A / Identify / MirrorsToDigital ---- */
+
+	case UA_MON_PARAM_UNKNOWN_0A:	/* 0x0a -> bits[9:8] */
+		setting_idx = 6;
+		hw_val  = (value & 3) << 8;
+		hw_mask = 0x00000300;
+		break;
+	case UA_MON_PARAM_IDENTIFY:	/* 0x1d -> bits[15:11] */
+		setting_idx = 6;
+		hw_val  = (value & 0x1F) << 11;
+		hw_mask = 0x0000F800;
+		break;
+	case UA_MON_PARAM_DIGITAL_MIRROR: /* 0x1e -> bit10 */
+		setting_idx = 6;
+		hw_val  = value ? BIT(10) : 0;
+		hw_mask = BIT(10);
+		break;
+	case UA_MON_PARAM_CUE1_MIRROR:	/* 0x2e -> bits[7:0] */
+		setting_idx = 6;
+		hw_val  = value & 0xFF;
+		hw_mask = 0x000000FF;
+		break;
+
+	/* ---- Setting[7]: Mirror B / TBConfig / misc ---- */
+
+	case UA_MON_PARAM_UNKNOWN_0F:	/* 0x0f -> bits[9:8] */
+		setting_idx = 7;
+		hw_val  = (value & 3) << 8;
+		hw_mask = 0x00000300;
+		break;
+	case UA_MON_PARAM_UNKNOWN_20:	/* 0x20 -> bit10 */
+		setting_idx = 7;
+		hw_val  = value ? BIT(10) : 0;
+		hw_mask = BIT(10);
+		break;
+	case UA_MON_PARAM_CUE2_MIRROR:	/* 0x2f -> bits[7:0] */
+		setting_idx = 7;
+		hw_val  = value & 0xFF;
+		hw_mask = 0x000000FF;
+		break;
+	case UA_MON_PARAM_UNKNOWN_45:	/* 0x45 -> bit11 */
+		setting_idx = 7;
+		hw_val  = value ? BIT(11) : 0;
+		hw_mask = BIT(11);
+		break;
+	case UA_MON_PARAM_TB_CONFIG:	/* 0x47 -> bit12 */
+		setting_idx = 7;
+		hw_val  = value ? BIT(12) : 0;
+		hw_mask = BIT(12);
+		break;
+	case UA_MON_PARAM_UNKNOWN_48:	/* 0x48 -> bit13 */
+		setting_idx = 7;
+		hw_val  = value ? BIT(13) : 0;
+		hw_mask = BIT(13);
+		break;
+	case UA_MON_PARAM_UNKNOWN_63:	/* 0x63 -> bit14 */
+		setting_idx = 7;
+		hw_val  = value ? BIT(14) : 0;
+		hw_mask = BIT(14);
+		break;
+
+	/* ---- Setting[8]: Digital out mode / CUE alt ---- */
+
+	case UA_MON_PARAM_DIGITAL_MODE:	/* 0x21 -> bits[7:0] */
+		setting_idx = 8;
+		hw_val  = value & 0xFF;
+		hw_mask = 0x000000FF;
+		break;
+	case UA_MON_PARAM_UNKNOWN_22:	/* 0x22 -> bits[29:28] */
+		setting_idx = 8;
+		hw_val  = (value & 3) << 28;
+		hw_mask = 0x30000000;
+		break;
+	case UA_MON_PARAM_CUE1_MIX_ALT:/* 0x23 -> bits[25:24] */
+		setting_idx = 8;
+		hw_val  = (value & 3) << 24;
+		hw_mask = 0x03000000;
+		break;
+	case UA_MON_PARAM_UNKNOWN_24:	/* 0x24 -> bits[31:30] */
+		setting_idx = 8;
+		hw_val  = (value & 3) << 30;
+		hw_mask = 0xC0000000;
+		break;
+	case UA_MON_PARAM_CUE2_MIX_ALT:/* 0x25 -> bits[27:26] */
+		setting_idx = 8;
+		hw_val  = (value & 3) << 26;
+		hw_mask = 0x0C000000;
+		break;
+
+	/* ---- Setting[11]: Mirror config / OutputRef ---- */
+
+	case UA_MON_PARAM_MIRROR_CFG_A:	/* 0x2a -> bit0 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(0) : 0;
+		hw_mask = BIT(0);
+		break;
+	case UA_MON_PARAM_MIRROR_CFG_B:	/* 0x2b -> bit1 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(1) : 0;
+		hw_mask = BIT(1);
+		break;
+	case UA_MON_PARAM_MIRROR_CFG_C:	/* 0x2c -> bit2 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(2) : 0;
+		hw_mask = BIT(2);
+		break;
+	case UA_MON_PARAM_MIRROR_CFG_D:	/* 0x2d -> bit3 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(3) : 0;
+		hw_mask = BIT(3);
+		break;
+	case UA_MON_PARAM_UNKNOWN_30:	/* 0x30 -> bits[23:16] */
+		setting_idx = 11;
+		hw_val  = (value & 0xFF) << 16;
+		hw_mask = 0x00FF0000;
+		break;
+	case UA_MON_PARAM_UNKNOWN_31:	/* 0x31 -> bits[31:24] */
+		setting_idx = 11;
+		hw_val  = (value & 0xFF) << 24;
+		hw_mask = 0xFF000000;
+		break;
+	case UA_MON_PARAM_OUTPUT_REF:	/* 0x32 -> bit4 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(4) : 0;
+		hw_mask = BIT(4);
+		break;
+	case UA_MON_PARAM_UNKNOWN_33:	/* 0x33 -> bit5 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(5) : 0;
+		hw_mask = BIT(5);
+		break;
+	case UA_MON_PARAM_UNKNOWN_34:	/* 0x34 -> bit6 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(6) : 0;
+		hw_mask = BIT(6);
+		break;
+	case UA_MON_PARAM_UNKNOWN_35:	/* 0x35 -> bit7 */
+		setting_idx = 11;
+		hw_val  = value ? BIT(7) : 0;
+		hw_mask = BIT(7);
+		break;
+
+	/* ---- Setting[12]: HP cue source ---- */
+
+	case UA_MON_PARAM_HP1_SOURCE:	/* 0x3f -> bits[26:24] */
+		setting_idx = 12;
+		hw_val  = (value & 7) << 24;
+		hw_mask = 0x07000000;
+		break;
+	case UA_MON_PARAM_HP2_SOURCE:	/* 0x40 -> bits[29:27] */
+		setting_idx = 12;
+		hw_val  = (value & 7) << 27;
+		hw_mask = 0x38000000;
+		break;
+
+	/* ---- Setting[13]: Talkback / misc ---- */
+
+	case UA_MON_PARAM_UNKNOWN_3A:	/* 0x3a -> bits[29:28] */
+		setting_idx = 13;
+		hw_val  = (value & 3) << 28;
+		hw_mask = 0x30000000;
+		break;
+	case UA_MON_PARAM_UNKNOWN_42:	/* 0x42 -> bits[15:13] */
+		setting_idx = 13;
+		hw_val  = (value & 7) << 13;
+		hw_mask = 0x0000E000;
+		break;
+	case UA_MON_PARAM_TALKBACK:	/* 0x46 -> bit8 */
+		setting_idx = 13;
+		hw_val  = value ? BIT(8) : 0;
+		hw_mask = BIT(8);
+		break;
+
+	/* ---- Setting[14]: Dim level / misc ---- */
+
+	case UA_MON_PARAM_DIM_LEVEL:	/* 0x43 -> bits[30:28] */
+		setting_idx = 14;
+		hw_val  = (value & 7) << 28;
+		hw_mask = 0x70000000;
+		break;
+	case UA_MON_PARAM_UNKNOWN_49:	/* 0x49 -> bit31 */
+		setting_idx = 14;
+		hw_val  = value ? BIT(31) : 0;
+		hw_mask = BIT(31);
+		break;
+	case UA_MON_PARAM_UNKNOWN_66:	/* 0x66 -> bits[7:0] */
+		setting_idx = 14;
+		hw_val  = value & 0xFF;
+		hw_mask = 0x000000FF;
+		break;
+
+	/* ---- Setting[15]: Mirror enables / clock-HP routing ---- */
+
+	case UA_MON_PARAM_UNKNOWN_38:	/* 0x38 -> bits[6:0] */
+		setting_idx = 15;
+		hw_val  = value & 0x7F;
+		hw_mask = 0x0000007F;
+		break;
+	case UA_MON_PARAM_UNKNOWN_39:	/* 0x39 -> bits[22:16] */
+		setting_idx = 15;
+		hw_val  = (value & 0x7F) << 16;
+		hw_mask = 0x007F0000;
+		break;
+	case UA_MON_PARAM_MIRROR_ENABLE_A: /* 0x3b -> bit8 */
+		setting_idx = 15;
+		hw_val  = value ? BIT(8) : 0;
+		hw_mask = BIT(8);
+		break;
+	case UA_MON_PARAM_MIRROR_ENABLE_B: /* 0x3c -> bit12 */
+		setting_idx = 15;
+		hw_val  = value ? BIT(12) : 0;
+		hw_mask = BIT(12);
+		break;
+	case UA_MON_PARAM_UNKNOWN_3E:	/* 0x3e -> bit9 */
+		setting_idx = 15;
+		hw_val  = value ? BIT(9) : 0;
+		hw_mask = BIT(9);
+		break;
+	case UA_MON_PARAM_UNKNOWN_41:	/* 0x41 -> bit7 */
+		setting_idx = 15;
+		hw_val  = value ? BIT(7) : 0;
+		hw_mask = BIT(7);
+		break;
+
+	/* ---- Setting[5]: Sound/config flags (type >= 0xa) ---- */
+
+	case UA_MON_PARAM_UNKNOWN_67:	/* 0x67 -> bit3 */
+		setting_idx = 5;
+		hw_val  = value ? BIT(3) : 0;
+		hw_mask = BIT(3);
+		break;
+	case UA_MON_PARAM_UNKNOWN_68:	/* 0x68 -> bit4 */
+		setting_idx = 5;
+		hw_val  = value ? BIT(4) : 0;
+		hw_mask = BIT(4);
+		break;
+	case UA_MON_PARAM_UNKNOWN_87:	/* 0x87 -> bit9 */
+		setting_idx = 5;
+		hw_val  = value ? BIT(9) : 0;
+		hw_mask = BIT(9);
+		break;
+
+	/* ---- Setting[32] (0x20): HP/output config flags ---- */
+
+	case 0x4a:			/* 0x4a -> bits[7:0] */
+		setting_idx = 32;
+		hw_val  = value & 0xFF;
+		hw_mask = 0x000000FF;
+		break;
+	case 0x64:			/* 0x64 -> bits[15:8] */
+		setting_idx = 32;
+		hw_val  = (value & 0xFF) << 8;
+		hw_mask = 0x0000FF00;
+		break;
+	case 0x5b:			/* 0x5b -> bit16 */
+		setting_idx = 32;
+		hw_val  = value ? BIT(16) : 0;
+		hw_mask = BIT(16);
+		break;
+	case 0x5c:			/* 0x5c -> bit17 */
+		setting_idx = 32;
+		hw_val  = value ? BIT(17) : 0;
+		hw_mask = BIT(17);
+		break;
+	case 0x53:			/* 0x53 -> bit24 */
+		setting_idx = 32;
+		hw_val  = value ? BIT(24) : 0;
+		hw_mask = BIT(24);
+		break;
+	case 0x54:			/* 0x54 -> bit25 */
+		setting_idx = 32;
+		hw_val  = value ? BIT(25) : 0;
+		hw_mask = BIT(25);
+		break;
+
+	/* ---- Setting[33] (0x21): HP output byte fields ---- */
+
+	case 0x4b:			/* 0x4b -> bits[7:0] */
+		setting_idx = 33;
+		hw_val  = value & 0xFF;
+		hw_mask = 0x000000FF;
+		break;
+	case 0x4c:			/* 0x4c -> bits[15:8] */
+		setting_idx = 33;
+		hw_val  = (value & 0xFF) << 8;
+		hw_mask = 0x0000FF00;
+		break;
+
+	/* ---- Setting[35] (0x23): Channel config count ---- */
+
+	case UA_MON_PARAM_CHAN_CFG:	/* 0x6a -> bits[4:0] */
+		setting_idx = 35;
+		hw_val  = value & 0x1F;
+		hw_mask = 0x0000001F;
 		break;
 
 	/*
-	 * Parameters with known param IDs but unknown DSP setting
-	 * indices.  The daemon routes these via WRITE_MIXER_SETTING.
-	 * Accept them here so the ioctl cache update path can fire ALSA
-	 * notifications, but don't write to hardware.
+	 * NOP params: stored in kext object but no WriteSetting call.
+	 * Accept for ALSA cache notifications but don't write hardware.
 	 */
-	case UA_MON_PARAM_SOURCE:
-	case UA_MON_PARAM_HP1_SOURCE:
-	case UA_MON_PARAM_HP2_SOURCE:
-	case UA_MON_PARAM_DIM_LEVEL:
-	case UA_MON_PARAM_TALKBACK:
-	case UA_MON_PARAM_DIGITAL_MODE:
-	case UA_MON_PARAM_OUTPUT_REF:
-	case UA_MON_PARAM_CUE1_MIRROR:
-	case UA_MON_PARAM_CUE2_MIRROR:
-	case UA_MON_PARAM_MIRROR_ENABLE_A:
-	case UA_MON_PARAM_MIRROR_ENABLE_B:
-	case UA_MON_PARAM_DIGITAL_MIRROR:
-	case UA_MON_PARAM_IDENTIFY:
-	case UA_MON_PARAM_SR_CONVERT:
-	case UA_MON_PARAM_DSP_SPANNING:
-	case UA_MON_PARAM_CUE1_MONO:
-	case UA_MON_PARAM_CUE2_MONO:
-	case UA_MON_PARAM_CUE1_MIX:
-	case UA_MON_PARAM_CUE2_MIX:
+	case UA_MON_PARAM_DSP_SPANNING:	/* 0x16 */
+	case 0x0b:
+	case 0x0c:
+	case 0x0d:
+	case 0x10:
+	case 0x11:
+	case 0x12:
+	case 0x17:
+	case 0x18:
+	case 0x26:
+	case 0x27:
+	case 0x28:
+	case 0x29:
 		dev_dbg(&ua->pdev->dev,
-			"monitor param 0x%x: cache-only (ch=%u val=0x%x)\n",
+			"monitor param 0x%x: NOP/cache-only (ch=%u val=0x%x)\n",
 			param_id, ch_idx, value);
 		return 0;
+
+	/*
+	 * Error params: kext returns -18 (ENODEV).  Reject them.
+	 */
+	case 0x09:
+	case 0x0e:
+	case 0x3d:
+		dev_dbg(&ua->pdev->dev,
+			"monitor param 0x%x: rejected (error param)\n",
+			param_id);
+		return -EINVAL;
 
 	default:
 		dev_dbg(&ua->pdev->dev,
@@ -811,12 +1245,12 @@ int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 	}
 
 	dev_dbg(&ua->pdev->dev,
-		"monitor→mixer: setting[%u] val=0x%08x mask=0x%08x "
+		"monitor->mixer: setting[%u] val=0x%08x mask=0x%08x "
 		"(ch=%u param=0x%x raw=0x%x)\n",
-		UA_MON_SETTING_IDX, hw_val, hw_mask,
+		setting_idx, hw_val, hw_mask,
 		ch_idx, param_id, value);
 
-	return ua_mixer_write_setting_locked(ua, UA_MON_SETTING_IDX,
+	return ua_mixer_write_setting_locked(ua, setting_idx,
 					     hw_val, hw_mask);
 }
 
@@ -928,22 +1362,30 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 	case 1:  /* Preamp → DSP mixer settings (no CLI) */
 		/*
 		 * Preamp controls go through DSP mixer settings only.
-		 * Hardware driver analysis confirms: setInputParam routes ALL
-		 * preamp params to the mixer setting write path.
+		 * Kext disassembly confirms: setInputParamARM routes ALL
+		 * preamp params to CPcieDeviceMixer::WriteSetting.
 		 * CLI binary commands FREEZE the ARM MCU — never use them.
 		 *
 		 * FLAG params (0x00-0x05): setting 0 (ch0-3) or 12 (ch4-7),
 		 *   6-bit stride, bit position = param_id.
 		 * GAIN params (0x06+): setting param_id+7 (ch0-3) or +15,
 		 *   8-bit byte packing.
+		 *
+		 * Route (0x13) and Level (0x16) are sent to ALL input
+		 * channels (0-31), not just physical preamps (0-3).
 		 */
-		if (param.channel_idx >= ua->audio.num_preamps ||
-		    param.channel_idx >= UA_MAX_PREAMP_CH) {
+		if (param.param_id == 0x13 || param.param_id == 0x16) {
+			if (param.channel_idx > 31) {
+				ret = -EINVAL;
+				goto out_unlock;
+			}
+		} else if (param.channel_idx >= ua->audio.num_preamps ||
+			   param.channel_idx >= UA_MAX_PREAMP_CH) {
 			ret = -EINVAL;
 			goto out_unlock;
 		}
 
-		/* Write to DSP mixer settings (verified path) */
+		/* Write to DSP mixer settings (kext-verified path) */
 		if (param.param_id <= 0x05) {
 			/* Flag params: 6-bit stride, shared setting */
 			unsigned int setting_idx;
@@ -956,7 +1398,7 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			hw_mask = (1u << param.param_id) << shift;
 
 			/*
-			 * Phase: hardware driver uses float (+1.0f=normal, -1.0f=invert)
+			 * Phase: kext uses float (+1.0f=normal, -1.0f=invert)
 			 * but daemon sends int (0=normal, 1=invert).
 			 * Handle both: bit 31 set (negative float) OR non-zero int.
 			 */
@@ -1081,7 +1523,7 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			notify_alsa = true;
 			break;
 		case UA_MON_PARAM_MONO:
-			/* Legacy hardware driver property ID 0x36 */
+			/* Legacy kext property ID 0x36 */
 			ua->audio.monitor.mono = !!param.value;
 			ctl_name = "Monitor Mono Switch";
 			notify_alsa = true;
@@ -1184,6 +1626,23 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 		}
 		break;
 
+	case 0:  /* DSP bus enable (ch_type=0) */
+		/*
+		 * Kext RE: SetBusEnable(bus_idx=ch_idx, enable=param_id).
+		 * Sends ring buffer cmd 0x1C to ALL DSPs.
+		 * Note: param_id IS the enable value; value field ignored.
+		 *
+		 * macOS init sends: bus 1,2 enable=1 (S/PDIF, ADAT)
+		 *                   bus 5,6 enable=1 (CUE routing)
+		 */
+		ret = ua_dsp_set_bus_enable(ua, param.channel_idx,
+					    param.param_id);
+		if (ret)
+			dev_warn(&ua->pdev->dev,
+				 "bus_enable failed: bus=%u en=%u (%d)\n",
+				 param.channel_idx, param.param_id, ret);
+		break;
+
 	default:
 		ret = -EINVAL;
 	}
@@ -1278,7 +1737,7 @@ static long ua_ioctl_set_mixer_bus_param(struct ua_device *ua,
 	/*
 	 * Bus param → DSP ring buffer command.
 	 *
-	 * From hardware driver analysis (SetMixerBusParam):
+	 * From kext CUAD2DeviceMixer::SetMixerBusParam disassembly:
 	 * bus coefficients are submitted as ring buffer commands (type
 	 * 0x1D, 4 dwords) to DSP 0, NOT via mixer setting registers.
 	 */
@@ -1894,8 +2353,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 * ua_boot_transport_start() programs all transport regs,
 		 * starts transport, does ACEFACE, and pulses DMA reset.
 		 *
-		 * Discovered via hardware observation: just AX_CONTROL=0x20F alone is
-		 * insufficient — all transport regs must be set first.
+		 * Discovered: just AX_CONTROL=0x20F alone is insufficient
+		 * — all transport regs must be set first.
 		 *
 		 * IOMMU FIX: ua_audio_preinit_dma() MUST be
 		 * called before ua_boot_transport_start().  When transport
@@ -1915,7 +2374,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 
 			/*
 			 * Set clock source for Apollo x4 internal clock.
-			 * Hardware observation: working driver uses source=0xC
+			 * DTrace RE: macOS uses source=0xC
 			 * (value 0x020C for 48kHz). Source=0 (0x0200) gets
 			 * no FPGA ack. Pre-ACEFACE clock write doesn't work
 			 * because notification status (0xC030) isn't configured
@@ -2019,7 +2478,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		ua_boot_transport_stop(ua);
 
 	/*
-	 * Second clock write after transport stop (hardware driver Phase G).
+	 * Second clock write after transport stop (macOS Phase G).
 	 * The early clock write (pre-transport) matches Phase A.
 	 * clock_source already set to 0xC above.
 	 */
@@ -2029,7 +2488,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 	 * mode but BREAKS playback (no audio output). Without it, DSP
 	 * stays in default passthrough mode where playback works.
 	 * Capture needs this write but it breaks playback.
-	 * (confirmed playback broken with clock write)
+	 * (confirmed: playback broken with clock write)
 	 */
 #if 0
 	if (ua_uses_audio_extension(ua->device_type) && ua->aceface_done) {
@@ -2092,7 +2551,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	/* Map BAR0 — hardware driver asserts minimum 0x2800 (10 KiB) */
+	/* Map BAR0 — kext asserts minimum 0x2800 (10 KiB) */
 	ua->regs_size = pci_resource_len(pdev, 0);
 	if (ua->regs_size < UA_MIN_BAR_SIZE) {
 		dev_err(&pdev->dev, "BAR0 too small: %llu < %u\n",
@@ -2108,7 +2567,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	ua->regs_phys = pci_resource_start(pdev, 0);
 
-	/* Read and cache FPGA revision — first thing the hardware driver does after mapping */
+	/* Read and cache FPGA revision — first thing the kext does after mapping */
 	ua->fpga_rev = ua_read(ua, UA_REG_FPGA_REV);
 	ua->subsystem_id = pdev->subsystem_device;
 
@@ -2182,7 +2641,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_info(&pdev->dev, "=== END ===\n");
 	}
 
-	/* Disable interrupts before setting up MSI (hardware driver writes 0 to IRQ_ENABLE) */
+	/* Disable interrupts before setting up MSI (kext writes 0 to IRQ_ENABLE) */
 	ua->irq_mask_lo = 0;
 	ua->irq_mask_hi = 0;
 	ua_write(ua, UA_REG_IRQ_ENABLE, 0);
@@ -2428,4 +2887,4 @@ module_exit(ua_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_VERSION(DRIVER_VERSION);
-MODULE_AUTHOR("Open Apollo contributors");
+MODULE_AUTHOR("open-apollo contributors");

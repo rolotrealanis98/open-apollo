@@ -2,7 +2,7 @@
 /*
  * Universal Audio Apollo — ALSA Audio Subsystem
  *
- * Copyright (c) 2026 Open Apollo contributors
+ * Copyright (c) 2026 open-apollo contributors
  *
  * Implements:
  *  - DMA buffer allocation and scatter-gather table programming
@@ -40,13 +40,21 @@ MODULE_PARM_DESC(no_connect, "Skip ACEFACE connect at probe (for crash debugging
 
 static bool warm_boot;
 module_param(warm_boot, bool, 0444);
-MODULE_PARM_DESC(warm_boot, "Skip FW load + ACEFACE, mark connected (warm boot from another OS)");
+MODULE_PARM_DESC(warm_boot, "Skip FW load + ACEFACE, mark connected (warm boot from Windows/macOS)");
+
+static bool skip_bus_coeff = true;
+module_param(skip_bus_coeff, bool, 0444);
+MODULE_PARM_DESC(skip_bus_coeff, "Skip BUS_COEFF (0x1D) in plugin chain (default: true)");
+
+static bool no_plugins;
+module_param(no_plugins, bool, 0444);
+MODULE_PARM_DESC(no_plugins, "Skip plugin chain entirely (keep ACEFACE)");
 
 /* ----------------------------------------------------------------
  * Per-model channel counts
  *
- * These are the PCIe DMA channel counts from hardware driver analysis, not the
- * physical I/O count.  The hardware driver adds +1 to playback channels by
+ * These are the PCIe DMA channel counts from kext analysis, not the
+ * physical I/O count.  The kext adds +1 to playback channels by
  * default (flag bit 1 clear) to carry a sync/timestamp channel.
  * ---------------------------------------------------------------- */
 
@@ -59,10 +67,10 @@ struct ua_model_info {
 };
 
 /*
- * Channel counts from hardware driver audio engine properties.
+ * Channel counts from macOS IOKit IOAudioEngine properties.
  * Apollo x4: "Number of Output Channels: 24", "Number of Input Channels: 22"
  *
- * With diagnostic flags=0 (default), hardware driver does NOT add +1 sync channel.
+ * With diagnostic flags=0 (default), kext does NOT add +1 sync channel.
  * The formula: actualPlay = play + ((flags & 0x6) >= 1 ? 1 : 0)
  * With flags=0: (0 & 0x6) = 0, not >= 1, so +0.
  */
@@ -120,7 +128,7 @@ static void ua_get_model_channels(struct ua_device *ua)
 /* ----------------------------------------------------------------
  * Buffer frame size calculation
  *
- * From hardware driver transport setup:
+ * From kext CPcieAudioExtension::PrepareTransport():
  *   maxCh = max(playCh, recCh)
  *   frameSize = roundDownPow2(0x400000 / (maxCh * 4) / 2)
  *   if (frameSize > 8192) frameSize = 8192
@@ -199,12 +207,12 @@ static void ua_audio_free_dma(struct ua_device *ua)
 }
 
 /*
- * Reset DMA engines — mirrors hardware driver DMA reset sequence.
+ * Reset DMA engines — mirrors CPcieIntrManager::ResetDMAEngines().
  *
  * DMA_CTRL (0x2200) bits 9-16 are per-engine reset bits.
  * On power-up / connect, these are SET (0x1FE00 = all engines in reset).
  * We must toggle them to properly initialize the DMA engine state,
- * then clear all pending interrupts (hardware driver writes 0xFFFFFFFF to ISR).
+ * then clear all pending interrupts (kext writes 0xFFFFFFFF to ISR).
  */
 static void ua_audio_reset_dma(struct ua_device *ua)
 {
@@ -250,7 +258,7 @@ static void ua_audio_reset_dma(struct ua_device *ua)
 	dev_info(&ua->pdev->dev, "  DMA_CTRL after reset:  0x%08x (expect 0x%08x)\n",
 		 readback, val_clean);
 
-	/* Clear all pending interrupts (step after DMA engine reset) */
+	/* Clear all pending interrupts (kext step after ResetDMAEngines) */
 	ua_write(ua, UA_REG_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
 	if (ua->fw_v2)
 		ua_write(ua, UA_REG_EXT_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
@@ -293,7 +301,7 @@ static void ua_audio_program_sg(struct ua_device *ua)
 			 upper_32_bits(addr));
 	}
 
-	/* No doorbell — hardware driver writes SG directly without one */
+	/* No doorbell — kext ProgramRegisters writes SG directly without one */
 
 	/*
 	 * Enable per-channel DMA engines.
@@ -409,8 +417,8 @@ static void ua_dump_channel_names(struct ua_device *ua)
  * DSP service loop — periodic readback drain
  *
  * The Apollo DSP firmware needs periodic "servicing" from the host to
- * stay alive.  The hardware driver calls a service routine
- * ~103/sec via a periodic callback.  Without this, the DSP
+ * stay alive.  On macOS, the kext calls CDSPResourceManager::Service()
+ * ~103/sec via ProcessPlugin (IOKit SEL119).  Without this, the DSP
  * halts: front panel freezes, mixer settings are written but never
  * processed (SEQ_RD never advances).
  *
@@ -434,7 +442,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 	/*
 	 * Poll and clear notification status register.
 	 *
-	 * The hardware driver's interrupt handler continuously reads and clears
+	 * The kext's interrupt handler continuously reads and clears
 	 * notification events from this register.  If the DSP fires
 	 * notifications (transport change, IO descriptors, etc.) and
 	 * the host never clears them, the DSP may stall.
@@ -620,8 +628,8 @@ int ua_aceface_handshake(struct ua_device *ua)
  * Cold boot transport start/stop
  *
  * The FPGA ring buffer engine requires the FULL PrepareTransport
- * register sequence before it processes ring entries.  Discovered
- * via hardware observation: just writing AX_CONTROL=0x20F is insufficient.
+ * register sequence before it processes ring entries.  Discovered:
+ * just writing AX_CONTROL=0x20F is insufficient.
  *
  * This encapsulates:
  *   1. Model channel count lookup
@@ -653,7 +661,7 @@ int ua_boot_transport_start(struct ua_device *ua)
 		 audio->buf_frame_size);
 
 	/*
-	 * Full transport prepare register sequence (from hardware driver analysis).
+	 * Full PrepareTransport register sequence (from kext disassembly).
 	 * Order matters — FPGA state machine expects this sequence.
 	 */
 
@@ -691,7 +699,7 @@ int ua_boot_transport_start(struct ua_device *ua)
 	 * CRITICAL: The FPGA state machine needs time between the
 	 * ARM write and the START write.  Without this delay, the
 	 * transport start is silently ignored (FRAME_CTR stays 0).
-	 * The hardware driver has substantial overhead between these writes
+	 * The kext has substantial overhead between these writes
 	 * (FRAME_CTR polling + vector enable), and the Python ioctl
 	 * path has syscall overhead between each write.  Back-to-back
 	 * iowrite32 in the kernel is too fast for the FPGA.
@@ -763,7 +771,7 @@ void ua_boot_transport_stop(struct ua_device *ua)
 /* ----------------------------------------------------------------
  * DSP firmware connection handshake
  *
- * From hardware driver connect sequence analysis:
+ * From kext CPcieAudioExtension::Connect() disassembly:
  *
  *   1. Write 0xACEFACE to BAR0 + bank*4 + 0xC004  (= 0xC02C for x4)
  *   2. Write 1 (doorbell) to BAR0 + 0x2260
@@ -774,7 +782,7 @@ void ua_boot_transport_stop(struct ua_device *ua)
  *   7. Signal connect completion
  *
  * CRITICAL: Previous code wrote ACEFACE to 0xC004 and polled 0x22C0.
- * The hardware driver uses bank-shifted addresses: 0xC02C and 0xC030.
+ * The kext uses bank-shifted addresses: 0xC02C and 0xC030.
  * 0x22C0 is a transport status register, NOT the notification status!
  * ---------------------------------------------------------------- */
 
@@ -784,7 +792,7 @@ static void ua_audio_write_connect_config(struct ua_device *ua)
 
 	/*
 	 * After connect response (bit 21), write 10 config dwords to
-	 * BAR0+0xC000 (NO bank shift).  From hardware driver notification interrupt handler.
+	 * BAR0+0xC000 (NO bank shift).  From kext _handleNotificationInterrupt.
 	 *
 	 * config[0] = bank_shift (0x0A for Apollo x4)
 	 * config[1] = readback_count (0x17C = 380)
@@ -840,11 +848,11 @@ static int ua_audio_connect(struct ua_device *ua)
 	}
 
 	/*
-	 * ACEFACE handshake from hardware driver connect sequence:
+	 * ACEFACE handshake from kext CPcieAudioExtension::Connect():
 	 *   Each outer retry re-sends ACEFACE magic + CONNECT doorbell,
 	 *   then polls notification status for bit 21 (connect response).
 	 *
-	 * The hardware driver uses up to 20 retries × 9 polls × 100ms = ~18 seconds.
+	 * The kext uses up to 20 retries × 9 polls × 100ms = ~18 seconds.
 	 *
 	 * CRITICAL FIX: Use bank-shifted registers.
 	 *   ACEFACE target: 0xC02C (was 0xC004)
@@ -907,7 +915,7 @@ post_handshake:
 				/*
 				 * Synthetic notification handling.
 				 *
-				 * The hardware driver's notification interrupt handler, after
+				 * The kext's _handleNotificationInterrupt, after
 				 * processing bit 21 (connect), synthetically
 				 * injects bits 0 + 1 + 22 (OR 0x00400003) and
 				 * falls through to handle them in-line.  This
@@ -1010,23 +1018,44 @@ post_handshake:
 					 * setting[24] across 2+ batch cycles.
 					 */
 					/*
-					 * Init mixer settings: match hardware driver
-					 * SEL132 init sweep (val=1 to settings
-					 * 0-11 only). Previous 0x20/0xFF to all
-					 * 37 settings corrupted gain settings.
-					 */
-					/*
-					 * Hardware driver init: val=1 mask=0 to
-					 * settings 0-11. mask=0 ORs bit 0 only,
-					 * preserving DSP's internal state.
-					 * Using mask=1 (bit 0 only) to match.
+					 * macOS SEL132 sends val=1 mask=0 to
+					 * settings 0-11 — but only AFTER ~7s
+					 * of DSP processing.  mask=0 means
+					 * "preserve DSP firmware defaults."
+					 *
+					 * Previously we set mask=1 here which
+					 * CORRUPTED setting[2] (monitor core:
+					 * volume/mute/source/dim) by writing
+					 * val=1 before the daemon could set
+					 * correct values.  This broke standalone
+					 * monitor operation.
+					 *
+					 * Fix: leave all settings at {0,0} so
+					 * the flush skips them (mask==0 check).
+					 * The daemon's 50-param monitor init
+					 * writes correct values via ioctl later.
+					 *
+					 * Exception: capture routing requires
+					 * settings 1-37 = 0x20/0xFF (Windows
+					 * BAR0 capture) plus setting[35] = 0x05
+					 * (channel config count).
+					 *
+					 * SKIP setting[2] — monitor core (volume,
+					 * mute, source, dim).  Writing 0x20 to it
+					 * corrupts monitor standalone operation.
+					 * The daemon's 57-param monitor init sets
+					 * setting[2] correctly via ioctl later.
 					 */
 					{
 						int s;
-						for (s = 0; s <= 11; s++) {
-							ua->mixer_val[s] = 1;
-							ua->mixer_mask[s] = 1;
+						for (s = 1; s < UA_MIXER_BATCH_COUNT; s++) {
+							if (s == 2)
+								continue; /* skip monitor */
+							ua->mixer_val[s] = 0x20;
+							ua->mixer_mask[s] = 0xFF;
 						}
+						ua->mixer_val[35] = 0x05;
+						ua->mixer_mask[35] = 0x1F;
 						ua->mixer_dirty = true;
 					}
 
@@ -1072,8 +1101,8 @@ post_handshake:
 				 * 0x001D0004, not consumed) and mixer settings
 				 * (settings 0-3 with float + sub masks, caused
 				 * SEQ deadlock on 12th write).  The correct
-				 * encoding for SEL130 is unknown — need
-				 * hardware register write observation.
+				 * encoding for SEL130 is unknown — need macOS
+				 * DTrace BAR0 write capture.
 				 *
 				 * Clock set: writes 0xC074 + doorbell(4) but
 				 * bit 22 ack never arrives (bit 21 reappears).
@@ -1082,15 +1111,25 @@ post_handshake:
 				 */
 
 				/*
-				 * Activate plugin chain before transport.
-				 * Sends SRAM_CFG + ROUTING + MODULE_ACTIVATE
-				 * to DSP 0. Must happen in connect path
-				 * (not pcm_prepare — that crashes).
+				 * Plugin chain DISABLED — it clobbers capture.
+				 *
+				 * The 572 SRAM_CFG + ROUTING + MODULE_ACTIVATE
+				 * ring commands overwrite DSP capture routing
+				 * state established by setting[24]=0x20.
+				 * Confirmed: no_plugins=1 restores capture
+				 * (Ch0/1 self-noise at -102/-106 dBFS).
+				 *
+				 * The DSP firmware handles basic routing on
+				 * cold boot without the plugin chain.  Playback,
+				 * capture, monitor, and preamp all work without it.
+				 *
+				 * TODO: identify which specific plugin chain
+				 * commands are safe vs which clobber capture,
+				 * then send only the safe subset.
 				 */
-				if (!ua->plugins_activated) {
-					ua_dsp_activate_plugin_chain(ua);
-					ua->plugins_activated = true;
-				}
+				if (!no_plugins)
+					dev_info(&ua->pdev->dev,
+						 "plugin chain skipped (clobbers capture)\n");
 
 				/*
 				 * Restart transport for DSP service.
@@ -1108,7 +1147,7 @@ post_handshake:
 
 			/*
 			 * Other notification bits may be set — log them.
-			 * The hardware driver processes bits 0, 1, 4, 5, 22 as well.
+			 * The kext processes bits 0, 1, 4, 5, 22 as well.
 			 */
 			if (status != 0)
 				dev_dbg(&ua->pdev->dev,
@@ -1200,7 +1239,7 @@ int ua_audio_reconnect(struct ua_device *ua)
 
 /*
  * Prepare the transport engine.
- * Mirrors hardware driver transport prepare sequence.
+ * Mirrors CPcieAudioExtension::PrepareTransport().
  */
 static int ua_audio_prepare_transport(struct ua_device *ua)
 {
@@ -1218,7 +1257,7 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 		 audio->buf_frame_size);
 
 	/*
-	 * Exact register sequence from hardware driver transport setup analysis.
+	 * Exact register sequence from kext PrepareTransport() disassembly.
 	 * Order matters — firmware state machine expects this sequence.
 	 */
 
@@ -1235,7 +1274,7 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 	/* Step 4: Enable timer vector (TIMER_CFG set later in pcm_prepare) */
 	ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC);
 
-	/* Step 5: Clear SAMPLE_POS again (hardware driver does this twice) */
+	/* Step 5: Clear SAMPLE_POS again (kext does this twice) */
 	ua_write(ua, UA_REG_AX_SAMPLE_POS, 0);
 
 	/* Step 6: Fence read of SAMPLE_POS */
@@ -1246,7 +1285,7 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 
 	/*
 	 * Step 8: POS_OFFSET (0x2258) — rate-dependent value.
-	 * From hardware driver transport setup: stored internally,
+	 * From kext PrepareTransport(): stored at this+0x2880,
 	 * indexed by rate enum.  The value doubles per speed tier:
 	 *   44.1/48 kHz   → 0x08
 	 *   88.2/96 kHz   → 0x10
@@ -1293,7 +1332,7 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 
 	/*
 	 * Step 13: P2P_ROUTE (0x224C) = 0x100 | (play_ch - 1)
-	 * From hardware driver: written AFTER DMA enable + status fence.
+	 * From kext: written AFTER DMA enable + status fence.
 	 * Tells FPGA how to route audio between DSP and DMA.
 	 * Previously written before DMA enable (wrong order).
 	 */
@@ -1323,7 +1362,7 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 	if (frame_ctr == 0)
 		dev_warn(&ua->pdev->dev, "frame counter still zero!\n");
 
-	/* Step 15: Enable end-of-buffer vector (0x47) — hardware driver does this here */
+	/* Step 15: Enable end-of-buffer vector (0x47) — kext does this here */
 	ua_enable_vector(ua, UA_IRQ_VEC_END_BUFFER);
 
 	dev_info(&ua->pdev->dev,
@@ -1451,7 +1490,7 @@ static int ua_audio_start_transport(struct ua_device *ua)
 	ctrl = UA_AX_CTRL_START;
 
 	/*
-	 * Extended mode: hardware driver checks device type against 0xA and 0x9.
+	 * Extended mode: kext checks device type against 0xA and 0x9.
 	 * For Apollo x4 (type 0x1F), try BOTH values to find which works.
 	 * Previous comment said 0x20F was "REQUIRED" but device has been
 	 * dying consistently with it.  Try 0x0F for v2 Thunderbolt devices.
@@ -1637,7 +1676,7 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
 /* ----------------------------------------------------------------
  * Clock control
  *
- * From hardware driver clock control analysis:
+ * From kext CPcieAudioExtension::_setSampleClock() disassembly:
  *   clockConfig = clockSource | (rateIndex << 8)
  *   Write to BAR0 + bank*4 + 0xC04C (= 0xC074 for Apollo x4)
  *   Doorbell: write 4 to BAR0 + 0x2260
@@ -1970,7 +2009,7 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		/*
 		 * Rate change: disconnect/reconnect cycle.
 		 *
-		 * Hardware observation shows the working driver does a full DSP
+		 * DTrace RE shows macOS does a full DSP
 		 * disconnect/reconnect with FW reload on every rate
 		 * change.  We implement the minimum: soft-disconnect
 		 * (preserves mixer DSP) then re-run connect setup to
@@ -2015,7 +2054,7 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 	/*
 	 * Prepare transport if not running.
 	 *
-	 * Order follows hardware driver register programming:
+	 * Order follows kext CPcieDevice::ProgramRegisters():
 	 *   1. ResetDMAEngines (toggle 0x2200 reset bits)
 	 *   2. Clear interrupts (0xFFFFFFFF → ISR)
 	 *   3. Program SG tables (ring buffer descriptors)
@@ -2036,15 +2075,9 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		 * Just stop the connect transport, prepare, and restart.
 		 */
 		/*
-		 * Activate plugin chain before transport starts.
-		 * This sends SRAM_CFG + ROUTING + MODULE_ACTIVATE
-		 * to DSP 0, enabling hardware parameter control
-		 * (SEL131 commands for volume, gain, talkback).
+		 * Plugin chain disabled — clobbers capture routing.
+		 * See connect path comment for details.
 		 */
-		if (ua->aceface_done && !ua->plugins_activated) {
-			ua_dsp_activate_plugin_chain(ua);
-			ua->plugins_activated = true;
-		}
 
 		ret = ua_audio_prepare_transport(ua);
 		if (ret)
@@ -2064,7 +2097,7 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		 * silence.  After transport, playback passthrough
 		 * is already established and capture routing
 		 * activates correctly.
-		 * (Discovered via hardware observation: ordering is critical)
+		 * (Discovered: ordering is critical)
 		 */
 		if (ua->aceface_done) {
 			/* Force source=0xC for internal clock — required for
@@ -2600,7 +2633,7 @@ static int ua_monitor_source_put(struct snd_kcontrol *kctl,
 	if ((int)idx == ua->audio.monitor.source)
 		return 0;
 
-	/* Verified via hardware observation: Monitor Source uses ch_idx=1 */
+	/* DTrace-verified: Monitor Source uses ch_idx=1 */
 	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_SOURCE, idx);
 	if (ret)
 		return ret;
@@ -2728,7 +2761,7 @@ static int ua_monitor_talkback_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.monitor.talkback)
 		return 0;
 
-	/* Verified via hardware observation: ON uses ch_idx=1, OFF uses ch_idx=9 */
+	/* DTrace-verified: ON uses ch_idx=1, OFF uses ch_idx=9 */
 	ret = ua_monitor_set_param(ua, newval ? 1 : 9,
 				   UA_MON_PARAM_TALKBACK,
 				   newval ? 1 : 0);
@@ -4062,7 +4095,7 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 	/*
 	 * Connect to DSP firmware at init time.
 	 *
-	 * The hardware driver defers this to first stream open, but we need
+	 * The macOS kext defers this to first stream open, but we need
 	 * the firmware connected early so the CLI interface (ARM MCU)
 	 * is responsive for userspace mixer control via ioctl.
 	 * Without this handshake, CLI commands timeout (status=0x24).
@@ -4070,9 +4103,11 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 	 * Non-fatal: if connect fails (e.g. FW not ready), ALSA
 	 * prepare will retry when a stream is actually opened.
 	 */
+	ua->skip_bus_coeff = skip_bus_coeff;
+
 	if (warm_boot) {
 		/*
-		 * Warm boot: DSP already fully
+		 * Warm boot from Windows/macOS: DSP already fully
 		 * initialized with per-channel firmware.  Skip ACEFACE
 		 * (which conflicts with existing state) and mark
 		 * connected so pcm_prepare goes straight to transport.

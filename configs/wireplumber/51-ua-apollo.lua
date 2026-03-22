@@ -3,7 +3,7 @@
 --
 -- NOTE: The pro-audio profile must be set via wpctl after PipeWire starts,
 -- because WirePlumber explicitly excludes pro-audio from auto-selection.
--- Set it manually: wpctl set-profile <device-id> pro-audio
+-- The apollo-init.sh script handles this.
 
 -- Node properties for Apollo output/input nodes
 table.insert(alsa_monitor.rules, {

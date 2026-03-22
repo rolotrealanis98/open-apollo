@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deploy PipeWire/WirePlumber/UCM2 configs for Universal Audio Apollo
-# Usage: sudo bash configs/deploy.sh
+# Run on Ubuntu: sudo bash ~/open-apollo/configs/deploy.sh
 
 set -euo pipefail
 

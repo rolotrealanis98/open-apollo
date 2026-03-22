@@ -186,6 +186,7 @@ class MixerDaemon:
         # Startup grace period: don't let readback overwrite state tree
         # defaults until we've had a chance to push them to hardware.
         self._readback_start_time = time.monotonic()
+        self._hw_init_done = False
 
         # Wire state tree SET notifications to hardware router
         if hw_router:
@@ -217,11 +218,13 @@ class MixerDaemon:
         # Fire initialized=True after a short delay.  ConsoleLink (iPad)
         # subscribes to /initialized and waits for the false→true transition
         # before proceeding past the "connecting" screen.  The POST /response
-        # path only fires for UAD Console, so we must also fire at
+        # path only fires for UAD Console (macOS), so we must also fire at
         # startup for clients that skip the challenge-response handshake.
         if not self._init_fired:
+            # Delay 4s to let driver's plugin chain complete (~400ms)
+            # before sending monitor init. Previous 1s delay was too early.
             asyncio.get_event_loop().call_later(
-                1.0, self._fire_init_complete)
+                4.0, self._fire_init_complete)
 
         async with self.server:
             if self.helper_server:
@@ -285,11 +288,28 @@ class MixerDaemon:
                         meter_cache.append(entry)
                 cache_gen = sub_gen
 
+            # Retry hardware init if device wasn't available at startup.
+            # Apollo may connect after daemon starts (TB hot-plug).
+            # Wait 3s after device appears for plugin chain to complete
+            # (~400ms) + DSP settle before sending monitor init.
+            if self.hw_router and not self._hw_init_done:
+                be = self.hw_router.backend
+                if be.connected and not hasattr(self, '_hw_appear_time'):
+                    self._hw_appear_time = time.monotonic()
+                    log.info("Device appeared, waiting 3s for plugin chain...")
+                if (be.connected and hasattr(self, '_hw_appear_time')
+                        and time.monotonic() - self._hw_appear_time >= 3.0):
+                    self._push_defaults_to_hardware()
+                    self._hw_init_done = True
+                    self._readback_start_time = time.monotonic()
+                    log.info("Late hardware init: monitor+preamp defaults sent")
+
             # Poll hardware readback and push changes to console
             # (monitor knob, mute, dim, preamp gains — NOT meters)
             # Skip during startup grace period (2s) to let init push
             # state tree defaults to hardware first.
             if self.hw_router and time.monotonic() - self._readback_start_time > 2.0:
+                self.hw_router.flush_pending_gains()
                 rb = self.hw_router.poll_hw_readback()
                 if rb:
                     self._sync_hw_readback(rb, last_rb)
@@ -436,7 +456,7 @@ class MixerDaemon:
         """Check if a readback push should be suppressed (recent client SET)."""
         ts = self._readback_suppress.get(path)
         if ts is not None:
-            if time.monotonic() - ts < 1.0:  # 1s suppression window
+            if time.monotonic() - ts < 2.0:  # 2s — suppress readback after SET
                 return True
             del self._readback_suppress[path]
         return False
@@ -496,37 +516,21 @@ class MixerDaemon:
             self._push_to_clients(
                 "/devices/0/outputs/18/TalkbackOn", talkback)
 
-        # Preamp gain readback — shared per stereo pair.
-        # bits[7:0] = gain for active preamp in pair 1 (preamp 1 or 2).
-        # bits[23:16] = gain for active preamp in pair 2 (preamp 3 or 4).
-        # Selection indicator in bits[31:28] tells us which preamp is active.
-        selection = rb.get("preamp_selection", 0)
-        last_selection = last_rb.get("preamp_selection", -1)
-        if selection != last_selection:
-            log.info("PREAMP SEL changed: %d → %d", last_selection, selection)
-        for pair_idx, (pair_key, pair_channels) in enumerate([
-            ("pair1", (0, 1)),
-            ("pair2", (2, 3)),
-        ]):
-            gain_dB = rb.get(f"preamp_{pair_key}_gain", 10)
-            gain_raw = rb.get(f"preamp_{pair_key}_gain_raw", 0)
-            last_gain = last_rb.get(f"preamp_{pair_key}_gain")
+        # Preamp gain readback — 4 individual channels.
+        # rb_data[3]: ch0=[7:0], ch1=[15:8], ch2=[23:16], ch3=[31:24]
+        for ch in range(4):
+            gain_dB = rb.get(f"preamp_{ch}_gain", 10)
+            last_gain = last_rb.get(f"preamp_{ch}_gain")
             if gain_dB != last_gain:
-                target_ch = selection if selection in pair_channels else pair_channels[0]
-                log.info("GAIN %s: raw=0x%02x dB=%s sel=%d target=ch%d sel_stable=%s",
-                         pair_key, gain_raw, gain_dB, selection, target_ch,
-                         selection == last_selection)
-                if selection != last_selection:
-                    continue  # skip during selection transitions
-                # Push both Gain (dB) and GainTapered (0-1) for app compat
-                gain_path = f"/devices/0/inputs/{target_ch}/preamps/0/Gain"
-                tapered_path = f"/devices/0/inputs/{target_ch}/preamps/0/GainTapered"
-                # Check both Gain and GainTapered suppression paths
-                # (client SETs GainTapered/value, suppression key includes /value)
-                if (not self._readback_suppressed(gain_path) and
-                        not self._readback_suppressed(tapered_path) and
-                        not self._readback_suppressed(gain_path + "/value") and
-                        not self._readback_suppressed(tapered_path + "/value")):
+                gain_raw = rb.get(f"preamp_{ch}_gain_raw", 0)
+                log.info("GAIN ch%d: raw=0x%02x dB=%d", ch, gain_raw, gain_dB)
+                gain_path = f"/devices/0/inputs/{ch}/preamps/0/Gain"
+                tapered_path = f"/devices/0/inputs/{ch}/preamps/0/GainTapered"
+                dragging = (self._readback_suppressed(gain_path) or
+                            self._readback_suppressed(tapered_path) or
+                            self._readback_suppressed(gain_path + "/value") or
+                            self._readback_suppressed(tapered_path + "/value"))
+                if not dragging:
                     self._push_to_clients(gain_path, float(gain_dB))
                     self._push_to_clients(tapered_path, preamp_db_to_tapered(gain_dB))
 
@@ -551,8 +555,8 @@ class MixerDaemon:
     def _poll_dsp_load(self):
         """Poll DSP load and push to state tree at ~1 Hz.
 
-        DSP load comes from GetPluginDSPLoad which returns an IEEE 754
-        float (0-100%) from the SHARC DSP.  On Linux,
+        On macOS, DSP load comes from SEL170 (GetPluginDSPLoad) which
+        returns an IEEE 754 float (0-100%) from the SHARC DSP.  On Linux,
         we query each DSP's running status via GET_DSP_INFO ioctl.
 
         The full SEL170-equivalent (which returns actual load percentage)
@@ -764,6 +768,8 @@ class MixerDaemon:
         # ensures hardware matches the desired state (device map defaults
         # or restored saved state).
         self._push_defaults_to_hardware()
+        if self.hw_router and self.hw_router.backend.connected:
+            self._hw_init_done = True
 
         # Force value change even if saved state restored True —
         # reset to False first so the False→True transition fires
@@ -809,8 +815,46 @@ class MixerDaemon:
         for path, value in defaults.items():
             self.hw_router.on_set(path, value)
 
-        # Disable talkback + dim matching hardware driver init sequence.
-        # From hardware observation: TB_CONFIG(0x47)=1 must precede
+        # ── Route + Level init (macOS sends these FIRST) ─────────────
+        # Route bitmask (param 0x13) tells the DSP mixer which output
+        # buses each input can route to.  Without it, no input reaches
+        # the monitor output.  Level (param 0x16, 0xA0 = -16 dB) sets
+        # the default DSP processing level per channel.
+        # DTrace capture: macOS sends Route to 19 channels and
+        # Level to all 32 channels before any other mixer params.
+        # Currently limited to ch 0-3 (physical preamps) — kernel
+        # setting encoding for extended ch_idx (8+) needs kext RE.
+        if self.hw_router and self.hw_router.backend:
+            be = self.hw_router.backend
+            PREAMP = 1  # ch_type=1
+
+            # Route bitmask for ALL input channels (macOS sends first).
+            # 0x0001FFFF enables routing to buses 0-16 (MIX, CUE1,
+            # CUE2, AUX, virtual outputs).
+            route_chs = [0,1,2,3, 8,9,10, 12,13,14,15,
+                         20,21,22,23, 24,25,26,27]
+            for ch in route_chs:
+                be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF)
+            # S/PDIF L gets extended route mask
+            be.set_mixer_param(PREAMP, 8, 0x13, 0x0003FFFF)
+
+            # Default DSP processing level for ALL channels (-16 dB).
+            level_chs = list(range(16)) + list(range(20, 32))
+            for ch in level_chs:
+                be.set_mixer_param(PREAMP, ch, 0x16, 0xA0)
+            log.info("Sent Route (0x13) to %d channels + Level (0x16) "
+                     "to %d channels", len(route_chs), len(level_chs))
+
+            # TYPE0 DSP path routing (ch_type=0).
+            # Enables S/PDIF, ADAT, and CUE bus routing paths.
+            be.set_mixer_param(0, 1, 0x01, 1)  # S/PDIF output path
+            be.set_mixer_param(0, 2, 0x01, 1)  # ADAT output path
+            be.set_mixer_param(0, 5, 0x00, 1)  # CUE bus routing
+            be.set_mixer_param(0, 6, 0x00, 1)  # CUE bus routing
+            log.info("Sent TYPE0 DSP path routing (4 calls)")
+
+        # Disable talkback + dim matching macOS init sequence.
+        # DTrace (talkback-init capture): TB_CONFIG(0x47)=1 must precede
         # TALKBACK(0x46)=0. Send to ch_idx 0 and 1 (varies by capture).
         if self.hw_router and self.hw_router.backend:
             be = self.hw_router.backend
@@ -821,22 +865,114 @@ class MixerDaemon:
                 be.set_mixer_param(2, ch_idx, 0x44, 0)   # DIM OFF
             log.info("Sent talkback/dim init sequence (TB_CONFIG + OFF)")
 
-            # Missing preamp init params (from hardware observation).
-            # These write to mixer settings 14/15 which act as "presence
-            # flags" — the DSP only forwards gain when these are set.
+            # Full per-channel preamp init matching macOS DTrace order.
+            # macOS sends 13 params per channel: Route → Level → LowCut →
+            # MicLine → 0x08(2x) → GainC → Phase → 0x07 → 0x11 → PAD →
+            # 48V → Link → Route(again).
             for ch in range(4):
-                be.set_mixer_param(1, ch, 0x07, 0)   # param 0x07 → setting[14]
-                be.set_mixer_param(1, ch, 0x08, 0)   # param 0x08 → setting[15]
-            # HiZ channels (0, 1) get param 0x11
-            be.set_mixer_param(1, 0, 0x11, 1)
-            be.set_mixer_param(1, 1, 0x11, 1)
-            # Level/pairing init (hardware driver sends 0xa0 for all channels)
-            for ch in range(4):
-                be.set_mixer_param(1, ch, 0x16, 0xa0)
-            log.info("Sent preamp gain init params (0x07/0x08/0x11/0x16)")
+                be.set_mixer_param(PREAMP, ch, 0x04, 0)          # LowCut=off
+                be.set_mixer_param(PREAMP, ch, 0x00, 0)          # Mic/Line=Mic
+                be.set_mixer_param(PREAMP, ch, 0x08, 0)          # Unknown
+                be.set_mixer_param(PREAMP, ch, 0x08, 0)          # Unknown (2x)
+                be.set_mixer_param(PREAMP, ch, 0x06, 1)          # GainC=1 (10dB)
+                be.set_mixer_param(PREAMP, ch, 0x05, 0x3F800000) # Phase=+1.0f
+                be.set_mixer_param(PREAMP, ch, 0x07, 0)          # Unknown
+                if ch <= 1:  # HiZ-capable channels only
+                    be.set_mixer_param(PREAMP, ch, 0x11, 1)      # HiZ flag
+                be.set_mixer_param(PREAMP, ch, 0x01, 0)          # PAD=off
+                be.set_mixer_param(PREAMP, ch, 0x03, 0)          # 48V=off
+                if ch in (0, 2):  # Link on first of each pair
+                    be.set_mixer_param(PREAMP, ch, 0x02, 0)      # Link=off
+                be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route (again)
+            log.info("Sent full preamp init: 13 params × 4 channels")
+
+            # Full monitor section init — replicate macOS UA Mixer Engine
+            # connect sequence. DTrace capture shows macOS sends
+            # 56 unique ch_type=2 params during init. Without all of them,
+            # the DSP monitor module never activates (no dim/mono buttons,
+            # volume changes ignored). Order matches macOS capture.
+            mon = be.set_mixer_param  # shorthand
+            MON = 2  # ch_type=2 (monitor)
+            mon(MON, 0, 0x6a, 5)       # Unknown init signal (sent 3x by macOS)
+            mon(MON, 1, 0x21, 0)       # DigOutMode = SPDIF
+            mon(MON, 1, 0x6a, 5)       # Unknown init signal
+            mon(MON, 0, 0x41, 0)       # Unknown bool
+            mon(MON, 1, 0x13, 2)       # Unknown config (setting[1])
+            mon(MON, 1, 0x14, 2)       # Unknown config (setting[1])
+            mon(MON, 0, 0x47, 1)       # TBConfig = 1
+            mon(MON, 0, 0x48, 0)       # Unknown bool
+            mon(MON, 1, 0x15, 0)       # Unknown (setting[2] bit28)
+            mon(MON, 1, 0x20, 0)       # Unknown (setting[7] bit10)
+            mon(MON, 1, 0x3a, 0)       # Unknown (setting[13])
+            mon(MON, 1, 0x41, 0)       # Unknown (setting[15] bit7)
+            mon(MON, 1, 0x43, 7)       # DimLevel = 7 (max attenuation)
+            mon(MON, 1, 0x46, 0)       # Talkback = off
+            mon(MON, 1, 0x47, 1)       # TBConfig = 1
+            mon(MON, 1, 0x48, 0)       # Unknown
+            mon(MON, 1, 0x67, 0)       # Unknown
+            mon(MON, 1, 0x68, 0)       # Unknown
+            mon(MON, 1, 0x1f, 1)       # SRConvert = on
+            mon(MON, 1, 0x0a, 0)       # Unknown (setting[6])
+            mon(MON, 1, 0x0f, 0)       # Unknown (setting[7])
+            mon(MON, 1, 0x19, 0)       # OutPadA = off
+            mon(MON, 10, 0x3b, 0)      # MirrorEnableA = off
+            mon(MON, 10, 0x38, 60)     # Clock/HP routing A = 60
+            mon(MON, 1, 0x1a, 0)       # OutPadB = off
+            mon(MON, 10, 0x3c, 0)      # MirrorEnableB = off
+            mon(MON, 10, 0x39, 60)     # Clock/HP routing B = 60
+            mon(MON, 1, 0x87, 0)       # Unknown
+            mon(MON, 1, 0x05, 2)       # CUE1 Mix = off
+            mon(MON, 0, 0x06, 0)       # CUE1 Mono = off
+            mon(MON, 10, 0x2e, 0xffffffff)  # MirrorA = disabled
+            mon(MON, 1, 0x07, 2)       # CUE2 Mix = off
+            mon(MON, 0, 0x08, 0)       # CUE2 Mono = off
+            mon(MON, 10, 0x2f, 0xffffffff)  # MirrorB = disabled
+            mon(MON, 1, 0x22, 0)       # Unknown (setting[8])
+            mon(MON, 0, 0x23, 0)       # CUE1Mix alt = off
+            mon(MON, 10, 0x30, 0xffffffff)  # Unknown mirror
+            mon(MON, 1, 0x24, 0)       # Unknown (setting[8])
+            mon(MON, 0, 0x25, 0)       # CUE2Mix alt = off
+            mon(MON, 10, 0x31, 0xffffffff)  # Unknown mirror
+            mon(MON, 1, 0x04, 0)       # MonitorSrc = MIX bus
+            mon(MON, 1, 0x01, 0)       # Volume = 0 (minimum, SAFE)
+            mon(MON, 0, 0x03, 0)       # Mute = off
+            mon(MON, 10, 0x1e, 0)      # MirrorsToDigital = off
+            mon(MON, 1, 0x32, 0)       # OutputRef = +4dBu
+            mon(MON, 1, 0x44, 0)       # Dim = off
+            mon(MON, 1, 0x3e, 1)       # Unknown (setting[15] bit9)
+            mon(MON, 1, 0x4b, 0)       # HP1 config (setting[33] byte0)
+            mon(MON, 1, 0x64, 0)       # HP config (setting[32] byte1)
+            mon(MON, 1, 0x53, 0)       # HP1 flag (setting[32] bit24)
+            mon(MON, 1, 0x5b, 0)       # HP1 flag (setting[32] bit16)
+            mon(MON, 1, 0x3f, 0)       # HP1 CueSrc = CUE1
+            mon(MON, 1, 0x40, 1)       # HP2 CueSrc = CUE2
+            mon(MON, 1, 0x4c, 0)       # HP2 config (setting[33] byte1)
+            mon(MON, 1, 0x64, 0)       # HP config (setting[32] byte1, 2nd)
+            mon(MON, 1, 0x54, 0)       # HP2 flag (setting[32] bit25)
+            mon(MON, 1, 0x5c, 0)       # HP2 flag (setting[32] bit17)
+            mon(MON, 0, 0x48, 1)       # Unknown = 1
+            mon(MON, 0, 0x6a, 5)       # Channel config count (final)
+            log.info("Monitor init: full 57-param sequence sent")
+
+            # Bus mute L/R (sub=5/6) for all 21 buses.
+            # macOS sends 7 sub-params per bus; we were missing sub 5/6.
+            # All buses init to 0.0 (muted) except talkback which gets
+            # passthrough. The daemon's fader init handles talkback later.
+            from hardware import SUB_PARAM_MUTE_L, SUB_PARAM_MUTE_R
+            all_buses = [0x00, 0x01, 0x02, 0x03,       # Analog In 1-4
+                         0x08, 0x09,                     # S/PDIF L/R
+                         0x0a,                           # Talkback
+                         0x0c, 0x0d, 0x0e, 0x0f,         # ADAT 1-4
+                         0x10, 0x12,                     # AUX 1/2 Return
+                         0x14, 0x15, 0x16, 0x17,         # ADAT 5-8
+                         0x18, 0x19, 0x1a, 0x1b]         # Virtual 1-4
+            for bus in all_buses:
+                be.set_mixer_bus_param(bus, SUB_PARAM_MUTE_L, 0.0)
+                be.set_mixer_bus_param(bus, SUB_PARAM_MUTE_R, 0.0)
+            log.info("Sent bus mute L/R (sub=5/6) for %d buses", len(all_buses))
 
         log.info("Pushed device map defaults to hardware "
-                 "(preamps + 24 input bus coefficients)")
+                 "(preamps + monitor + bus coefficients)")
 
     @staticmethod
     def _coerce_params(params: dict | None) -> dict | None:
@@ -1087,6 +1223,38 @@ class MixerDaemon:
             # gain LED blinking from readback pushing old values back)
             self._readback_suppress[path] = time.monotonic()
 
+        # For gain SETs: push BOTH Gain and GainTapered to the client.
+        # macOS Mixer Engine does this — every gain SET echoes both values
+        # as subscription pushes within ~14ms.
+        if "preamps/0/Gain" in path:
+            import re as _re
+            m = _re.search(r'/inputs/(\d+)/preamps/0/(GainTapered|Gain)', path)
+            if m:
+                ch, ctrl = int(m.group(1)), m.group(2)
+                from hardware import preamp_tapered_to_db, preamp_db_to_tapered
+                base = f"/devices/0/inputs/{ch}/preamps/0"
+                if ctrl == "GainTapered":
+                    db = int(round(preamp_tapered_to_db(float(cmd.value))))
+                    tapered = float(cmd.value)
+                elif ctrl == "Gain":
+                    db = int(round(float(cmd.value)))
+                    tapered = preamp_db_to_tapered(db)
+                else:
+                    db = None
+                if db is not None:
+                    # Only send the COMPANION value — the original path
+                    # is already pushed by state.set() subscriber echo.
+                    # macOS sends exactly 2 messages: Gain + GainTapered.
+                    from protocol import encode_response_bytes
+                    if ctrl == "GainTapered":
+                        # iPad sent GainTapered → push Gain (dB) only
+                        client.send(encode_response_bytes(
+                            f"{base}/Gain/value", float(db)))
+                    else:
+                        # iPad sent Gain → push GainTapered only
+                        client.send(encode_response_bytes(
+                            f"{base}/GainTapered/value", tapered))
+
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
             self._send_response(client, path, cmd.value, resp_params)
@@ -1271,10 +1439,10 @@ def find_device_map() -> Path | None:
     if DEFAULT_DEVICE_MAP.exists():
         return DEFAULT_DEVICE_MAP
 
-    # Check alternate location
-    alt_map = Path.home() / "devices/device_map_apollo_x4.json"
-    if alt_map.exists():
-        return alt_map
+    # Check ConsoleLink project
+    consolelink_map = Path.home() / "Documents/GitHub/ConsoleLink/UAD Console Network/device_maps/device_map_apollo_x4.json"
+    if consolelink_map.exists():
+        return consolelink_map
 
     return None
 
@@ -1334,7 +1502,7 @@ Examples:
     if not device_map or not device_map.exists():
         log.error("Device map not found. Searched:")
         log.error("  %s", DEFAULT_DEVICE_MAP)
-        log.error("  ~/devices/device_map_apollo_x4.json")
+        log.error("  ~/Documents/GitHub/ConsoleLink/.../device_map_apollo_x4.json")
         log.error("Use --device-map to specify the path.")
         sys.exit(1)
 

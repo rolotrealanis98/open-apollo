@@ -1,5 +1,5 @@
 /* Full Windows ring buffer — ALL commands including BUS_COEFF
- * Source: tools/captures/win-dsp0-ring-complete-20260319.json
+ * Source: tools/captures/win-dsp0-ring-complete.json
  * Includes: BUS_COEFF(745) + ROUTING(284) + SRAM_CFG(140) +
  *           DMA_REF(99) + SYNCH(37) + MOD_ACT(11) + WAKE(1)
  * Previous chain had 571 entries (excluded BUS_COEFF + WAKE)

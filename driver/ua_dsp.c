@@ -2,12 +2,12 @@
 /*
  * Universal Audio Apollo — DSP Ring Buffer & Firmware Loading
  *
- * Copyright (c) 2026 Open Apollo contributors
+ * Copyright (c) 2026 open-apollo contributors
  *
- * Reverse-engineered from vendor driver analysis:
- *   Ring buffer management protocol
- *   Firmware DMA transfer protocol
- *   DSP handshake sequence
+ * Reverse-engineered from UAD2System.kext v11.8.1:
+ *   CPcieRingBuffer — ring buffer management
+ *   CPcieDevice::_loadFirmware — firmware DMA transfer protocol
+ *   CPcieDevice::_connectDSPs — DSP handshake
  *
  * Each SHARC DSP has a 128-byte register bank split into two rings:
  *   cmd ring  at bank_base + 0x00 (host → DSP commands)
@@ -107,7 +107,7 @@ static void ua_dsp_ring_free(struct ua_device *ua, struct ua_dsp_ring *ring)
  * @ring: ring buffer to program
  * @ring_base: BAR0 offset of the ring's register block (cmd or resp)
  *
- * Mirrors hardware driver ring buffer register programming:
+ * Mirrors CPcieRingBuffer::ProgramRegisters():
  *   Write page addresses to PAGE0_LO..PAGE3_HI (0x00..0x1C)
  *   Write 0 to WRITE_PTR (0x20)
  *   Reset software write pointer
@@ -139,7 +139,7 @@ static void ua_dsp_ring_program(struct ua_device *ua,
 	 *
 	 * CRITICAL: Only write WRITE_PTR (0x20) here — do NOT write
 	 * DOORBELL (0x24).  Writing DOORBELL=0 during init puts the
-	 * FPGA in a state where it ignores future entries.  The hardware driver's
+	 * FPGA in a state where it ignores future entries.  The kext's
 	 * ProgramRegisters writes both, but that's called in a different
 	 * hardware state (after full transport+ACEFACE init).
 	 */
@@ -205,7 +205,7 @@ static int ua_dsp_ring_put_entry(struct ua_dsp_ring *ring,
  * @ring: ring that has new entries
  * @ring_base: BAR0 offset of the ring's register block
  *
- * Hardware driver ring buffer service writes DOORBELL (0x24) FIRST,
+ * Kext CPcieRingBuffer::Service() writes DOORBELL (0x24) FIRST,
  * then WRITE_PTR (0x20).  This order matters: DOORBELL sets the
  * target write pointer, WRITE_PTR triggers processing.  Writing
  * WRITE_PTR first (our previous code) caused the FPGA to begin
@@ -321,7 +321,7 @@ int ua_dsp_rings_init(struct ua_device *ua)
 
 		dev_info(&ua->pdev->dev,
 			 "DMA_CTRL before engine enable: 0x%08x\n", dma);
-		/* hardware driver uses 0x1FFFE (16 engines); we had 0x1FE (9).
+		/* macOS uses 0x1FFFE (16 engines); we had 0x1FE (9).
 		 * More engines may be needed for type 0x01 capture channels. */
 		ua_write(ua, UA_REG_DMA_CTRL, dma | 0x1FFFE);
 		ua->dma_ctrl_cache = ua_read(ua, UA_REG_DMA_CTRL);
@@ -440,7 +440,7 @@ void ua_dsp_rings_reprogram(struct ua_device *ua)
  * @fw_data: kernel buffer containing firmware binary
  * @fw_size: size of firmware in bytes
  *
- * Protocol (from hardware driver firmware load analysis):
+ * Protocol (from kext _loadFirmware / _sendBlock):
  *   1. Allocate single contiguous DMA buffer for [cmd, count, param, fw_data]
  *   2. Allocate response DMA buffer
  *   3. Submit ONE DMA ref entry to cmd ring (entire payload)
@@ -449,7 +449,7 @@ void ua_dsp_rings_reprogram(struct ua_device *ua)
  *   6. Poll response buffer for 0x8004xxxx
  *   7. Free DMA buffers
  *
- * The hardware driver uses a single large DMA buffer per sendBlock call.
+ * The kext uses a single large DMA buffer per sendBlock call.
  * The FPGA processes one ring entry per logical command — chained
  * entries do NOT work for firmware loading.
  */
@@ -930,7 +930,7 @@ int ua_dsp_test_dma_ref(struct ua_device *ua)
  * _sendBlock — send a data block to a DSP via ring buffer
  * ----------------------------------------------------------------
  *
- * Hardware driver analysis (sendBlock at offset 0x1f7f8):
+ * Kext analysis (CUAD2Device::_sendBlock, 0x1f7f8):
  *
  * _sendBlock(this, cmd, param, DMABuffer, data_offset, data_size, response_code)
  *
@@ -949,7 +949,7 @@ int ua_dsp_test_dma_ref(struct ua_device *ua)
  *   - Doorbell order: DOORBELL(0x24) first, then WRITE_PTR(0x20)
  */
 
-/* Response buffer size: 4 dwords (16 bytes), matching hardware driver response descriptor.
+/* Response buffer size: 4 dwords (16 bytes), matching kext descriptor2.
  * The FPGA writes a 4-dword completion status to this buffer.
  */
 #define SEND_BLOCK_RESP_DWORDS	4
@@ -1503,7 +1503,7 @@ int __attribute__((optimize("O1"))) ua_dsp_test_send_block(struct ua_device *ua)
 
 	/*
 	 * Test E: Firmware load command via single DMA ref.
-	 * The hardware driver puts [packed_cmd, param, data...] in ONE buffer.
+	 * The kext puts [packed_cmd, param, data...] in ONE buffer.
 	 * DMA ref entry points to the whole thing.
 	 * Even a tiny "firmware" (1 dword) should elicit a response.
 	 *
@@ -1940,7 +1940,7 @@ void ua_dsp_test_dma_locality(struct ua_device *ua)
  *
  * Each block is sent to DSP 0 via ua_dsp_send_block() with:
  *   cmd   = SRAM address (from block table)
- *   param = 1 (constant, matches hardware driver capture)
+ *   param = 1 (constant, matches macOS capture)
  *   data  = block payload
  *
  * Returns 0 on success, negative errno on failure.
@@ -2020,7 +2020,7 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 		 num_blocks, fw->size);
 
 	/*
-	 * 3-phase FW load (from Windows driver analysis):
+	 * 3-phase FW load (from Windows UAD2Pcie.sys Ghidra):
 	 *   0xD0000 (pre-load) → 0x120000 (upload) → 0xE0000 (post-load)
 	 *
 	 * Pre/post phases DISABLED: sending 0xD0000 before main FW
@@ -2060,8 +2060,8 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 		}
 
 		/*
-		 * Try cmd=0x120000 (hardware driver LoadFirmware address) with param
-		 * 0x80040000 first.  The hardware driver sends the entire firmware as
+		 * Try cmd=0x120000 (kext LoadFirmware address) with param
+		 * 0x80040000 first.  The kext sends the entire firmware as
 		 * one _sendBlock with these values.  Our per-block SRAM
 		 * addresses (0x0e8cc000 etc.) may not be valid ring commands.
 		 *
@@ -2164,7 +2164,7 @@ int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx)
  * ua_dsp_connect_all - Send connect commands to all DSPs
  * @ua: device (must hold ua->lock)
  *
- * Protocol (from hardware driver DSP connect):
+ * Protocol (from kext _connectDSPs):
  *   Phase 1: For each DSP i: inline {0x00230002, 1, 0, 0} + doorbell
  *   Phase 2: DSP 0 only: inline {0x00100002, 0, 0, 0} + doorbell
  */
@@ -2272,7 +2272,7 @@ int ua_dsp_connect_all(struct ua_device *ua)
  * coefficients work) but the mixer task never starts, so SRAM-based
  * parameter writes are ignored.
  *
- * Data extracted from tools/captures/win-dsp0-ring-complete-20260319.json
+ * Data extracted from tools/captures/win-dsp0-ring-complete.json
  */
 int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 {
@@ -2282,6 +2282,7 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 	struct ua_ring_entry entry;
 	int i, batch, ret;
 	u32 pos;
+	int sent_total = 0, skipped = 0;
 
 	if (!ds->rings_allocated) {
 		dev_warn(&ua->pdev->dev,
@@ -2290,8 +2291,9 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 	}
 
 	dev_info(&ua->pdev->dev,
-		 "plugin chain: sending %d commands to DSP 0\n",
-		 UA_PLUGIN_CHAIN_COUNT);
+		 "plugin chain: sending %d commands to DSP 0 "
+		 "(skip_bus_coeff=%d)\n",
+		 UA_PLUGIN_CHAIN_COUNT, ua->skip_bus_coeff);
 
 	/*
 	 * Send commands in batches to avoid overflowing the ring buffer.
@@ -2299,6 +2301,8 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 	 * the DSP to consume them before sending more.
 	 */
 	for (i = 0; i < UA_PLUGIN_CHAIN_COUNT; i += batch) {
+		int sent = 0;
+
 		batch = min(64, UA_PLUGIN_CHAIN_COUNT - i);
 
 		/* Reset ring for this batch */
@@ -2306,6 +2310,17 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 
 		for (int j = 0; j < batch; j++) {
 			const u32 *cmd = ua_plugin_chain_data[i + j];
+
+			/*
+			 * Optionally skip BUS_COEFF commands (0x001D0004).
+			 * The 745 BUS_COEFF entries set all mix coefficients
+			 * to zero, which may override firmware-initialized
+			 * monitor bus routing and prevent monitor processing.
+			 */
+			if (ua->skip_bus_coeff && cmd[0] == 0x001d0004) {
+				skipped++;
+				continue;
+			}
 
 			entry = (struct ua_ring_entry){
 				.word0 = cpu_to_le32(cmd[0]),
@@ -2321,7 +2336,11 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 					i + j);
 				return ret;
 			}
+			sent++;
 		}
+
+		if (!sent)
+			continue;  /* entire batch was BUS_COEFF */
 
 		/* Single doorbell for the batch */
 		ua_dsp_ring_doorbell(ua, &ds->cmd, cmd_base);
@@ -2329,22 +2348,23 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 		/* Wait for DSP to consume */
 		usleep_range(10000, 20000);
 		pos = ua_read(ua, cmd_base + UA_RING_POSITION);
-		if (pos < (u32)batch)
+		if (pos < (u32)sent)
 			dev_dbg(&ua->pdev->dev,
 				"plugin chain: batch %d-%d pos=%u/%d\n",
-				i, i + batch - 1, pos, batch);
+				i, i + batch - 1, pos, sent);
+		sent_total += sent;
 	}
 
 	dev_info(&ua->pdev->dev,
-		 "plugin chain: activated (%d commands sent)\n",
-		 UA_PLUGIN_CHAIN_COUNT);
+		 "plugin chain: activated (%d sent, %d skipped)\n",
+		 sent_total, skipped);
 	return 0;
 }
 
 /* ----------------------------------------------------------------
  * Bus coefficient commands (SEL130 / SetMixerBusParam equivalent)
  *
- * From hardware driver analysis (SetMixerBusParam):
+ * From kext CUAD2DeviceMixer::SetMixerBusParam disassembly:
  * Bus coefficients (fader, pan, send levels) are submitted as ring
  * buffer commands to DSP 0, NOT through the BAR0+0x38xx mixer setting
  * registers.  The command format is:
@@ -2474,6 +2494,40 @@ int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
 }
 
 /**
+ * ua_dsp_set_bus_enable - Enable/disable a DSP output bus on all DSPs
+ * @ua: device (caller must hold ua->lock)
+ * @bus_idx: bus group index (0-6)
+ * @enable: 1=enable, 0=disable
+ *
+ * Kext RE: CUAD2DeviceMixer::SetBusEnable sends ring buffer command
+ * {0x001C0003, bus_idx, enable, 0} to EVERY DSP (not just DSP 0).
+ * This enables audio routing paths through the DSP fabric.
+ */
+int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable)
+{
+	unsigned int dsp;
+	int ret, err = 0;
+
+	if (bus_idx > 6)
+		return -EINVAL;
+
+	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+		if (!ua->dsp[dsp].rings_allocated)
+			continue;
+		ret = ua_dsp_ring_send_raw(ua, dsp,
+					   0x001C0003, bus_idx, enable, 0);
+		if (ret) {
+			dev_warn(&ua->pdev->dev,
+				 "bus_enable ring full (dsp=%u bus=%u)\n",
+				 dsp, bus_idx);
+			err = ret;
+		}
+	}
+
+	return err;
+}
+
+/**
  * ua_dsp_flush_bus_params - Ensure all queued bus params are processed
  * @ua: device
  *
@@ -2513,7 +2567,7 @@ void ua_dsp_flush_bus_params(struct ua_device *ua)
  *   4. EnableSynchProcessing for modules 0 and 1
  *   5. RoutingEnable commands
  *
- * Data source: tools/captures/win-dsp0-ring-complete-20260319.json
+ * Data source: tools/captures/win-dsp0-ring-complete.json
  * ---------------------------------------------------------------- */
 
 /**
@@ -2824,7 +2878,7 @@ out_free:
  * The IO descriptor regions at 0xC1A4 (input) and 0xC2C4 (output)
  * tell the FPGA/DSP how to map DMA channels to audio signals.
  *
- * Hardware format (from BAR0 dump):
+ * macOS format (BAR0 dump captured):
  *   6-word header + packed 16-bit channel pairs + 0x00FF00FF padding
  *
  * Linux was writing raw 32-bit channel IDs with no header — wrong
@@ -2838,7 +2892,7 @@ out_free:
  * ua_dsp_send_routing - Write IO descriptors to SRAM for audio routing
  * @ua: device (must hold ua->lock)
  *
- * Writes the hardware-format IO descriptor data to the SRAM regions at
+ * Writes the macOS-format IO descriptor data to the SRAM regions at
  * 0xC1A4 (input) and 0xC2C4 (output).  These descriptors map DMA
  * channels to audio signals and must match what the DSP firmware expects.
  *
@@ -2887,7 +2941,7 @@ int ua_dsp_send_routing(struct ua_device *ua)
  * ua_dsp_load_programs - Send DSP audio routing programs to DSP 0
  *
  * Loads the mixer core, output routing, and capture routing programs
- * captured from hardware observation. These programs
+ * captured from macOS kext via DTrace. These programs
  * tell the DSP how to route audio between preamp inputs, mix buses,
  * and DMA record/playback channels.
  *
@@ -2895,11 +2949,11 @@ int ua_dsp_send_routing(struct ua_device *ua)
  * Uses ring buffer sendBlock with program command (0x0027012A),
  * NOT firmware load command (0x00120000).
  *
- * Command word from hardware driver analysis at offset 0x39158:
+ * Command word from kext disassembly of SEL127 handler at 0x39158:
  *   MOVZ W1, #0x12A; MOVK W1, #0x27, LSL#16 → cmd = 0x0027012A
  *   W2 = 0x1 (param)
  */
-/* Program load command from hardware driver command table at 0x8aade.
+/* Program load command from kext command table at 0x8aade.
  * Different from firmware load (0x00120000) — this is for
  * DSP audio routing programs ("Bill" blocks). */
 #define UA_DSP_PROG_CMD   0x00360000
@@ -2916,7 +2970,7 @@ int ua_dsp_load_programs(struct ua_device *ua)
 	}
 
 	/*
-	 * Send programs to all 4 DSPs matching hardware driver sequence:
+	 * Send programs to all 4 DSPs matching macOS sequence:
 	 *   DSP 0: A5 (mixer) + C2 (routing) + DB (capture) = 3 blocks
 	 *   DSP 1-3: A5 (mixer) + C2 (routing) = 2 blocks each
 	 */

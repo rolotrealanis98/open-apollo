@@ -4,7 +4,8 @@ Reads PCM samples from the ALSA capture device and computes per-channel
 peak amplitudes, converting to dBFS.  Replaces the non-functional hardware
 readback meter registers (rb_data[8]-[17] are static 0xf0000000).
 
-The UA Mixer Engine computes meters from PCM sample buffers in the same way.
+The real UA Mixer Engine on macOS computes meters in its CMxMeter class
+from PCM sample buffers in the same way.
 
 Usage:
     meter = AlsaMeter(device='hw:2,0', capture_channels=22)

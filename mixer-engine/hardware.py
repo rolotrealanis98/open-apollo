@@ -9,9 +9,9 @@ for reading/writing BAR0 registers. Implements:
 3. Bus parameter writes — fader levels, pan, send gains
 4. Value encoding helpers — float↔fixed, dB↔linear, bool↔int
 
-Register map (from hardware driver analysis):
+Register map (from CPcieDeviceMixer kext disassembly):
     Mixer registers live at BAR0 + 0x3800 (NOT BAR0 + 0x0000).
-    The hardware driver initializes: mixerBase = barBase + 0x3800
+    CPcieDeviceMixer::Initialize does: this->mixerBase = barBase + 0x3800
 
     0x3808  MIXER_SEQ_WR    Mixer sequence counter (host → DSP)
     0x380C  MIXER_SEQ_RD    Mixer sequence counter (DSP readback)
@@ -94,7 +94,7 @@ UA_IOCTL_READ_REG = _IOWR(UA_IOCTL_MAGIC, 0x10, _REG_IO_SIZE)
 UA_IOCTL_WRITE_REG = _IOW(UA_IOCTL_MAGIC, 0x11, _REG_IO_SIZE)
 
 # struct ua_mixer_param { ch_type, ch_idx, param_id, value } = 16 bytes
-# Maps to hardware driver SetMixerParam command (24 bytes).
+# Maps to macOS IOKit SEL131 (SetMixerParam, 24 bytes over IOKit).
 # On Linux, the driver handles routing via DSP mixer settings:
 #   ch_type=1 (preamp) → mixer setting[param_id + 7]
 #   ch_type=2 (monitor) → mixer setting (TBD)
@@ -102,7 +102,7 @@ _MIXER_PARAM_SIZE = 16
 UA_IOCTL_SET_MIXER_PARAM = _IOW(UA_IOCTL_MAGIC, 0x31, _MIXER_PARAM_SIZE)
 
 # struct ua_mixer_bus_param { bus_id, sub_param, value_u32, flags } = 16 bytes
-# Maps to hardware driver SetMixerBusParam command (136 bytes).
+# Maps to macOS IOKit SEL130 (SetMixerBusParam, 136 bytes over IOKit).
 # value_u32 is IEEE 754 float packed as uint32 (linear gain).
 _MIXER_BUS_PARAM_SIZE = 16
 UA_IOCTL_SET_MIXER_BUS_PARAM = _IOW(UA_IOCTL_MAGIC, 0x30, _MIXER_BUS_PARAM_SIZE)
@@ -154,8 +154,8 @@ UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
 UA_IOCTL_DSP_CONNECT = _IO(UA_IOCTL_MAGIC, 0x51)
 
 # ── Register offsets ────────────────────────────────────────────────
-# Mixer registers are at BAR0 + 0x3800, discovered from hardware driver analysis
-# of the hardware driver initialization (barBase + 0x3800)
+# Mixer registers are at BAR0 + 0x3800, discovered from kext disassembly
+# of CPcieDeviceMixer::Initialize (barBase + 0x3800)
 
 MIXER_BAR_OFFSET = 0x3800
 REG_MIXER_SEQ_WR = MIXER_BAR_OFFSET + 0x08   # 0x3808
@@ -163,7 +163,7 @@ REG_MIXER_SEQ_RD = MIXER_BAR_OFFSET + 0x0C   # 0x380C
 MIXER_SETTING_COUNT = 38
 
 # ── CLI Register Interface (ARM microcontroller communication) ──────
-# From ua_apollo.h and hardware driver analysis. The CLI provides a command/response
+# From ua_apollo.h and kext disassembly. The CLI provides a command/response
 # interface to the ARM MCU that controls preamps, phantom power, etc.
 
 REG_CLI_ENABLE   = 0xC3F4  # Write 1 to enable CLI
@@ -175,10 +175,10 @@ CLI_CMD_BUF_SIZE = 128
 CLI_RESP_BUF_SIZE = 128
 
 # ── ARM Parameter IDs ──────────────────────────────────────────────
-# From hardware driver analysis of the input parameter handler, confirmed
-# by hardware observation.
+# From kext disassembly of CUAD2DeviceMixer::SetInputParam, confirmed
+# by IoKit capture (tools/captures/mixer/iokit-baseline.log).
 #
-# The 36-byte SetInputParam struct layout (from hardware observation):
+# The 36-byte SetInputParam struct layout (from IoKit capture):
 #   word[0]:  paramID  (0x00-0x17)
 #   word[1-4]: reserved (0)
 #   word[5]:  hwID     (channel hardware ID)
@@ -188,19 +188,19 @@ CLI_RESP_BUF_SIZE = 128
 # ParamIDs route to either ARM MCU (preamp controls) or DSP.
 # _isDSPInputParam() returns true for paramIDs 0x05, 0x13, 0x16.
 
-# Preamp parameter IDs — verified via hardware observation.
+# Preamp parameter IDs — VERIFIED via DTrace SEL131 capture.
 # All preamp params go through DSP mixer settings (SetMixerParam ch_type=1),
-# NOT through ARM CLI.  The hardware driver routes them to mixer setting[param_id + 7].
+# NOT through ARM CLI.  The kext routes them to mixer setting[param_id + 7].
 # HiZ has NO software control — hardware auto-detect only (rb_data[0] bit 24).
 PREAMP_PARAM_IDS = {
     "MicLine":  0x00,   # 1=Line, 0=Mic
     "Pad":      0x01,   # on=1, off=0
     "48V":      0x03,   # on=1, off=0 (triggers ARM safety blink)
-    "LowCut":   0x04,   # on=1, off=0 (NOT HiZ — verified via hardware observation)
+    "LowCut":   0x04,   # on=1, off=0 (NOT HiZ — verified via DTrace)
     "Phase":    0x05,   # invert=0xbf800000 (-1.0f), normal=0x3f800000 (+1.0f)
-    "GainA":    0x0A,   # Gain_A (1st write, dB-10) — verified via hardware observation
-    "GainB":    0x09,   # Gain_B (2nd write, dB-10) — verified via hardware observation
-    "GainC":    0x06,   # Gain_C (periodic 3rd write, dB-9) — verified via hardware observation
+    "GainA":    0x0A,   # Gain_A (1st write, dB-10) — verified DTrace
+    "GainB":    0x09,   # Gain_B (2nd write, dB-10) — verified DTrace
+    "GainC":    0x06,   # Gain_C (periodic 3rd write, dB-9) — verified DTrace
     "Route":    0x13,   # Channel routing mask (0x0001ffff)
     "Level":    0x16,   # Default level (0xa0 = -16dB)
 }
@@ -209,7 +209,7 @@ PREAMP_PARAM_IDS = {
 ARM_PARAM_IDS = PREAMP_PARAM_IDS
 
 # ── Hardware IDs for Apollo x4 analog inputs ────────────────────────
-# From hardware observation: each analog input has a unique hwID
+# From IoKit capture analysis: each analog input has a unique hwID
 # with stride 0x0800. These IDs are passed in the SetInputParam struct
 # at word[5] to identify which preamp channel to control.
 
@@ -223,10 +223,10 @@ APOLLO_X4_HW_IDS = {
 HW_ID_STRIDE = 0x0800
 MAX_PREAMP_CHANNELS = 4  # Apollo x4; other models vary
 
-# ── Bus ID Mapping (from hardware observation, Apollo x4) ──
+# ── Bus ID Mapping (from IOKit SEL130 capture + hw probe, Apollo x4) ──
 # Bus IDs identify mixer bus channels for SetMixerBusParam (SEL130).
 # VERIFIED: setting_index == bus_id for ALL 32 buses (0x00-0x1f).
-# See hardware observation notes for full capture analysis.
+# See docs/iokit-mixer-mapping.md for full capture analysis.
 #
 # Complete bus map (Apollo x4):
 #   0x0000-0x0003: Analog In 1-4 (mono, mic/line)
@@ -251,7 +251,7 @@ _INPUT_IDX_TO_BUS = (
     0x0A, 0x0B,               # Talkback 1/2 (inputs 22-23)
 )
 
-# Talkback bus constants (verified via hardware observation)
+# Talkback bus constants (DTrace-verified)
 # Talkback faders use sub=0 ONLY (not the triplet sub=0,3,4).
 # Unity gain ≈ 3.976353 (NOT 0.707 like normal inputs).
 TALKBACK_BUS_START = 0x0A
@@ -270,7 +270,7 @@ def aux_bus_id(aux_idx: int) -> int:
     return 0x0010 + aux_idx * 2
 
 # ── SEL130 Sub-Parameter Indices ──────────────────────────────────
-# From hardware observation (verified all sends + fader + pan):
+# From DTrace capture (verified all sends + fader + pan):
 #   Each input bus has 5 coefficients:
 #     sub=0: main mix coefficient (fader trigger + pan)
 #     sub=1: CUE1 send level
@@ -286,8 +286,10 @@ SUB_PARAM_CUE1 = 1          # CUE 1 send level
 SUB_PARAM_CUE2 = 2          # CUE 2 send level
 SUB_PARAM_GAIN_L = 3        # Gain L (fader / AUX 1 send)
 SUB_PARAM_GAIN_R = 4        # Gain R (fader / AUX 2 send)
+SUB_PARAM_MUTE_L = 5        # Bus mute L coefficient (DTrace-verified)
+SUB_PARAM_MUTE_R = 6        # Bus mute R coefficient (DTrace-verified)
 
-# State tree send index → SEL130 sub-param mapping (verified via hardware observation)
+# State tree send index → SEL130 sub-param mapping (DTrace-verified)
 # sends/0="AUX 1"→sub=3, sends/1="AUX 2"→sub=4,
 # sends/2="CUE 1"→sub=1, sends/3="CUE 2"→sub=2
 _SEND_IDX_TO_SUB = {
@@ -298,15 +300,15 @@ _SEND_IDX_TO_SUB = {
 }
 
 # ── Monitor Parameter IDs (SEL131, channel_type=2) ───────────────
-# From hardware observation of SetMixerParam with w2=2 (monitor type).
+# From IOKit capture of SetMixerParam with w2=2 (monitor type).
 MONITOR_PARAM = {
     "CRMonitorLevel":  0x01,   # w3=1, value = 192 + (dB × 2)
     "MonitorMute":     0x03,   # w3=0, value = 2 (muted) / 0 (unmuted)
     "MixToMono":       0x03,   # w3=0, value = 1/0 (VERIFIED: same param as MonitorMute!)
     "DimOn":           0x44,   # w3=0, value = 1/0
-    # Pad and MirrorsToDigital — VERIFIED via hardware observation:
+    # Pad and MirrorsToDigital — VERIFIED via DTrace:
     # "Pad" on outputs/18 = OutputRef (param 0x32, ch_idx=1): 1=-10dBV, 0=+4dBu
-    # "MirrorsToDigital" = DigitalMirror (param 0x1e, ch_idx=9): 1=on, 0=off
+    # "MirrorsToDigital" = DigitalMirror (param 0x1e, ch_idx=10): 1=on, 0=off
     "Pad":             0x32,   # VERIFIED: OutputRef +4dBu/-10dBV, ch_idx=1
     "MirrorsToDigital": 0x1e,  # VERIFIED: DigitalMirror, ch_idx=9
     # Cache-only controls — route through SET_MIXER_PARAM for ALSA cache sync:
@@ -314,7 +316,7 @@ MONITOR_PARAM = {
     "HP1Source":       0x3f,   # ch_idx=1: 0=CUE1, 1=CUE2 (HP1 routing)
     "HP2Source":       0x40,   # ch_idx=1: 0=CUE1, 1=CUE2 (HP2 routing)
     "DimLevel":        0x43,   # ch_idx=0: 1-7 (dim attenuation step)
-    "TalkbackOn":      0x46,   # ch_idx=1 ON / ch_idx=9 OFF (verified via hardware observation)
+    "TalkbackOn":      0x46,   # ch_idx=1 ON / ch_idx=9 OFF (DTrace-verified)
     "DigitalOutputMode": 0x21, # ch_idx=0: 0=SPDIF, 8=ADAT
     "SRConvert":       0x1f,   # ch_idx=1: sample rate converter on/off (S/PDIF inputs)
     "DSPSpanning":     0x16,   # ch_idx=0: DSP pairing/spanning mode
@@ -337,9 +339,9 @@ MONITOR_CHANNEL_TYPE = 2
 PREAMP_CHANNEL_TYPE = 1
 
 # Headphone output bus ID (from state tree: /devices/0/outputs/19/)
-# Hardware observation confirmed: HP volume on Apollo x4 uses
+# DTrace capture confirmed: HP volume on Apollo x4 uses
 # ch_type=2 ch_idx=1 param=0x0001 — SAME path as main monitor.
-# HP and monitor levels appear to be ganged at the hardware driver level.
+# HP and monitor levels appear to be ganged at the IOKit level.
 HP_BUS_ID = 0x0019
 HP_CHANNEL_IDX = 1  # confirmed: same as monitor on Apollo x4
 
@@ -384,7 +386,7 @@ MIRROR_SOURCE_NAMES = {
 CUE_MIX_ON = 0   # "cue" / "on" / "1" → mix enabled
 CUE_MIX_OFF = 2  # "mon" / "off" / "0" → mix disabled (follow monitor)
 
-# ── MixInSource value encoding (verified via hardware observation) ──────
+# ── MixInSource value encoding (DTrace-verified) ──────
 # Monitor source: string → int. Tree values are "mon", "cue1", "cue2"
 MONITOR_SOURCE_MAP = {"mon": 0, "mix": 0, "0": 0, "cue1": 1, "1": 1, "cue2": 2, "2": 2}
 # HP source: string → int. Tree values are "cue1", "cue2"
@@ -421,7 +423,7 @@ USE_DIRECT_MIXER_WRITES = len(BUS_SETTING_MAP) > 0
 def mixer_setting_offset(index: int) -> int:
     """Calculate the BAR0-absolute register offset for a mixer setting.
 
-    From hardware driver analysis, there are 3 ranges
+    From CPcieDeviceMixer::_writeSetting disassembly, there are 3 ranges
     with different base offsets (all relative to the 0x3800 mixer window):
         Settings 0-15:  0xB4 + index * 8
         Settings 16-31: 0xBC + index * 8
@@ -442,7 +444,7 @@ def mixer_setting_offset(index: int) -> int:
 def encode_mixer_pair(value: int, mask: int = 0xFFFFFFFF) -> tuple[int, int]:
     """Encode a 32-bit value + changed-bits mask into the paired word format.
 
-    From the hardware driver write-setting function:
+    From CPcieDeviceMixer::_writeSetting:
         wordA = (mask[15:0]  << 16) | value[15:0]
         wordB = (mask[31:16] << 16) | value[31:16]
 
@@ -514,7 +516,7 @@ def encode_gain_value(gain_db: float) -> int:
 def encode_monitor_level(db: float) -> int:
     """Encode monitor level dB to SEL131 integer value.
 
-    Formula from hardware observation: value = 192 + (dB × 2)
+    Formula from IOKit capture: value = 192 + (dB × 2)
     Verified: -10dB→172, -15dB→162, -30dB→132, -50dB→92
     """
     return max(0, min(384, int(round(192 + db * 2))))
@@ -530,7 +532,7 @@ def encode_input_fader(db: float) -> float:
     This gives 0 dB fader → 1/sqrt(2) ≈ 0.707107 (-3.01 dB to DSP),
     providing headroom in the summing bus.
 
-    Verified against hardware observation:
+    Verified against IOKit captures:
         0dB  → 0.707107 (0x3F3504F3)
        -10dB → 0.223607 (0x3E64F92E)
        -40dB → 0.007071 (0x3BE7B46A)
@@ -543,7 +545,7 @@ def encode_input_fader(db: float) -> float:
 def encode_mix_coeff(fader_db: float, pan: float) -> float:
     """Compute the sub=0 mix coefficient combining fader + pan.
 
-    Verified formula:
+    DTrace-verified formula:
         mix_coeff = 10^(fader_dB/20) × cos((pan + 1) × π/4)
     This is encode_input_fader(dB) × √2 × cos((pan+1)×π/4).
 
@@ -559,7 +561,7 @@ def encode_mix_coeff(fader_db: float, pan: float) -> float:
 def encode_aux_fader(db: float) -> float:
     """Encode aux fader dB to linear float (NO offset).
 
-    Formula from hardware observation: linear = 10^(dB / 20)
+    Formula from IOKit capture: linear = 10^(dB / 20)
     Verified: -10dB→0.316228, -15dB→0.177828, -20dB→0.100000
     """
     if db <= -144.0:
@@ -1046,7 +1048,7 @@ class HardwareBackend:
     def cli_send_command(self, cmd_data: bytes, timeout_ms: int = 100) -> bytes | None:
         """Send a command via CLI registers and return response data.
 
-        Protocol (reverse-engineered from the hardware driver's CLI enable/send):
+        Protocol (reverse-engineered from kext EnableCLI/SendCLICommand):
             1. Ensure CLI is enabled
             2. Write command data to CLI_CMD_BUF (0xC400), 4 bytes at a time
             3. Write command length to CLI_STATUS (0xC3F8) to trigger
@@ -1128,9 +1130,9 @@ class HardwareBackend:
         """Set an ARM microcontroller parameter (preamp, 48V, pad, etc.).
 
         Uses the CLI register interface to send commands to the ARM MCU.
-        The command format is derived from the device request protocol.
+        The command format is derived from the kext's DeviceRequest protocol.
 
-        From hardware observation, the SetInputParam struct is 36 bytes:
+        From IoKit capture analysis, the SetInputParam struct is 36 bytes:
             word[0]:   paramID (0x00-0x17)
             word[1-4]: reserved (0)
             word[5]:   hwID (channel identifier)
@@ -1224,9 +1226,9 @@ class HardwareBackend:
 
     def set_mixer_param(self, channel_type: int, channel_idx: int,
                         param_id: int, value: int) -> bool:
-        """Set a mixer parameter — equivalent to hardware driver SetMixerParam.
+        """Set a mixer parameter — equivalent to macOS IOKit SEL131.
 
-        The hardware driver routes this based on channel_type:
+        On macOS, the kext routes this based on channel_type:
             channel_type=1 (preamp) → DSP mixer settings
             channel_type=2 (monitor) → DSP mixer settings
 
@@ -1283,12 +1285,12 @@ class HardwareBackend:
 
     def set_mixer_bus_param(self, bus_id: int, sub_param: int,
                             value_float: float) -> bool:
-        """Set a mixer bus parameter — equivalent to hardware driver SetMixerBusParam.
+        """Set a mixer bus parameter — equivalent to macOS IOKit SEL130.
 
         Sends fader level, pan, and send gain values. Values are IEEE 754
         float (linear gain), packed as uint32 for the ioctl.
 
-        Each fader change sends 3 writes:
+        On macOS, each fader change sends 3 writes:
             sub_param=0: main value
             sub_param=3: companion L
             sub_param=4: companion R
@@ -1304,7 +1306,7 @@ class HardwareBackend:
         value_u32 = float_to_uint32(value_float)
 
         # All 32 buses (0x00-0x1f) use direct mapping: setting_index = bus_id.
-        # Confirmed via hardware probing on Apollo x4.
+        # Confirmed via hw-probe-bus-settings.py on Apollo x4.
         if self.safe_mode and bus_id > 0x1f:
             log.debug("BUS_PARAM BLOCKED (safe_mode): bus=0x%04x sub=%d "
                       "value=%.6f", bus_id, sub_param, value_float)
@@ -1331,7 +1333,7 @@ class HardwareBackend:
                      mix_coeff: float = 0.0) -> bool:
         """Send a complete fader change (3 sub-param writes).
 
-        From hardware observation: each fader change sends 3 writes:
+        From DTrace capture: each fader change sends 3 writes:
             sub=0: combined fader+pan mix coefficient
             sub=3: effective gain, left channel
             sub=4: effective gain, right channel
@@ -1348,7 +1350,7 @@ class HardwareBackend:
     def set_bus_pan(self, bus_id: int, mix_coeff: float) -> bool:
         """Send a pan change (single write to sub=0).
 
-        From hardware observation: pan writes only sub=0.
+        From DTrace capture: pan writes only sub=0.
         mix_coeff = fader_linear × √2 × cos((pan + 1) × π/4)
         """
         write_fn = self.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
@@ -1423,7 +1425,7 @@ class HardwareBackend:
     def get_hw_readback(self) -> tuple[int, list[int]] | None:
         """Read 40-word hardware readback from DSP (BAR0+0x3810/0x3814).
 
-        The hardware driver reads these at ~33Hz for metering and status.
+        The kext reads these at ~33Hz for metering and status.
         Returns (status, [40 words]) or None on error.
         status=1 means data is valid; the driver re-arms automatically.
         """
@@ -1444,7 +1446,7 @@ class HardwareBackend:
         """Query DSP info for a single SHARC DSP.
 
         Returns dict with 'index', 'bank_base', 'status' (0=idle, 1=running),
-        or None on error. Maps to hardware driver GetDSPInfo / GetPluginDSPLoad commands
+        or None on error. Maps to macOS SEL112 (GetDSPInfo) / SEL170
         (GetPluginDSPLoad).
 
         The Apollo x4 has 4 DSPs (index 0-3).
@@ -1554,7 +1556,7 @@ class HardwareBackend:
 #
 # Maps TCP:4710 control paths to hardware write actions.
 #
-# Hardware paths (from hardware driver analysis):
+# Hardware paths from kext disassembly (UAD2System.kext):
 #
 #   1. MIXER SETTINGS (38 registers at BAR0+0x3800+offset)
 #      - DSP-processed: fader levels, mute, solo, pan, bus sends
@@ -1564,7 +1566,7 @@ class HardwareBackend:
 #   2. ARM PARAMETERS (via CLI registers → ARM MCU)
 #      - ARM microcontroller: preamp gain, 48V, pad, HiZ, lowcut, phase
 #      - Verified hwIDs: 0x0000, 0x0800, 0x1000, 0x1800 (4 channels)
-#      - Verified paramIDs: 0x00-0x0B, 0x17 (from hardware observation)
+#      - Verified paramIDs: 0x00-0x0B, 0x17 (from IoKit capture)
 #
 #   3. BUS PARAMETERS (via SetMixerBusParam, 24-byte struct)
 #      - Monitor level, bus enable/mute, headphone level
@@ -1633,8 +1635,8 @@ class HardwareRouter:
         self.backend = backend
         self.state_tree = state_tree
         # Rate-limit gain writes to prevent DSP overload.
-        # Key: channel, Value: (last_db, last_time)
-        self._gain_last: dict[int, tuple[int, float]] = {}
+        self._gain_last: dict[int, tuple[int, float]] = {}  # ch → (db, time)
+        self._gain_pending: dict[int, int] = {}  # ch → deferred db value
         self._sync_driver_state()
 
     def _sync_driver_state(self):
@@ -1767,13 +1769,13 @@ class HardwareRouter:
     def _handle_preamp(self, path: str, ch: int, control: str, value: Any):
         """Route preamp controls through DSP mixer settings.
 
-        From hardware driver analysis of the preamp parameter handler:
+        From kext disassembly of CUAD2DeviceMixer::setInputParamARM():
         Preamp parameters are written to DSP mixer settings (NOT CLI).
         Each setting packs 4 channels as 8-bit values in a 32-bit word.
         The kernel driver computes: setting_index = param_id + 7,
         and packs value into the channel's byte position.
 
-        paramID mapping (from hardware driver input parameter dispatch):
+        paramID mapping (from kext SetInputParam dispatch):
             Mute=0x00  Phase=0x01  48V=0x04  Pad=0x08
             HiZ=0x09   LowCut=0x0A  Gain=0x17
         """
@@ -1781,9 +1783,9 @@ class HardwareRouter:
             log.debug("SET %s = %r (no preamp for input %d)", path, value, ch)
             return
 
-        # Gain: hardware driver sends triplet {0x0A, 0x09, 0x06} via DSP settings.
-        # Verified: GainA(0x0A)=dB-10, GainB(0x09)=dB-10, GainC(0x06)=dB-9.
-        # Rate-limited to prevent DSP overload from rapid iPad slider drags.
+        # Gain: macOS sends SEL131 triplet {0x0A, 0x09, 0x06} via DSP settings.
+        # No rate limit — macOS doesn't rate-limit either. The driver's
+        # batch flush only sends when DSP is idle, so we can't overflow.
         if control in ("Gain", "GainTapered"):
             if control == "GainTapered":
                 gain_db = preamp_tapered_to_db(float(value))
@@ -1791,16 +1793,11 @@ class HardwareRouter:
                 gain_db = float(value)
             gain_db = int(round(gain_db))
 
-            # Rate limit: skip if same dB value or < 50ms since last write
-            now = time.monotonic()
+            # Skip exact duplicates only
             last = self._gain_last.get(ch)
-            if last:
-                last_db, last_t = last
-                if gain_db == last_db:
-                    return  # duplicate, skip entirely
-                if now - last_t < 0.05:
-                    return  # too fast, skip (iPad sends at 30-60Hz)
-            self._gain_last[ch] = (gain_db, now)
+            if last and last[0] == gain_db:
+                return
+            self._gain_last[ch] = (gain_db, time.monotonic())
 
             val_a = max(0, min(54, gain_db - 10))   # 0x0A: dB-10, max 54
             val_b = val_a                             # 0x09: same as A
@@ -1810,7 +1807,7 @@ class HardwareRouter:
                      "GainA=0x0A:%d GainB=0x09:%d GainC=0x06:%d",
                      ch, gain_db, val_a, val_b, val_c)
 
-            # Send all three as SetMixerParam — matches hardware driver behavior
+            # Send all three as SEL131 (SetMixerParam) — same as macOS
             ok = True
             ok &= self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch,
                                                0x0A, val_a)
@@ -1845,12 +1842,31 @@ class HardwareRouter:
                                             param_id, hw_value):
             log.error("HW PREAMP: failed to set input[%d].preamp.%s", ch, control)
 
+        # After any flag toggle, re-send current gain to prevent the
+        # batch flush from pushing stale cached gain values to the DSP.
+        if control in ("48V", "Pad", "LowCut", "Phase", "MicLine"):
+            last = self._gain_last.get(ch)
+            if last:
+                gain_db = last[0]
+            elif self.state_tree:
+                base = f"/devices/0/inputs/{ch}/preamps/0"
+                g = self.state_tree.get_value(f"{base}/Gain/value")
+                gain_db = int(round(float(g))) if g else 10
+            else:
+                gain_db = 10
+            val_a = max(0, min(54, gain_db - 10))
+            val_b = val_a
+            val_c = max(0, min(56, gain_db - 9))
+            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x0A, val_a)
+            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x09, val_b)
+            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x06, val_c)
+
     # ── Input channel controls (SEL130 bus param path) ───────────
 
     def _handle_input(self, path: str, ch: int, control: str, value: Any):
         """Route input channel controls via SetMixerBusParam (SEL130).
 
-        From hardware observation:
+        From IOKit capture (docs/iokit-mixer-mapping.md):
         - FaderLevel → linear float with -3dB offset, 3 sub-param writes
         - Mute → fader to 0.0 (linear silence), 3 sub-param writes
         - Pan → float coefficient, single sub_param=0 write
@@ -1867,7 +1883,7 @@ class HardwareRouter:
             else:
                 db = float(value)
 
-            # Talkback bus uses different encoding (verified via hardware observation):
+            # Talkback bus uses different encoding (DTrace-verified):
             # sub=0 only, unity≈3.976, sub=3/4 always 0.0
             if bus == TALKBACK_BUS_START:
                 linear = 0.0 if db <= -144.0 else 10.0 ** (db / 20.0) * TALKBACK_UNITY
@@ -1916,7 +1932,7 @@ class HardwareRouter:
             return
 
         if control == "IOType":
-            # Mic/Line switching: verified via hardware observation, maps to
+            # Mic/Line switching: DTrace-verified, maps to
             # SEL131 ch_type=1 param=0x00, value 1=Line 0=Mic
             if ch >= MAX_PREAMP_CHANNELS:
                 log.debug("SET %s = %r (no preamp for input %d)", path, value, ch)
@@ -1947,7 +1963,7 @@ class HardwareRouter:
                      control: str, value: Any):
         """Route bus send controls via SetMixerBusParam (SEL130).
 
-        Verified via hardware observation: sends write to the INPUT bus
+        DTrace-verified: sends write to the INPUT bus
         with different sub-params:
             sends/0 (AUX 1) → sub=3 (GAIN_L) on input bus
             sends/1 (AUX 2) → sub=4 (GAIN_R) on input bus
@@ -1993,7 +2009,7 @@ class HardwareRouter:
     def _handle_output(self, path: str, ch: int, control: str, value: Any):
         """Route output/monitor controls via SetMixerParam (SEL131).
 
-        From hardware observation:
+        From IOKit capture (docs/iokit-mixer-mapping.md):
         Monitor controls use SEL131 with channel_type=2:
             CRMonitorLevel: param=0x01, ch_idx=1, value = 192+(dB×2)
             MonitorMute:    param=0x03, ch_idx=0, value = 2/0 (NOT 1!)
@@ -2002,7 +2018,7 @@ class HardwareRouter:
         Output 18 = MONITOR (Apollo x4), Output 19 = HP 1.
         """
         # CUE outputs (14-15 = CUE1 L/R, 16-17 = CUE2 L/R)
-        # From hardware observation: all ch_type=2, ch_idx=0
+        # From IOKit mapping: all ch_type=2, ch_idx=0
         #   CUE1 MONO=param 0x06 (1/0), CUE1 MIX=param 0x05 (0=on, 2=off)
         #   CUE2 MONO=param 0x08 (1/0), CUE2 MIX=param 0x07 (0=on, 2=off)
         if ch in (14, 15, 16, 17):
@@ -2041,28 +2057,28 @@ class HardwareRouter:
                 if hw_value == 0xFFFFFFFF:
                     # "None" → disable mirror
                     log.info("HW CUE%d: OutputDestination = %r → mirror disabled "
-                             "(param=%s=0x%02x, enable=%s=0x%02x, ch_idx=9)",
+                             "(param=%s=0x%02x, enable=%s=0x%02x, ch_idx=10)",
                              cue_idx + 1, value, param_name,
                              MONITOR_PARAM[param_name],
                              enable_name, MONITOR_PARAM[enable_name])
                     self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 9,
+                        MONITOR_CHANNEL_TYPE, 10,
                         MONITOR_PARAM[enable_name], 0)
                     self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 9,
+                        MONITOR_CHANNEL_TYPE, 10,
                         MONITOR_PARAM[param_name], hw_value & 0xFFFFFFFF)
                 else:
                     # Set source, then enable mirror
                     log.info("HW CUE%d: OutputDestination = %r → %d "
-                             "(param=%s=0x%02x, enable=%s=0x%02x, ch_idx=9)",
+                             "(param=%s=0x%02x, enable=%s=0x%02x, ch_idx=10)",
                              cue_idx + 1, value, hw_value, param_name,
                              MONITOR_PARAM[param_name],
                              enable_name, MONITOR_PARAM[enable_name])
                     self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 9,
+                        MONITOR_CHANNEL_TYPE, 10,
                         MONITOR_PARAM[param_name], hw_value)
                     self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 9,
+                        MONITOR_CHANNEL_TYPE, 10,
                         MONITOR_PARAM[enable_name], 1)
                 return
 
@@ -2094,7 +2110,7 @@ class HardwareRouter:
                 return
 
             if control == "DimOn":
-                # Cold boot init uses ch_idx=7 (from power cycle observation)
+                # Cold boot init uses ch_idx=7 (DTrace clock-power-cycle)
                 hw_value = 1 if value and value != "0" and value != "false" else 0
                 log.info("HW MONITOR: Dim = %r → %d", value, hw_value)
                 self.backend.set_mixer_param(
@@ -2128,16 +2144,16 @@ class HardwareRouter:
                 return
 
             if control == "MirrorsToDigital":
-                # Verified: ch_idx=9, param=0x1e
+                # DTrace-verified: ch_idx=10, param=0x1e
                 hw_value = 1 if value and value != "0" and value != "false" else 0
                 log.info("HW MONITOR: MirrorsToDigital = %r → %d", value, hw_value)
                 self.backend.set_mixer_param(
-                    MONITOR_CHANNEL_TYPE, 9,
+                    MONITOR_CHANNEL_TYPE, 10,
                     MONITOR_PARAM["MirrorsToDigital"], hw_value)
                 return
 
             if control == "MixInSource":
-                # Verified: ch_idx=1, 0=MIX/1=CUE1/2=CUE2
+                # DTrace-verified: ch_idx=1, 0=MIX/1=CUE1/2=CUE2
                 hw_value = MONITOR_SOURCE_MAP.get(str(value).lower(), 0)
                 log.info("HW MONITOR: MixInSource = %r → %d", value, hw_value)
                 self.backend.set_mixer_param(
@@ -2175,7 +2191,7 @@ class HardwareRouter:
                 return
 
         # Headphone output (ch=19 on Apollo x4)
-        # Confirmed: HP uses same driver path as monitor
+        # DTrace capture confirmed: HP uses same IOKit path as monitor
         # (ch_type=2, ch_idx=1). HP and monitor are ganged on Apollo x4.
         if ch == 19:
             if control in ("CRMonitorLevel", "CRMonitorLevelTapered"):
@@ -2212,7 +2228,7 @@ class HardwareRouter:
                 return
 
             if control == "MixInSource":
-                # Verified: ch_idx=1, p=0x3f, CUE1=0/CUE2=1
+                # DTrace-verified: ch_idx=1, p=0x3f, CUE1=0/CUE2=1
                 hw_value = HP_SOURCE_MAP.get(str(value).lower(), 0)
                 log.info("HW HP1: MixInSource = %r → %d", value, hw_value)
                 self.backend.set_mixer_param(
@@ -2226,7 +2242,7 @@ class HardwareRouter:
         # Headphone 2 output (ch=20 on Apollo x4)
         if ch == 20:
             if control == "MixInSource":
-                # Verified: ch_idx=1, p=0x40, CUE1=0/CUE2=1
+                # DTrace-verified: ch_idx=1, p=0x40, CUE1=0/CUE2=1
                 hw_value = HP_SOURCE_MAP.get(str(value).lower(), 0)
                 log.info("HW HP2: MixInSource = %r → %d", value, hw_value)
                 self.backend.set_mixer_param(
@@ -2242,7 +2258,7 @@ class HardwareRouter:
     def _handle_aux(self, path: str, bus: int, control: str, value: Any):
         """Route aux bus controls via SetMixerBusParam (SEL130).
 
-        From hardware observation: aux faders use NO dB offset (unlike inputs).
+        From IOKit capture: aux faders use NO dB offset (unlike inputs).
         Bus IDs: aux 0=0x0010, aux 1=0x0012 (stride of 2).
         Aux faders send only sub_param=0 (single write, not 3).
         """
@@ -2266,7 +2282,7 @@ class HardwareRouter:
                          bus, bus_id)
                 self.backend.set_mixer_bus_param(bus_id, SUB_PARAM_MIX, 0.0)
             else:
-                # Verified: unmute restores fader level
+                # DTrace-verified: unmute restores fader level
                 saved_db = -144.0
                 if self.state_tree:
                     val = self.state_tree.get(
@@ -2310,8 +2326,8 @@ class HardwareRouter:
     def _handle_device_global(self, path: str, control: str, value: Any):
         """Route device-level global controls via SetMixerParam (SEL131)."""
         if control == "TalkbackOn":
-            # Cold boot init uses ch_idx=7 (from power cycle observation)
-            # Runtime toggle uses ch_idx=0 (from hardware observation)
+            # Cold boot init uses ch_idx=7 (DTrace clock-power-cycle capture)
+            # Runtime toggle uses ch_idx=0 (DTrace talkback capture)
             # Send to BOTH to cover init and runtime scenarios
             hw_value = 1 if value and value != "0" and value != "false" else 0
             log.info("HW MONITOR: TalkbackOn = %r → %d",
@@ -2370,10 +2386,10 @@ class HardwareRouter:
         """Route global controls (sample rate, clock source).
 
         These go through SetDriverParameter (sel 0xA6, 16-byte struct)
-        in the hardware driver. The struct is: {paramID, reserved, value_lo, value_hi}
+        in the kext. The struct is: {paramID, reserved, value_lo, value_hi}
 
         WARNING: Changing sample rate or clock source while streaming
-        will disrupt audio. The hardware driver warns but proceeds.
+        will disrupt audio. The macOS kext warns but proceeds.
         """
         if control == "SampleRate":
             try:
@@ -2387,7 +2403,7 @@ class HardwareRouter:
                             rate, sorted(VALID_SAMPLE_RATES))
                 return
 
-            # Check transport state (warn but proceed, matches hardware driver)
+            # Check transport state (warn but proceed, matches macOS)
             transport = self.backend.get_driver_param(DRIVER_PARAM_TRANSPORT_RUNNING)
             if transport and transport > 0:
                 log.warning("HW DRV: changing SampleRate while transport "
@@ -2418,6 +2434,22 @@ class HardwareRouter:
 
         log.debug("HW DRV: %s = %r (unhandled global)", control, value)
 
+    def flush_pending_gains(self):
+        """Send any deferred gain values whose rate-limit window has passed."""
+        now = time.monotonic()
+        for ch in list(self._gain_pending):
+            last = self._gain_last.get(ch)
+            if last and now - last[1] >= 0.03:
+                gain_db = self._gain_pending.pop(ch)
+                self._gain_last[ch] = (gain_db, now)
+                val_a = max(0, min(54, gain_db - 10))
+                val_b = val_a
+                val_c = max(0, min(56, gain_db - 9))
+                log.debug("HW PREAMP GAIN (deferred): ch%d = %d dB", ch, gain_db)
+                self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x0A, val_a)
+                self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x09, val_b)
+                self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x06, val_c)
+
     # ── Readback / metering ──────────────────────────────────────
 
     def poll_hw_readback(self) -> dict | None:
@@ -2440,7 +2472,7 @@ class HardwareRouter:
         NOT present in readback:
             data[8]-[17]: Static 0xf0000000 — NOT audio meter data.
                           Audio meters must be computed in software from
-                          PCM samples (software meter computation).
+                          PCM samples (CMxMeter-equivalent logic).
         """
         rb = self.backend.get_hw_readback()
         if rb is None:
@@ -2487,27 +2519,37 @@ class HardwareRouter:
             result[f"preamp_{ch}_phase"] = bool(d0 & (1 << (base + 5)))
 
         # Decode preamp gain from data[3].
-        # Register layout (shared per stereo pair):
-        #   bits[7:0]   = gain for active preamp in pair 1 (preamp 1 or 2)
-        #   bits[15:8]  = pair 1 metadata/flags (limited resolution)
-        #   bits[23:16] = gain for active preamp in pair 2 (preamp 3 or 4)
-        #   bits[31:24] = upper nybble: preamp selection (0=ch1,1=ch2,2=ch3,3=ch4)
-        #                 lower nybble: pair 2 metadata
-        # Gain encoding: dB = raw - 55 (verified: 0x41=10dB, 0x78=65dB, 1 step=1dB)
+        # GainC encoding split across bytes (verified via macOS DTrace
+        # full 1dB sweep):
+        #   b0[5:0]  = ch0 GainC (6 bits)
+        #   b0[7:6]  = ch1 GainC low 2 bits
+        #   b1[4:0]  = ch1 GainC high 5 bits
+        #   b1[7:5]  = constant (0b111)
+        #   b2[5:0]  = ch2 GainC (6 bits)
+        #   b2[7:6]  = ch3 GainC low 2 bits
+        #   b3[3:0]  = ch3 GainC high 4 bits
+        #   b3[7:4]  = preamp selection indicator
+        # dB = GainC + 9, range 10-65dB, 1dB resolution all channels
         d3 = data[3]
-        pair1_raw = d3 & 0xFF
-        pair2_raw = (d3 >> 16) & 0xFF
-        selection = (d3 >> 28) & 0x0F  # 0=preamp1, 1=preamp2, 2=preamp3, 3=preamp4
-        result["preamp_selection"] = selection
-        result["preamp_pair1_gain_raw"] = pair1_raw
-        result["preamp_pair2_gain_raw"] = pair2_raw
-        result["preamp_pair1_gain"] = min(65, max(10, pair1_raw - 55))
-        result["preamp_pair2_gain"] = min(65, max(10, pair2_raw - 55))
+        b0 = d3 & 0xFF
+        b1 = (d3 >> 8) & 0xFF
+        b2 = (d3 >> 16) & 0xFF
+        b3 = (d3 >> 24) & 0xFF
+        gains_c = [
+            b0 & 0x3F,                          # ch0
+            ((b1 & 0x1F) << 2) | (b0 >> 6),     # ch1
+            b2 & 0x3F,                           # ch2
+            ((b3 & 0x0F) << 2) | (b2 >> 6),     # ch3
+        ]
+        for ch in range(4):
+            db = min(65, max(10, gains_c[ch] + 9))
+            result[f"preamp_{ch}_gain_raw"] = gains_c[ch]
+            result[f"preamp_{ch}_gain"] = db
 
         # NOTE: rb_data[8]-[17] are NOT audio metering data.
         # Confirmed static 0xf0000000 even with live audio playing.
         # Audio meters must be computed in software from PCM samples
-        # in the DMA buffers (software meter computation), not read
+        # in the DMA buffers (CMxMeter-equivalent logic), not read
         # from hardware readback registers.  See docs/hw-readback-map.md
         # and docs/STATUS.md issue #32.
 
