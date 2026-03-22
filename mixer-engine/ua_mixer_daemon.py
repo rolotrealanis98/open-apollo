@@ -809,8 +809,10 @@ class MixerDaemon:
 
         # Push all 24 input fader defaults via state tree path.
         # This uses the proven FaderLevel→bus coefficient pipeline.
+        # Mute all inputs by default — no input monitoring until user unmutes.
         for i in range(24):
             defaults[f"/devices/0/inputs/{i}/FaderLevel/value"] = 0.0
+            defaults[f"/devices/0/inputs/{i}/Mute/value"] = True
 
         for path, value in defaults.items():
             self.hw_router.on_set(path, value)
