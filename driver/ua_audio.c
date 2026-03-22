@@ -1593,6 +1593,10 @@ static void ua_audio_stop_transport(struct ua_device *ua)
 	if (!audio->transport_running)
 		return;
 
+	dev_info(&ua->pdev->dev,
+		 "=== STOP TRANSPORT === connected=%d aceface=%d\n",
+		 audio->connected, ua->aceface_done);
+
 	/* Disable end-of-buffer interrupt */
 	ua_disable_vector(ua, UA_IRQ_VEC_END_BUFFER);
 
@@ -1600,7 +1604,10 @@ static void ua_audio_stop_transport(struct ua_device *ua)
 	ua_write(ua, UA_REG_AX_CONTROL, 0);
 	audio->transport_running = false;
 
-	dev_dbg(&ua->pdev->dev, "transport stopped\n");
+	dev_info(&ua->pdev->dev,
+		 "transport stopped: AX_CTRL=0x%08x SP=0x%08x\n",
+		 ua_read(ua, UA_REG_AX_CONTROL),
+		 ua_read(ua, UA_REG_AX_SAMPLE_POS));
 }
 
 /**
@@ -1808,6 +1815,11 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	struct snd_pcm_runtime *runtime = sub->runtime;
 	unsigned long flags;
 
+	dev_info(&ua->pdev->dev,
+		 "pcm_open: stream=%s connected=%d transport=%d\n",
+		 sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
+		 audio->connected, audio->transport_running);
+
 	runtime->hw = ua_pcm_hw;
 
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -1843,6 +1855,11 @@ static int ua_pcm_close(struct snd_pcm_substream *sub)
 	struct ua_audio *audio = &ua->audio;
 	unsigned long flags;
 
+	dev_info(&ua->pdev->dev,
+		 "pcm_close: stream=%s play_sub=%p rec_sub=%p transport=%d\n",
+		 sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
+		 audio->play_sub, audio->rec_sub, audio->transport_running);
+
 	spin_lock_irqsave(&audio->lock, flags);
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		audio->play_sub = NULL;
@@ -1851,8 +1868,11 @@ static int ua_pcm_close(struct snd_pcm_substream *sub)
 	spin_unlock_irqrestore(&audio->lock, flags);
 
 	/* Stop transport when both substreams are closed */
-	if (!audio->play_sub && !audio->rec_sub && audio->transport_running)
+	if (!audio->play_sub && !audio->rec_sub && audio->transport_running) {
+		dev_info(&ua->pdev->dev,
+			 "pcm_close: both subs closed, stopping transport\n");
 		ua_audio_stop_transport(ua);
+	}
 
 	return 0;
 }
@@ -2005,14 +2025,12 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 	int ret;
 
 	dev_info(&ua->pdev->dev,
-		 "pcm_prepare: stream=%s rate=%u channels=%u period=%lu buffer=%lu\n",
+		 "pcm_prepare: stream=%s rate=%u channels=%u period=%lu buffer=%lu "
+		 "connected=%d transport=%d aceface=%d\n",
 		 sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
 		 sub->runtime->rate, sub->runtime->channels,
-		 sub->runtime->period_size, sub->runtime->buffer_size);
-	dev_info(&ua->pdev->dev,
-		 "pcm_prepare: play_dma=%pad rec_dma=%pad buf_frames=%u\n",
-		 &audio->play_addr, &audio->rec_addr,
-		 audio->buf_frame_size);
+		 sub->runtime->period_size, sub->runtime->buffer_size,
+		 audio->connected, audio->transport_running, ua->aceface_done);
 
 	/* Connect to DSP firmware if not already connected */
 	if (!audio->connected) {
@@ -2083,18 +2101,10 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 	 * ring buffer control registers and the record SG table.
 	 */
 	if (!audio->transport_running) {
-		/*
-		 * SG table was already programmed by ua_audio_preinit_dma()
-		 * during probe.  Do NOT reprogram here — writing 16K of SG
-		 * entries while the connect transport is running corrupts
-		 * the FPGA's DMA state and produces capture zeros.
-		 *
-		 * Just stop the connect transport, prepare, and restart.
-		 */
-		/*
-		 * Plugin chain disabled — clobbers capture routing.
-		 * See connect path comment for details.
-		 */
+		dev_info(&ua->pdev->dev,
+			 "pcm_prepare: transport not running — restarting "
+			 "(play_sub=%p rec_sub=%p)\n",
+			 audio->play_sub, audio->rec_sub);
 
 		ret = ua_audio_prepare_transport(ua);
 		if (ret)
@@ -2128,6 +2138,9 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 			dev_info(&ua->pdev->dev,
 				 "post-transport clock write (capture enable)\n");
 		}
+	} else {
+		dev_info(&ua->pdev->dev,
+			 "pcm_prepare: transport already running, skip restart\n");
 	}
 
 	/*

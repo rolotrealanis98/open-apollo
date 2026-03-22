@@ -487,6 +487,13 @@ deploy_configs() {
             systemctl --user restart pipewire wireplumber 2>/dev/null || true
         sleep 3
         ok "PipeWire restarted"
+
+        # Set up virtual I/O devices (discovers Apollo node names dynamically)
+        if [ -x /usr/local/bin/apollo-setup-io ]; then
+            info "Setting up Apollo virtual I/O devices..."
+            sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+                /usr/local/bin/apollo-setup-io 2>&1 || true
+        fi
     fi
 }
 
