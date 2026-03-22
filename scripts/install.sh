@@ -236,6 +236,17 @@ check_install_deps() {
     else
         ok "pavucontrol"
     fi
+    # AppIndicator3 for tray indicator
+    if ! python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
+        missing+=("appindicator")
+        case "$PKG_MGR" in
+            dnf)    missing_pkgs+=("libappindicator-gtk3") ;;
+            apt)    missing_pkgs+=("gir1.2-appindicator3-0.1") ;;
+            pacman) missing_pkgs+=("libappindicator-gtk3") ;;
+        esac
+    else
+        ok "appindicator"
+    fi
 
     if [ ${#missing[@]} -eq 0 ]; then
         ok "All required dependencies present"

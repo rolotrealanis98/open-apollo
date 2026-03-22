@@ -45,6 +45,19 @@ udevadm control --reload-rules 2>/dev/null || true
 echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
 echo "  -> /usr/local/bin/open-apollo-profile-setup"
 
+# Step 5: Deploy tray indicator autostart
+echo "Installing tray indicator autostart..."
+DESKTOP_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+if [ -n "$DESKTOP_USER" ]; then
+    AUTOSTART_DIR="$(eval echo ~"$DESKTOP_USER")/.config/autostart"
+    mkdir -p "$AUTOSTART_DIR"
+    # Point Exec to the actual repo location
+    REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+    sed "s|/opt/open-apollo|$REPO_DIR|g" "$SCRIPT_DIR/autostart/open-apollo-tray.desktop" \
+        > "$AUTOSTART_DIR/open-apollo-tray.desktop"
+    echo "  -> $AUTOSTART_DIR/open-apollo-tray.desktop"
+fi
+
 echo ""
 echo "=== Deployment complete ==="
 echo ""

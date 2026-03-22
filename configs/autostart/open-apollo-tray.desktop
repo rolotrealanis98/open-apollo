@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Open Apollo
+Comment=System tray indicator for Universal Audio Apollo
+Exec=python3 /opt/open-apollo/tools/open-apollo-tray.py
+Icon=/opt/open-apollo/tools/icons/apollo-green.svg
+Terminal=false
+Categories=AudioVideo;Audio;
+X-GNOME-Autostart-enabled=true
