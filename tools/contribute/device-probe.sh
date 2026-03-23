@@ -1,14 +1,16 @@
 #!/bin/bash
 # device-probe.sh — Gather hardware info from a running Apollo system
 #
-# This script is READ-ONLY. It does not write to any hardware registers,
-# modify any driver state, or send any data over the network. All output
-# is saved to a local JSON file that you can review before submitting.
+# This script is READ-ONLY. It does not write to any hardware registers
+# or modify any driver state. All output is saved to a local JSON file
+# that you can review. Optionally uploads the report to the Open Apollo API.
 #
 # Usage:
 #   ./device-probe.sh [--output path/to/report.json]
 
 set -euo pipefail
+
+TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/captures"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -133,6 +135,7 @@ echo "Building report..."
 cat > "$OUTPUT" << ENDJSON
 {
   "report_version": "1.0",
+  "platform": "linux",
   "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "system": {
     "kernel": "$KERNEL_VERSION",
@@ -169,7 +172,36 @@ ENDJSON
 echo ""
 printf "${GREEN}Report saved to: ${OUTPUT}${NC}\n"
 echo ""
-echo "To submit to the Open Apollo project:"
+
+# ============================================================================
+# Telemetry — opt-in upload
+# ============================================================================
+ANSWER="n"
+if [ -t 0 ]; then
+    read -rp "Help improve Open Apollo — send this device report anonymously? [y/N] " ANSWER
+else
+    # Non-interactive (piped, SSH, etc.) — auto-send
+    ANSWER="y"
+fi
+
+if [[ "$ANSWER" =~ ^[Yy] ]]; then
+    echo "Sending report to $TELEMETRY_URL..."
+    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+        -X POST "$TELEMETRY_URL" \
+        -H "Content-Type: application/json" \
+        -d @"$OUTPUT" 2>/dev/null || echo "000")
+
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        printf "${GREEN}Report sent — thank you!${NC}\n"
+    else
+        printf "${YELLOW}Upload failed (HTTP $HTTP_CODE) — report saved locally at $OUTPUT${NC}\n"
+    fi
+else
+    echo "No data sent. Report saved locally at $OUTPUT"
+fi
+
+echo ""
+echo "To also submit manually:"
 echo "  1. Review the file — it contains only hardware identifiers, no personal data"
 echo "  2. Go to: https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml"
 echo "  3. Attach the JSON file or paste its contents"
