@@ -23,7 +23,7 @@ mixer daemon, and system tray indicator.
 - **Full duplex audio** — 4 analog inputs + 6 analog outputs verified (24/22 total ALSA channels exposed; S/PDIF, ADAT, and virtual channels are unverified)
 - **All sample rates** — 44.1, 48, 88.2, 96, 176.4, 192 kHz
 - **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching
-- **Monitor control** — volume, mute, dim, mono, headphone routing
+- **Monitor control** — volume, mute, dim, mono, talkback, headphone routing
 - **DSP mixer** — input faders, pan, sends (AUX1/AUX2, CUE1/CUE2), solo, mute
 - **PipeWire virtual I/O** — named Mic 1-4, Line In 3+4, Monitor L/R, Line Out devices
 - **Desktop audio** — YouTube, system sounds, GNOME volume control all work through Apollo Monitor
@@ -47,7 +47,7 @@ mixer daemon, and system tray indicator.
 
 ## Not Yet Implemented
 
-Talkback, virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD plugins require PACE licensing — not planned)
+Virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD plugins require PACE licensing — not planned)
 
 ## Supported Devices
 
@@ -134,7 +134,7 @@ cd mixer-engine
 python3 ua_mixer_daemon.py -v
 ```
 
-The daemon exposes TCP:4710 and TCP:4720 for mixer control from any client application.
+The daemon exposes TCP:4710, TCP:4720, and WS:4721 for mixer control from any client application.
 
 ## Architecture
 

@@ -45,7 +45,7 @@ The Apollo x4 is the primary development and test device. On this model, the fol
 - All six sample rates (44.1, 48, 88.2, 96, 176.4, 192 kHz)
 - Preamp gain control (all 4 channels)
 - Preamp flags: 48V phantom power, PAD, low cut, phase invert, mic/line switching
-- Monitor volume, mute, dim, mono
+- Monitor volume, mute, dim, mono, talkback
 - DSP mixer routing (analog buses only — digital bus routing untested)
 - ALSA integration with 50+ mixer controls
 
