@@ -620,38 +620,6 @@ run_init() {
 generate_report() {
     header "Install Report"
 
-    # Collect dmesg excerpts
-    DMESG_APOLLO=$(dmesg 2>/dev/null | grep -i 'ua_apollo\|apollo' | tail -10 | tr '\n' '\\n' || echo "")
-    DMESG_TB=$(dmesg 2>/dev/null | grep -i thunderbolt | tail -5 | tr '\n' '\\n' || echo "")
-
-    # Build steps JSON
-    local steps_json="{"
-    local first=1
-    for key in distro deps build dkms configs init; do
-        local status="${STEP_STATUS[$key]:-skipped}"
-        local detail="${STEP_DETAIL[$key]:-}"
-        [ $first -eq 0 ] && steps_json+=","
-        first=0
-        if [ -n "$detail" ]; then
-            steps_json+="\"$key\":{\"status\":\"$status\",\"detail\":\"$(echo "$detail" | sed 's/"/\\"/g')\"}"
-        else
-            steps_json+="\"$key\":{\"status\":\"$status\"}"
-        fi
-    done
-    steps_json+="}"
-
-    # Build cards array
-    local cards_json="[]"
-    if [ -n "$EXISTING_CARDS" ]; then
-        cards_json="[$(echo "$EXISTING_CARDS" | tr '|' '\n' | grep -v '^$' | sed 's/^/"/;s/$/"/' | tr '\n' ',' | sed 's/,$//' )]"
-    fi
-
-    # Build snd_modules array
-    local mods_json="[]"
-    if [ -n "$SND_MODULES" ]; then
-        mods_json="[$(echo "$SND_MODULES" | tr '|' '\n' | grep -v '^$' | sed 's/^/"/;s/$/"/' | tr '\n' ',' | sed 's/,$//' )]"
-    fi
-
     # Overall success
     local overall="true"
     for key in deps build; do
@@ -661,40 +629,89 @@ generate_report() {
         fi
     done
 
-    cat > "$REPORT_FILE" <<REPORTEOF
-{
-  "version": 1,
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "success": $overall,
-  "system": {
-    "distro": "$DISTRO",
-    "kernel": "$KERNEL",
-    "arch": "$ARCH",
-    "ram_mb": ${RAM_MB:-0},
-    "cpu": "$CPU_MODEL",
-    "secure_boot": $( [ "$SECURE_BOOT" = "true" ] && echo true || echo false ),
-    "iommu": "$IOMMU"
-  },
-  "audio": {
-    "pipewire_version": "${PW_VER:-null}",
-    "wireplumber_version": "${WP_VER:-null}",
-    "pulseaudio_running": $PA_RUNNING,
-    "existing_cards": $cards_json,
-    "snd_modules": $mods_json
-  },
-  "apollo": {
-    "detected": $( [ -n "$APOLLO_PCIE" ] && echo true || echo false ),
-    "pcie_device": "$(echo "$APOLLO_PCIE" | sed 's/"/\\"/g')",
-    "thunderbolt_controller": "$(echo "$TB_CONTROLLER" | sed 's/"/\\"/g')"
-  },
-  "steps": $steps_json,
-  "logs": {
-    "dmesg_apollo": "$DMESG_APOLLO",
-    "dmesg_thunderbolt": "$DMESG_TB",
-    "dmesg_iommu": "$DMESG_IOMMU"
-  }
+    # Write report data as env vars, then use python3 for clean JSON
+    local _steps_csv=""
+    for key in distro deps build dkms configs init; do
+        _steps_csv+="${key}:${STEP_STATUS[$key]:-skipped}:${STEP_DETAIL[$key]:-}|"
+    done
+
+    REPORT_DISTRO="$DISTRO" \
+    REPORT_KERNEL="$KERNEL" \
+    REPORT_ARCH="$ARCH" \
+    REPORT_RAM="${RAM_MB:-0}" \
+    REPORT_CPU="$CPU_MODEL" \
+    REPORT_SECBOOT="$SECURE_BOOT" \
+    REPORT_IOMMU="$IOMMU" \
+    REPORT_PW_VER="${PW_VER:-}" \
+    REPORT_WP_VER="${WP_VER:-}" \
+    REPORT_PA="$PA_RUNNING" \
+    REPORT_CARDS="$EXISTING_CARDS" \
+    REPORT_MODS="$SND_MODULES" \
+    REPORT_APOLLO_DET="$( [ -n "$APOLLO_PCIE" ] && echo true || echo false )" \
+    REPORT_APOLLO_PCI="$APOLLO_PCIE" \
+    REPORT_TB="$TB_CONTROLLER" \
+    REPORT_STEPS="$_steps_csv" \
+    REPORT_SUCCESS="$overall" \
+    REPORT_FILE="$REPORT_FILE" \
+    python3 -c '
+import json, subprocess, os, datetime
+
+def dmesg_grep(pattern, lines=10):
+    try:
+        out = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=5)
+        return "\n".join([l for l in out.stdout.splitlines() if pattern.lower() in l.lower()][-lines:])
+    except: return ""
+
+def split_list(s, sep="|"):
+    return [x for x in s.split(sep) if x] if s else []
+
+def parse_steps(s):
+    steps = {}
+    for part in s.split("|"):
+        if ":" not in part: continue
+        fields = part.split(":", 2)
+        key, status = fields[0], fields[1]
+        entry = {"status": status}
+        if len(fields) > 2 and fields[2]: entry["detail"] = fields[2]
+        steps[key] = entry
+    return steps
+
+e = os.environ
+report = {
+    "version": 1,
+    "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "success": e["REPORT_SUCCESS"] == "true",
+    "system": {
+        "distro": e["REPORT_DISTRO"],
+        "kernel": e["REPORT_KERNEL"],
+        "arch": e["REPORT_ARCH"],
+        "ram_mb": int(e["REPORT_RAM"] or 0),
+        "cpu": e["REPORT_CPU"],
+        "secure_boot": e["REPORT_SECBOOT"] == "true",
+        "iommu": e["REPORT_IOMMU"],
+    },
+    "audio": {
+        "pipewire_version": e["REPORT_PW_VER"] or None,
+        "wireplumber_version": e["REPORT_WP_VER"] or None,
+        "pulseaudio_running": e["REPORT_PA"] == "true",
+        "existing_cards": split_list(e["REPORT_CARDS"]),
+        "snd_modules": split_list(e["REPORT_MODS"]),
+    },
+    "apollo": {
+        "detected": e["REPORT_APOLLO_DET"] == "true",
+        "pcie_device": e["REPORT_APOLLO_PCI"],
+        "thunderbolt_controller": e["REPORT_TB"],
+    },
+    "steps": parse_steps(e["REPORT_STEPS"]),
+    "logs": {
+        "dmesg_apollo": dmesg_grep("ua_apollo"),
+        "dmesg_thunderbolt": dmesg_grep("thunderbolt", 5),
+        "dmesg_iommu": dmesg_grep("iommu", 5),
+    },
 }
-REPORTEOF
+with open(e["REPORT_FILE"], "w") as f:
+    json.dump(report, f, indent=2)
+'
 
     ok "Report saved: $REPORT_FILE"
 }
@@ -705,8 +722,14 @@ REPORTEOF
 telemetry_prompt() {
     header "Telemetry"
 
-    echo ""
-    read -rp "Help improve Open Apollo — send anonymous install report? [y/N] " answer
+    local answer="n"
+    if [ -t 0 ]; then
+        echo ""
+        read -rp "Help improve Open Apollo — send anonymous install report? [y/N] " answer
+    else
+        # Non-interactive (piped sudo, SSH, etc.) — auto-send
+        answer="y"
+    fi
 
     if [[ "$answer" =~ ^[Yy] ]]; then
         info "Sending report to $TELEMETRY_URL..."
