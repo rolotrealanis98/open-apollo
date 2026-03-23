@@ -513,6 +513,24 @@ run_init() {
         return 0
     fi
 
+    # Stop PipeWire before loading driver to prevent race condition.
+    # PipeWire auto-opens the ALSA device the moment it appears, which can
+    # start transport before the TB link is fully stable → PCIe link death.
+    local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+    local pw_uid
+    pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
+    local pw_home
+    pw_home=$(eval echo "~$pw_user" 2>/dev/null || echo "")
+
+    if [ -n "$pw_user" ] && [ -n "$pw_uid" ]; then
+        info "Stopping PipeWire (prevents race during driver init)..."
+        sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+            systemctl --user stop pipewire.service wireplumber.service \
+            pipewire.socket pipewire-pulse.socket pipewire-pulse.service 2>/dev/null || true
+        sleep 1
+        ok "PipeWire stopped"
+    fi
+
     # Gate 1: Load the driver
     if ! lsmod | grep -q ua_apollo; then
         info "Loading driver..."
