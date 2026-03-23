@@ -142,6 +142,7 @@ context.modules = [
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_1"
@@ -162,6 +163,7 @@ context.modules = [
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_2"
@@ -182,6 +184,7 @@ context.modules = [
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_stereo"
@@ -202,6 +205,7 @@ context.modules = [
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_3"
@@ -222,6 +226,7 @@ context.modules = [
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_4"
@@ -242,6 +247,7 @@ context.modules = [
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_line_34"
@@ -271,6 +277,7 @@ context.modules = [
             playback.props = {
                 node.target           = "$OUTPUT_NODE"
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
                 audio.position        = [ AUX0 AUX1 ]
                 stream.dont-remix     = true
             }
@@ -290,6 +297,7 @@ context.modules = [
             playback.props = {
                 node.target           = "$OUTPUT_NODE"
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
                 audio.position        = [ AUX2 AUX3 ]
                 stream.dont-remix     = true
             }
@@ -309,6 +317,7 @@ context.modules = [
             playback.props = {
                 node.target           = "$OUTPUT_NODE"
                 node.latency          = 1024/48000
+                clock.name            = "ua_apollo"
                 audio.position        = [ AUX4 AUX5 ]
                 stream.dont-remix     = true
             }
@@ -329,7 +338,7 @@ log "  Sinks:   Monitor L/R, Line Out 1+2, Line Out 3+4"
 # "pending linkable(s) not activated" and no audio output.
 if systemctl --user is-active pipewire.service &>/dev/null; then
     log "Restarting PipeWire + WirePlumber to load new config..."
-    systemctl --user restart pipewire.service wireplumber.service
+    systemctl --user restart pipewire.service wireplumber.service pipewire-pulse.service
     sleep 2
     wait_for_pipewire
 

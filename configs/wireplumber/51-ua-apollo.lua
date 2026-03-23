@@ -36,6 +36,11 @@ table.insert(alsa_monitor.rules, {
     -- (Apollo firmware can be sensitive to transport resets)
     ["session.suspend-timeout-seconds"]  = 0,
 
+    -- Force quantum 1024 when Apollo is the graph driver.
+    -- Firefox WebRTC requests quantum 1200 (25ms) which mismatches
+    -- the ALSA buffer, causing choppy capture through loopbacks.
+    ["node.force-quantum"]               = 1024,
+
     -- Force S32_LE format (native Apollo format)
     ["audio.format"]                     = "S32LE",
 
@@ -44,6 +49,10 @@ table.insert(alsa_monitor.rules, {
 
     -- Use software volume — don't touch the Apollo hardware monitor level.
     ["api.alsa.soft-mixer"]              = true,
+
+    -- Shared clock name — loopback nodes use the same clock.name
+    -- so PipeWire skips adaptive resampling between them
+    ["clock.name"]                       = "ua_apollo",
 
     -- Node descriptions for Sound Settings UI
     ["node.nick"]                        = "Apollo",
