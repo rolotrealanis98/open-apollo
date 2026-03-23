@@ -1,50 +1,10 @@
 #!/bin/bash
-# open-apollo-profile-setup — Fully auto-configure Apollo audio
+# open-apollo-profile-setup — Auto-configure Apollo audio on hotplug
 # Triggered by udev when Apollo PCI device appears.
-# Runs in background to avoid blocking udev.
 #
-# Flow: wait for driver + PipeWire → set pro-audio profile → create virtual I/O devices
+# Uses systemd-run to launch setup in a transient service, fully detached
+# from the udev process tree. This survives the PipeWire restart that
+# apollo-setup-io triggers internally.
 
-(
-    # Wait for driver probe + PipeWire to discover the device
-    # Retry up to 30s (Apollo needs time for ACEFACE + PipeWire enumeration)
-    for i in $(seq 1 15); do
-        sleep 2
-
-        # Find the logged-in user running PipeWire
-        PW_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
-        [ -z "$PW_USER" ] && continue
-
-        PW_UID=$(id -u "$PW_USER" 2>/dev/null)
-        [ -z "$PW_UID" ] && continue
-
-        # Check if Apollo is visible in PipeWire
-        if sudo -u "$PW_USER" XDG_RUNTIME_DIR="/run/user/$PW_UID" \
-            wpctl status 2>/dev/null | grep -q 'Apollo x4'; then
-            break
-        fi
-    done
-
-    [ -z "$PW_USER" ] && exit 0
-    [ -z "$PW_UID" ] && exit 0
-
-    # Helper: run command as the PipeWire user (HOME must be set for config paths)
-    PW_HOME=$(eval echo "~$PW_USER")
-    pw_run() { sudo -u "$PW_USER" HOME="$PW_HOME" XDG_RUNTIME_DIR="/run/user/$PW_UID" "$@"; }
-
-    # Run the full I/O setup (sets profile + creates virtual devices)
-    if [ -x /usr/local/bin/apollo-setup-io ]; then
-        pw_run /usr/local/bin/apollo-setup-io 2>/dev/null
-    else
-        # Fallback: just set pro-audio profile
-        DEV_ID=$(pw_run wpctl status 2>/dev/null | \
-            grep 'Apollo x4' | grep '\[alsa\]' | grep -oP '[0-9]+' | head -1)
-        [ -n "$DEV_ID" ] && pw_run wpctl set-profile "$DEV_ID" 1 2>/dev/null
-    fi
-
-    # Set Monitor L/R as default sink
-    sleep 2
-    SINK_ID=$(pw_run wpctl status 2>/dev/null | \
-        grep 'Apollo Monitor' | grep -oP '[0-9]+' | head -1)
-    [ -n "$SINK_ID" ] && pw_run wpctl set-default "$SINK_ID" 2>/dev/null
-) &
+systemd-run --no-block --unit=open-apollo-setup \
+    /usr/local/bin/open-apollo-setup-worker

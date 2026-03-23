@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# apollo-init.sh — Initialize Apollo x4 on Linux
+# apollo-init.sh — Initialize Apollo on Linux
 #
 # Handles cold boot, warm restart, and diagnostics.
 # Detects failure mode and tells you exactly what to do.
@@ -316,7 +316,7 @@ fi
 # Main init flow
 # ──────────────────────────────────────────────────────────────
 
-echo -e "${BOLD}Apollo x4 — Linux Init${NC}"
+echo -e "${BOLD}Apollo — Linux Init${NC}"
 
 # Must be root
 if [ "$(id -u)" -ne 0 ]; then

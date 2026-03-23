@@ -1,0 +1,61 @@
+#!/bin/bash
+# open-apollo-setup-worker — Does the actual Apollo auto-configure work.
+# Launched by systemd-run from the udev trigger script, so it runs in its
+# own systemd scope and survives PipeWire restarts.
+
+LOG_TAG="open-apollo-setup"
+
+# Find the logged-in user running PipeWire (up to 30s)
+for i in $(seq 1 15); do
+    PW_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
+    PW_UID=$(id -u "$PW_USER" 2>/dev/null)
+    [ -n "$PW_USER" ] && [ -n "$PW_UID" ] && break
+    sleep 2
+done
+[ -z "$PW_USER" ] && { logger -t "$LOG_TAG" "No PipeWire user found"; exit 0; }
+
+PW_HOME=$(eval echo "~$PW_USER")
+pw_run() { sudo -u "$PW_USER" HOME="$PW_HOME" XDG_RUNTIME_DIR="/run/user/$PW_UID" "$@"; }
+
+# Wait for PipeWire to see the Apollo ALSA card (up to 60s)
+for i in $(seq 1 30); do
+    pw_run wpctl status 2>/dev/null | grep -q 'Apollo.*\[alsa\]' && break
+    sleep 2
+done
+
+logger -t "$LOG_TAG" "Running apollo-setup-io for user $PW_USER"
+
+# Run apollo-setup-io — generates config and restarts PipeWire.
+# It will die from the PipeWire restart — that is expected.
+pw_run /usr/local/bin/apollo-setup-io > /tmp/apollo-setup-io.log 2>&1 || true
+
+# Post-restart fixup: re-set pro-audio profile
+logger -t "$LOG_TAG" "Post-restart: re-setting pro-audio profile"
+
+# Wait for PipeWire to come back (up to 20s)
+for i in $(seq 1 10); do
+    pw_run pw-cli info 0 &>/dev/null && break
+    sleep 2
+done
+
+# Re-set pro-audio profile (WirePlumber does not reliably auto-set it)
+for i in $(seq 1 10); do
+    DEV_ID=$(pw_run wpctl status 2>/dev/null | \
+        grep 'Apollo.*\[alsa\]' | grep -oP '[0-9]+' | head -1)
+    [ -n "$DEV_ID" ] && break
+    sleep 2
+done
+
+if [ -n "$DEV_ID" ]; then
+    pw_run wpctl set-profile "$DEV_ID" 1 2>/dev/null
+    logger -t "$LOG_TAG" "Set pro-audio profile on device $DEV_ID"
+
+    # Wait for ALSA nodes to appear (up to 20s)
+    for i in $(seq 1 10); do
+        pw_run pw-cli ls Node 2>/dev/null | grep -q 'alsa_input.*pro-input' && break
+        sleep 2
+    done
+    logger -t "$LOG_TAG" "ALSA nodes ready"
+fi
+
+logger -t "$LOG_TAG" "Auto-configure complete"

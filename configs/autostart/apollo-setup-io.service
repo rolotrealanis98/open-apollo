@@ -2,6 +2,9 @@
 Description=Apollo PipeWire I/O Device Setup
 After=pipewire.service wireplumber.service
 Wants=pipewire.service wireplumber.service
+# Retry up to 3 times if Apollo isn't on PipeWire yet
+StartLimitBurst=3
+StartLimitIntervalSec=60
 
 [Service]
 Type=oneshot
@@ -9,9 +12,6 @@ ExecStartPre=/bin/sleep 5
 ExecStart=/usr/local/bin/apollo-setup-io
 Restart=on-failure
 RestartSec=10
-# Retry up to 3 times if Apollo isn't on PipeWire yet
-StartLimitBurst=3
-StartLimitIntervalSec=60
 
 [Install]
 WantedBy=default.target

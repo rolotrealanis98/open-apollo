@@ -257,13 +257,8 @@ class ApolloTray:
         self.run_sudo(['pkill', '-f', 'ua_mixer_daemon'])
 
     def on_reload_pipewire(self, _):
-        """Restart WirePlumber and set profile."""
-        subprocess.Popen(['bash', '-c', (
-            'systemctl --user restart wireplumber; sleep 3; '
-            'DEV_ID=$(wpctl status | grep -i apollo | head -1 | '
-            "sed 's/[^0-9]*\\([0-9]*\\)\\..*/\\1/'); "
-            '[ -n "$DEV_ID" ] && wpctl set-profile "$DEV_ID" 1'
-        )])
+        """Re-run apollo-setup-io to recreate virtual devices."""
+        subprocess.Popen(['apollo-setup-io'])
 
     def on_open_log(self, _):
         if os.path.exists(DAEMON_LOG):

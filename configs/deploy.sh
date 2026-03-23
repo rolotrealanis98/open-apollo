@@ -46,10 +46,13 @@ echo "  -> /usr/share/alsa/ucm2/conf.d/ua_apollo/ua_apollo.conf (symlink)"
 echo "Installing udev rule for auto profile setup..."
 cp "$SCRIPT_DIR/udev/91-ua-apollo.rules" /etc/udev/rules.d/
 cp "$SCRIPT_DIR/udev/open-apollo-profile-setup" /usr/local/bin/
+cp "$SCRIPT_DIR/udev/open-apollo-setup-worker" /usr/local/bin/
 chmod +x /usr/local/bin/open-apollo-profile-setup
+chmod +x /usr/local/bin/open-apollo-setup-worker
 udevadm control --reload-rules 2>/dev/null || true
 echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
 echo "  -> /usr/local/bin/open-apollo-profile-setup"
+echo "  -> /usr/local/bin/open-apollo-setup-worker"
 
 # Step 5: Deploy PipeWire I/O mapping setup script + systemd autostart
 echo "Installing PipeWire I/O setup script..."

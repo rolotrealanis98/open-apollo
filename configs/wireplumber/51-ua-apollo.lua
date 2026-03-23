@@ -36,9 +36,10 @@ table.insert(alsa_monitor.rules, {
     -- (Apollo firmware can be sensitive to transport resets)
     ["session.suspend-timeout-seconds"]  = 0,
 
-    -- Force quantum 1024 when Apollo is the graph driver.
-    -- Firefox WebRTC requests quantum 1200 (25ms) which mismatches
-    -- the ALSA buffer, causing choppy capture through loopbacks.
+    -- Force quantum 1024 (~21ms) when Apollo is the graph driver.
+    -- Lower values (256) can cause system instability / crashes.
+    -- Browsers requesting mismatched quantums (900/1200) get clamped
+    -- by the PulseAudio bridge rules in 50-apollo-pulse-rules.conf.
     ["node.force-quantum"]               = 1024,
 
     -- Force S32_LE format (native Apollo format)
@@ -57,5 +58,9 @@ table.insert(alsa_monitor.rules, {
 
     -- Node descriptions for Sound Settings UI
     ["node.nick"]                        = "Apollo",
+
+    -- Prefer Apollo over other audio devices (HDMI, built-in)
+    ["priority.driver"]                  = 2000,
+    ["priority.session"]                 = 2000,
   },
 })
