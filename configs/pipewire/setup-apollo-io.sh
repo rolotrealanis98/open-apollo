@@ -141,15 +141,16 @@ context.modules = [
                 stream.dont-remix     = true
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_1"
                 media.class           = "Audio/Source"
                 audio.position        = [ MONO ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 priority.session      = 2000
+                clock.name            = "ua_apollo"
             }
         }
     }
@@ -163,14 +164,15 @@ context.modules = [
                 stream.dont-remix     = true
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_2"
                 media.class           = "Audio/Source"
                 audio.position        = [ MONO ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
+                clock.name            = "ua_apollo"
             }
         }
     }
@@ -184,14 +186,15 @@ context.modules = [
                 stream.dont-remix     = true
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_stereo"
                 media.class           = "Audio/Source"
                 audio.position        = [ FL FR ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
+                clock.name            = "ua_apollo"
             }
         }
     }
@@ -205,14 +208,15 @@ context.modules = [
                 stream.dont-remix     = true
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_3"
                 media.class           = "Audio/Source"
                 audio.position        = [ MONO ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
+                clock.name            = "ua_apollo"
             }
         }
     }
@@ -226,14 +230,15 @@ context.modules = [
                 stream.dont-remix     = true
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_mic_4"
                 media.class           = "Audio/Source"
                 audio.position        = [ MONO ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
+                clock.name            = "ua_apollo"
             }
         }
     }
@@ -247,14 +252,15 @@ context.modules = [
                 stream.dont-remix     = true
                 node.target           = "$INPUT_NODE"
                 node.passive          = true
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.name             = "apollo_line_34"
                 media.class           = "Audio/Source"
                 audio.position        = [ FL FR ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
+                clock.name            = "ua_apollo"
             }
         }
     }
@@ -273,12 +279,13 @@ context.modules = [
                 node.name             = "apollo_monitor"
                 media.class           = "Audio/Sink"
                 audio.position        = [ FL FR ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 priority.session      = 2000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.target           = "$OUTPUT_NODE"
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
                 audio.position        = [ AUX0 AUX1 ]
                 stream.dont-remix     = true
@@ -294,11 +301,12 @@ context.modules = [
                 node.name             = "apollo_line_out_12"
                 media.class           = "Audio/Sink"
                 audio.position        = [ FL FR ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.target           = "$OUTPUT_NODE"
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
                 audio.position        = [ AUX2 AUX3 ]
                 stream.dont-remix     = true
@@ -314,11 +322,12 @@ context.modules = [
                 node.name             = "apollo_line_out_34"
                 media.class           = "Audio/Sink"
                 audio.position        = [ FL FR ]
-                node.latency          = 256/48000
+                node.latency          = 512/48000
+                clock.name            = "ua_apollo"
             }
             playback.props = {
                 node.target           = "$OUTPUT_NODE"
-                node.latency          = 256/48000
+                node.latency          = 512/48000
                 clock.name            = "ua_apollo"
                 audio.position        = [ AUX4 AUX5 ]
                 stream.dont-remix     = true

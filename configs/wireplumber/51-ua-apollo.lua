@@ -36,11 +36,10 @@ table.insert(alsa_monitor.rules, {
     -- (Apollo firmware can be sensitive to transport resets)
     ["session.suspend-timeout-seconds"]  = 0,
 
-    -- Force quantum 1024 (~21ms) when Apollo is the graph driver.
-    -- Lower values (256) can cause system instability / crashes.
-    -- Browsers requesting mismatched quantums (900/1200) get clamped
-    -- by the PulseAudio bridge rules in 50-apollo-pulse-rules.conf.
-    ["node.force-quantum"]               = 1024,
+    -- Force quantum 512 (~10.7ms) when Apollo is the graph driver.
+    -- Quantum 256 caused instability from PipeWire restart races.
+    -- Browsers get clamped to match via 50-apollo-pulse-rules.conf.
+    ["node.force-quantum"]               = 512,
 
     -- Force S32_LE format (native Apollo format)
     ["audio.format"]                     = "S32LE",
@@ -54,6 +53,10 @@ table.insert(alsa_monitor.rules, {
     -- Shared clock name — loopback nodes use the same clock.name
     -- so PipeWire skips adaptive resampling between them
     ["clock.name"]                       = "ua_apollo",
+
+    -- Lower DLL bandwidth for smoother clock lock-in.
+    -- Default (~100) causes pitch wobble during initial sync.
+    ["api.alsa.dll-bandwidth-max"]       = 12,
 
 
     -- Node descriptions for Sound Settings UI
