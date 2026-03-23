@@ -102,18 +102,17 @@ cd mixer-engine
 python3 ua_mixer_daemon.py -v
 ```
 
-The daemon exposes TCP:4710 (ConsoleLink protocol), TCP:4720 (Mixer Helper /
-UBJSON), and WS:4721 (WebSocket) for mixer control from any client application.
+The daemon exposes TCP:4710 and TCP:4720 for mixer control from any client application.
 
 ## Architecture
 
 ```
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│ ConsoleLink  │   │  UA Console  │   │  UA Connect  │
-│ (TCP:4710)   │   │  (TCP:4720)  │   │  (WS:4721)   │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                  │
-       └────────┬─────────┴──────────────────┘
+┌──────────────┐   ┌──────────────┐
+│ Control App  │   │ Control App  │
+│ (TCP:4710)   │   │ (TCP:4720)   │
+└──────┬───────┘   └──────┬───────┘
+       │                  │
+       └────────┬─────────┘
                 │
        ┌────────▼────────┐
        │  Mixer Daemon   │

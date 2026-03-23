@@ -9,13 +9,13 @@ Open Apollo consists of two main components that work together to provide full m
 ## System diagram
 
 ```
-┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-│   ConsoleLink       │  │   UA Console        │  │   UA Connect        │
-│   (iOS/iPad)        │  │   (Desktop)         │  │   (Electron)        │
-└────────┬────────────┘  └────────┬────────────┘  └────────┬────────────┘
-         │ TCP:4710               │ TCP:4720               │ WS:4721
-         │                        │                        │
-         └────────────┬───────────┴────────────────────────┘
+┌─────────────────────┐  ┌─────────────────────┐
+│   Control Client    │  │   Control Client    │
+│   (any TCP/WS app)  │  │   (any TCP/WS app)  │
+└────────┬────────────┘  └────────┬────────────┘
+         │ TCP:4710               │ TCP:4720
+         │                        │
+         └────────────┬───────────┘
                       │
          ┌────────────▼─────────────┐
          │   Mixer Daemon           │
@@ -67,14 +67,13 @@ The driver communicates with hardware exclusively through memory-mapped I/O (MMI
 
 The userspace daemon is the control plane. It translates high-level mixer operations into low-level hardware commands:
 
-- **TCP server (port 4710)**: Speaks the ConsoleLink protocol used by the iOS/iPad app
-- **TCP server (port 4720)**: Speaks the Mixer Helper protocol (text commands, UBJSON responses) used by UA Console desktop
-- **WebSocket server (port 4721)**: Speaks the same protocol as UA Connect
-- **State tree**: Maintains a hierarchical tree of all mixer controls (11,000+ nodes for Apollo x4), mirroring the structure expected by UA client software
+- **TCP server (port 4710)**: Mixer Engine protocol (null-terminated JSON text)
+- **TCP server (port 4720)**: Mixer Helper protocol (text commands, UBJSON binary responses)
+- **State tree**: Maintains a hierarchical tree of all mixer controls (11,000+ nodes for Apollo x4)
 - **Hardware router**: Translates state tree changes into ioctl calls to the kernel driver
 - **Metering**: Computes audio level meters from PCM sample data
 
-The daemon's protocol compatibility means existing UA client software can connect to it without modification.
+The daemon implements the same network protocols that UA's own software uses, so it's compatible with third-party tools that speak those protocols.
 
 ---
 
