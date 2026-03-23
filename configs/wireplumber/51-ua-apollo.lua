@@ -37,8 +37,7 @@ table.insert(alsa_monitor.rules, {
     ["session.suspend-timeout-seconds"]  = 0,
 
     -- Force quantum 512 (~10.7ms) when Apollo is the graph driver.
-    -- Quantum 256 caused instability from PipeWire restart races.
-    -- Browsers get clamped to match via 50-apollo-pulse-rules.conf.
+    -- 256 crashes during PipeWire restart races. 512 is stable + no drift.
     ["node.force-quantum"]               = 512,
 
     -- Force S32_LE format (native Apollo format)
