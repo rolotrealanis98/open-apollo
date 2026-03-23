@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Linux PCIe kernel module for Apollo Thunderbolt interfaces
-- Full duplex audio: 24-channel playback + 22-channel capture
+- Full duplex audio: 24-channel playback + 22-channel capture (4 analog inputs and 6 analog outputs verified; S/PDIF, ADAT, and virtual channels unverified)
 - All 6 sample rates (44.1kHz – 192kHz)
 - Preamp control via ALSA mixer: 48V phantom, pad, gain, phase, low cut
 - 50 ALSA mixer controls

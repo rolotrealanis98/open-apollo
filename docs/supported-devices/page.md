@@ -14,7 +14,7 @@ Open Apollo targets all Universal Audio Apollo Thunderbolt interfaces. The drive
 | Arrow | 0x28 | 3 | 2 | 1 | 0 | Needs Testing |
 | Apollo Twin X | 0x23 | 8 | 8 | 2 | 2 | Needs Testing |
 | Apollo Twin X Gen 2 | 0x3A | 8 | 8 | 2 | 2 | Needs Testing |
-| Apollo x4 | 0x1F | 24 | 22 | 4 | 2 | **Verified** |
+| Apollo x4 | 0x1F | 24 | 22 | 4 | 2 | **Partially Verified** |
 | Apollo x4 Gen 2 | 0x36 | 24 | 22 | 4 | 2 | Needs Testing |
 | Apollo x6 | 0x1E | 24 | 22 | 4 | 2 | Needs Testing |
 | Apollo x6 Gen 2 | 0x35 | 24 | 22 | 4 | 2 | Needs Testing |
@@ -40,12 +40,13 @@ Open Apollo targets all Universal Audio Apollo Thunderbolt interfaces. The drive
 
 The Apollo x4 is the primary development and test device. On this model, the following features are confirmed working:
 
-- Full duplex audio (24 playback / 22 record channels)
+- Full duplex audio with **4 analog inputs** (Mic 1-4) and **6 analog outputs** (Monitor L/R, Line Out 1-4) verified
+- The driver exposes all 24 playback / 22 record ALSA channels, but S/PDIF, ADAT, and virtual (DAW playback) channels are **unverified and likely not working**
 - All six sample rates (44.1, 48, 88.2, 96, 176.4, 192 kHz)
 - Preamp gain control (all 4 channels)
 - Preamp flags: 48V phantom power, PAD, low cut, phase invert, mic/line switching
 - Monitor volume, mute, dim, mono
-- DSP mixer routing (all buses)
+- DSP mixer routing (analog buses only — digital bus routing untested)
 - ALSA integration with 50+ mixer controls
 
 ---

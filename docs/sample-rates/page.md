@@ -145,7 +145,7 @@ When no streams are open, changing the rate via the ALSA control writes the new 
 
 ## Channel Count at Higher Rates
 
-The Apollo's PCIe DMA channel count is fixed regardless of sample rate. The driver always allocates the full channel count for your model (e.g., 24 playback / 22 capture on the Apollo x4).
+The Apollo's PCIe DMA channel count is fixed regardless of sample rate. The driver always allocates the full channel count for your model (e.g., 24 playback / 22 capture on the Apollo x4). Note that only analog I/O channels (4 inputs, 6 outputs on the x4) have been verified — S/PDIF, ADAT, and virtual channels are unverified.
 
 However, at higher sample rates, the Apollo's internal DSP processing capacity is reduced. At 2x rates (88.2/96 kHz), some internal mixer channels may be unavailable. At 4x rates (176.4/192 kHz), the available DSP channels are further reduced.
 

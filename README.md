@@ -18,9 +18,9 @@ mixer daemon, and system tray indicator.
 > configurations, and incomplete features. We're shipping early to get community
 > feedback and testing across different Apollo models.
 
-## What Works (Apollo x4, Ubuntu 24.04)
+## What Works (Apollo x4 Analog I/O, Ubuntu 24.04)
 
-- **Full duplex audio** — 24 playback + 22 capture channels via ALSA
+- **Full duplex audio** — 4 analog inputs + 6 analog outputs verified (24/22 total ALSA channels exposed; S/PDIF, ADAT, and virtual channels are unverified)
 - **All sample rates** — 44.1, 48, 88.2, 96, 176.4, 192 kHz
 - **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching
 - **Monitor control** — volume, mute, dim, mono, headphone routing
@@ -52,7 +52,7 @@ Talkback, virtual/monitor loopback, console UI, multi-device support, plugin cha
 
 | Device | Status |
 |--------|--------|
-| Apollo x4 | **Verified** — playback, capture, preamps, gain, DSP settings |
+| Apollo x4 | **Partially Verified** — analog I/O (Mic 1-4, Monitor, Line Out), preamps, gain, DSP settings. S/PDIF, ADAT, virtual channels untested. |
 | Apollo x4 Gen 2 | Needs Testing |
 | Apollo x6 / Gen 2 | Needs Testing |
 | Apollo x8 / Gen 2 | Needs Testing |
