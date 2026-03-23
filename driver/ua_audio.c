@@ -1820,6 +1820,18 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 		 sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
 		 audio->connected, audio->transport_running);
 
+	/*
+	 * Reject open if device is not connected (ACEFACE not done).
+	 * PipeWire/ALSA will retry later.  Without this gate, PipeWire
+	 * races to start transport before DSP is ready, causing
+	 * 0xFFFFFFFF reads and a dead PCIe link.
+	 */
+	if (!ua->aceface_done) {
+		dev_info(&ua->pdev->dev,
+			 "pcm_open: rejecting — ACEFACE not complete\n");
+		return -ENODEV;
+	}
+
 	runtime->hw = ua_pcm_hw;
 
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK) {
