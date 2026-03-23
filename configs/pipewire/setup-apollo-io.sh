@@ -305,18 +305,26 @@ log "  Sinks:   Monitor L/R, Line Out 1+2, Line Out 3+4"
 # ── Step 5: Restart PipeWire to load the config ──
 
 # PipeWire reads conf.d on startup, so we need a restart to pick up the new config.
+# Restart both PipeWire AND WirePlumber together — restarting only PipeWire
+# leaves WirePlumber with stale linkable references, causing
+# "pending linkable(s) not activated" and no audio output.
 if systemctl --user is-active pipewire.service &>/dev/null; then
-    log "Restarting PipeWire to load new config..."
-    systemctl --user restart pipewire.service
+    log "Restarting PipeWire + WirePlumber to load new config..."
+    systemctl --user restart pipewire.service wireplumber.service
     sleep 2
     wait_for_pipewire
 
-    # Re-set pro-audio profile after restart (lost during restart)
-    sleep 1
+    # WirePlumber rule auto-sets pro-audio profile, but verify it took effect
+    sleep 2
     NEW_DEVID=$(wpctl status 2>/dev/null | grep 'Apollo x4' | grep '\[alsa\]' | grep -oP '[0-9]+' | head -1 || true)
     if [ -n "$NEW_DEVID" ]; then
-        wpctl set-profile "$NEW_DEVID" 1 2>/dev/null || true
-        log "Re-set pro-audio profile (device $NEW_DEVID)"
+        # Check if pro-audio nodes exist; if not, set profile explicitly
+        if ! wpctl status 2>/dev/null | grep -q 'Apollo x4 Pro'; then
+            wpctl set-profile "$NEW_DEVID" 1 2>/dev/null || true
+            log "Set pro-audio profile (device $NEW_DEVID)"
+        else
+            log "Pro-audio profile active (device $NEW_DEVID)"
+        fi
     fi
 fi
 
@@ -326,8 +334,15 @@ sleep 2
 SOURCES=$(wpctl status 2>/dev/null | grep -c 'Apollo' || echo 0)
 log "Apollo nodes visible in wpctl: $SOURCES"
 
-if [ "$SOURCES" -gt 0 ]; then
-    log "Setup complete!"
+if [ "$SOURCES" -ge 5 ]; then
+    log "Setup complete! ($SOURCES Apollo nodes)"
+
+    # Set Apollo Monitor L/R as default output
+    MONITOR_ID=$(wpctl status 2>/dev/null | grep 'Apollo Monitor' | grep -oP '[0-9]+' | head -1 || true)
+    if [ -n "$MONITOR_ID" ]; then
+        wpctl set-default "$MONITOR_ID" 2>/dev/null || true
+        log "Default output: Apollo Monitor L/R"
+    fi
 else
-    log "Warning: no Apollo virtual nodes found. Check: wpctl status"
+    log "Warning: expected 5+ Apollo nodes, found $SOURCES. Check: wpctl status"
 fi
