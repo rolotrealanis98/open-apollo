@@ -45,13 +45,24 @@ udevadm control --reload-rules 2>/dev/null || true
 echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
 echo "  -> /usr/local/bin/open-apollo-profile-setup"
 
-# Step 5: Deploy PipeWire I/O mapping setup script
+# Step 5: Deploy PipeWire I/O mapping setup script + systemd autostart
 echo "Installing PipeWire I/O setup script..."
 DESKTOP_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cp "$SCRIPT_DIR/pipewire/setup-apollo-io.sh" /usr/local/bin/apollo-setup-io
 chmod +x /usr/local/bin/apollo-setup-io
 echo "  -> /usr/local/bin/apollo-setup-io"
+
+# Install systemd user service for auto-setup after PipeWire starts
+if [ -n "$DESKTOP_USER" ]; then
+    SVC_DIR="$(eval echo ~"$DESKTOP_USER")/.config/systemd/user"
+    mkdir -p "$SVC_DIR"
+    cp "$SCRIPT_DIR/autostart/apollo-setup-io.service" "$SVC_DIR/"
+    # Enable the service (runs as user, not root)
+    sudo -u "$DESKTOP_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$DESKTOP_USER")" \
+        systemctl --user enable apollo-setup-io.service 2>/dev/null || true
+    echo "  -> $SVC_DIR/apollo-setup-io.service (enabled)"
+fi
 
 # Step 6: Deploy tray indicator (autostart + app launcher)
 echo "Installing tray indicator..."
