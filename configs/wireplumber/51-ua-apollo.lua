@@ -54,6 +54,7 @@ table.insert(alsa_monitor.rules, {
     -- so PipeWire skips adaptive resampling between them
     ["clock.name"]                       = "ua_apollo",
 
+
     -- Node descriptions for Sound Settings UI
     ["node.nick"]                        = "Apollo",
   },

@@ -371,6 +371,14 @@ if [ "$SOURCES" -ge 5 ]; then
         wpctl set-default "$MONITOR_ID" 2>/dev/null || true
         log "Default output: Apollo Monitor L/R"
     fi
+
+    # Set Apollo Mic 1 as default input (NOT the raw 22ch pro-audio source
+    # which can crash apps that try to open it directly)
+    MIC1_ID=$(wpctl status 2>/dev/null | grep 'Apollo Mic 1 ' | grep -oP '[0-9]+' | head -1 || true)
+    if [ -n "$MIC1_ID" ]; then
+        wpctl set-default "$MIC1_ID" 2>/dev/null || true
+        log "Default input: Apollo Mic 1"
+    fi
 else
     log "Warning: expected 5+ Apollo nodes, found $SOURCES. Check: wpctl status"
 fi
