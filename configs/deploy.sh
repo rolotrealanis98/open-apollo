@@ -17,7 +17,13 @@ else
     echo "No broken config to remove (OK)"
 fi
 
-# Step 2: Deploy WirePlumber rules
+# Step 2a: Deploy PipeWire Pulse rules (browser quantum fix)
+echo "Installing PipeWire Pulse rules..."
+mkdir -p /etc/pipewire/pipewire-pulse.conf.d
+cp "$SCRIPT_DIR/pipewire/50-apollo-pulse-rules.conf" /etc/pipewire/pipewire-pulse.conf.d/
+echo "  -> /etc/pipewire/pipewire-pulse.conf.d/50-apollo-pulse-rules.conf"
+
+# Step 2b: Deploy WirePlumber rules
 echo "Installing WirePlumber rules..."
 mkdir -p /etc/wireplumber/main.lua.d
 cp "$SCRIPT_DIR/wireplumber/51-ua-apollo.lua" /etc/wireplumber/main.lua.d/

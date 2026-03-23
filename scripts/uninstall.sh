@@ -92,7 +92,8 @@ fi
 
 # Step 5: Remove WirePlumber rules
 rm -f /etc/wireplumber/main.lua.d/51-ua-apollo.lua 2>/dev/null
-ok "Removed WirePlumber rules"
+rm -f /etc/pipewire/pipewire-pulse.conf.d/50-apollo-pulse-rules.conf 2>/dev/null
+ok "Removed WirePlumber + PipeWire Pulse rules"
 
 # Step 6: Remove UCM2 profile
 rm -rf /usr/share/alsa/ucm2/ua_apollo 2>/dev/null
