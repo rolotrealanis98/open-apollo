@@ -17,11 +17,42 @@ else
     echo "No broken config to remove (OK)"
 fi
 
-# Step 2: Deploy WirePlumber rules
+# Step 2: Deploy WirePlumber rules (detect version for correct config format)
 echo "Installing WirePlumber rules..."
-mkdir -p /etc/wireplumber/main.lua.d
-cp "$SCRIPT_DIR/wireplumber/51-ua-apollo.lua" /etc/wireplumber/main.lua.d/
-echo "  -> /etc/wireplumber/main.lua.d/51-ua-apollo.lua"
+
+# Detect WirePlumber version: 0.5+ uses .conf (JSON-like), 0.4.x uses .lua
+WP_VER=""
+if command -v wpctl &>/dev/null; then
+    # wpctl doesn't have --version, so check the package manager
+    if command -v pacman &>/dev/null; then
+        WP_VER=$(pacman -Q wireplumber 2>/dev/null | awk '{print $2}' | cut -d- -f1)
+    elif command -v dpkg &>/dev/null; then
+        WP_VER=$(dpkg -s wireplumber 2>/dev/null | grep '^Version:' | awk '{print $2}' | cut -d- -f1 | cut -d: -f2)
+    elif command -v rpm &>/dev/null; then
+        WP_VER=$(rpm -q --qf '%{VERSION}' wireplumber 2>/dev/null)
+    fi
+fi
+
+WP_MAJOR=$(echo "$WP_VER" | cut -d. -f1)
+WP_MINOR=$(echo "$WP_VER" | cut -d. -f2)
+
+if [ "${WP_MAJOR:-0}" -gt 0 ] 2>/dev/null || [ "${WP_MINOR:-0}" -ge 5 ] 2>/dev/null; then
+    # WirePlumber 0.5+ — use .conf format
+    echo "  WirePlumber $WP_VER detected (0.5+ config format)"
+    mkdir -p /etc/wireplumber/wireplumber.conf.d
+    cp "$SCRIPT_DIR/wireplumber/51-ua-apollo.conf" /etc/wireplumber/wireplumber.conf.d/
+    echo "  -> /etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf"
+    # Remove old lua config if present (would trigger warnings)
+    rm -f /etc/wireplumber/main.lua.d/51-ua-apollo.lua 2>/dev/null
+else
+    # WirePlumber 0.4.x or unknown — use .lua format
+    echo "  WirePlumber ${WP_VER:-unknown} detected (0.4.x config format)"
+    mkdir -p /etc/wireplumber/main.lua.d
+    cp "$SCRIPT_DIR/wireplumber/51-ua-apollo.lua" /etc/wireplumber/main.lua.d/
+    echo "  -> /etc/wireplumber/main.lua.d/51-ua-apollo.lua"
+    # Remove new conf if present (shouldn't be, but clean up)
+    rm -f /etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf 2>/dev/null
+fi
 
 # Step 3: Deploy UCM2 profile
 echo "Installing UCM2 profile..."
