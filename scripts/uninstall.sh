@@ -90,10 +90,12 @@ if [ -n "$USER_HOME" ]; then
     ok "Removed PipeWire loopback config"
 fi
 
-# Step 5: Remove WirePlumber rules
+# Step 5: Remove WirePlumber rules (both 0.4.x lua and 0.5.x conf formats)
 rm -f /etc/wireplumber/main.lua.d/51-ua-apollo.lua 2>/dev/null
+rm -f /etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf 2>/dev/null
 rm -f /etc/pipewire/pipewire-pulse.conf.d/50-apollo-pulse-rules.conf 2>/dev/null
-ok "Removed WirePlumber + PipeWire Pulse rules"
+rm -f /etc/pipewire/pipewire.conf.d/10-apollo.conf 2>/dev/null
+ok "Removed WirePlumber + PipeWire rules"
 
 # Step 6: Remove UCM2 profile
 rm -rf /usr/share/alsa/ucm2/ua_apollo 2>/dev/null
@@ -104,6 +106,7 @@ ok "Removed UCM2 profile"
 # Step 7: Remove udev rules and scripts
 rm -f /etc/udev/rules.d/91-ua-apollo.rules 2>/dev/null
 rm -f /usr/local/bin/open-apollo-profile-setup 2>/dev/null
+rm -f /usr/local/bin/open-apollo-setup-worker 2>/dev/null
 rm -f /usr/local/bin/apollo-setup-io 2>/dev/null
 udevadm control --reload-rules 2>/dev/null || true
 ok "Removed udev rules and scripts"
@@ -125,9 +128,12 @@ if [ "$KEEP_DKMS" = "0" ] && command -v dkms &>/dev/null; then
     rm -rf /usr/src/ua_apollo-* 2>/dev/null
 fi
 
-# Step 10: Remove module auto-load
+# Step 10: Remove module auto-load and manually installed .ko files
 rm -f /etc/modules-load.d/ua_apollo.conf 2>/dev/null
-ok "Removed module auto-load config"
+rm -f "/lib/modules/$(uname -r)/extra/ua_apollo.ko" 2>/dev/null
+rm -f "/lib/modules/$(uname -r)/extra/ua_apollo.ko.zst" 2>/dev/null
+depmod -a 2>/dev/null || true
+ok "Removed module auto-load config and extra module files"
 
 # Step 11: Unload kernel module
 # Must happen BEFORE PipeWire restart — PipeWire holds ALSA references.
