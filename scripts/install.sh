@@ -402,6 +402,9 @@ setup_dkms() {
         run_sudo dkms remove ua_apollo/$VERSION --all 2>/dev/null || true
     fi
 
+    # Remove any manually installed .ko to avoid "Differences" warning
+    run_sudo rm -f "/lib/modules/$(uname -r)/extra/ua_apollo.ko" 2>/dev/null || true
+
     # Copy source
     info "Copying driver source to $dkms_src"
     run_sudo rm -rf "$dkms_src"
@@ -671,7 +674,7 @@ run_init() {
         sleep 2
         local vdev_count
         vdev_count=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
-            wpctl status 2>/dev/null | grep -c 'Apollo' || echo 0)
+            wpctl status 2>/dev/null | grep -ic 'apollo' || echo 0)
         if [ "$vdev_count" -ge 5 ]; then
             ok "PipeWire virtual devices active ($vdev_count Apollo nodes)"
         else
@@ -681,7 +684,7 @@ run_init() {
         # Set Apollo Monitor as default sink
         local sink_id
         sink_id=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
-            wpctl status 2>/dev/null | grep 'Apollo Monitor' | grep -oP '[0-9]+' | head -1 || true)
+            wpctl status 2>/dev/null | grep -i 'apollo.*monitor\|apollo_monitor' | grep -oP '[0-9]+' | head -1 || true)
         if [ -n "$sink_id" ]; then
             sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
                 wpctl set-default "$sink_id" 2>/dev/null || true
