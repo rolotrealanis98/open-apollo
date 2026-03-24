@@ -27,6 +27,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# AI agent config (local only, never commit)
+.claude/
+CLAUDE.md
+
 # Captures (never commit binary payloads)
 *.bin
 *.log
