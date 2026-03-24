@@ -122,10 +122,16 @@ if [ "$KEEP_DKMS" = "0" ] && command -v dkms &>/dev/null; then
         VERSION=$(dkms status ua_apollo 2>/dev/null | head -1 | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
         if [ -n "$VERSION" ]; then
             dkms remove "ua_apollo/$VERSION" --all 2>/dev/null || true
-            ok "Removed DKMS (ua_apollo/$VERSION)"
+            ok "Removed DKMS registration (ua_apollo/$VERSION)"
         fi
     fi
+    # Clean up source and internal DKMS state completely
     rm -rf /usr/src/ua_apollo-* 2>/dev/null
+    rm -rf /var/lib/dkms/ua_apollo 2>/dev/null
+    # Remove DKMS-installed module files
+    rm -f "/lib/modules/$(uname -r)/updates/dkms/ua_apollo.ko"* 2>/dev/null
+    depmod -a 2>/dev/null || true
+    ok "Cleaned DKMS build tree and installed modules"
 fi
 
 # Step 10: Remove module auto-load and manually installed .ko files
