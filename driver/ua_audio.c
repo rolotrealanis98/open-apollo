@@ -17,6 +17,7 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
+#include <linux/version.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/control.h>
@@ -217,7 +218,7 @@ static void ua_audio_free_dma(struct ua_device *ua)
  * We must toggle them to properly initialize the DMA engine state,
  * then clear all pending interrupts (kext writes 0xFFFFFFFF to ISR).
  */
-static void ua_audio_reset_dma(struct ua_device *ua)
+static void __maybe_unused ua_audio_reset_dma(struct ua_device *ua)
 {
 	u32 val, val_clean, val_reset, readback;
 
@@ -394,7 +395,7 @@ int ua_audio_preinit_dma(struct ua_device *ua)
 
 #define UA_CHAN_NAME_WORDS  72
 
-static void ua_dump_channel_names(struct ua_device *ua)
+static void __maybe_unused ua_dump_channel_names(struct ua_device *ua)
 {
 	u32 in_buf[UA_CHAN_NAME_WORDS];
 	u32 out_buf[UA_CHAN_NAME_WORDS];
@@ -4039,8 +4040,13 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 
 	spin_lock_init(&audio->lock);
 	INIT_DELAYED_WORK(&audio->dsp_service_work, ua_dsp_service_handler);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&audio->period_timer, ua_period_timer_callback,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+#else
+	hrtimer_init(&audio->period_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	audio->period_timer.function = ua_period_timer_callback;
+#endif
 	init_completion(&audio->connect_done);
 	audio->sample_rate = 48000;
 	audio->rate_index = UA_RATE_48000;
