@@ -83,13 +83,21 @@ All Thunderbolt Apollo models share the same register map and protocol — the d
 includes device detection and channel configuration for every model listed above.
 We need community testers to verify each one.
 
+### Thunderbolt 2 Devices (Not Supported)
+
+Older Apollo models with **Thunderbolt 2** connections (Apollo Twin, Apollo 8, Apollo 16, Apollo Duo, Apollo Quad) are **not expected to work**, even with an Apple Thunderbolt 2 → 3 adapter.
+
+The issue is not the driver — it's that **Linux does not enumerate Thunderbolt 2 PCIe devices** in most configurations. The Apollo will not appear in `lspci` output, so the driver has nothing to bind to. This has been confirmed by a community member testing an Apollo Twin (TB2) with an Apple adapter on a Linux laptop with Thunderbolt 3 ports — the install completed successfully but the device was never detected.
+
+If your Apollo uses a Thunderbolt 2 connector (Mini DisplayPort-shaped, not USB-C), you will likely hit this limitation. This project targets **Thunderbolt 3/4 Apollo models** (USB-C connector) on systems with native Thunderbolt 3 or 4 ports.
+
 ## Quick Start
 
 ### Prerequisites
 
-- Ubuntu 24.04 LTS (primary tested platform) or Fedora 43 / Arch Linux
-- Linux kernel 6.1+ with headers installed
-- Thunderbolt 3 or 4 connection
+- Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed, Linux Mint 22, Pop!_OS 24.04, Manjaro
+- Linux kernel 6.8+ with headers installed (required — uses `hrtimer_types.h` introduced in 6.8)
+- Thunderbolt 3 or 4 connection (see [Thunderbolt 2 note](#thunderbolt-2-devices-not-supported) below)
 - GCC, Make
 - Python 3.10+ (for mixer daemon)
 - `iommu=pt` kernel parameter required on most systems (see below)
