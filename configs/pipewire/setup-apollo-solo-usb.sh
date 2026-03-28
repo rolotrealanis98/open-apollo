@@ -34,20 +34,21 @@ for obj in json.load(sys.stdin):
 [ -z "$DEVICE_ID" ] && { log "Apollo Solo USB not found in PipeWire"; exit 1; }
 log "Device ID: $DEVICE_ID"
 
-# Set pro-audio profile (index 26)
-wpctl set-profile "$DEVICE_ID" 26 2>/dev/null || true
+# Use analog surround 2.1 profile (pro-audio has PipeWire capture start bug)
+# Profile 1 = analog-surround-21 output + input (3ch: FL, FR, LFE)
+wpctl set-profile "$DEVICE_ID" 1 2>/dev/null || true
 sleep 1
-log "Pro-audio profile set"
+log "Analog surround 2.1 profile set"
 
 # Discover node names
 eval "$(pw-dump 2>/dev/null | python3 -c "
 import json, sys
 for obj in json.load(sys.stdin):
     props = obj.get('info', {}).get('props', {})
-    if 'Apollo Solo USB' not in props.get('node.description', ''): continue
+    if 'Apollo Solo USB' not in props.get('alsa.card_name', ''): continue
     name = props.get('node.name', '')
-    if 'pro-input' in name: print(f'INPUT_NODE=\"{name}\"')
-    if 'pro-output' in name: print(f'OUTPUT_NODE=\"{name}\"')
+    if 'input' in name and 'loopback' not in name: print(f'INPUT_NODE=\"{name}\"')
+    if 'output' in name and 'loopback' not in name: print(f'OUTPUT_NODE=\"{name}\"')
 " 2>/dev/null || echo 'INPUT_NODE="" ; OUTPUT_NODE=""')"
 
 [ -z "$INPUT_NODE" ] && { log "Input node not found"; exit 1; }
@@ -66,16 +67,17 @@ cat > "$CONF_FILE" << CONF
 context.modules = [
 
     # ═══════ CAPTURE SOURCES (Apollo → PipeWire) ═══════
+    # Analog surround 2.1: FL=Mic1, FR=Mic2, LFE=?
 
     # Mic/Instrument 1 (mono)
     { name = libpipewire-module-loopback
         args = {
             node.description = "Apollo Mic 1"
             capture.props = {
-                audio.position    = [ AUX0 ]
+                audio.position    = [ FL ]
                 stream.dont-remix = true
                 node.target       = "$INPUT_NODE"
-                node.passive      = false
+                node.passive      = true
             }
             playback.props = {
                 node.name   = "apollo_mic_1"
@@ -90,10 +92,10 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 2"
             capture.props = {
-                audio.position    = [ AUX1 ]
+                audio.position    = [ FR ]
                 stream.dont-remix = true
                 node.target       = "$INPUT_NODE"
-                node.passive      = false
+                node.passive      = true
             }
             playback.props = {
                 node.name   = "apollo_mic_2"
@@ -108,10 +110,10 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 1+2"
             capture.props = {
-                audio.position    = [ AUX0 AUX1 ]
+                audio.position    = [ FL FR ]
                 stream.dont-remix = true
                 node.target       = "$INPUT_NODE"
-                node.passive      = false
+                node.passive      = true
             }
             playback.props = {
                 node.name   = "apollo_mic_stereo"
@@ -122,6 +124,7 @@ context.modules = [
     }
 
     # ═══════ PLAYBACK SINKS (PipeWire → Apollo) ═══════
+    # Analog surround 2.1: FL=MonL, FR=MonR, LFE=?
 
     # Monitor L/R (main speakers)
     { name = libpipewire-module-loopback
@@ -134,24 +137,7 @@ context.modules = [
             }
             playback.props = {
                 node.target       = "$OUTPUT_NODE"
-                audio.position    = [ AUX0 AUX1 ]
-                stream.dont-remix = true
-            }
-        }
-    }
-
-    # Headphone L/R
-    { name = libpipewire-module-loopback
-        args = {
-            node.description = "Apollo Headphone"
-            capture.props = {
-                node.name   = "apollo_headphone"
-                media.class = "Audio/Sink"
-                audio.position = [ FL FR ]
-            }
-            playback.props = {
-                node.target       = "$OUTPUT_NODE"
-                audio.position    = [ AUX2 AUX3 ]
+                audio.position    = [ FL FR ]
                 stream.dont-remix = true
             }
         }
@@ -161,20 +147,9 @@ CONF
 
 log "Config written: $CONF_FILE"
 
-# Restart PipeWire to load config
+# Restart PipeWire to load the loopback config
 systemctl --user restart pipewire wireplumber 2>/dev/null || true
-sleep 2
-
-# Re-set pro-audio profile after restart
-NEW_ID=$(pw-dump 2>/dev/null | python3 -c "
-import json, sys
-for obj in json.load(sys.stdin):
-    props = obj.get('info', {}).get('props', {})
-    if 'Apollo Solo USB' in props.get('alsa.card_name', '') and obj.get('type') == 'PipeWire:Interface:Device':
-        print(obj['id']); break
-" 2>/dev/null || true)
-[ -n "$NEW_ID" ] && wpctl set-profile "$NEW_ID" 26 2>/dev/null || true
-sleep 1
+sleep 3
 
 # Verify
 NODES=$(wpctl status 2>/dev/null | grep -c 'Apollo' || echo 0)

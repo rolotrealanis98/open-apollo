@@ -362,7 +362,7 @@ monitor.alsa.rules = [
         ]
         actions = {
             update-props = {
-                device.profile = "pro-audio"
+                device.profile = "output:analog-surround-21+input:analog-surround-21"
             }
         }
     }
