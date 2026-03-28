@@ -14,7 +14,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FW_DIR="/lib/firmware/universal-audio"
-SND_USB_BUILD="/tmp/open-apollo-snd-usb-build"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -40,6 +39,11 @@ prompt() {
 }
 
 die() { fail "$*"; exit 1; }
+
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(eval echo "~$REAL_USER")
+REAL_UID=$(id -u "$REAL_USER" 2>/dev/null || echo 1000)
+SND_USB_BUILD="$REAL_HOME/.cache/open-apollo-snd-usb-build"
 
 run_sudo() {
     if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
@@ -208,10 +212,6 @@ header "Building patched snd-usb-audio kernel module"
 info "UA USB devices need a 3-line kernel patch for sample rate enumeration."
 info "Building out-of-tree snd-usb-audio module..."
 
-REAL_USER="${SUDO_USER:-$USER}"
-REAL_HOME=$(eval echo "~$REAL_USER")
-SND_USB_BUILD="$REAL_HOME/.cache/open-apollo-snd-usb-build"
-
 rm -rf "$SND_USB_BUILD"
 su - "$REAL_USER" -c "mkdir -p '$SND_USB_BUILD'"
 
@@ -326,10 +326,6 @@ fi
 # ================================================================
 header "PipeWire Configuration"
 
-# Run as the actual user (not root)
-REAL_USER="${SUDO_USER:-$USER}"
-REAL_HOME=$(eval echo "~$REAL_USER")
-
 if command -v pipewire &>/dev/null; then
     info "Setting up PipeWire virtual I/O devices..."
 
@@ -374,8 +370,13 @@ monitor.alsa.rules = [
 WPEOF
     chown -R "$REAL_USER":"$REAL_USER" "$WP_CONF_DIR" 2>/dev/null || true
 
-    # Run the PipeWire setup script as the real user with their D-Bus/PipeWire session
-    REAL_UID=$(id -u "$REAL_USER")
+    # Restart PipeWire so it discovers the new ALSA card, then run setup
+    info "Restarting PipeWire to detect Apollo..."
+    sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        systemctl --user restart pipewire wireplumber 2>/dev/null || true
+    sleep 3
+
     if sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
         bash "$PROJECT_DIR/configs/pipewire/setup-apollo-solo-usb.sh" 2>/dev/null; then
