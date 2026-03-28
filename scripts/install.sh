@@ -348,10 +348,24 @@ check_install_deps() {
 build_driver() {
     header "Building Driver"
 
-    make -C "$PROJECT_DIR/driver" clean &>/dev/null || true
+    local build_output kdir_arg=""
 
-    local build_output
-    build_output=$(make -C "$PROJECT_DIR/driver" 2>&1)
+    # TEST_BUILD mode: find any installed kernel headers (for Docker containers
+    # where the host kernel doesn't match the distro's headers package)
+    if [ "${TEST_BUILD:-0}" = "1" ]; then
+        local kdir
+        kdir=$(find /usr/lib/modules /lib/modules -name "build" -type l 2>/dev/null | head -1)
+        if [ -z "$kdir" ]; then
+            warn "No kernel headers found — skipping build test"
+            STEP_STATUS[build]="skipped"
+            return 0
+        fi
+        kdir_arg="KDIR=$kdir"
+    fi
+
+    make -C "$PROJECT_DIR/driver" $kdir_arg clean &>/dev/null || true
+
+    build_output=$(make -C "$PROJECT_DIR/driver" $kdir_arg 2>&1)
     local rc=$?
 
     BUILD_WARNINGS=$(echo "$build_output" | grep -c 'warning:' || true)

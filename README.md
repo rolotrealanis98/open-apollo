@@ -6,19 +6,19 @@
 
 # Open Apollo
 
-**Open-source Linux driver for Universal Audio Apollo Thunderbolt interfaces**
+**Open-source Linux driver and tools for Universal Audio Apollo Thunderbolt and USB interfaces**
 
-Open Apollo brings Linux support to Universal Audio's Apollo
-Thunderbolt audio interfaces. Built through clean-room reverse engineering,
-this community-driven project provides a native kernel driver, userspace
-mixer daemon, and system tray indicator.
+Open Apollo brings Linux support to Universal Audio's Apollo audio interfaces.
+Built through clean-room reverse engineering, this community-driven project
+provides a native kernel driver for Thunderbolt models and a pure-userspace
+stack for USB models, along with a mixer daemon and system tray indicator.
 
 > **⚠️ Experimental** — This project is under active development and not yet ready
 > for production use. Expect rough edges, kernel stability issues on some
 > configurations, and incomplete features. We're shipping early to get community
 > feedback and testing across different Apollo models.
 
-## What Works (Apollo x4 Analog I/O, Ubuntu 24.04)
+## What Works (Apollo x4 — Thunderbolt, Ubuntu 24.04)
 
 - **Full duplex audio** — 4 analog inputs + 6 analog outputs verified (24/22 total ALSA channels exposed; S/PDIF, ADAT, and virtual channels are unverified)
 - **All sample rates** — 44.1, 48, 88.2, 96, 176.4, 192 kHz
@@ -31,6 +31,20 @@ mixer daemon, and system tray indicator.
 - **pw-record/pw-play** — zero-dropout capture and playback verified
 - **Guided installer** — `sudo bash scripts/install.sh` with hardware validation gates + audio test
 - **System tray indicator** — real-time hardware status
+
+## What Works (Apollo Solo USB, Ubuntu 24.04)
+
+- **Full duplex audio** — 6ch playback, 10ch capture at 48kHz
+- **Preamp control** — gain, 48V phantom power, mic/line switching
+- **Monitor control** — level, mute, mono
+- **Mixer control** — vendor control request 0x03 with batch write protocol
+- **PipeWire virtual I/O** — Mic 1, Mic 2, Mic 1+2, Monitor, Headphone devices
+- **No kernel module needed** — pure userspace (UAC 2.0 audio + patched `snd-usb-audio`)
+
+{% callout type="warning" %}
+USB support requires a manual setup process — there is no `install.sh` equivalent yet.
+See [USB Quick Start](#usb-quick-start-apollo-solo-usb) below.
+{% /callout %}
 
 ## Known Issues
 
@@ -66,6 +80,8 @@ Virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD pl
 
 ## Supported Devices
 
+### Thunderbolt Models
+
 | Device | Status |
 |--------|--------|
 | Apollo x4 | **Partially Verified** — analog I/O (Mic 1-4, Monitor, Line Out), preamps, gain, DSP settings. S/PDIF, ADAT, virtual channels untested. |
@@ -76,12 +92,20 @@ Virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD pl
 | Apollo x16 / Gen 2 | Needs Testing |
 | Apollo x16D | Needs Testing |
 | Apollo Twin X / Gen 2 | Needs Testing |
-| Apollo Solo | Needs Testing |
+| Apollo Solo (Thunderbolt) | Needs Testing |
 | Arrow | Needs Testing |
 
 All Thunderbolt Apollo models share the same register map and protocol — the driver
 includes device detection and channel configuration for every model listed above.
 We need community testers to verify each one.
+
+### USB Models
+
+| Device | Status |
+|--------|--------|
+| Apollo Solo USB | **Verified** — USB, playback + capture, preamp control, PipeWire integration |
+| Apollo Twin USB | Needs Testing |
+| Apollo Twin X USB | Needs Testing |
 
 ### Thunderbolt 2 Devices (Not Supported)
 
@@ -149,6 +173,44 @@ After running `apollo-setup-io`, these devices are available in PipeWire:
 | Apollo Monitor L/R | Sink (playback) | Stereo |
 | Apollo Line Out 1+2 | Sink (playback) | Stereo |
 | Apollo Line Out 3+4 | Sink (playback) | Stereo |
+
+### USB Quick Start (Apollo Solo USB)
+
+USB support is manual — there is no guided installer yet.
+
+**Prerequisites:** Python 3.10+, `pyusb` (`pip install pyusb`), Linux kernel headers
+
+**1. Get firmware** — Download from [UA firmware page](https://help.uaudio.com/hc/en-us/articles/26454031439892)
+or extract from UA Connect on Windows (`C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmware\USB\`).
+Place `ApolloSolo.bin` in `/lib/firmware/universal-audio/`.
+
+**2. Clone and init:**
+```bash
+git clone https://github.com/rolotrealanis98/open-apollo.git
+cd open-apollo
+sudo python3 tools/usb-full-init.py
+```
+
+**3. Build the patched snd-usb-audio module** (required — stock kernel module can't enumerate PCM streams):
+```bash
+bash scripts/build-snd-usb.sh    # see docs/usb-apollo-re for manual build notes
+sudo insmod snd-usb-audio.ko
+```
+
+**4. Setup PipeWire:**
+```bash
+bash configs/pipewire/setup-apollo-solo-usb.sh
+```
+
+After these steps, the following PipeWire devices are available:
+
+| Device | Type | Channels |
+|--------|------|----------|
+| Apollo Solo USB Mic 1 | Source (capture) | Mono |
+| Apollo Solo USB Mic 2 | Source (capture) | Mono |
+| Apollo Solo USB Mic 1+2 | Source (capture) | Stereo |
+| Apollo Solo USB Monitor | Sink (playback) | Stereo |
+| Apollo Solo USB Headphone | Sink (playback) | Stereo |
 
 ### Start the Mixer Daemon
 

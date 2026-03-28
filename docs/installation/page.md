@@ -18,7 +18,7 @@ If your Apollo is powered on and connected via Thunderbolt, DKMS module auto-loa
 
 You need a Linux system with:
 
-- **Kernel headers** for your running kernel
+- **Linux kernel 6.8+** with headers installed (Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed)
 - **GCC** (or compatible C compiler)
 - **Make**
 - **Python 3.10+** (for the mixer daemon)
@@ -321,12 +321,40 @@ echo "ua_apollo" | sudo tee /etc/modules-load.d/ua_apollo.conf
 
 ## Verified configurations
 
+### Hardware-verified (full audio I/O)
+
 | Distro | Kernel | CPU | Thunderbolt | Status |
 |--------|--------|-----|-------------|--------|
 | Ubuntu 24.04.4 LTS | 6.17.0-19-generic | Intel i9-14900K | Thunderbolt 4 (Maple Ridge) | Fully working — 8/8 install cycles verified |
 | Fedora 43 | 6.18.16-200.fc43.x86_64 | — | Thunderbolt 3 | Fully working |
 
 Ubuntu 24.04 is the primary tested platform. Install testing was performed on overlayroot (ephemeral filesystem) to guarantee clean-state reproducibility across all 8 cycles.
+
+### Docker install matrix (build + config deploy, no hardware)
+
+Automated testing validates that the driver compiles and all configs deploy correctly across supported distros. Requires **kernel 6.8+** — the driver uses `linux/hrtimer_types.h` which was split from `linux/hrtimer.h` in 6.8.
+
+| Distro | Kernel Headers | Driver Build | WirePlumber | Configs |
+|--------|---------------|-------------|-------------|---------|
+| Ubuntu 24.04 | 6.8 | PASS | 0.4 (lua) | All deployed |
+| Fedora 42 | 6.12 | PASS | 0.5 (conf) | All deployed |
+| Fedora 41 | 6.11 | PASS | 0.5 (conf) | All deployed |
+| Fedora 40 | 6.8 | PASS | 0.5 (conf) | All deployed |
+| Debian trixie (13) | 6.x | PASS | 0.5 (conf) | All deployed |
+| Arch (latest) | latest | PASS | 0.5 (conf) | All deployed |
+| openSUSE Tumbleweed | latest | PASS | 0.5 (conf) | All deployed |
+| Linux Mint 22 | 6.8 | PASS | 0.4 (lua) | All deployed |
+| Pop!_OS 24.04 | 6.8 | PASS | 0.4 (lua) | All deployed |
+| Manjaro (latest) | latest | PASS | 0.5 (conf) | All deployed |
+
+**Not supported** (kernel too old):
+
+| Distro | Kernel Headers | Reason |
+|--------|---------------|--------|
+| Ubuntu 22.04 | 5.15 | Missing `hrtimer_types.h` |
+| Ubuntu 20.04 | 5.4 | Missing `hrtimer_types.h`, no PipeWire |
+| Debian bookworm (12) | 6.1 | Missing `hrtimer_types.h` |
+| Debian bullseye (11) | 5.10 | Missing `hrtimer_types.h`, no PipeWire |
 
 ---
 

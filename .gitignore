@@ -42,3 +42,4 @@ docs-site/
 # Local testbench plans and scripts (not part of project)
 plans/
 tools/testbench/
+tests/

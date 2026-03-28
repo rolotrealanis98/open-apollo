@@ -12,7 +12,7 @@ For the standard quick-start process (build, load, verify), see the [Installatio
 
 You need the following packages installed on your system:
 
-- **Kernel headers** matching your running kernel
+- **Linux kernel 6.8+** with headers matching your running kernel
 - **GCC** (the kernel module build system requires it)
 - **GNU Make**
 - **kmod** tools (`insmod`, `modprobe`, `depmod`)

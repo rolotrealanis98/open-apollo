@@ -2,11 +2,11 @@
 title: Supported Devices
 ---
 
-Open Apollo targets all Universal Audio Apollo Thunderbolt interfaces. The driver identifies devices by their internal device type ID and configures channel counts, preamp counts, and features accordingly.
+Open Apollo supports Universal Audio Apollo Thunderbolt and USB interfaces. Thunderbolt models use a native Linux kernel driver. USB models use a pure-userspace stack (UAC 2.0 audio + patched `snd-usb-audio` — no kernel module required).
 
 ---
 
-## Device table
+## Thunderbolt devices
 
 | Model | Device Type | Playback | Record | Preamps | HiZ | Status |
 |---|---|---|---|---|---|---|
@@ -25,6 +25,24 @@ Open Apollo targets all Universal Audio Apollo Thunderbolt interfaces. The drive
 | Apollo x16 | 0x21 | 34 | 34 | 8 | 2 | Needs Testing |
 | Apollo x16 Gen 2 | 0x39 | 34 | 34 | 8 | 2 | Needs Testing |
 | Apollo x16D | 0x2A | 34 | 34 | 0 | 0 | Needs Testing |
+
+---
+
+## USB devices
+
+USB Apollo models use UAC 2.0 audio. No kernel module is required — the FX3 firmware is uploaded from userspace on each power-on, and `snd-usb-audio` (with a 3-line patch) handles audio streaming. See [USB RE findings](/docs/usb-apollo-re) for protocol details.
+
+| Model | VID | PID (live) | Playback | Record | Preamps | HiZ | Status |
+|---|---|---|---|---|---|---|---|
+| Apollo Solo USB | 0x2B5A | 0x000D | 6 | 10 | 2 | 2 | **Verified** |
+| Apollo Twin USB | 0x2B5A | 0x0002 | — | — | 2 | 2 | Needs Testing |
+| Apollo Twin X USB | 0x2B5A | 0x000F | — | — | 2 | 2 | Needs Testing |
+
+{% callout type="note" %}
+USB setup is currently manual — there is no `install.sh` equivalent. See the [USB Quick Start](/docs/usb-quick-start) guide.
+{% /callout %}
+
+---
 
 ### Column definitions
 
