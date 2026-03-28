@@ -32,7 +32,7 @@ header() { echo -e "\n${BOLD}── $* ──${NC}"; }
 
 prompt() {
     local varname="$1"; shift
-    if [ -e /dev/tty ]; then
+    if [ -t 0 ] && [ -e /dev/tty ]; then
         read -rp "$*" "$varname" < /dev/tty
     else
         eval "$varname=''"
@@ -167,7 +167,9 @@ else
     FW_FILE="ApolloSolo.bin"
 fi
 
-if [ -f "$FW_DIR/$FW_FILE" ]; then
+if [ "$NEEDS_FW_LOAD" -eq 0 ]; then
+    ok "Device already has firmware loaded — skipping firmware check"
+elif [ -f "$FW_DIR/$FW_FILE" ]; then
     ok "Firmware found: $FW_DIR/$FW_FILE"
 else
     warn "Firmware not found: $FW_DIR/$FW_FILE"
@@ -180,16 +182,16 @@ else
     echo "    2. Download the firmware package"
     echo "    3. Extract $FW_FILE"
     echo ""
-    echo "  Option B: Copy from a Windows/macOS install of UA Connect"
-    echo "    Windows: C:\\Program Files (x86)\\Universal Audio\\Powered Plugins\\Firmware\\USB\\"
-    echo "    macOS:   /Library/Application Support/Universal Audio/Firmware/USB/"
+    echo "  Option B: Copy from a Windows install of UA Connect"
+    echo "    C:\\Program Files (x86)\\Universal Audio\\Powered Plugins\\Firmware\\USB\\"
     echo ""
     echo "  Then place it:"
     echo "    sudo mkdir -p $FW_DIR"
     echo "    sudo cp $FW_FILE $FW_DIR/"
     echo ""
+    FWPATH=""
     prompt FWPATH "Enter path to $FW_FILE (or press Enter to skip): "
-    if [ -n "$FWPATH" ] && [ -f "$FWPATH" ]; then
+    if [ -n "${FWPATH:-}" ] && [ -f "${FWPATH:-}" ]; then
         run_sudo mkdir -p "$FW_DIR"
         run_sudo cp "$FWPATH" "$FW_DIR/$FW_FILE"
         ok "Firmware installed: $FW_DIR/$FW_FILE"
@@ -206,62 +208,68 @@ header "Building patched snd-usb-audio kernel module"
 info "UA USB devices need a 3-line kernel patch for sample rate enumeration."
 info "Building out-of-tree snd-usb-audio module..."
 
-rm -rf "$SND_USB_BUILD"
-mkdir -p "$SND_USB_BUILD"
-cd "$SND_USB_BUILD"
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(eval echo "~$REAL_USER")
+SND_USB_BUILD="$REAL_HOME/.cache/open-apollo-snd-usb-build"
 
-# Download kernel source (just sound/usb)
+rm -rf "$SND_USB_BUILD"
+su - "$REAL_USER" -c "mkdir -p '$SND_USB_BUILD'"
+
+# Download kernel source (just sound/usb) as the real user
 KVER_MAJOR=$(echo "$KERNEL" | grep -oP '^\d+\.\d+')
 info "Downloading sound/usb source for kernel $KVER_MAJOR..."
-wget -q "https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR%%.*}.x/linux-${KVER_MAJOR}.tar.xz" -O - | \
-    xz -d | tar x --strip-components=1 "linux-${KVER_MAJOR}/sound/usb/" 2>/dev/null
+su - "$REAL_USER" -c "cd '$SND_USB_BUILD' && wget -q 'https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR%%.*}.x/linux-${KVER_MAJOR}.tar.xz' -O - | xz -d | tar x --strip-components=1 'linux-${KVER_MAJOR}/sound/usb/' 2>/dev/null"
 
-if [ ! -f sound/usb/format.c ]; then
+if [ ! -f "$SND_USB_BUILD/sound/usb/format.c" ]; then
     fail "Could not download kernel source for $KVER_MAJOR"
     info "You may need to build the patched module manually."
     info "See: tools/usb-re/0001-ALSA-usb-audio-Add-quirk-for-Universal-Audio-USB-devices.patch"
-    cd "$PROJECT_DIR"
 else
-    cd sound/usb
+    # Apply patch and build as real user
+    su - "$REAL_USER" -c "
+        cd '$SND_USB_BUILD/sound/usb'
 
-    # Apply the fixed-rate quirk patch
-    sed -i '/case USB_ID(0x19f7, 0x0011):.*Rode Rodecaster Pro/a\
-\tcase USB_ID(0x2b5a, 0x000d): /* Universal Audio Apollo Solo USB */\
-\tcase USB_ID(0x2b5a, 0x0002): /* Universal Audio Twin USB */\
-\tcase USB_ID(0x2b5a, 0x000f): /* Universal Audio Twin X USB */' format.c
+        # Apply the fixed-rate quirk patch
+        sed -i '/case USB_ID(0x19f7, 0x0011):.*Rode Rodecaster Pro/a\\
+\\tcase USB_ID(0x2b5a, 0x000d): /* Universal Audio Apollo Solo USB */\\
+\\tcase USB_ID(0x2b5a, 0x0002): /* Universal Audio Twin USB */\\
+\\tcase USB_ID(0x2b5a, 0x000f): /* Universal Audio Twin X USB */' format.c
 
-    # Fix includes for out-of-tree build
-    sed -i '1a #include <linux/usb.h>\n#include <linux/usb/audio.h>\n#include <linux/usb/audio-v2.h>\n#include "usbaudio.h"\n#include "mixer.h"' mixer_maps.c
+        # Fix includes for out-of-tree build
+        sed -i '1a #include <linux/usb.h>\n#include <linux/usb/audio.h>\n#include <linux/usb/audio-v2.h>\n#include <linux/usb/audio-v3.h>\n#include \"usbaudio.h\"\n#include \"mixer.h\"' mixer_maps.c
 
-    # Create Makefile
-    cat > Makefile << 'MKEOF'
-KVER := $(shell uname -r)
-KDIR := /lib/modules/$(KVER)/build
+        # Create Makefile
+        cat > Makefile << 'MKEOF'
+KVER := \$(shell uname -r)
+KDIR := /lib/modules/\$(KVER)/build
 
 obj-m += snd-usb-audio.o
-snd-usb-audio-objs := card.o clock.o endpoint.o format.o helper.o \
-    mixer.o mixer_maps.o mixer_quirks.o mixer_scarlett.o mixer_scarlett2.o \
-    mixer_us16x08.o mixer_s1810c.o pcm.o power.o proc.o quirks.o stream.o \
+snd-usb-audio-objs := card.o clock.o endpoint.o format.o helper.o \\
+    mixer.o mixer_maps.o mixer_quirks.o mixer_scarlett.o mixer_scarlett2.o \\
+    mixer_us16x08.o mixer_s1810c.o pcm.o power.o proc.o quirks.o stream.o \\
     implicit.o media.o validate.o midi2.o fcp.o
 
 ccflags-y := -O1 -Wno-error
 
 all:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	\$(MAKE) -C \$(KDIR) M=\$(PWD) modules
 MKEOF
 
-    if make 2>/dev/null; then
+        make 2>&1 | tail -3
+    "
+
+    # Check for the .ko file (make may return non-zero from warnings)
+    if [ -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
         ok "snd-usb-audio.ko built successfully"
-        # Install to a known location
-        run_sudo cp snd-usb-audio.ko /lib/modules/"$KERNEL"/updates/
-        run_sudo depmod -a
+        mkdir -p /lib/modules/"$KERNEL"/updates
+        cp "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" /lib/modules/"$KERNEL"/updates/
+        depmod -a
         ok "Module installed to /lib/modules/$KERNEL/updates/"
     else
         fail "Build failed — check kernel headers and gcc"
-        info "Manual build instructions in the README"
+        info "Try building manually:"
+        info "  cd $SND_USB_BUILD/sound/usb && make"
     fi
-
-    cd "$PROJECT_DIR"
 fi
 
 # ================================================================
@@ -366,8 +374,11 @@ monitor.alsa.rules = [
 WPEOF
     chown -R "$REAL_USER":"$REAL_USER" "$WP_CONF_DIR" 2>/dev/null || true
 
-    # Run the PipeWire setup script as the real user
-    if su - "$REAL_USER" -c "bash '$PROJECT_DIR/configs/pipewire/setup-apollo-solo-usb.sh'" 2>/dev/null; then
+    # Run the PipeWire setup script as the real user with their D-Bus/PipeWire session
+    REAL_UID=$(id -u "$REAL_USER")
+    if sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        bash "$PROJECT_DIR/configs/pipewire/setup-apollo-solo-usb.sh" 2>/dev/null; then
         ok "PipeWire virtual I/O configured"
     else
         warn "PipeWire setup had issues — run manually:"
