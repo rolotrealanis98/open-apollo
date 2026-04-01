@@ -14,6 +14,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FW_DIR="/lib/firmware/universal-audio"
+REPORT_FILE="/tmp/open-apollo-usb-install-report.json"
+TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
+VERSION="0.1.0"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -466,6 +469,118 @@ w.close()
     rm -f /tmp/apollo-usb-test.wav
 else
     warn "No Apollo ALSA card — skipping audio test"
+fi
+
+# ================================================================
+# Step 9: Install report
+# ================================================================
+header "Install Report"
+
+# Determine overall success
+INSTALL_SUCCESS="false"
+if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
+    INSTALL_SUCCESS="true"
+fi
+
+# Collect system info
+RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+CPU_MODEL=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs || echo "unknown")
+USB_CTRL=$(lspci 2>/dev/null | grep -i 'usb controller' | head -3 | tr '\n' '|' || echo "")
+ALSA_CARDS=$(cat /proc/asound/cards 2>/dev/null | tr '\n' '|' || echo "")
+DMESG_USB=$(dmesg 2>/dev/null | grep -i 'apollo\|2b5a\|snd.usb' | tail -15 | tr '\n' '|' || echo "")
+
+REPORT_DISTRO="${DISTRO:-unknown}" \
+REPORT_KERNEL="$KERNEL" \
+REPORT_ARCH="$ARCH" \
+REPORT_RAM="$RAM_MB" \
+REPORT_CPU="$CPU_MODEL" \
+REPORT_USB_SPEED="${USB_SPEED:-unknown}" \
+REPORT_USB_CTRL="$USB_CTRL" \
+REPORT_FW_FILE="$FW_FILE" \
+REPORT_KERN_CC="$KERN_CC" \
+REPORT_ALSA_CARDS="$ALSA_CARDS" \
+REPORT_DMESG_USB="$DMESG_USB" \
+REPORT_SUCCESS="$INSTALL_SUCCESS" \
+REPORT_FILE="$REPORT_FILE" \
+REPORT_SCRIPT_VERSION="$VERSION" \
+python3 -c '
+import json, os, datetime
+
+e = os.environ
+report = {
+    "version": 2,
+    "type": "usb",
+    "script_version": e["REPORT_SCRIPT_VERSION"],
+    "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "success": e["REPORT_SUCCESS"] == "true",
+    "system": {
+        "distro": e["REPORT_DISTRO"],
+        "kernel": e["REPORT_KERNEL"],
+        "arch": e["REPORT_ARCH"],
+        "ram_mb": int(e["REPORT_RAM"] or 0),
+        "cpu": e["REPORT_CPU"],
+        "kernel_cc": e["REPORT_KERN_CC"],
+    },
+    "usb": {
+        "speed_mbps": e["REPORT_USB_SPEED"],
+        "controllers": e["REPORT_USB_CTRL"],
+        "firmware": e["REPORT_FW_FILE"],
+    },
+    "audio": {
+        "alsa_cards": e["REPORT_ALSA_CARDS"],
+    },
+    "logs": {
+        "dmesg_usb": e["REPORT_DMESG_USB"],
+    },
+}
+with open(e["REPORT_FILE"], "w") as f:
+    json.dump(report, f, indent=2)
+'
+
+ok "Report saved: $REPORT_FILE"
+
+# ================================================================
+# Step 10: Telemetry opt-in
+# ================================================================
+header "Telemetry"
+
+TELEM_ANSWER="n"
+if [ -t 0 ]; then
+    echo ""
+    prompt TELEM_ANSWER "Help improve Open Apollo — send anonymous install report? [y/N] "
+else
+    TELEM_ANSWER="y"
+fi
+
+if [[ "${TELEM_ANSWER:-n}" =~ ^[Yy] ]]; then
+    # Optional GitHub username
+    GH_USER=""
+    if [ -t 0 ]; then
+        echo ""
+        prompt GH_USER "Optional: GitHub username for follow-up if we spot an issue (Enter to skip): "
+    fi
+    if [ -n "${GH_USER:-}" ]; then
+        python3 -c "
+import json, sys
+with open('$REPORT_FILE') as f: d = json.load(f)
+d['github_username'] = sys.argv[1]
+with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
+" "$GH_USER"
+    fi
+
+    info "Sending report to $TELEMETRY_URL..."
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' \
+        -X POST "$TELEMETRY_URL" \
+        -H "Content-Type: application/json" \
+        -d @"$REPORT_FILE" 2>/dev/null || echo "000")
+
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        ok "Report sent — thank you!"
+    else
+        warn "Upload failed (HTTP $http_code) — report saved locally at $REPORT_FILE"
+    fi
+else
+    info "No data sent. Report saved locally at $REPORT_FILE"
 fi
 
 # ================================================================
