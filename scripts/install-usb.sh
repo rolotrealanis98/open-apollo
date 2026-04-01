@@ -49,6 +49,15 @@ run_sudo() {
     if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
 }
 
+# Detect if kernel was built with Clang (CachyOS, some Arch kernels)
+KERN_CC="gcc"
+if [ -f "/lib/modules/$(uname -r)/build/Makefile" ]; then
+    if grep -q 'clang' "/lib/modules/$(uname -r)/build/Makefile" 2>/dev/null || \
+       grep -q 'CC.*clang' "/lib/modules/$(uname -r)/build/.config" 2>/dev/null; then
+        KERN_CC="clang"
+    fi
+fi
+
 # ================================================================
 # Step 1: System detection
 # ================================================================
@@ -112,8 +121,12 @@ if ! python3 -c "import usb.core" 2>/dev/null; then DEPS_NEEDED+=(pyusb); fi
 # Check kernel headers (needed for snd-usb-audio build)
 if [ ! -d "/lib/modules/$KERNEL/build" ]; then DEPS_NEEDED+=(kernel-headers); fi
 
-# Check gcc/make
-if ! command -v gcc &>/dev/null; then DEPS_NEEDED+=(gcc); fi
+# Check build tools — clang if kernel was built with it, else gcc
+if [ "$KERN_CC" = "clang" ]; then
+    if ! command -v clang &>/dev/null; then DEPS_NEEDED+=(clang); fi
+else
+    if ! command -v gcc &>/dev/null; then DEPS_NEEDED+=(gcc); fi
+fi
 if ! command -v make &>/dev/null; then DEPS_NEEDED+=(make); fi
 
 # Check wget
@@ -140,8 +153,13 @@ else
             if pacman -Q linux-cachyos &>/dev/null; then
                 KERN_HDR_PKG="linux-cachyos-headers"
             fi
-            run_sudo pacman -S --noconfirm python python-pip \
-                "$KERN_HDR_PKG" gcc make wget 2>/dev/null
+            PKGS=(python python-pip "$KERN_HDR_PKG" make wget)
+            if [ "$KERN_CC" = "clang" ]; then
+                PKGS+=(clang llvm lld)
+            else
+                PKGS+=(gcc)
+            fi
+            run_sudo pacman -S --noconfirm "${PKGS[@]}" 2>/dev/null
             ;;
     esac
 
@@ -230,43 +248,49 @@ if [ ! -f "$SND_USB_BUILD/sound/usb/format.c" ]; then
     info "You may need to build the patched module manually."
     info "See: tools/usb-re/0001-ALSA-usb-audio-Add-quirk-for-Universal-Audio-USB-devices.patch"
 else
+    # Determine build flags
+    BUILD_ARGS=""
+    if [ "$KERN_CC" = "clang" ]; then
+        BUILD_ARGS="CC=clang LD=ld.lld"
+        info "Kernel built with Clang — using CC=clang LD=ld.lld"
+    fi
+
     # Apply patch and build as real user
-    su - "$REAL_USER" -s /bin/bash -c "
-        cd '$SND_USB_BUILD/sound/usb'
+    SRC="$SND_USB_BUILD/sound/usb"
 
-        # Apply the fixed-rate quirk patch
-        sed -i '/case USB_ID(0x19f7, 0x0011):.*Rode Rodecaster Pro/a\\
-\\tcase USB_ID(0x2b5a, 0x000d): /* Universal Audio Apollo Solo USB */\\
-\\tcase USB_ID(0x2b5a, 0x0002): /* Universal Audio Twin USB */\\
-\\tcase USB_ID(0x2b5a, 0x000f): /* Universal Audio Twin X USB */' format.c
+    # Apply the fixed-rate quirk patch
+    sed -i '/case USB_ID(0x19f7, 0x0011):.*Rode Rodecaster Pro/a\
+\tcase USB_ID(0x2b5a, 0x000d): /* Universal Audio Apollo Solo USB */\
+\tcase USB_ID(0x2b5a, 0x0002): /* Universal Audio Twin USB */\
+\tcase USB_ID(0x2b5a, 0x000f): /* Universal Audio Twin X USB */' "$SRC/format.c"
 
-        # Fix includes for out-of-tree build
-        sed -i '1a #include <linux/usb.h>\n#include <linux/usb/audio.h>\n#include <linux/usb/audio-v2.h>\n#include <linux/usb/audio-v3.h>\n#include \"usbaudio.h\"\n#include \"mixer.h\"' mixer_maps.c
+    # Fix includes for out-of-tree build
+    sed -i '1a #include <linux/usb.h>\n#include <linux/usb/audio.h>\n#include <linux/usb/audio-v2.h>\n#include <linux/usb/audio-v3.h>\n#include "usbaudio.h"\n#include "mixer.h"' "$SRC/mixer_maps.c"
 
-        # Create Makefile
-        cat > Makefile << 'MKEOF'
-KVER := \$(shell uname -r)
-KDIR := /lib/modules/\$(KVER)/build
+    # Create Makefile
+    cat > "$SRC/Makefile" << 'MKEOF'
+KVER := $(shell uname -r)
+KDIR := /lib/modules/$(KVER)/build
 
 obj-m += snd-usb-audio.o
-snd-usb-audio-objs := card.o clock.o endpoint.o format.o helper.o \\
-    mixer.o mixer_maps.o mixer_quirks.o mixer_scarlett.o mixer_scarlett2.o \\
-    mixer_us16x08.o mixer_s1810c.o pcm.o power.o proc.o quirks.o stream.o \\
+snd-usb-audio-objs := card.o clock.o endpoint.o format.o helper.o \
+    mixer.o mixer_maps.o mixer_quirks.o mixer_scarlett.o mixer_scarlett2.o \
+    mixer_us16x08.o mixer_s1810c.o pcm.o power.o proc.o quirks.o stream.o \
     implicit.o media.o validate.o midi2.o fcp.o
 
 ccflags-y := -O1 -Wno-error
 
 all:
-	\$(MAKE) -C \$(KDIR) M=\$(PWD) modules
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
 MKEOF
+    chown -R "$REAL_USER":"$REAL_USER" "$SND_USB_BUILD"
 
-        make 2>&1 | tail -3
-    "
+    su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | tail -5"
 
-    # Check for the .ko file — retry once if first build failed (race condition)
-    if [ ! -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
+    # Check for the .ko file — retry once if first build failed
+    if [ ! -f "$SRC/snd-usb-audio.ko" ]; then
         warn "First build attempt didn't produce .ko, retrying..."
-        su - "$REAL_USER" -s /bin/bash -c "cd '$SND_USB_BUILD/sound/usb' && make 2>&1 | tail -3"
+        su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | tail -5"
     fi
 
     if [ -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
@@ -283,15 +307,15 @@ MKEOF
 fi
 
 # ================================================================
-# Step 6: Load firmware and init DSP
+# Step 6: Load firmware and init audio
 # ================================================================
 header "Initializing Apollo USB"
 
 # Load firmware if needed
 if [ "$NEEDS_FW_LOAD" -eq 1 ] && [ -f "$FW_DIR/$FW_FILE" ]; then
     info "Uploading firmware..."
-    run_sudo python3 "$PROJECT_DIR/tools/fx3-load.py" 2>/dev/null
-    sleep 3
+    run_sudo python3 "$PROJECT_DIR/tools/fx3-load.py" "$FW_DIR/$FW_FILE"
+    sleep 4
     # Check if device re-enumerated
     if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
         ok "Firmware loaded — device re-enumerated"
@@ -300,35 +324,42 @@ if [ "$NEEDS_FW_LOAD" -eq 1 ] && [ -f "$FW_DIR/$FW_FILE" ]; then
     fi
 fi
 
-# Reload snd-usb-audio with patched module
+# Check USB speed — audio interfaces only work at SuperSpeed (USB 3.0)
+USB_SPEED=""
+for d in /sys/bus/usb/devices/*/; do
+    if [ -f "${d}idProduct" ] && [ -f "${d}idVendor" ]; then
+        vid=$(cat "${d}idVendor" 2>/dev/null)
+        pid=$(cat "${d}idProduct" 2>/dev/null)
+        if [ "$vid" = "2b5a" ] && [ "$pid" = "000d" -o "$pid" = "0002" -o "$pid" = "000f" ]; then
+            USB_SPEED=$(cat "${d}speed" 2>/dev/null)
+            break
+        fi
+    fi
+done
+
+if [ -n "$USB_SPEED" ]; then
+    if [ "$USB_SPEED" -ge 5000 ] 2>/dev/null; then
+        ok "USB connection: ${USB_SPEED} Mbps (SuperSpeed)"
+    else
+        fail "USB connection: ${USB_SPEED} Mbps (NOT SuperSpeed)"
+        warn "Apollo USB REQUIRES a USB 3.0 cable and port for audio."
+        warn "At USB 2.0, audio interfaces are not available."
+        info "Use a USB 3.0 cable (blue connector) or USB-C/Thunderbolt."
+    fi
+fi
+
+# Load patched snd-usb-audio module
 if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
     info "Loading patched snd-usb-audio..."
     run_sudo rmmod snd_usb_audio 2>/dev/null || true
     sleep 1
     run_sudo modprobe snd_usb_audio
-    sleep 1
+    sleep 2
     if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
         ok "ALSA card detected: $(grep -i Apollo /proc/asound/cards | head -1 | xargs)"
     else
-        warn "Apollo not in ALSA cards — may need firmware load first"
+        warn "Apollo not in ALSA cards — check USB speed and firmware"
     fi
-fi
-
-# Run DSP init
-if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
-    info "Running DSP + routing init..."
-    if run_sudo python3 "$PROJECT_DIR/tools/usb-full-init.py" 2>&1 | tail -3; then
-        ok "DSP initialized with routing"
-    else
-        warn "DSP init had issues — check USB connection"
-    fi
-
-    # Reload snd-usb-audio after init (init claims interface 0)
-    info "Reloading audio module..."
-    run_sudo rmmod snd_usb_audio 2>/dev/null || true
-    sleep 1
-    run_sudo modprobe snd_usb_audio
-    sleep 1
 fi
 
 # ================================================================
@@ -407,7 +438,7 @@ header "Audio Test"
 
 if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
     info "Recording 2 seconds from capture..."
-    timeout 3 arecord -D plughw:USB -f S32_LE -r 48000 -c 2 /tmp/apollo-usb-test.wav 2>/dev/null || true
+    timeout 3 arecord -D plughw:USB -f S32_LE -r 48000 -c 6 /tmp/apollo-usb-test.wav 2>/dev/null || true
 
     if [ -f /tmp/apollo-usb-test.wav ]; then
         PEAK=$(python3 -c "
@@ -454,8 +485,7 @@ echo ""
 info "To control preamp gain, 48V, monitor level:"
 echo "  sudo python3 tools/usb-mixer-test.py"
 echo ""
-info "Note: After reboot, run DSP init again:"
-echo "  sudo python3 tools/usb-full-init.py"
-echo "  sudo rmmod snd_usb_audio; sudo modprobe snd_usb_audio"
-echo "  bash configs/pipewire/setup-apollo-solo-usb.sh"
+info "After reboot, reload firmware:"
+echo "  sudo python3 tools/fx3-load.py /lib/firmware/universal-audio/$FW_FILE"
+echo "  (the patched snd-usb-audio module loads automatically)"
 echo ""

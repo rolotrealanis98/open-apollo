@@ -26,7 +26,21 @@ INIT_BIN = os.path.join(os.path.dirname(__file__), "usb-re", "init-bulk-sequence
 
 
 def replay_init_sequence(dev, bin_path):
-    """Replay the captured init bulk sequence."""
+    """Replay the captured init bulk sequence.
+
+    The 38-packet sequence has three phases:
+      0-9:   FPGA config + clock setup
+      10-23: DSP program loads (large packets)
+      24-37: Routing table + monitor config
+
+    The DSP needs time to process program loads before accepting routing
+    writes.  Windows UA Console leaves 1+ second gaps between phases.
+    """
+    # Packets after DSP program loads that are routing block writes —
+    # the DSP must finish processing programs before these succeed.
+    DSP_PROGRAM_END = 23      # last DSP program load packet
+    ROUTING_START = 24        # first routing config packet
+
     with open(bin_path, "rb") as f:
         count = struct.unpack("<I", f.read(4))[0]
         print(f"Replaying {count} bulk OUT packets...")
@@ -36,28 +50,44 @@ def replay_init_sequence(dev, bin_path):
 
             wc, cmd_type, magic = struct.unpack_from("<HBB", pkt_data, 0)
 
-            # Large packets (DSP program loads) and early FPGA config need more time
-            if pkt_len > 512 or i < 6:
-                timeout = 10000
-            else:
-                timeout = 5000
+            # Phase transition delay — let DSP finish processing programs
+            if i == ROUTING_START:
+                print("  -- waiting for DSP to process program loads --")
+                time.sleep(2.0)
+
+            # All packets get generous timeout (AMD xHCI can be slow)
+            timeout = 10000
+
+            # Inter-packet pacing: small delay between all packets,
+            # longer delay after large ones (DSP program uploads)
+            if i > 0:
+                if pkt_len > 512:
+                    time.sleep(0.2)
+                else:
+                    time.sleep(0.05)
 
             for attempt in range(3):
                 try:
                     dev.write(EP_BULK_OUT, pkt_data, timeout=timeout)
                     break
                 except usb.core.USBTimeoutError:
-                    if attempt < 2:
-                        print(f"  [{i:2d}] timeout, retrying ({attempt+1}/3)...")
-                        time.sleep(0.5)
-                    else:
+                    if attempt == 2:
                         raise
+                    wait = 1.0 * (attempt + 1)
+                    print(f"  [{i:2d}] timeout, retrying ({attempt+1}/3) "
+                          f"after {wait:.0f}s...")
+                    time.sleep(wait)
+                    # Drain any stale responses before retry
+                    try:
+                        while True:
+                            dev.read(EP_BULK_IN, 1024, timeout=100)
+                    except usb.core.USBTimeoutError:
+                        pass
 
-            if i < 5 or i == count - 1:
-                print(f"  [{i:2d}] type={cmd_type:3d} words={wc:3d} len={pkt_len}")
+            print(f"  [{i:2d}] type={cmd_type:3d} words={wc:3d} len={pkt_len}")
 
             # Drain responses — wait longer after big packets
-            drain_timeout = 500 if pkt_len > 512 else 100
+            drain_timeout = 1000 if pkt_len > 512 else 500
             try:
                 while True:
                     dev.read(EP_BULK_IN, 1024, timeout=drain_timeout)
