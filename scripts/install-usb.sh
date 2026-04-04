@@ -351,6 +351,18 @@ if [ -n "$USB_SPEED" ]; then
     fi
 fi
 
+# Run DSP init (activate FPGA + set clock + set monitor level)
+if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
+    info "Initializing DSP (FPGA activation + monitor routing)..."
+    if run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" 2>&1 | tail -5; then
+        ok "DSP initialized"
+    else
+        warn "DSP init had issues — audio may need manual init"
+        info "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
+    fi
+    sleep 1
+fi
+
 # Load patched snd-usb-audio module
 if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
     info "Loading patched snd-usb-audio..."
@@ -364,6 +376,29 @@ if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
         warn "Apollo not in ALSA cards — check USB speed and firmware"
     fi
 fi
+
+# ================================================================
+# Step 6b: Install udev rules + init scripts for auto-init on reboot
+# ================================================================
+header "Installing Auto-Init (udev)"
+
+UA_USB_LIB="/usr/local/lib/ua-usb"
+UA_USB_BIN="/usr/local/bin"
+UDEV_DIR="/etc/udev/rules.d"
+
+info "Installing firmware loader and DSP init scripts..."
+run_sudo mkdir -p "$UA_USB_LIB"
+run_sudo cp "$PROJECT_DIR/tools/fx3-load.py" "$UA_USB_LIB/"
+run_sudo cp "$PROJECT_DIR/tools/usb-dsp-init.py" "$UA_USB_LIB/"
+run_sudo cp "$PROJECT_DIR/scripts/ua-usb-init.sh" "$UA_USB_BIN/ua-usb-init"
+run_sudo cp "$PROJECT_DIR/scripts/ua-usb-dsp-init.sh" "$UA_USB_BIN/ua-usb-dsp-init"
+run_sudo chmod +x "$UA_USB_BIN/ua-usb-init" "$UA_USB_BIN/ua-usb-dsp-init"
+
+run_sudo cp "$PROJECT_DIR/configs/udev/99-apollo-usb.rules" "$UDEV_DIR/"
+run_sudo udevadm control --reload-rules 2>/dev/null || true
+
+ok "udev rules installed — Apollo will auto-init on power-on/reboot"
+info "Firmware must be in $FW_DIR/ for auto-load to work"
 
 # ================================================================
 # Step 7: PipeWire config
@@ -595,12 +630,12 @@ echo "  - Apollo Mic 1       (capture, mono)"
 echo "  - Apollo Mic 2       (capture, mono)"
 echo "  - Apollo Mic 1+2     (capture, stereo)"
 echo "  - Apollo Monitor     (playback, stereo)"
-echo "  - Apollo Headphone   (playback, stereo)"
 echo ""
 info "To control preamp gain, 48V, monitor level:"
 echo "  sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py"
 echo ""
-info "After reboot, reload firmware:"
-echo "  sudo python3 $PROJECT_DIR/tools/fx3-load.py /lib/firmware/universal-audio/$FW_FILE"
-echo "  (the patched snd-usb-audio module loads automatically)"
+info "After reboot, firmware + DSP init happen automatically via udev."
+info "If auto-init doesn't work, run manually:"
+echo "  sudo python3 $PROJECT_DIR/tools/fx3-load.py $FW_DIR/$FW_FILE"
+echo "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
 echo ""

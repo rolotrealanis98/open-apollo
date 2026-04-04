@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Initialize DSP on UA Apollo USB devices.
 
-Sends the DSP init command via bulk endpoint and sets the UAC2 clock
-frequency. Must run after firmware is loaded (device at PID 000d/0002/000f).
+Sends the DSP init command via bulk endpoint, sets the UAC2 clock
+frequency, and configures a safe default monitor level so audio routes
+to physical outputs.
 
+Must run after firmware is loaded (device at PID 000d/0002/000f).
 Can be called standalone or from udev via ua-usb-dsp-init.sh.
 
 Usage: sudo python3 usb-dsp-init.py
@@ -27,6 +29,11 @@ EP_BULK_IN = 0x81
 # DSP protocol constants
 MAGIC_CMD = 0xDC
 MAGIC_RSP = 0xDD
+
+# Mixer settings FPGA addresses (vendor request 0x03)
+SETTINGS_SEQ = 0x0602
+SETTINGS_MASK = 0x062D
+SETTING_MONITOR = 2  # offset in 128-byte mask buffer
 
 
 def find_device():
@@ -55,10 +62,6 @@ def dsp_init(dev):
 
 def set_clock(dev, rate=48000):
     """Set UAC2 clock frequency via SET_CUR."""
-    # bmRequestType=0x21 (host-to-device, class, interface)
-    # bRequest=0x01 (SET_CUR)
-    # wValue=0x0100 (CS_SAM_FREQ_CONTROL)
-    # wIndex=0x8001 (clock_id=128, interface=1)
     try:
         dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
                           struct.pack("<I", rate), timeout=2000)
@@ -71,6 +74,31 @@ def set_clock(dev, rate=48000):
         return struct.unpack("<I", bytes(data))[0]
     except usb.core.USBError:
         return 0
+
+
+def set_monitor_level(dev, db=-12):
+    """Set monitor output level via vendor control request 0x03.
+
+    Without this, the FPGA boots with all mixer settings muted (0x80000000)
+    and no audio reaches the physical outputs.
+    Uses the same batch-write protocol as usb-mixer-test.py:
+      1. Write 128-byte mask buffer to SETTINGS_MASK (0x062D)
+      2. Bump sequence counter at SETTINGS_SEQ (0x0602)
+    """
+    raw = max(0, min(0xC0, int(192 + db * 2)))
+    mask_buf = bytearray(128)
+    # setting_word: (changed_mask << 16) | value
+    word = (0x00FF << 16) | raw
+    struct.pack_into("<I", mask_buf, SETTING_MONITOR * 8, word)
+
+    try:
+        dev.ctrl_transfer(0x41, 0x03, SETTINGS_MASK, 0,
+                          bytes(mask_buf), timeout=1000)
+        dev.ctrl_transfer(0x41, 0x03, SETTINGS_SEQ, 0,
+                          struct.pack("<I", 1), timeout=1000)
+    except usb.core.USBError:
+        return False
+    return True
 
 
 def main():
@@ -91,7 +119,7 @@ def main():
 
     usb.util.claim_interface(dev, 0)
 
-    # Step 1: DSP init
+    # Step 1: DSP init (activate FPGA)
     dsp_init(dev)
     print("DSP init done")
 
@@ -100,6 +128,14 @@ def main():
     print("Clock: {} Hz".format(freq))
 
     usb.util.release_interface(dev, 0)
+
+    # Step 3: Set monitor level to -12 dB (safe default)
+    # Uses EP0 vendor control — no interface claim needed
+    if set_monitor_level(dev, -12):
+        print("Monitor: -12 dB")
+    else:
+        print("Monitor level set failed (non-fatal)")
+
     print("Ready")
 
 
