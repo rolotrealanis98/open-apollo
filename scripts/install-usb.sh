@@ -267,6 +267,21 @@ else
 \tcase USB_ID(0x2b5a, 0x0002): /* Universal Audio Twin USB */\
 \tcase USB_ID(0x2b5a, 0x000f): /* Universal Audio Twin X USB */' "$SRC/format.c"
 
+    # Skip implicit feedback for UA USB devices (EP 0x83 descriptor conflict)
+    # The device declares EP 0x83 as "Implicit feedback Data" but handles its
+    # own clock — snd-usb-audio trying to use it as feedback kills playback.
+    python3 -c "
+with open('$SRC/implicit.c') as f: s = f.read()
+s = s.replace(
+    '\t{ } /* terminator */\n};',
+    '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000d), /* Universal Audio Apollo Solo USB */\n'
+    '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x0002), /* Universal Audio Twin USB */\n'
+    '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000f), /* Universal Audio Twin X USB */\n'
+    '\t{ } /* terminator */\n};',
+    1)
+with open('$SRC/implicit.c', 'w') as f: f.write(s)
+"
+
     # Fix includes for out-of-tree build
     sed -i '1a #include <linux/usb.h>\n#include <linux/usb/audio.h>\n#include <linux/usb/audio-v2.h>\n#include <linux/usb/audio-v3.h>\n#include "usbaudio.h"\n#include "mixer.h"' "$SRC/mixer_maps.c"
 
