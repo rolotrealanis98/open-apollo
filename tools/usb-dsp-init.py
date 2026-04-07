@@ -229,27 +229,19 @@ def main():
         # catch PipeWire's stream open.
         print("EP6 drain active (Ctrl+C to stop)")
         try:
-            # Wait for ALSA card to appear (snd-usb-audio probe)
-            for _ in range(30):
-                try:
-                    with open("/proc/asound/cards") as f:
-                        if "Apollo" in f.read():
-                            print("ALSA card detected — waiting for PipeWire...")
-                            break
-                except OSError:
-                    pass
-                time.sleep(1)
-
-            # Wait for PipeWire to open streams, then re-send routing
-            time.sleep(5)
-            dsp_init(dev)
-            set_clock(dev, 48000, seq=0x10)
-            set_monitor_level(dev, -12)
-            print("Routing re-sent after stream open")
-
-            # Keep draining EP6
+            # Re-send routing table every 2 seconds.
+            # Each time PipeWire opens a stream, snd-usb-audio sends
+            # SET_INTERFACE which wipes the FPGA routing. Since the
+            # routing write is idempotent, periodic re-send is safe
+            # and guarantees routing survives any stream open/close.
             while True:
-                time.sleep(1)
+                time.sleep(2)
+                try:
+                    dsp_init(dev)
+                    set_clock(dev, 48000, seq=0x10)
+                    set_monitor_level(dev, -12)
+                except usb.core.USBError:
+                    pass
         except KeyboardInterrupt:
             pass
         finally:
