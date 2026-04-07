@@ -234,14 +234,20 @@ def main():
             # SET_INTERFACE which wipes the FPGA routing. Since the
             # routing write is idempotent, periodic re-send is safe
             # and guarantees routing survives any stream open/close.
+            resend_count = 0
             while True:
                 time.sleep(2)
                 try:
                     dsp_init(dev)
                     set_clock(dev, 48000, seq=0x10)
                     set_monitor_level(dev, -12)
-                except usb.core.USBError:
-                    pass
+                    resend_count += 1
+                    if resend_count <= 3 or resend_count % 30 == 0:
+                        print("Routing re-sent (#{})"
+                              .format(resend_count), flush=True)
+                except usb.core.USBError as e:
+                    print("Routing re-send FAILED: {}".format(e),
+                          flush=True)
         except KeyboardInterrupt:
             pass
         finally:
