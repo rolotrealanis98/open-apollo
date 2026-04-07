@@ -277,7 +277,7 @@ import re
 # --- implicit.c: add SKIP_DEV entries to playback quirk table ---
 with open('$SRC/implicit.c') as f: s = f.read()
 s = re.sub(
-    r'(\t\{ \}\s*/\*\s*terminator\s*\*/)',
+    r'([ \t]*\{[ ]?\}[ \t]*/\*\s*terminator\s*\*/)',
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000d), /* Universal Audio Apollo Solo USB */\n'
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x0002), /* Universal Audio Twin USB */\n'
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000f), /* Universal Audio Twin X USB */\n'
@@ -378,16 +378,21 @@ if [ -n "$USB_SPEED" ]; then
     fi
 fi
 
-# Run DSP init (activate FPGA + set clock + set monitor level)
+# Run DSP init + EP6 drain daemon (activate FPGA + drain interrupt endpoint)
+# On Intel xHCI controllers, EP6 notifications flood the USB stack if not consumed.
+# The --daemon flag keeps the script running to drain EP6 in the background.
 if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
-    info "Initializing DSP (FPGA activation + monitor routing)..."
-    if run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" 2>&1 | tail -5; then
-        ok "DSP initialized"
+    info "Initializing DSP (FPGA activation + EP6 drain + monitor routing)..."
+    run_sudo pkill -f "usb-dsp-init.py --daemon" 2>/dev/null || true
+    run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" --daemon </dev/null >/dev/null 2>&1 &
+    DSP_PID=$!
+    sleep 3
+    if kill -0 "$DSP_PID" 2>/dev/null; then
+        ok "DSP initialized + EP6 drain active (PID $DSP_PID)"
     else
-        warn "DSP init had issues — audio may need manual init"
+        warn "DSP init may have failed — check USB connection"
         info "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
     fi
-    sleep 1
 fi
 
 # Load patched snd-usb-audio module
