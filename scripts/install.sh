@@ -16,6 +16,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPORT_FILE="/tmp/open-apollo-install-report.json"
 TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
 VERSION="0.1.0"
+SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 
 # --- Flags ---
 SKIP_INIT=0
@@ -802,6 +803,7 @@ generate_report() {
     REPORT_SUCCESS="$overall" \
     REPORT_FILE="$REPORT_FILE" \
     REPORT_SCRIPT_VERSION="$VERSION" \
+    REPORT_SOURCE="$SOURCE" \
     REPORT_DMESG_FULL="$DMESG_FULL" \
     REPORT_IOMMU_GROUPS="$IOMMU_GROUPS" \
     REPORT_AUDIO_APLAY="$AUDIO_APLAY" \
@@ -846,6 +848,8 @@ report = {
     "script_version": e["REPORT_SCRIPT_VERSION"],
     "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "success": e["REPORT_SUCCESS"] == "true",
+    "source": e.get("REPORT_SOURCE", "user"),
+    "type": "thunderbolt",
     "system": {
         "distro": e["REPORT_DISTRO"],
         "kernel": e["REPORT_KERNEL"],

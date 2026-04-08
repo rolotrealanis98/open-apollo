@@ -17,6 +17,7 @@ FW_DIR="/lib/firmware/universal-audio"
 REPORT_FILE="/tmp/open-apollo-usb-install-report.json"
 TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
 VERSION="0.1.0"
+SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -519,11 +520,13 @@ fi
 # ================================================================
 header "Audio Test"
 
+CAPTURE_WORKS="false"
 if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
     info "Recording 2 seconds from capture..."
     timeout 3 arecord -D plughw:USB -f S32_LE -r 48000 -c 6 /tmp/apollo-usb-test.wav 2>/dev/null || true
 
     if [ -f /tmp/apollo-usb-test.wav ]; then
+        CAPTURE_WORKS="true"
         PEAK=$(python3 -c "
 import wave, struct
 w = wave.open('/tmp/apollo-usb-test.wav', 'r')
@@ -566,6 +569,36 @@ fi
 RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
 CPU_MODEL=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs || echo "unknown")
 USB_CTRL=$(lspci 2>/dev/null | grep -i 'usb controller' | head -3 | tr '\n' '|' || echo "")
+
+USB_CTRL_VENDOR=""
+if echo "$USB_CTRL" | grep -qi "intel"; then
+    USB_CTRL_VENDOR="intel"
+elif echo "$USB_CTRL" | grep -qi "amd\|advanced micro"; then
+    USB_CTRL_VENDOR="amd"
+elif echo "$USB_CTRL" | grep -qi "renesas"; then
+    USB_CTRL_VENDOR="renesas"
+else
+    USB_CTRL_VENDOR="other"
+fi
+
+PW_VER=""
+if command -v pipewire &>/dev/null; then
+    PW_VER=$(pipewire --version 2>/dev/null | grep -oP '[\d.]+' | head -1 || echo "")
+fi
+WP_VER=""
+if command -v wireplumber &>/dev/null; then
+    WP_VER=$(wireplumber --version 2>/dev/null | grep -oP '[\d.]+' | head -1 || echo "")
+fi
+
+EP6_RUNNING="false"
+if pgrep -f "usb-dsp-init.py" >/dev/null 2>&1; then
+    EP6_RUNNING="true"
+fi
+
+PATCHES_APPLIED="false"
+if [ -f "$SND_USB_BUILD/sound/usb/format.c" ] && grep -q "2b5a" "$SND_USB_BUILD/sound/usb/format.c" 2>/dev/null; then
+    PATCHES_APPLIED="true"
+fi
 ALSA_CARDS=$(cat /proc/asound/cards 2>/dev/null | tr '\n' '|' || echo "")
 DMESG_USB=$(dmesg 2>/dev/null | grep -i 'apollo\|2b5a\|snd.usb' | tail -15 | tr '\n' '|' || echo "")
 
@@ -583,6 +616,13 @@ REPORT_DMESG_USB="$DMESG_USB" \
 REPORT_SUCCESS="$INSTALL_SUCCESS" \
 REPORT_FILE="$REPORT_FILE" \
 REPORT_SCRIPT_VERSION="$VERSION" \
+REPORT_SOURCE="$SOURCE" \
+REPORT_PW_VER="$PW_VER" \
+REPORT_WP_VER="$WP_VER" \
+REPORT_USB_CTRL_VENDOR="$USB_CTRL_VENDOR" \
+REPORT_EP6_RUNNING="$EP6_RUNNING" \
+REPORT_PATCHES_APPLIED="$PATCHES_APPLIED" \
+REPORT_CAPTURE_WORKS="${CAPTURE_WORKS:-false}" \
 python3 -c '
 import json, os, datetime
 
@@ -593,6 +633,7 @@ report = {
     "script_version": e["REPORT_SCRIPT_VERSION"],
     "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "success": e["REPORT_SUCCESS"] == "true",
+    "source": e.get("REPORT_SOURCE", "user"),
     "system": {
         "distro": e["REPORT_DISTRO"],
         "kernel": e["REPORT_KERNEL"],
@@ -605,9 +646,17 @@ report = {
         "speed_mbps": e["REPORT_USB_SPEED"],
         "controllers": e["REPORT_USB_CTRL"],
         "firmware": e["REPORT_FW_FILE"],
+        "controller_vendor": e.get("REPORT_USB_CTRL_VENDOR", ""),
     },
     "audio": {
         "alsa_cards": e["REPORT_ALSA_CARDS"],
+        "pipewire_version": e.get("REPORT_PW_VER") or None,
+        "wireplumber_version": e.get("REPORT_WP_VER") or None,
+        "capture_works": e.get("REPORT_CAPTURE_WORKS", "false") == "true",
+    },
+    "patches": {
+        "applied": e.get("REPORT_PATCHES_APPLIED", "false") == "true",
+        "ep6_daemon": e.get("REPORT_EP6_RUNNING", "false") == "true",
     },
     "logs": {
         "dmesg_usb": e["REPORT_DMESG_USB"],
