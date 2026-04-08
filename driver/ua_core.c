@@ -2895,8 +2895,9 @@ static void ua_io_resume(struct pci_dev *pdev)
 
 	dev_info(&pdev->dev, "I/O resumed\n");
 
-	/* Clear shutdown flag — device is back */
+	/* Clear shutdown and failure flags — device is back */
 	atomic_set(&ua->shutdown, 0);
+	ua->aceface_failed = false;
 
 	/*
 	 * After PCIe AER slot reset, the DSP service was stopped.

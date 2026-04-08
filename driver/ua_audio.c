@@ -633,6 +633,7 @@ int ua_aceface_handshake(struct ua_device *ua)
 	dev_warn(&ua->pdev->dev,
 		 "early ACEFACE timed out after %d retries\n",
 		 UA_CONNECT_RETRIES);
+	ua->aceface_failed = true;
 	return -ETIMEDOUT;
 }
 
@@ -1145,15 +1146,17 @@ post_handshake:
 						 "plugin chain skipped (clobbers capture)\n");
 
 				/*
-				 * Restart transport for DSP service.
+				 * Transport start deferred to pcm_prepare.
+				 *
+				 * Starting transport here (during probe/connect)
+				 * triggers an immediate PCIe AER error on some
+				 * Thunderbolt controllers (kernel 6.18+, Maple
+				 * Ridge), killing the link within ~50ms.
+				 * The DSP service will start once pcm_prepare
+				 * brings up transport on first audio open.
 				 */
-				ua_write(ua, UA_REG_AX_CONTROL,
-					 UA_AX_CTRL_DMA_EN);
-				usleep_range(1000, 2000);
-				ua_write(ua, UA_REG_AX_CONTROL,
-					 UA_AX_CTRL_START_EXT);
 				dev_info(&ua->pdev->dev,
-					 "  transport restarted\n");
+					 "  transport deferred to pcm_prepare\n");
 
 				return 0;
 			}
@@ -1172,6 +1175,7 @@ post_handshake:
 	}
 
 	dev_err(&ua->pdev->dev, "audio extension connect timeout\n");
+	ua->aceface_failed = true;
 	return -ETIMEDOUT;
 }
 
@@ -2073,6 +2077,19 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 
 	/* Connect to DSP firmware if not already connected */
 	if (!audio->connected) {
+		/*
+		 * If ACEFACE already timed out, don't retry from pcm_prepare.
+		 * PipeWire retries pcm_prepare immediately on failure, which
+		 * creates an infinite 20s-blocking loop that freezes the system.
+		 * A power cycle (hot-replug) clears aceface_failed via probe.
+		 */
+		if (ua->aceface_failed) {
+			dev_dbg(&ua->pdev->dev,
+				"pcm_prepare: ACEFACE previously failed, "
+				"power-cycle Apollo to recover\n");
+			return -ENODEV;
+		}
+
 		ret = ua_audio_connect(ua);
 		if (ret)
 			return ret;

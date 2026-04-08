@@ -744,6 +744,7 @@ struct ua_device {
 	bool fw_loaded;
 	bool dsps_connected;
 	bool aceface_done;          /* ACEFACE handshake completed */
+	bool aceface_failed;        /* ACEFACE timed out — don't retry from pcm_prepare */
 	bool pcie_setup_done;       /* PCIe ASPM/timeout configured */
 	bool plugins_activated;     /* Plugin chain sent to DSP */
 	bool skip_bus_coeff;        /* Skip BUS_COEFF in plugin chain */
