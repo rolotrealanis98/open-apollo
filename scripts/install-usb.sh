@@ -54,10 +54,11 @@ run_sudo() {
 }
 
 # Detect if kernel was built with Clang (CachyOS, some Arch kernels)
+# Only check CC_IS_CLANG in .config — grepping Makefile for "clang" causes
+# false positives on Ubuntu/Debian where Makefile mentions clang in comments.
 KERN_CC="gcc"
-if [ -f "/lib/modules/$(uname -r)/build/Makefile" ]; then
-    if grep -q 'clang' "/lib/modules/$(uname -r)/build/Makefile" 2>/dev/null || \
-       grep -q 'CC.*clang' "/lib/modules/$(uname -r)/build/.config" 2>/dev/null; then
+if [ -f "/lib/modules/$(uname -r)/build/.config" ]; then
+    if grep -q '^CONFIG_CC_IS_CLANG=y' "/lib/modules/$(uname -r)/build/.config" 2>/dev/null; then
         KERN_CC="clang"
     fi
 fi
@@ -293,6 +294,21 @@ s = re.sub(
     'if (!endpoint_compatible(ep, fp, params) &&\n\t\t    USB_ID_VENDOR(chip->usb_id) != 0x2b5a)',
     s, count=1)
 with open('$SRC/endpoint.c', 'w') as f: f.write(s)
+
+# --- quirks.c: add IFACE_SKIP_CLOSE for UA devices ---
+# PipeWire opens/closes capture streams during negotiation. Each close
+# resets Interface 3 to alt=0, wiping the FPGA capture routing that
+# usb-full-init.py programmed. IFACE_SKIP_CLOSE prevents the alt=0
+# reset so the DSP program state persists across stream open/close.
+with open('$SRC/quirks.c') as f: s = f.read()
+s = re.sub(
+    r'([ \t]*\{[ ]?\}[ \t]*/\*\s*terminator\s*\*/)',
+    '\t{ USB_DEVICE(0x2b5a, 0x000d), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Apollo Solo USB */\n'
+    '\t{ USB_DEVICE(0x2b5a, 0x0002), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Twin USB */\n'
+    '\t{ USB_DEVICE(0x2b5a, 0x000f), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Twin X USB */\n'
+    r'\1',
+    s, count=1)
+with open('$SRC/quirks.c', 'w') as f: f.write(s)
 "
 
     # Fix includes for out-of-tree build
