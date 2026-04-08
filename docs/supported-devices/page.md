@@ -10,6 +10,7 @@ Open Apollo supports Universal Audio Apollo Thunderbolt and USB interfaces. Thun
 
 | Model | Device Type | Playback | Record | Preamps | HiZ | Status |
 |---|---|---|---|---|---|---|
+| Apollo 8P (original) | 0x0A | 26 | 26 | 8 | 2 | Needs Testing |
 | Apollo Solo | 0x27 | 3 | 2 | 1 | 0 | Needs Testing |
 | Arrow | 0x28 | 3 | 2 | 1 | 0 | Needs Testing |
 | Apollo Twin X | 0x23 | 8 | 8 | 2 | 2 | Needs Testing |
@@ -34,12 +35,12 @@ USB Apollo models use UAC 2.0 audio. No kernel module is required — the FX3 fi
 
 | Model | VID | PID (live) | Playback | Record | Preamps | HiZ | Status |
 |---|---|---|---|---|---|---|---|
-| Apollo Solo USB | 0x2B5A | 0x000D | 6 | 10 | 2 | 2 | **Verified** |
+| Apollo Solo USB | 0x2B5A | 0x000D | 6 | 10 | 2 | 2 | **Partially Verified** |
 | Apollo Twin USB | 0x2B5A | 0x0002 | — | — | 2 | 2 | Needs Testing |
 | Apollo Twin X USB | 0x2B5A | 0x000F | — | — | 2 | 2 | Needs Testing |
 
 {% callout type="note" %}
-USB setup is currently manual — there is no `install.sh` equivalent. See the [USB Quick Start](/docs/usb-quick-start) guide.
+USB setup uses `sudo bash scripts/install-usb.sh`. See [Installation](/docs/installation) for details, or [USB RE findings](/docs/usb-apollo-re) for protocol details.
 {% /callout %}
 
 ---
@@ -56,6 +57,8 @@ USB setup is currently manual — there is no `install.sh` equivalent. See the [
 
 ## What "Verified" means
 
+### Thunderbolt (Apollo x4)
+
 The Apollo x4 is the primary development and test device. On this model, the following features are confirmed working:
 
 - Full duplex audio with **4 analog inputs** (Mic 1-4) and **6 analog outputs** (Monitor L/R, Line Out 1-4) verified
@@ -66,6 +69,19 @@ The Apollo x4 is the primary development and test device. On this model, the fol
 - Monitor volume, mute, dim, mono, talkback
 - DSP mixer routing (analog buses only — digital bus routing untested)
 - ALSA integration with 50+ mixer controls
+
+### USB (Apollo Solo USB)
+
+The Apollo Solo USB is "Partially Verified" — playback is confirmed working; capture has known issues:
+
+- **6ch playback** (S32_LE 48kHz) confirmed on Ubuntu Studio 24.04 (kernel 6.17, Intel) and CachyOS (kernel 6.19, AMD)
+- **PipeWire playback** — browser audio, system audio working
+- **Preamp gain, 48V, monitor level/mute** — working via mixer daemon
+- **10ch capture** — works with `usb-full-init.py` but the init sequence is firmware-version-specific; some firmware builds crash at packet 28
+- **Capture through PipeWire** — returns zeros even when raw ALSA capture works (under investigation)
+- Hardware monitoring (mic → headphones) works when PipeWire is stopped
+
+See [USB RE findings](/docs/usb-apollo-re) for the full protocol details and known issues.
 
 ---
 

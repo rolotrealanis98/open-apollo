@@ -36,7 +36,7 @@ sudo dnf install kernel-devel gcc make python3
 sudo apt install linux-headers-$(uname -r) build-essential python3
 ```
 
-### Arch Linux
+### Arch Linux / CachyOS / Manjaro
 
 ```bash
 sudo pacman -S linux-headers gcc make python
@@ -61,6 +61,23 @@ sudo bash scripts/install.sh --skip-init   # Skip hardware init
 sudo bash scripts/install.sh --no-dkms     # Skip DKMS setup
 sudo bash scripts/install.sh --help        # Show all options
 ```
+
+### NixOS (declarative)
+
+Add to your `flake.nix` inputs:
+
+```nix
+inputs.open-apollo.url = "github:rolotrealanis98/open-apollo";
+```
+
+Then in your `configuration.nix`:
+
+```nix
+imports = [ inputs.open-apollo.nixosModules.default ];
+hardware.ua-apollo.enable = true;
+```
+
+Run `nixos-rebuild switch`. The module handles the kernel module build, `iommu=pt`, Thunderbolt (bolt), PipeWire, and required packages automatically. No manual steps required.
 
 ### Manual build (alternative)
 
@@ -319,9 +336,61 @@ echo "ua_apollo" | sudo tee /etc/modules-load.d/ua_apollo.conf
 
 ---
 
+## USB Apollo installation
+
+USB Apollo models (Solo USB, Twin USB, Twin X USB) use a separate installer that does not require a kernel module.
+
+```bash
+git clone https://github.com/rolotrealanis98/open-apollo.git
+cd open-apollo
+sudo bash scripts/install-usb.sh
+```
+
+The installer handles: dependency installation, FX3 firmware setup (prompts if missing), patched `snd-usb-audio` kernel module build (three patches — see below), DSP init daemon deployment, udev rule deployment, and PipeWire configuration.
+
+{% callout type="note" %}
+The Apollo must be plugged into a **USB 3.0** port. USB 2.0 cables and ports are not supported — the FX3 re-enumerates at SuperSpeed after firmware upload.
+{% /callout %}
+
+Firmware files (`ApolloSolo.bin`, etc.) can be obtained from UA's firmware page or extracted from UA Connect on Windows: `C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmware\USB\`. Place them in `/lib/firmware/universal-audio/` — the installer will prompt you if they are missing.
+
+### What the installer patches in snd-usb-audio
+
+The stock `snd-usb-audio` module cannot work with Apollo USB devices. The installer builds an out-of-tree module with three patches:
+
+1. **format.c** — fixed-rate quirk: when `GET_RANGE` STALLs (UA devices don't implement it), fall back to hardcoded rates (44100, 48000, 88200, 96000, 176400, 192000 Hz)
+2. **implicit.c** — `IMPLICIT_FB_SKIP_DEV` for VID `0x2B5A`: prevents EP 0x83 feedback endpoint conflict that blocks stream open
+3. **endpoint.c** — skips `endpoint_compatible()` check for UA VID: prevents "Incompatible EP setup" errors
+
+### What runs automatically after plug-in
+
+Once installed, the udev rule (`/etc/udev/rules.d/99-apollo-usb.rules`) handles the full init sequence on each plug-in:
+
+1. `fx3-load.py` uploads `ApolloSolo.bin` to the Cypress FX3 (firmware loader PID → audio PID)
+2. A 3-second delay lets `snd-usb-audio` fully probe the device
+3. `usb-dsp-init.py --daemon` activates the FPGA, sets sample rate, and starts the EP6 drain daemon
+
+The EP6 drain daemon is required on Intel xHCI controllers — without it, the Apollo's JFK notification flood (~2000 packets/sec) overflows the interrupt ring buffer and causes audio dropouts.
+
+### Capture (10ch recording)
+
+Playback (6ch) works automatically after plug-in. For capture, full DSP initialization is required:
+
+```bash
+sudo python3 tools/usb-full-init.py
+```
+
+{% callout type="warning" title="Firmware version dependency" %}
+`usb-full-init.py` replays a 38-packet init sequence captured from Cauldron firmware v1.3 build 3. If your device runs a different firmware build, the sequence may crash at packet 28 (SRAM address mismatch). If this happens, unplug and re-plug the device to recover, and use the lightweight init for playback-only.
+{% /callout %}
+
+Capture through PipeWire currently returns silence even when raw ALSA capture works. Use `arecord -D hw:USB` as a workaround until this is resolved.
+
+---
+
 ## Verified configurations
 
-### Hardware-verified (full audio I/O)
+### Hardware-verified (Thunderbolt)
 
 | Distro | Kernel | CPU | Thunderbolt | Status |
 |--------|--------|-----|-------------|--------|
@@ -329,6 +398,13 @@ echo "ua_apollo" | sudo tee /etc/modules-load.d/ua_apollo.conf
 | Fedora 43 | 6.18.16-200.fc43.x86_64 | — | Thunderbolt 3 | Fully working |
 
 Ubuntu 24.04 is the primary tested platform. Install testing was performed on overlayroot (ephemeral filesystem) to guarantee clean-state reproducibility across all 8 cycles.
+
+### Hardware-verified (USB — Apollo Solo USB)
+
+| Distro | Kernel | USB Controller | Playback | Capture |
+|--------|--------|---------------|----------|---------|
+| Ubuntu Studio 24.04 | 6.17.0-20-generic | Intel Tiger Lake-H xHCI | Working | Working (usb-full-init.py) |
+| CachyOS | 6.19.10-1-cachyos | AMD USB | Working | Needs usb-full-init.py |
 
 ### Docker install matrix (build + config deploy, no hardware)
 

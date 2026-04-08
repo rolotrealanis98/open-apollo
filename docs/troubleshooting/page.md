@@ -286,6 +286,125 @@ sudo modprobe ua_apollo
 
 ---
 
+## USB Apollo Issues
+
+### Device not found after plugging in
+
+**Symptom:** No `Apollo Solo USB` ALSA card after plugging in.
+
+**Causes and fixes:**
+
+1. **FX3 firmware not uploaded:** The Cypress FX3 has no onboard flash — firmware must be uploaded every power-on. Check that udev triggered the init script:
+   ```bash
+   dmesg | grep -i "apollo\|fx3\|2b5a"
+   journalctl -u ua-usb-init --since "5 minutes ago"
+   ```
+   If missing, run manually:
+   ```bash
+   sudo bash scripts/ua-usb-init.sh
+   ```
+
+2. **Firmware files missing:** Firmware must be in `/lib/firmware/universal-audio/`. Check:
+   ```bash
+   ls /lib/firmware/universal-audio/ApolloSolo.bin
+   ```
+   If missing, obtain from UA Connect on Windows (`C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmware\USB\`) and copy to `/lib/firmware/universal-audio/`.
+
+3. **USB 2.0 port or cable:** The Apollo Solo USB requires USB 3.0 SuperSpeed. With USB 2.0, the FX3 re-enumerates but audio interfaces fail to initialize. Use a USB 3.0 port (usually blue) and a USB 3.0 cable.
+
+4. **udev rule not installed:** Confirm the udev rule is present:
+   ```bash
+   cat /etc/udev/rules.d/99-apollo-usb.rules
+   ```
+   If missing, reinstall: `sudo bash scripts/install-usb.sh`
+
+### No PCM streams / ALSA card shows no playback or capture
+
+**Symptom:** The `Apollo Solo USB` card appears in `aplay -l` but shows no streams, or audio applications cannot open it.
+
+**Cause:** The standard `snd-usb-audio` module cannot enumerate PCM streams because the device does not implement UAC 2.0 `GET_RANGE` for clock frequencies — it STALLs, which causes `snd-usb-audio` to skip stream creation.
+
+**Fix:** The patched `snd-usb-audio` module (built by `install-usb.sh`) adds a quirk that falls back to hardcoded rates (44100, 48000, 88200, 96000, 176400, 192000 Hz) when `GET_RANGE` fails for VID `0x2B5A`. If the stock module was loaded instead:
+
+```bash
+# Check which module is active
+modinfo snd-usb-audio | grep filename
+
+# If it points to the stock module, reinstall:
+sudo bash scripts/install-usb.sh
+```
+
+### USB audio dropouts or -EIO errors
+
+**Symptom:** Isochronous transfer errors in `dmesg`, audio cuts out.
+
+**Cause:** DSP initialization or sample rate was not set before activating audio endpoints. The device requires a specific sequence: DSP init → SET_CUR sample rate 48000 Hz → SET_INTERFACE to activate endpoints. If the DSP init script was not run or failed, audio streaming fails.
+
+**Fix:**
+```bash
+sudo bash scripts/ua-usb-dsp-init.sh
+# Then restart PipeWire:
+systemctl --user restart pipewire wireplumber
+```
+
+### Crackling or xHCI errors on Intel systems
+
+**Symptom:** `dmesg` shows xHCI ring buffer errors or EP6 overflow messages. Audio crackles or drops.
+
+**Cause:** The Apollo Solo USB sends JFK notification packets on EP6 IN at approximately 2000 packets/second. Intel xHCI controllers overflow their interrupt ring buffer under this load. AMD USB controllers handle it gracefully.
+
+**Fix:** The EP6 drain daemon (started by `tools/usb-dsp-init.py --daemon`) continuously drains EP6 before it overflows. If you are running the daemon and still see errors, ensure it started after the patched module loaded:
+
+```bash
+# Confirm the drain daemon is running
+pgrep -af usb-dsp-init
+
+# Restart if needed
+sudo python3 /opt/open-apollo/tools/usb-dsp-init.py --daemon &
+```
+
+### Capture returns zeros through PipeWire
+
+**Symptom:** Raw `arecord -D hw:USB ...` captures audio correctly, but recording via PipeWire (e.g., OBS, Ardour) produces silence.
+
+**Cause:** Known issue as of April 2026. Suspected channel mapping or stream-open ordering interaction between PipeWire and the patched `snd-usb-audio` module when capture streams are opened after playback.
+
+**Workaround:** Use raw ALSA capture with `arecord` until this is resolved, or stop PipeWire before recording:
+```bash
+systemctl --user stop pipewire pipewire-pulse wireplumber
+arecord -D hw:USB -f S32_LE -r 48000 -c 10 output.wav
+```
+
+### Full init crashes at packet 28 (capture not working after usb-full-init.py)
+
+**Symptom:** `usb-full-init.py` hangs or the device becomes unresponsive after the 28th init packet. Capture does not work even after re-plugging.
+
+**Cause:** The 38-packet DSP init sequence was captured from Cauldron firmware v1.3 build 3. Some firmware builds place the IIR biquad SRAM region at a different address — writing to the wrong address during initialization corrupts the DSP state.
+
+**Fix:** Unplug and re-plug the Apollo Solo USB to reset, then use the lightweight init (no capture):
+```bash
+sudo python3 tools/usb-dsp-init.py
+```
+Capture with `usb-full-init.py` will only work if your firmware matches the captured version. Check your firmware version:
+```bash
+python3 tools/fx3-load.py --info
+```
+
+### DSP init must run after snd-usb-audio loads (ordering issue)
+
+**Symptom:** DSP init runs but audio endpoints remain broken. SET_INTERFACE calls after init wipe the FPGA routing table.
+
+**Cause:** When `snd-usb-audio` opens or closes a stream, it issues SET_INTERFACE to switch alternate settings, which resets FPGA state. If the DSP init runs before the module has fully probed (and before any stream opens/closes), the routing table gets cleared.
+
+**Fix:** The correct ordering is:
+1. Load patched `snd-usb-audio` module (let it fully probe)
+2. Run `tools/usb-dsp-init.py` (or wait for udev to trigger it)
+3. Start PipeWire
+
+The udev rule in `configs/udev/99-apollo-usb.rules` includes a `sleep 3` delay after module load to respect this ordering.
+
+---
+
 ## Reading dmesg for Apollo Messages
 
 All driver messages are prefixed with `ua_apollo`. Filter for them:
@@ -303,10 +422,12 @@ dmesg | grep ua_apollo | grep -iE "error|warn|fail"
 
 ### Key Messages to Look For
 
+The channel count messages below are for the Apollo x4 — other models show different counts (e.g., 8/8 for Twin X, 34/34 for x16).
+
 | Message | Meaning |
 |---------|---------|
-| `Apollo x4: FPGA rev 0x...` | Device detected successfully |
-| `audio: 24 play ch, 22 rec ch` | Channel counts detected |
+| `Apollo x4: FPGA rev 0x...` | Device detected successfully (model name varies) |
+| `audio: 24 play ch, 22 rec ch` | Channel counts detected (x4-specific) |
 | `mixer DSP alive` | DSP firmware is running |
 | `ACEFACE handshake OK` | Audio transport connection succeeded |
 | `ALSA mixer: N controls` | ALSA controls registered |

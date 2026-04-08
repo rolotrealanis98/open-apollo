@@ -127,15 +127,33 @@ Files located at `C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmwar
 ## Linux Status
 
 ### Working
-- [x] FX3 firmware upload from Linux (`tools/fx3-load.py`)
+- [x] FX3 firmware upload from Linux (`tools/fx3-load.py`), udev auto-load on device plug
 - [x] Device re-enumerates as UAC 2.0 audio + vendor DSP
-- [x] `snd-usb-audio` claims device (card appears as `[USB]`)
-- [x] Clock source responds at 48kHz
+- [x] `snd-usb-audio` claims device with three patches applied (see below)
+- [x] Clock source responds at 48kHz after DSP init
+- [x] **6ch ALSA playback** (S32_LE 48kHz) — confirmed on Ubuntu Studio 24.04 (kernel 6.17, Intel Tiger Lake-H) and CachyOS (kernel 6.19, AMD USB)
+- [x] PipeWire playback — browser audio, system audio working
+- [x] DSP init — FPGA activation, CONFIG_A/B, identity routing table, clock set, monitor level (`tools/usb-dsp-init.py`)
+- [x] EP6 drain daemon — prevents Intel xHCI buffer overruns from JFK notification packets
+- [x] Mixer settings via vendor control 0x03 — preamp gain, 48V, monitor level/mute
 
-### Blocking Issues
-- `snd-usb-audio` can't enumerate PCM streams (GET_RANGE fails → no sample rate list)
-- DSP bulk endpoint protocol unknown (device accepts writes but gives no response)
-- FPGA may need initialization commands before audio works
+### Partially Working
+- [~] **10ch ALSA capture** — works with full DSP program load (`tools/usb-full-init.py`), but the init sequence is firmware-version-specific. Some firmware builds crash at packet 28 (IIR biquad writes to a moved SRAM address)
+- [~] **Hardware monitoring** (mic → headphones) — works when PipeWire is stopped
+- [~] **Mixer settings** — work via vendor control 0x03 but may stop responding after full DSP init (`usb-full-init.py`)
+
+### Known Issues
+- **SET_INTERFACE resets FPGA state** — when `snd-usb-audio` opens/closes streams, SET_INTERFACE can wipe the routing table. DSP init must run AFTER module probe, not before
+- **EP6 interrupt flood on Intel xHCI** — the Apollo pushes JFK notifications at ~2000/sec. Intel xHCI controllers overflow; AMD handles it gracefully. Fix: EP6 drain daemon in `tools/usb-dsp-init.py`
+- **Interface 0 contention** — the DSP init daemon and `snd-usb-audio` can conflict on Interface 0 (vendor DSP). Correct ordering: load patched module first, then start daemon
+- **Firmware-specific init sequence** — the captured 38-packet init from Cauldron 1.3 build 3 works on some devices but crashes others at packet 28 (SRAM address mismatch in IIR biquad writes)
+- **Capture through PipeWire returns zeros** — raw ALSA capture works but PipeWire returns silence. Channel mapping or stream-open interaction needs investigation
+
+### Required Init Order
+1. Upload firmware (`tools/fx3-load.py` or udev auto-trigger)
+2. Load patched `snd-usb-audio` module
+3. Start `tools/usb-dsp-init.py --daemon` (or `tools/usb-full-init.py` for capture)
+4. Start PipeWire
 
 ## Windows Driver Stack
 
@@ -215,9 +233,15 @@ Replay of Windows init sequence via `tools/usb-dsp-init.py` **works**:
 - Status query returns 388B state
 - Clock reads 48000 Hz after init
 
-## snd-usb-audio Kernel Quirk — Working
-Patched `sound/usb/format.c` `line6_parse_audio_format_rates_quirk()` to add UA USB IDs.
-Compiled out-of-tree module from v6.17 kernel source. Build notes:
+## snd-usb-audio Kernel Patches — Three Patches Applied
+
+Compiled out-of-tree module from v6.17 kernel source with three patches:
+
+1. **`format.c`** — fixed-rate quirk: bypasses `GET_RANGE` STALL by falling back to hardcoded rates (44100, 48000, 88200, 96000, 176400, 192000 Hz) for VID `0x2B5A`
+2. **`implicit.c`** — adds `IMPLICIT_FB_SKIP_DEV` flag to prevent EP 0x83 feedback endpoint conflict
+3. **`endpoint.c`** — skips `endpoint_compatible()` check for UA VID, preventing "Incompatible EP setup" errors during stream open
+
+Build notes:
 - Add `#include <linux/usb/audio-v2.h>` and `<linux/usb/audio-v3.h>` to mixer_maps.c
 - Remove midi.o from objects (separate snd_usbmidi_lib module)
 - Add `CFLAGS_mixer.o := -O1` and `CFLAGS_implicit.o := -O1` (compiler ICE at -O2)
@@ -330,20 +354,29 @@ Outputs: 0=HP, 1=CUE 2, 2=CUE 3, 3=CUE 4, 4=MONITOR, 5=HP
 - [x] ~~Capture USB traffic~~ — 14MB pcap with full init sequence
 - [x] ~~Decode DSP bulk protocol~~ — header + sub-command format identified
 - [x] ~~Replay init sequence on Linux~~ — DSP responds, clock active
-- [x] ~~Patch `snd-usb-audio`~~ — compiled out-of-tree module with fixed-rate quirk, works
+- [x] ~~Patch `snd-usb-audio`~~ — three patches: fixed-rate quirk, implicit FB skip, endpoint compat skip
 - [x] ~~Build USB hardware backend~~ — `mixer-engine/hardware_usb.py`, reads/writes DSP state
 - [x] ~~Create udev rule~~ — `configs/udev/99-apollo-usb.rules` + init scripts, auto-init on plug-in
-- [x] ~~Playback verified~~ — `plughw:USB` stereo output confirmed
+- [x] ~~Playback verified~~ — 6ch S32_LE 48kHz confirmed on Intel Tiger Lake-H and AMD USB
 - [x] ~~Decode mixer settings protocol~~ — vendor ctrl 0x03 with batch writes to FPGA addresses
 - [x] ~~Map preamp gain, 48V, mic/line, monitor level/mute/mono~~ — from mixer-knobs.pcap
 - [x] ~~Test mixer settings writes on Linux~~ — verified, capture routing confirmed with signal
 - [x] ~~PipeWire integration~~ — `configs/pipewire/setup-apollo-solo-usb.sh`, Mic 1/2, Monitor, Headphone devices
+- [x] ~~EP6 drain daemon~~ — prevents Intel xHCI JFK notification flood
+- [ ] Fix firmware-version-specific SRAM crash at packet 28 (IIR biquad address)
+- [ ] Fix capture through PipeWire (returns zeros — channel mapping or stream-open interaction)
 - [ ] Map remaining settings: dim, pad, hiz, lowcut, phase, fader, pan, sends
-- [ ] Submit kernel patch upstream (alsa-devel)
-- [ ] Fix `hw:USB` 6ch S32_LE playback (implicit feedback issue)
+- [ ] Submit kernel patches upstream (alsa-devel) — 3 patches ready
+- [ ] Investigate mixer settings lockup after `usb-full-init.py`
 
-## Test Device
+## Test Environments
+
+| System | Kernel | USB Controller | Status |
+|--------|--------|---------------|--------|
+| Ubuntu Studio 24.04, Intel Tiger Lake-H | 6.17.0-20-generic | Intel xHCI | Playback + capture confirmed |
+| CachyOS, AMD | 6.19.10-1-cachyos | AMD USB | Playback confirmed; capture needs `usb-full-init.py` |
+
 - **Model**: Apollo Solo USB (USB-C edition)
 - **Firmware Loader Serial**: `0000000004BE`
+- **Firmware**: Cauldron v1.3 build 3 (Feb 18 2026)
 - **Connection**: USB 3.0+ required (failed with USB 2.0 cable)
-- **Linux**: USB 3.0 SuperSpeed on Bus 004, xhci_hcd
