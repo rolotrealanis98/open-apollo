@@ -32,18 +32,29 @@ stack for USB models, along with a mixer daemon and system tray indicator.
 - **Guided installer** — `sudo bash scripts/install.sh` with hardware validation gates + audio test
 - **System tray indicator** — real-time hardware status
 
-## What Works (Apollo Solo USB, Ubuntu 24.04)
+## What Works (Apollo Solo USB)
 
-- **Full duplex audio** — 6ch playback, 10ch capture at 48kHz
-- **Preamp control** — gain, 48V phantom power, mic/line switching
+- **6ch playback** — S32_LE 48kHz, confirmed on Ubuntu Studio 24.04 (Intel) and CachyOS (AMD)
+- **10ch capture** — requires full DSP program load (`usb-full-init.py`); firmware-version-specific
+- **Preamp control** — gain, 48V phantom power, mic/line switching via vendor control
 - **Monitor control** — level, mute, mono
-- **Mixer control** — vendor control request 0x03 with batch write protocol
-- **PipeWire virtual I/O** — Mic 1, Mic 2, Mic 1+2, Monitor, Headphone devices
-- **No kernel module needed** — pure userspace (UAC 2.0 audio + patched `snd-usb-audio`)
+- **PipeWire playback** — browser audio, system audio, DAWs all work
+- **EP6 drain daemon** — prevents Intel xHCI buffer overruns from FPGA notification packets
+- **Patched snd-usb-audio** — three out-of-tree patches (fixed-rate quirk, implicit feedback skip, endpoint compat bypass)
+- **Automatic init via udev** — firmware upload + DSP init on device plug-in
 
-{% callout type="warning" %}
-USB support requires a manual setup process — there is no `install.sh` equivalent yet.
-See [USB Quick Start](#usb-quick-start-apollo-solo-usb) below.
+### USB Known Issues
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| **Capture requires full DSP init** | Partial | `usb-full-init.py` needed; init sequence is firmware-version-specific |
+| **Intel xHCI EP6 flood** | Fixed | EP6 drain daemon prevents buffer overruns on Intel USB controllers |
+| **PipeWire capture zeros** | Open | Raw ALSA capture works but PipeWire capture returns zeros; channel mapping under investigation |
+| **Full init crash at packet 28** | Known | Some firmware builds crash on IIR biquad SRAM write (address mismatch); provide a fresh Windows capture if affected |
+| **DSP init ordering** | Documented | Module must load before daemon starts; SET_INTERFACE wipes FPGA routing |
+
+{% callout type="note" %}
+USB support uses `sudo bash scripts/install-usb.sh`. See [USB Quick Start](#usb-quick-start-apollo-solo-usb) below.
 {% /callout %}
 
 ## Known Issues
@@ -93,6 +104,7 @@ Virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD pl
 | Apollo x16D | Needs Testing |
 | Apollo Twin X / Gen 2 | Needs Testing |
 | Apollo Solo (Thunderbolt) | Needs Testing |
+| Apollo 8P (original) | Needs Testing |
 | Arrow | Needs Testing |
 
 All Thunderbolt Apollo models share the same register map and protocol — the driver
