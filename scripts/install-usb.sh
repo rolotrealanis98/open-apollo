@@ -299,13 +299,17 @@ with open('$SRC/endpoint.c', 'w') as f: f.write(s)
 # resets Interface 3 to alt=0, wiping the FPGA capture routing that
 # usb-full-init.py programmed. IFACE_SKIP_CLOSE prevents the alt=0
 # reset so the DSP program state persists across stream open/close.
+# Uses DEVICE_FLG() macro — the canonical entry for quirk_flag_table.
 with open('$SRC/quirks.c') as f: s = f.read()
 s = re.sub(
-    r'([ \t]*\{[ ]?\}[ \t]*/\*\s*terminator\s*\*/)',
-    '\t{ USB_DEVICE(0x2b5a, 0x000d), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Apollo Solo USB */\n'
-    '\t{ USB_DEVICE(0x2b5a, 0x0002), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Twin USB */\n'
-    '\t{ USB_DEVICE(0x2b5a, 0x000f), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Twin X USB */\n'
-    r'\1',
+    r'(static const struct quirk_flag_table quirk_flag_table\[\][^{]*\{)',
+    r'\1\n'
+    '\tDEVICE_FLG(0x2b5a, 0x000d, /* Universal Audio Apollo Solo USB */\n'
+    '\t\t   QUIRK_FLAG_IFACE_SKIP_CLOSE),\n'
+    '\tDEVICE_FLG(0x2b5a, 0x0002, /* Universal Audio Twin USB */\n'
+    '\t\t   QUIRK_FLAG_IFACE_SKIP_CLOSE),\n'
+    '\tDEVICE_FLG(0x2b5a, 0x000f, /* Universal Audio Twin X USB */\n'
+    '\t\t   QUIRK_FLAG_IFACE_SKIP_CLOSE),',
     s, count=1)
 with open('$SRC/quirks.c', 'w') as f: f.write(s)
 "
