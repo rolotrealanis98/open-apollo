@@ -121,10 +121,18 @@ fi
 # ================================================================
 header "Restoring stock snd-usb-audio"
 
+# UNLOAD_FAILED gates the final status message.  If we can't drop the
+# patched module from memory (audio apps holding it), we still wipe the
+# on-disk artifacts so next reboot lands on stock, but we refuse to
+# report "Uninstall Complete" and exit non-zero — operators need to know
+# the running kernel state does not yet match disk state.
+UNLOAD_FAILED=0
+
 if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
     modprobe -r snd_usb_audio 2>/dev/null || rmmod snd_usb_audio 2>/dev/null || true
     if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
-        warn "Could not unload snd_usb_audio (in use — close audio apps and retry)"
+        UNLOAD_FAILED=1
+        warn "Could not unload snd_usb_audio — in use by audio apps or PipeWire"
     else
         ok "Unloaded snd_usb_audio"
     fi
@@ -139,10 +147,16 @@ for ext in "" ".zst" ".xz"; do
 done
 
 depmod -a 2>/dev/null || true
-modprobe snd_usb_audio 2>/dev/null || true
-if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
-    STOCK_PATH=$(modinfo snd_usb_audio 2>/dev/null | awk '/^filename:/ {print $2}')
-    ok "Stock snd_usb_audio loaded: $STOCK_PATH"
+
+# Only attempt to reload stock if the earlier unload succeeded — otherwise
+# modprobe is a no-op (patched is already loaded) and would print a
+# misleading "stock loaded" message from modinfo's disk-state view.
+if [ "$UNLOAD_FAILED" = "0" ]; then
+    modprobe snd_usb_audio 2>/dev/null || true
+    if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
+        STOCK_PATH=$(modinfo snd_usb_audio 2>/dev/null | awk '/^filename:/ {print $2}')
+        ok "Stock snd_usb_audio loaded: $STOCK_PATH"
+    fi
 fi
 
 # ================================================================
@@ -212,8 +226,28 @@ if [ "$PURGE" = "1" ]; then
 fi
 
 # ================================================================
-# Done
+# Done — report partial vs full based on UNLOAD_FAILED
 # ================================================================
+if [ "$UNLOAD_FAILED" = "1" ]; then
+    header "Uninstall PARTIAL — REBOOT REQUIRED"
+    echo ""
+    fail "Patched snd_usb_audio is still loaded in memory"
+    info "All files removed from disk and next reboot will drop the in-memory"
+    info "module and load stock snd-usb-audio automatically."
+    info ""
+    info "Processes still holding the audio subsystem:"
+    if command -v fuser &>/dev/null; then
+        fuser -v /dev/snd/* 2>&1 | sed 's/^/    /' || true
+    else
+        lsof /dev/snd/* 2>/dev/null | sed 's/^/    /' || \
+            info "    (install psmisc or lsof to see holders)"
+    fi
+    echo ""
+    warn "Reboot to complete the uninstall."
+    echo ""
+    exit 2
+fi
+
 header "Uninstall Complete"
 echo ""
 ok "All USB install artifacts removed"

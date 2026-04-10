@@ -236,6 +236,12 @@ fi
 # ================================================================
 header "Building patched snd-usb-audio kernel module"
 
+# BUILD_SUCCESS gates the rest of the install — if module build or kernel
+# source download fails we MUST NOT tear down snd_usb_audio or install udev
+# hooks, otherwise a transient network/build failure leaves the system in a
+# worse state than before (no audio driver + persistent hotplug hooks).
+BUILD_SUCCESS=0
+
 info "UA USB devices need a 3-line kernel patch for sample rate enumeration."
 info "Building out-of-tree snd-usb-audio module..."
 
@@ -248,16 +254,19 @@ rm -rf "$SND_USB_BUILD"
 sudo -u "$REAL_USER" -H bash -c "mkdir -p '$SND_USB_BUILD'"
 
 # Download kernel source (sound/usb only) as the real user.  Try the exact
-# running kernel version first, then fall back to the previous two minor
-# releases — the sound/usb API is stable across minor versions, and
-# bleeding-edge distro kernels (CachyOS 6.19.x, Arch rc kernels) may not have
-# a matching upstream release on kernel.org yet.
+# running kernel first, then ONE minor release back — the sound/usb ABI is
+# usually stable across a single minor bump, but falling back further is a
+# semantic-correctness risk that Codex flagged: an older driver compiled
+# against newer ALSA headers can build and load while misbehaving at
+# runtime.  If neither attempt works, we fail closed and tell the user.
+# Bleeding-edge distro kernels (CachyOS 6.19.x, Arch rc) are the only real
+# users of the fallback and will get a prominent warning if it engages.
 KVER_FULL=$(echo "$KERNEL" | grep -oP '^\d+\.\d+')
 KVER_MAJOR_NUM="${KVER_FULL%%.*}"
 KVER_MINOR_NUM="${KVER_FULL##*.}"
 
 DOWNLOADED_KVER=""
-for offset in 0 -1 -2 -3; do
+for offset in 0 -1; do
     try_minor=$((KVER_MINOR_NUM + offset))
     [ "$try_minor" -lt 0 ] && continue
     try_ver="${KVER_MAJOR_NUM}.${try_minor}"
@@ -275,11 +284,31 @@ for offset in 0 -1 -2 -3; do
     warn "v${try_ver} not available on kernel.org"
 done
 
+# Prominent warning when we're building across a kernel minor boundary.
+# The sound/usb code is usually stable minor-to-minor but this is NOT a
+# guarantee — file a bug if you hit audio misbehavior after this warning.
+if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" != "$KVER_FULL" ]; then
+    echo -e "${YELLOW}${BOLD}"
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║  VERSION SKEW WARNING                                         ║"
+    echo "║                                                               ║"
+    echo "║  Running kernel: v${KVER_FULL}$(printf '%*s' $((44 - ${#KVER_FULL})) '')║"
+    echo "║  Building from:  v${DOWNLOADED_KVER}$(printf '%*s' $((44 - ${#DOWNLOADED_KVER})) '')║"
+    echo "║                                                               ║"
+    echo "║  The sound/usb ABI is usually stable across one minor bump    ║"
+    echo "║  but this is not guaranteed.  If audio misbehaves after       ║"
+    echo "║  install, report your kernel version at:                      ║"
+    echo "║    github.com/rolotrealanis98/open-apollo                     ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+fi
+
 if [ -z "$DOWNLOADED_KVER" ]; then
-    fail "Could not download any kernel source (tried v${KVER_FULL} down to offset -3)"
+    fail "Could not download kernel source for v${KVER_FULL} or v$((KVER_MINOR_NUM - 1))"
     info "Last wget error (if any):"
     [ -f /tmp/open-apollo-wget.log ] && tail -5 /tmp/open-apollo-wget.log | sed 's/^/    /'
-    info "You may need to build the patched module manually."
+    info "Install will NOT touch the audio stack — your current driver is untouched."
+    info "Fix the kernel-source availability issue and re-run the installer."
     info "See: tools/usb-re/0001-ALSA-usb-audio-Add-quirk-for-Universal-Audio-USB-devices.patch"
 else
     # Determine build flags
@@ -402,6 +431,7 @@ MKEOF
         cp "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" /lib/modules/"$KERNEL"/updates/
         depmod -a
         ok "Module installed to /lib/modules/$KERNEL/updates/"
+        BUILD_SUCCESS=1
     else
         fail "Build failed — check kernel headers and gcc"
         info "Try building manually:"
@@ -456,13 +486,29 @@ fi
 # loading the module after init is safe — capture and playback both work.
 # No daemon needed.
 
+# Gate: refuse to touch the audio stack if we don't have a usable module.
+# Without this check a failed build + unconditional rmmod would leave the
+# machine with no USB audio driver AND persistent udev hooks — strictly
+# worse than the pre-install state (Codex P1 finding).  If a patched .ko
+# exists from a prior install, we allow proceeding with the old module.
+if [ "$BUILD_SUCCESS" != "1" ] && [ ! -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
+    fail "Module build failed and no pre-existing patched module available."
+    info "Refusing to unload snd_usb_audio without a replacement — that would"
+    info "leave you with no USB audio driver until next reboot."
+    info ""
+    info "Fix the kernel source/build error above and re-run install-usb.sh."
+    info "Your audio stack is UNTOUCHED — everything that worked before still works."
+    exit 1
+fi
+
 # Step A: Clean slate
 #
 # Kill any stragglers from a previous install (udev-spawned init scripts
-# especially) AND unconditionally unload snd-usb-audio.  Previously this was
-# gated on the patched .ko existing, which meant when the build failed the
-# stock module kept running and blocked usb-full-init.py from claiming
-# interface 0 → `USBTimeoutError`.  Always rmmod, regardless of build state.
+# especially) AND unload snd-usb-audio.  Previously this was gated on the
+# patched .ko existing, which meant when the build failed the stock module
+# kept running and blocked usb-full-init.py from claiming interface 0 →
+# `USBTimeoutError`.  Always rmmod, gated only by the BUILD_SUCCESS check
+# above so we never leave a machine without a module.
 run_sudo pkill -9 -f "usb-dsp-init\|usb-full-init\|ua-usb-init\|ua-usb-dsp-init" 2>/dev/null || true
 run_sudo udevadm settle 2>/dev/null || true
 run_sudo modprobe -r snd_usb_audio 2>/dev/null || \
