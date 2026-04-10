@@ -240,15 +240,45 @@ info "UA USB devices need a 3-line kernel patch for sample rate enumeration."
 info "Building out-of-tree snd-usb-audio module..."
 
 rm -rf "$SND_USB_BUILD"
-su - "$REAL_USER" -s /bin/bash -c "mkdir -p '$SND_USB_BUILD'"
+# NOTE: `sudo -u USER -H bash -c` (not `su - USER -s /bin/bash`).  Any option
+# after the username in `su` is passed to the target user's login shell — on
+# CachyOS / Arch users whose login shell is fish, `-s` becomes a fish arg and
+# errors out with `fish: -s: unknown option`, causing the entire module build
+# to silently skip.  sudo -u sidesteps the user's login shell entirely.
+sudo -u "$REAL_USER" -H bash -c "mkdir -p '$SND_USB_BUILD'"
 
-# Download kernel source (just sound/usb) as the real user
-KVER_MAJOR=$(echo "$KERNEL" | grep -oP '^\d+\.\d+')
-info "Downloading sound/usb source for kernel $KVER_MAJOR..."
-su - "$REAL_USER" -s /bin/bash -c "cd '$SND_USB_BUILD' && wget -q 'https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR%%.*}.x/linux-${KVER_MAJOR}.tar.xz' -O - | xz -d | tar x --strip-components=1 'linux-${KVER_MAJOR}/sound/usb/' 2>/dev/null"
+# Download kernel source (sound/usb only) as the real user.  Try the exact
+# running kernel version first, then fall back to the previous two minor
+# releases — the sound/usb API is stable across minor versions, and
+# bleeding-edge distro kernels (CachyOS 6.19.x, Arch rc kernels) may not have
+# a matching upstream release on kernel.org yet.
+KVER_FULL=$(echo "$KERNEL" | grep -oP '^\d+\.\d+')
+KVER_MAJOR_NUM="${KVER_FULL%%.*}"
+KVER_MINOR_NUM="${KVER_FULL##*.}"
 
-if [ ! -f "$SND_USB_BUILD/sound/usb/format.c" ]; then
-    fail "Could not download kernel source for $KVER_MAJOR"
+DOWNLOADED_KVER=""
+for offset in 0 -1 -2 -3; do
+    try_minor=$((KVER_MINOR_NUM + offset))
+    [ "$try_minor" -lt 0 ] && continue
+    try_ver="${KVER_MAJOR_NUM}.${try_minor}"
+    try_url="https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR_NUM}.x/linux-${try_ver}.tar.xz"
+    info "Trying kernel source v${try_ver}..."
+    # Wipe any partial download from a previous attempt
+    rm -rf "$SND_USB_BUILD/sound" "$SND_USB_BUILD/linux-${try_ver}" 2>/dev/null
+    sudo -u "$REAL_USER" -H bash -c "cd '$SND_USB_BUILD' && wget '${try_url}' -O - 2>/tmp/open-apollo-wget.log | xz -d 2>/dev/null | tar x --strip-components=1 'linux-${try_ver}/sound/usb/' 2>/dev/null" || true
+    if [ -f "$SND_USB_BUILD/sound/usb/format.c" ]; then
+        DOWNLOADED_KVER="$try_ver"
+        ok "Kernel source v${try_ver} downloaded"
+        rm -f /tmp/open-apollo-wget.log
+        break
+    fi
+    warn "v${try_ver} not available on kernel.org"
+done
+
+if [ -z "$DOWNLOADED_KVER" ]; then
+    fail "Could not download any kernel source (tried v${KVER_FULL} down to offset -3)"
+    info "Last wget error (if any):"
+    [ -f /tmp/open-apollo-wget.log ] && tail -5 /tmp/open-apollo-wget.log | sed 's/^/    /'
     info "You may need to build the patched module manually."
     info "See: tools/usb-re/0001-ALSA-usb-audio-Add-quirk-for-Universal-Audio-USB-devices.patch"
 else
@@ -272,37 +302,49 @@ else
     # The device declares EP 0x83 as "Implicit feedback Data" but handles its
     # own clock — snd-usb-audio trying to use it as feedback kills playback.
     # Two patches: implicit.c table entry + endpoint.c compatibility bypass.
+    #
+    # Every re.subn() below returns the replacement count — we assert exactly
+    # one match and sys.exit(2) on mismatch so silent regex drift never ships
+    # a stock (unpatched) module into production again.
     python3 -c "
-import re
+import re, sys
+
+def patch(path, pattern, repl, label):
+    with open(path) as f: s = f.read()
+    s, n = re.subn(pattern, repl, s, count=1)
+    if n != 1:
+        sys.stderr.write('PATCH-FAIL: ' + label + ' pattern did not match ' + path + '\n')
+        sys.exit(2)
+    with open(path, 'w') as f: f.write(s)
 
 # --- implicit.c: add SKIP_DEV entries to playback quirk table ---
-with open('$SRC/implicit.c') as f: s = f.read()
-s = re.sub(
+patch('$SRC/implicit.c',
     r'([ \t]*\{[ ]?\}[ \t]*/\*\s*terminator\s*\*/)',
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000d), /* Universal Audio Apollo Solo USB */\n'
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x0002), /* Universal Audio Twin USB */\n'
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000f), /* Universal Audio Twin X USB */\n'
     r'\1',
-    s, count=1)
-with open('$SRC/implicit.c', 'w') as f: f.write(s)
+    'implicit.c SKIP_DEV')
 
 # --- endpoint.c: allow EP reuse for UA devices (skip compat check) ---
-with open('$SRC/endpoint.c') as f: s = f.read()
-s = re.sub(
+patch('$SRC/endpoint.c',
     r'if \(!endpoint_compatible\(ep,\s*fp,\s*params\)\)',
     'if (!endpoint_compatible(ep, fp, params) &&\n\t\t    USB_ID_VENDOR(chip->usb_id) != 0x2b5a)',
-    s, count=1)
-with open('$SRC/endpoint.c', 'w') as f: f.write(s)
+    'endpoint.c compat bypass')
 
 # --- quirks.c: add IFACE_SKIP_CLOSE for UA devices ---
 # PipeWire opens/closes capture streams during negotiation. Each close
 # resets Interface 3 to alt=0, wiping the FPGA capture routing that
 # usb-full-init.py programmed. IFACE_SKIP_CLOSE prevents the alt=0
 # reset so the DSP program state persists across stream open/close.
-# Uses DEVICE_FLG() macro — the canonical entry for quirk_flag_table.
-with open('$SRC/quirks.c') as f: s = f.read()
-s = re.sub(
-    r'(static const struct quirk_flag_table quirk_flag_table\[\][^{]*\{)',
+#
+# NOTE on symbol names: the struct type is 'usb_audio_quirk_flags_table'
+# (prefixed, plural) and the array is 'quirk_flags_table' (plural) —
+# verified across kernels v6.1, v6.6, v6.17, and master.  The earlier
+# regex used singular 'quirk_flag_table' for both, which matched nothing
+# and silently skipped the patch.  DEVICE_FLG() is the canonical macro.
+patch('$SRC/quirks.c',
+    r'(static const struct usb_audio_quirk_flags_table quirk_flags_table\[\][^{]*\{)',
     r'\1\n'
     '\tDEVICE_FLG(0x2b5a, 0x000d, /* Universal Audio Apollo Solo USB */\n'
     '\t\t   QUIRK_FLAG_IFACE_SKIP_CLOSE),\n'
@@ -310,9 +352,19 @@ s = re.sub(
     '\t\t   QUIRK_FLAG_IFACE_SKIP_CLOSE),\n'
     '\tDEVICE_FLG(0x2b5a, 0x000f, /* Universal Audio Twin X USB */\n'
     '\t\t   QUIRK_FLAG_IFACE_SKIP_CLOSE),',
-    s, count=1)
-with open('$SRC/quirks.c', 'w') as f: f.write(s)
-"
+    'quirks.c IFACE_SKIP_CLOSE')
+" || die "snd-usb-audio source patching failed — regex did not match this kernel version. Report the kernel version on GitHub."
+
+    # Belt-and-suspenders: verify the UA vendor ID (0x2b5a) landed in every
+    # patched file.  Upstream sound/usb source contains zero references to
+    # 0x2b5a, so any absence after patching means the sed or re.subn pattern
+    # drifted and we'd be shipping a stock module again.
+    for f in format.c implicit.c endpoint.c quirks.c; do
+        if ! grep -qF '0x2b5a' "$SRC/$f" 2>/dev/null; then
+            die "Patch verification failed: '0x2b5a' not found in $f — report kernel version on GitHub"
+        fi
+    done
+    ok "All snd-usb-audio patches applied and verified"
 
     # Fix includes for out-of-tree build
     sed -i '1a #include <linux/usb.h>\n#include <linux/usb/audio.h>\n#include <linux/usb/audio-v2.h>\n#include <linux/usb/audio-v3.h>\n#include "usbaudio.h"\n#include "mixer.h"' "$SRC/mixer_maps.c"
@@ -335,13 +387,13 @@ all:
 MKEOF
     chown -R "$REAL_USER":"$REAL_USER" "$SND_USB_BUILD"
 
-    su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | grep -v 'BTF\|vmlinux' | tail -5"
+    sudo -u "$REAL_USER" -H bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | grep -v 'BTF\|vmlinux' | tail -5"
 
     # Check for the .ko file — retry once if first build failed
     # (BTF warnings are cosmetic and don't affect the module)
     if [ ! -f "$SRC/snd-usb-audio.ko" ]; then
         warn "First build attempt didn't produce .ko, retrying..."
-        su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | grep -v 'BTF\|vmlinux' | tail -5"
+        sudo -u "$REAL_USER" -H bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | grep -v 'BTF\|vmlinux' | tail -5"
     fi
 
     if [ -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
@@ -405,10 +457,16 @@ fi
 # No daemon needed.
 
 # Step A: Clean slate
-run_sudo pkill -9 -f "usb-dsp-init\|usb-full-init" 2>/dev/null || true
-if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
+#
+# Kill any stragglers from a previous install (udev-spawned init scripts
+# especially) AND unconditionally unload snd-usb-audio.  Previously this was
+# gated on the patched .ko existing, which meant when the build failed the
+# stock module kept running and blocked usb-full-init.py from claiming
+# interface 0 → `USBTimeoutError`.  Always rmmod, regardless of build state.
+run_sudo pkill -9 -f "usb-dsp-init\|usb-full-init\|ua-usb-init\|ua-usb-dsp-init" 2>/dev/null || true
+run_sudo udevadm settle 2>/dev/null || true
+run_sudo modprobe -r snd_usb_audio 2>/dev/null || \
     run_sudo rmmod snd_usb_audio 2>/dev/null || true
-fi
 sleep 1
 
 # Step B: Run full DSP init (38 packets including DSP program load for capture)
