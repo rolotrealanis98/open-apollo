@@ -101,7 +101,6 @@ If you own an Apollo model marked "Needs Testing", your contribution would be ex
 See [How to Contribute](/docs/how-to-contribute) for details, or jump straight to the device capture guides:
 
 - [Device Capture (macOS)](/docs/device-capture-macos) — capture routing data using DTrace
-- [Device Capture (Windows)](/docs/device-capture-windows) — capture register snapshots using WinRing0
 
 You can also run the quick probe script on Linux:
 

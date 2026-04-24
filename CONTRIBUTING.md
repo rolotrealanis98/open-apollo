@@ -17,21 +17,48 @@ us understand what works and what needs fixing across the Apollo product line.
 
 ### Steps
 
-1. Clone and build the driver:
+1. Clone the repo and check dependencies (common to both connection types):
    ```bash
    git clone https://github.com/open-apollo/open-apollo.git
    cd open-apollo
    ./scripts/check-deps.sh
-   cd driver && make
-   sudo insmod ua_apollo.ko
    ```
 
-2. Run the device probe script:
+   If you are unsure which connection type your Apollo uses, see
+   [Installation](https://open-apollo.org/docs/installation).
+
+### Thunderbolt Apollo (x-series, Twin/Arrow Thunderbolt)
+
+2. Apollo powered **off**, run the installer from the repo root; power the
+   Apollo on when the installer prompts:
    ```bash
-   ./scripts/device-probe.sh
+   sudo bash ./scripts/install.sh
    ```
 
-3. Submit the output as a [Device Report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) issue.
+3. From the repo root, run the device probe script:
+   ```bash
+   sudo ./tools/contribute/device-probe.sh
+   ```
+   The probe writes a JSON report and offers to upload it. The probe currently
+   expects the Thunderbolt `ua_apollo` kernel module and uses `lspci` — it is
+   **not** compatible with USB Apollos.
+
+4. Submit the probe output as a [Device Report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) issue.
+
+### USB Apollo (Solo USB, Twin X USB)
+
+2. Apollo plugged into a USB 3.0 port and powered **on**, run:
+   ```bash
+   sudo bash ./scripts/install-usb.sh
+   ```
+   The USB installer generates `/tmp/open-apollo-usb-install-report.json` and
+   offers to upload it on completion.
+
+3. Submit that report (plus any audio test notes — playback working? capture
+   attempts? PipeWire output?) as a
+   [Device Report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) issue.
+   Do **not** run `tools/contribute/device-probe.sh` on USB — it only supports
+   the Thunderbolt driver path and will error out.
 
 Even if nothing works, the probe output tells us what we need to know about
 your hardware revision. Negative results are still valuable.
@@ -39,14 +66,10 @@ your hardware revision. Negative results are still valuable.
 ## Tier 2: Capture Device Data
 
 For Apollo models we don't have routing tables for yet, we need register-level
-captures from a working system (Windows). This data lets us build correct
-routing and initialization sequences for each model.
-
-### Windows Capture
-
-See the [Windows capture guide](https://open-apollo.org/contribute/windows-capture)
-on our docs site for detailed instructions on capturing BAR0 register data
-using standard debugging tools.
+captures from a working macOS system using DTrace. See the
+[Device Capture (macOS) guide](https://open-apollo.org/docs/device-capture-macos)
+for instructions. The capture script is read-only — it observes driver behavior
+without modifying anything.
 
 > **Note:** Captures contain only hardware register values — no personal data,
 > no audio content, no account information.

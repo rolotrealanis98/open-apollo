@@ -52,7 +52,7 @@ The capture tools do not collect:
 4. Title your issue: `Device data: Apollo <model name>`
 5. In the description, include:
    - Your Apollo model (e.g., Apollo x8p, Arrow, Twin X)
-   - The operating system you captured from (macOS or Windows)
+   - The operating system you captured from (macOS)
    - Firmware version (if known)
    - Any notes about your configuration (sample rate, connected peripherals)
 6. Drag and drop your capture file(s) into the issue, or attach them as a `.json` or `.zip` file
@@ -111,5 +111,4 @@ Currently supported models have been developed and tested with captured data fro
 ## Further reading
 
 - [Device Capture on macOS](/docs/device-capture-macos) — how to capture data from macOS
-- [Device Capture on Windows](/docs/device-capture-windows) — how to capture data from Windows
 - [Supported Devices](/docs/supported-devices) — current device support status

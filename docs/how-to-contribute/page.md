@@ -32,7 +32,7 @@ Even a simple "driver loaded, audio plays" report on a model we haven't tested i
 
 ## Tier 2: Capture device data (advanced)
 
-The most valuable contribution is capturing device configuration data from a working system (macOS or Windows). This data tells us exactly how each Apollo model configures its audio routing, which is essential for supporting models we don't have physical access to.
+The most valuable contribution is capturing device configuration data from a working system (macOS). This data tells us exactly how each Apollo model configures its audio routing, which is essential for supporting models we don't have physical access to.
 
 ### macOS capture
 
@@ -40,15 +40,21 @@ Requires temporarily disabling System Integrity Protection (SIP) to use DTrace. 
 
 See the full guide: [Device Capture (macOS)](/docs/device-capture-macos)
 
-### Windows capture
-
-Uses WinRing0, an open-source kernel driver, to read PCIe registers. The capture script only reads status and configuration registers — no writes.
-
-See the full guide: [Device Capture (Windows)](/docs/device-capture-windows)
-
 ### After capturing
 
 See [Submitting Your Data](/docs/submitting-data) for how to review and submit your capture.
+
+---
+
+## Tier 2b: Run the install matrix
+
+The repository includes Docker-based install matrix tests that validate the driver builds and all configs deploy correctly across supported distros. Running these helps catch regressions:
+
+```bash
+bash tests/test-install-matrix.sh
+```
+
+This runs Dockerfiles in `tests/docker/` for Ubuntu, Fedora, Arch, Debian, openSUSE, Mint, Pop!_OS, and Manjaro. Requires Docker installed locally.
 
 ---
 
@@ -86,9 +92,11 @@ We use conventional commit prefixes:
 
 ### What we need most
 
-- **Device testing** — People with non-x4 Apollo models willing to test and report
-- **Routing table captures** — DTrace or BAR0 captures from untested models
+- **USB device testing** — People with Apollo Twin USB or Twin X USB willing to test `install-usb.sh` and report results
+- **Thunderbolt device testing** — People with non-x4 Apollo models willing to test and report
+- **Routing table captures** — DTrace or BAR0 captures from untested Thunderbolt models
 - **Mixer daemon improvements** — Protocol edge cases, error handling
+- **Kernel patch** — Submit the `snd-usb-audio` GET_RANGE quirk for VID `0x2B5A` to alsa-devel
 - **Documentation** — Corrections, clarifications, additional examples
 
 ---
