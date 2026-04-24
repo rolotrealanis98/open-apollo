@@ -76,6 +76,32 @@ def replay_init_sequence(dev, bin_path):
                     break
                 except usb.core.USBTimeoutError:
                     if attempt == 2:
+                        # Packet 0 timing out after all retries means the
+                        # device is wedged — usually a halted EP that
+                        # survived clear_halt, or stale state from a racing
+                        # snd-usb-audio probe.  A one-time bulk-IN drain +
+                        # halt-clear gives the device one last chance before
+                        # we surface the error to the user.
+                        if i == 0:
+                            try:
+                                usb.util.clear_halt(dev, EP_BULK_OUT)
+                                usb.util.clear_halt(dev, EP_BULK_IN)
+                            except Exception:
+                                pass
+                            try:
+                                while True:
+                                    dev.read(EP_BULK_IN, 1024, timeout=200)
+                            except usb.core.USBTimeoutError:
+                                pass
+                            try:
+                                dev.write(EP_BULK_OUT, pkt_data,
+                                          timeout=timeout)
+                                break
+                            except usb.core.USBTimeoutError:
+                                print("  [ 0] device unresponsive — "
+                                      "power-cycle the Apollo (unplug "
+                                      "USB, wait 5s, replug) and retry.")
+                                raise
                         raise
                     wait = 1.0 * (attempt + 1)
                     print(f"  [{i:2d}] timeout, retrying ({attempt+1}/3) "
@@ -118,6 +144,31 @@ try:
 except Exception:
     pass
 usb.util.claim_interface(dev, 0)
+
+# Normalize device state before replay.  Three failure modes get cleared here:
+#   1. Stale bulk-IN responses from a prior udev-triggered init — drain them
+#      or the first bulk OUT times out waiting for the device to service us.
+#   2. Halted bulk endpoints from an interrupted transfer (prior Ctrl-C,
+#      reboot mid-init, or a racing snd-usb-audio probe) — clear_halt resets
+#      the STALL condition so packet 0 can actually leave the host.
+#   3. DSP already running from a prior boot init — the FPGA sequence counter
+#      is mid-sequence, so re-running from packet 0 hangs.  A bulk-IN drain
+#      pulls any pending state replies; a subsequent init overwrites FPGA
+#      state cleanly because every packet carries an absolute write address.
+try:
+    usb.util.clear_halt(dev, EP_BULK_OUT)
+except Exception:
+    pass
+try:
+    usb.util.clear_halt(dev, EP_BULK_IN)
+except Exception:
+    pass
+# Drain any stale responses queued from a prior init.
+for _ in range(32):
+    try:
+        dev.read(EP_BULK_IN, 1024, timeout=50)
+    except usb.core.USBTimeoutError:
+        break
 
 # Step 1: Full init sequence (FPGA + routing + DSP programs)
 replay_init_sequence(dev, INIT_BIN)
