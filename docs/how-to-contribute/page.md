@@ -12,17 +12,43 @@ If you have an Apollo connected to a Linux machine, this is the most straightfor
 
 ### What to do
 
-1. Build and load the driver ([Installation guide](/docs/installation))
-2. Run the device probe script:
+1. Clone the repo and check dependencies (common to both connection types):
    ```bash
-   sudo ./tools/contribute/device-probe.sh
+   git clone https://github.com/open-apollo/open-apollo.git
+   cd open-apollo
+   ./scripts/check-deps.sh
    ```
-3. Test basic functionality:
+   If you are not sure which connection type your Apollo uses, see the
+   [Installation guide](/docs/installation).
+
+2. Install the driver for your connection type:
+
+   - **Thunderbolt Apollo** (x-series, Twin/Arrow Thunderbolt) — Apollo powered **off** when you start; power on when the installer prompts:
+     ```bash
+     sudo bash ./scripts/install.sh
+     ```
+   - **USB Apollo** (Solo USB, Twin X USB) — Apollo plugged into a USB 3.0 port and powered **on** before running:
+     ```bash
+     sudo bash ./scripts/install-usb.sh
+     ```
+     The USB installer writes `/tmp/open-apollo-usb-install-report.json` and offers to upload it.
+
+3. Generate the report to submit:
+
+   - **Thunderbolt Apollo:** from the repo root, run the device probe script:
+     ```bash
+     sudo ./tools/contribute/device-probe.sh
+     ```
+     The probe expects the Thunderbolt `ua_apollo` kernel module and uses `lspci`, so it does **not** work on USB Apollos.
+   - **USB Apollo:** use `/tmp/open-apollo-usb-install-report.json` from step 2. Do not run `device-probe.sh`.
+
+4. Test basic functionality and note what happens:
    - Does `aplay -l` show your Apollo?
    - Does audio playback work?
    - Does recording work?
    - Do preamp controls respond?
-4. [Submit a device report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) with your probe output and test results
+
+5. [Submit a device report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) with your probe/install report and test notes.
 
 ### What we learn
 
