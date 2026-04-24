@@ -33,11 +33,22 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="overlay" onclick={onclose}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="settings-modal" onclick={(e) => e.stopPropagation()}>
+  <div class="settings-modal mock" onclick={(e) => e.stopPropagation()}>
     <!-- Header -->
     <div class="modal-header">
       <button class="close-btn" onclick={onclose}>&#10005;</button>
       <span class="modal-title">SETTINGS</span>
+    </div>
+
+    <!--
+      All controls below are visual mocks — none are wired to the daemon
+      yet. SampleRate + ClockSource live in StatusBar.svelte; everything
+      else needs daemon-side plumbing that doesn't exist. Banner + mock
+      class keep the modal honest until each tab is wired up.
+    -->
+    <div class="mock-banner" role="note">
+      MOCK — read-only. Use the status bar for Sample Rate and Clock Source.
+      Other controls will be wired up per tab as daemon support lands.
     </div>
 
     <!-- Tabs -->
@@ -517,5 +528,26 @@
     background: var(--bg-recessed);
     border-radius: var(--radius-xs);
     color: var(--text-value);
+  }
+
+  /* ── Mock-mode banner + interaction lock ─────────────────── */
+  .mock-banner {
+    background: color-mix(in srgb, var(--amber) 18%, var(--bg-surface));
+    color: var(--amber);
+    border-bottom: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+    font-family: var(--font-family);
+    font-size: var(--font-label);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    padding: 6px 16px;
+    text-align: center;
+  }
+  /* Disable every interactive descendant except the close button + tabs.
+     The modal itself stays open; tabs still switch so users can preview
+     each panel. Inputs, selects, and buttons inside the panels are inert. */
+  .mock .tab-content :where(select, input, button) {
+    pointer-events: none;
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 </style>
