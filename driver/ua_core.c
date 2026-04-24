@@ -800,8 +800,9 @@ out:
  *
  * Must be called with ua->lock held.
  */
-int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
-			 u32 param_id, u32 value)
+__attribute__((optimize("Os"))) int
+ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
+		     u32 param_id, u32 value)
 {
 	unsigned int setting_idx;
 	u32 hw_val, hw_mask;
@@ -2433,6 +2434,23 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 */
 
 		if (fw_ret == 0) {
+			/*
+			 * Load captured plugin-chain DMA payloads so
+			 * ua_dsp_activate_plugin_chain() can substitute
+			 * Linux dma_addrs for the Windows-era host PAs
+			 * baked into ua_plugin_chain_data[].  Soft-fails:
+			 * if the firmware blob is missing, DMA_REF entries
+			 * are skipped and preamp relays (PAD/48V/MicLine)
+			 * will not toggle, but the rest of the driver
+			 * still operates.
+			 */
+			int plugin_ret = ua_dsp_load_plugin_payloads(ua);
+
+			if (plugin_ret && plugin_ret != -ENOENT)
+				dev_warn(&pdev->dev,
+					 "plugin chain fw load failed: %d\n",
+					 plugin_ret);
+
 			if (ua_uses_audio_extension(ua->device_type)) {
 				/*
 				 * On cold boot, ACEFACE fails before FW
@@ -2456,6 +2474,24 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 					 ua->aceface_done ? "done" : "FAILED");
 			} else {
 				fw_ret = ua_dsp_connect_all(ua);
+				/*
+				 * Non-AudioExtension devices connect in
+				 * probe; activate the plugin chain now so
+				 * its DSP programs load before userspace
+				 * opens the device.  AudioExtension devices
+				 * defer activation to ua_audio_connect()
+				 * (after ACEFACE completes).
+				 */
+				if (fw_ret == 0 && !ua->plugins_activated) {
+					int pc_ret =
+						ua_dsp_activate_plugin_chain(ua);
+					if (pc_ret)
+						dev_warn(&pdev->dev,
+							 "plugin chain activate failed: %d\n",
+							 pc_ret);
+					else
+						ua->plugins_activated = true;
+				}
 			}
 
 			if (fw_ret == 0) {
@@ -2809,7 +2845,10 @@ static void ua_remove(struct pci_dev *pdev)
 	/* 7. Free DSP ring pages */
 	ua_dsp_rings_fini(ua);
 
-	/* 8. Cleanup chardev and IDA */
+	/* 8. Release plugin-chain DMA payload buffers */
+	ua_dsp_free_plugin_payloads(ua);
+
+	/* 9. Cleanup chardev and IDA */
 	device_destroy(ua_class, MKDEV(MAJOR(ua_devno), ua->dev_id));
 	cdev_del(&ua->cdev);
 	ida_free(&ua_ida, ua->dev_id);

@@ -34,5 +34,6 @@ install:
 
 firmware-install:
 	install -m 644 $(CURDIR)/../ua-apollo-mixer.bin /lib/firmware/ua-apollo-mixer.bin
+	install -m 644 $(CURDIR)/../configs/firmware/ua-apollo-plugin-chain.bin /lib/firmware/ua-apollo-plugin-chain.bin
 
 .PHONY: all clean install firmware-install

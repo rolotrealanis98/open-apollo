@@ -1007,6 +1007,32 @@ post_handshake:
 				audio->connected = true;
 
 				/*
+				 * Activate plugin chain AFTER ACEFACE connect
+				 * succeeds and BEFORE mixer batch protocol
+				 * begins.  This loads the DSP programs that
+				 * forward preamp flag writes (PAD/48V/MicLine)
+				 * from SRAM to the ARM MCU; without it, those
+				 * relays don't toggle.  cmd[2]/cmd[3] of each
+				 * DMA_REF entry is substituted with the Linux
+				 * dma_addr of the matching payload buffer
+				 * loaded earlier via request_firmware().
+				 *
+				 * Guarded by plugins_activated so replug /
+				 * reconnect doesn't re-run.  Soft-fails if
+				 * payloads weren't loaded (DMA_REFs skipped).
+				 */
+				if (!ua->plugins_activated) {
+					int pc_ret =
+						ua_dsp_activate_plugin_chain(ua);
+					if (pc_ret)
+						dev_warn(&ua->pdev->dev,
+							 "plugin chain activate failed: %d\n",
+							 pc_ret);
+					else
+						ua->plugins_activated = true;
+				}
+
+				/*
 				 * Initialize mixer batch protocol.
 				 *
 				 * The DSP reads ALL 38 settings atomically

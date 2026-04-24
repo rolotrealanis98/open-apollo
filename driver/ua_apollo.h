@@ -336,6 +336,19 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_MIXER_FW_VERSION     1
 #define UA_MIXER_FW_NAME        "ua-apollo-mixer.bin"
 
+/* Plugin-chain firmware blob format (ua-apollo-plugin-chain.bin).
+ * Contains captured DMA_REF payloads from the Windows driver; the
+ * kernel substitutes each payload's Linux dma_addr into cmd[2]/cmd[3]
+ * of the ring entries before submitting the plugin chain.  Without
+ * this, DMA_REF entries in ua_plugin_chain.h carry raw Windows host
+ * physical addresses (0x9_492Cxxxx..0x9_493Fxxxx) that do not exist
+ * on Linux — the FPGA fetches garbage and any DSP program loaded via
+ * the plugin chain (including the DSP→ARM flag-forwarder that drives
+ * PAD/48V/MicLine relays) never initializes. */
+#define UA_PLUGIN_CHAIN_FW_MAGIC    0x43504155  /* 'UAPC' */
+#define UA_PLUGIN_CHAIN_FW_VERSION  1
+#define UA_PLUGIN_CHAIN_FW_NAME     "ua-apollo-plugin-chain.bin"
+
 /* DMA Constants */
 #define UA_PCIE_PAGE_SIZE       0x1000  /* 4 KiB page alignment for DMA */
 #define UA_RING_MAX_SIZE        0x0400  /* Max 1024 descriptors per ring */
@@ -717,6 +730,15 @@ struct ua_audio {
 	snd_pcm_uframes_t last_rec_period_pos;
 };
 
+/* One allocated DMA buffer carrying a plugin-chain DMA_REF payload.
+ * Lifetime tied to the ua_device — allocated at probe, freed at remove. */
+struct ua_plugin_dma_buf {
+	unsigned int ring_idx;      /* Index into ua_plugin_chain_data[] */
+	size_t size;                /* Buffer size in bytes */
+	dma_addr_t dma;             /* DMA address handed to the FPGA */
+	void *cpu;                  /* Kernel-visible mapping (coherent) */
+};
+
 struct ua_device {
 	struct pci_dev *pdev;
 	void __iomem *regs;         /* BAR0 MMIO base */
@@ -749,6 +771,14 @@ struct ua_device {
 	bool pcie_setup_done;       /* PCIe ASPM/timeout configured */
 	bool plugins_activated;     /* Plugin chain sent to DSP */
 	bool skip_bus_coeff;        /* Skip BUS_COEFF in plugin chain */
+
+	/* Plugin-chain DMA payload buffers (one per DMA_REF ring entry).
+	 * Allocated by ua_dsp_load_plugin_payloads() when the firmware
+	 * blob is present; freed by ua_dsp_free_plugin_payloads().  The
+	 * array is indexed by ring_idx (sparse — only populated for
+	 * entries whose cmd[0] has bit31 set). */
+	struct ua_plugin_dma_buf *plugin_bufs;
+	unsigned int plugin_bufs_count;
 
 	/* Mixer batch write state (matches kext CPcieDeviceMixer protocol) */
 	u32 mixer_val[UA_MIXER_BATCH_COUNT];   /* Cached setting values */
@@ -917,6 +947,8 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 int ua_dsp_load_mixer_blocks(struct ua_device *ua);
 int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_connect_all(struct ua_device *ua);
+int ua_dsp_load_plugin_payloads(struct ua_device *ua);
+void ua_dsp_free_plugin_payloads(struct ua_device *ua);
 int ua_dsp_activate_plugin_chain(struct ua_device *ua);
 void ua_dump_mixer_sram(struct ua_device *ua, const char *label);
 int ua_dsp_test_dma_ref(struct ua_device *ua);

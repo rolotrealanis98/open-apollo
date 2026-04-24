@@ -2260,17 +2260,208 @@ int ua_dsp_connect_all(struct ua_device *ua)
 #include "ua_plugin_chain.h"
 
 /**
+ * ua_dsp_load_plugin_payloads - Load plugin-chain DMA payloads from firmware
+ * @ua: device
+ *
+ * The ua_plugin_chain_data[] table includes DMA_REF entries whose
+ * cmd[2]/cmd[3] are Windows host physical addresses captured on the
+ * original driver's machine.  Those addresses are meaningless on
+ * Linux; the FPGA would fetch garbage.  This function loads the
+ * captured payload bytes from /lib/firmware/ua-apollo-plugin-chain.bin
+ * (packed by tools/build-plugin-chain-firmware.py) and allocates one
+ * coherent DMA buffer per DMA_REF entry, keyed by ring_idx.
+ *
+ * ua_dsp_activate_plugin_chain() then substitutes cmd[2]/cmd[3] with
+ * the Linux dma_addr of the matching buffer before handing the entry
+ * to the ring.
+ *
+ * -ENOENT is a soft failure: plugin-chain activation will still run
+ * but DMA_REF entries will be skipped, so DSP programs that depend on
+ * plugin-loaded code (including the ARM flag-forwarder driving
+ * PAD/48V/MicLine relays) will not initialize.
+ */
+int ua_dsp_load_plugin_payloads(struct ua_device *ua)
+{
+	const struct firmware *fw;
+	const u8 *data;
+	u32 magic, version, entry_count, data_offset;
+	unsigned int table_size, i;
+	int ret;
+
+	if (ua->plugin_bufs)
+		return 0;   /* Already loaded */
+
+	ret = request_firmware(&fw, UA_PLUGIN_CHAIN_FW_NAME, &ua->pdev->dev);
+	if (ret) {
+		if (ret == -ENOENT)
+			dev_warn(&ua->pdev->dev,
+				 "plugin chain firmware '%s' not found; "
+				 "DMA_REF entries will be skipped (preamp "
+				 "PAD/48V/MicLine relays will not work)\n",
+				 UA_PLUGIN_CHAIN_FW_NAME);
+		else
+			dev_err(&ua->pdev->dev,
+				"plugin chain firmware load failed: %d\n", ret);
+		return ret;
+	}
+
+	data = fw->data;
+
+	if (fw->size < 16) {
+		dev_err(&ua->pdev->dev,
+			"plugin chain fw too small (%zu bytes)\n", fw->size);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	magic        = le32_to_cpup((__le32 *)&data[0]);
+	version      = le32_to_cpup((__le32 *)&data[4]);
+	entry_count  = le32_to_cpup((__le32 *)&data[8]);
+	data_offset  = le32_to_cpup((__le32 *)&data[12]);
+
+	if (magic != UA_PLUGIN_CHAIN_FW_MAGIC) {
+		dev_err(&ua->pdev->dev,
+			"plugin chain fw bad magic 0x%08x\n", magic);
+		ret = -EINVAL;
+		goto out;
+	}
+	if (version != UA_PLUGIN_CHAIN_FW_VERSION) {
+		dev_err(&ua->pdev->dev,
+			"plugin chain fw version %u unsupported\n", version);
+		ret = -EINVAL;
+		goto out;
+	}
+	if (entry_count == 0 || entry_count > 512) {
+		dev_err(&ua->pdev->dev,
+			"plugin chain fw bad entry count %u\n", entry_count);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	table_size = entry_count * 12;
+	if (fw->size < 16 + table_size || data_offset < 16 + table_size) {
+		dev_err(&ua->pdev->dev,
+			"plugin chain fw truncated (size=%zu, need >= %u)\n",
+			fw->size, 16 + table_size);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ua->plugin_bufs = kcalloc(entry_count,
+				  sizeof(*ua->plugin_bufs), GFP_KERNEL);
+	if (!ua->plugin_bufs) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	ua->plugin_bufs_count = entry_count;
+
+	for (i = 0; i < entry_count; i++) {
+		unsigned int entry_off = 16 + i * 12;
+		u32 ring_idx, payload_bytes, payload_off;
+		struct ua_plugin_dma_buf *buf = &ua->plugin_bufs[i];
+
+		ring_idx      = le32_to_cpup((__le32 *)&data[entry_off]);
+		payload_bytes = le32_to_cpup((__le32 *)&data[entry_off + 4]);
+		payload_off   = le32_to_cpup((__le32 *)&data[entry_off + 8]);
+
+		if (!payload_bytes ||
+		    payload_off < data_offset ||
+		    payload_off + payload_bytes > fw->size) {
+			dev_err(&ua->pdev->dev,
+				"plugin fw entry %u bad range "
+				"(off=%u bytes=%u total=%zu)\n",
+				i, payload_off, payload_bytes, fw->size);
+			ret = -EINVAL;
+			goto out_free;
+		}
+
+		buf->ring_idx = ring_idx;
+		buf->size = payload_bytes;
+		buf->cpu = dma_alloc_coherent(&ua->pdev->dev, payload_bytes,
+					      &buf->dma, GFP_KERNEL);
+		if (!buf->cpu) {
+			dev_err(&ua->pdev->dev,
+				"plugin fw entry %u: dma_alloc %u bytes failed\n",
+				i, payload_bytes);
+			ret = -ENOMEM;
+			goto out_free;
+		}
+		memcpy(buf->cpu, &data[payload_off], payload_bytes);
+	}
+
+	dev_info(&ua->pdev->dev,
+		 "plugin chain firmware loaded: %u DMA_REF payloads, %zu bytes total\n",
+		 entry_count, fw->size);
+	release_firmware(fw);
+	return 0;
+
+out_free:
+	ua_dsp_free_plugin_payloads(ua);
+out:
+	release_firmware(fw);
+	return ret;
+}
+
+/**
+ * ua_dsp_free_plugin_payloads - Release plugin-chain DMA buffers
+ * @ua: device
+ *
+ * Called on device teardown or as rollback from ua_dsp_load_plugin_payloads().
+ */
+void ua_dsp_free_plugin_payloads(struct ua_device *ua)
+{
+	unsigned int i;
+
+	if (!ua->plugin_bufs)
+		return;
+
+	for (i = 0; i < ua->plugin_bufs_count; i++) {
+		struct ua_plugin_dma_buf *buf = &ua->plugin_bufs[i];
+
+		if (buf->cpu)
+			dma_free_coherent(&ua->pdev->dev, buf->size,
+					  buf->cpu, buf->dma);
+	}
+	kfree(ua->plugin_bufs);
+	ua->plugin_bufs = NULL;
+	ua->plugin_bufs_count = 0;
+}
+
+/**
+ * ua_plugin_lookup_dma - Find allocated DMA buffer for a ring index
+ * Returns NULL if no buffer was allocated for that entry.
+ */
+static struct ua_plugin_dma_buf *
+ua_plugin_lookup_dma(struct ua_device *ua, unsigned int ring_idx)
+{
+	unsigned int i;
+
+	if (!ua->plugin_bufs)
+		return NULL;
+
+	for (i = 0; i < ua->plugin_bufs_count; i++) {
+		if (ua->plugin_bufs[i].ring_idx == ring_idx)
+			return &ua->plugin_bufs[i];
+	}
+	return NULL;
+}
+
+/**
  * ua_dsp_activate_plugin_chain - Send plugin chain init to DSP 0
  * @ua: device (must hold ua->lock)
  *
  * Replays the SRAM_CFG + ROUTING + DMA_REF + MODULE_ACTIVATE + SYNCH
  * sequence captured from a working Windows driver.  This activates the
  * DSP mixer/routing modules so that SEL131 SetMixerParam commands
- * (monitor volume, gain, talkback, dim) take effect.
+ * (monitor volume, gain, talkback, dim) take effect, AND loads the
+ * DSP program that forwards flag writes (PAD, 48V, MicLine) from SRAM
+ * to the ARM MCU so those relays actually toggle.
  *
- * Without this, the DSP kernel runs (ring buffer commands like bus
- * coefficients work) but the mixer task never starts, so SRAM-based
- * parameter writes are ignored.
+ * DMA_REF entries (cmd[0] & 0x80000000) carry Windows host physical
+ * addresses in cmd[2]/cmd[3] that are invalid on Linux.  Each one is
+ * substituted with the Linux dma_addr of a coherent buffer whose
+ * contents came from ua_dsp_load_plugin_payloads().  If no payload
+ * was loaded (firmware blob missing), the DMA_REF entry is skipped.
  *
  * Data extracted from tools/captures/win-dsp0-ring-complete-20260319.json
  */
@@ -2288,6 +2479,34 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 		dev_warn(&ua->pdev->dev,
 			 "plugin chain: DSP 0 rings not ready\n");
 		return -ENODEV;
+	}
+
+	/*
+	 * Attempt to load payloads if not already loaded.  This lets a
+	 * caller whose first probe happened before the firmware blob
+	 * was installed pick it up on a later reconnect without a
+	 * module reload.  Idempotent: returns 0 immediately if already
+	 * loaded.
+	 */
+	if (!ua->plugin_bufs)
+		(void)ua_dsp_load_plugin_payloads(ua);
+
+	/*
+	 * Refuse to send the plugin chain without payloads.  Sending it
+	 * with every DMA_REF skipped leaves the DSP in a partially
+	 * configured state: DSP programs that depend on DMA-fetched
+	 * code or tables (including the ARM flag-forwarder driving
+	 * PAD/48V/MicLine relays) never initialize.  Returning an error
+	 * here keeps ua->plugins_activated = false in the caller so a
+	 * subsequent reconnect retries once the firmware blob is in
+	 * /lib/firmware/.
+	 */
+	if (!ua->plugin_bufs) {
+		dev_warn(&ua->pdev->dev,
+			 "plugin chain: payloads not loaded, activation skipped "
+			 "(install %s to enable preamp relays)\n",
+			 UA_PLUGIN_CHAIN_FW_NAME);
+		return -ENODATA;
 	}
 
 	dev_info(&ua->pdev->dev,
@@ -2310,6 +2529,8 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 
 		for (int j = 0; j < batch; j++) {
 			const u32 *cmd = ua_plugin_chain_data[i + j];
+			u32 word2 = cmd[2];
+			u32 word3 = cmd[3];
 
 			/*
 			 * Optionally skip BUS_COEFF commands (0x001D0004).
@@ -2322,11 +2543,30 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 				continue;
 			}
 
+			/*
+			 * DMA_REF entries: substitute Windows host physical
+			 * addresses (cmd[2]/cmd[3]) with the Linux dma_addr
+			 * of the matching payload buffer.  Skip the entry if
+			 * no payload is available — the FPGA would otherwise
+			 * DMA garbage from an invalid address.
+			 */
+			if (cmd[0] & 0x80000000) {
+				struct ua_plugin_dma_buf *buf =
+					ua_plugin_lookup_dma(ua, i + j);
+
+				if (!buf) {
+					skipped++;
+					continue;
+				}
+				word2 = lower_32_bits(buf->dma);
+				word3 = upper_32_bits(buf->dma);
+			}
+
 			entry = (struct ua_ring_entry){
 				.word0 = cpu_to_le32(cmd[0]),
 				.word1 = cpu_to_le32(cmd[1]),
-				.word2 = cpu_to_le32(cmd[2]),
-				.word3 = cpu_to_le32(cmd[3]),
+				.word2 = cpu_to_le32(word2),
+				.word3 = cpu_to_le32(word3),
 			};
 
 			ret = ua_dsp_ring_put_entry(&ds->cmd, &entry);

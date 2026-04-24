@@ -560,6 +560,49 @@ check_iommu() {
 }
 
 # ================================================================
+# Step 4c: Install firmware blobs to /lib/firmware/
+# ================================================================
+# Ships DSP mixer blob (if present in repo root) and the plugin-chain
+# DMA payload blob (always shipped under configs/firmware/).  The
+# plugin-chain blob is REQUIRED for preamp PAD/48V/MicLine relays to
+# toggle — without it, ua_dsp_load_plugin_payloads returns -ENOENT
+# and ua_dsp_activate_plugin_chain skips every DMA_REF entry.
+install_firmware() {
+    header "Installing Firmware Blobs"
+
+    local pc_src="$PROJECT_DIR/configs/firmware/ua-apollo-plugin-chain.bin"
+    local mx_src="$PROJECT_DIR/ua-apollo-mixer.bin"
+    local dst="/lib/firmware"
+    local any=0
+
+    run_sudo mkdir -p "$dst"
+
+    if [ -f "$pc_src" ]; then
+        if run_sudo install -m 644 "$pc_src" "$dst/ua-apollo-plugin-chain.bin"; then
+            ok "plugin-chain firmware: $dst/ua-apollo-plugin-chain.bin"
+            any=1
+        else
+            fail "failed to install plugin-chain firmware"
+            STEP_STATUS[firmware]="fail"
+            return 1
+        fi
+    else
+        warn "plugin-chain firmware missing: $pc_src"
+        warn "  regenerate with: python3 tools/build-plugin-chain-firmware.py"
+        warn "  preamp PAD/48V/MicLine relays will NOT work without it"
+    fi
+
+    if [ -f "$mx_src" ]; then
+        if run_sudo install -m 644 "$mx_src" "$dst/ua-apollo-mixer.bin"; then
+            ok "mixer firmware: $dst/ua-apollo-mixer.bin"
+            any=1
+        fi
+    fi
+
+    STEP_STATUS[firmware]=$([ "$any" = "1" ] && echo ok || echo skipped)
+}
+
+# ================================================================
 # Step 5: Deploy configs
 # ================================================================
 deploy_configs() {
@@ -955,6 +998,7 @@ check_install_deps || true
 build_driver       || true
 setup_dkms         || true
 check_iommu        || true
+install_firmware   || true
 deploy_configs     || true
 
 # Check if build succeeded before proceeding
