@@ -867,10 +867,31 @@ class MixerDaemon:
                 be.set_mixer_param(2, ch_idx, 0x44, 0)   # DIM OFF
             log.info("Sent talkback/dim init sequence (TB_CONFIG + OFF)")
 
-            # Full per-channel preamp init matching macOS DTrace order.
-            # macOS sends 13 params per channel: Route → Level → LowCut →
-            # MicLine → 0x08(2x) → GainC → Phase → 0x07 → 0x11 → PAD →
-            # 48V → Link → Route(again).
+            # Full per-channel preamp init matching macOS DTrace capture
+            # (apollo-linux/tools/captures/macos-full-init-20260322-decoded.txt).
+            #
+            # macOS order per preamp channel:
+            #   1 leading  Route (0x13)       — all 4 channels first
+            #   2 leading  Level (0x16 = 0xA0) — all 4 channels second
+            #   3 flag block (LowCut → MicLine → 0x08×2 → GainC → Phase
+            #                 → 0x07 → 0x11(ch 0-1) → PAD → 48V → Link(0,2))
+            #   4 trailing Route × 2          — per channel, right after flags
+            #   5 trailing Level (0x16 = 0xA0) — all 4 channels, later
+            #
+            # Prior Linux sequence sent only the flag block + a single
+            # trailing Route and never sent Level (0x16) at all.  Symptom:
+            # setting[0] bits 0/1/3 (MicLine, PAD, 48V) reached SRAM but
+            # the ARM MCU never latched the physical relays — bits 4/5
+            # (LowCut, Phase) worked because they are DSP-internal.
+            #
+            # Working hypothesis (plans/260424-0922-dsp-arm-relay-propagation/
+            # research/findings.md): 0x16=0xA0 is the ARM-relay arm signal.
+            # Matching macOS exactly makes hypothesis bisection unnecessary.
+            for ch in range(4):
+                be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route (leading)
+            for ch in range(4):
+                be.set_mixer_param(PREAMP, ch, 0x16, 0xA0)       # Level = -16 dB (leading)
+
             for ch in range(4):
                 be.set_mixer_param(PREAMP, ch, 0x04, 0)          # LowCut=off
                 be.set_mixer_param(PREAMP, ch, 0x00, 0)          # Mic/Line=Mic
@@ -885,8 +906,12 @@ class MixerDaemon:
                 be.set_mixer_param(PREAMP, ch, 0x03, 0)          # 48V=off
                 if ch in (0, 2):  # Link on first of each pair
                     be.set_mixer_param(PREAMP, ch, 0x02, 0)      # Link=off
-                be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route (again)
-            log.info("Sent full preamp init: 13 params × 4 channels")
+                be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route pass 2
+                be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route pass 3
+
+            for ch in range(4):
+                be.set_mixer_param(PREAMP, ch, 0x16, 0xA0)       # Level = -16 dB (trailing)
+            log.info("Sent full preamp init: 4 ch × (Route + Level + 10 flags + 2×Route) + Level")
 
             # Full monitor section init — replicate macOS UA Mixer Engine
             # connect sequence. DTrace capture shows macOS sends
