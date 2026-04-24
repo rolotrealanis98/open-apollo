@@ -3248,7 +3248,8 @@ int ua_dsp_load_programs(struct ua_device *ua)
 	for (i = 0; i < UA_X4_DSP0_NUM_PROGRAMS; i++) {
 		const struct ua_dsp_program *prog = &ua_x4_dsp0_programs[i];
 
-		ret = ua_dsp_send_block(ua, 0, UA_FW_CMD, UA_FW_PARAM,
+		ret = ua_dsp_send_block(ua, 0,
+					UA_DSP_PROG_CMD, UA_DSP_PROG_PARAM,
 					prog->data, prog->size);
 		if (ret) {
 			dev_err(&ua->pdev->dev,
