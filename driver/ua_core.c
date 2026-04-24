@@ -2451,6 +2451,30 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 					 "plugin chain fw load failed: %d\n",
 					 plugin_ret);
 
+			/*
+			 * Upload DSP audio programs ("Bill" blocks) — EB,
+			 * A5, C2, DB, 12B.  The plugin-chain MODULE_ACTIVATE
+			 * commands reference these by module ID, but
+			 * without the program binaries in DSP SRAM the
+			 * activated modules are stubs with no relay
+			 * forwarding logic.  This is the current primary
+			 * suspect for PAD/48V/MicLine failing to toggle
+			 * (see plans/reports/hardware-re-260424-1258-
+			 * arm-relay-mechanism-hunt.md).
+			 *
+			 * Soft-fail: logs a warning but proceeds so we
+			 * can still observe DSP-internal controls working
+			 * if program upload goes wrong.
+			 */
+			{
+				int prog_ret = ua_dsp_load_programs(ua);
+
+				if (prog_ret)
+					dev_warn(&pdev->dev,
+						 "DSP program load failed: %d\n",
+						 prog_ret);
+			}
+
 			if (ua_uses_audio_extension(ua->device_type)) {
 				/*
 				 * On cold boot, ACEFACE fails before FW

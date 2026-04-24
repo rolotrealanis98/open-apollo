@@ -3223,7 +3223,8 @@ int ua_dsp_send_routing(struct ua_device *ua)
 
 int ua_dsp_load_programs(struct ua_device *ua)
 {
-	int dsp, i, ret;
+	unsigned int i;
+	int ret;
 
 	if (ua->device_type != UA_DEV_APOLLO_X4) {
 		dev_info(&ua->pdev->dev,
@@ -3232,24 +3233,23 @@ int ua_dsp_load_programs(struct ua_device *ua)
 	}
 
 	/*
-	 * Send programs to all 4 DSPs matching macOS sequence:
-	 *   DSP 0: A5 (mixer) + C2 (routing) + DB (capture) = 3 blocks
-	 *   DSP 1-3: A5 (mixer) + C2 (routing) = 2 blocks each
+	 * DSP 0 only.  macOS loads the same 5 "Bill" programs to all
+	 * 4 SHARC DSPs, but Linux currently only firmware-loads DSP 0
+	 * (ua_dsp_load_mixer_blocks / ua-apollo-mixer.bin). Submitting
+	 * program blocks to DSPs 1-3 whose bootloaders are not yet
+	 * firmware-loaded leaves ring state of unclear correctness —
+	 * ship-safe behavior is to stay on the FW-ready DSP 0 until
+	 * the DSP 1-3 FW load path exists.  Extend to all DSPs once
+	 * that lands.
 	 */
-	for (dsp = 0; dsp < ua->num_dsps && dsp < 4; dsp++) {
-		/* All DSPs get A5 + C2 (first 2 programs) */
-		int num = (dsp == 0) ? UA_X4_DSP0_NUM_PROGRAMS : 2;
+	dev_info(&ua->pdev->dev,
+		 "loading %u programs for DSP 0\n", UA_X4_DSP0_NUM_PROGRAMS);
 
-		dev_info(&ua->pdev->dev,
-			 "loading %d programs for DSP %d\n", num, dsp);
+	for (i = 0; i < UA_X4_DSP0_NUM_PROGRAMS; i++) {
+		const struct ua_dsp_program *prog = &ua_x4_dsp0_programs[i];
 
-		for (i = 0; i < num; i++) {
-			const struct ua_dsp_program *prog =
-				&ua_x4_dsp0_programs[i];
-
-			ret = ua_dsp_send_block(ua, dsp, UA_FW_CMD,
-						UA_FW_PARAM,
-						prog->data, prog->size);
+		ret = ua_dsp_send_block(ua, 0, UA_FW_CMD, UA_FW_PARAM,
+					prog->data, prog->size);
 		if (ret) {
 			dev_err(&ua->pdev->dev,
 				"DSP program %s failed: %d\n",
@@ -3257,11 +3257,10 @@ int ua_dsp_load_programs(struct ua_device *ua)
 			return ret;
 		}
 		dev_info(&ua->pdev->dev,
-			 "  DSP%d: loaded %s (%u bytes)\n",
-			 dsp, prog->name, prog->size);
-		}
+			 "  DSP0: loaded %s (%u bytes)\n",
+			 prog->name, prog->size);
 	}
 
-	dev_info(&ua->pdev->dev, "DSP audio programs loaded (4 DSPs)\n");
+	dev_info(&ua->pdev->dev, "DSP audio programs loaded (DSP 0)\n");
 	return 0;
 }
