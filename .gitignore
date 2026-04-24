@@ -13,11 +13,16 @@ Module.symvers
 __pycache__/
 *.pyc
 .venv/
+.env.save
+.env.local
+.env.*.local
 
 # Node
 node_modules/
 .next/
 out/
+console-web/node_modules/
+console-web/dist/
 
 # OS
 .DS_Store
@@ -29,12 +34,32 @@ Thumbs.db
 
 # AI agent config (local only, never commit)
 .claude/
+.codex/
+.opencode/
+.agents/
+.cursor/
+.roo/
+.aider/
+.windsurf/
+.continue/
+.mcp.json
+opencode.json
+.repomixignore
+repomix-output.*
+AGENTS.md
 CLAUDE.md
+CODEX.md
+OPENCODE.md
 
 # Captures (never commit binary payloads)
 *.bin
 *.log
 .obsidian/
+release-manifest.json
+tools/usb-re/*.pcap
+tools/usb-re/*.etl
+tools/usb-re/*.sys
+tools/usb-re/*.dll
 
 # Docs site (Tailwind Plus license — private repo)
 docs-site/
@@ -43,3 +68,6 @@ docs-site/
 plans/
 tools/testbench/
 tests/
+
+usb-firmware
+driver/.*.cmd

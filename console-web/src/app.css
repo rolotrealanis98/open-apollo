@@ -1,0 +1,84 @@
+/*
+ * Apollo Console — Design Tokens & Global Styles
+ * Skeuomorphic aesthetic inspired by UAD Console
+ */
+
+:root {
+  /* ── Background palette ──────────────────────────────────── */
+  --bg-primary:   #18181b;
+  --bg-surface:   #222225;
+  --bg-elevated:  #2a2a2e;
+  --bg-recessed:  #0f0f11;
+
+  /* ── Bezel / 3D edge colors ──────────────────────────────── */
+  --bezel-light:  #3a3a3e;
+  --bezel-dark:   #0c0c0e;
+
+  /* ── Text palette ────────────────────────────────────────── */
+  --text-primary:   #d4d4d8;
+  --text-secondary: #71717a;
+  --text-value:     #e4e4e7;
+  --text-on-accent: #ffffff;
+  --text-dimmed:    #3f3f46;
+
+  /* ── Accent colors ──────────────────────────────────────── */
+  --red:          #ef4444;
+  --red-dim:      #7f1d1d;
+  --red-glow:     rgba(239, 68, 68, 0.4);
+  --amber:        #f59e0b;
+  --amber-dim:    #78350f;
+  --amber-glow:   rgba(245, 158, 11, 0.4);
+  --green:        #22c55e;
+  --green-dim:    #14532d;
+  --green-glow:   rgba(34, 197, 94, 0.4);
+  --blue:         #60a5fa;
+  --blue-dim:     #1e3a5f;
+  --blue-glow:    rgba(96, 165, 250, 0.4);
+  --gray:         #a1a1aa;
+  --gray-dim:     #3f3f46;
+  --gray-glow:    rgba(161, 161, 170, 0.3);
+
+  /* ── Spacing (4px base grid) ─────────────────────────────── */
+  --sp-xs:   4px;
+  --sp-sm:   8px;
+  --sp-md:  12px;
+  --sp-lg:  16px;
+  --sp-xl:  24px;
+  --sp-xxl: 32px;
+
+  /* ── Border radii ────────────────────────────────────────── */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+
+  /* ── Typography ──────────────────────────────────────────── */
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-tiny:    8px;
+  --font-label:   9px;
+  --font-value:  11px;
+  --font-heading: 13px;
+  --font-title:  16px;
+
+  /* ── Animation ───────────────────────────────────────────── */
+  --anim-fast:   80ms;
+  --anim-normal: 150ms;
+}
+
+/* ── Reset & Base ────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  min-height: 100vh;
+}
