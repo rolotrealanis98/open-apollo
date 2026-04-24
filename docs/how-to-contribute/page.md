@@ -14,7 +14,7 @@ If you have an Apollo connected to a Linux machine, this is the most straightfor
 
 1. Clone the repo and check dependencies (common to both connection types):
    ```bash
-   git clone https://github.com/open-apollo/open-apollo.git
+   git clone https://github.com/rolotrealanis98/open-apollo.git
    cd open-apollo
    ./scripts/check-deps.sh
    ```
@@ -48,7 +48,7 @@ If you have an Apollo connected to a Linux machine, this is the most straightfor
    - Does recording work?
    - Do preamp controls respond?
 
-5. [Submit a device report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) with your probe/install report and test notes.
+5. [Submit a device report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml) with your probe/install report and test notes.
 
 ### What we learn
 
@@ -129,7 +129,7 @@ We use conventional commit prefixes:
 
 ## Reporting issues
 
-If something doesn't work, please [open an issue](https://github.com/open-apollo/open-apollo/issues/new) with:
+If something doesn't work, please [open an issue](https://github.com/rolotrealanis98/open-apollo/issues/new) with:
 
 - Your Apollo model
 - Linux distribution and kernel version (`uname -r`)

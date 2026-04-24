@@ -49,7 +49,7 @@ sudo pacman -S linux-headers gcc make python
 The repository includes an interactive installer that handles everything: dependency checks, kernel module build, DKMS registration, IOMMU detection, PipeWire/WirePlumber config deployment, and tray indicator setup.
 
 ```bash
-git clone https://github.com/open-apollo/open-apollo.git
+git clone https://github.com/rolotrealanis98/open-apollo.git
 cd open-apollo
 sudo bash scripts/install.sh
 ```

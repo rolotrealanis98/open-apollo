@@ -27,7 +27,7 @@ The GPL-2.0 is the same license used by the Linux kernel itself. This is a requi
 
 ## Full License Text
 
-The complete license text is available in the [LICENSE](https://github.com/open-apollo/open-apollo/blob/main/LICENSE) file at the root of the repository.
+The complete license text is available in the [LICENSE](https://github.com/rolotrealanis98/open-apollo/blob/master/LICENSE) file at the root of the repository.
 
 ---
 

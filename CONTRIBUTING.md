@@ -19,7 +19,7 @@ us understand what works and what needs fixing across the Apollo product line.
 
 1. Clone the repo and check dependencies (common to both connection types):
    ```bash
-   git clone https://github.com/open-apollo/open-apollo.git
+   git clone https://github.com/rolotrealanis98/open-apollo.git
    cd open-apollo
    ./scripts/check-deps.sh
    ```
@@ -43,7 +43,7 @@ us understand what works and what needs fixing across the Apollo product line.
    expects the Thunderbolt `ua_apollo` kernel module and uses `lspci` — it is
    **not** compatible with USB Apollos.
 
-4. Submit the probe output as a [Device Report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) issue.
+4. Submit the probe output as a [Device Report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml) issue.
 
 ### USB Apollo (Solo USB, Twin X USB)
 
@@ -56,7 +56,7 @@ us understand what works and what needs fixing across the Apollo product line.
 
 3. Submit that report (plus any audio test notes — playback working? capture
    attempts? PipeWire output?) as a
-   [Device Report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml) issue.
+   [Device Report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml) issue.
    Do **not** run `tools/contribute/device-probe.sh` on USB — it only supports
    the Thunderbolt driver path and will error out.
 

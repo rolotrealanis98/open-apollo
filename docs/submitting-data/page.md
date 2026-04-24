@@ -46,7 +46,7 @@ The capture tools do not collect:
 
 ### Option 1: GitHub Issue (recommended)
 
-1. Go to the [Open Apollo GitHub repository](https://github.com/open-apollo/open-apollo/issues)
+1. Go to the [Open Apollo GitHub repository](https://github.com/rolotrealanis98/open-apollo/issues)
 2. Click **New Issue**
 3. Select the **Device Data Submission** template (if available), or create a blank issue
 4. Title your issue: `Device data: Apollo <model name>`

@@ -50,7 +50,7 @@ If this directory does not exist, your kernel headers are not installed or do no
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/open-apollo/open-apollo.git
+git clone https://github.com/rolotrealanis98/open-apollo.git
 cd open-apollo
 ```
 

@@ -297,7 +297,7 @@ for that device.
 
 1. Build and load the driver
 2. Run `./tools/contribute/device-probe.sh`
-3. [Submit a device report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml)
+3. [Submit a device report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml)
 
 ## License
 

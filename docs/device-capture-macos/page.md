@@ -61,7 +61,7 @@ Make sure:
 Clone the repository if you haven't already:
 
 ```bash
-git clone https://github.com/open-apollo/open-apollo.git
+git clone https://github.com/rolotrealanis98/open-apollo.git
 cd open-apollo
 ```
 
