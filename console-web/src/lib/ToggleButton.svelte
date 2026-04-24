@@ -13,6 +13,7 @@
     active = $bindable(false),
     disabled = false,
     filter = false,       // show HPF curve icon instead of text
+    warn = "",            // non-empty → render "unverified" outline + tooltip
     onclick = undefined,
   } = $props();
 
@@ -31,6 +32,7 @@
   class="toggle"
   class:active
   class:disabled
+  class:warn={!!warn}
   style="
     --accent: var(--{color});
     --accent-dim: var(--{color}-dim);
@@ -38,6 +40,7 @@
   "
   onclick={toggle}
   {disabled}
+  title={warn}
 >
   {#if filter}
     <!-- HPF filter curve icon -->
@@ -155,6 +158,26 @@
   .toggle.disabled {
     opacity: 0.35;
     cursor: not-allowed;
+  }
+
+  /* ── Warn: control writes daemon state but hardware path unverified ── */
+  .toggle.warn::after {
+    content: "!";
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--amber);
+    color: #000;
+    font-size: 8px;
+    font-weight: 900;
+    line-height: 10px;
+    text-align: center;
+    z-index: 2;
+    box-shadow: 0 0 3px var(--amber-glow);
+    pointer-events: none;
   }
 
   /* ── Content positioning ─────────────────────────────────── */

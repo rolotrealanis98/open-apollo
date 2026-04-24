@@ -15,6 +15,12 @@
   // ch 2-3 = Line only. HiZ auto-detect works only on ch 0-1.
   const MIC_LINE_CAPABLE = new Set([0, 1]);
 
+  // MIC/LINE, PAD, 48V write daemon state correctly but the ARM MCU does
+  // not latch the physical relays yet — tracked in
+  // plans/260424-0922-dsp-arm-relay-propagation/. Mark them "unverified" in
+  // the UI so users aren't misled. Drop this once that plan ships.
+  const RELAY_WARN = "Hardware relay not yet wired (DSP→ARM latch WIP, see plans/260424-0922-dsp-arm-relay-propagation/).";
+
   function preampPath(ch, prop) {
     return `/devices/0/inputs/${ch}/preamps/0/${prop}/value`;
   }
@@ -65,6 +71,7 @@
                 label={isLine(ch) ? "LINE" : "MIC"}
                 color={isLine(ch) ? "blue" : "green"}
                 active={isLine(ch)}
+                warn={RELAY_WARN}
                 onclick={(v) => writeIOType(ch, v)}
               />
             {:else}
@@ -83,9 +90,9 @@
 
         <!-- Row 3: 48V + PAD -->
         <div class="btn-row">
-          <ToggleButton label="48V" color="red"
+          <ToggleButton label="48V" color="red" warn={RELAY_WARN}
             active={v48For(ch)} onclick={(v) => setPreamp(ch, "48V", v)} />
-          <ToggleButton label="PAD" color="amber"
+          <ToggleButton label="PAD" color="amber" warn={RELAY_WARN}
             active={padFor(ch)} onclick={(v) => setPreamp(ch, "Pad", v)} />
         </div>
 
