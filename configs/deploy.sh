@@ -21,16 +21,22 @@ fi
 echo "Installing WirePlumber rules..."
 
 # Detect WirePlumber version: 0.5+ uses .conf (JSON-like), 0.4.x uses .lua
+# (patched: ask wireplumber/wpctl directly first; probe ALL package managers with
+#  fall-through instead of elif — a host can have e.g. dpkg installed on Fedora
+#  with no database entry, which previously aborted the script under `set -e`)
 WP_VER=""
-if command -v wpctl &>/dev/null; then
-    # wpctl doesn't have --version, so check the package manager
-    if command -v pacman &>/dev/null; then
-        WP_VER=$(pacman -Q wireplumber 2>/dev/null | awk '{print $2}' | cut -d- -f1)
-    elif command -v dpkg &>/dev/null; then
-        WP_VER=$(dpkg -s wireplumber 2>/dev/null | grep '^Version:' | awk '{print $2}' | cut -d- -f1 | cut -d: -f2)
-    elif command -v rpm &>/dev/null; then
-        WP_VER=$(rpm -q --qf '%{VERSION}' wireplumber 2>/dev/null)
-    fi
+WP_VER=$(wireplumber --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+if [ -z "$WP_VER" ]; then
+    WP_VER=$(wpctl --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+fi
+if [ -z "$WP_VER" ] && command -v pacman &>/dev/null; then
+    WP_VER=$(pacman -Q wireplumber 2>/dev/null | awk '{print $2}' | cut -d- -f1 || true)
+fi
+if [ -z "$WP_VER" ] && command -v dpkg &>/dev/null; then
+    WP_VER=$(dpkg -s wireplumber 2>/dev/null | grep '^Version:' | awk '{print $2}' | cut -d- -f1 | cut -d: -f2 || true)
+fi
+if [ -z "$WP_VER" ] && command -v rpm &>/dev/null; then
+    WP_VER=$(rpm -q --qf '%{VERSION}' wireplumber 2>/dev/null || true)
 fi
 
 WP_MAJOR=$(echo "$WP_VER" | cut -d. -f1)
