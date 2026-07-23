@@ -1,0 +1,16 @@
+{
+  "model": "Apollo x8p",
+  "device_type": "0x20",
+  "subsystem_id": "0x0014",
+  "serial_prefix": "2008",
+  "channels": {
+    "play": 26,
+    "rec": 26
+  },
+  "preamps": 8,
+  "hiz": 2,
+  "features": ["spdif", "adat"],
+  "status": "enumerates",
+  "contributor": "@Skrypt",
+  "notes": "Detected via PCI subsystem ID 0x0014 (serial contains false-match '2017'->x8). Connect + FW load + mixer verify pass; transport does not clock yet (issue #46). Mixer daemon device map not yet captured — daemon falls back to the x4 map."
+}
