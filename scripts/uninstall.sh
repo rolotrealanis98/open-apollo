@@ -135,11 +135,28 @@ if [ "$KEEP_DKMS" = "0" ] && command -v dkms &>/dev/null; then
 fi
 
 # Step 10: Remove module auto-load and manually installed .ko files
+HAD_MODULES_LOAD=0
+[ -f /etc/modules-load.d/ua_apollo.conf ] && HAD_MODULES_LOAD=1
 rm -f /etc/modules-load.d/ua_apollo.conf 2>/dev/null
 rm -f "/lib/modules/$(uname -r)/extra/ua_apollo.ko" 2>/dev/null
 rm -f "/lib/modules/$(uname -r)/extra/ua_apollo.ko.zst" 2>/dev/null
 depmod -a 2>/dev/null || true
 ok "Removed module auto-load config and extra module files"
+
+# dracut bakes modules-load.d entries into the initramfs — without a regen the
+# removed entry survives and keeps failing systemd-modules-load (issue #43)
+if [ "$HAD_MODULES_LOAD" = "1" ]; then
+    if command -v dracut &>/dev/null; then
+        dracut -f 2>/dev/null && ok "Regenerated initramfs (dracut -f)" \
+            || warn "dracut -f failed — run 'sudo dracut -f' manually"
+    elif command -v update-initramfs &>/dev/null; then
+        update-initramfs -u 2>/dev/null && ok "Regenerated initramfs" \
+            || warn "update-initramfs failed — run 'sudo update-initramfs -u' manually"
+    elif command -v mkinitcpio &>/dev/null; then
+        mkinitcpio -P 2>/dev/null && ok "Regenerated initramfs" \
+            || warn "mkinitcpio -P failed — run it manually"
+    fi
+fi
 
 # Step 11: Unload kernel module
 # Must happen BEFORE PipeWire restart — PipeWire holds ALSA references.

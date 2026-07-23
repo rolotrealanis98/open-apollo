@@ -87,6 +87,20 @@ run_sudo() {
     fi
 }
 
+# --- Initramfs regen (dracut bakes /etc/modules-load.d into the initrd) ---
+regen_initramfs() {
+    if command -v dracut &>/dev/null; then
+        info "Regenerating initramfs (dracut -f)..."
+        run_sudo dracut -f 2>/dev/null || warn "dracut -f failed — run it manually"
+    elif command -v update-initramfs &>/dev/null; then
+        info "Regenerating initramfs (update-initramfs -u)..."
+        run_sudo update-initramfs -u 2>/dev/null || warn "update-initramfs failed — run it manually"
+    elif command -v mkinitcpio &>/dev/null; then
+        info "Regenerating initramfs (mkinitcpio -P)..."
+        run_sudo mkinitcpio -P 2>/dev/null || warn "mkinitcpio failed — run it manually"
+    fi
+}
+
 # --- Report state ---
 declare -A STEP_STATUS=()
 declare -A STEP_DETAIL=()
@@ -496,9 +510,18 @@ DKMSEOF
         return 1
     fi
 
-    # Auto-load on boot
-    run_sudo tee /etc/modules-load.d/ua_apollo.conf >/dev/null <<< "ua_apollo"
-    ok "Auto-load configured (/etc/modules-load.d/ua_apollo.conf)"
+    # Auto-load: the module carries PCI modaliases, so udev loads it when
+    # the Thunderbolt device appears. Do NOT add a modules-load.d entry —
+    # early-boot loading pulls snd_pcm whose Fedora install hook (dist-alsa.conf
+    # -> snd-seq) fails inside the initramfs, failing systemd-modules-load
+    # on every boot (issue #43).
+    if [ -f /etc/modules-load.d/ua_apollo.conf ]; then
+        run_sudo rm -f /etc/modules-load.d/ua_apollo.conf
+        regen_initramfs
+        ok "Removed legacy modules-load.d entry (udev modalias handles auto-load)"
+    else
+        ok "Auto-load via udev PCI modalias (no modules-load.d entry needed)"
+    fi
 
     STEP_STATUS[dkms]="ok"
 }
