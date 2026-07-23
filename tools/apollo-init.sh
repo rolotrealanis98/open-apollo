@@ -511,7 +511,22 @@ step "PipeWire"
 
 # WirePlumber explicitly excludes pro-audio from auto-selection,
 # so we must set it after PipeWire discovers the device.
-if command -v wpctl > /dev/null 2>&1; then
+#
+# SAFETY GATE (issue #42): if the protective 51-ua-apollo rule is not
+# deployed, restarting WirePlumber makes it open the raw multichannel PCM
+# and hard-freezes the machine. Refuse to touch PipeWire in that state.
+# APOLLO_SKIP_PIPEWIRE=1 skips this step entirely.
+WP_RULE_OK=0
+[ -f /etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf ] && WP_RULE_OK=1
+[ -f /etc/wireplumber/main.lua.d/51-ua-apollo.lua ] && WP_RULE_OK=1
+
+if [ "${APOLLO_SKIP_PIPEWIRE:-0}" = "1" ]; then
+    info "APOLLO_SKIP_PIPEWIRE=1 — skipping PipeWire setup"
+elif [ "$WP_RULE_OK" = "0" ]; then
+    fail "WirePlumber rule 51-ua-apollo missing — NOT touching PipeWire"
+    info "Restarting WirePlumber without it can hard-freeze the system (issue #42)"
+    action "Deploy configs first: sudo bash configs/deploy.sh"
+elif command -v wpctl > /dev/null 2>&1; then
     # wpctl needs XDG_RUNTIME_DIR to connect to PipeWire's user socket
     DAEMON_UID=$(id -u "$DAEMON_USER" 2>/dev/null || echo "")
     pw_run() { sudo -u "$DAEMON_USER" XDG_RUNTIME_DIR="/run/user/$DAEMON_UID" "$@"; }
