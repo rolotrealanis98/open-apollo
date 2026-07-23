@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  console-web-build:
+    name: console-web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: console-web/package-lock.json
+      - name: Install dependencies
+        working-directory: console-web
+        run: npm ci
+      - name: Build
+        working-directory: console-web
+        run: npm run build
+
+  python-syntax-check:
+    name: Python syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Compile-check Python sources
+        run: |
+          python3 -m py_compile $(find mixer-engine tools -name '*.py')
