@@ -1,0 +1,66 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  driver-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kernel headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-headers-generic
+      - name: Build module
+        run: |
+          # Build against generic headers, not the runner's Azure kernel —
+          # Azure kernels lack CONFIG_SND, so modpost can't resolve snd_*
+          # symbols. Module is compile-tested only, never loaded in CI.
+          KDIR="$(ls -d /usr/src/linux-headers-*-generic | sort -V | tail -1)"
+          make -C driver KDIR="$KDIR"
+
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Ruff (errors only) + compile check
+        run: |
+          # E9/F63/F7/F82: syntax errors + real faults only — current tree is
+          # green at this level; do not widen without fixing findings first
+          pipx run ruff check --select E9,F63,F7,F82 mixer-engine tools
+          python -m compileall -q mixer-engine
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: |
+          sudo apt-get install -y shellcheck
+          find scripts tools configs tests -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+
+  console-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: console-web/package-lock.json
+      - name: Build
+        working-directory: console-web
+        run: |
+          npm ci
+          npm run build

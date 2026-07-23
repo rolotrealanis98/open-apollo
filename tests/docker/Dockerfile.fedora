@@ -1,0 +1,10 @@
+FROM fedora:42
+RUN dnf install -y \
+    gcc make kernel-devel \
+    python3 python3-pip python3-websockets \
+    pipewire wireplumber alsa-utils \
+    openssh-server dkms curl sudo \
+    && dnf clean all
+WORKDIR /opt/open-apollo
+COPY . .
+CMD ["bash", "-c", "TEST_BUILD=1 bash scripts/install.sh --skip-init --no-dkms"]

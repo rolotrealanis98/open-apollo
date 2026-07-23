@@ -1,0 +1,11 @@
+# Manjaro — Arch-based rolling release with delayed package updates
+FROM --platform=linux/amd64 manjarolinux/base
+RUN pacman -Syu --noconfirm --disable-sandbox && pacman -S --noconfirm --disable-sandbox \
+    base-devel linux-headers gcc make \
+    python python-pip python-websockets python-zeroconf \
+    pipewire pipewire-alsa pipewire-pulse wireplumber alsa-utils \
+    openssh dkms curl sudo \
+    && pacman -Scc --noconfirm
+WORKDIR /opt/open-apollo
+COPY . .
+CMD ["bash", "-c", "TEST_BUILD=1 bash scripts/install.sh --skip-init --no-dkms"]
