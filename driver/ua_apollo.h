@@ -36,6 +36,7 @@
 #define UA_SUBSYS_APOLLO_X4_QUAD        0x0011
 #define UA_SUBSYS_APOLLO_SOLO           0x000F
 #define UA_SUBSYS_APOLLO_8P             0x0006
+#define UA_SUBSYS_APOLLO_X8P            0x0014  /* x8p: serial 2008xxxx false-matches "2017"->x8; 6 DSPs, FPGA 0xa241c5ac */
 
 /*
  * UAD2DeviceType enum — reconstructed from CPcieDevice::Name() and

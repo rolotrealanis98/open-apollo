@@ -215,6 +215,11 @@ static void ua_detect_capabilities(struct ua_device *ua)
 		case UA_SUBSYS_APOLLO_8P:
 			ua->device_type = UA_DEV_APOLLO_8P;
 			break;
+		case UA_SUBSYS_APOLLO_X8P:
+			/* x8p serial "2008xxxx" false-matches "2017"->x8 in the
+			 * serial table; pin it by subsystem ID (0x0014) instead. */
+			ua->device_type = UA_DEV_APOLLO_X8P;
+			break;
 		case UA_SUBSYS_APOLLO_SOLO:
 			ua->device_type = UA_DEV_APOLLO_SOLO;
 			break;
