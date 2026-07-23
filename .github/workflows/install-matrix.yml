@@ -1,0 +1,48 @@
+name: Install Matrix Test
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'driver/**'
+      - 'scripts/**'
+      - 'configs/**'
+      - 'tests/docker/**'
+      - '.github/workflows/install-matrix.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'driver/**'
+      - 'scripts/**'
+      - 'configs/**'
+      - 'tests/docker/**'
+      - '.github/workflows/install-matrix.yml'
+
+concurrency:
+  group: install-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu, fedora, debian, arch, opensuse]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build test image
+        run: docker build -t test-${{ matrix.distro }} -f tests/docker/Dockerfile.${{ matrix.distro }} .
+      - name: Install + verify artifacts
+        run: |
+          docker run --rm test-${{ matrix.distro }} bash -c "
+            TEST_BUILD=1 bash scripts/install.sh --skip-init --no-dkms 2>&1 || exit 1;
+            # Verify WirePlumber config deployed
+            ls /etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf 2>/dev/null || \
+            ls /etc/wireplumber/main.lua.d/51-ua-apollo.lua 2>/dev/null || \
+            { echo 'FAIL: No WirePlumber config'; exit 1; };
+            # Verify UCM2 config deployed
+            ls /usr/share/alsa/ucm2/ua_apollo/ua_apollo.conf || \
+            { echo 'FAIL: No UCM2 config'; exit 1; };
+            echo 'All checks passed'
+          "
