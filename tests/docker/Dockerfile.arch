@@ -1,0 +1,12 @@
+# NOTE: --platform=linux/amd64 required for Apple Silicon (no arm64 archlinux image).
+# pacman --disable-sandbox works around QEMU user namespace issue under emulation.
+FROM --platform=linux/amd64 archlinux:latest
+RUN pacman -Syu --noconfirm --disable-sandbox && pacman -S --noconfirm --disable-sandbox \
+    base-devel linux-headers gcc make \
+    python python-pip python-websockets python-zeroconf \
+    pipewire pipewire-alsa pipewire-pulse wireplumber alsa-utils \
+    openssh dkms curl sudo \
+    && pacman -Scc --noconfirm
+WORKDIR /opt/open-apollo
+COPY . .
+CMD ["bash", "-c", "TEST_BUILD=1 bash scripts/install.sh --skip-init --no-dkms"]

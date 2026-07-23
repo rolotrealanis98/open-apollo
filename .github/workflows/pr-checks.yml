@@ -47,7 +47,7 @@ jobs:
       - name: Shellcheck
         run: |
           sudo apt-get install -y shellcheck
-          find scripts tools configs -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+          find scripts tools configs tests -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
 
   console-web:
     runs-on: ubuntu-latest
