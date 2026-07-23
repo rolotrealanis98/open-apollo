@@ -18,12 +18,13 @@ jobs:
       - name: Install kernel headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y "linux-headers-$(uname -r)" || sudo apt-get install -y linux-headers-generic
+          sudo apt-get install -y linux-headers-generic
       - name: Build module
         run: |
-          # Fall back to newest installed headers if runner kernel headers unavailable
-          KDIR="/lib/modules/$(uname -r)/build"
-          [ -d "$KDIR" ] || KDIR="$(ls -d /lib/modules/*/build | sort -V | tail -1)"
+          # Build against generic headers, not the runner's Azure kernel —
+          # Azure kernels lack CONFIG_SND, so modpost can't resolve snd_*
+          # symbols. Module is compile-tested only, never loaded in CI.
+          KDIR="$(ls -d /usr/src/linux-headers-*-generic | sort -V | tail -1)"
           make -C driver KDIR="$KDIR"
 
   python-lint:
