@@ -16,6 +16,7 @@
 
 #include <linux/module.h>
 #include <linux/delay.h>
+#include <linux/jiffies.h>
 #include <linux/dma-mapping.h>
 #include <linux/version.h>
 #include <sound/core.h>
@@ -1310,6 +1311,31 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 		 audio->buf_frame_size);
 
 	/*
+	 * Clear stale DMA reset strobes before configuring transport.
+	 *
+	 * On x8p (issue #46) DMA_CTRL reads 0x1ffff at stream time — the
+	 * per-engine reset strobes [16:9] are re-asserted some time after
+	 * the SG-programming enable write (observed post FW replay),
+	 * holding the DMA engines in reset: transport arms and acks
+	 * (CTRL readback 0x28f) but SAMPLE_POS/FRAME_CTR never advance.
+	 * Re-apply the enable/clear mask here; no-op on devices where the
+	 * strobes are already clear (x4 reads 0x1FF at this point).
+	 */
+	{
+		u32 dma_ctrl = ua_read(ua, UA_REG_DMA_CTRL);
+		u32 clean = ua->fw_v2 ?
+			((dma_ctrl | 0x1FF) & ~0x1FE00) :
+			((dma_ctrl | 0x1F) & ~0x1E00);
+
+		if (dma_ctrl != clean) {
+			ua_write(ua, UA_REG_DMA_CTRL, clean);
+			dev_info(&ua->pdev->dev,
+				 "  DMA_CTRL stale 0x%08x -> 0x%08x (reset strobes cleared)\n",
+				 dma_ctrl, ua_read(ua, UA_REG_DMA_CTRL));
+		}
+	}
+
+	/*
 	 * Exact register sequence from kext PrepareTransport() disassembly.
 	 * Order matters — firmware state machine expects this sequence.
 	 */
@@ -2101,6 +2127,46 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		dev_err(&ua->pdev->dev,
 			"pcm_prepare: device unreachable\n");
 		return -ENODEV;
+	}
+
+	/*
+	 * Prepare-churn guard (issue #42).
+	 *
+	 * When the protective WirePlumber rule is missing, the session
+	 * manager auto-opens the raw multichannel PCM and churns
+	 * open/prepare cycles against a transport whose SAMPLE_POS never
+	 * advances (e.g. x8p, issue #46).  The resulting register traffic
+	 * eventually wedges the PCIe link — hard system freeze, no oops.
+	 *
+	 * A healthy transport advances SAMPLE_POS between prepares (48
+	 * frames/ms at minimum rate), so a frozen SAMPLE_POS across many
+	 * rapid prepares can only be stall churn.  Refuse with -EIO and a
+	 * 30s cooldown so userspace gets a clean error instead of the
+	 * machine locking up.
+	 */
+	{
+		u32 sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
+
+		if (time_before(jiffies, audio->churn_block_until)) {
+			dev_err_ratelimited(&ua->pdev->dev,
+				"pcm_prepare: transport stalled, backing off — deploy WirePlumber rule 51-ua-apollo (configs/deploy.sh)\n");
+			return -EIO;
+		}
+
+		if (sp == audio->churn_last_sample_pos &&
+		    time_before(jiffies, audio->churn_last_jiffies + 2 * HZ)) {
+			if (++audio->churn_count >= 8) {
+				audio->churn_count = 0;
+				audio->churn_block_until = jiffies + 30 * HZ;
+				dev_err(&ua->pdev->dev,
+					"pcm_prepare: SAMPLE_POS frozen across 8 rapid prepares — refusing opens for 30s to protect the PCIe link\n");
+				return -EIO;
+			}
+		} else {
+			audio->churn_count = 0;
+		}
+		audio->churn_last_jiffies = jiffies;
+		audio->churn_last_sample_pos = sp;
 	}
 
 	dev_info(&ua->pdev->dev,

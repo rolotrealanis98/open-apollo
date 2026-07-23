@@ -728,6 +728,17 @@ struct ua_audio {
 	bool period_timer_running;
 	snd_pcm_uframes_t last_play_period_pos;
 	snd_pcm_uframes_t last_rec_period_pos;
+
+	/* Prepare-churn guard (issue #42).  A session manager opening the
+	 * raw PCM without the protective WirePlumber rule churns
+	 * open/prepare cycles against a transport whose SAMPLE_POS never
+	 * advances; the register traffic eventually wedges the PCIe link
+	 * (hard freeze, no oops).  Track SAMPLE_POS across prepares and
+	 * back off when it is frozen. */
+	unsigned long churn_last_jiffies;   /* jiffies of last pcm_prepare */
+	u32 churn_last_sample_pos;          /* SAMPLE_POS at last pcm_prepare */
+	unsigned int churn_count;           /* consecutive stalled prepares */
+	unsigned long churn_block_until;    /* refuse prepares until (jiffies) */
 };
 
 /* One allocated DMA buffer carrying a plugin-chain DMA_REF payload.
