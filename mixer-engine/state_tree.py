@@ -84,18 +84,6 @@ class StateTree:
         self._insert_control(ctrl_path, ctrl)
         self._props[ctrl_path] = self.get_prop_dict(ctrl_path)
 
-    def update_property(self, ctrl_path: str, overrides: dict):
-        """Update an existing property with override values.
-
-        Only updates fields that have non-None values in overrides,
-        preserving existing fields not mentioned in overrides.
-        """
-        prop = self.get_prop_dict(ctrl_path)
-        if prop is None:
-            return
-        for key in ("type", "value", "min", "max", "values", "readonly"):
-            if overrides.get(key) is not None:
-                prop[key] = overrides[key]
 
     def get_prop_dict(self, path: str) -> dict | None:
         """Get the raw property dict for a path (for direct mutation)."""
@@ -549,6 +537,3 @@ class StateTree:
             return resolved.get("value")
         return None
 
-    def all_paths(self) -> list[str]:
-        """Return all control paths (flat list)."""
-        return list(self._props.keys())

@@ -238,8 +238,65 @@ The CLI (Command Line Interface) provides communication with the ARM microcontro
 | `0xC3F4` | `CLI_ENABLE` | W | Write 1 to enable CLI |
 | `0xC3F8` | `CLI_STATUS` | R | Command status / length |
 | `0xC3FC` | `CLI_RESP_LEN` | R | Response data length (bytes) |
-| `0xC400` | `CLI_CMD_BUF` | W | Command buffer (128 bytes, 32 x u32) |
-| `0xC480` | `CLI_RESP_BUF` | R | Response buffer (128 bytes, 32 x u32) |
+| `0xC400` | `CLI_CMD_BUF` | W | Command buffer (128 bytes, 32 × u32) |
+| `0xC480` | `CLI_RESP_BUF` | R | Response buffer (128 bytes, 32 × u32) |
+
+Both buffers are 128 bytes (`CLI_CMD_BUF_SIZE = CLI_RESP_BUF_SIZE = 128`).
+
+> ### ⚠ Hazard — the CLI path freezes the ARM MCU, and it is not fully closed
+>
+> Sending a CLI command to the ARM MCU **freezes it** on Apollo x4
+> (`driver/ua_core.c:526`). All preamp control must go through DSP mixer settings
+> (the `SET_MIXER_PARAM` ioctl), never the CLI.
+>
+> The kernel-internal helper `ua_cli_send_locked()` is blocked unconditionally
+> (`driver/ua_core.c:531`, `return -ENOSYS`). **However, that is not the whole story:**
+> `ua_ioctl_cli_command()` (`driver/ua_core.c:1286`), dispatched from the ioctl switch at
+> `driver/ua_core.c:2093` (`case UA_IOCTL_CLI_COMMAND`), reimplements the same command
+> sequence inline with **no such block**. The device node is world-writable
+> (`configs/udev/91-ua-apollo.rules:7`, `MODE="0666"`), so any local process can reach the
+> freeze path. **This risk is open, not closed** — treat this section as a description of a
+> live hazard, not a fixed one.
+
+### ARM / preamp parameter IDs
+
+Preamp controls are addressed by parameter ID. The kext (and this driver) route each write
+to mixer `setting[param_id + 7]`, **not** through the ARM CLI. Values below are DTrace-verified.
+
+| Control | Param ID | Notes |
+|---|---|---|
+| `MicLine` | `0x00` | 1 = Line, 0 = Mic |
+| `Pad` | `0x01` | on = 1, off = 0 |
+| `48V` | `0x03` | on = 1, off = 0 (triggers ARM safety blink) |
+| `LowCut` | `0x04` | on = 1, off = 0 (not HiZ — DTrace-verified) |
+| `Phase` | `0x05` | invert = `0xbf800000` (−1.0f), normal = `0x3f800000` (+1.0f) |
+| `GainA` | `0x0A` | Gain_A, 1st write, dB−10 |
+| `GainB` | `0x09` | Gain_B, 2nd write, dB−10 |
+| `GainC` | `0x06` | Gain_C, periodic 3rd write, dB−9 |
+| `Route` | `0x13` | Channel routing mask (`0x0001ffff`) |
+| `Level` | `0x16` | Default level (`0xa0` = −16 dB) |
+
+HiZ has **no** software control — hardware auto-detect only (`rb_data[0]` bit 24).
+
+### Apollo x4 analog-input hardware IDs
+
+Each analog input has a unique hardware ID with stride `0x0800`, passed in the
+`SetInputParam` struct at `word[5]` to identify which preamp channel to control.
+
+| Input | hwID |
+|---|---|
+| 0 — Analog In 1 (Mic/Line, HiZ) | `0x0000` |
+| 1 — Analog In 2 (Mic/Line, HiZ) | `0x0800` |
+| 2 — Analog In 3 (Line only) | `0x1000` |
+| 3 — Analog In 4 (Line only) | `0x1800` |
+
+Stride: `HW_ID_STRIDE = 0x0800`. Inputs 4+ are S/PDIF, ADAT, and Virtual — no preamps, no hwID.
+
+> The mixer daemon once mirrored this CLI sequence in Python
+> (`arm_set_param` / `cli_send_command` in `mixer-engine/hardware.py`). That code was
+> **unreachable** — preamp control has always gone through the DSP mixer path — and was
+> removed as dead code. Reintroducing it would mean redoing the reverse engineering; the
+> register knowledge is preserved here precisely so that is unnecessary.
 
 ---
 
