@@ -10,7 +10,7 @@
   "preamps": 8,
   "hiz": 2,
   "features": ["spdif", "adat"],
-  "status": "enumerates",
+  "status": "verified",
   "contributor": "@Skrypt",
-  "notes": "Detected via PCI subsystem ID 0x0014 (serial contains false-match '2017'->x8). Connect + FW load + mixer verify pass; transport does not clock yet (issue #46). Mixer daemon device map not yet captured — daemon falls back to the x4 map."
+  "notes": "Detected via PCI subsystem ID 0x0014 (serial contains false-match '2017'->x8). Audio confirmed on real hardware (issue #46): SG table programmed, SAMPLE_POS/FRAME_CTR advancing, audible playback via PipeWire, no DMAR faults with intel_iommu=on. Required 6016d4e (reset strobe re-clear) + 2df18d5 (SG table on ring-connect devices). Unverified: rates other than 48k, full duplex, digital I/O, channel identity map. No routing config for device_type 0x20 — ua_dsp_send_routing() returns -ENODATA, so IO descriptors are never written and channel order is the FPGA default. Mixer daemon falls back to the x4 control map (4 of 8 preamps). Tracked in issue #52."
 }
