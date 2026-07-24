@@ -26,19 +26,12 @@ DAEMON_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
 
 # Ioctl numbers computed at runtime (avoids precompute errors)
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+# --- Shared helpers: colours, info/ok/warn/fail/header, die, prompt, run_sudo ---
+. "$REPO_ROOT/scripts/lib.sh"
+command -v die >/dev/null 2>&1 || { echo "FATAL: scripts/lib.sh not sourced" >&2; exit 1; }
 
-info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[ OK ]${NC}  $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-fail()  { echo -e "${RED}[FAIL]${NC}  $*"; }
-step()  { echo -e "\n${BOLD}── $* ──${NC}"; }
+# apollo-init-specific: highlighted action line (not part of the shared prelude).
+# 'step' was identical to lib.sh's header(); its call sites now call header().
 action(){ echo -e "${YELLOW}${BOLD}  ➜ $*${NC}"; }
 
 # Parse args
@@ -325,7 +318,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ── Step 1: Driver ──
-step "Driver"
+header "Driver"
 
 if lsmod | grep ua_apollo > /dev/null 2>&1; then
     ok "Driver already loaded"
@@ -369,7 +362,7 @@ ok "Device: $DEVICE"
 chmod 666 "$DEVICE"
 
 # ── Step 2: Diagnose DSP ──
-step "DSP Health Check"
+header "DSP Health Check"
 
 output=$(read_dsp_state 2>/dev/null) || true
 
@@ -396,7 +389,7 @@ else
     fi
 
     # ── Step 3: Firmware replay ──
-    step "Firmware Replay"
+    header "Firmware Replay"
 
     info "Loading 15 firmware blocks (169 KB)..."
     fw_output=$(cd "$REPO_ROOT" && python3 tools/replay-fw-blocks.py 2>&1) || true
@@ -404,7 +397,7 @@ else
     ok "Firmware loaded"
 
     # ── Step 4: ACEFACE Connect ──
-    step "DSP Activation"
+    header "DSP Activation"
 
     # After firmware load, trigger ACEFACE handshake via ioctl.
     # The driver's probe-time connect attempt fails on cold boot
@@ -443,7 +436,7 @@ finally:
     sleep 0.5
 
     # ── Step 6: Verify mixer responds ──
-    step "Verify"
+    header "Verify"
 
     sleep 0.5
     output=$(read_dsp_state 2>/dev/null) || true
@@ -461,7 +454,7 @@ finally:
 fi
 
 # ── Step 7: Daemon ──
-step "Mixer Daemon"
+header "Mixer Daemon"
 
 if [ "$NO_DAEMON" = "1" ]; then
     info "Skipping daemon (--no-daemon)"
@@ -507,7 +500,7 @@ else
 fi
 
 # ── Step 8: PipeWire pro-audio profile ──
-step "PipeWire"
+header "PipeWire"
 
 # WirePlumber explicitly excludes pro-audio from auto-selection,
 # so we must set it after PipeWire discovers the device.

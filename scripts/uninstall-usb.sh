@@ -22,18 +22,10 @@
 
 set -uo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
-
-info()   { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()     { echo -e "${GREEN}[ OK ]${NC}  $*"; }
-warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-fail()   { echo -e "${RED}[FAIL]${NC}  $*"; }
-header() { echo -e "\n${BOLD}── $* ──${NC}"; }
+# --- Shared helpers: colours, info/ok/warn/fail/header, die, prompt, run_sudo ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib.sh"
+command -v die >/dev/null 2>&1 || { echo "FATAL: scripts/lib.sh not sourced" >&2; exit 1; }
 
 PURGE=0
 for arg in "$@"; do

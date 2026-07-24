@@ -50,42 +50,9 @@ EOF
     esac
 done
 
-# --- Colors ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
-
-info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()      { echo -e "${GREEN}[ OK ]${NC}  $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-fail()    { echo -e "${RED}[FAIL]${NC}  $*"; }
-header()  { echo -e "\n${BOLD}── $* ──${NC}"; }
-
-# --- Prompt helper ---
-# Reads from /dev/tty so prompts work even when sudo password is piped via stdin
-prompt() {
-    local varname="$1"; shift
-    if [ -e /dev/tty ]; then
-        read -rp "$*" "$varname" < /dev/tty
-    else
-        eval "$varname=''"
-    fi
-}
-
-# Returns true if we can show interactive prompts
-can_prompt() { [ -e /dev/tty ]; }
-
-# --- Sudo helper ---
-run_sudo() {
-    if [ "$(id -u)" -eq 0 ]; then
-        "$@"
-    else
-        sudo "$@"
-    fi
-}
+# --- Shared helpers: colours, info/ok/warn/fail/header, die, prompt, can_prompt, run_sudo ---
+. "$SCRIPT_DIR/lib.sh"
+command -v die >/dev/null 2>&1 || { echo "FATAL: scripts/lib.sh not sourced" >&2; exit 1; }
 
 # --- Initramfs regen (dracut bakes /etc/modules-load.d into the initrd) ---
 regen_initramfs() {
