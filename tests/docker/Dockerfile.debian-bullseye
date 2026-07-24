@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y \
     build-essential linux-headers-generic gcc make \
     python3 python3-pip \
     alsa-utils \
-    openssh-server dkms curl sudo \
+    openssh-server dkms curl sudo avahi-utils \
     && rm -rf /var/lib/apt/lists/*
 # NOTE: Debian 11 has no pipewire/wireplumber in main repos.
 # Driver build + base config deploy still tested.

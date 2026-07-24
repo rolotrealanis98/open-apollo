@@ -1,74 +1,63 @@
-"""
-Bonjour/mDNS service announcement for ua-mixer-daemon.
+"""mDNS announcement for ua-mixer-daemon via the `avahi-publish` subprocess.
 
-Advertises _uamixer._tcp. so ConsoleLink auto-discovers the daemon.
-The real UA Mixer Engine advertises with the computer hostname
-on port 4710 with empty TXT properties.
+Advertises _uamixer._tcp so ConsoleLink auto-discovers the daemon, matching the
+real UA Mixer Engine (hostname service name, port 4710, empty TXT properties).
 """
 
 import logging
+import shutil
 import socket
+import subprocess
+import time
 
 log = logging.getLogger(__name__)
 
-# Optional dependency — daemon works without it
-try:
-    from zeroconf import Zeroconf, ServiceInfo
-    HAS_ZEROCONF = True
-except ImportError:
-    HAS_ZEROCONF = False
-
-
-SERVICE_TYPE = "_uamixer._tcp.local."
+SERVICE_TYPE = "_uamixer._tcp"
 
 
 class BonjourAnnouncer:
-    """Advertise the mixer daemon via Bonjour/mDNS."""
+    """Advertise the mixer daemon via mDNS using `avahi-publish`."""
 
     def __init__(self, port: int = 4710, name: str | None = None):
         self.port = port
         self.name = name or _default_name()
-        self.zc: "Zeroconf | None" = None
-        self.info: "ServiceInfo | None" = None
+        self.proc: "subprocess.Popen | None" = None
 
     def start(self) -> bool:
-        """Register the Bonjour service. Returns True on success."""
-        if not HAS_ZEROCONF:
-            log.warning("zeroconf not installed — Bonjour disabled "
-                        "(pip install zeroconf)")
+        """Publish the service. True only if the child is still alive."""
+        if not self.name:
+            log.warning("Bonjour disabled — empty service name")
             return False
-
-        try:
-            self.zc = Zeroconf()
-            self.info = ServiceInfo(
-                SERVICE_TYPE,
-                f"{self.name}.{SERVICE_TYPE}",
-                port=self.port,
-                server=socket.gethostname() + ".local.",
-                properties={},
-            )
-            self.zc.register_service(self.info)
-            log.info("Bonjour: advertising '%s' on _uamixer._tcp port %d",
-                     self.name, self.port)
-            return True
-        except Exception:
-            log.exception("Bonjour registration failed")
+        if not shutil.which("avahi-publish"):
+            log.warning("avahi-publish not found — Bonjour disabled "
+                        "(install avahi-utils)")
             return False
+        # List form (no shell); `-s` consumes the next token as the service name
+        # regardless of leading dashes, so a user --name cannot inject arguments.
+        proc = subprocess.Popen(
+            ["avahi-publish", "-s", self.name, SERVICE_TYPE, str(self.port)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.3)
+        if proc.poll() is not None:
+            log.warning("Bonjour disabled — avahi-publish exited immediately "
+                        "(is avahi-daemon running?)")
+            return False
+        self.proc = proc
+        log.info("Bonjour: advertising '%s' on %s port %d",
+                 self.name, SERVICE_TYPE, self.port)
+        return True
 
     def stop(self):
-        """Unregister the Bonjour service."""
-        if self.zc and self.info:
-            try:
-                self.zc.unregister_service(self.info)
-            except Exception:
-                pass
-            try:
-                self.zc.close()
-            except Exception:
-                pass
-            self.zc = None
-            self.info = None
-            log.info("Bonjour: unregistered")
+        """Terminate the avahi-publish child."""
+        if not self.proc:
+            return
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        self.proc = None
+        log.info("Bonjour: unregistered")
 
 
 def _default_name() -> str:

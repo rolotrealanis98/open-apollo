@@ -1625,7 +1625,7 @@ Examples:
              f"tcp://{args.host}:{helper_port}" if helper_port else "disabled")
     log.info("  WS (UA Connect): %s",
              f"ws://{args.host}:{args.ws_port}" if ws_server else "disabled")
-    log.info("  Bonjour: %s", "enabled" if bonjour and bonjour.zc else "disabled")
+    log.info("  Bonjour: %s", "enabled" if bonjour and bonjour.proc else "disabled")
 
     async def run_all():
         """Run TCP servers, meter pump, heartbeat, and (optionally) WS server."""

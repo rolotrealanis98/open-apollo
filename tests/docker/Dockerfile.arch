@@ -3,9 +3,9 @@
 FROM --platform=linux/amd64 archlinux:latest
 RUN pacman -Syu --noconfirm --disable-sandbox && pacman -S --noconfirm --disable-sandbox \
     base-devel linux-headers gcc make \
-    python python-pip python-websockets python-zeroconf \
+    python python-pip python-websockets \
     pipewire pipewire-alsa pipewire-pulse wireplumber alsa-utils \
-    openssh dkms curl sudo \
+    openssh dkms curl sudo avahi \
     && pacman -Scc --noconfirm
 WORKDIR /opt/open-apollo
 COPY . .
