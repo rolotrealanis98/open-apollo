@@ -1638,6 +1638,15 @@ Examples:
             tasks.append(asyncio.create_task(ws_server.start()))
         await asyncio.gather(*tasks)
 
+    # SIGTERM is the normal shutdown path — install.sh/uninstall.sh pkill the
+    # daemon on every reinstall. Python's default SIGTERM disposition exits
+    # immediately, so the finally block below never runs: metering threads, unsaved
+    # state, and any Bonjour child would leak. Route SIGTERM through the same
+    # KeyboardInterrupt path SIGINT already uses so shutdown is symmetric.
+    def _handle_sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     try:
         asyncio.run(run_all())
     except KeyboardInterrupt:
