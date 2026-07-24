@@ -21,7 +21,7 @@ Open Apollo supports Universal Audio Apollo Thunderbolt and USB interfaces. Thun
 | Apollo x6 Gen 2 | 0x35 | 24 | 22 | 4 | 2 | Needs Testing |
 | Apollo x8 | 0x22 | 26 | 26 | 4 | 2 | Needs Testing |
 | Apollo x8 Gen 2 | 0x37 | 26 | 26 | 4 | 2 | Needs Testing |
-| Apollo x8p | 0x20 | 26 | 26 | 8 | 2 | Needs Testing |
+| Apollo x8p | 0x20 | 26 | 26 | 8 | 2 | **Partially Verified** |
 | Apollo x8p Gen 2 | 0x38 | 26 | 26 | 8 | 2 | Needs Testing |
 | Apollo x16 | 0x21 | 34 | 34 | 8 | 2 | Needs Testing |
 | Apollo x16 Gen 2 | 0x39 | 34 | 34 | 8 | 2 | Needs Testing |
@@ -69,6 +69,21 @@ The Apollo x4 is the primary development and test device. On this model, the fol
 - Monitor volume, mute, dim, mono, talkback
 - DSP mixer routing (analog buses only — digital bus routing untested)
 - ALSA integration with 50+ mixer controls
+
+### Thunderbolt (Apollo x8p)
+
+Confirmed on real hardware by contributor @Skrypt (issue #46):
+
+- **Detection** — matched by PCI subsystem ID `0x0014`. The serial string contains a false-match
+  `2017` that would otherwise mis-detect it as an x8; subsystem-ID matching takes precedence
+  (serial prefix `2008`).
+- **Audio** — SG table programmed, `SAMPLE_POS`/`FRAME_CTR` advancing, audible playback via
+  PipeWire, no DMAR faults with `intel_iommu=on`. Required the reset-strobe re-clear and the
+  SG-table-on-ring-connect fixes.
+- **Unverified** — sample rates other than 48 kHz, full duplex, digital I/O, channel identity map.
+- **Known gap (issue #52)** — there is no routing config for `device_type 0x20`, so
+  `ua_dsp_send_routing()` returns `-ENODATA`, IO descriptors are never written, and channel order
+  is the FPGA default. The mixer daemon falls back to the x4 control map (4 of 8 preamps).
 
 ### USB (Apollo Solo USB)
 

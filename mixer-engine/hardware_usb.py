@@ -11,6 +11,10 @@ Protocol:
   Sub-commands:   [opcode:u16LE][param:u16LE][value:u32LE]
 """
 
+# STAGED: USB hardware backend. Intentionally not wired into ua_mixer_daemon.py yet —
+# mirrors HardwareBackend's interface for when USB capture lands (see CLAUDE.md Status,
+# docs/usb-apollo-re/page.md). Zero importers is expected, not evidence of deadness.
+
 import logging
 import struct
 import time

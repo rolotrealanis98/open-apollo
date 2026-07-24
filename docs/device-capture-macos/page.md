@@ -134,6 +134,36 @@ See `tools/contribute/macos/WHAT-THIS-DOES.md` in the repository for a line-by-l
 
 ---
 
+## Committed device maps are minified
+
+The device maps under `mixer-engine/device_maps/` are committed **minified** (single-line,
+no pretty whitespace) to keep the repository small — the two maps went from 5.5 MB to
+2.2 MB. `mixer-engine/device_maps/minify-device-map.py` performs the transform:
+
+- `device_map_*.json` — minified; the six never-read capture-metadata keys (`timestamp`,
+  `host`, `port`, `propfilter`, `message_count`, `tree_path`) are dropped, and per-control
+  `type`/`min`/`max`/`values` are removed when null. `value` is **never** dropped (217
+  controls carry an explicit `"value": null` that must remain subscribable).
+- `helper_tree.json` — minified only; its nulls and `read_only: false` are load-bearing.
+
+`StateTree`/`HelperTree` build byte-identical trees before and after; the maps are behavior-
+equivalent, just smaller.
+
+### Reviewing a change to a minified map
+
+Pretty-print both sides before diffing:
+
+```sh
+git show HEAD:mixer-engine/device_maps/device_map_apollo_x4.json | python3 -m json.tool > /tmp/a.json
+python3 -m json.tool < mixer-engine/device_maps/device_map_apollo_x4.json > /tmp/b.json
+diff -u /tmp/a.json /tmp/b.json
+```
+
+To re-minify after editing a pretty-printed capture, run
+`python3 mixer-engine/device_maps/minify-device-map.py <file>`.
+
+---
+
 ## Next steps
 
 - [Submitting Your Data](/docs/submitting-data) — how to submit your capture

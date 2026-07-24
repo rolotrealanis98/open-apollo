@@ -6,10 +6,11 @@
 
 set -euo pipefail
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# --- Shared colours + helpers. check() below is intentionally NOT shared —
+#     its per-distro package hints are the reason it exists. ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib.sh"
+command -v die >/dev/null 2>&1 || { echo "FATAL: scripts/lib.sh not sourced" >&2; exit 1; }
 
 MISSING=0
 
@@ -19,14 +20,16 @@ check() {
     local fedora_pkg="$3"
     local debian_pkg="$4"
     local arch_pkg="$5"
+    local opensuse_pkg="$6"
 
     if eval "$check_cmd" > /dev/null 2>&1; then
         printf "  ${GREEN}[OK]${NC}  %s\n" "$name"
     else
         printf "  ${RED}[  ]${NC}  %s — not found\n" "$name"
-        printf "        Fedora:       sudo dnf install %s\n" "$fedora_pkg"
+        printf "        Fedora:        sudo dnf install %s\n" "$fedora_pkg"
         printf "        Ubuntu/Debian: sudo apt install %s\n" "$debian_pkg"
-        printf "        Arch:         sudo pacman -S %s\n" "$arch_pkg"
+        printf "        Arch:          sudo pacman -S %s\n" "$arch_pkg"
+        printf "        openSUSE:      sudo zypper install %s\n" "$opensuse_pkg"
         echo ""
         MISSING=$((MISSING + 1))
     fi
@@ -39,10 +42,10 @@ echo ""
 
 # Build tools
 echo "Build tools:"
-check "gcc" "command -v gcc" "gcc" "gcc" "gcc"
-check "make" "command -v make" "make" "make" "make"
+check "gcc" "command -v gcc" "gcc" "gcc" "gcc" "gcc"
+check "make" "command -v make" "make" "make" "make" "make"
 check "kernel headers" "test -d /lib/modules/\$(uname -r)/build" \
-    "kernel-devel" "linux-headers-\$(uname -r)" "linux-headers"
+    "kernel-devel" "linux-headers-\$(uname -r)" "linux-headers" "kernel-default-devel"
 
 echo ""
 
@@ -50,7 +53,7 @@ echo ""
 echo "Runtime:"
 check "python3 (>= 3.10)" \
     "python3 -c 'import sys; assert sys.version_info >= (3,10)'" \
-    "python3" "python3" "python3"
+    "python3" "python3" "python3" "python3"
 
 echo ""
 
@@ -66,6 +69,15 @@ if command -v pw-cli > /dev/null 2>&1; then
     printf "  ${GREEN}[OK]${NC}  pipewire\n"
 else
     printf "  ${YELLOW}[--]${NC}  pipewire — not found (optional, for audio routing)\n"
+fi
+
+# avahi-publish is optional: the daemon runs fine without it, only Bonjour/mDNS
+# auto-discovery is disabled. Not counted as a missing required dependency.
+if command -v avahi-publish > /dev/null 2>&1; then
+    printf "  ${GREEN}[OK]${NC}  avahi-publish\n"
+else
+    printf "  ${YELLOW}[--]${NC}  avahi-publish — not found (optional, for Bonjour/mDNS auto-discovery)\n"
+    printf "        Fedora: avahi-tools · Ubuntu/Debian/openSUSE: avahi-utils · Arch: avahi\n"
 fi
 
 echo ""

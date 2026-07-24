@@ -19,20 +19,13 @@ TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
 VERSION="0.1.0"
 SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 
-# --- Colors ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+# --- Shared helpers: colours, info/ok/warn/fail/header, die, can_prompt, run_sudo ---
+. "$SCRIPT_DIR/lib.sh"
+command -v die >/dev/null 2>&1 || { echo "FATAL: scripts/lib.sh not sourced" >&2; exit 1; }
 
-info()   { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()     { echo -e "${GREEN}[ OK ]${NC}  $*"; }
-warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-fail()   { echo -e "${RED}[FAIL]${NC}  $*"; }
-header() { echo -e "\n${BOLD}── $* ──${NC}"; }
-
+# Stricter prompt() than scripts/lib.sh: also requires stdin to be a TTY
+# ([ -t 0 ]) so a piped-in sudo password is never consumed as a prompt answer.
+# Intentionally overrides the lib.sh definition — do not "dedupe" this away.
 prompt() {
     local varname="$1"; shift
     if [ -t 0 ] && [ -e /dev/tty ]; then
@@ -42,16 +35,10 @@ prompt() {
     fi
 }
 
-die() { fail "$*"; exit 1; }
-
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo "~$REAL_USER")
 REAL_UID=$(id -u "$REAL_USER" 2>/dev/null || echo 1000)
 SND_USB_BUILD="$REAL_HOME/.cache/open-apollo-snd-usb-build"
-
-run_sudo() {
-    if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
-}
 
 # Detect if kernel was built with Clang (CachyOS, some Arch kernels)
 # Use /proc/version as ground truth — it reports the actual compiler the

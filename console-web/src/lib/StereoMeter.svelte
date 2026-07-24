@@ -14,41 +14,14 @@
     wide = false,   // wider bars for monitor column
   } = $props();
 
-  import { onMount } from "svelte";
+  import Meter from "./Meter.svelte";
+  import { METER_TICKS } from "./meter-scale.js";
 
-  let clipActive = $derived(peakL > 0.97 || peakR > 0.97);
+  const barWidth = $derived(wide ? 22 : 10);
 
-  // Wall-clock stable ballistics — dt-based exponential smoothing.
-  let displayL = $state(0);
-  let displayR = $state(0);
-  const TAU_ATTACK_S = 0.012;
-  const TAU_RELEASE_S = 0.170;
-
-  onMount(() => {
-    let prevL = 0, prevR = 0;
-    let last = performance.now();
-    let rafId = 0;
-    const tick = (now) => {
-      const dt = Math.max(0, (now - last) / 1000);
-      last = now;
-
-      const tauL = levelL > prevL ? TAU_ATTACK_S : TAU_RELEASE_S;
-      const aL = 1 - Math.exp(-dt / tauL);
-      prevL += (levelL - prevL) * aL;
-      if (prevL < 1e-4) prevL = 0;
-      displayL = prevL;
-
-      const tauR = levelR > prevR ? TAU_ATTACK_S : TAU_RELEASE_S;
-      const aR = 1 - Math.exp(-dt / tauR);
-      prevR += (levelR - prevR) * aR;
-      if (prevR < 1e-4) prevR = 0;
-      displayR = prevR;
-
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  });
+  // Sparser subset of METER_TICKS for the narrower shared scale column.
+  const DISPLAY_DBS = [0, 6, 12, 18, 27, 46];
+  const TICKS = METER_TICKS.filter((t) => DISPLAY_DBS.includes(t.db));
 
   // Track highest peak (true peak hold, click to reset)
   let heldPeakL = $state(0);
@@ -70,61 +43,17 @@
     if (db > -0.5) return "0.0";
     return db.toFixed(1);
   });
-
-  // dB scale ticks. Same non-linear pro-meter scale as Meter.svelte.
-  const TICKS = [
-    { db: "0",  pct: 100 },
-    { db: "6",  pct: 85 },
-    { db: "12", pct: 69 },
-    { db: "18", pct: 51 },
-    { db: "27", pct: 32 },
-    { db: "46", pct: 10 },
-  ];
-
-  // Full tick set for accurate interpolation (matches Meter.svelte).
-  const MAP_TICKS = [
-    { db: 0, pct: 100 }, { db: 3, pct: 93 }, { db: 6, pct: 85 },
-    { db: 9, pct: 77 }, { db: 12, pct: 69 }, { db: 15, pct: 60 },
-    { db: 18, pct: 51 }, { db: 21, pct: 42 }, { db: 27, pct: 32 },
-    { db: 36, pct: 20 }, { db: 46, pct: 10 }, { db: 60, pct: 0 },
-  ];
-  function linearToScalePct(linear) {
-    if (linear <= 0) return 0;
-    const db = -(20 * Math.log10(Math.max(linear, 1e-6)));
-    if (db <= 0) return 100;
-    for (let i = 1; i < MAP_TICKS.length; i++) {
-      if (db <= MAP_TICKS[i].db) {
-        const t = (db - MAP_TICKS[i - 1].db) / (MAP_TICKS[i].db - MAP_TICKS[i - 1].db);
-        return MAP_TICKS[i - 1].pct + (MAP_TICKS[i].pct - MAP_TICKS[i - 1].pct) * t;
-      }
-    }
-    return 0;
-  }
-  const levelLPct = $derived(linearToScalePct(displayL));
-  const levelRPct = $derived(linearToScalePct(displayR));
-  const peakLPct = $derived(linearToScalePct(peakL));
-  const peakRPct = $derived(linearToScalePct(peakR));
 </script>
 
 <div class="stereo-meter" class:wide style="--height: {height}px;">
   <div class="meter-row">
-    <!-- Two meter bars -->
+    <!-- Two composed meter bars (no per-instance clip dot / scale / readout) -->
     <div class="bars">
-      <div class="bar">
-        <div class="bar-fill" style="height: {levelLPct}%;"></div>
-        {#if peakL > 0.01}
-          <div class="peak-line" style="bottom: {peakLPct}%;"></div>
-        {/if}
-      </div>
-      <div class="bar">
-        <div class="bar-fill" style="height: {levelRPct}%;"></div>
-        {#if peakR > 0.01}
-          <div class="peak-line" style="bottom: {peakRPct}%;"></div>
-        {/if}
-      </div>
+      <Meter level={levelL} peak={peakL} height={height} width={barWidth} showClip={false} showScale={false} />
+      <Meter level={levelR} peak={peakR} height={height} width={barWidth} showClip={false} showScale={false} />
     </div>
 
-    <!-- dB scale -->
+    <!-- Shared dB scale -->
     <div class="scale">
       {#each TICKS as tick}
         <div class="tick" style="bottom: {tick.pct}%;">
@@ -184,52 +113,6 @@
     gap: 2px;
   }
 
-  .bar {
-    position: relative;
-    width: 10px;
-    height: 100%;
-    background: var(--bg-recessed);
-    border-radius: var(--radius-xs);
-    border: 1px solid var(--bezel-dark);
-    overflow: hidden;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
-  }
-
-  .bar-fill {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: linear-gradient(
-      to top,
-      var(--green) 0%,
-      var(--green) 55%,
-      var(--amber) 75%,
-      var(--red) 95%
-    );
-    transition: height 50ms linear;
-    mask-image: repeating-linear-gradient(
-      to top,
-      black 0px, black 3px,
-      transparent 3px, transparent 4px
-    );
-    -webkit-mask-image: repeating-linear-gradient(
-      to top,
-      black 0px, black 3px,
-      transparent 3px, transparent 4px
-    );
-  }
-
-  .peak-line {
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--text-value);
-    box-shadow: 0 0 4px rgba(228, 228, 231, 0.3);
-    transition: bottom 50ms linear;
-  }
-
   /* ── Scale ───────────────────────────────────────────────── */
   .scale {
     position: relative;
@@ -284,7 +167,6 @@
   /* ── Wide variant (monitor column) ─────────────────────── */
   .wide .meter-row { margin-right: -20px; }
   .wide .bars { gap: 4px; }
-  .wide .bar { width: 22px; }
   .wide .lr-labels span { width: 22px; font-size: 8px; }
   .wide .lr-labels { gap: 4px; }
   .wide .peak-readout { width: 52px; font-size: 9px; padding: 4px 0; }

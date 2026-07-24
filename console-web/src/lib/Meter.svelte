@@ -10,9 +10,15 @@
     peak = 0,       // 0-1 peak hold
     height = 160,
     clip = false,   // true when clipping
+    // The three props below exist solely so StereoMeter.svelte can compose
+    // two Meter instances (its 1:1 consumer) — not a general-purpose API.
+    showClip = true,   // show the clip indicator dot
+    showScale = true,  // show the dB scale ticks + peak dB readout
+    width,             // optional override for meter body width (px)
   } = $props();
 
   import { onMount } from "svelte";
+  import { METER_TICKS, linearToScalePct } from "./meter-scale.js";
 
   let clipActive = $derived(clip || peak > 0.97);
 
@@ -61,50 +67,15 @@
     return db.toFixed(1);
   });
 
-  // dB scale ticks for the meter (dBFS values and positions). Pct values
-  // are derived from consoleOS meters — non-linear, higher resolution at top.
-  const METER_TICKS = [
-    { db: "0",   pct: 100 },
-    { db: "3",   pct: 93 },
-    { db: "6",   pct: 85 },
-    { db: "9",   pct: 77 },
-    { db: "12",  pct: 69 },
-    { db: "15",  pct: 60 },
-    { db: "18",  pct: 51 },
-    { db: "21",  pct: 42 },
-    { db: "27",  pct: 32 },
-    { db: "36",  pct: 20 },
-    { db: "46",  pct: 10 },
-    { db: "60",  pct: 0 },
-  ];
-
-  // Piecewise linear mapping — linear 0..1 → pct on METER_TICKS scale.
-  // Keeps the visible fill aligned with the dB labels on the scale.
-  function linearToScalePct(linear) {
-    if (linear <= 0) return 0;
-    const db = -(20 * Math.log10(Math.max(linear, 1e-6)));  // positive dBFS (e.g. 12 for -12 dBFS)
-    // METER_TICKS is sorted: db ascending (0, 3, 6, ..., 60), pct descending (100 → 0)
-    if (db <= 0) return 100;
-    for (let i = 1; i < METER_TICKS.length; i++) {
-      const tickDb = parseFloat(METER_TICKS[i].db);
-      if (db <= tickDb) {
-        const prevDb = parseFloat(METER_TICKS[i - 1].db);
-        const prevPct = METER_TICKS[i - 1].pct;
-        const pct = METER_TICKS[i].pct;
-        const t = (db - prevDb) / (tickDb - prevDb);
-        return prevPct + (pct - prevPct) * t;
-      }
-    }
-    return 0;
-  }
-
   const levelPct = $derived(linearToScalePct(displayLevel));
   const peakPct = $derived(linearToScalePct(peak));
 </script>
 
-<div class="meter" style="--height: {height}px;">
-  <!-- Clip indicator dot -->
-  <div class="clip-dot" class:active={clipActive}></div>
+<div class="meter" style="--height: {height}px; --width: {width ?? 14}px;">
+  {#if showClip}
+    <!-- Clip indicator dot -->
+    <div class="clip-dot" class:active={clipActive}></div>
+  {/if}
 
   <div class="meter-row">
     <!-- Meter body -->
@@ -119,19 +90,23 @@
     </div>
 
     <!-- dB scale on right side -->
-    <div class="meter-scale">
-      {#each METER_TICKS as tick}
-        <div class="meter-tick" style="bottom: {tick.pct}%;">
-          <span class="meter-tick-line"></span>
-          <span class="meter-tick-label">{tick.db}</span>
-        </div>
-      {/each}
-    </div>
+    {#if showScale}
+      <div class="meter-scale">
+        {#each METER_TICKS as tick}
+          <div class="meter-tick" style="bottom: {tick.pct}%;">
+            <span class="meter-tick-line"></span>
+            <span class="meter-tick-label">{tick.db}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
   </div>
 
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <!-- Peak hold dB readout (click to reset) -->
-  <span class="meter-readout" onclick={resetPeak} title="Click to reset peak">{peakDb}</span>
+  {#if showScale}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- Peak hold dB readout (click to reset) -->
+    <span class="meter-readout" onclick={resetPeak} title="Click to reset peak">{peakDb}</span>
+  {/if}
 </div>
 
 <style>
@@ -166,7 +141,7 @@
   /* ── Meter body ──────────────────────────────────────────── */
   .meter-body {
     position: relative;
-    width: 14px;
+    width: var(--width);
     height: var(--height);
     background: var(--bg-recessed);
     border-radius: var(--radius-xs);

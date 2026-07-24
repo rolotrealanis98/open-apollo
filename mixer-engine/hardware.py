@@ -162,17 +162,6 @@ REG_MIXER_SEQ_WR = MIXER_BAR_OFFSET + 0x08   # 0x3808
 REG_MIXER_SEQ_RD = MIXER_BAR_OFFSET + 0x0C   # 0x380C
 MIXER_SETTING_COUNT = 38
 
-# ── CLI Register Interface (ARM microcontroller communication) ──────
-# From ua_apollo.h and kext disassembly. The CLI provides a command/response
-# interface to the ARM MCU that controls preamps, phantom power, etc.
-
-REG_CLI_ENABLE   = 0xC3F4  # Write 1 to enable CLI
-REG_CLI_STATUS   = 0xC3F8  # Command status / command length
-REG_CLI_RESP_LEN = 0xC3FC  # Response data length (bytes)
-REG_CLI_CMD_BUF  = 0xC400  # Command buffer (128 bytes, 32 uint32)
-REG_CLI_RESP_BUF = 0xC480  # Response buffer (128 bytes, 32 uint32)
-CLI_CMD_BUF_SIZE = 128
-CLI_RESP_BUF_SIZE = 128
 
 # ── ARM Parameter IDs ──────────────────────────────────────────────
 # From kext disassembly of CUAD2DeviceMixer::SetInputParam, confirmed
@@ -205,22 +194,7 @@ PREAMP_PARAM_IDS = {
     "Level":    0x16,   # Default level (0xa0 = -16dB)
 }
 
-# Legacy alias for existing code that uses ARM_PARAM_IDS
-ARM_PARAM_IDS = PREAMP_PARAM_IDS
 
-# ── Hardware IDs for Apollo x4 analog inputs ────────────────────────
-# From IoKit capture analysis: each analog input has a unique hwID
-# with stride 0x0800. These IDs are passed in the SetInputParam struct
-# at word[5] to identify which preamp channel to control.
-
-APOLLO_X4_HW_IDS = {
-    0: 0x0000,  # Analog Input 1 (Mic/Line, HiZ available)
-    1: 0x0800,  # Analog Input 2 (Mic/Line, HiZ available)
-    2: 0x1000,  # Analog Input 3 (Line only)
-    3: 0x1800,  # Analog Input 4 (Line only)
-}
-# Inputs 4+ are S/PDIF, ADAT, Virtual — no preamps, no hwID needed.
-HW_ID_STRIDE = 0x0800
 MAX_PREAMP_CHANNELS = 4  # Apollo x4; other models vary
 
 # ── Bus ID Mapping (from IOKit SEL130 capture + hw probe, Apollo x4) ──
@@ -413,12 +387,6 @@ def dim_attenuation_to_step(db: int) -> int:
 # ── TOSLinkOutput string → DigitalOutputMode int ────────────────
 TOSLINK_OUTPUT_MAP = {"S/PDIF": 0, "SPDIF": 0, "ADAT": 8}
 
-# ── Bus ID → Mixer Setting Index Mapping ─────────────────────────
-# Populated from hw-probe-settings.py Phase D results.
-# Key: (bus_id, sub_param) → value: mixer setting index (0-37)
-BUS_SETTING_MAP: dict[tuple[int, int], int] = {}
-USE_DIRECT_MIXER_WRITES = len(BUS_SETTING_MAP) > 0
-
 
 def mixer_setting_offset(index: int) -> int:
     """Calculate the BAR0-absolute register offset for a mixer setting.
@@ -469,48 +437,7 @@ def encode_mixer_pair(value: int, mask: int = 0xFFFFFFFF) -> tuple[int, int]:
     return word_a, word_b
 
 
-def decode_mixer_pair(word_a: int, word_b: int) -> tuple[int, int]:
-    """Decode paired register words back to (value, mask).
-
-    Inverse of encode_mixer_pair.
-    """
-    val_lo = word_a & 0xFFFF
-    val_hi = word_b & 0xFFFF
-    mask_lo = (word_a >> 16) & 0xFFFF
-    mask_hi = (word_b >> 16) & 0xFFFF
-    value = (val_hi << 16) | val_lo
-    mask = (mask_hi << 16) | mask_lo
-    return value, mask
-
-
 # ── Value encoding helpers ─────────────────────────────────────────
-
-def float_to_fixed16(value: float) -> int:
-    """Convert float to Q16.16 fixed-point integer."""
-    return int(value * 65536) & 0xFFFFFFFF
-
-
-def fixed16_to_float(value: int) -> float:
-    """Convert Q16.16 fixed-point integer to float."""
-    if value & 0x80000000:
-        value -= 0x100000000
-    return value / 65536.0
-
-
-def db_to_linear(db: float) -> float:
-    """Convert dB to linear scale (0.0 to 1.0)."""
-    if db <= -144.0:
-        return 0.0
-    return 10.0 ** (db / 20.0)
-
-
-def encode_gain_value(gain_db: float) -> int:
-    """Encode preamp gain (dB) to ARM register value.
-
-    From capture analysis: gain values are integer dB, range -144 to 65.
-    The ARM MCU expects the raw integer dB value.
-    """
-    return max(-144, min(65, int(round(gain_db)))) & 0xFFFFFFFF
 
 
 def encode_monitor_level(db: float) -> int:
@@ -567,33 +494,6 @@ def encode_aux_fader(db: float) -> float:
     if db <= -144.0:
         return 0.0
     return 10.0 ** (db / 20.0)
-
-
-def taper_to_db(tapered: float, min_db: float = -96.0, max_db: float = 0.0) -> float:
-    """Convert tapered 0.0-1.0 to dB using quadratic audio curve.
-
-    DEPRECATED: Use fader_tapered_to_db() for input/send/aux faders,
-    or preamp_tapered_to_db() for preamp gain. This old quadratic
-    approximation is kept for backwards compatibility only.
-    """
-    if tapered <= 0.0:
-        return -144.0  # silence
-    if tapered >= 1.0:
-        return max_db
-    # Quadratic taper: more resolution near 0 dB
-    return min_db + (max_db - min_db) * (tapered ** 2)
-
-
-def db_to_taper(db: float, min_db: float = -96.0, max_db: float = 0.0) -> float:
-    """Convert dB to tapered 0.0-1.0 using quadratic audio curve.
-
-    DEPRECATED: Inverse of taper_to_db.
-    """
-    if db <= min_db:
-        return 0.0
-    if db >= max_db:
-        return 1.0
-    return ((db - min_db) / (max_db - min_db)) ** 0.5
 
 
 # ── Fader taper lookup table (input/send/aux) ──────────────────────────
@@ -673,33 +573,6 @@ def fader_tapered_to_db(tapered: float) -> float:
     db_lo = _FADER_TAPER_FWD[idx]
     db_hi = _FADER_TAPER_FWD[idx + 1]
     return db_lo + frac * (db_hi - db_lo)
-
-
-def fader_db_to_tapered(db: float) -> float:
-    """Convert dB to fader tapered 0.0-1.0 using captured LUT.
-
-    Inverse of fader_tapered_to_db. Uses binary search on the
-    monotonically increasing LUT.
-    """
-    if db <= -144.0:
-        return 0.0
-    if db >= 12.0:
-        return 1.0
-    # Binary search for the interval containing db
-    lo, hi = 0, 360
-    while lo < hi - 1:
-        mid = (lo + hi) // 2
-        if _FADER_TAPER_FWD[mid] <= db:
-            lo = mid
-        else:
-            hi = mid
-    # Interpolate within the interval
-    db_lo = _FADER_TAPER_FWD[lo]
-    db_hi = _FADER_TAPER_FWD[hi] if hi <= 360 else 12.0
-    if db_hi == db_lo:
-        return lo / 360.0
-    frac = (db - db_lo) / (db_hi - db_lo)
-    return (lo + frac) / 360.0
 
 
 def preamp_tapered_to_db(tapered: float) -> float:
@@ -830,11 +703,6 @@ def float_to_uint32(f: float) -> int:
     return struct.unpack('<I', struct.pack('<f', f))[0]
 
 
-def uint32_to_float(u: int) -> float:
-    """Unpack a uint32 as an IEEE 754 float."""
-    return struct.unpack('<f', struct.pack('<I', u & 0xFFFFFFFF))[0]
-
-
 # ── Hardware Backend ────────────────────────────────────────────────
 
 class HardwareBackend:
@@ -851,11 +719,8 @@ class HardwareBackend:
         self.fd = -1
         self.device_path = device_path
         self.connected = False
-        self._cli_enabled = False
         self.safe_mode = safe_mode  # Block unmapped DSP writes (bus params, monitor)
         self._last_mixer_write = 0.0  # Throttle: time of last DSP setting write
-        self._last_cli_write = 0.0   # Throttle: time of last ARM CLI command
-        self._cli_frozen = False     # Set True on first CLI timeout — stops all CLI
 
     def open(self, device_path: str | None = None) -> bool:
         """Open the device node. Auto-discovers /dev/ua_apollo* if no path given."""
@@ -881,7 +746,6 @@ class HardwareBackend:
             os.close(self.fd)
             self.fd = -1
             self.connected = False
-            self._cli_enabled = False
 
     def _find_device(self) -> str | None:
         """Auto-discover /dev/ua_apollo*."""
@@ -989,238 +853,12 @@ class HardwareBackend:
                   "read=%d)", index, new_seq, self.reg_read(REG_MIXER_SEQ_RD) or -1)
         return False
 
-    def mixer_read_setting(self, index: int) -> tuple[int, int] | None:
-        """Read a mixer setting, returning (value, mask).
-
-        Uses the atomic kernel ioctl (READ_MIXER_SETTING) when available,
-        which reads the paired registers under the device mutex. Falls back
-        to direct register reads if the ioctl is not supported.
-
-        Returns (value, mask) tuple or None on error.
-        """
-        if index < 0 or index >= MIXER_SETTING_COUNT:
-            return None
-
-        # Try atomic kernel ioctl first
-        if self.fd >= 0:
-            buf = struct.pack('<IIII', index, 0, 0, 0)
-            try:
-                result = fcntl.ioctl(self.fd, UA_IOCTL_READ_MIXER_SETTING, buf)
-                _, value, mask, _ = struct.unpack('<IIII', result)
-                return value, mask
-            except OSError as e:
-                if e.errno != 25:  # ENOTTY — not supported
-                    log.error("mixer_read_setting[%d]: ioctl error: %s",
-                              index, e)
-                    return None
-                # Fall through to register path
-
-        # Fallback: direct register reads (returns raw wordA, wordB)
-        reg = mixer_setting_offset(index)
-        a = self.reg_read(reg)
-        b = self.reg_read(reg + 4)
-        if a is None or b is None:
-            return None
-        return decode_mixer_pair(a, b)
 
     # ── CLI register interface (ARM MCU communication) ───────────────
 
-    def cli_enable(self) -> bool:
-        """Enable the CLI interface for ARM MCU communication.
-
-        Must be called before cli_send_command(). The CLI interface is
-        a register-mapped command/response buffer at BAR0+0xC3F4.
-        """
-        if self._cli_enabled:
-            return True
-        if not self.reg_write(REG_CLI_ENABLE, 1):
-            return False
-        # Brief delay for CLI to initialize
-        time.sleep(0.01)
-        status = self.reg_read(REG_CLI_STATUS)
-        if status is None:
-            log.error("CLI enable: failed to read status")
-            return False
-        self._cli_enabled = True
-        log.debug("CLI enabled (status=0x%08x)", status)
-        return True
-
-    def cli_send_command(self, cmd_data: bytes, timeout_ms: int = 100) -> bytes | None:
-        """Send a command via CLI registers and return response data.
-
-        Protocol (reverse-engineered from kext EnableCLI/SendCLICommand):
-            1. Ensure CLI is enabled
-            2. Write command data to CLI_CMD_BUF (0xC400), 4 bytes at a time
-            3. Write command length to CLI_STATUS (0xC3F8) to trigger
-            4. Poll CLI_STATUS for completion (bit 31 or length change)
-            5. Read response length from CLI_RESP_LEN (0xC3FC)
-            6. Read response data from CLI_RESP_BUF (0xC480)
-
-        Args:
-            cmd_data: Command bytes (max 128 bytes)
-            timeout_ms: Timeout for response in milliseconds
-
-        Returns:
-            Response bytes, or None on timeout/error
-        """
-        if not self._cli_enabled:
-            if not self.cli_enable():
-                return None
-
-        if len(cmd_data) > CLI_CMD_BUF_SIZE:
-            log.error("CLI command too large: %d bytes (max %d)",
-                      len(cmd_data), CLI_CMD_BUF_SIZE)
-            return None
-
-        # Pad to 4-byte boundary
-        remainder = len(cmd_data) % 4
-        padded = cmd_data + b'\x00' * (4 - remainder) if remainder else cmd_data
-
-        # Write command data to CLI_CMD_BUF
-        for i in range(0, len(padded), 4):
-            word = struct.unpack_from('<I', padded, i)[0]
-            if not self.reg_write(REG_CLI_CMD_BUF + i, word):
-                log.error("CLI: failed to write cmd buf at offset %d", i)
-                return None
-
-        # Trigger command by writing length to CLI_STATUS
-        if not self.reg_write(REG_CLI_STATUS, len(cmd_data)):
-            return None
-
-        log.debug("CLI: sent %d bytes, waiting for response...", len(cmd_data))
-
-        # Poll for response
-        polls = timeout_ms
-        for _ in range(polls):
-            status = self.reg_read(REG_CLI_STATUS)
-            if status is None:
-                return None
-            # Check for completion — status should change from command length
-            # to 0 or a response indicator
-            if status == 0 or (status & 0x80000000):
-                break
-            time.sleep(0.001)
-        else:
-            log.error("CLI: timeout waiting for response (status=0x%08x)", status or 0)
-            return None
-
-        # Read response length
-        resp_len = self.reg_read(REG_CLI_RESP_LEN)
-        if resp_len is None or resp_len == 0:
-            # No response data (command may have been void)
-            return b''
-
-        resp_len = min(resp_len, CLI_RESP_BUF_SIZE)
-
-        # Read response data
-        resp = bytearray()
-        for i in range(0, resp_len + (4 - resp_len % 4) if resp_len % 4 else resp_len, 4):
-            word = self.reg_read(REG_CLI_RESP_BUF + i)
-            if word is None:
-                break
-            resp.extend(struct.pack('<I', word))
-
-        result = bytes(resp[:resp_len])
-        log.debug("CLI: received %d bytes response", len(result))
-        return result
 
     # ── ARM parameter access ─────────────────────────────────────────
 
-    def arm_set_param(self, hw_id: int, param_id: int, value: int) -> bool:
-        """Set an ARM microcontroller parameter (preamp, 48V, pad, etc.).
-
-        Uses the CLI register interface to send commands to the ARM MCU.
-        The command format is derived from the kext's DeviceRequest protocol.
-
-        From IoKit capture analysis, the SetInputParam struct is 36 bytes:
-            word[0]:   paramID (0x00-0x17)
-            word[1-4]: reserved (0)
-            word[5]:   hwID (channel identifier)
-            word[6-7]: reserved (0)
-            word[8]:   0x08 (data size / flags)
-
-        For the CLI path, we encode this as a register write sequence:
-        the ARM MCU reads paramID, hwID, and value from known locations.
-
-        Args:
-            hw_id:    Channel hardware ID (0x0000, 0x0800, 0x1000, 0x1800)
-            param_id: Parameter ID (see ARM_PARAM_IDS)
-            value:    Parameter value (integer)
-
-        Returns:
-            True on success
-        """
-        # Build the 36-byte CLI command matching the kernel driver's
-        # ua_preamp_set_param(): {param_id, value, 0, 0, 0, hw_id, 0, 0, 8}
-        cli_payload = struct.pack('<9I',
-            param_id,          # word[0]: paramID
-            value,             # word[1]: value
-            0, 0, 0,           # word[2-4]: reserved
-            hw_id,             # word[5]: hardware channel ID
-            0, 0,              # word[6-7]: reserved
-            8,                 # word[8]: data size
-        )
-
-        if self._cli_frozen:
-            log.debug("ARM CLI frozen — skipping hwID=0x%04x paramID=0x%02x",
-                      hw_id, param_id)
-            return False
-
-        log.info("HW ARM: hwID=0x%04x paramID=0x%02x value=%d", hw_id, param_id, value)
-
-        # Throttle: ARM MCU needs 500ms+ between commands.
-        # Without this, rapid CLI writes freeze the Apollo permanently.
-        now = time.monotonic()
-        elapsed = now - self._last_cli_write
-        if elapsed < 0.500:
-            time.sleep(0.500 - elapsed)
-
-        # Use UA_IOCTL_CLI_COMMAND to go through the kernel's CLI
-        # handshake (mutex + enable + send + poll + read response).
-        # struct: {cmd_len(u32), resp_len(u32), cmd_data[128], resp_data[128]}
-        buf = bytearray(264)
-        struct.pack_into('<I', buf, 0, len(cli_payload))  # cmd_len
-        # resp_len at offset 4 is output, leave as 0
-        buf[8:8+len(cli_payload)] = cli_payload  # cmd_data at offset 8
-        try:
-            result = fcntl.ioctl(self.fd, UA_IOCTL_CLI_COMMAND, bytes(buf))
-            self._last_cli_write = time.monotonic()
-            resp_len = struct.unpack_from('<I', result, 4)[0]
-            if resp_len > 0:
-                resp_data = result[136:136+min(resp_len, 128)]
-                resp_code = struct.unpack_from('<I', resp_data, 0)[0] if resp_len >= 4 else 0
-                log.debug("ARM param OK (resp_len=%d code=0x%04x)", resp_len, resp_code)
-            return True
-        except OSError as e:
-            self._last_cli_write = time.monotonic()
-            if e.errno == 110:  # ETIMEDOUT — ARM MCU is frozen
-                self._cli_frozen = True
-                log.error("ARM CLI FROZEN — stopping all CLI commands. "
-                          "Apollo needs power cycle. "
-                          "(hwID=0x%04x paramID=0x%02x value=%d)",
-                          hw_id, param_id, value)
-            else:
-                log.error("ARM set param failed: %s "
-                          "(hwID=0x%04x paramID=0x%02x value=%d)",
-                          e, hw_id, param_id, value)
-            return False
-
-    def arm_get_param(self, hw_id: int, param_id: int) -> int | None:
-        """Read an ARM parameter value.
-
-        Sends a query command and returns the current value, or None on error.
-        """
-        # Query struct: same layout but value=0 indicates read
-        cmd = struct.pack('<9I',
-            param_id, 0, 0, 0, 0, hw_id, 0, 0, 8)
-
-        resp = self.cli_send_command(cmd)
-        if resp is None or len(resp) < 8:
-            return None
-
-        # Response should contain the current value
-        value = struct.unpack_from('<I', resp, 4)[0]
-        return value
 
     # ── SetMixerParam (SEL131 equivalent) ────────────────────────────
 
@@ -1340,8 +978,7 @@ class HardwareBackend:
         mix_coeff = fader_linear × √2 × cos((pan + 1) × π/4)
         At center pan, mix_coeff == linear_gain (the √2 and cos(π/4) cancel).
         """
-        write_fn = self.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
-            else self.set_mixer_bus_param
+        write_fn = self.set_mixer_bus_param
         ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
         ok &= write_fn(bus_id, SUB_PARAM_GAIN_L, linear_gain)
         ok &= write_fn(bus_id, SUB_PARAM_GAIN_R, linear_gain)
@@ -1353,74 +990,11 @@ class HardwareBackend:
         From DTrace capture: pan writes only sub=0.
         mix_coeff = fader_linear × √2 × cos((pan + 1) × π/4)
         """
-        write_fn = self.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
-            else self.set_mixer_bus_param
+        write_fn = self.set_mixer_bus_param
         return write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
 
     # ── Diagnostic / Probing ──────────────────────────────────────────
 
-    def dump_mixer_settings(self) -> list[dict]:
-        """Read and return all 38 mixer settings for diagnostics."""
-        results = []
-        for i in range(MIXER_SETTING_COUNT):
-            pair = self.mixer_read_setting(i)
-            if pair is None:
-                results.append({"index": i, "error": True})
-                continue
-            value, mask = pair
-            results.append({
-                "index": i,
-                "reg": mixer_setting_offset(i),
-                "value": value,
-                "mask": mask,
-            })
-        return results
-
-    def dump_cli_registers(self) -> dict:
-        """Read CLI register state for diagnostics."""
-        return {
-            "enable": self.reg_read(REG_CLI_ENABLE),
-            "status": self.reg_read(REG_CLI_STATUS),
-            "resp_len": self.reg_read(REG_CLI_RESP_LEN),
-        }
-
-    def dump_mixer_seq(self) -> dict:
-        """Read mixer sequence counters."""
-        return {
-            "seq_wr": self.reg_read(REG_MIXER_SEQ_WR),
-            "seq_rd": self.reg_read(REG_MIXER_SEQ_RD),
-        }
-
-    def get_mixer_readback(self) -> list[int] | None:
-        """Read all 38 mixer settings atomically via GET_MIXER_READBACK ioctl.
-
-        The kernel reads all 38 settings under the device mutex and computes
-        XOR checksums (data[38] = XOR of [0..37], data[39] = ~data[38]).
-
-        Returns list of 38 u32 values, or None on error.
-        """
-        if self.fd < 0:
-            return None
-
-        # Pack: 4 input words (zeroed) + 41 data words (zeroed)
-        buf = struct.pack('<' + 'I' * 45, *([0] * 45))
-        try:
-            result = fcntl.ioctl(self.fd, UA_IOCTL_GET_MIXER_READBACK, buf)
-            words = struct.unpack('<' + 'I' * 45, result)
-            data = list(words[4:])  # data[0..40]
-
-            # Verify checksum
-            checksum = 0
-            for i in range(38):
-                checksum ^= data[i]
-            if data[38] != checksum:
-                log.warning("mixer readback checksum mismatch: "
-                            "computed=0x%08x, got=0x%08x", checksum, data[38])
-
-            return data[:38]  # Return just the 38 settings
-        except OSError as e:
-            log.error("get_mixer_readback: %s", e)
-            return None
 
     def get_hw_readback(self) -> tuple[int, list[int]] | None:
         """Read 40-word hardware readback from DSP (BAR0+0x3810/0x3814).
@@ -1464,18 +1038,6 @@ class HardwareBackend:
             log.debug("get_dsp_info(dsp=%d): %s", dsp_index, e)
             return None
 
-    def get_all_dsp_status(self) -> list[dict]:
-        """Query all 4 DSPs and return their status."""
-        results = []
-        for i in range(4):
-            info = self.get_dsp_info(i)
-            if info:
-                results.append(info)
-        return results
-
-    def probe_register(self, offset: int) -> int | None:
-        """Read a single register (for empirical probing)."""
-        return self.reg_read(offset)
 
     # ── Driver parameter access ──────────────────────────────────────
 
@@ -1520,36 +1082,6 @@ class HardwareBackend:
             return None
 
     # ── Direct mixer setting writes for bus params ────────────────────
-
-    def set_bus_param_direct(self, bus_id: int, sub_param: int,
-                             value_float: float) -> bool:
-        """Write a bus param directly to the correct mixer setting.
-
-        Looks up (bus_id, sub_param) in BUS_SETTING_MAP. If found,
-        writes to that mixer setting index via mixer_write_setting(),
-        bypassing the driver's SET_MIXER_BUS_PARAM ioctl. Falls back
-        to set_mixer_bus_param() if the mapping is unknown.
-        """
-        key = (bus_id, sub_param)
-        setting_idx = BUS_SETTING_MAP.get(key)
-
-        if setting_idx is None:
-            log.debug("BUS_PARAM_DIRECT: no mapping for bus=0x%04x sub=%d, "
-                      "falling back to ioctl", bus_id, sub_param)
-            return self.set_mixer_bus_param(bus_id, sub_param, value_float)
-
-        value_u32 = float_to_uint32(value_float)
-
-        if self.safe_mode:
-            log.debug("BUS_PARAM_DIRECT BLOCKED (safe_mode): bus=0x%04x "
-                      "sub=%d → setting[%d] value=%.6f",
-                      bus_id, sub_param, setting_idx, value_float)
-            return True
-
-        log.debug("BUS_PARAM_DIRECT: bus=0x%04x sub=%d → setting[%d] "
-                  "value=%.6f (0x%08x)",
-                  bus_id, sub_param, setting_idx, value_float, value_u32)
-        return self.mixer_write_setting(setting_idx, value_u32)
 
 
 # ── Control-to-Hardware Routing ─────────────────────────────────────
@@ -1819,7 +1351,7 @@ class HardwareRouter:
                 log.error("HW PREAMP GAIN: failed for input[%d]", ch)
             return
 
-        param_id = ARM_PARAM_IDS.get(control)
+        param_id = PREAMP_PARAM_IDS.get(control)
         if param_id is None:
             log.debug("SET %s = %r (unknown preamp param '%s')", path, value, control)
             return
@@ -1889,8 +1421,7 @@ class HardwareRouter:
                 linear = 0.0 if db <= -144.0 else 10.0 ** (db / 20.0) * TALKBACK_UNITY
                 log.info("HW BUS: talkback.Fader = %.1f dB → %.6f "
                          "(bus=0x%04x, sub=0 only)", db, linear, bus)
-                write_fn = self.backend.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
-                    else self.backend.set_mixer_bus_param
+                write_fn = self.backend.set_mixer_bus_param
                 write_fn(bus, SUB_PARAM_MIX, linear)
                 return
 
@@ -2561,17 +2092,3 @@ class HardwareRouter:
 
     # ── Value encoding helpers ────────────────────────────────────
 
-    @staticmethod
-    def encode_mixer_value(value: Any, encoding: str = "raw") -> int:
-        """Encode a control value to a mixer register uint32."""
-        if encoding == "bool":
-            return 1 if value else 0
-        elif encoding == "float_to_fixed":
-            return float_to_fixed16(float(value))
-        elif encoding == "db":
-            return encode_gain_value(float(value))
-        else:
-            try:
-                return int(value) & 0xFFFFFFFF
-            except (ValueError, TypeError):
-                return 0

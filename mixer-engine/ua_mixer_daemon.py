@@ -1625,7 +1625,7 @@ Examples:
              f"tcp://{args.host}:{helper_port}" if helper_port else "disabled")
     log.info("  WS (UA Connect): %s",
              f"ws://{args.host}:{args.ws_port}" if ws_server else "disabled")
-    log.info("  Bonjour: %s", "enabled" if bonjour and bonjour.zc else "disabled")
+    log.info("  Bonjour: %s", "enabled" if bonjour and bonjour.proc else "disabled")
 
     async def run_all():
         """Run TCP servers, meter pump, heartbeat, and (optionally) WS server."""
@@ -1637,6 +1637,15 @@ Examples:
         if ws_server:
             tasks.append(asyncio.create_task(ws_server.start()))
         await asyncio.gather(*tasks)
+
+    # SIGTERM is the normal shutdown path — install.sh/uninstall.sh pkill the
+    # daemon on every reinstall. Python's default SIGTERM disposition exits
+    # immediately, so the finally block below never runs: metering threads, unsaved
+    # state, and any Bonjour child would leak. Route SIGTERM through the same
+    # KeyboardInterrupt path SIGINT already uses so shutdown is symmetric.
+    def _handle_sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     try:
         asyncio.run(run_all())
