@@ -173,9 +173,32 @@ If ALSA metering is unavailable, meters report silence (-77 dBFS) for all channe
 
 The daemon loads a device map JSON file that defines the complete state tree structure. This file describes all controls, their types, ranges, and default values.
 
-Default location: `mixer-engine/device_maps/device_map_apollo_x4.json`
+The device map is a capture of the state tree from a working UA Mixer Engine. Different Apollo models expose different controls (channel counts, preamps, routing), so each model needs its own map. Available maps live in `mixer-engine/device_maps/`:
 
-The device map is a capture of the state tree from a working UA Mixer Engine. Different Apollo models require different device maps.
+| Model | Device type | Device map |
+|---|---|---|
+| Apollo x4 | 0x1F | `device_map_apollo_x4.json` |
+| Apollo x8p | 0x20 | `device_map_apollo_x8p.json` |
+
+### Automatic selection
+
+When `--device-map` is not given, the daemon reads the attached device's `device_type` from the driver (`UA_IOCTL_GET_DEVICE_INFO`), looks it up against the descriptors in `devices/apollo-*.json`, and loads the matching `device_map_apollo_<model>.json`. If the device type is unknown, no map exists for it yet, or the daemon runs with `--no-hardware`, it falls back to the Apollo x4 map.
+
+To force a specific map (e.g. when developing without matching hardware):
+
+```bash
+python3 ua_mixer_daemon.py --device-map device_maps/device_map_apollo_x8p.json
+```
+
+### Adding a map for a new model
+
+Capture the model's control tree from a working UA Mixer Engine (see [Device Capture (macOS)](/docs/device-capture-macos)), then flatten it into the daemon's format:
+
+```bash
+python3 tools/tree_to_device_map.py capture.json -o device_maps/device_map_apollo_<model>.json
+```
+
+Add a matching `devices/apollo-<model>.json` descriptor with the correct `device_type` and `model`, and the daemon will select the new map automatically.
 
 ---
 

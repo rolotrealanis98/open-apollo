@@ -134,6 +134,27 @@ See `tools/contribute/macos/WHAT-THIS-DOES.md` in the repository for a line-by-l
 
 ---
 
+## Capturing the mixer device map
+
+The DTrace capture above records the **routing table** (how DMA and DSP channels map). The mixer daemon additionally needs a **device map** — the full control tree (preamps, buses, plugins, routes) for the model. This is captured separately, over TCP, and does **not** require SIP to be disabled.
+
+With your Apollo connected and **UA Console** open (so the UA Mixer Engine is serving on port 4710), run the tree dumper from the repo:
+
+```bash
+python3 mixer-engine/tools/dump_x8p_tree.py --host 127.0.0.1 --out capture.json
+```
+
+It walks the engine's control tree node by node (a full map is a few MB, so allow ~a minute). Then flatten the raw tree into the daemon's device-map format:
+
+```bash
+python3 mixer-engine/tools/tree_to_device_map.py capture.json \
+    -o mixer-engine/device_maps/device_map_apollo_<model>.json
+```
+
+Add a `devices/apollo-<model>.json` descriptor with the matching `device_type`, and the daemon will select the new map automatically for that model. See [Daemon Configuration](/docs/daemon-configuration#device-maps) for details.
+
+---
+
 ## Next steps
 
 - [Submitting Your Data](/docs/submitting-data) — how to submit your capture
