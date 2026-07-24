@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- Repo-wide over-engineering cleanup (behavior-preserving): removed unreachable CLI/ARM dead code, minified the committed device maps (−3.3 MB), extracted a shared `scripts/lib.sh` shell prelude, deduplicated the console-web meters, replaced the `zeroconf` dependency with `avahi-publish`, and added a SIGTERM shutdown handler.
+
 ## [1.0.0] - 2026-03-22
 
 ### Added
