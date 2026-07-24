@@ -97,6 +97,9 @@ RUNTIME_PROPERTIES = {
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_DEVICE_MAP = SCRIPT_DIR / "device_maps" / "device_map_apollo_x4.json"
 DEFAULT_HELPER_TREE = SCRIPT_DIR / "device_maps" / "helper_tree.json"
+# Device descriptors (devices/apollo-*.json) map a driver device_type to a model
+# name, from which the matching device map filename is derived.
+DEVICES_DIR = SCRIPT_DIR.parent / "devices"
 DEFAULT_PORT = 4710
 DEFAULT_HELPER_PORT = 4720
 DEFAULT_WS_PORT = 4721
@@ -1460,9 +1463,56 @@ class MixerDaemon:
         log.debug("%s: POST %s (value=%r) — ignored", client.id, cmd.path, cmd.value)
 
 
-def find_device_map() -> Path | None:
-    """Find the best available device map."""
-    # Check default location
+def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
+    """Resolve a driver device_type to (model, device_map_path) via devices/*.json.
+
+    Each devices/apollo-*.json descriptor carries a "device_type" (hex string)
+    and "model" (e.g. "Apollo x8p"). The device map filename is derived from the
+    model's suffix: "Apollo x8p" -> device_maps/device_map_apollo_x8p.json.
+    Returns (model, path) where path is None if the map file doesn't exist yet.
+    """
+    if not DEVICES_DIR.is_dir():
+        return None, None
+    for desc_path in sorted(DEVICES_DIR.glob("*.json")):
+        try:
+            desc = json.loads(desc_path.read_text())
+            dt = desc.get("device_type")
+            if dt is None or int(str(dt), 16) != device_type:
+                continue
+        except (ValueError, OSError, json.JSONDecodeError):
+            continue
+        model = desc.get("model")
+        suffix = (model.split()[-1] if model else desc_path.stem.split("-")[-1]).lower()
+        candidate = SCRIPT_DIR / "device_maps" / f"device_map_apollo_{suffix}.json"
+        return model, (candidate if candidate.exists() else None)
+    return None, None
+
+
+def device_model_name(device_type: int) -> str:
+    """Human-readable model name for a device_type (for logging)."""
+    model, _ = lookup_device(device_type)
+    return model or f"device_type 0x{device_type:02x}"
+
+
+def find_device_map(device_type: int | None = None) -> Path | None:
+    """Find the best available device map, preferring the attached device's own.
+
+    When the connected hardware's device_type is known, load the matching map
+    (e.g. Apollo x8p -> device_map_apollo_x8p.json). Otherwise, or if no such map
+    exists, fall back to the default Apollo x4 map.
+    """
+    # Device-specific map, keyed off the attached hardware
+    if device_type is not None:
+        model, dev_map = lookup_device(device_type)
+        if dev_map:
+            log.info("Selected device map for %s", model or f"0x{device_type:02x}")
+            return dev_map
+        if model:
+            log.warning("No device map for %s (device_type 0x%02x) — falling back "
+                        "to Apollo x4. Controls/routing may not match this device.",
+                        model, device_type)
+
+    # Default location (Apollo x4)
     if DEFAULT_DEVICE_MAP.exists():
         return DEFAULT_DEVICE_MAP
 
@@ -1524,8 +1574,29 @@ Examples:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S")
 
-    # Find device map
-    device_map = args.device_map or find_device_map()
+    # Open hardware early (unless --no-hardware) so we can identify the attached
+    # Apollo model and load the device map that matches it.
+    backend = None
+    device_type = None
+    if not args.no_hardware:
+        backend = HardwareBackend(args.device, safe_mode=args.safe_mode)
+        if backend.open():
+            info = backend.get_device_info()
+            if info:
+                device_type = info["device_type"]
+                log.info("Detected %s (device_type=0x%02x, subsystem=0x%04x, "
+                         "%d DSPs, serial=0x%08x)",
+                         device_model_name(device_type), device_type,
+                         info["subsystem_id"], info["num_dsps"], info["serial"])
+            else:
+                log.warning("Driver did not report device info "
+                            "(pre-GET_DEVICE_INFO?) — using default device map")
+        else:
+            log.warning("No hardware device found — running in software-only mode")
+            backend = None
+
+    # Find device map (prefer one matching the attached device; --device-map wins)
+    device_map = args.device_map or find_device_map(device_type)
     if not device_map or not device_map.exists():
         log.error("Device map not found. Searched:")
         log.error("  %s", DEFAULT_DEVICE_MAP)
@@ -1564,21 +1635,16 @@ Examples:
         log.warning("Helper tree not found: %s — 4720 clients will use device map",
                      helper_tree_path)
 
-    # Initialize hardware backend
+    # Wire up the hardware router (backend was opened above for device detection)
     hw_router = None
-    if not args.no_hardware:
-        safe_mode = args.safe_mode
-        backend = HardwareBackend(args.device, safe_mode=safe_mode)
-        if backend.open():
-            hw_router = HardwareRouter(backend, state)
-            log.info("Hardware backend: %s", backend.device_path)
-            log.info("Safe mode: %s (monitor+preamp+analog bus enabled, "
-                     "digital/send/aux bus writes %s)",
-                     "ON" if safe_mode else "OFF",
-                     "blocked" if safe_mode else "enabled")
-        else:
-            log.warning("No hardware device found — running in software-only mode")
-    else:
+    if backend is not None:
+        hw_router = HardwareRouter(backend, state)
+        log.info("Hardware backend: %s", backend.device_path)
+        log.info("Safe mode: %s (monitor+preamp+analog bus enabled, "
+                 "digital/send/aux bus writes %s)",
+                 "ON" if args.safe_mode else "OFF",
+                 "blocked" if args.safe_mode else "enabled")
+    elif args.no_hardware:
         log.info("Software-only mode (--no-hardware)")
 
     # Initialize software metering (ALSA PCM capture)

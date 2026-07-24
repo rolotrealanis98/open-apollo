@@ -149,6 +149,14 @@ def _IO(type_, nr):
 _DSP_INFO_SIZE = 32
 UA_IOCTL_GET_DSP_INFO = _IOWR(UA_IOCTL_MAGIC, 0x02, _DSP_INFO_SIZE)
 
+# struct ua_device_info {
+#     fpga_rev, device_type, subsystem_id, num_dsps,
+#     fw_version, fw_v2, serial, ext_caps, reserved[8]
+# } = 16 * u32 = 64 bytes.  Identifies which Apollo model is attached so the
+# daemon can select the matching device map (x4 vs x8p vs ...).
+_DEVICE_INFO_SIZE = 64
+UA_IOCTL_GET_DEVICE_INFO = _IOR(UA_IOCTL_MAGIC, 0x01, _DEVICE_INFO_SIZE)
+
 _FW_LOAD_SIZE = 16
 UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
 UA_IOCTL_DSP_CONNECT = _IO(UA_IOCTL_MAGIC, 0x51)
@@ -1441,6 +1449,41 @@ class HardwareBackend:
         except OSError as e:
             log.error("get_hw_readback: %s", e)
             return None
+
+    def get_device_info(self) -> dict | None:
+        """Query which Apollo model is attached via UA_IOCTL_GET_DEVICE_INFO.
+
+        Returns a dict with 'fpga_rev', 'device_type', 'subsystem_id',
+        'num_dsps', 'fw_version', 'fw_v2', 'serial', 'ext_caps', or None if the
+        device node isn't open or the driver is too old to support the ioctl.
+
+        The daemon uses 'device_type' to pick the right device map
+        (e.g. 0x1F -> Apollo x4, 0x20 -> Apollo x8p).
+        """
+        if self.fd < 0:
+            return None
+
+        # struct ua_device_info: 8 u32 fields + reserved[8] = 64 bytes.
+        buf = bytearray(_DEVICE_INFO_SIZE)
+        try:
+            result = fcntl.ioctl(self.fd, UA_IOCTL_GET_DEVICE_INFO, buf)
+        except OSError as e:
+            # Older drivers (pre-GET_DEVICE_INFO) return ENOTTY — not fatal.
+            log.debug("get_device_info: %s", e)
+            return None
+
+        (fpga_rev, device_type, subsystem_id, num_dsps,
+         fw_version, fw_v2, serial, ext_caps) = struct.unpack_from('<8I', result)
+        return {
+            "fpga_rev": fpga_rev,
+            "device_type": device_type,
+            "subsystem_id": subsystem_id,
+            "num_dsps": num_dsps,
+            "fw_version": fw_version,
+            "fw_v2": bool(fw_v2),
+            "serial": serial,
+            "ext_caps": ext_caps,
+        }
 
     def get_dsp_info(self, dsp_index: int) -> dict | None:
         """Query DSP info for a single SHARC DSP.
