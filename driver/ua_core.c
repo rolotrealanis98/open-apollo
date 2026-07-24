@@ -2338,14 +2338,15 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		/* SG table must be programmed even on warm boot —
 		 * the previous OS's SG entries point to invalid
 		 * physical addresses.  Without this, SAMPLE_POS
-		 * stays at 0 after transport start. */
-		if (ua_uses_audio_extension(ua->device_type)) {
-			ret = ua_audio_preinit_dma(ua);
-			if (ret)
-				dev_warn(&pdev->dev,
-					 "warm boot DMA preinit failed: %d\n",
-					 ret);
-		}
+		 * stays at 0 after transport start.
+		 * Applies to every device class: the SG SRAM and the
+		 * DMA engine enables are FPGA-side, independent of the
+		 * AudioExtension vs ring-connect DSP handshake. */
+		ret = ua_audio_preinit_dma(ua);
+		if (ret)
+			dev_warn(&pdev->dev,
+				 "warm boot DMA preinit failed: %d\n",
+				 ret);
 	} else {
 		ret = ua_program_registers(ua);
 		if (ret) {
@@ -2391,14 +2392,22 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 * → PCIe Uncorrectable Fatal error → kernel lockup on Fedora
 		 * 43 with Intel VT-d enforced.
 		 */
-		if (ua_uses_audio_extension(ua->device_type)) {
-			ret = ua_audio_preinit_dma(ua);
-			if (ret) {
-				dev_err(&pdev->dev,
-					"DMA pre-alloc failed: %d\n", ret);
-				return ret;
-			}
+		/*
+		 * Ring-connect devices (x8/x8p/x16/Twin X, issue #46)
+		 * need this too: nothing else programs the audio SG
+		 * table or clears the DMA reset strobes for them, so
+		 * the FPGA was left DMAing to whatever the SG SRAM
+		 * held — SAMPLE_POS frozen at 0, and a host lockup as
+		 * soon as a stream opened.
+		 */
+		ret = ua_audio_preinit_dma(ua);
+		if (ret) {
+			dev_err(&pdev->dev,
+				"DMA pre-alloc failed: %d\n", ret);
+			return ret;
+		}
 
+		if (ua_uses_audio_extension(ua->device_type)) {
 			/*
 			 * Set clock source for Apollo x4 internal clock.
 			 * DTrace RE (2026-03-09): macOS uses source=0xC
