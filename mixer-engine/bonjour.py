@@ -32,8 +32,11 @@ class BonjourAnnouncer:
             log.warning("avahi-publish not found — Bonjour disabled "
                         "(install avahi-utils)")
             return False
-        # List form (no shell); `-s` consumes the next token as the service name
-        # regardless of leading dashes, so a user --name cannot inject arguments.
+        # List form (no shell), so a user-supplied --name cannot inject a shell
+        # command. name is a trusted local CLI arg (default: hostname, which can't
+        # start with '-'); a stray leading-dash name would be misparsed by
+        # avahi-publish's getopt and exit immediately — caught by the poll() check
+        # below and reported as a graceful disable, never executed as an option.
         proc = subprocess.Popen(
             ["avahi-publish", "-s", self.name, SERVICE_TYPE, str(self.port)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

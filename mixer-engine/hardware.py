@@ -721,8 +721,6 @@ class HardwareBackend:
         self.connected = False
         self.safe_mode = safe_mode  # Block unmapped DSP writes (bus params, monitor)
         self._last_mixer_write = 0.0  # Throttle: time of last DSP setting write
-        self._last_cli_write = 0.0   # Throttle: time of last ARM CLI command
-        self._cli_frozen = False     # Set True on first CLI timeout — stops all CLI
 
     def open(self, device_path: str | None = None) -> bool:
         """Open the device node. Auto-discovers /dev/ua_apollo* if no path given."""
