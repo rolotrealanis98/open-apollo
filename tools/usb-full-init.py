@@ -182,14 +182,11 @@ print(f"Clock: {freq} Hz")
 
 usb.util.release_interface(dev, 0)
 
-# Step 3: Set monitor level to -12dB via vendor ctrl (no interface claim needed)
-# Use high sequence counter (100) so FPGA processes it — the full init
-# leaves the internal counter at ~38, so seq=7 gets ignored.
-raw = int(192 + (-12) * 2)  # 0xa8
-mask_buf = bytearray(128)
-struct.pack_into("<I", mask_buf, 16, (0x00FF << 16) | raw)
-dev.ctrl_transfer(0x41, 0x03, 0x062D, 0, bytes(mask_buf), timeout=1000)
-dev.ctrl_transfer(0x41, 0x03, 0x0602, 0, struct.pack("<I", 100), timeout=1000)
-print("Monitor: -12 dB")
+# NOTE: deliberately NOT writing setting[2] (monitor core) here.
+# It holds volume/mute/source/dim state that the ARM MCU needs for the
+# front panel knob and buttons to work. Writing it with a non-zero mask
+# during init overwrites the firmware's own defaults and breaks physical
+# knob control — see docs/register-map/page.md and
+# docs/initialization/page.md.
 
 print("Ready — run 'sudo modprobe snd_usb_audio' to get ALSA card")
