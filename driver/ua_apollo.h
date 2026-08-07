@@ -37,6 +37,20 @@
 #define UA_SUBSYS_APOLLO_SOLO           0x000F
 #define UA_SUBSYS_APOLLO_8P             0x0006
 #define UA_SUBSYS_APOLLO_X8P            0x0014  /* x8p: serial 2008xxxx false-matches "2017"->x8; 6 DSPs, FPGA 0xa241c5ac */
+/*
+ * Twin X DUO, read off real hardware via macOS IOKit (2026-07-29):
+ *   ioreg -l -r -n "Universal Audio Apollo Twin X - DUO"
+ *     vendor-id    = 0x1A00   (matches the driver's documented vendor)
+ *     device-id    = 0x0002   (PCI_DEVICE_ID_UA_APOLLO)
+ *     subsystem-id = 0x0019
+ *     model        = "Universal Audio Apollo Twin X - DUO"
+ *
+ * Pinning by subsystem ID avoids the serial-prefix heuristic entirely, which
+ * the comment above UA_REG_SERIAL_BASE warns misidentifies hardware. Unverified
+ * for the QUAD variant, which likely carries a different subsystem ID — do not
+ * assume this value covers it.
+ */
+#define UA_SUBSYS_APOLLO_TWIN_X_DUO     0x0019  /* Twin X DUO: 2 DSPs, verified via macOS IOKit */
 
 /*
  * UAD2DeviceType enum — reconstructed from CPcieDevice::Name() and
@@ -778,6 +792,16 @@ struct ua_device {
 	u32 num_dsps;               /* Number of SHARC DSPs */
 	bool fw_v2;                 /* Extended (v2) firmware */
 	bool cli_enabled;           /* CLI register interface active */
+
+	/* probe_only: identification-only probe. Set when the module is
+	 * loaded with probe_only=1, meaning ua_probe() returned after
+	 * reading identity registers without allocating IRQ vectors,
+	 * creating the chardev, or initialising the audio subsystem.
+	 * ua_remove() MUST check this and bail early — the normal teardown
+	 * path calls free_irq(), hrtimer_cancel(), device_destroy() and
+	 * cdev_del() unconditionally, all of which are invalid on a
+	 * minimally-probed device. */
+	bool probe_minimal;
 
 	/* Interrupts */
 	int num_irq_vectors;

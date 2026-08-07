@@ -83,8 +83,40 @@ static const struct ua_model_info ua_models[] = {
 	/*                             play rec preamps hiz */
 	{ UA_DEV_APOLLO_SOLO,          3,  2,  1, 0 },
 	{ UA_DEV_ARROW,                3,  2,  1, 0 },
-	{ UA_DEV_APOLLO_TWIN_X,        8,  8,  2, 2 },
-	{ UA_DEV_APOLLO_TWIN_X_GEN2,   8,  8,  2, 2 },
+	/*
+	 * Apollo Twin X (0x23) / Twin X Gen 2 (0x3A).
+	 *
+	 * Physical I/O: 2 Unison mic/line preamps (rear combo XLR/TRS),
+	 * 1 Hi-Z instrument input (front 1/4"), 2 monitor outs, 1 stereo
+	 * headphone out, 1 optical TOSLINK *input* (8ch ADAT @48k or
+	 * S/PDIF). No optical output. UA rates the unit 10 in x 6 out.
+	 *
+	 * num_hiz corrected 2 -> 1: the struct documents it as "first N
+	 * preamps", and the Twin X has a single front-panel instrument
+	 * input, unlike the x4's two. Claiming 2 exposes an ALSA Hi-Z
+	 * switch for preamp 2 that has no jack behind it.
+	 *
+	 * play_ch/rec_ch MEASURED on real hardware, 2026-07-29, from the
+	 * same source the x4's 24/22 came from — macOS IOKit properties on
+	 * an attached Apollo Twin X DUO (UAD2System.kext 11.8.1, macOS 26.5.2):
+	 *
+	 *   ioreg -l -r -c com_uaudio_driver_UAD2AudioStream
+	 *     stream A: IOAudioStreamNumChannels=10, Direction=0 (output)
+	 *     stream B: IOAudioStreamNumChannels=16, Direction=1 (input)
+	 *
+	 * IOAudioFamily defines kIOAudioStreamDirectionOutput=0 and
+	 * kIOAudioStreamDirectionInput=1, so play=10 and rec=16. Both differ
+	 * from the previous 8/8 placeholders, in opposite directions — the old
+	 * values were not measurements.
+	 *
+	 * Both streams advertise 44.1/48/88.2/96/176.4/192 kHz at 24-bit in
+	 * 32-bit containers, matching UA_MAX/MIN rate support already assumed.
+	 *
+	 * Still unverified for Twin X Gen 2 (0x3A), which is a distinct model;
+	 * it inherits these numbers only as the best available guess.
+	 */
+	{ UA_DEV_APOLLO_TWIN_X,       10, 16,  2, 1 },
+	{ UA_DEV_APOLLO_TWIN_X_GEN2,  10, 16,  2, 1 },
 	{ UA_DEV_APOLLO_X4,           24, 22,  4, 2 },
 	{ UA_DEV_APOLLO_X4_GEN2,     24, 22,  4, 2 },
 	{ UA_DEV_APOLLO_X6,           24, 22,  4, 2 },
@@ -1300,7 +1332,7 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 	struct ua_audio *audio = &ua->audio;
 	unsigned int block_size;
 	int retries;
-	u32 frame_ctr, acr, readback;
+	u32 frame_ctr, readback;
 
 	audio->buf_frame_size = ua_calc_buf_frame_size(audio->play_channels,
 						       audio->rec_channels);
