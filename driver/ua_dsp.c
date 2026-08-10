@@ -27,6 +27,7 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/firmware.h>
+#include <linux/moduleparam.h>
 #include <linux/slab.h>
 
 #include "ua_dsp_programs.h"
@@ -3221,15 +3222,46 @@ int ua_dsp_send_routing(struct ua_device *ua)
 #define UA_DSP_PROG_CMD   0x00360000
 #define UA_DSP_PROG_PARAM 0x80040000
 
+/*
+ * twinx_dsp — opt in to submitting the x4 DSP0 program set on an Apollo
+ * Twin X. EXPERIMENTAL and off by default, deliberately.
+ *
+ * The program blobs in ua_dsp_programs.h were captured from an x4
+ * (ua_x4_dsp0_programs). macOS is known to load the same five "Bill"
+ * programs to every SHARC on that model, which makes it plausible the
+ * same blocks apply to a Twin X's DSP 0 — but plausible is not verified.
+ * These blocks are submitted straight into the DSP command ring, so if
+ * they are wrong for this silicon the likely outcome is a wedged DSP
+ * rather than a clean error return.
+ *
+ * Keep this off until basic identification and transport are confirmed
+ * working. It exists so the step can be tested deliberately, in isolation,
+ * rather than being silently entangled with everything else at probe.
+ */
+static bool twinx_dsp;
+module_param(twinx_dsp, bool, 0444);
+MODULE_PARM_DESC(twinx_dsp,
+	"EXPERIMENTAL: load x4-derived DSP0 programs on Apollo Twin X (default off; may wedge the DSP)");
+
 int ua_dsp_load_programs(struct ua_device *ua)
 {
 	unsigned int i;
 	int ret;
+	bool is_twinx = (ua->device_type == UA_DEV_APOLLO_TWIN_X ||
+			 ua->device_type == UA_DEV_APOLLO_TWIN_X_GEN2);
 
 	if (ua->device_type != UA_DEV_APOLLO_X4) {
-		dev_info(&ua->pdev->dev,
-			 "DSP programs: only x4 supported, skipping\n");
-		return 0;
+		if (is_twinx && twinx_dsp) {
+			dev_warn(&ua->pdev->dev,
+				 "DSP programs: EXPERIMENTAL — submitting x4-derived programs on Twin X (twinx_dsp=1)\n");
+		} else {
+			dev_info(&ua->pdev->dev,
+				 "DSP programs: only x4 supported, skipping%s\n",
+				 is_twinx ?
+				 " (Twin X: set twinx_dsp=1 to try the x4 set)" :
+				 "");
+			return 0;
+		}
 	}
 
 	/*
@@ -3243,7 +3275,7 @@ int ua_dsp_load_programs(struct ua_device *ua)
 	 * that lands.
 	 */
 	dev_info(&ua->pdev->dev,
-		 "loading %u programs for DSP 0\n", UA_X4_DSP0_NUM_PROGRAMS);
+		 "loading %zu programs for DSP 0\n", UA_X4_DSP0_NUM_PROGRAMS);
 
 	for (i = 0; i < UA_X4_DSP0_NUM_PROGRAMS; i++) {
 		const struct ua_dsp_program *prog = &ua_x4_dsp0_programs[i];

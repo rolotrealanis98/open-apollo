@@ -1,0 +1,65 @@
+{
+  "model": "Apollo Twin X",
+  "variant": "DUO",
+  "device_type": "0x23",
+  "serial_prefix": "2020",
+  "subsystem_id": "0x0019",
+  "pci": {
+    "vendor_id": "0x1A00",
+    "device_id": "0x0002",
+    "subsystem_id": "0x0019",
+    "revision_id": "0x00",
+    "ioreg_model": "Universal Audio Apollo Twin X - DUO",
+    "source": "macOS IOKit + Linux BAR0, verified on real hardware"
+  },
+  "thunderbolt": {
+    "vendor_id": "0x1176",
+    "device_id": "0x9",
+    "vendor_name": "Universal Audio, Inc.",
+    "device_name": "Apollo Twin X",
+    "generation": "Thunderbolt 3",
+    "negotiated_link_linux": "20 Gb/s (2 lanes x 10 Gb/s) on GC-TITAN RIDGE JHL7540",
+    "negotiated_link_macos": "40 Gb/s on Apple Silicon MacBook Air"
+  },
+  "connect_path": "ring-buffer",
+  "dsps": 2,
+  "channels": {
+    "play": 10,
+    "rec": 16,
+    "verified": true,
+    "source": "macOS IOKit UAD2AudioStream + Linux ALSA/PipeWire Multichannel (s32le 10ch play / 16ch rec @ 48 kHz)"
+  },
+  "sample_rates": [44100, 48000, 88200, 96000, 176400, 192000],
+  "sample_format": "24-bit in 32-bit containers, mixable, big-endian flag 1",
+  "preamps": 2,
+  "hiz": 1,
+  "features": ["spdif", "adat"],
+  "physical_io": {
+    "mic_line_in": 2,
+    "hiz_instrument_in": 1,
+    "monitor_out": 2,
+    "headphone_out": 1,
+    "optical": "TOSLINK input only (8ch ADAT @48k or S/PDIF); no optical output",
+    "ua_rating": "10 in x 6 out"
+  },
+  "capture_environment": {
+    "macos": "26.5.2 (build 25F84)",
+    "arch": "arm64 (Apple Silicon)",
+    "ua_kext": "com.uaudio.driver.UAD2System 11.8.1",
+    "linux": "Arch/Omarchy, kernel 7.1.5-arch1-2, PipeWire 1.6.8",
+    "note": "11.8.1 is the exact kext version this project was reverse engineered from"
+  },
+  "status": "verified",
+  "contributor": "@grey-tsosie",
+  "notes": [
+    "VERIFIED on Linux (Thunderbolt 3): playback and capture through PipeWire Multichannel I/O; Discord voice calls confirmed using Apollo as the default input/output.",
+    "VERIFIED via macOS IOKit on 2026-07-29: DUO variant (2 SHARC DSPs), subsystem ID 0x0019, DMA channel counts play=10 / rec=16.",
+    "Linux BAR0 identification matches: device_type 0x23, subsys 0x0019, 2 DSPs. Transport SAMPLE_POS clocks on the ring-buffer connect path (contrast upstream x8p / issue #46).",
+    "The previous ua_models[] entry had play=8 / rec=8 placeholders. Measured values are play=10 / rec=16; num_hiz corrected 2 -> 1 (single front-panel Hi-Z).",
+    "subsystem_id 0x0019 pins Twin X DUO independently of the serial-prefix heuristic. This unit's serial digits 5-8 are 2024, which the serial table maps to Apollo Solo (0x27) — wrong connect path and channel counts without the subsystem pin.",
+    "Do NOT use CoreAudio aggregate figures from system_profiler SPAudioDataType for channel counts.",
+    "QUAD and Twin X Gen 2 (0x3A) are unverified; Gen 2 inherits channel counts only as a best guess. QUAD likely has a different subsystem ID.",
+    "STILL MISSING: Twin X-specific routing tables / IO descriptors for ua_routing.h, and Twin X DSP program blocks. twinx_dsp=1 can opt into the x4-derived DSP0 set experimentally (default off).",
+    "Some Thunderbolt hosts fail to tunnel the PCIe endpoint across cold boot (race with Apollo ~22s ready time). That is a host/TB rescan issue, not a missing ua_apollo bind — tracked separately from device identification."
+  ]
+}
