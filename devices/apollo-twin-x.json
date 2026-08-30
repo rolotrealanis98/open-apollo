@@ -2,7 +2,8 @@
   "model": "Apollo Twin X",
   "variant": "DUO",
   "device_type": "0x23",
-  "serial_prefix": "2020",
+  "serial_prefix": "2024",
+  "serial_leading": "2403",
   "subsystem_id": "0x0019",
   "pci": {
     "vendor_id": "0x1A00",
@@ -56,10 +57,10 @@
     "VERIFIED via macOS IOKit on 2026-07-29: DUO variant (2 SHARC DSPs), subsystem ID 0x0019, DMA channel counts play=10 / rec=16.",
     "Linux BAR0 identification matches: device_type 0x23, subsys 0x0019, 2 DSPs. Transport SAMPLE_POS clocks on the ring-buffer connect path (contrast upstream x8p / issue #46).",
     "The previous ua_models[] entry had play=8 / rec=8 placeholders. Measured values are play=10 / rec=16; num_hiz corrected 2 -> 1 (single front-panel Hi-Z).",
-    "subsystem_id 0x0019 pins Twin X DUO independently of the serial-prefix heuristic. This unit's serial digits 5-8 are 2024, which the serial table maps to Apollo Solo (0x27) — wrong connect path and channel counts without the subsystem pin.",
+    "subsystem_id 0x0019 pins Twin X DUO independently of the serial-prefix heuristic. Observed serial 2403 2024 xxxxxx. serial_prefix is digits 5-8 (2024), which the serial table maps to Apollo Solo (0x27). serial_leading is digits 1-4 (2403). Wrong connect path and channel counts without the subsystem pin.",
     "Do NOT use CoreAudio aggregate figures from system_profiler SPAudioDataType for channel counts.",
     "QUAD and Twin X Gen 2 (0x3A) are unverified; Gen 2 inherits channel counts only as a best guess. QUAD likely has a different subsystem ID.",
     "STILL MISSING: Twin X-specific routing tables / IO descriptors for ua_routing.h, and Twin X DSP program blocks. twinx_dsp=1 can opt into the x4-derived DSP0 set experimentally (default off).",
-    "Some Thunderbolt hosts fail to tunnel the PCIe endpoint across cold boot (race with Apollo ~22s ready time). That is a host/TB rescan issue, not a missing ua_apollo bind — tracked separately from device identification."
+    "Some Thunderbolt hosts fail to tunnel the PCIe endpoint across cold boot (race with Apollo ~22s ready time). That is a host/TB rescan issue, not a missing ua_apollo bind. Tracked separately from device identification."
   ]
 }
