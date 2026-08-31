@@ -695,11 +695,18 @@ struct ua_audio {
 	struct snd_card *card;
 	struct snd_pcm *pcm;
 
-	/* DMA buffers — 4 MiB coherent per direction */
-	void *play_buf;
-	dma_addr_t play_addr;
-	void *rec_buf;
-	dma_addr_t rec_addr;
+	/*
+	 * DMA buffers — 4 MiB per direction, allocated as
+	 * UA_DMA_SG_ENTRIES separate 4 KiB coherent pages and vmapped
+	 * into one flat CPU range. The hardware SG table maps the pages
+	 * for the device, so no contiguous order-10 block is required.
+	 */
+	void *play_buf;                      /* vmapped CPU view */
+	void *rec_buf;                       /* vmapped CPU view */
+	void *play_cpu[UA_DMA_SG_ENTRIES];   /* per-page coherent CPU addr */
+	void *rec_cpu[UA_DMA_SG_ENTRIES];    /* per-page coherent CPU addr */
+	dma_addr_t play_dmas[UA_DMA_SG_ENTRIES];
+	dma_addr_t rec_dmas[UA_DMA_SG_ENTRIES];
 
 	/* Audio state */
 	bool connected;             /* DSP firmware connection established */
