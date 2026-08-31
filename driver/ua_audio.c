@@ -18,6 +18,7 @@
 #include <linux/delay.h>
 #include <linux/jiffies.h>
 #include <linux/dma-mapping.h>
+#include <linux/vmalloc.h>
 #include <linux/version.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -168,47 +169,133 @@ static int ua_audio_alloc_dma(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct device *dev = &ua->pdev->dev;
+	struct page **pages;
+	unsigned int i;
+	int ret;
 
-	audio->play_buf = dma_alloc_coherent(dev, UA_DMA_BUF_SIZE,
-					     &audio->play_addr, GFP_KERNEL);
-	if (!audio->play_buf)
-		return -ENOMEM;
-
-	audio->rec_buf = dma_alloc_coherent(dev, UA_DMA_BUF_SIZE,
-					    &audio->rec_addr, GFP_KERNEL);
-	if (!audio->rec_buf) {
-		dma_free_coherent(dev, UA_DMA_BUF_SIZE,
-				  audio->play_buf, audio->play_addr);
-		audio->play_buf = NULL;
-		return -ENOMEM;
+	pages = kmalloc_array(UA_DMA_SG_ENTRIES, sizeof(*pages), GFP_KERNEL);
+	if (!pages) {
+		ret = -ENOMEM;
+		goto err_play;
 	}
+
+	/*
+	 * Allocate the 4 MiB ring as UA_DMA_SG_ENTRIES separate 4 KiB
+	 * coherent pages instead of one contiguous order-10 block.
+	 *
+	 * A single 4 MiB dma_alloc_coherent needs a physically contiguous
+	 * order-10 buddy block below 4 GiB (DMA_BIT_MASK(32)); with
+	 * CmaTotal=0, low memory fragments within hours of uptime and
+	 * probe fails with -ENOMEM on every replug (2026-08-29: three
+	 * consecutive -12 failures after the first boot-time connect).
+	 * The hardware walks an SG table of 1024 4 KiB entries, so
+	 * contiguity is not required by the device.
+	 */
+	for (i = 0; i < UA_DMA_SG_ENTRIES; i++) {
+		audio->play_cpu[i] = dma_alloc_coherent(dev,
+						       UA_PCIE_PAGE_SIZE,
+						       &audio->play_dmas[i],
+						       GFP_KERNEL);
+		if (!audio->play_cpu[i]) {
+			ret = -ENOMEM;
+			goto err_play;
+		}
+	}
+
+	for (i = 0; i < UA_DMA_SG_ENTRIES; i++) {
+		audio->rec_cpu[i] = dma_alloc_coherent(dev,
+						      UA_PCIE_PAGE_SIZE,
+						      &audio->rec_dmas[i],
+						      GFP_KERNEL);
+		if (!audio->rec_cpu[i]) {
+			ret = -ENOMEM;
+			goto err_rec;
+		}
+	}
+
+	/*
+	 * One flat CPU view over the scattered pages, so the PCM copy
+	 * callback and the dma_test ioctl keep treating the ring as a
+	 * single 4 MiB buffer.
+	 */
+	for (i = 0; i < UA_DMA_SG_ENTRIES; i++)
+		pages[i] = virt_to_page(audio->play_cpu[i]);
+
+	audio->play_buf = vmap(pages, UA_DMA_SG_ENTRIES, VM_MAP, PAGE_KERNEL);
+	if (!audio->play_buf) {
+		ret = -ENOMEM;
+		goto err_rec;
+	}
+
+	for (i = 0; i < UA_DMA_SG_ENTRIES; i++)
+		pages[i] = virt_to_page(audio->rec_cpu[i]);
+
+	audio->rec_buf = vmap(pages, UA_DMA_SG_ENTRIES, VM_MAP, PAGE_KERNEL);
+	if (!audio->rec_buf) {
+		vunmap(audio->play_buf);
+		audio->play_buf = NULL;
+		ret = -ENOMEM;
+		goto err_rec;
+	}
+
+	kfree(pages);
 
 	memset(audio->play_buf, 0, UA_DMA_BUF_SIZE);
 	memset(audio->rec_buf, 0, UA_DMA_BUF_SIZE);
 
-	dev_info(dev, "DMA buffers: play=%pad rec=%pad (4 MiB each)\n",
-		 &audio->play_addr, &audio->rec_addr);
-	dev_info(dev, "DMA phys:    play=0x%llx rec=0x%llx\n",
-		 (u64)virt_to_phys(audio->play_buf),
-		 (u64)virt_to_phys(audio->rec_buf));
+	dev_info(dev, "DMA buffers: %u pages per direction, vmapped flat (4 MiB each)\n",
+		 UA_DMA_SG_ENTRIES);
+	dev_info(dev, "  play dma[0]=%pad dma[%u]=%pad\n",
+		 &audio->play_dmas[0], UA_DMA_SG_ENTRIES - 1,
+		 &audio->play_dmas[UA_DMA_SG_ENTRIES - 1]);
+	dev_info(dev, "  rec dma[0]=%pad dma[%u]=%pad\n",
+		 &audio->rec_dmas[0], UA_DMA_SG_ENTRIES - 1,
+		 &audio->rec_dmas[UA_DMA_SG_ENTRIES - 1]);
 	return 0;
+
+err_rec:
+	for (i = 0; i < UA_DMA_SG_ENTRIES && audio->rec_cpu[i]; i++) {
+		dma_free_coherent(dev, UA_PCIE_PAGE_SIZE,
+				  audio->rec_cpu[i], audio->rec_dmas[i]);
+		audio->rec_cpu[i] = NULL;
+	}
+err_play:
+	for (i = 0; i < UA_DMA_SG_ENTRIES && audio->play_cpu[i]; i++) {
+		dma_free_coherent(dev, UA_PCIE_PAGE_SIZE,
+				  audio->play_cpu[i], audio->play_dmas[i]);
+		audio->play_cpu[i] = NULL;
+	}
+	kfree(pages);
+	return ret;
 }
 
 static void ua_audio_free_dma(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct device *dev = &ua->pdev->dev;
+	unsigned int i;
 
+	/* vunmap first — the vmapped view aliases the per-page CPU addrs */
 	if (audio->play_buf) {
-		dma_free_coherent(dev, UA_DMA_BUF_SIZE,
-				  audio->play_buf, audio->play_addr);
+		vunmap(audio->play_buf);
 		audio->play_buf = NULL;
 	}
 
 	if (audio->rec_buf) {
-		dma_free_coherent(dev, UA_DMA_BUF_SIZE,
-				  audio->rec_buf, audio->rec_addr);
+		vunmap(audio->rec_buf);
 		audio->rec_buf = NULL;
+	}
+
+	for (i = 0; i < UA_DMA_SG_ENTRIES && audio->play_cpu[i]; i++) {
+		dma_free_coherent(dev, UA_PCIE_PAGE_SIZE,
+				  audio->play_cpu[i], audio->play_dmas[i]);
+		audio->play_cpu[i] = NULL;
+	}
+
+	for (i = 0; i < UA_DMA_SG_ENTRIES && audio->rec_cpu[i]; i++) {
+		dma_free_coherent(dev, UA_PCIE_PAGE_SIZE,
+				  audio->rec_cpu[i], audio->rec_dmas[i]);
+		audio->rec_cpu[i] = NULL;
 	}
 }
 
@@ -286,25 +373,26 @@ static void ua_audio_program_sg(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	unsigned int i;
-	dma_addr_t addr;
 
 	dev_info(&ua->pdev->dev, "=== PROGRAM SG TABLE (%u entries, stride=0x%x) ===\n",
 		 UA_DMA_SG_ENTRIES, UA_PCIE_PAGE_SIZE);
-	dev_info(&ua->pdev->dev, "  play_addr=%pad rec_addr=%pad\n",
-		 &audio->play_addr, &audio->rec_addr);
+	dev_info(&ua->pdev->dev, "  play dma[0]=%pad dma[%u]=%pad\n",
+		 &audio->play_dmas[0], UA_DMA_SG_ENTRIES - 1,
+		 &audio->play_dmas[UA_DMA_SG_ENTRIES - 1]);
+	dev_info(&ua->pdev->dev, "  rec dma[0]=%pad dma[%u]=%pad\n",
+		 &audio->rec_dmas[0], UA_DMA_SG_ENTRIES - 1,
+		 &audio->rec_dmas[UA_DMA_SG_ENTRIES - 1]);
 
 	for (i = 0; i < UA_DMA_SG_ENTRIES; i++) {
-		addr = audio->play_addr + (dma_addr_t)i * UA_PCIE_PAGE_SIZE;
 		ua_write(ua, UA_REG_PLAY_DMA_BASE + i * 8,
-			 lower_32_bits(addr));
+			 lower_32_bits(audio->play_dmas[i]));
 		ua_write(ua, UA_REG_PLAY_DMA_BASE + i * 8 + 4,
-			 upper_32_bits(addr));
+			 upper_32_bits(audio->play_dmas[i]));
 
-		addr = audio->rec_addr + (dma_addr_t)i * UA_PCIE_PAGE_SIZE;
 		ua_write(ua, UA_REG_REC_DMA_BASE + i * 8,
-			 lower_32_bits(addr));
+			 lower_32_bits(audio->rec_dmas[i]));
 		ua_write(ua, UA_REG_REC_DMA_BASE + i * 8 + 4,
-			 upper_32_bits(addr));
+			 upper_32_bits(audio->rec_dmas[i]));
 	}
 
 	/* No doorbell — kext ProgramRegisters writes SG directly without one */
@@ -338,11 +426,12 @@ static void ua_audio_program_sg(struct ua_device *ua)
 	ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION);
 
 	dev_info(&ua->pdev->dev, "  SG[0]: play=0x%08x rec=0x%08x\n",
-		 lower_32_bits(audio->play_addr),
-		 lower_32_bits(audio->rec_addr));
-	dev_info(&ua->pdev->dev, "  SG[1023]: play=0x%08x rec=0x%08x\n",
-		 lower_32_bits(audio->play_addr + 1023ULL * UA_PCIE_PAGE_SIZE),
-		 lower_32_bits(audio->rec_addr + 1023ULL * UA_PCIE_PAGE_SIZE));
+		 lower_32_bits(audio->play_dmas[0]),
+		 lower_32_bits(audio->rec_dmas[0]));
+	dev_info(&ua->pdev->dev, "  SG[%u]: play=0x%08x rec=0x%08x\n",
+		 UA_DMA_SG_ENTRIES - 1,
+		 lower_32_bits(audio->play_dmas[UA_DMA_SG_ENTRIES - 1]),
+		 lower_32_bits(audio->rec_dmas[UA_DMA_SG_ENTRIES - 1]));
 }
 
 /*
