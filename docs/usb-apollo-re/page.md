@@ -143,6 +143,7 @@ Files located at `C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmwar
 - **SET_INTERFACE resets FPGA state on stream close** — fixed by `QUIRK_FLAG_IFACE_SKIP_CLOSE` patch (quirks.c, patch 4). Without it, closing a capture stream resets Interface 3 to alt=0 and wipes FPGA capture routing
 - **EP6 interrupt flood on Intel xHCI** — the Apollo pushes JFK notifications at ~2000/sec. No longer requires a drain daemon; the one-shot `usb-full-init.py` init stabilizes the device. AMD controllers handle it gracefully without any workaround
 - **Firmware-specific init sequence** — the captured 38-packet init from Cauldron 1.3 build 3 works on some devices but crashes others at packet 28 (SRAM address mismatch in IIR biquad writes). Observed with CachyOS/AMD contributor (@ariahello) using a different Cauldron build
+- **Cold DSP needs ~30 s after firmware boot before the init** — on an Apollo Twin USB, a full init replay started ~5 s after the device re-enumerates as `0x0002` brings up converters, routing and monitoring but silently never instantiates the UAD chain; the same replay after a 30 s settle does. Instrumented cold vs. warm runs are identical at the USB layer (934 vs 919 responses, 0 errors either way), so the only variable is elapsed time. 30 s is known-good, not bisected; the true minimum is somewhere between 5 and 30 s. Likely the same variable as the packet-28 stall above (see #62)
 - **Interface 0 contention (resolved)** — EP6 drain daemon was causing Interface 0 conflicts with `snd-usb-audio`. Daemon has been removed from the stack entirely
 - **udev `RUN+=` silently fails to import pyusb (fixed)** — `systemd-udevd.service` runs with `MemoryDenyWriteExecute` and a restrictive `SystemCallFilter`; `RUN+=` children inherit that sandbox. On systemd with these hardening defaults (confirmed on Ubuntu 26.04), this makes every `RUN+=`-invoked Python init script fail with `ModuleNotFoundError: No module named 'usb'` on every boot/hotplug — 100% reproducible, not transient — even though the same command succeeds when run manually. Since `usb-full-init.py` never ran, FPGA capture routing was never programmed automatically, so the device would enumerate and play back audio fine but capture nothing. Fixed by triggering init via `TAG+="systemd", ENV{SYSTEMD_WANTS}=...}` instead of `RUN+=` (see `configs/systemd/`), since plain systemd services don't inherit udevd's sandbox
 
@@ -172,25 +173,33 @@ Files located at `C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmwar
 
 ### Packet Format
 ```
-Header (4 bytes):
-  [word_count : u16 LE]  — number of 32-bit words in payload
-  [type       : u8]      — command/response sub-type
-  [magic      : u8]      — 0xDC = command (OUT), 0xDD = response (IN)
+Header (4 bytes — four independent fields, not a u16 word count):
+  [word_count : u8]  — payload length in 32-bit words (255 max, so 1024-byte packets)
+  [flags      : u8]  — 0x00 or 0x10: which of two logical streams this packet belongs to
+  [seq        : u8]  — sequence counter, +1 per packet, wraps at 256
+  [magic      : u8]  — 0xDC = command (OUT), 0xDD = response (IN)
 
-Payload (word_count * 4 bytes):
-  Repeated sub-commands, each 8 bytes:
-  [opcode : u16 LE]  — operation code (0x0001 = query, 0x0002 = read/write)
-  [param  : u16 LE]  — register/parameter index
-  [value  : u32 LE]  — value (write) or 0 (read)
+Payload (word_count * 4 bytes): a stream of entries, each starting with one dword:
+  [wordcount : u16 LE]  — entry length in dwords, INCLUDING this dword
+  [reg       : u16 LE]  — register
+
+  wordcount 1  : register read        [hdr]
+  wordcount 2  : register write       [hdr][value]
+  wordcount 4  : routing/table entry  [hdr][DSP address][mask][value]
+  wordcount 5+ : block write          [hdr][DSP address][flags/mask][payload ...]
 ```
+
+The low 16 bits of an entry are a **length**, not an opcode. Reading them as "0x0001 = query, 0x0002 = write" is right for those two lengths and only those — a parser that steps 4 or 8 bytes resumes mid-entry on anything longer and reads payload data as fresh headers, which is what "register 0xC4B5" or "opcode 542467070" in a decode means. (`tools/usb-re/pcap-mixer-decode.py` did both of these until #70/#76.)
+
+**Entries span packets, per stream.** A block write can be far longer than one packet — the largest seen is 6603 dwords (26 KB, register `0x0001`) — and the remainder simply continues in the next packet **with the same flags byte**. The two flags values are two independent streams multiplexed on EP1; reassemble each on its own and every entry parses. Verified on two Apollo Twin USB init captures (2341 and 2596 command packets): split by flags and walked as streams they yield 5482 and 5616 entries that consume every dword with nothing left over. Walked packet-by-packet, the same captures fail on the 447 1024-byte program-load packets that are continuations.
 
 ### Observed Init Sequence
 ```
-# Frame 77 — Host sends init command (type=0)
+# Frame 77 — Host sends init command (seq=0)
 OUT: 04 00 00 DC  02 00 23 00 01 00 00 00  02 00 10 00 48 14 B7 01
      ^header      ^write reg 0x23 = 1       ^write reg 0x10 = 0x01B71448
 
-# Frame 78 — Host sends readback request (type=1)
+# Frame 78 — Host sends readback request (seq=1)
 OUT: 04 00 01 DC  02 00 10 00 48 14 B7 01  02 00 11 00 20 24 E5 0A
      ^header      ^reg 0x10                 ^reg 0x11
 
@@ -200,28 +209,80 @@ IN:  64 00 01 DD  ...  (100 words)
 IN:  75 00 02 DD  ...  (117 words)
 ...continues across 8 response packets...
 
-# Frame 309 — Host queries status (type=1)
+# Frame 309 — Host queries status (seq=1)
 OUT: 01 00 01 DC  01 00 27 00
-     ^1 word      ^opcode=1 param=0x27
+     ^1 word      ^wordcount=1 (read) reg=0x27
 
 # Frame 311 — Device responds with status
 IN:  02 00 08 DD  02 00 0D 80  42 01 00 00
-     ^2 words     ^param=0x800D  value=0x142 (322)
+     ^2 words     ^wordcount=2 reg=0x800D  value=0x142 (322)
 ```
 
 ### Key Registers
-| Param | Direction | Purpose |
+| Register | Direction | Purpose |
 |-------|-----------|---------|
 | 0x0023 | Write | Init/connect (value=1 to activate, 0 to query) |
 | 0x0010 | Read/Write | Config word A (0x01B71448) |
 | 0x0011 | Read/Write | Config word B (0x0AE52420) |
-| 0x0027 | Query | Status request (opcode 0x01) |
+| 0x0027 | Read | Status request (wordcount 1) |
 | 0x800D | Response | Status response (value 0x142) |
+
+Additional registers seen in the Apollo Twin USB init (two captures, Console 11.7.0). Purposes marked with `?` are inferred from where the writes sit in the sequence, not decoded:
+
+| Register | Entry sizes | Purpose |
+|-------|-----------|---------|
+| 0x0001 | up to 6603 dwords | Block loads: 156 entries, ~389 KB per init, byte-identical between the two captures; every payload begins with an ASCII `Bill` tag — DSP program image? |
+| 0x0004 | up to 1115 dwords | Block loads of the same shape (`Bill` tag), 24 entries, ~39 KB per init |
+| 0x0003 | 2 | DSP / clock parameters (117 register writes) |
+| 0x0008 | 4 | DSP program load, one `[address][mask][value]` per entry (584 of them) |
+| 0x000C | 4 | UAD plugin chain upload (1433 packets, last phase). Also ~180 entries/s of steady-state polling while Console is open |
+| 0x0014 | 4–347 | Plugin parameter / coefficient writes (~400 per init); the sweep target for UAD parameter control |
+| 0x001A | 2 | **Sample rate as a plain integer Hz**: `0x00AC44`=44100, `0x00BB80`=48000, `0x015888`=88200, `0x017700`=96000, `0x02B110`=176400, `0x02EE00`=192000 — all six confirmed from a rate sweep |
+| 0x001D / 0x001E / 0x001F | 4 | Routing matrix (1284 / 399 / 40 entries per init) |
+| 0x0006, 0x0015, 0x001C | 2–153 | Seen, not decoded |
 
 ### Register Dump Structure
 The init response returns ~780 32-bit words across 8 bulk packets, containing
 the full mixer/DSP state. Values are mostly `0x80000000` (muted/default) and
 `0x83000000`, similar to the Thunderbolt mixer settings format.
+
+### The init is bulk AND control — Apollo Twin USB
+
+**Decoded from two USBPcap captures of an Apollo Twin USB DUO (`2b5a:0002`) powering on under Console 11.7.0; replayed on Linux with `tools/usb-re/init-replay.py` (#77).**
+
+The bulk stream is not the whole init. Interleaved with the 2341 bulk OUT packets are **45 vendor control OUT transfers** (`bmRequestType 0x41`) that carry state the bulk stream never touches:
+
+| bRequest | wValue | Length | Purpose |
+|----------|--------|--------|---------|
+| 3 | `0x062D` | 128 | Settings mask+value block — same protocol as the mixer section below; monitor level at slot 2 |
+| 3 | `0x064F` | 128 | Value block — preamp gain, slots 0 and 1 |
+| 3 | `0x0670` | 48 | Extended block |
+| 3 | `0x0602` | 4 | Commit — incrementing sequence counter |
+| 5 | `0x0001` | 0 | **Arm** |
+| 7 | `0x000C` | 0 | **Commit register `0x000C`** (the plugin-chain register) |
+| 12 | `0x012E` | 0 | Apply (pre-commit) |
+| 13 | `0x0000` | 0 | Apply (post-commit), always paired with 12 |
+
+The `wValue`s of 5 and 12 are session counters, not constants: `bReq 5` carried `0x0001` in one capture and `0x0002` in the other, `bReq 12` carried `0x012E` and `0x012B`. The Solo table below lists `0x0115` / `0x0010` for the same pair.
+
+**A bulk-only replay is about half the init.** It brings up converters, routing and monitoring — audio works — but preamp state and the UAD chain do not come up. With the control transfers included, the preamp gain lands (input level on ch0 rises ~55 dB) and the Unison chain runs.
+
+**The `bReq 5` / `bReq 7` pair is the reason the plugin chain looked PACE-protected.** Without it the DSP accepts all 1433 plugin-chain packets, acknowledges every one, and does nothing. That is exactly what "the replay is authorised on Windows but ignored on Linux" looks like from outside — and it is not PACE, it is a missing arm/commit handshake. With the pair sent immediately before the chain upload, the chain instantiates and processes audio (confirmed by third-octave A/B against a cold start: Neve 1073 high-pass at 50 Hz, VOXBOX peak at 12.5 kHz, 6σ). The pair appears four times in one capture and once in the other; once is enough.
+
+Phases of the Twin init as the extractor splits them (idle gap > 150 ms):
+
+| Phase | Bulk | Control | What |
+|-------|------|---------|------|
+| 0–2 | 5 | 0 | INIT, CONFIG_A/B, STATUS read |
+| 3 | 75 | 0 | Routing matrix |
+| 4 | 176 | 8 | Block loads (`0x0001`), DSP program (`0x0008`), settings blocks |
+| 5 | 652 | 11 | Main DSP / routing bring-up, first apply |
+| 6–9 | 0 | 8 | Arm / commit handshake (`bReq 5`, `bReq 7`) |
+| 10 | 1433 | 18 | Plugin chain (`0x000C`) |
+
+Two things that did **not** carry over from the Solo notes: the plugin chain did not corrupt capture routing on the Twin (`setting[24] = 0x20` never appeared), and the amber front-panel indicator is not evidence the chain loaded — it reflects the Unison preamp mode set by the phase 4–5 control blocks, and comes on with phases 0–5 alone.
+
+Everything above the firmware survives a host restart as long as the Apollo keeps its own power: converters, routing, preamp state and the chain were all still in place after a reboot with the init inhibited (ch1 noise floor matched to 0.00 dB, chain-signature bands unchanged). Cutting the Apollo's power drops it back to the loader PID and clears all of it.
 
 ## Linux DSP Init — Working
 Replay of Windows init sequence via `tools/usb-dsp-init.py` **works**:
@@ -234,7 +295,7 @@ Replay of Windows init sequence via `tools/usb-dsp-init.py` **works**:
 
 Compiled out-of-tree module from v6.17 kernel source with four patches:
 
-1. **`format.c`** — fixed-rate quirk: bypasses `GET_RANGE` STALL by falling back to hardcoded rates (44100, 48000, 88200, 96000, 176400, 192000 Hz) for VID `0x2B5A`
+1. **`format.c`** — fixed-rate quirk: bypasses `GET_RANGE` STALL with `set_fixed_rate(fp, 48000, SNDRV_PCM_RATE_48000)` for VID `0x2B5A` — **48 kHz only**; the device itself accepts all six rates via register `0x001A` (see Key Registers), but the quirk has not been taught the list
 2. **`implicit.c`** — adds `IMPLICIT_FB_SKIP_DEV` flag to prevent EP 0x83 feedback endpoint conflict
 3. **`endpoint.c`** — skips `endpoint_compatible()` check for UA VID, preventing "Incompatible EP setup" errors during stream open
 4. **`quirks.c`** — `QUIRK_FLAG_IFACE_SKIP_CLOSE` for VID `0x2B5A`: prevents `snd-usb-audio` from resetting Interface 3 to alt=0 when PipeWire closes capture streams. Without this, stream close wipes the FPGA capture routing programmed by `usb-full-init.py`, causing subsequent captures to return silence
