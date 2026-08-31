@@ -13,7 +13,7 @@ Open Apollo supports Universal Audio Apollo Thunderbolt and USB interfaces. Thun
 | Apollo 8P (original) | 0x0A | 26 | 26 | 8 | 2 | Needs Testing |
 | Apollo Solo | 0x27 | 3 | 2 | 1 | 0 | Needs Testing |
 | Arrow | 0x28 | 3 | 2 | 1 | 0 | Needs Testing |
-| Apollo Twin X | 0x23 | 8 | 8 | 2 | 2 | Needs Testing |
+| Apollo Twin X | 0x23 | 10 | 16 | 2 | 1 | **Partially Verified** |
 | Apollo Twin X Gen 2 | 0x3A | 8 | 8 | 2 | 2 | Needs Testing |
 | Apollo x4 | 0x1F | 24 | 22 | 4 | 2 | **Partially Verified** |
 | Apollo x4 Gen 2 | 0x36 | 24 | 22 | 4 | 2 | Needs Testing |

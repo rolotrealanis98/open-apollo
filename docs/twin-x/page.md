@@ -1,11 +1,70 @@
-# Where UA keeps the device description (and how to read it without DTrace)
+---
+title: Apollo Twin X
+---
+
+# Apollo Twin X
+
+The Apollo Twin X DUO uses device type `0x23` and PCI subsystem ID `0x0019`.
+The subsystem ID is required because serial prefix `2024` also identifies an
+Apollo Solo in the current serial table.
+
+## Linux support status
+
+The Twin X DUO is partially verified on Linux with 10 playback channels, 16
+capture channels, and one Hi-Z input. PipeWire playback and capture work at 48
+kHz. Discord voice calls also work with the Apollo as the input and output.
+
+The following areas remain unverified:
+
+- Twin X routing tables and DSP program blocks
+- Preamp PAD, 48 V, and mic or line relays
+- Apollo Twin X QUAD and Apollo Twin X Gen 2
+
+## Safe first contact
+
+Use `probe_only=1` to identify the device without starting interrupts, direct
+memory access, or ALSA:
+
+```bash
+cd driver
+make
+sudo insmod ./ua_apollo.ko probe_only=1
+sudo dmesg | tail -50
+sudo rmmod ua_apollo
+```
+
+After a full initialization, removing `ua_apollo` is the documented brick path
+on the Apollo x4. The Thunderbolt link can drop and require a cold boot.
+
+On the tested Twin X DUO, five consecutive `probe_only=1` load and unload
+cycles completed without a link loss. Two full initialization unloads also
+completed without a link loss. The PCI Express endpoint remained present at
+`0000:3e:00.0` after the final unload, and the device did not need a cold boot.
+
+## Measured Linux results
+
+Testing used an Apollo Twin X DUO over Thunderbolt 3 on an Arch Linux host with
+kernel 7.1.5. The driver reported device type `0x23`, subsystem ID `0x0019`,
+firmware version 2, and two SHARC DSPs.
+
+The ring buffer transport clocked after both warm and cold starts. PipeWire
+exposed 10 playback channels and 16 capture channels at 48 kHz. The tests found
+no kernel oops, call trace, or uncorrectable PCI Express error.
+
+No routing configuration exists for device type `0x23`. Applications that can
+use raw multichannel input and output work, but Universal Audio channel labels
+and routing remain incomplete.
+
+## Device description source
+
+### Where UA keeps the device description
 
 The question that produced this document: *how would an Apollo engineer build this?*
 Answer: they would not hand-author routing blobs. They would read a device
 description. That description ships with the UA software and can be read off
 disk — **no SIP change, no DTrace, no kernel tracing.**
 
-## Location
+### Location
 
 ```
 /Library/Application Support/Universal Audio/Apollo/UA Mixer Engine.app/Contents/MacOS/UA Mixer Engine
@@ -21,7 +80,7 @@ Object types present: `kRoot`, `kMixer`, `kInput`, `kOutput`, `kAuxBus`,
 96 `kAuxBus` (i.e. 2 per device, matching the manual's "two independent stereo
 Auxiliary buses"), 50 each of `kRoot`/`kMixer`.
 
-## Schema
+### Schema
 
 Every channel is an ordered object carrying a name and a type:
 
@@ -42,7 +101,7 @@ Preamp channels additionally carry `kPropGain`, `kPropPad`, `kProp48VEnable`,
 `kPropImpedance`, `kPropLowCut`, which lines up with the manual's preamp feature
 list and with the driver's existing preamp controls.
 
-## Console IOType enumeration (observed)
+### Console IOType enumeration
 
 | `kPropIOType` | Channel class |
 |---|---|
@@ -53,7 +112,7 @@ list and with the driver's existing preamp controls.
 | 12 | UNAVAILABLE (placeholder strip) |
 | 13 | TALKBACK |
 
-## The Twin-class map (`kPropMixerTypeId = 2`)
+### Twin class map (`kPropMixerTypeId = 2`)
 
 Document at offset 18754864. 22 inputs, 7 outputs, 2 aux buses:
 
@@ -97,7 +156,7 @@ Corroborated independently by the running Mixer Engine log on the test machine:
 Twin X' (hwID = 1202099349)
 ```
 
-## What this closes, and what it does not
+### What the description establishes
 
 **Closes:** the channel composition and ordering — the part previously called
 un-derivable. It is authoritative, model-specific, and free to read.
@@ -128,7 +187,7 @@ Observed driver type bytes are 0x00–0x05, 0x07, 0x09–0x0b, leaving **0x06** 
 **0x08** as the gaps — and 0x06 sits directly adjacent to S/PDIF (0x05), which
 is suggestive. That is a two-candidate sweep, not an open question.
 
-## Why this matters for the plan
+### Why this changes the capture plan
 
 Gap 3 was the reason to disable SIP. With the composition and ordering now
 readable from disk, DTrace is reduced from *required* to *confirmatory* — useful
@@ -136,7 +195,7 @@ for verifying the ADAT byte and for gap 4 (DSP program blocks), but no longer
 the only path. That is a materially better security tradeoff than the one
 originally on the table.
 
-## Reproducing
+### Read the embedded descriptions
 
 ```bash
 python3 - <<'EOF'
