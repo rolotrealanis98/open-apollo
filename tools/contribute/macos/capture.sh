@@ -14,6 +14,7 @@
 set -euo pipefail
 
 TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/captures"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -97,7 +98,15 @@ if [ -z "$OUTPUT" ]; then
 fi
 
 TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+DTRACE_PID=""
+cleanup() {
+    if [ -n "$DTRACE_PID" ] && kill -0 "$DTRACE_PID" 2>/dev/null; then
+        kill -INT "$DTRACE_PID" 2>/dev/null || true
+        wait "$DTRACE_PID" 2>/dev/null || true
+    fi
+    rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
 
 echo "This script will capture:"
 echo "  - Device configuration (model, channels, sample rate)"
@@ -121,39 +130,19 @@ ioreg -r -c IOAudioDevice 2>/dev/null | grep -A 20 "UAD\|Universal Audio" > "$TM
 # ============================================================================
 echo "Running DTrace capture (10 seconds)..."
 
-# TODO: Fill in actual DTrace probe specifications.
-# The probes target IOConnectCallStructMethod in the UA Mixer Engine process
-# to capture routing table data (SEL171) and device configuration.
-#
-# Probe structure:
-#   pid$target::IOConnectCallStructMethod:entry
-#   - arg0: connection
-#   - arg1: selector number (171 = routing, 131 = mixer param, etc.)
-#   - arg2: pointer to input struct
-#   - arg3: input struct size
-#
-# Example DTrace script (template — actual probe details TBD):
-#
-#   dtrace -n '
-#     pid$target::IOConnectCallStructMethod:entry
-#     /arg1 == 171/
-#     {
-#         printf("SEL171 routing call: size=%d", arg3);
-#         tracemem(copyin(arg2, arg3), 256);
-#     }
-#   ' -p $(pgrep -f "UA Mixer Engine") -o "$TMPDIR/dtrace_routing.out"
+MIXER_PID=$(pgrep -f "UA Mixer Engine" | head -1 || true)
+if [ -z "$MIXER_PID" ]; then
+    printf "${RED}UA Mixer Engine process not found.${NC}\n"
+    exit 1
+fi
 
-# Placeholder: write a note that probes need to be filled in
-cat > "$TMPDIR/dtrace_routing.out" << 'PLACEHOLDER'
-# DTrace capture placeholder
-# TODO: Actual DTrace probes will be added as they are verified for each
-# macOS version and Apollo model. The probe targets are:
-#   - SEL171 (GetRoutingTable): Read-only routing configuration
-#   - Device type and channel count identification
-#
-# If you are a developer and want to help define these probes,
-# please open an issue on the Open Apollo repository.
-PLACEHOLDER
+dtrace -q -s "$SCRIPT_DIR/apollo-capture.d" -p "$MIXER_PID" \
+    -o "$TMPDIR/dtrace_routing.out" &
+DTRACE_PID=$!
+sleep 10
+kill -INT "$DTRACE_PID" 2>/dev/null || true
+wait "$DTRACE_PID" || true
+DTRACE_PID=""
 
 echo "DTrace capture complete."
 echo ""
@@ -164,6 +153,7 @@ echo ""
 echo "Building report..."
 
 IOREG_CONTENT=$(cat "$TMPDIR/ioregistry.txt" 2>/dev/null | head -50 | sed 's/"/\\"/g' | tr '\n' ' ' || echo "not available")
+DTRACE_CONTENT=$(sed 's/"/\\"/g' "$TMPDIR/dtrace_routing.out" | tr '\n' ' ' || echo "not available")
 
 cat > "$OUTPUT" << ENDJSON
 {
@@ -180,7 +170,8 @@ cat > "$OUTPUT" << ENDJSON
   },
   "ioregistry": "$IOREG_CONTENT",
   "routing": {
-    "status": "TODO — DTrace probes not yet defined for this macOS version",
+    "status": "captured with apollo-capture.d",
+    "dtrace": "$DTRACE_CONTENT",
     "notes": "See WHAT-THIS-DOES.md for details on what will be captured"
   }
 }

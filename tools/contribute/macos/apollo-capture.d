@@ -1,7 +1,7 @@
 /*
- * twinx-capture-dtrace.d — full routing / program capture for Apollo Twin X.
+ * apollo-capture.d — full routing and program capture for Apollo devices.
  *
- * RUN twinx-dtrace-smoke.d FIRST. This script is worthless if the selectors
+ * RUN apollo-selector-smoke.d FIRST. This script is worthless if the selectors
  * never fire, and the smoke test answers that in 20 seconds.
  *
  * Captures the payloads behind the selectors the Linux driver needs and does
@@ -35,7 +35,7 @@
  * Requires SIP disabled.
  *
  * Usage:
- *   sudo dtrace -q -s twinx-capture-dtrace.d \
+ *   sudo dtrace -q -s apollo-capture.d \
  *        -p $(pgrep -f "UA Mixer Engine" | head -1) \
  *        -o twinx-dtrace-capture.txt
  *
@@ -60,7 +60,7 @@
 
 dtrace:::BEGIN
 {
-	printf("=== Apollo Twin X routing capture ===\n");
+	printf("=== Apollo routing capture ===\n");
 	printf("Exercise UA Console: change sample rate, toggle preamp\n");
 	printf("switches, start/stop playback, replug Thunderbolt.\n");
 	printf("Ctrl+C when done.\n\n");

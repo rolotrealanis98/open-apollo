@@ -1,5 +1,5 @@
 /*
- * twinx-dtrace-smoke.d — selector census for the UA mixer IOKit channel.
+ * apollo-selector-smoke.d — selector census for the UA mixer IOKit channel.
  *
  * PURPOSE: cheap proof that the DTrace approach works at all, BEFORE anyone
  * invests a long capture session (or trusts a large untested script) with SIP
@@ -24,10 +24,10 @@
  *
  *   # census by PID, 20 seconds — click around UA Console while it runs,
  *   # change a preamp setting, start and stop playback
- *   sudo dtrace -q -s twinx-dtrace-smoke.d -p <PID>
+ *   sudo dtrace -q -s apollo-selector-smoke.d -p <PID>
  *
  *   # or trace every process calling into IOKit (noisier but finds the right one)
- *   sudo dtrace -q -s twinx-dtrace-smoke.d
+ *   sudo dtrace -q -s apollo-selector-smoke.d
  *
  * INTERPRETING THE RESULT:
  *   - SEL171 appears  -> routing capture is viable; move to the full script.
@@ -116,7 +116,7 @@ dtrace:::END
 	printf("\n=== IOConnectCallAsyncStructMethod ===\n");
 	printa("  SEL%-6d calls=%@d\n", @async_calls);
 
-	printf("\nIf SEL171 appears above, proceed to twinx-capture-dtrace.d.\n");
+	printf("\nIf SEL171 appears above, proceed to apollo-capture.d.\n");
 	printf("If nothing appears at all, stop and re-enable SIP — DTrace on\n");
 	printf("these symbols is not the right tool for this driver build.\n");
 }

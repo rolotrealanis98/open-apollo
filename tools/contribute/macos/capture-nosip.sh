@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# twinx-capture-nosip.sh — Apollo Twin X data capture on macOS, WITHOUT SIP.
+# capture-nosip.sh — Apollo device data capture on macOS without SIP.
 #
 # Run this FIRST, before considering DTrace. It needs no SIP change, no kernel
 # tracing, and makes no network calls. Everything here is standard macOS
@@ -14,12 +14,12 @@
 # What this CANNOT close: the routing tables and IO descriptors (gap 3) or the
 # DSP program blobs (gap 4). Those are only visible while the UA driver is
 # actively exchanging them with UA Console, which requires DTrace and therefore
-# SIP. See twinx-dtrace-smoke.d before going down that road.
+# SIP. See apollo-selector-smoke.d before going down that road.
 #
 # Read-only. No writes, no installs, no uploads. Output goes to a directory you
 # can review file by file before sharing anything.
 #
-# Usage:  ./twinx-capture-nosip.sh [outdir]
+# Usage:  ./capture-nosip.sh [outdir]
 #
 set -uo pipefail
 
