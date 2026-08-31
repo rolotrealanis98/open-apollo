@@ -651,6 +651,13 @@ deploy_configs() {
 # ================================================================
 # Step 6: Verify hardware + PipeWire
 # ================================================================
+apollo_driver_bound() {
+    local driver_link="$1"
+
+    [ -L "$driver_link" ] || return 1
+    [ "$(basename "$(readlink -f "$driver_link")")" = "ua_apollo" ]
+}
+
 run_init() {
     header "Hardware Verification"
 
@@ -701,7 +708,19 @@ run_init() {
         ok "Driver already loaded"
     fi
 
-    # Gate 2: Wait for device node (driver probe complete)
+    # Gate 2: Verify the loaded module claimed the Apollo.
+    local apollo_addr driver_link
+    apollo_addr=$(lspci -D -d 1a00: 2>/dev/null | awk 'NR == 1 { print $1 }')
+    driver_link="/sys/bus/pci/devices/$apollo_addr/driver"
+    if ! apollo_driver_bound "$driver_link"; then
+        fail "Driver loaded but not bound to Apollo — check dmesg for probe errors"
+        STEP_STATUS[init]="fail"
+        STEP_DETAIL[init]="module loaded but device unbound"
+        return 1
+    fi
+    ok "Driver bound to Apollo"
+
+    # Gate 3: Wait for device node (driver probe complete)
     info "Waiting for device node..."
     local tries=0
     while [ ! -e /dev/ua_apollo0 ] && [ $tries -lt 50 ]; do
@@ -717,7 +736,7 @@ run_init() {
         return 1
     fi
 
-    # Gate 3: Wait for ACEFACE connect (DSP handshake)
+    # Gate 4: Wait for ACEFACE connect (DSP handshake)
     # Check dmesg (needs sudo) or verify ALSA card appeared (indirect confirmation).
     info "Waiting for DSP handshake..."
     local aceface_ok=0
@@ -740,7 +759,7 @@ run_init() {
         warn "DSP handshake not confirmed after 30s — proceeding cautiously"
     fi
 
-    # Gate 4: Verify ALSA card registered (retry up to 10s)
+    # Gate 5: Verify ALSA card registered (retry up to 10s)
     local alsa_ok=0
     for i in $(seq 1 10); do
         if aplay -l 2>/dev/null | grep -qi apollo; then
@@ -755,7 +774,7 @@ run_init() {
         warn "ALSA card not found — audio may not work"
     fi
 
-    # Gate 5: Verify hardware is responsive (read a register)
+    # Gate 6: Verify hardware is responsive (read a register)
     # Check that BAR0 reads don't return 0xFFFFFFFF
     if dmesg 2>/dev/null | grep -q "device unreachable\|PCIe error detected"; then
         fail "Apollo PCIe link is down — power cycle Apollo and try again"
@@ -765,7 +784,7 @@ run_init() {
     fi
     ok "Hardware responding"
 
-    # Gate 6: Set up PipeWire virtual I/O devices
+    # Gate 7: Set up PipeWire virtual I/O devices
     local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
     local pw_uid
     pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
@@ -784,7 +803,7 @@ run_init() {
         sudo -u "$pw_user" HOME="$pw_home" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
             /usr/local/bin/apollo-setup-io 2>&1 || true
 
-        # Gate 7: Verify virtual devices appeared
+        # Gate 8: Verify virtual devices appeared
         sleep 2
         local vdev_count
         vdev_count=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
