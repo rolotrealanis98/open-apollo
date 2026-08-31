@@ -25,7 +25,21 @@ except ImportError:
     sys.exit(1)
 
 UA_VID = 0x2B5A
-SOLO_PID = 0x000D
+LIVE_PIDS = {
+    0x000D: "Apollo Solo USB",
+    0x0002: "Twin USB",
+    0x000F: "Twin X USB",
+}
+
+
+def find_live_device():
+    """Return (device, model_name) for whichever live Apollo USB is present."""
+    for pid, name in LIVE_PIDS.items():
+        dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
+        if dev:
+            return dev, name
+    return None, None
+
 
 # FPGA addresses for vendor request 0x03
 SETTINGS_SEQ = 0x0602       # 4B: sequence counter
@@ -43,9 +57,11 @@ def setting_word(mask, value):
 
 
 def find_device():
-    dev = usb.core.find(idVendor=UA_VID, idProduct=SOLO_PID)
+    dev, model = find_live_device()
     if not dev:
-        print("Apollo Solo USB not found (VID 0x2B5A PID 0x000D)")
+        print("No live Apollo USB device found "
+              "(expected one of: %s)" %
+              ", ".join(LIVE_PIDS.values()))
         print("Is firmware loaded? Run: sudo python3 tools/fx3-load.py")
         sys.exit(1)
     print(f"Found: {dev.manufacturer} {dev.product}")

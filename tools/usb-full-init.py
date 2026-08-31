@@ -19,7 +19,22 @@ import usb.core
 import usb.util
 
 UA_VID = 0x2B5A
-SOLO_PID = 0x000D
+LIVE_PIDS = {
+    0x000D: "Apollo Solo USB",
+    0x0002: "Twin USB",
+    0x000F: "Twin X USB",
+}
+
+
+def find_device():
+    """Return (device, model_name) for whichever live Apollo USB is present."""
+    for pid, name in LIVE_PIDS.items():
+        dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
+        if dev:
+            return dev, name
+    return None, None
+
+
 EP_BULK_OUT = 0x01
 EP_BULK_IN = 0x81
 # Look for init sequence in both repo layout and installed layout
@@ -127,11 +142,13 @@ def replay_init_sequence(dev, bin_path):
     print(f"  Sent all {count} packets")
 
 
-dev = usb.core.find(idVendor=UA_VID, idProduct=SOLO_PID)
+dev, model = find_device()
 if not dev:
-    print("Apollo Solo USB not found")
+    print("No live Apollo USB device found "
+          "(expected one of: %s)" %
+          ", ".join(LIVE_PIDS.values()))
     sys.exit(1)
-print(f"Found: {dev.product}")
+print(f"Found: {model} — {dev.product}")
 
 if not os.path.exists(INIT_BIN):
     print(f"Missing: {INIT_BIN}")
