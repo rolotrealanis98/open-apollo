@@ -213,12 +213,12 @@ def main():
         # EP6 drain stops when the script exits (daemon thread)
         usb.util.release_interface(dev, 0)
 
-    # Step 3: Set monitor level to -12 dB
-    if set_monitor_level(dev, -12):
-        print("Monitor: -12 dB")
-    else:
-        print("Monitor level set failed (non-fatal)")
-
+    # NOTE: deliberately NOT calling set_monitor_level() here.
+    # setting[2] (monitor core) holds volume/mute/source/dim state that the
+    # ARM MCU needs for the front panel knob and buttons to work. Writing it
+    # with a non-zero mask during init overwrites the firmware's own
+    # defaults and breaks physical knob control — see
+    # docs/register-map/page.md and docs/initialization/page.md.
     print("Ready")
 
     if daemon_mode:
