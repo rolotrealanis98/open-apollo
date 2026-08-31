@@ -81,8 +81,9 @@ class DspCommand:
     """Decoded DSP bulk command/response."""
     timestamp: float
     direction: str          # "OUT" or "IN"
-    word_count: int
-    cmd_type: int           # sub-type byte
+    word_count: int         # payload length in 32-bit dwords
+    flags: int              # 0x00 or 0x10
+    seq: int                # sequence counter, wraps at 256
     magic: int              # 0xDC or 0xDD
     subcmds: list = field(default_factory=list)  # [(opcode, param, value), ...]
     raw: bytes = b""
@@ -167,7 +168,11 @@ def decode_dsp_packet(pkt):
     if len(pkt.data) < 4:
         return None
 
-    word_count, cmd_type, magic = struct.unpack_from("<HBB", pkt.data, 0)
+    # The header is four independent bytes, not a u16 word count followed by
+    # two bytes. Reading it as "<HBB" folds the flags byte into word_count and
+    # shifts seq into its place, which silently mangles every packet that has
+    # flags == 0x10 (about half of them on Apollo Twin USB).
+    word_count, flags, seq, magic = struct.unpack_from("<BBBB", pkt.data, 0)
 
     if magic not in (MAGIC_CMD, MAGIC_RSP):
         return None
@@ -176,7 +181,8 @@ def decode_dsp_packet(pkt):
         timestamp=pkt.timestamp,
         direction=pkt.direction,
         word_count=word_count,
-        cmd_type=cmd_type,
+        flags=flags,
+        seq=seq,
         magic=magic,
         raw=pkt.data,
     )
@@ -303,7 +309,8 @@ def build_mapping(correlations):
                     "value": value,
                     "param_hex": f"0x{param:04x}",
                     "value_hex": f"0x{value:08x}",
-                    "cmd_type": cmd.cmd_type,
+                    "flags": cmd.flags,
+                    "seq": cmd.seq,
                 })
 
     return dict(mapping)
@@ -320,7 +327,7 @@ def print_commands(dsp_cmds, limit=None):
         dir_arrow = "→" if cmd.direction == "OUT" else "←"
         subcmd_strs = [format_subcmd(o, p, v) for o, p, v in cmd.subcmds]
         print(f"  {cmd.timestamp:.6f} {dir_arrow} {magic_name} "
-              f"type={cmd.cmd_type} words={cmd.word_count} "
+              f"flags=0x{cmd.flags:02x} seq={cmd.seq} words={cmd.word_count} "
               f"[{', '.join(subcmd_strs)}]")
         count += 1
 
@@ -426,7 +433,7 @@ def main():
                     print(f"    op=0x{c['opcode']:04x} "
                           f"param={c['param_hex']} "
                           f"value={c['value_hex']} "
-                          f"type={c['cmd_type']}")
+                          f"flags=0x{c['flags']:02x} seq={c['seq']}")
 
             if args.json:
                 with open(args.json, "w") as f:
