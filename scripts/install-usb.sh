@@ -127,27 +127,29 @@ fi
 # ================================================================
 header "Dependencies"
 
-DEPS_NEEDED=()
+# Everything the rest of the installer needs, in one place so the same
+# check runs before AND after the package manager.  The install commands
+# below deliberately ignore the package manager's exit status (a partial
+# failure must not abort a run that can still succeed), so a re-check is
+# the only thing that catches a package that did not actually land.
+missing_deps() {
+    local missing=()
+    command -v python3 &>/dev/null || missing+=(python3)
+    python3 -c "import usb.core" 2>/dev/null || missing+=(pyusb)
+    # Kernel headers (needed for snd-usb-audio build)
+    [ -d "/lib/modules/$KERNEL/build" ] || missing+=(kernel-headers)
+    # Build tools — clang if kernel was built with it, else gcc
+    if [ "$KERN_CC" = "clang" ]; then
+        command -v clang &>/dev/null || missing+=(clang)
+    else
+        command -v gcc &>/dev/null || missing+=(gcc)
+    fi
+    command -v make &>/dev/null || missing+=(make)
+    command -v wget &>/dev/null || missing+=(wget)
+    echo "${missing[@]}"
+}
 
-# Check python3
-if ! command -v python3 &>/dev/null; then DEPS_NEEDED+=(python3); fi
-
-# Check pyusb
-if ! python3 -c "import usb.core" 2>/dev/null; then DEPS_NEEDED+=(pyusb); fi
-
-# Check kernel headers (needed for snd-usb-audio build)
-if [ ! -d "/lib/modules/$KERNEL/build" ]; then DEPS_NEEDED+=(kernel-headers); fi
-
-# Check build tools — clang if kernel was built with it, else gcc
-if [ "$KERN_CC" = "clang" ]; then
-    if ! command -v clang &>/dev/null; then DEPS_NEEDED+=(clang); fi
-else
-    if ! command -v gcc &>/dev/null; then DEPS_NEEDED+=(gcc); fi
-fi
-if ! command -v make &>/dev/null; then DEPS_NEEDED+=(make); fi
-
-# Check wget
-if ! command -v wget &>/dev/null; then DEPS_NEEDED+=(wget); fi
+DEPS_NEEDED=($(missing_deps))
 
 if [ ${#DEPS_NEEDED[@]} -eq 0 ]; then
     ok "All dependencies present"
@@ -187,10 +189,20 @@ else
             run_sudo pip3 install --break-system-packages pyusb 2>/dev/null
     fi
 
-    if python3 -c "import usb.core" 2>/dev/null; then
+    # Re-check the full list, not just pyusb.  Before this, a package the
+    # manager failed to install (wget, say) was still reported as
+    # "Dependencies installed" and only surfaced 30 lines later as
+    # "kernel source not available on kernel.org" — the wrong error.
+    STILL_MISSING=($(missing_deps))
+    if [ ${#STILL_MISSING[@]} -eq 0 ]; then
         ok "Dependencies installed"
     else
-        fail "Could not install pyusb — install manually: pip3 install pyusb"
+        fail "Still missing after install: ${STILL_MISSING[*]}"
+        if [[ " ${STILL_MISSING[*]} " == *" pyusb "* ]]; then
+            info "pyusb: pip3 install pyusb (or your distro's python3-usb / python-pyusb package)"
+        fi
+        info "Install the rest with your package manager, then re-run the installer."
+        info "Install will NOT touch the audio stack — your current driver is untouched."
         exit 1
     fi
 fi
