@@ -267,22 +267,34 @@ rm -rf "$SND_USB_BUILD"
 sudo -u "$REAL_USER" -H bash -c "mkdir -p '$SND_USB_BUILD'"
 
 # Download kernel source (sound/usb only) as the real user.  Try the exact
-# running kernel first, then ONE minor release back — the sound/usb ABI is
-# usually stable across a single minor bump, but falling back further is a
-# semantic-correctness risk that Codex flagged: an older driver compiled
-# against newer ALSA headers can build and load while misbehaving at
-# runtime.  If neither attempt works, we fail closed and tell the user.
-# Bleeding-edge distro kernels (CachyOS 6.19.x, Arch rc) are the only real
-# users of the fallback and will get a prominent warning if it engages.
-KVER_FULL=$(echo "$KERNEL" | grep -oP '^\d+\.\d+')
-KVER_MAJOR_NUM="${KVER_FULL%%.*}"
-KVER_MINOR_NUM="${KVER_FULL##*.}"
+# running kernel (X.Y.Z) first, then the X.Y base release, then ONE minor
+# release back.  The exact tarball matters more than it looks: stable
+# point releases backport sound/usb fixes, so building X.Y's tree against
+# X.Y.Z's headers can compile cleanly and still not match the running
+# driver.  The sound/usb ABI is usually stable across a single minor bump,
+# but falling back further is a semantic-correctness risk that Codex
+# flagged: an older driver compiled against newer ALSA headers can build
+# and load while misbehaving at runtime.  If nothing works, we fail
+# closed and tell the user.  Bleeding-edge distro kernels (CachyOS 6.19.x,
+# Arch rc) are the only real users of the minor fallback and will get a
+# prominent warning if it engages.
+KVER_FULL=$(echo "$KERNEL" | grep -oP '^\d+\.\d+(\.\d+)?')
+KVER_MAJOR_NUM=$(echo "$KVER_FULL" | cut -d. -f1)
+KVER_MINOR_NUM=$(echo "$KVER_FULL" | cut -d. -f2)
+KVER_PATCH_NUM=$(echo "$KVER_FULL" | cut -d. -f3)
+# kernel.org names the first release of a series X.Y, never X.Y.0
+KVER_BASE="${KVER_MAJOR_NUM}.${KVER_MINOR_NUM}"
+if [ -n "$KVER_PATCH_NUM" ] && [ "$KVER_PATCH_NUM" != "0" ]; then
+    KVER_EXACT="${KVER_BASE}.${KVER_PATCH_NUM}"
+else
+    KVER_EXACT="$KVER_BASE"
+fi
+KVER_CANDIDATES=("$KVER_EXACT")
+[ "$KVER_BASE" != "$KVER_EXACT" ] && KVER_CANDIDATES+=("$KVER_BASE")
+[ "$KVER_MINOR_NUM" -gt 0 ] && KVER_CANDIDATES+=("${KVER_MAJOR_NUM}.$((KVER_MINOR_NUM - 1))")
 
 DOWNLOADED_KVER=""
-for offset in 0 -1; do
-    try_minor=$((KVER_MINOR_NUM + offset))
-    [ "$try_minor" -lt 0 ] && continue
-    try_ver="${KVER_MAJOR_NUM}.${try_minor}"
+for try_ver in "${KVER_CANDIDATES[@]}"; do
     try_url="https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR_NUM}.x/linux-${try_ver}.tar.xz"
     info "Trying kernel source v${try_ver}..."
     # Wipe any partial download from a previous attempt
@@ -297,10 +309,15 @@ for offset in 0 -1; do
     warn "v${try_ver} not available on kernel.org"
 done
 
+# Building the X.Y base tree for an X.Y.Z kernel is worth a line, not a box.
+if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" = "$KVER_BASE" ] && [ "$KVER_BASE" != "$KVER_EXACT" ]; then
+    warn "Exact source for v${KVER_EXACT} not on kernel.org; building from the v${KVER_BASE} base release"
+fi
+
 # Prominent warning when we're building across a kernel minor boundary.
 # The sound/usb code is usually stable minor-to-minor but this is NOT a
 # guarantee — file a bug if you hit audio misbehavior after this warning.
-if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" != "$KVER_FULL" ]; then
+if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" != "$KVER_EXACT" ] && [ "$DOWNLOADED_KVER" != "$KVER_BASE" ]; then
     echo -e "${YELLOW}${BOLD}"
     echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║  VERSION SKEW WARNING                                         ║"
@@ -317,7 +334,7 @@ if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" != "$KVER_FULL" ]; then
 fi
 
 if [ -z "$DOWNLOADED_KVER" ]; then
-    fail "Could not download kernel source for v${KVER_FULL} or v$((KVER_MINOR_NUM - 1))"
+    fail "Could not download kernel source for any of:$(printf ' v%s' "${KVER_CANDIDATES[@]}")"
     info "Last wget error (if any):"
     [ -f /tmp/open-apollo-wget.log ] && tail -5 /tmp/open-apollo-wget.log | sed 's/^/    /'
     info "Install will NOT touch the audio stack — your current driver is untouched."
