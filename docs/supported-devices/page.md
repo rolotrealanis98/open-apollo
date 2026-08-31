@@ -126,6 +126,7 @@ If you own an Apollo model marked "Needs Testing", your contribution would be ex
 See [How to Contribute](/docs/how-to-contribute) for details, or jump straight to the device capture guides:
 
 - [Device Capture (macOS)](/docs/device-capture-macos) — capture routing data using DTrace
+- [Device Capture (Windows, USB)](/docs/device-capture-windows) — capture a USB Apollo's init sequence with USBPcap
 
 You can also run the quick probe script on Linux:
 

@@ -111,4 +111,5 @@ Currently supported models have been developed and tested with captured data fro
 ## Further reading
 
 - [Device Capture on macOS](/docs/device-capture-macos) — how to capture data from macOS
+- [Device Capture on Windows (USB)](/docs/device-capture-windows) — how to capture a USB Apollo's init sequence
 - [Supported Devices](/docs/supported-devices) — current device support status
