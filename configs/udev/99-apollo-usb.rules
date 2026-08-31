@@ -9,7 +9,7 @@
 # Requires firmware in /lib/firmware/universal-audio/
 # See docs/usb-apollo-re/ for details.
 #
-# IMPORTANT: init runs via systemd (TAG+="systemd", ENV{SYSTEMD_WANTS}=...),
+# IMPORTANT: init runs via systemd (TAG+="systemd", ENV{SYSTEMD_WANTS}+=...),
 # NOT via RUN+=. systemd-udevd.service runs with MemoryDenyWriteExecute and
 # a restrictive SystemCallFilter; RUN+= children inherit that sandbox, which
 # breaks Python's import of pyusb (silent "ModuleNotFoundError: No module
@@ -17,26 +17,31 @@
 # transient race). Plain systemd services started via SYSTEMD_WANTS don't
 # inherit systemd-udevd's sandbox. See configs/systemd/ua-usb-init@.service
 # and configs/systemd/ua-usb-dsp-init.service.
+#
+# SYSTEMD_WANTS is a space-separated list, so it is added to with "+=".
+# A plain "=" would overwrite whatever an earlier-sorting rules file put
+# there, and the loss is silent: the device enumerates, no unit starts,
+# and only `udevadm test` shows the other file's unit is gone.
 
 # FX3 firmware loader stubs — upload firmware on hotplug
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000c", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}="ua-usb-init@ApolloSolo.bin.service"
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="ua-usb-init@ApolloSolo.bin.service"
 
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="0001", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}="ua-usb-init@ApolloTwin.bin.service"
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="ua-usb-init@ApolloTwin.bin.service"
 
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000e", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}="ua-usb-init@ApolloTwinX.bin.service"
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="ua-usb-init@ApolloTwinX.bin.service"
 
 # Post-firmware device — run DSP init after enumeration
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000d", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}="ua-usb-dsp-init.service"
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="ua-usb-dsp-init.service"
 
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="0002", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}="ua-usb-dsp-init.service"
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="ua-usb-dsp-init.service"
 
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000f", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}="ua-usb-dsp-init.service"
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="ua-usb-dsp-init.service"
 
 # Clear the ua-usb-dsp-init idempotency stamp on unplug, so a fresh replug
 # re-runs DSP init instead of being skipped by the rebind-loop guard.
