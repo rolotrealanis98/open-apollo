@@ -14,6 +14,9 @@
 # property that makes switching seamless, and it is worth preserving —
 # installing DKMS or an autoload rule would break it.
 #
+# WARNING: rmmod after full initialization is the documented brick path on the
+# Apollo x4. The Thunderbolt link can drop and require a cold boot.
+#
 # Usage:  sudo ./scripts/twinx-switch.sh {status|release|claim} [extra insmod args]
 #
 set -uo pipefail
@@ -96,6 +99,8 @@ do_release() {
         # driver can re-initialise cleanly, so prefer rmmod over yanking the
         # cable while loaded.
         echo "unloading (this stops transport and disables interrupts)..."
+        ylw "WARNING: rmmod after full initialization is the documented Apollo x4 brick path."
+        ylw "The Thunderbolt link can drop and require a cold boot."
         if rmmod "$MOD"; then
             grn "unloaded cleanly"
         else

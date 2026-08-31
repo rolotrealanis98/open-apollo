@@ -15,6 +15,9 @@
 # Installs nothing. No DKMS, no modules-load.d, no initramfs, no PipeWire
 # changes. Always attempts rmmod, including on failure.
 #
+# WARNING: rmmod after full initialization is the documented brick path on the
+# Apollo x4. The Thunderbolt link can drop and require a cold boot.
+#
 # BEFORE RUNNING: turn the monitor level down and unplug headphones. A wrong
 # routing/channel map cannot hurt the Apollo but can send full-scale digital to
 # the outputs.
@@ -75,6 +78,8 @@ hdr "Full log for this load"
 dmesg | sed -n "/$MARK/,\$p" | grep -vF "$MARK"
 
 hdr "Unloading"
+ylw "WARNING: rmmod after full initialization is the documented Apollo x4 brick path."
+ylw "The Thunderbolt link can drop and require a cold boot."
 if rmmod "$MOD"; then
     grn "unloaded cleanly"
 else
