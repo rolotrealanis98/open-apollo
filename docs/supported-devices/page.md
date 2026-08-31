@@ -36,7 +36,7 @@ USB Apollo models use UAC 2.0 audio. No kernel module is required — the FX3 fi
 | Model | VID | PID (live) | Playback | Record | Preamps | HiZ | Status |
 |---|---|---|---|---|---|---|---|
 | Apollo Solo USB | 0x2B5A | 0x000D | 6 | 10 | 2 | 2 | **Verified** |
-| Apollo Twin USB | 0x2B5A | 0x0002 | — | — | 2 | 2 | Needs Testing |
+| Apollo Twin USB | 0x2B5A | 0x0002 | 10 | 22 | 2 | 2 | Needs Testing |
 | Apollo Twin X USB | 0x2B5A | 0x000F | — | — | 2 | 2 | Needs Testing |
 
 {% callout type="note" %}
