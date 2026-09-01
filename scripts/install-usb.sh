@@ -127,27 +127,29 @@ fi
 # ================================================================
 header "Dependencies"
 
-DEPS_NEEDED=()
+# Everything the rest of the installer needs, in one place so the same
+# check runs before AND after the package manager.  The install commands
+# below deliberately ignore the package manager's exit status (a partial
+# failure must not abort a run that can still succeed), so a re-check is
+# the only thing that catches a package that did not actually land.
+missing_deps() {
+    local missing=()
+    command -v python3 &>/dev/null || missing+=(python3)
+    python3 -c "import usb.core" 2>/dev/null || missing+=(pyusb)
+    # Kernel headers (needed for snd-usb-audio build)
+    [ -d "/lib/modules/$KERNEL/build" ] || missing+=(kernel-headers)
+    # Build tools — clang if kernel was built with it, else gcc
+    if [ "$KERN_CC" = "clang" ]; then
+        command -v clang &>/dev/null || missing+=(clang)
+    else
+        command -v gcc &>/dev/null || missing+=(gcc)
+    fi
+    command -v make &>/dev/null || missing+=(make)
+    command -v wget &>/dev/null || missing+=(wget)
+    echo "${missing[@]}"
+}
 
-# Check python3
-if ! command -v python3 &>/dev/null; then DEPS_NEEDED+=(python3); fi
-
-# Check pyusb
-if ! python3 -c "import usb.core" 2>/dev/null; then DEPS_NEEDED+=(pyusb); fi
-
-# Check kernel headers (needed for snd-usb-audio build)
-if [ ! -d "/lib/modules/$KERNEL/build" ]; then DEPS_NEEDED+=(kernel-headers); fi
-
-# Check build tools — clang if kernel was built with it, else gcc
-if [ "$KERN_CC" = "clang" ]; then
-    if ! command -v clang &>/dev/null; then DEPS_NEEDED+=(clang); fi
-else
-    if ! command -v gcc &>/dev/null; then DEPS_NEEDED+=(gcc); fi
-fi
-if ! command -v make &>/dev/null; then DEPS_NEEDED+=(make); fi
-
-# Check wget
-if ! command -v wget &>/dev/null; then DEPS_NEEDED+=(wget); fi
+DEPS_NEEDED=($(missing_deps))
 
 if [ ${#DEPS_NEEDED[@]} -eq 0 ]; then
     ok "All dependencies present"
@@ -187,10 +189,20 @@ else
             run_sudo pip3 install --break-system-packages pyusb 2>/dev/null
     fi
 
-    if python3 -c "import usb.core" 2>/dev/null; then
+    # Re-check the full list, not just pyusb.  Before this, a package the
+    # manager failed to install (wget, say) was still reported as
+    # "Dependencies installed" and only surfaced 30 lines later as
+    # "kernel source not available on kernel.org" — the wrong error.
+    STILL_MISSING=($(missing_deps))
+    if [ ${#STILL_MISSING[@]} -eq 0 ]; then
         ok "Dependencies installed"
     else
-        fail "Could not install pyusb — install manually: pip3 install pyusb"
+        fail "Still missing after install: ${STILL_MISSING[*]}"
+        if [[ " ${STILL_MISSING[*]} " == *" pyusb "* ]]; then
+            info "pyusb: pip3 install pyusb (or your distro's python3-usb / python-pyusb package)"
+        fi
+        info "Install the rest with your package manager, then re-run the installer."
+        info "Install will NOT touch the audio stack — your current driver is untouched."
         exit 1
     fi
 fi
@@ -267,22 +279,34 @@ rm -rf "$SND_USB_BUILD"
 sudo -u "$REAL_USER" -H bash -c "mkdir -p '$SND_USB_BUILD'"
 
 # Download kernel source (sound/usb only) as the real user.  Try the exact
-# running kernel first, then ONE minor release back — the sound/usb ABI is
-# usually stable across a single minor bump, but falling back further is a
-# semantic-correctness risk that Codex flagged: an older driver compiled
-# against newer ALSA headers can build and load while misbehaving at
-# runtime.  If neither attempt works, we fail closed and tell the user.
-# Bleeding-edge distro kernels (CachyOS 6.19.x, Arch rc) are the only real
-# users of the fallback and will get a prominent warning if it engages.
-KVER_FULL=$(echo "$KERNEL" | grep -oP '^\d+\.\d+')
-KVER_MAJOR_NUM="${KVER_FULL%%.*}"
-KVER_MINOR_NUM="${KVER_FULL##*.}"
+# running kernel (X.Y.Z) first, then the X.Y base release, then ONE minor
+# release back.  The exact tarball matters more than it looks: stable
+# point releases backport sound/usb fixes, so building X.Y's tree against
+# X.Y.Z's headers can compile cleanly and still not match the running
+# driver.  The sound/usb ABI is usually stable across a single minor bump,
+# but falling back further is a semantic-correctness risk that Codex
+# flagged: an older driver compiled against newer ALSA headers can build
+# and load while misbehaving at runtime.  If nothing works, we fail
+# closed and tell the user.  Bleeding-edge distro kernels (CachyOS 6.19.x,
+# Arch rc) are the only real users of the minor fallback and will get a
+# prominent warning if it engages.
+KVER_FULL=$(echo "$KERNEL" | grep -oP '^\d+\.\d+(\.\d+)?')
+KVER_MAJOR_NUM=$(echo "$KVER_FULL" | cut -d. -f1)
+KVER_MINOR_NUM=$(echo "$KVER_FULL" | cut -d. -f2)
+KVER_PATCH_NUM=$(echo "$KVER_FULL" | cut -d. -f3)
+# kernel.org names the first release of a series X.Y, never X.Y.0
+KVER_BASE="${KVER_MAJOR_NUM}.${KVER_MINOR_NUM}"
+if [ -n "$KVER_PATCH_NUM" ] && [ "$KVER_PATCH_NUM" != "0" ]; then
+    KVER_EXACT="${KVER_BASE}.${KVER_PATCH_NUM}"
+else
+    KVER_EXACT="$KVER_BASE"
+fi
+KVER_CANDIDATES=("$KVER_EXACT")
+[ "$KVER_BASE" != "$KVER_EXACT" ] && KVER_CANDIDATES+=("$KVER_BASE")
+[ "$KVER_MINOR_NUM" -gt 0 ] && KVER_CANDIDATES+=("${KVER_MAJOR_NUM}.$((KVER_MINOR_NUM - 1))")
 
 DOWNLOADED_KVER=""
-for offset in 0 -1; do
-    try_minor=$((KVER_MINOR_NUM + offset))
-    [ "$try_minor" -lt 0 ] && continue
-    try_ver="${KVER_MAJOR_NUM}.${try_minor}"
+for try_ver in "${KVER_CANDIDATES[@]}"; do
     try_url="https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR_NUM}.x/linux-${try_ver}.tar.xz"
     info "Trying kernel source v${try_ver}..."
     # Wipe any partial download from a previous attempt
@@ -297,10 +321,15 @@ for offset in 0 -1; do
     warn "v${try_ver} not available on kernel.org"
 done
 
+# Building the X.Y base tree for an X.Y.Z kernel is worth a line, not a box.
+if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" = "$KVER_BASE" ] && [ "$KVER_BASE" != "$KVER_EXACT" ]; then
+    warn "Exact source for v${KVER_EXACT} not on kernel.org; building from the v${KVER_BASE} base release"
+fi
+
 # Prominent warning when we're building across a kernel minor boundary.
 # The sound/usb code is usually stable minor-to-minor but this is NOT a
 # guarantee — file a bug if you hit audio misbehavior after this warning.
-if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" != "$KVER_FULL" ]; then
+if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" != "$KVER_EXACT" ] && [ "$DOWNLOADED_KVER" != "$KVER_BASE" ]; then
     echo -e "${YELLOW}${BOLD}"
     echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║  VERSION SKEW WARNING                                         ║"
@@ -317,7 +346,7 @@ if [ -n "$DOWNLOADED_KVER" ] && [ "$DOWNLOADED_KVER" != "$KVER_FULL" ]; then
 fi
 
 if [ -z "$DOWNLOADED_KVER" ]; then
-    fail "Could not download kernel source for v${KVER_FULL} or v$((KVER_MINOR_NUM - 1))"
+    fail "Could not download kernel source for any of:$(printf ' v%s' "${KVER_CANDIDATES[@]}")"
     info "Last wget error (if any):"
     [ -f /tmp/open-apollo-wget.log ] && tail -5 /tmp/open-apollo-wget.log | sed 's/^/    /'
     info "Install will NOT touch the audio stack — your current driver is untouched."
@@ -667,7 +696,16 @@ run_sudo chmod +x "$UA_USB_BIN/ua-usb-init" "$UA_USB_BIN/ua-usb-dsp-init"
 run_sudo cp "$PROJECT_DIR/configs/udev/99-apollo-usb.rules" "$UDEV_DIR/"
 run_sudo udevadm control --reload-rules 2>/dev/null || true
 
-ok "udev rules installed — Apollo will auto-init on power-on/reboot"
+# Init runs via systemd (TAG+="systemd", ENV{SYSTEMD_WANTS}=...), not
+# RUN+=, because systemd-udevd.service's own sandbox (MemoryDenyWriteExecute,
+# restrictive SystemCallFilter) is inherited by RUN+= children and breaks
+# Python's import of pyusb. See configs/udev/99-apollo-usb.rules for details.
+info "Installing systemd units for udev-triggered init..."
+run_sudo cp "$PROJECT_DIR/configs/systemd/ua-usb-init@.service" /etc/systemd/system/
+run_sudo cp "$PROJECT_DIR/configs/systemd/ua-usb-dsp-init.service" /etc/systemd/system/
+run_sudo systemctl daemon-reload
+
+ok "udev rules + systemd units installed — Apollo will auto-init on power-on/reboot"
 info "Firmware must be in $FW_DIR/ for auto-load to work"
 
 # ================================================================
@@ -902,7 +940,10 @@ if [ -t 0 ]; then
     echo ""
     prompt TELEM_ANSWER "Help improve Open Apollo — send anonymous install report? [y/N] "
 else
-    TELEM_ANSWER="y"
+    # Locally patched: do not silently opt in to telemetry when running
+    # non-interactively. Upstream defaults this to "y" for non-tty runs;
+    # we require explicit consent instead.
+    TELEM_ANSWER="n"
 fi
 
 if [[ "${TELEM_ANSWER:-n}" =~ ^[Yy] ]]; then

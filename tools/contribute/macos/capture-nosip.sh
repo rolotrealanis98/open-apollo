@@ -14,7 +14,7 @@
 # What this CANNOT close: the routing tables and IO descriptors (gap 3) or the
 # DSP program blobs (gap 4). Those are only visible while the UA driver is
 # actively exchanging them with UA Console, which requires DTrace and therefore
-# SIP. See apollo-selector-smoke.d before going down that road.
+# SIP. See capture.sh and apollo-selectors.d before going down that road.
 #
 # Read-only. No writes, no installs, no uploads. Output goes to a directory you
 # can review file by file before sharing anything.

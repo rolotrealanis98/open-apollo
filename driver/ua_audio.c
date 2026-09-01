@@ -124,7 +124,7 @@ static const struct ua_model_info ua_models[] = {
 	{ UA_DEV_APOLLO_X8,           26, 26,  4, 2 },
 	{ UA_DEV_APOLLO_X8_GEN2,     26, 26,  4, 2 },
 	{ UA_DEV_APOLLO_8P,           26, 26,  8, 2 },
-	{ UA_DEV_APOLLO_X8P,          26, 26,  8, 2 },
+	{ UA_DEV_APOLLO_X8P,          34, 32,  8, 2 },
 	{ UA_DEV_APOLLO_X8P_GEN2,    26, 26,  8, 2 },
 	{ UA_DEV_APOLLO_X16,          34, 34,  8, 2 },
 	{ UA_DEV_APOLLO_X16_GEN2,    34, 34,  8, 2 },

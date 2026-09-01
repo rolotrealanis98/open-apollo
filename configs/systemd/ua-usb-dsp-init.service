@@ -1,0 +1,6 @@
+[Unit]
+Description=Universal Audio Apollo USB DSP init (routing, clock, capture)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ua-usb-dsp-init

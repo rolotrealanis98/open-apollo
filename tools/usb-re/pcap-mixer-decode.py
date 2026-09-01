@@ -46,6 +46,12 @@ USBPCAP_HEADER_LEN = 27
 # Apollo DSP protocol constants
 MAGIC_CMD = 0xDC
 MAGIC_RSP = 0xDD
+# The low 16 bits of an entry's first dword are its length in dwords
+# (including that dword), not an opcode. The lengths that used to be read
+# as opcodes keep their names: 1 dword is a register read, 2 is a register
+# write with the value in the second dword, 4 is a routing/table entry.
+# Longer entries carry a DSP address (dword 1), a mask (dword 2) and a
+# payload block, and can be hundreds of dwords.
 OP_QUERY = 0x0001
 OP_READWRITE = 0x0002
 OP_BLOCK_WRITE = 0x0004
@@ -81,11 +87,13 @@ class DspCommand:
     """Decoded DSP bulk command/response."""
     timestamp: float
     direction: str          # "OUT" or "IN"
-    word_count: int
-    cmd_type: int           # sub-type byte
+    word_count: int         # payload length in 32-bit dwords
+    flags: int              # 0x00 or 0x10
+    seq: int                # sequence counter, wraps at 256
     magic: int              # 0xDC or 0xDD
-    subcmds: list = field(default_factory=list)  # [(opcode, param, value), ...]
+    subcmds: list = field(default_factory=list)  # [(wordcount, reg, value), ...]
     raw: bytes = b""
+    truncated: bool = False  # last entry runs past this packet's payload
 
 
 @dataclass
@@ -167,7 +175,11 @@ def decode_dsp_packet(pkt):
     if len(pkt.data) < 4:
         return None
 
-    word_count, cmd_type, magic = struct.unpack_from("<HBB", pkt.data, 0)
+    # The header is four independent bytes, not a u16 word count followed by
+    # two bytes. Reading it as "<HBB" folds the flags byte into word_count and
+    # shifts seq into its place, which silently mangles every packet that has
+    # flags == 0x10 (about half of them on Apollo Twin USB).
+    word_count, flags, seq, magic = struct.unpack_from("<BBBB", pkt.data, 0)
 
     if magic not in (MAGIC_CMD, MAGIC_RSP):
         return None
@@ -176,28 +188,38 @@ def decode_dsp_packet(pkt):
         timestamp=pkt.timestamp,
         direction=pkt.direction,
         word_count=word_count,
-        cmd_type=cmd_type,
+        flags=flags,
+        seq=seq,
         magic=magic,
         raw=pkt.data,
     )
 
-    # Parse sub-commands (8 bytes each: opcode:u16 param:u16 value:u32)
+    # Parse entries. Each starts with a dword whose low 16 bits are the
+    # entry length in dwords (including that dword) and whose high 16 bits
+    # are the register, so the step is always wordcount * 4. The old walk
+    # assumed 4-byte queries and 8-byte everything-else, which is right for
+    # lengths 1 and 2 and resumes mid-entry for every other length, reading
+    # payload data as fresh headers.
+    #
+    # An entry may be longer than the packet that starts it; the rest
+    # follows in the next packet with the same flags byte. Such an entry is
+    # recorded with what is here and the command is marked truncated rather
+    # than misparsed.
     payload = pkt.data[4:]
-    # For queries (opcode 0x01), sub-command is only 4 bytes: opcode:u16 param:u16
+    n_words = len(payload) // 4
     offset = 0
-    while offset < len(payload):
-        if offset + 4 > len(payload):
+    while offset < n_words:
+        wordcount, reg = struct.unpack_from("<HH", payload, offset * 4)
+        if wordcount == 0:
             break
-        opcode, param = struct.unpack_from("<HH", payload, offset)
-        if opcode == OP_QUERY:
-            cmd.subcmds.append((opcode, param, 0))
-            offset += 4
-        elif offset + 8 <= len(payload):
-            value = struct.unpack_from("<I", payload, offset + 4)[0]
-            cmd.subcmds.append((opcode, param, value))
-            offset += 8
-        else:
+        value = 0
+        if wordcount >= 2 and offset + 1 < n_words:
+            value = struct.unpack_from("<I", payload, offset * 4 + 4)[0]
+        cmd.subcmds.append((wordcount, reg, value))
+        if offset + wordcount > n_words:
+            cmd.truncated = True
             break
+        offset += wordcount
 
     return cmd
 
@@ -218,8 +240,8 @@ def read_sweep_log(filepath):
 
 
 def format_subcmd(opcode, param, value):
-    """Format a sub-command for display."""
-    op_name = OP_NAMES.get(opcode, f"0x{opcode:04x}")
+    """Format an entry for display (opcode is the entry's wordcount)."""
+    op_name = OP_NAMES.get(opcode, f"WC{opcode}")
     reg_name = REG_NAMES.get(param, f"0x{param:04x}")
     if opcode == OP_QUERY:
         return f"{op_name}({reg_name})"
@@ -303,7 +325,8 @@ def build_mapping(correlations):
                     "value": value,
                     "param_hex": f"0x{param:04x}",
                     "value_hex": f"0x{value:08x}",
-                    "cmd_type": cmd.cmd_type,
+                    "flags": cmd.flags,
+                    "seq": cmd.seq,
                 })
 
     return dict(mapping)
@@ -319,8 +342,10 @@ def print_commands(dsp_cmds, limit=None):
         magic_name = "CMD" if cmd.magic == MAGIC_CMD else "RSP"
         dir_arrow = "→" if cmd.direction == "OUT" else "←"
         subcmd_strs = [format_subcmd(o, p, v) for o, p, v in cmd.subcmds]
+        if cmd.truncated:
+            subcmd_strs.append("...continues")
         print(f"  {cmd.timestamp:.6f} {dir_arrow} {magic_name} "
-              f"type={cmd.cmd_type} words={cmd.word_count} "
+              f"flags=0x{cmd.flags:02x} seq={cmd.seq} words={cmd.word_count} "
               f"[{', '.join(subcmd_strs)}]")
         count += 1
 
@@ -426,7 +451,7 @@ def main():
                     print(f"    op=0x{c['opcode']:04x} "
                           f"param={c['param_hex']} "
                           f"value={c['value_hex']} "
-                          f"type={c['cmd_type']}")
+                          f"flags=0x{c['flags']:02x} seq={c['seq']}")
 
             if args.json:
                 with open(args.json, "w") as f:

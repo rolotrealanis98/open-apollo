@@ -36,7 +36,7 @@ USB Apollo models use UAC 2.0 audio. No kernel module is required — the FX3 fi
 | Model | VID | PID (live) | Playback | Record | Preamps | HiZ | Status |
 |---|---|---|---|---|---|---|---|
 | Apollo Solo USB | 0x2B5A | 0x000D | 6 | 10 | 2 | 2 | **Verified** |
-| Apollo Twin USB | 0x2B5A | 0x0002 | — | — | 2 | 2 | Needs Testing |
+| Apollo Twin USB | 0x2B5A | 0x0002 | 10 | 22 | 2 | 2 | Needs Testing |
 | Apollo Twin X USB | 0x2B5A | 0x000F | — | — | 2 | 2 | Needs Testing |
 
 {% callout type="note" %}
@@ -126,6 +126,7 @@ If you own an Apollo model marked "Needs Testing", your contribution would be ex
 See [How to Contribute](/docs/how-to-contribute) for details, or jump straight to the device capture guides:
 
 - [Device Capture (macOS)](/docs/device-capture-macos) — capture routing data using DTrace
+- [Device Capture (Windows, USB)](/docs/device-capture-windows) — capture a USB Apollo's init sequence with USBPcap
 
 You can also run the quick probe script on Linux:
 

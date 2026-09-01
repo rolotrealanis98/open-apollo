@@ -34,11 +34,28 @@ for obj in json.load(sys.stdin):
 [ -z "$DEVICE_ID" ] && { log "Apollo Solo USB not found in PipeWire"; exit 1; }
 log "Device ID: $DEVICE_ID"
 
-# Use analog surround 2.1 profile (pro-audio has PipeWire capture start bug)
-# Profile 1 = analog-surround-21 output + input (3ch: FL, FR, LFE)
-wpctl set-profile "$DEVICE_ID" 1 2>/dev/null || true
+# Set the pro-audio profile — gives the real 10ch capture / 6ch playback
+# with proper AUX0-9 channel naming. (An earlier version of this script
+# avoided pro-audio for a suspected "capture start bug" and fell back to
+# a 3-channel analog-surround-2.1 profile instead — that fallback doesn't
+# carry mic signal at all on this device and was never actually needed;
+# pro-audio works. Looked up by name, not a hardcoded index: ACP assigns
+# pro-audio a different index per device depending on how many surround
+# permutation profiles it also generates.)
+PROFILE_INDEX=$(pw-dump 2>/dev/null | python3 -c "
+import json, sys
+for obj in json.load(sys.stdin):
+    if obj.get('id') != $DEVICE_ID: continue
+    for p in obj.get('info', {}).get('params', {}).get('EnumProfile', []):
+        if p.get('name') == 'pro-audio':
+            print(p['index']); break
+" 2>/dev/null || true)
+
+[ -z "$PROFILE_INDEX" ] && { log "pro-audio profile not found on device $DEVICE_ID"; exit 1; }
+
+wpctl set-profile "$DEVICE_ID" "$PROFILE_INDEX" 2>/dev/null || true
 sleep 1
-log "Analog surround 2.1 profile set"
+log "pro-audio profile set (index $PROFILE_INDEX)"
 
 # Discover node names
 eval "$(pw-dump 2>/dev/null | python3 -c "
@@ -67,14 +84,14 @@ cat > "$CONF_FILE" << CONF
 context.modules = [
 
     # ═══════ CAPTURE SOURCES (Apollo → PipeWire) ═══════
-    # Analog surround 2.1: FL=Mic1, FR=Mic2, LFE=?
+    # pro-audio capture channels are named AUX0-AUX9: AUX0=Mic1, AUX1=Mic2
 
     # Mic/Instrument 1 (mono)
     { name = libpipewire-module-loopback
         args = {
             node.description = "Apollo Mic 1"
             capture.props = {
-                audio.position    = [ FL ]
+                audio.position    = [ AUX0 ]
                 stream.dont-remix = true
                 node.target       = "$INPUT_NODE"
                 node.passive      = true
@@ -92,7 +109,7 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 2"
             capture.props = {
-                audio.position    = [ FR ]
+                audio.position    = [ AUX1 ]
                 stream.dont-remix = true
                 node.target       = "$INPUT_NODE"
                 node.passive      = true
@@ -110,7 +127,7 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 1+2"
             capture.props = {
-                audio.position    = [ FL FR ]
+                audio.position    = [ AUX0 AUX1 ]
                 stream.dont-remix = true
                 node.target       = "$INPUT_NODE"
                 node.passive      = true
@@ -124,7 +141,7 @@ context.modules = [
     }
 
     # ═══════ PLAYBACK SINKS (PipeWire → Apollo) ═══════
-    # Analog surround 2.1: FL=MonL, FR=MonR, LFE=?
+    # pro-audio playback channels are named AUX0-AUX5: AUX0=Mon L, AUX1=Mon R
 
     # Monitor L/R (main speakers)
     { name = libpipewire-module-loopback
@@ -137,7 +154,7 @@ context.modules = [
             }
             playback.props = {
                 node.target       = "$OUTPUT_NODE"
-                audio.position    = [ FL FR ]
+                audio.position    = [ AUX0 AUX1 ]
                 stream.dont-remix = true
             }
         }

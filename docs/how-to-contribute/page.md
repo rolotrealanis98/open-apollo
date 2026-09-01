@@ -58,13 +58,19 @@ Even a simple "driver loaded, audio plays" report on a model we haven't tested i
 
 ## Tier 2: Capture device data (advanced)
 
-The most valuable contribution is capturing device configuration data from a working system (macOS). This data tells us exactly how each Apollo model configures its audio routing, which is essential for supporting models we don't have physical access to.
+The most valuable contribution is capturing device configuration data from a working system (macOS for Thunderbolt models, Windows for USB models). This data tells us exactly how each Apollo model configures its audio routing, which is essential for supporting models we don't have physical access to.
 
-### macOS capture
+### macOS capture (Thunderbolt models)
 
 Requires temporarily disabling System Integrity Protection (SIP) to use DTrace. The capture script is read-only — it observes driver behavior without modifying anything.
 
 See the full guide: [Device Capture (macOS)](/docs/device-capture-macos)
+
+### Windows capture (USB models)
+
+USB Apollos are brought up by an init sequence the Windows driver sends over USB. Capturing it with USBPcap on a machine where UA Console works gives you a sequence matched to your own device and firmware, which you can replay on Linux — this is how the Twin USB was brought up. The capture is read-only; the capture file stays on your machine.
+
+See the full guide: [Device Capture (Windows, USB)](/docs/device-capture-windows)
 
 ### After capturing
 

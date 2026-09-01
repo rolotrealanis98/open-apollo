@@ -310,7 +310,23 @@ sudo modprobe ua_apollo
    ```
    If missing, obtain from UA Connect on Windows (`C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmware\USB\`) and copy to `/lib/firmware/universal-audio/`.
 
-3. **USB 2.0 port or cable:** The Apollo Solo USB requires USB 3.0 SuperSpeed. With USB 2.0, the FX3 re-enumerates but audio interfaces fail to initialize. Use a USB 3.0 port (usually blue) and a USB 3.0 cable.
+3. **USB 2.0 port or cable:** USB Apollos require USB 3.0 SuperSpeed. At high speed the device still enumerates and `snd-usb-audio` still binds, so it looks healthy — but it advertises **no AudioStreaming (class 01/02) interfaces at all**, so there is nothing to build a PCM device from. Use a USB 3.0 port (usually blue) and a USB 3.0 cable.
+
+   Check the negotiated speed and the interfaces actually present:
+   ```bash
+   # find the Apollo's sysfs node, then read its speed and interface classes
+   for d in /sys/bus/usb/devices/*/; do
+     [ "$(cat $d/idVendor 2>/dev/null)" = "2b5a" ] || continue
+     echo "speed: $(cat $d/speed) Mbps"
+     for i in $d*:1.*/; do
+       echo "  $(basename $i) class $(cat $i/bInterfaceClass)/$(cat $i/bInterfaceSubClass)"
+     done
+   done
+   ```
+   A working SuperSpeed link reports `5000` Mbps and includes two `01/02`
+   (AudioStreaming) interfaces. On USB 2.0 you get `480` Mbps and only
+   `ff/00`, `01/01`, `ff/01`, `ff/01` — no `01/02` anywhere, and no amount of
+   module patching will help.
 
 4. **udev rule not installed:** Confirm the udev rule is present:
    ```bash
@@ -320,11 +336,15 @@ sudo modprobe ua_apollo
 
 ### No PCM streams / ALSA card shows no playback or capture
 
-**Symptom:** The `Apollo Solo USB` card appears in `aplay -l` but shows no streams, or audio applications cannot open it.
+**Symptom:** The card appears in `aplay -l` but shows no streams, or audio applications cannot open it.
+
+{% callout type="warning" %}
+Two different faults produce this same symptom. Before reinstalling the module, check the port: if `/proc/asound/<card>/` contains only `id usbbus usbid usbmixer` — no `pcm0c`/`pcm0p` — and the device has no `01/02` interfaces, you are on a USB 2.0 link and the module is not the problem. See "Device not found after plugging in" above.
+{% /callout %}
 
 **Cause:** The standard `snd-usb-audio` module cannot enumerate PCM streams because the device does not implement UAC 2.0 `GET_RANGE` for clock frequencies — it STALLs, which causes `snd-usb-audio` to skip stream creation.
 
-**Fix:** The patched `snd-usb-audio` module (built by `install-usb.sh`) adds a quirk that falls back to hardcoded rates (44100, 48000, 88200, 96000, 176400, 192000 Hz) when `GET_RANGE` fails for VID `0x2B5A`. If the stock module was loaded instead:
+**Fix:** The patched `snd-usb-audio` module (built by `install-usb.sh`) adds a quirk that falls back to a fixed **48 kHz** when `GET_RANGE` fails. The quirk calls `set_fixed_rate(fp, 48000, SNDRV_PCM_RATE_48000)`, so 48 kHz is the only rate exposed — `/proc/asound/<card>/stream0` will report `Rates: 48000` for every altset. If the stock module was loaded instead:
 
 ```bash
 # Check which module is active

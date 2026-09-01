@@ -14,7 +14,21 @@ import usb.core
 import usb.util
 
 UA_VID = 0x2B5A
-APOLLO_SOLO_PID = 0x000D
+LIVE_PIDS = {
+    0x000D: "Apollo Solo USB",
+    0x0002: "Twin USB",
+    0x000F: "Twin X USB",
+}
+
+
+def find_device():
+    """Return (device, model_name) for whichever live Apollo USB is present."""
+    for pid, name in LIVE_PIDS.items():
+        dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
+        if dev:
+            return dev, name
+    return None, None
+
 
 # UAC 2.0 constants
 UAC2_CS_CUR = 0x01
@@ -28,11 +42,13 @@ CLOCK_ID = 128  # 0x80
 AC_INTERFACE = 1
 
 def probe():
-    dev = usb.core.find(idVendor=UA_VID, idProduct=APOLLO_SOLO_PID)
+    dev, model = find_device()
     if not dev:
-        print("Apollo Solo USB not found")
+        print("No live Apollo USB device found "
+              "(expected one of: %s)" %
+              ", ".join(LIVE_PIDS.values()))
         sys.exit(1)
-    print(f"Found: {dev.product}\n")
+    print(f"Found: {model} — {dev.product}\n")
 
     # Detach kernel driver from audio interfaces if attached
     for intf in [0, 1, 2, 3]:

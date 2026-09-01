@@ -10,7 +10,21 @@
 set -euo pipefail
 
 LOG_TAG="ua-usb-dsp-init"
-log() { logger -t "$LOG_TAG" "$*"; }
+# `--` stops logger from treating a line starting with "-" (e.g. the
+# "-- waiting for DSP..." progress message) as an unrecognised option.
+log() { logger -t "$LOG_TAG" -- "$*"; }
+
+# Idempotency guard: the rebind step at the end of this script (unbind+bind
+# the whole USB device) generates a fresh "add" uevent for the same PID,
+# which re-triggers the udev rule that runs this script.  Without this
+# stamp, a successful run loops forever (init -> rebind -> add event ->
+# init -> rebind -> ...).  configs/udev/99-apollo-usb.rules removes the
+# stamp on "remove" so unplug/replug re-inits normally.
+STAMP="/run/ua-usb-dsp-init.done"
+if [ -f "$STAMP" ]; then
+    log "Already initialized since last unplug (stamp present) — skipping"
+    exit 0
+fi
 
 # Delay for USB enumeration and snd-usb-audio probe to settle.  2s wasn't
 # enough on AMD xHCI / slow systems — snd-usb-audio was still claiming its
@@ -56,4 +70,5 @@ if [ -n "$DEVPATH" ]; then
     echo "$DEVPATH" > /sys/bus/usb/drivers/usb/bind 2>/dev/null || true
 fi
 
+touch "$STAMP"
 log "DSP init complete"

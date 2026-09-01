@@ -1,0 +1,6 @@
+[Unit]
+Description=Universal Audio Apollo USB FX3 firmware loader (%i)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ua-usb-init %i

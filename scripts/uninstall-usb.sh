@@ -97,6 +97,12 @@ else
     info "udev rules not installed"
 fi
 
+for f in /etc/systemd/system/ua-usb-init@.service /etc/systemd/system/ua-usb-dsp-init.service; do
+    [ -f "$f" ] && rm -f "$f"
+done
+rm -f /run/ua-usb-dsp-init.done
+systemctl daemon-reload 2>/dev/null || true
+
 # ================================================================
 # Step 3: Remove installed helper scripts and library
 # ================================================================

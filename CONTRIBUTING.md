@@ -71,6 +71,10 @@ captures from a working macOS system using DTrace. See the
 for instructions. The capture script is read-only — it observes driver behavior
 without modifying anything.
 
+For **USB** models, the equivalent is a USBPcap capture of the Windows driver
+bringing the device up, which you then replay on Linux from your own machine.
+See the [Device Capture (Windows, USB) guide](https://open-apollo.org/docs/device-capture-windows).
+
 > **Note:** Captures contain only hardware register values — no personal data,
 > no audio content, no account information.
 
