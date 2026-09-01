@@ -20,6 +20,19 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+dtrace_allowed() {
+    local sip_status="$1"
+
+    if printf '%s\n' "$sip_status" | grep -q '^[[:space:]]*DTrace Restrictions:'; then
+        printf '%s\n' "$sip_status" |
+            grep -q '^[[:space:]]*DTrace Restrictions: disabled$'
+        return
+    fi
+
+    printf '%s\n' "$sip_status" |
+        grep -q '^System Integrity Protection status: disabled'
+}
+
 # ============================================================================
 # SIP WARNING
 # ============================================================================
@@ -58,13 +71,13 @@ fi
 
 # Check SIP status
 SIP_STATUS=$(csrutil status 2>/dev/null || echo "unknown")
-if echo "$SIP_STATUS" | grep -q "enabled"; then
-    printf "${RED}SIP is enabled. DTrace will not work.${NC}\n"
+if ! dtrace_allowed "$SIP_STATUS"; then
+    printf "${RED}DTrace restrictions are enabled. DTrace will not work.${NC}\n"
     echo ""
-    echo "Disable SIP first (see instructions above), then re-run."
+    echo "Disable DTrace restrictions first (see instructions above), then re-run."
     exit 1
 fi
-printf "${GREEN}SIP status: disabled (OK)${NC}\n"
+printf "${GREEN}DTrace restrictions: disabled (OK)${NC}\n"
 echo ""
 
 # Check that UA driver is loaded
