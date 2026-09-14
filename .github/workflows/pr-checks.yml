@@ -55,7 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Installer unit tests
-        run: bash tests/test-install-module-binding.sh
+        run: |
+          bash tests/test-install-module-binding.sh
+          bash tests/test-install-dependencies.sh
 
   console-web:
     runs-on: ubuntu-latest
