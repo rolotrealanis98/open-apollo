@@ -1468,7 +1468,7 @@ def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
 
     Each devices/apollo-*.json descriptor carries a "device_type" (hex string)
     and "model" (e.g. "Apollo x8p"). The device map filename is derived from the
-    model's suffix: "Apollo x8p" -> device_maps/device_map_apollo_x8p.json.
+    full model: "Apollo Twin X" -> device_maps/device_map_apollo_twin_x.json.
     Returns (model, path) where path is None if the map file doesn't exist yet.
     """
     if not DEVICES_DIR.is_dir():
@@ -1500,8 +1500,11 @@ def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
         model = desc.get("model")
         if not isinstance(model, str) or not model.strip():
             model = None
-        suffix = (model.split()[-1] if model else desc_path.stem.split("-")[-1]).lower()
-        candidate = SCRIPT_DIR / "device_maps" / f"device_map_apollo_{suffix}.json"
+        if model:
+            map_name = "_".join(model.lower().split())
+        else:
+            map_name = desc_path.stem.replace("-", "_").lower()
+        candidate = SCRIPT_DIR / "device_maps" / f"device_map_{map_name}.json"
         return model, (candidate if candidate.exists() else None)
     return None, None
 

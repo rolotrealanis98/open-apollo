@@ -20,6 +20,10 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/contribute/macos/capture-lib.sh
+source "$SCRIPT_DIR/capture-lib.sh"
+
 # ============================================================================
 # SIP WARNING
 # ============================================================================
@@ -58,13 +62,18 @@ fi
 
 # Check SIP status
 SIP_STATUS=$(csrutil status 2>/dev/null || echo "unknown")
-if echo "$SIP_STATUS" | grep -q "enabled"; then
-    printf "${RED}SIP is enabled. DTrace will not work.${NC}\n"
-    echo ""
-    echo "Disable SIP first (see instructions above), then re-run."
+if [ "$SIP_STATUS" = "unknown" ]; then
+    printf "${RED}Could not read SIP status (csrutil unavailable), so DTrace access cannot be confirmed.${NC}\n"
+    echo "Run 'csrutil status' by hand and re-run once DTrace restrictions are disabled."
     exit 1
 fi
-printf "${GREEN}SIP status: disabled (OK)${NC}\n"
+if ! dtrace_allowed "$SIP_STATUS"; then
+    printf "${RED}DTrace restrictions are enabled. DTrace will not work.${NC}\n"
+    echo ""
+    echo "Disable DTrace restrictions first (see instructions above), then re-run."
+    exit 1
+fi
+printf "${GREEN}DTrace restrictions: disabled (OK)${NC}\n"
 echo ""
 
 # Check that UA driver is loaded
@@ -100,9 +109,6 @@ done
 if [ -z "$OUTPUT" ]; then
     OUTPUT="./apollo-macos-capture-$(date +%Y%m%d-%H%M%S).json"
 fi
-
-# Resolve alongside this script so apollo-selectors.d is found regardless of cwd.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
