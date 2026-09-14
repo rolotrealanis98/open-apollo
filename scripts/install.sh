@@ -92,6 +92,12 @@ run_sudo() {
     fi
 }
 
+# Debian 13 removed the legacy AppIndicator package.  Ayatana exposes the same
+# AppIndicator3 GI namespace and is available on every supported apt release.
+apt_appindicator_package() {
+    printf '%s\n' gir1.2-ayatanaappindicator3-0.1
+}
+
 # --- Initramfs regen (dracut bakes /etc/modules-load.d into the initrd) ---
 regen_initramfs() {
     if command -v dracut &>/dev/null; then
@@ -329,7 +335,7 @@ check_install_deps() {
         missing+=("appindicator")
         case "$PKG_MGR" in
             dnf)    missing_pkgs+=("libappindicator-gtk3") ;;
-            apt)    missing_pkgs+=("gir1.2-appindicator3-0.1") ;;
+            apt)    missing_pkgs+=("$(apt_appindicator_package)") ;;
             pacman) missing_pkgs+=("libappindicator-gtk3") ;;
             zypper) missing_pkgs+=("typelib-1_0-AppIndicator3-0_1") ;;
         esac
