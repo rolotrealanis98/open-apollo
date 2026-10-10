@@ -28,6 +28,7 @@
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/idr.h>
+#include <linux/slab.h>
 #include <linux/version.h>
 #include <linux/delay.h>
 
@@ -40,9 +41,15 @@
 #define DRIVER_DESC	"Universal Audio Apollo Thunderbolt PCIe driver"
 #define DRIVER_VERSION	"0.2.0"
 
-/* Kernel version compat: class_create() lost the owner param in 6.4 */
+/*
+ * Kernel version compat: class_create() lost the owner param in 6.4.
+ * Before 6.4 class_create() is itself a macro, so redefining it (as this
+ * used to) breaks the build there; use a wrapper name instead.
+ */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
-#define class_create(name)	class_create(THIS_MODULE, name)
+#define ua_class_create(name)	class_create(THIS_MODULE, name)
+#else
+#define ua_class_create(name)	class_create(name)
 #endif
 
 /* PCI_IRQ_LEGACY renamed to PCI_IRQ_INTX in 6.8+ */
@@ -56,6 +63,26 @@
 static dev_t ua_devno;
 static struct class *ua_class;
 static DEFINE_IDA(ua_ida);
+
+/*
+ * Lifecycle module parameters (kext-vs-driver audit D1/D4/D5/D6).
+ * All default to the conservative behaviour; the "on" settings follow
+ * UAD2System.kext 12.0.0 more closely but need hardware validation.
+ */
+static bool full_shutdown;
+module_param(full_shutdown, bool, 0444);
+MODULE_PARM_DESC(full_shutdown,
+		 "On remove/shutdown/suspend also run ResetDMAEngines, clear the ACEFACE magic and ring the disconnect doorbell, as the macOS driver does; the next probe then cold-boots the DSP (default: off, keep a live mixer DSP)");
+
+static bool warm_dma_reset;
+module_param(warm_dma_reset, bool, 0444);
+MODULE_PARM_DESC(warm_dma_reset,
+		 "With a live mixer DSP (warm probe/resume), also write TRANSPORT=0 and reset the DMA engines with the macOS driver's 4/8-engine masks before reprogramming the SG table (default: off; an earlier 8-engine reset killed a running mixer DSP)");
+
+static bool v12_connect;
+module_param(v12_connect, bool, 0444);
+MODULE_PARM_DESC(v12_connect,
+		 "EXPERIMENTAL, needs Solo/Arrow/x8p testers: use the v12 ring-connect device set (adds Solo TB, Arrow, type 0x29) and do the ACEFACE handshake before the ring connect (default: off)");
 
 /* ----------------------------------------------------------------
  * PCI device table
@@ -131,36 +158,45 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 
 /* Forward declarations */
 static void ua_read_serial_type(struct ua_device *ua);
+static void ua_resume_work(struct work_struct *work);
 
 /* ----------------------------------------------------------------
  * Hardware initialisation helpers
  * ---------------------------------------------------------------- */
 
 /*
- * Reset DMA engines.
- * Mirrors CPcieIntrManager::ResetDMAEngines():
- *   1. Read current DMA control
- *   2. Apply reset bitmask (differs between v1 and v2 firmware)
- *   3. Clear interrupt status
+ * Pulse the per-engine DMA reset strobes, as CPcieIntrManager::
+ * ResetDMAEngines() (kext 12.0.0 x86 0x99f8) does: clear the engine
+ * enables, write enables-cleared | strobes (assert), then the cleared
+ * value (deassert), read back as a flush.
+ *   @eight:  8-engine masks (enables [8:1], strobes [16:9]) rather than
+ *            the 4-engine ones (enables [4:1], strobes [12:9]);
+ *   @global: force bit 0 (global DMA enable) on in the result.
+ * Starts from the live register: the cache is stale at probe/resume.
+ */
+static void ua_dma_reset_pulse(struct ua_device *ua, bool eight, bool global)
+{
+	u32 strobes = eight ? UA_DMA_RESET_V2_MASK : UA_DMA_RESET_V1_MASK;
+	u32 clean = ua_read(ua, UA_REG_DMA_CTRL) &
+		    ~(eight ? UA_DMA_RESET_V2_CLR : UA_DMA_RESET_V1_CLR);
+
+	if (global)
+		clean |= 0x1;
+
+	ua_write(ua, UA_REG_DMA_CTRL, clean | strobes);	/* Assert reset */
+	ua_write(ua, UA_REG_DMA_CTRL, clean);		/* Deassert reset */
+	(void)ua_read(ua, UA_REG_DMA_CTRL);		/* Flush */
+	ua->dma_ctrl_cache = clean;
+}
+
+/*
+ * Reset DMA engines (the driver's long-standing variant, cold path and
+ * UA_IOCTL_RESET_DMA): 8-engine masks on every v2 device, global enable
+ * forced on, then all pending interrupts cleared.
  */
 void ua_reset_dma(struct ua_device *ua)
 {
-	u32 val, val_clean, val_reset;
-
-	val = ua_read(ua, UA_REG_DMA_CTRL);
-
-	if (ua->fw_v2) {
-		val_clean = (val & ~UA_DMA_RESET_V2_CLR) | 0x1;
-		val_reset = val_clean | UA_DMA_RESET_V2_MASK;
-	} else {
-		val_clean = (val & ~UA_DMA_RESET_V1_CLR) | 0x1;
-		val_reset = val_clean | UA_DMA_RESET_V1_MASK;
-	}
-
-	ua_write(ua, UA_REG_DMA_CTRL, val_reset); /* Assert reset */
-	ua_write(ua, UA_REG_DMA_CTRL, val_clean); /* Deassert reset */
-	(void)ua_read(ua, UA_REG_DMA_CTRL);       /* Flush */
-	ua->dma_ctrl_cache = val_clean;
+	ua_dma_reset_pulse(ua, ua->fw_v2, true);
 
 	/* Clear all pending interrupts */
 	ua_write(ua, UA_REG_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
@@ -206,25 +242,35 @@ static void ua_detect_capabilities(struct ua_device *ua)
 
 		/*
 		 * Device type detection for v2 firmware:
-		 * 1. Try PCI subsystem device ID (reliable, constant per model)
-		 * 2. Fall back to serial number prefix (ambiguous — some serials
-		 *    contain prefixes that match other models, e.g. Solo serial
-		 *    "22522032108702" has "2032" which falsely matches x16D)
+		 * 1. PCI subsystem ID for the models the serial table cannot
+		 *    resolve: the Apollo 8p (an ext_caps family, no serial
+		 *    entry) and the Solo (serial "2252 2032 ..." would read
+		 *    as 2032 -> 0x2A).
+		 * 2. Otherwise the serial prefix table, as the kext does.
+		 *
+		 * The x8p used to be pinned by subsystem 0x0014 because the
+		 * table here named 0x22 an x8.  The kext names 0x22 the x8p,
+		 * so the observed unit ("2008 2017 ...") now resolves by
+		 * serial; 0x0014 is only a fallback when the serial lookup
+		 * fails, since nothing shows the subsystem ID is unique to
+		 * the x8p among the HEXA units.
 		 */
 		switch (ua->subsystem_id) {
 		case UA_SUBSYS_APOLLO_8P:
 			ua->device_type = UA_DEV_APOLLO_8P;
-			break;
-		case UA_SUBSYS_APOLLO_X8P:
-			/* x8p serial "2008xxxx" false-matches "2017"->x8 in the
-			 * serial table; pin it by subsystem ID (0x0014) instead. */
-			ua->device_type = UA_DEV_APOLLO_X8P;
 			break;
 		case UA_SUBSYS_APOLLO_SOLO:
 			ua->device_type = UA_DEV_APOLLO_SOLO;
 			break;
 		default:
 			ua_read_serial_type(ua);
+			if (!ua->device_type &&
+			    ua->subsystem_id == UA_SUBSYS_APOLLO_X8P) {
+				dev_info(&ua->pdev->dev,
+					 "serial unresolved, subsystem 0x%04x -> Apollo x8p\n",
+					 ua->subsystem_id);
+				ua->device_type = UA_DEV_APOLLO_X8P;
+			}
 			break;
 		}
 	}
@@ -235,7 +281,11 @@ static void ua_detect_capabilities(struct ua_device *ua)
 
 /*
  * Serial prefix → device type lookup table.
- * Extracted from _deviceTypeFromSerialNumber() data at kext offset 0x3E840.
+ *
+ * UAD2System.kext 12.0.0 _deviceTypeFromSerialNumber(): 22 entries of
+ * {char[4] prefix, u32 pad, u32 type} at __TEXT,__const 0x3f800 (x86_64
+ * slice), kept in the kext's order.  The type numbers match the older
+ * v11 table; v12 adds 2107-2110.  Model names: ua_device_name().
  */
 struct ua_serial_entry {
 	char prefix[5]; /* 4-char ASCII serial prefix + NUL */
@@ -244,23 +294,27 @@ struct ua_serial_entry {
 
 static const struct ua_serial_entry ua_serial_table[] = {
 	{ "2005", UA_DEV_APOLLO_X4 },
-	{ "2016", UA_DEV_APOLLO_X6 },
-	{ "2017", UA_DEV_APOLLO_X8 },
-	{ "2018", UA_DEV_APOLLO_X16 },
-	{ "2019", UA_DEV_APOLLO_X8P },
-	{ "2020", UA_DEV_APOLLO_TWIN_X },
+	{ "2019", UA_DEV_APOLLO_X6 },
+	{ "2018", UA_DEV_APOLLO_X8 },
+	{ "2017", UA_DEV_APOLLO_X8P },
+	{ "2020", UA_DEV_APOLLO_X16 },
 	{ "2024", UA_DEV_APOLLO_SOLO },
 	{ "2025", UA_DEV_ARROW },
-	{ "2032", UA_DEV_APOLLO_X16D },
-	{ "2073", UA_DEV_APOLLO_X6_GEN2 },
-	{ "2082", UA_DEV_APOLLO_X6_GEN2 },
-	{ "2086", UA_DEV_APOLLO_X8_GEN2 },
-	{ "2087", UA_DEV_APOLLO_X8P_GEN2 },
-	{ "2088", UA_DEV_APOLLO_X16_GEN2 },
-	{ "2089", UA_DEV_APOLLO_TWIN_X_GEN2 },
-	{ "2090", 0x3B },  /* Unknown Gen2 variant */
-	{ "2091", 0x3C },  /* Unknown Gen2 variant */
+	{ "2073", UA_DEV_APOLLO_X16D },
+	{ "2082", UA_DEV_APOLLO_X16D },
+	{ "2016", UA_DEV_SERIAL_2016 },
+	{ "2032", UA_DEV_SERIAL_2032 },
 	{ "2092", UA_DEV_APOLLO_X4_GEN2 },
+	{ "2086", UA_DEV_APOLLO_X6_GEN2 },
+	{ "2087", UA_DEV_APOLLO_X8_GEN2 },
+	{ "2088", UA_DEV_APOLLO_X8P_GEN2 },
+	{ "2089", UA_DEV_APOLLO_X16_GEN2 },
+	{ "2090", UA_DEV_APOLLO_TWIN_X_GEN2 },
+	{ "2091", UA_DEV_APOLLO_TWIN_X_GEN2_B },
+	{ "2107", UA_DEV_APOLLO_TWIN_X_GEN2_TB4 },
+	{ "2108", UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B },
+	{ "2109", UA_DEV_APOLLO_X4_GEN2_TB4 },
+	{ "2110", UA_DEV_SERIAL_2110 },
 };
 
 /*
@@ -295,26 +349,30 @@ static void ua_read_serial_type(struct ua_device *ua)
 	ua->device_type = 0;
 }
 
+/*
+ * Model name for a device type, following CPcieDevice::Name() (kext
+ * 12.0.0).  Names of the models with generated data come from
+ * devices/<model>.json via ua_models_gen.h.
+ */
 const char *ua_device_name(u32 device_type)
 {
+	const char *name;
+
+	if (ua_model_lookup(device_type, &name))
+		return name;
+
 	switch (device_type) {
-	case UA_DEV_APOLLO_8P:		return "Apollo 8P";
-	case UA_DEV_APOLLO_X4:		return "Apollo x4";
-	case UA_DEV_APOLLO_X6:		return "Apollo x6";
-	case UA_DEV_APOLLO_X8:		return "Apollo x8";
-	case UA_DEV_APOLLO_X8P:		return "Apollo x8p";
-	case UA_DEV_APOLLO_X16:		return "Apollo x16";
-	case UA_DEV_APOLLO_X16D:	return "Apollo x16D";
-	case UA_DEV_APOLLO_TWIN_X:	return "Apollo Twin X";
-	case UA_DEV_APOLLO_SOLO:	return "Apollo Solo";
-	case UA_DEV_ARROW:		return "Arrow";
-	case UA_DEV_APOLLO_X4_GEN2:	return "Apollo x4 Gen 2";
-	case UA_DEV_APOLLO_X6_GEN2:	return "Apollo x6 Gen 2";
-	case UA_DEV_APOLLO_X8_GEN2:	return "Apollo x8 Gen 2";
-	case UA_DEV_APOLLO_X8P_GEN2:	return "Apollo x8p Gen 2";
-	case UA_DEV_APOLLO_X16_GEN2:	return "Apollo x16 Gen 2";
-	case UA_DEV_APOLLO_TWIN_X_GEN2:	return "Apollo Twin X Gen 2";
-	default:			return "Unknown UA Device";
+	case UA_DEV_SERIAL_2016:
+	case UA_DEV_SERIAL_2032:
+	case UA_DEV_SERIAL_2110:
+		/*
+		 * In the HEXA family Name() calls these an x16D only when
+		 * _deviceTypeFromFPGAVersion() returns 0x35; that check is
+		 * not ported, so they stay unidentified.
+		 */
+		return "Apollo (unidentified HEXA)";
+	default:
+		return "Unknown UA Device";
 	}
 }
 
@@ -365,6 +423,53 @@ static int ua_program_registers(struct ua_device *ua)
 	ua_check_dsps(ua);
 
 	return 0;
+}
+
+/*
+ * ua_reset_dma_engines - CPcieIntrManager::ResetDMAEngines() as the kext
+ * does it (12.0.0 x86 0x99f8).  Differs from ua_reset_dma():
+ *   - 8-engine masks (enables [8:1], strobes [16:9]) only when the DSP
+ *     count is > 4 (MapHardware 0x97da: ext_caps[15:8] >= 5 on v2
+ *     firmware); otherwise the 4-engine masks (enables [4:1], strobes
+ *     [12:9]) — the x4 is a 4-engine part to the kext;
+ *   - bit 0 is not forced on, and no ISR write (CPcieDevice::
+ *     ProgramRegisters writes ISR = ~0 itself afterwards).
+ * Used only with full_shutdown=1 / warm_dma_reset=1.
+ */
+static void ua_reset_dma_engines(struct ua_device *ua)
+{
+	ua_dma_reset_pulse(ua, ua->fw_v2 && ua->num_dsps > 4, false);
+}
+
+/*
+ * ua_hw_stop_xport_irqs - the DSP-safe front half of the kext's
+ * ProgramRegisters: stop the audio transport and mask + clear every
+ * interrupt, before bus mastering is (re)enabled and before the SG table
+ * is rewritten.
+ *
+ *   CPcieAudioExtension::ProgramRegisters (x86 0x33f4a): AX_CONTROL = 0,
+ *     read it back as a flush (logs if the previous owner left it set);
+ *   CPcieIntrManager::ProgramRegisters (0x996a): IMR = 0, IMR_HI = 0;
+ *   CPcieDevice::ProgramRegisters (0x5d66): ISR = 0xFFFFFFFF.
+ *
+ * Safe with a live mixer DSP: AX_CONTROL = 0 is what pcm_close does on
+ * every stream stop.  TRANSPORT (0x2220) = 0 and ResetDMAEngines are left
+ * to ua_program_registers() (cold) and warm_dma_reset=1 (warm).
+ */
+static void ua_hw_stop_xport_irqs(struct ua_device *ua)
+{
+	u32 ax;
+
+	ax = ua_read(ua, UA_REG_AX_CONTROL);
+	if (ax && ax != 0xFFFFFFFF)
+		dev_info(&ua->pdev->dev,
+			 "previous session left the transport running (AX_CONTROL=0x%x), stopping it\n",
+			 ax);
+	ua_write(ua, UA_REG_AX_CONTROL, 0);
+	(void)ua_read(ua, UA_REG_AX_CONTROL);
+	ua->audio.transport_running = false;
+
+	ua_irq_mask_all(ua, true);
 }
 
 /* ----------------------------------------------------------------
@@ -737,6 +842,134 @@ static int ua_mixer_read_setting_locked(struct ua_device *ua,
 		*mask = (packed >> 16) & 0xFFFF;
 	}
 	return 0;
+}
+
+/*
+ * Device types with an output mute: CPcieDevice::SetOutputMute (kext
+ * 12.0.0 x86 0x6140) acts only for type <= 0x27 with a bit set in
+ * 0x8010080000, i.e. 0x13, 0x1C and 0x27 (Apollo Solo TB).  A no-op on
+ * every other model, the x4 included.
+ */
+#define UA_OUTPUT_MUTE_TYPES	0x8010080000ULL
+#define UA_OUTPUT_MUTE_MAX_TYPE	0x27
+
+/**
+ * ua_set_output_mute_locked - SetOutputMute(mute) as the kext does it
+ * @ua: device (caller holds ua->lock)
+ * @mute: true = mute (shutdown/suspend), false = unmute (connect)
+ * @flush_now: push the batch now instead of on the next service tick
+ *
+ * The kext calls CUAD2DeviceMixer::SetOtherParam(0x20, mute) — setting[7]
+ * bit 10 here — and sleeps 50 ms after muting so the outputs settle
+ * before the transport stops.
+ */
+void ua_set_output_mute_locked(struct ua_device *ua, bool mute,
+			       bool flush_now)
+{
+	unsigned int polls;
+	u32 seq_rd;
+
+	if (ua->device_type > UA_OUTPUT_MUTE_MAX_TYPE ||
+	    !(UA_OUTPUT_MUTE_TYPES & BIT_ULL(ua->device_type)))
+		return;
+	if (!ua->mixer_ready)
+		return;
+	if (ua_monitor_set_param(ua, 0, UA_MON_PARAM_OUTPUT_MUTE, mute))
+		return;
+	if (!flush_now)
+		return;
+
+	/* The batch only goes out when the DSP has taken the last one */
+	for (polls = 0; polls < UA_MIXER_SEQ_TIMEOUT; polls++) {
+		seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
+		if (seq_rd == ua->mixer_seq_wr || seq_rd == 0xFFFFFFFF)
+			break;
+		usleep_range(1000, 1200);
+	}
+	ua_mixer_flush_settings(ua);
+
+	dev_info(&ua->pdev->dev, "output %s\n", mute ? "muted" : "unmuted");
+	if (mute)
+		msleep(50);
+}
+
+/**
+ * ua_hw_quiesce_locked - stop all device DMA and interrupts
+ * @ua: device (caller holds ua->lock and has stopped the DSP service loop
+ *      and the period timer; the device must be present)
+ *
+ * CPcieDevice::Shutdown (kext 12.0.0 x86 0x62b6) followed by
+ * CPcieIntrManager::DisableInterrupts, which stop() and _stopPowerGated()
+ * both run:
+ *   1. connected = 0
+ *   2. SetOutputMute(1)
+ *   3. StopTransport: DisableVector(0x47), AX_CONTROL = 0
+ *   3b. DSP rings: drain briefly, then DOORBELL = WRITE_PTR = POSITION
+ *       (ua_dsp_rings_quiesce(); the kext gets there by ResetDMAEngines
+ *       and HardResetDSPs, which gentle init cannot use)
+ *   4. ResetDMAEngines                                    [full_shutdown]
+ *   5. AudioExtension::Shutdown (0x34cb8): AX_CONTROL = 0,
+ *      NOTIF_ACEFACE = 0 [full_shutdown], read AX_CONTROL (flush),
+ *      0x22C4 (P2P enable) = 0, DisableVector(0x28)
+ *   6. _disconnect (0x34dac): AX_CONNECT = 0x10, read FPGA_REV
+ *   7. DisableInterrupts: IMR = 0, IMR_HI = 0 (and W1C anything pending)
+ *
+ * Without full_shutdown the steps that can kill a running mixer DSP (per
+ * the 2026-02-16 finding) or force a cold boot are skipped,
+ * so the next probe/resume can take the gentle warm path.  The caller
+ * clears bus mastering afterwards; with the transport stopped, nothing
+ * queued on any ring and BME off, the device cannot DMA into buffers
+ * that are about to be freed, nor right after the next probe/resume
+ * turns BME back on.
+ */
+static void ua_hw_quiesce_locked(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	lockdep_assert_held(&ua->lock);
+
+	dev_info(&ua->pdev->dev, "quiescing device (full_shutdown=%d)\n",
+		 full_shutdown);
+
+	/* 2. SetOutputMute(1) — needs the DSP connection, so goes first */
+	ua_set_output_mute_locked(ua, true, true);
+
+	/* 3. StopTransport */
+	ua_disable_vector(ua, UA_IRQ_VEC_END_BUFFER);
+	ua_write(ua, UA_REG_AX_CONTROL, 0);
+	audio->transport_running = false;
+
+	/* 3b. Nothing left queued on the DSP rings */
+	ua_dsp_rings_quiesce(ua);
+
+	/* 4. ResetDMAEngines */
+	if (full_shutdown)
+		ua_reset_dma_engines(ua);
+
+	/* 5. AudioExtension::Shutdown */
+	ua_write(ua, UA_REG_AX_CONTROL, 0);
+	if (full_shutdown)
+		ua_write(ua, UA_REG_NOTIF_ACEFACE, 0);
+	(void)ua_read(ua, UA_REG_AX_CONTROL);
+	ua_write(ua, UA_REG_AX_P2P_ENABLE, 0);
+	ua_disable_vector(ua, UA_IRQ_VEC_NOTIFICATION);
+
+	/*
+	 * 6. _disconnect.  Always: without the doorbell the audio extension
+	 * stays connected to the host that just left and never acks the next
+	 * ACEFACE (x4, 2026-10-09: rmmod + insmod could not connect).  The
+	 * doorbell alone left the mixer DSP's SEQ counters untouched, so it
+	 * does not cost the gentle warm path.
+	 */
+	ua_write(ua, UA_REG_AX_CONNECT, UA_AX_DISCONNECT);
+	(void)ua_read(ua, UA_REG_FPGA_REV);
+
+	/* 7. DisableInterrupts */
+	ua_irq_mask_all(ua, true);
+
+	/* 1. connected = 0 (state only, kept last so step 2 could flush) */
+	audio->connected = false;
+	ua->mixer_ready = false;
 }
 
 /* ----------------------------------------------------------------
@@ -1367,8 +1600,9 @@ static noinline __attribute__((optimize("O0"))) long
 ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 {
 	struct ua_mixer_param param;
-	int ret;
+	int ret = 0;	/* the preamp (type 1) path never set it */
 	bool notify_alsa = false;
+	bool digital_mode_changed = false;
 	const char *ctl_name = NULL;
 	unsigned int ch = 0;
 
@@ -1581,6 +1815,7 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			ua->audio.monitor.digital_mode = (int)param.value;
 			ctl_name = "Digital Output Mode";
 			notify_alsa = true;
+			digital_mode_changed = true;
 			break;
 		case UA_MON_PARAM_OUTPUT_REF:
 			ua->audio.monitor.output_ref = (int)param.value;
@@ -1670,6 +1905,13 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 	default:
 		ret = -EINVAL;
 	}
+
+	/*
+	 * The TOSLink output type picks the playback route channels
+	 * (io_map=1).  Under ua->lock: the layout only changes under it.
+	 */
+	if (digital_mode_changed)
+		ua_io_map_digital_mode_changed(ua);
 
 out_unlock:
 	mutex_unlock(&ua->lock);
@@ -1902,12 +2144,15 @@ static long ua_ioctl_set_driver_param(struct ua_device *ua, unsigned long arg)
 	}
 
 	case 1: {  /* Clock source */
+		unsigned int old = ua->audio.clock_source;
 		int ret;
 
 		ua->audio.clock_source = (unsigned int)dp.value;
 		ret = ua_audio_set_clock(ua, ua->audio.sample_rate);
 		if (!ret)
 			ua_notify_clock_controls(ua);
+		else
+			ua->audio.clock_source = old;	/* not acknowledged */
 		return ret;
 	}
 
@@ -1976,6 +2221,39 @@ static long ua_ioctl_load_firmware(struct ua_device *ua, unsigned long arg)
 	return ret;
 }
 
+/*
+ * Does this device need the ring-buffer DSP connect (_connectToDsps)?
+ * Default: the v11.8.1 set, which is exactly the complement of
+ * ua_uses_audio_extension().  v12_connect=1: the v12 set, which also
+ * covers Solo TB / Arrow / 0x29 — those keep their AudioExtension
+ * bring-up and get the ring connect on top, as in the kext's Connect().
+ */
+static bool ua_needs_ring_connect(struct ua_device *ua)
+{
+	if (v12_connect)
+		return ua_ring_connect_v12(ua->device_type);
+	return !ua_uses_audio_extension(ua->device_type);
+}
+
+/*
+ * v12_connect=1: CPcieDevice::Connect (kext 12.0.0 x86 0x5f84) always runs
+ * CPcieAudioExtension::Connect — the ACEFACE handshake — before
+ * _connectToDsps.  Linux used to ring-connect first and ACEFACE later
+ * (from ua_audio_init / pcm_prepare).  Caller holds ua->lock.
+ */
+static void ua_v12_aceface_first(struct ua_device *ua)
+{
+	int ret;
+
+	if (!v12_connect || ua->aceface_done)
+		return;
+
+	ret = ua_aceface_handshake(ua);
+	dev_info(&ua->pdev->dev,
+		 "v12_connect: ACEFACE before ring connect: %s (%d)\n",
+		 ret ? "failed" : "ok", ret);
+}
+
 static long ua_ioctl_dsp_connect(struct ua_device *ua)
 {
 	int ret;
@@ -1987,10 +2265,13 @@ static long ua_ioctl_dsp_connect(struct ua_device *ua)
 		 * ua_audio_reconnect() resets the connected flag and
 		 * re-does the ACEFACE handshake + routing + service.
 		 */
-		return ua_audio_reconnect(ua);
+		ret = ua_audio_reconnect(ua);
+		if (ret || !ua_needs_ring_connect(ua))
+			return ret;
 	}
 
 	mutex_lock(&ua->lock);
+	ua_v12_aceface_first(ua);
 	ret = ua_dsp_connect_all(ua);
 	mutex_unlock(&ua->lock);
 
@@ -2035,6 +2316,29 @@ static long ua_ioctl_dsp_send_block(struct ua_device *ua, unsigned long arg)
 	mutex_unlock(&ua->lock);
 
 	kfree(data_buf);
+	return ret;
+}
+
+/*
+ * UA_IOCTL_GET_IO_MAP: firmware IO descriptors + ALSA channel map.
+ * Built at -O2: under this file's -Og, GCC 12 (Debian 12, 6.1 headers)
+ * reports a bogus "copy source size is too small" for the heap buffer.
+ */
+static noinline __attribute__((optimize("O2"))) long
+ua_ioctl_get_io_map(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_io_map_info *info;
+	long ret = 0;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	ua_io_map_get_info(ua, info);
+	if (copy_to_user((void __user *)arg, info, sizeof(*info)))
+		ret = -EFAULT;
+
+	kfree(info);
 	return ret;
 }
 
@@ -2139,6 +2443,9 @@ static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		mutex_unlock(&ua->lock);
 		return route_ret;
 	}
+
+	case UA_IOCTL_GET_IO_MAP:
+		return ua_ioctl_get_io_map(ua, arg);
 
 	case UA_IOCTL_RING_SEND: {
 		struct ua_ring_cmd rc;
@@ -2282,12 +2589,17 @@ static const struct file_operations ua_fops = {
  * avoid GCC-13 internal compiler errors (cfgcleanup.cc ICE).
  * ---------------------------------------------------------------- */
 
-static int ua_dsp_init_and_load(struct ua_device *ua)
+/*
+ * Is the mixer DSP running (gentle-init check)?  SEQ_RD > 0 and equal to
+ * SEQ_WR, and — since the counters can match on a zombie DSP left by a
+ * broken session — a readback within 300 ms.
+ */
+static bool ua_mixer_dsp_alive(struct ua_device *ua)
 {
 	struct pci_dev *pdev = ua->pdev;
 	u32 seq_wr, seq_rd, mixer_state;
-	bool dsp_was_dead;
-	int ret;
+	unsigned int rb_polls;
+	u32 rb = 0;
 
 	seq_wr = ua_read(ua, UA_REG_MIXER_SEQ_WR);
 	seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
@@ -2297,32 +2609,35 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 "pre-init: SEQ_WR=%u SEQ_RD=%u mixer_state=0x%08x\n",
 		 seq_wr, seq_rd, mixer_state);
 
-	dsp_was_dead = !(seq_rd > 0 && seq_rd == seq_wr);
+	if (!(seq_rd > 0 && seq_rd == seq_wr))
+		return false;
 
-	/*
-	 * SEQ counters can match even when the DSP is zombie
-	 * (stale counters from a previous broken session).
-	 * Verify liveness by checking if the DSP produces a
-	 * readback within 300ms.
-	 */
-	if (!dsp_was_dead) {
-		unsigned int rb_polls;
-		u32 rb;
-
-		ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
-		for (rb_polls = 0; rb_polls < 30; rb_polls++) {
-			usleep_range(10000, 12000);
-			rb = ua_read(ua, UA_REG_MIXER_RB_STATUS);
-			if (rb == 1)
-				break;
-		}
-		if (rb != 1) {
-			dev_warn(&pdev->dev,
-				 "SEQ counters look alive (%u/%u) but readback dead — forcing cold boot\n",
-				 seq_wr, seq_rd);
-			dsp_was_dead = true;
-		}
+	ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
+	for (rb_polls = 0; rb_polls < 30; rb_polls++) {
+		usleep_range(10000, 12000);
+		rb = ua_read(ua, UA_REG_MIXER_RB_STATUS);
+		if (rb == 1)
+			return true;
 	}
+
+	dev_warn(&pdev->dev,
+		 "SEQ counters look alive (%u/%u) but readback dead — forcing cold boot\n",
+		 seq_wr, seq_rd);
+	return false;
+}
+
+/*
+ * @resume: called on system resume — the DMA rings and DSP rings already
+ * exist and are only reprogrammed (the probe path allocates them).
+ * @dsp_was_dead: !ua_mixer_dsp_alive(), i.e. take the cold path
+ * (DMA reset + firmware load) rather than gentle init.
+ */
+static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
+				bool dsp_was_dead)
+{
+	struct pci_dev *pdev = ua->pdev;
+	u32 seq_wr, seq_rd;
+	int ret;
 
 	if (!dsp_was_dead) {
 		dev_info(&pdev->dev,
@@ -2336,6 +2651,21 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 * Leave aceface_done = false so ua_audio_connect()
 		 * does the full ACEFACE handshake even on warm boot. */
 
+		/*
+		 * Transport and IRQs were already stopped and cleared by
+		 * ua_hw_stop_xport_irqs() before bus mastering came on.
+		 * warm_dma_reset=1 adds the rest of the kext's
+		 * ProgramRegisters before the SG rewrite: TRANSPORT = 0,
+		 * ResetDMAEngines (kext masks), ISR = ~0.
+		 */
+		if (warm_dma_reset) {
+			dev_info(&pdev->dev,
+				 "warm_dma_reset: TRANSPORT=0 + kext ResetDMAEngines\n");
+			ua_write(ua, UA_REG_TRANSPORT, 0);
+			ua_reset_dma_engines(ua);
+			ua_write(ua, UA_REG_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
+		}
+
 		/* SG table must be programmed even on warm boot —
 		 * the previous OS's SG entries point to invalid
 		 * physical addresses.  Without this, SAMPLE_POS
@@ -2343,7 +2673,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 * Applies to every device class: the SG SRAM and the
 		 * DMA engine enables are FPGA-side, independent of the
 		 * AudioExtension vs ring-connect DSP handshake. */
-		ret = ua_audio_preinit_dma(ua);
+		ret = resume ? ua_audio_reprogram_dma(ua) :
+			       ua_audio_preinit_dma(ua);
 		if (ret)
 			dev_warn(&pdev->dev,
 				 "warm boot DMA preinit failed: %d\n",
@@ -2354,6 +2685,11 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 			dev_err(&pdev->dev, "hardware init failed: %d\n", ret);
 			return ret;
 		}
+		/* The DSP is (re)loaded below: everything sent to the
+		 * previous firmware instance has to be sent again. */
+		ua->fw_loaded = false;
+		ua->dsps_connected = false;
+		ua->plugins_activated = false;
 	}
 
 	seq_wr = ua_read(ua, UA_REG_MIXER_SEQ_WR);
@@ -2364,6 +2700,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 	/*
 	 * Always allocate DSP ring buffers — needed for firmware
 	 * loading on cold boot AND for routing config on warm boot.
+	 * On resume the existing rings are reprogrammed instead.
 	 */
 	ret = ua_dsp_rings_init(ua);
 	if (ret)
@@ -2401,7 +2738,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 * held — SAMPLE_POS frozen at 0, and a host lockup as
 		 * soon as a stream opened.
 		 */
-		ret = ua_audio_preinit_dma(ua);
+		ret = resume ? ua_audio_reprogram_dma(ua) :
+			       ua_audio_preinit_dma(ua);
 		if (ret) {
 			dev_err(&pdev->dev,
 				"DMA pre-alloc failed: %d\n", ret);
@@ -2506,7 +2844,12 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 					 "full connect deferred to "
 					 "ua_audio_init()\n",
 					 ua->aceface_done ? "done" : "FAILED");
-			} else {
+			}
+
+			if (ua_needs_ring_connect(ua)) {
+				/* v12_connect: ACEFACE before ring connect */
+				ua_v12_aceface_first(ua);
+
 				fw_ret = ua_dsp_connect_all(ua);
 				/*
 				 * Non-AudioExtension devices connect in
@@ -2608,9 +2951,31 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
  * PCI probe / remove
  * ---------------------------------------------------------------- */
 
+/*
+ * UAD2Pcie2::_initializeInterrupts (kext 12.0.0 x86 0xbe40) reads config
+ * 0x02 (device ID) and 0x2E (subsystem ID): device 0x0001 always gets the
+ * legacy interrupt; device 0x0002 gets it when the subsystem is 0x05, 0x0A
+ * or 0x0B (bit mask 0xc20).  Every other device uses MSI.
+ */
+static bool ua_wants_intx(struct pci_dev *pdev)
+{
+	if (pdev->device == PCI_DEVICE_ID_UA_UAD2)
+		return true;
+
+	switch (pdev->subsystem_device) {
+	case 0x05:
+	case 0x0A:
+	case 0x0B:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct ua_device *ua;
+	bool intx;
 	int ret, devno;
 
 	ua = devm_kzalloc(&pdev->dev, sizeof(*ua), GFP_KERNEL);
@@ -2620,6 +2985,8 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ua->pdev = pdev;
 	mutex_init(&ua->lock);
 	spin_lock_init(&ua->irq_lock);
+	INIT_LIST_HEAD(&ua->dma_orphans);
+	INIT_WORK(&ua->resume_work, ua_resume_work);
 	pci_set_drvdata(pdev, ua);
 
 	/* Enable device */
@@ -2629,7 +2996,12 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	pci_set_master(pdev);
+	/*
+	 * Bus mastering is enabled only after the transport left running
+	 * by the previous owner (warm reboot, kexec, macOS, rmmod) has been
+	 * stopped — see ua_hw_stop_xport_irqs() below.  Otherwise it DMAs
+	 * into stale addresses the moment BME comes on.
+	 */
 
 	/*
 	 * Force 32-bit DMA mask.
@@ -2670,104 +3042,96 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* Detect firmware version, device type, and DSP count from hardware regs */
 	ua_detect_capabilities(ua);
 
+	/* tools/contribute/device-probe.sh parses this line; keep its shape */
 	dev_info(&pdev->dev,
 		 "%s: FPGA rev 0x%08x, subsys 0x%04x, %u DSPs, FW %s\n",
 		 ua_device_name(ua->device_type),
 		 ua->fpga_rev, ua->subsystem_id, ua->num_dsps,
 		 ua->fw_v2 ? "v2" : "v1");
+	dev_info(&pdev->dev, "device type 0x%02x\n", ua->device_type);
 
-	/* Ring buffer + DMA page dump for warm-boot analysis.
-	 * Reads the PREVIOUS OS's ring buffer pages via memremap
-	 * BEFORE ua_dsp_rings_init() overwrites the page registers.
+	/*
+	 * Previous-session ring state, for warm-boot debugging.  Registers
+	 * only: the old WARM SNAPSHOT also memremap()ed and read whatever
+	 * physical address the device reported for ring page 0 — memory
+	 * left over from another OS, possibly not RAM at all.
 	 */
 	{
-		u32 v;
 		int d;
 
-		dev_info(&pdev->dev, "=== WARM SNAPSHOT ===\n");
 		for (d = 0; d < 4; d++) {
-			u32 bank = 0x2000 + d * 0x80;
-			u32 wp = ua_read(ua, bank + 0x20);
-			u32 pos = ua_read(ua, bank + 0x28);
-			u32 pg0_lo = ua_read(ua, bank + 0x00);
-			u32 pg0_hi = ua_read(ua, bank + 0x04);
-			u64 phys0 = ((u64)pg0_hi << 32) | pg0_lo;
+			u32 bank = ua_dsp_base(d);
 
-			if (!wp && !pos)
-				continue;
-
-			dev_info(&pdev->dev,
-				 "  DSP%d CMD wp=%u pos=%u pg0=0x%llx\n",
-				 d, wp, pos, phys0);
-
-			/* Try to read the DMA page contents */
-			if (phys0 && phys0 != ~0ULL) {
-				void *mapped;
-				u32 *words;
-				unsigned int i, count = 0;
-
-				mapped = memremap(phys0, 4096,
-						  MEMREMAP_WB);
-				if (mapped) {
-					words = mapped;
-					for (i = 0; i < 256; i++) {
-						u32 w0 = words[i*4];
-						u32 w1 = words[i*4+1];
-						u32 w2 = words[i*4+2];
-						u32 w3 = words[i*4+3];
-
-						if (!w0 && !w1 && !w2 && !w3)
-							continue;
-						dev_info(&pdev->dev,
-							 "    [%3u] %08x %08x %08x %08x\n",
-							 i, w0, w1, w2, w3);
-						if (++count >= 60)
-							break;
-					}
-					memunmap(mapped);
-				} else {
-					dev_info(&pdev->dev,
-						 "    memremap failed\n");
-				}
-			}
+			dev_dbg(&pdev->dev,
+				"previous session: DSP%d cmd wp=%u pos=%u pg0=%08x:%08x\n",
+				d, ua_read(ua, bank + UA_RING_WRITE_PTR),
+				ua_read(ua, bank + UA_RING_POSITION),
+				ua_read(ua, bank + UA_RING_PAGE0_HI),
+				ua_read(ua, bank + UA_RING_PAGE0_LO));
 		}
-		dev_info(&pdev->dev, "  SEQ WR=%u RD=%u rb32=0x%08x\n",
-			 ua_read(ua, 0x3808), ua_read(ua, 0x380C),
-			 ua_read(ua, 0x3894));
-		dev_info(&pdev->dev, "=== END ===\n");
+		dev_dbg(&pdev->dev,
+			"previous session: SEQ WR=%u RD=%u rb32=0x%08x\n",
+			ua_read(ua, UA_REG_MIXER_SEQ_WR),
+			ua_read(ua, UA_REG_MIXER_SEQ_RD),
+			ua_read(ua, 0x3894));
 	}
 
-	/* Disable interrupts before setting up MSI (kext writes 0 to IRQ_ENABLE) */
-	ua->irq_mask_lo = 0;
-	ua->irq_mask_hi = 0;
-	ua_write(ua, UA_REG_IRQ_ENABLE, 0);
-	if (ua->fw_v2)
-		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, 0);
+	/*
+	 * Quiesce before bus mastering (kext ProgramRegisters order):
+	 * stop the transport, mask and clear all interrupts, and pull every
+	 * DSP ring's target back to its position so no descriptor left by
+	 * the previous owner (whose ring pages may be freed memory by now)
+	 * is fetched once BME is on.  Leaves a live mixer DSP alone, so the
+	 * warm path below still applies.
+	 */
+	ua_hw_stop_xport_irqs(ua);
+	ua_dsp_rings_neutralize(ua);
+	pci_set_master(pdev);
 
-	/* Allocate MSI vectors — device supports 1-2 */
-	ua->num_irq_vectors = pci_alloc_irq_vectors(pdev,
-						     UA_MSI_VECTORS_MIN,
-						     UA_MSI_VECTORS_MAX,
-						     PCI_IRQ_MSI | PCI_IRQ_MSIX);
-	if (ua->num_irq_vectors < 0) {
-		dev_warn(&pdev->dev, "MSI allocation failed (%d), trying legacy\n",
-			 ua->num_irq_vectors);
+	/* A cold re-init after system resume needs the firmware files */
+	ua_dsp_cache_firmware(ua);
+
+	/*
+	 * Interrupt type, as UAD2Pcie2::_initializeInterrupts (kext 12.0.0
+	 * x86 0xbe40): legacy INTx for device 0x0001 (UAD-2 PCIe) and for
+	 * subsystems 0x05, 0x0A and 0x0B; MSI for every other device.
+	 */
+	intx = ua_wants_intx(pdev);
+	if (intx) {
+		dev_info(&pdev->dev,
+			 "device 0x%04x subsys 0x%04x: legacy INTx (as the macOS driver)\n",
+			 pdev->device, pdev->subsystem_device);
 		ua->num_irq_vectors = pci_alloc_irq_vectors(pdev, 1, 1,
 							     PCI_IRQ_LEGACY);
+	} else {
+		/* Allocate MSI vectors — device supports 1-2 */
+		ua->num_irq_vectors = pci_alloc_irq_vectors(pdev,
+							     UA_MSI_VECTORS_MIN,
+							     UA_MSI_VECTORS_MAX,
+							     PCI_IRQ_MSI | PCI_IRQ_MSIX);
 		if (ua->num_irq_vectors < 0) {
-			dev_err(&pdev->dev, "no interrupt vectors available\n");
-			return ua->num_irq_vectors;
+			dev_warn(&pdev->dev, "MSI allocation failed (%d), trying legacy\n",
+				 ua->num_irq_vectors);
+			intx = true;
+			ua->num_irq_vectors = pci_alloc_irq_vectors(pdev, 1, 1,
+								     PCI_IRQ_LEGACY);
 		}
 	}
+	if (ua->num_irq_vectors < 0) {
+		dev_err(&pdev->dev, "no interrupt vectors available\n");
+		return ua->num_irq_vectors;
+	}
 
+	/* An INTx line may be shared; the handler returns IRQ_NONE for
+	 * interrupts that are not ours */
 	ret = request_irq(pci_irq_vector(pdev, 0), ua_irq_handler,
-			  0, DRIVER_NAME, ua);
+			  intx ? IRQF_SHARED : 0, DRIVER_NAME, ua);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to request IRQ: %d\n", ret);
 		goto err_free_irq_vectors;
 	}
 
-	ret = ua_dsp_init_and_load(ua);
+	ret = ua_dsp_init_and_load(ua, false, !ua_mixer_dsp_alive(ua));
 	if (ret)
 		goto err_free_irq;
 
@@ -2828,46 +3192,71 @@ static void ua_remove(struct pci_dev *pdev)
 	dev_info(&pdev->dev, "ua_remove: surprise=%d\n", dead);
 
 	/*
-	 * 1. Set shutdown flag — blocks new BAR0 access via ua_read/ua_write
-	 *    guards, rejects new ioctls, and stops PCM ops.
+	 * 1. Stop the software that touches BAR0 on its own: a pending
+	 *    resume re-init, the DSP service loop (both block until the
+	 *    handler returns — they take ua->lock, so this must happen
+	 *    without the lock) and the period timer (process context,
+	 *    hrtimer_cancel is safe).
 	 */
-	atomic_set(&ua->shutdown, 1);
-
-	/*
-	 * 2. Drain IRQ — synchronize_irq ensures any in-flight handler
-	 *    finishes, then free_irq removes it.  Must happen before
-	 *    tearing down any state the handler references.
-	 */
-	ua->irq_mask_lo = 0;
-	ua->irq_mask_hi = 0;
-	free_irq(pci_irq_vector(pdev, 0), ua);
-	pci_free_irq_vectors(pdev);
-
-	/*
-	 * 3. Stop hrtimer — may be running from PCM trigger.
-	 *    Safe to call hrtimer_cancel here (process context).
-	 */
+	cancel_work_sync(&ua->resume_work);
+	ua_dsp_service_stop(ua);
 	ua->audio.period_timer_running = false;
 	hrtimer_cancel(&ua->audio.period_timer);
 
 	/*
-	 * 4. Stop DSP service workqueue (blocks until handler returns).
+	 * 2. If the device is still present (unbind / rmmod), run the
+	 *    kext Shutdown sequence BEFORE any DMA buffer is freed:
+	 *    mute, transport stop, P2P off, all vectors masked (see
+	 *    ua_hw_quiesce_locked()).  The transport register is cleared
+	 *    as remove always did.  Under ua->lock, and the shutdown flag
+	 *    is raised before the lock is dropped, so an ioctl or
+	 *    pcm_prepare that was waiting for the lock cannot restart the
+	 *    transport afterwards.
+	 *
+	 *    The flag blocks new BAR0 access via the ua_read/ua_write
+	 *    guards, rejects new ioctls, and stops PCM ops.
 	 */
-	ua_dsp_service_stop(ua);
+	mutex_lock(&ua->lock);
+	if (!dead) {
+		ua_hw_quiesce_locked(ua);
+		ua_write(ua, UA_REG_TRANSPORT, 0);
+	}
+	atomic_set(&ua->shutdown, 1);
+	mutex_unlock(&ua->lock);
 
 	/*
-	 * 5. If device is still present (normal remove / reboot),
-	 *    stop DMA engine and wait for firmware to drain.
-	 *    Use iowrite32 directly — shutdown flag blocks ua_write.
+	 * 3. Give the firmware time to drain, then take bus mastering
+	 *    away: from here on the device cannot DMA at all, so the SG
+	 *    table and ring page registers that still point at the
+	 *    buffers freed below are harmless.  (pcim's devres would
+	 *    clear it too, but only after remove() has freed them.)  The
+	 *    rings were left with nothing queued, so a later probe that
+	 *    turns bus mastering on before reprogramming them finds no
+	 *    descriptor in these pages to fetch (and neutralizes the
+	 *    rings again first anyway).
 	 */
 	if (!dead) {
-		iowrite32(0, ua->regs + UA_REG_AX_CONTROL);
-		iowrite32(0, ua->regs + UA_REG_TRANSPORT);
-		iowrite32(0, ua->regs + UA_REG_IRQ_ENABLE);
-		if (ua->fw_v2)
-			iowrite32(0, ua->regs + UA_REG_EXT_IRQ_ENABLE);
 		msleep(100);
+		pci_clear_master(pdev);
 	}
+
+	/*
+	 * 4. Drain IRQ — free_irq waits for any in-flight handler,
+	 *    then removes it.  Must happen before tearing down any
+	 *    state the handler references.
+	 */
+	ua_irq_mask_all(ua, false);	/* caches only: flag is set */
+	free_irq(pci_irq_vector(pdev, 0), ua);
+	pci_free_irq_vectors(pdev);
+
+	/*
+	 * 5. A pcm_prepare or trigger that ran between step 1 and the
+	 *    shutdown flag could have restarted the service loop or the
+	 *    timer; both see the flag now, stop them for good.
+	 */
+	ua->audio.period_timer_running = false;
+	hrtimer_cancel(&ua->audio.period_timer);
+	ua_dsp_service_stop(ua);
 
 	/*
 	 * 6. Tear down audio subsystem — disconnects ALSA card,
@@ -2876,8 +3265,13 @@ static void ua_remove(struct pci_dev *pdev)
 	 */
 	ua_audio_fini(ua);
 
-	/* 7. Free DSP ring pages */
-	ua_dsp_rings_fini(ua);
+	/*
+	 * 7. Free DSP ring pages and the buffers parked by timed-out
+	 *    commands.  Those still unaccounted for are only safe to free
+	 *    when nothing can write them: device gone, or DMA engines reset
+	 *    by full_shutdown's quiesce.
+	 */
+	ua_dsp_rings_fini(ua, dead || full_shutdown);
 
 	/* 8. Release plugin-chain DMA payload buffers */
 	ua_dsp_free_plugin_payloads(ua);
@@ -2909,9 +3303,8 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 	ua->audio.connected = false;
 	ua->audio.transport_running = false;
 
-	/* Clear cached IRQ masks */
-	ua->irq_mask_lo = 0;
-	ua->irq_mask_hi = 0;
+	/* Clear cached IRQ masks (register writes are no-ops by now) */
+	ua_irq_mask_all(ua, false);
 
 	if (state == pci_channel_io_perm_failure)
 		return PCI_ERS_RESULT_DISCONNECT;
@@ -2984,6 +3377,244 @@ static const struct pci_error_handlers ua_err_handlers = {
 };
 
 /* ----------------------------------------------------------------
+ * Reboot / power-off and system sleep
+ *
+ * UAD2System.kext quiesces the device on every path the host stops
+ * driving it: stop(), the reboot notifier (_rebootHandler) and
+ * setPowerState(off) → _stopPowerGated all run CPcieDevice::Shutdown;
+ * setPowerState(on) → _startPowerGated re-enables memory + bus master,
+ * then runs ProgramRegisters and Connect(1).  Linux had none of this, so
+ * the transport kept DMAing through reboot and suspend (issue #33:
+ * freeze at login / after resume that clears when the Apollo is
+ * switched off).
+ * ---------------------------------------------------------------- */
+
+/*
+ * Common quiesce for .shutdown and suspend: stop the software side,
+ * run the kext Shutdown sequence, drop bus mastering.  Returns with the
+ * device unable to DMA or interrupt.  @sleep also parks the ALSA card in
+ * D3hot until resume (not for .shutdown: nothing would ever wake it).
+ */
+static void ua_quiesce_device(struct ua_device *ua, const char *why,
+			      bool sleep)
+{
+	struct pci_dev *pdev = ua->pdev;
+	bool present = pci_device_is_present(pdev);
+
+	dev_info(&pdev->dev, "%s: quiescing (present=%d)\n", why, present);
+
+	/*
+	 * Software side first, without ua->lock (the resume work and the
+	 * service handler take it): an unfinished resume re-init, the DSP
+	 * service loop, the period timer.
+	 */
+	cancel_work_sync(&ua->resume_work);
+	if (sleep) {
+		ua_audio_suspend(ua);
+	} else {
+		ua_dsp_service_stop(ua);
+		ua->audio.period_timer_running = false;
+		hrtimer_cancel(&ua->audio.period_timer);
+	}
+
+	mutex_lock(&ua->lock);
+	ua->resume_pending = false;
+	ua->resume_need_init = false;
+	if (present && !atomic_read(&ua->shutdown))
+		ua_hw_quiesce_locked(ua);
+	/* ACEFACE does not survive the link going down; redo it on resume */
+	ua->aceface_done = false;
+	ua->aceface_failed = false;
+	ua->audio.connected = false;
+	ua->audio.transport_running = false;
+	mutex_unlock(&ua->lock);
+
+	if (present)
+		pci_clear_master(pdev);
+}
+
+/*
+ * .shutdown — reboot, power-off and kexec.  Leaves the device stopped so
+ * nothing DMAs into memory the next kernel or firmware owns.  The mixer
+ * DSP keeps running unless full_shutdown=1, so the next boot can take the
+ * gentle warm path.
+ */
+static void ua_shutdown(struct pci_dev *pdev)
+{
+	struct ua_device *ua = pci_get_drvdata(pdev);
+
+	if (!ua)
+		return;
+
+	ua_quiesce_device(ua, "shutdown", false);
+
+	/* Nothing may touch the device any more (late ioctl, PCM op) */
+	atomic_set(&ua->shutdown, 1);
+}
+
+/* System sleep / hibernation: the kext's _stopPowerGated */
+static int __maybe_unused ua_suspend(struct device *dev)
+{
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct ua_device *ua = pci_get_drvdata(pdev);
+
+	ua_quiesce_device(ua, "suspend", true);
+
+	/* The PCI core saves config space and picks the low-power state */
+	return 0;
+}
+
+/*
+ * Deferred half of resume: everything that may block for seconds — the
+ * cold re-init when the mixer DSP did not survive (DMA reset, firmware
+ * load, plugin chain, ACEFACE retries) and the full ACEFACE connect
+ * (UA_CONNECT_RETRIES x ~1 s).  Queued on system_freezable_wq, so it runs
+ * once tasks are thawed and the filesystem is up (request_firmware() is
+ * also served from the firmware cache, see ua_dsp_cache_firmware()).
+ * pcm_prepare fails with -EBUSY while resume_pending is set.
+ */
+static void ua_resume_work(struct work_struct *work)
+{
+	struct ua_device *ua = container_of(work, struct ua_device,
+					    resume_work);
+	int ret = 0;
+
+	mutex_lock(&ua->lock);
+	if (atomic_read(&ua->shutdown)) {
+		ua->resume_pending = false;
+		mutex_unlock(&ua->lock);
+		return;
+	}
+	if (ua->resume_need_init) {
+		ua->resume_need_init = false;
+		ret = ua_dsp_init_and_load(ua, true, !ua_mixer_dsp_alive(ua));
+		if (ret) {
+			dev_err(&ua->pdev->dev,
+				"resume: DSP re-init failed: %d\n", ret);
+			/* pcm_prepare fails fast until a power cycle */
+			ua->aceface_failed = true;
+		}
+	}
+	mutex_unlock(&ua->lock);
+
+	/* Connect(1), as at probe (takes ua->lock itself) */
+	if (!ret)
+		ret = ua_audio_resume(ua, UA_RESUME_CONNECT);
+
+	mutex_lock(&ua->lock);
+	ua->resume_pending = false;
+	mutex_unlock(&ua->lock);
+
+	dev_info(&ua->pdev->dev, "resume re-init done (%d)\n", ret);
+}
+
+/*
+ * The kext's _startPowerGated: bus master back on, ProgramRegisters,
+ * Connect(1) — here the same init path as probe (gentle warm path when
+ * the mixer DSP survived, cold boot with firmware reload when it did
+ * not), reusing the DMA and DSP rings allocated at probe.
+ *
+ * Kept fast: only the warm path runs here (register reprogramming, the
+ * <= 300 ms liveness check and the <= 1 s early ACEFACE handshake).  A cold
+ * re-init, or a connect that needs the full ACEFACE loop, is deferred to
+ * ua_resume_work().
+ */
+static int __maybe_unused ua_resume(struct device *dev)
+{
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct ua_device *ua = pci_get_drvdata(pdev);
+	bool defer = false;
+	u32 fpga;
+	int ret = 0;
+
+	if (atomic_read(&ua->shutdown)) {
+		/* Error recovery / removal owns the device; only reopen
+		 * the ALSA controls so nothing waits on D0 forever */
+		ua_audio_resume(ua, UA_RESUME_CONTROLS);
+		return 0;
+	}
+
+	fpga = ua_read(ua, UA_REG_FPGA_REV);
+	if (fpga == 0xFFFFFFFF) {
+		/* Unplugged or switched off while asleep; hotplug removes it */
+		dev_warn(dev, "resume: device not reachable, skipping re-init\n");
+		ret = -ENODEV;
+		goto fail;
+	}
+	if (fpga != ua->fpga_rev) {
+		dev_err(dev, "resume: FPGA revision 0x%08x, expected 0x%08x\n",
+			fpga, ua->fpga_rev);
+		ret = -EIO;
+		goto fail;
+	}
+
+	mutex_lock(&ua->lock);
+
+	/*
+	 * ProgramRegisters front half, before bus mastering comes back:
+	 * transport stopped, interrupts masked and cleared, nothing queued
+	 * on any DSP ring (the quiesce left none; stale entries a power
+	 * glitch could have produced are dropped too).
+	 */
+	ua_hw_stop_xport_irqs(ua);
+	ua_dsp_rings_neutralize(ua);
+	pci_set_master(pdev);
+
+	if (ua_mixer_dsp_alive(ua)) {
+		/* Warm: SG + ring reprogramming only */
+		ret = ua_dsp_init_and_load(ua, true, false);
+		if (ret)
+			dev_err(dev, "resume: re-init failed: %d\n", ret);
+	} else {
+		dev_info(dev, "resume: mixer DSP not running, cold re-init deferred\n");
+		ua->resume_need_init = true;
+		defer = true;
+	}
+	if (defer || !ret)
+		ua->resume_pending = true;
+	mutex_unlock(&ua->lock);
+
+	if (ret)
+		goto fail;
+
+	/* Connect(1) when it is quick; otherwise the work does the full one */
+	if (!defer && ua_audio_resume(ua, UA_RESUME_CONNECT_FAST) != -EAGAIN) {
+		mutex_lock(&ua->lock);
+		ua->resume_pending = false;
+		mutex_unlock(&ua->lock);
+		dev_info(dev, "resumed (warm)\n");
+		return 0;
+	}
+
+	if (defer)
+		ua_audio_resume(ua, UA_RESUME_CONTROLS);
+	queue_work(system_freezable_wq, &ua->resume_work);
+	dev_info(dev, "resumed; %s deferred to a worker\n",
+		 defer ? "DSP re-init and connect" : "the full ACEFACE connect");
+	return 0;
+
+fail:
+	/* Skip the connect and make pcm_prepare fail fast until the
+	 * Apollo is power-cycled; reopen the ALSA controls regardless */
+	ua->aceface_failed = true;
+	ua_audio_resume(ua, UA_RESUME_CONTROLS);
+	dev_info(dev, "resumed (%d)\n", ret);
+
+	/* A device that vanished during sleep is hotplug's business */
+	return ret == -ENODEV ? 0 : ret;
+}
+
+/* DEFINE_SIMPLE_DEV_PM_OPS / pm_sleep_ptr() appeared in 5.17 */
+#ifdef DEFINE_SIMPLE_DEV_PM_OPS
+static DEFINE_SIMPLE_DEV_PM_OPS(ua_pm_ops, ua_suspend, ua_resume);
+#else
+static SIMPLE_DEV_PM_OPS(ua_pm_ops, ua_suspend, ua_resume);
+#endif
+#ifndef pm_sleep_ptr
+#define pm_sleep_ptr(_ptr)	(IS_ENABLED(CONFIG_PM_SLEEP) ? (_ptr) : NULL)
+#endif
+
+/* ----------------------------------------------------------------
  * Module init / exit
  * ---------------------------------------------------------------- */
 
@@ -2992,7 +3623,9 @@ static struct pci_driver ua_pci_driver = {
 	.id_table	= ua_pci_ids,
 	.probe		= ua_probe,
 	.remove		= ua_remove,
+	.shutdown	= ua_shutdown,
 	.err_handler	= &ua_err_handlers,
+	.driver.pm	= pm_sleep_ptr(&ua_pm_ops),
 };
 
 static int __init ua_init(void)
@@ -3003,7 +3636,7 @@ static int __init ua_init(void)
 	if (ret)
 		return ret;
 
-	ua_class = class_create(DRIVER_NAME);
+	ua_class = ua_class_create(DRIVER_NAME);
 	if (IS_ERR(ua_class)) {
 		ret = PTR_ERR(ua_class);
 		goto err_chrdev;

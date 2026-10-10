@@ -20,7 +20,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
-#include <linux/hrtimer_types.h>
+#include <linux/list.h>
+#include <linux/spinlock.h>
+/* <linux/hrtimer_types.h> only exists from ~6.9; hrtimer.h pulls it in */
 #include <linux/hrtimer.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -37,40 +39,56 @@
 #define UA_SUBSYS_APOLLO_X4_QUAD        0x0011
 #define UA_SUBSYS_APOLLO_SOLO           0x000F
 #define UA_SUBSYS_APOLLO_8P             0x0006
-#define UA_SUBSYS_APOLLO_X8P            0x0014  /* x8p: serial 2008xxxx false-matches "2017"->x8; 6 DSPs, FPGA 0xa241c5ac */
+#define UA_SUBSYS_APOLLO_X8P            0x0014  /* x8p; fallback if serial unresolved */
 
 /*
- * UAD2DeviceType enum — reconstructed from CPcieDevice::Name() and
- * _deviceTypeFromSerialNumber() lookup table at 0x3E840.
+ * Internal device type (what the kext calls the serial type) — the value
+ * returned by _deviceTypeFromSerialNumber() and named by CPcieDevice::Name().
  *
  * v1 devices: type derived from FPGA rev register (0x2218) bits[31:28] - 1
- * v2 devices: type derived from ext_caps register (0x2234) bits[25:20] - 1,
- *             then refined via serial number prefix lookup.
+ * v2 devices: ext_caps register (0x2234) bits[25:20] - 1 selects a family;
+ *             x-series families are then refined via the serial prefix table.
  *
  * DSP variant (SOLO/DUO/QUAD/HEXA/OCTO) comes from ext_caps bits[15:8].
+ *
+ * Names below follow UAD2System.kext 12.0.0: the serial table at
+ * __TEXT,__const 0x3f800 (x86_64 slice, 22 entries) and the Name() jump
+ * tables.  Earlier revisions of this header (from a v11 analysis) put the
+ * wrong model on most HEXA and Gen 2 types.
+ *
+ * "x16D per FPGA check": in the HEXA family Name() calls a serial type
+ * outside 0x20-0x23 / 0x35-0x3a an x16D only when
+ * _deviceTypeFromFPGAVersion() returns 0x35, else "Unknown serial number";
+ * that check is not ported.  "unnamed in v12": Name() has no case for the
+ * type; the attribution comes from the older analysis (and, for the Solo,
+ * the subsystem pin).  The observed x8p unit reads "2008 2017 ...".
  */
 
-/* Original (pre-x) Thunderbolt device types (from ext_caps register) */
+/* Original (pre-x) Thunderbolt device types (ext_caps family) */
 #define UA_DEV_APOLLO_8P            0x0A  /* Subsys 0x0006, serial 1526xxxx */
 
-/* v2 Thunderbolt device types (from serial prefix table) */
-#define UA_DEV_APOLLO_X6            0x1E  /* Serial 2016 */
+/* x-series Thunderbolt device types (serial prefix table) */
+#define UA_DEV_SERIAL_2016          0x1E  /* Serial 2016; x16D per FPGA check */
 #define UA_DEV_APOLLO_X4            0x1F  /* Serial 2005 */
-#define UA_DEV_APOLLO_X8P           0x20  /* Serial 2019; observed unit reads
-                                           * "2017" here and false-matches x8 —
-                                           * pinned by subsys 0x0014 instead */
-#define UA_DEV_APOLLO_X16           0x21  /* Serial 2018 */
-#define UA_DEV_APOLLO_X8            0x22  /* Serial 2017 */
-#define UA_DEV_APOLLO_TWIN_X        0x23  /* Serial 2020 */
-#define UA_DEV_APOLLO_SOLO          0x27  /* Serial 2024 */
-#define UA_DEV_ARROW                0x28  /* Serial 2025 */
-#define UA_DEV_APOLLO_X16D          0x2A  /* Serial 2032 */
-#define UA_DEV_APOLLO_X6_GEN2       0x35  /* Serial 2073/2082 */
+#define UA_DEV_APOLLO_X6            0x20  /* Serial 2019 */
+#define UA_DEV_APOLLO_X8            0x21  /* Serial 2018 */
+#define UA_DEV_APOLLO_X8P           0x22  /* Serial 2017 */
+#define UA_DEV_APOLLO_X16           0x23  /* Serial 2020 */
+#define UA_DEV_APOLLO_SOLO          0x27  /* Serial 2024; unnamed in v12 */
+#define UA_DEV_ARROW                0x28  /* Serial 2025; unnamed in v12 */
+#define UA_DEV_SERIAL_2032          0x2A  /* Serial 2032; x16D per FPGA check */
+#define UA_DEV_APOLLO_X16D          0x35  /* Serial 2073/2082 */
 #define UA_DEV_APOLLO_X4_GEN2       0x36  /* Serial 2092 */
-#define UA_DEV_APOLLO_X8_GEN2       0x37  /* Serial 2086 */
-#define UA_DEV_APOLLO_X8P_GEN2      0x38  /* Serial 2087 */
-#define UA_DEV_APOLLO_X16_GEN2      0x39  /* Serial 2088 */
-#define UA_DEV_APOLLO_TWIN_X_GEN2   0x3A  /* Serial 2089 */
+#define UA_DEV_APOLLO_X6_GEN2       0x37  /* Serial 2086 */
+#define UA_DEV_APOLLO_X8_GEN2       0x38  /* Serial 2087 */
+#define UA_DEV_APOLLO_X8P_GEN2      0x39  /* Serial 2088 */
+#define UA_DEV_APOLLO_X16_GEN2      0x3A  /* Serial 2089 */
+#define UA_DEV_APOLLO_TWIN_X_GEN2   0x3B  /* Serial 2090 */
+#define UA_DEV_APOLLO_TWIN_X_GEN2_B 0x3C  /* Serial 2091 */
+#define UA_DEV_SERIAL_2110          0x3E  /* Serial 2110 (v12); x16D per FPGA check */
+#define UA_DEV_APOLLO_X4_GEN2_TB4   0x3F  /* Serial 2109 (v12) */
+#define UA_DEV_APOLLO_TWIN_X_GEN2_TB4   0x40  /* Serial 2107 (v12) */
+#define UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B 0x41  /* Serial 2108 (v12) */
 
 /*
  * AudioExtension vs legacy ring-buffer connect mechanism.
@@ -102,6 +120,25 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 }
 
 /*
+ * UAD2System.kext 12.0.0 widened the ring-connect set: CPcieDevice::Connect
+ * (x86 0x5f84) and HardResetDSPs (0x44f2) test type <= 0x29 against
+ * 0x3ff17fcf9b0, adding 0x27 (Apollo Solo TB), 0x28 (Arrow) and 0x29 to the
+ * v11.8.1 set above.  Only consulted with the v12_connect module parameter.
+ */
+#define UA_RING_CONNECT_V12_BITMASK_HI  0x3ffUL     /* bits 32-41 */
+#define UA_RING_CONNECT_V12_MAX_TYPE    0x29
+
+static inline bool ua_ring_connect_v12(u32 device_type)
+{
+	if (device_type > UA_RING_CONNECT_V12_MAX_TYPE)
+		return false;
+	if (device_type >= 32)
+		return UA_RING_CONNECT_V12_BITMASK_HI &
+		       (1UL << (device_type - 32));
+	return UA_RING_CONNECT_BITMASK_LO & (1UL << device_type);
+}
+
+/*
  * Serial prefix register: hardware registers at BAR0 + 0x20..0x2C
  * contain a 16-byte serial string. ASCII digits 5-8 (serial + 4, NOT the
  * leading four) are the model prefix matched by _deviceTypeFromSerialNumber()
@@ -111,13 +148,13 @@ static inline bool ua_uses_audio_extension(u32 device_type)
  * they are demonstrably not a model ID: matching against them misidentifies
  * hardware. Two observed units:
  *
- *   Apollo x4   "2019 2005 01xxxx"  -> matches 2005, correct
- *   Apollo x8p  "2008 2017 00xxxx"  -> matches 2017, collides with x8
+ *   Apollo x4   "2019 2005 01xxxx"  -> matches 2005 -> 0x1F, correct
+ *   Apollo x8p  "2008 2017 00xxxx"  -> matches 2017 -> 0x22, correct
  *
- * Note the x4's leading group is 2019, which is this table's x8p entry: read
- * the wrong four digits and a QUAD x4 identifies as an x8p. The x8p's own
- * model group collides with x8, which is why that model is pinned by
- * subsystem ID rather than resolved by serial.
+ * Note the x4's leading group is 2019, which is this table's x6 entry: read
+ * the wrong four digits and a QUAD x4 identifies as an x6.  The x8p used to
+ * look like a collision with the x8 only because this header named 0x22 an
+ * x8; the kext names 0x22 the x8p, so the serial resolves it directly.
  */
 #define UA_REG_SERIAL_BASE          0x0020
 #define UA_REG_SERIAL_LEN           16
@@ -170,6 +207,11 @@ static inline bool ua_uses_audio_extension(u32 device_type)
  * Notification status is at UA_REG_NOTIF_STATUS (0xC030, bank-shifted).
  * This register is used as a read fence in PrepareTransport step 12. */
 #define UA_REG_AX_STATUS        0x22C0  /* Transport status (read fence only) */
+
+/* Peer-to-peer route enable mask (kext EnablePeerToPeer writes the slot
+ * mask, ClearPeerToPeerAudioRoutings and AudioExtension::Shutdown write 0).
+ * 0 = no peer routes; Linux never sets it. */
+#define UA_REG_AX_P2P_ENABLE    0x22C4
 
 /* Audio Clock */
 #define UA_REG_CLOCK_SRC0       0x2280  /* Clock source register 0 */
@@ -280,8 +322,48 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_REG_CLOCK_CFG_BASE   0xC04C  /* WRONG: missing bank shift. Use UA_REG_NOTIF_CLOCK_CFG */
 
 /* IO descriptor areas (NO bank shift — fixed offsets) */
-#define UA_REG_IN_NAMES_BASE    0xC1A4  /* Input channel name data (72 x u32) */
-#define UA_REG_OUT_NAMES_BASE   0xC2C4  /* Output channel name data (72 x u32) */
+#define UA_REG_IN_NAMES_BASE    0xC1A4  /* Input IO descriptor (72 x u32) */
+#define UA_REG_OUT_NAMES_BASE   0xC2C4  /* Output IO descriptor (72 x u32) */
+
+/*
+ * IO descriptor layout (firmware-written; the kext only reads it).
+ *
+ * CPcieAudioExtension::_handleNotificationInterrupt copies all 72 words
+ * of each area when notification bit 0 (output) / bit 1 (input) is set,
+ * and after connect (bit 21 handling ORs in 0x400003).  Word layout:
+ *
+ *   [0]  1           (version)
+ *   [1]  0x46        (70 = words that follow)
+ *   [2]  0xFFFFFFFF
+ *   [3]  input slot count   (meaningful in the input area)
+ *   [4]  output slot count  (meaningful in the output area)
+ *   [5]  2 in the input area, 0 in the output area (not used by the kext)
+ *   [6+] u16 channel IDs, slot order, low half-word first
+ *
+ * The kext takes the count from word 3 (input, this+0x1d4) / word 4
+ * (output, this+0x2f8), clamps it to 128 for _parseIONames(), and uses it
+ * for AX_REC_CH / AX_PLAY_CH and the DMA frame stride.  Channel ID =
+ * UAChanType << 8 | number (1-based); the type byte indexes the devNames
+ * table (see ua_chan_name()).  The macOS-captured x4 descriptor holds 34
+ * input and 48 output slots, the x8p's 34 and 52.
+ */
+#define UA_IO_DESC_WORDS        72
+#define UA_IO_DESC_HDR_WORDS    6
+#define UA_IO_DESC_VERSION      1
+#define UA_IO_DESC_LENGTH       0x46
+#define UA_IO_DESC_IN_COUNT     3       /* word index of the input count */
+#define UA_IO_DESC_OUT_COUNT    4       /* word index of the output count */
+#define UA_IO_DESC_FLAGS        5
+
+/*
+ * AX_*_CH extra channel (kext PrepareTransport, CPcieAudioExtension
+ * +0x28b8): a flag channel is added only when the diagnostic flags set by
+ * SetDiagnosticFlags() ask for it — play gets +1 when (flags & 6), record
+ * +1 when (flags & 4), and P2P_ROUTE is written only when (flags & 2).
+ * The constructor zeroes the flags and nothing but the diagnostic
+ * selector changes them, so a normal macOS session runs with 0.
+ */
+#define UA_AX_DIAG_FLAGS        0
 #define UA_REG_CLI_ENABLE       0xC3F4  /* CLI enable register */
 #define UA_REG_CLI_STATUS       0xC3F8  /* CLI command status / length */
 #define UA_REG_CLI_RESP_LEN     0xC3FC  /* CLI response length */
@@ -329,8 +411,15 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_RING_ENTRIES_PER_PAGE (UA_PCIE_PAGE_SIZE / UA_RING_ENTRY_SIZE) /* 256 */
 #define UA_RING_CMD_OFFSET      0x00    /* Command ring within DSP bank */
 #define UA_RING_RESP_OFFSET     0x40    /* Response ring within DSP bank */
-#define UA_RING_NUM_PAGES       1       /* Default: 1 page = 256 entries */
-#define UA_FW_RING_NUM_PAGES    4       /* DSP 0 cmd ring: 4 pages = 1024 entries */
+/*
+ * Every ring is 4 pages = 1024 entries and circular, as in the kext:
+ * CPcieRingBuffer::Initialize (12.0.0 x86 0xa84e) allocates 0x4000 bytes
+ * for every command and response ring, Service (0xad12) wraps the index
+ * with & 0x3ff and treats a POSITION >= 0x400 as invalid.  A 1-page ring
+ * would leave pages 1-3 programmed as bus address 0 for the FPGA to walk.
+ */
+#define UA_RING_NUM_PAGES       4
+#define UA_FW_RING_NUM_PAGES    4       /* DSP 0 cmd ring (same as all rings) */
 #define UA_RING_DMA_REF         BIT(31) /* BIT31=1 in word0 → DMA reference entry */
 
 /* Firmware loading */
@@ -463,6 +552,9 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 /* --- Setting[7]: Mirror B / TBConfig / misc --- */
 #define UA_MON_PARAM_UNKNOWN_0F 0x0f  /* setting[7] bits[9:8], 2-bit */
 #define UA_MON_PARAM_UNKNOWN_20 0x20  /* setting[7] bit10, bool (flush) */
+/* Param 0x20 is the output mute: CPcieDevice::SetOutputMute() (kext 12.0.0
+ * x86 0x6140) calls CUAD2DeviceMixer::SetOtherParam(0x20, mute). */
+#define UA_MON_PARAM_OUTPUT_MUTE UA_MON_PARAM_UNKNOWN_20
 #define UA_MON_PARAM_CUE2_MIRROR 0x2f /* ch_idx=9, MirrorB value, 8-bit */
 #define UA_MON_PARAM_UNKNOWN_45 0x45  /* setting[7] bit11, bool */
 #define UA_MON_PARAM_TB_CONFIG  0x47  /* ch_idx=0, talkback config, bit12 */
@@ -624,7 +716,9 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_NOTIF_BIT_OUT_IO     BIT(0)   /* Output IO descriptors ready */
 #define UA_NOTIF_BIT_IN_IO      BIT(1)   /* Input IO descriptors ready */
 #define UA_NOTIF_BIT_TRANSPORT  BIT(4)   /* Transport/clock change */
-#define UA_NOTIF_BIT_EVENT      BIT(5)   /* Generic event */
+#define UA_NOTIF_BIT_EVENT      BIT(5)   /* Clock-change event: the only bit that
+					  * signals the kext's ClockChangeEvent
+					  * (_handleNotificationInterrupt) */
 #define UA_NOTIF_BIT_CONNECT    BIT(21)  /* Connect response (ACEFACE ack) */
 #define UA_NOTIF_BIT_SRATE      BIT(22)  /* Sample rate change */
 
@@ -637,13 +731,17 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 /* Clock change timeout */
 #define UA_CLOCK_TIMEOUT_MS     2000
 
-/* DSP ring buffer state */
+/* DSP ring buffer state (circular, see UA_RING_NUM_PAGES) */
 struct ua_dsp_ring {
 	void *pages[UA_RING_MAX_PAGES];
 	dma_addr_t page_addrs[UA_RING_MAX_PAGES];
 	unsigned int num_pages;
-	unsigned int write_ptr;
-	unsigned int capacity;      /* num_pages × 256 */
+	unsigned int write_ptr;     /* producer index, 0..capacity-1 */
+	unsigned int hw_pos;        /* last valid POSITION read (consumer) */
+	unsigned int capacity;      /* num_pages × 256, a power of two */
+	u32 reg_base;               /* BAR0 offset of this ring's registers */
+	u32 gen;                    /* bumped when a resync abandons entries */
+	bool live;                  /* indices valid since the last (re)program */
 };
 
 struct ua_dsp_state {
@@ -691,6 +789,94 @@ struct ua_monitor_state {
 	int cue2_mix;        /* CUE2 mix: 0=on, 2=off */
 };
 
+/*
+ * Per-model route data (generated: driver/ua_models_gen.h from
+ * devices/<model>.json by tools/gen-driver-models.py).
+ *
+ * Route tables come from the UA Mixer Engine's per-model IORouteInfo
+ * tables: the channel IDs, in route order, that macOS exposes to
+ * CoreAudio.  The Mixer Engine picks the Hi table at >= 176.4 kHz and the
+ * LoMid table below (MixerTypeBase::GetCurrentRouteTableIndex).  The
+ * per-class IsChannelShownForIORoute() rules that only depend on the
+ * TOSLink mode and the channel number are applied by the generator; the
+ * one rate rule (ADAT 5-8 hidden at 88.2/96 kHz on the x4 and Twin
+ * classes) is applied at runtime from adat_mid_rate_max.
+ */
+#define UA_RATE_BAND_LOMID      0       /* < 176.4 kHz */
+#define UA_RATE_BAND_HI         1       /* >= 176.4 kHz */
+#define UA_RATE_BANDS           2
+
+#define UA_DIG_SPDIF            0       /* TOSLink / digital mode S/PDIF */
+#define UA_DIG_ADAT             1       /* TOSLink / digital mode ADAT */
+#define UA_DIG_MODES            2
+
+/*
+ * Which TOSLink mode picks a direction's route list, after the class's
+ * IsChannelShownForIORoute() (UA Mixer Engine 11.9.0): Freud (x4), Rene8
+ * (x8p) and Peyton (8p) test the input type (property 0xcc) for record
+ * routes and the output type (0x108) for playback; Armstrong/Stretch
+ * (Twin family) test the input type for both; every other class shows
+ * all entries.
+ */
+#define UA_TOSLINK_NONE         0
+#define UA_TOSLINK_PER_DIR      1
+#define UA_TOSLINK_INPUT        2
+
+#define UA_DIR_REC              0       /* device -> host (kext dir 1) */
+#define UA_DIR_PLAY             1       /* host -> device (kext dir 0) */
+#define UA_DIRS                 2
+
+#define UA_MODEL_F_TALKBACK     BIT(0)
+#define UA_MODEL_F_AES          BIT(1)  /* digital I/O is AES/EBU */
+#define UA_MODEL_F_DESKTOP      BIT(2)
+
+struct ua_route_list {
+	const u16 *ids;         /* UA channel IDs, ALSA channel order */
+	unsigned int count;
+};
+
+struct ua_model_desc {
+	const char *name;
+	unsigned int preamps;           /* preamp channels with controls */
+	unsigned int hiz;               /* HiZ-capable inputs */
+	unsigned int flags;             /* UA_MODEL_F_* */
+	unsigned int legacy_mode;       /* UA_DIG_* labelling the legacy layout */
+	unsigned int toslink;           /* UA_TOSLINK_* route-list rule */
+	unsigned int default_in_mode;   /* UA_DIG_*: default TOSLink input */
+	unsigned int adat_mid_rate_max; /* 0, or last ADAT shown at 88.2/96k */
+	struct ua_route_list routes[UA_RATE_BANDS][UA_DIG_MODES][UA_DIRS];
+};
+
+struct ua_model_type {
+	u32 device_type;
+	const char *name;               /* NULL: model->name */
+	const struct ua_model_desc *model;
+};
+
+/* One parsed firmware IO descriptor (see UA_IO_DESC_*) */
+struct ua_io_desc {
+	bool valid;                     /* header and count passed checks */
+	u32 hdr[UA_IO_DESC_HDR_WORDS];  /* raw header words */
+	unsigned int count;             /* slots in the DMA frame */
+	u16 ids[UA_MAX_CHANNELS];       /* channel ID per slot */
+};
+
+/*
+ * ALSA channel -> DMA frame slot map for one direction.  A route channel the
+ * firmware does not carry at the current rate (x4 at 176.4/192 kHz drops
+ * VIRTUAL 1-8, AUX2 and CUE3/4) keeps its ALSA channel with slot
+ * UA_CHAN_NO_SLOT: capture reads silence, playback is discarded.  That keeps
+ * the channel count fixed across rates, as CoreAudio does (22/24 on an x4 at
+ * every rate), so a stream can always be reopened at a new rate.
+ */
+#define UA_CHAN_NO_SLOT 0xFF
+
+struct ua_chan_map {
+	unsigned int channels;          /* ALSA-visible channels */
+	u8 slot[UA_MAX_CHANNELS];       /* frame slot of ALSA channel i */
+	u16 ch_id[UA_MAX_CHANNELS];     /* ID of ALSA channel i, 0 = none */
+};
+
 /* Page-granular backing store for one audio DMA ring (ua_audio.c) */
 struct ua_dma_ring {
 	struct page **pages;        /* UA_DMA_SG_ENTRIES entries, kvcalloc()ed */
@@ -736,6 +922,32 @@ struct ua_audio {
 	/* Preamp / monitor model info */
 	unsigned int num_preamps;   /* Number of preamp channels */
 	unsigned int num_hiz;       /* Number of HiZ-capable channels */
+
+	/*
+	 * Model data and IO map (ua_audio.c "IO descriptor and channel map").
+	 *
+	 * The layout (chan_map, play/rec_channels, buf_frame_size,
+	 * io_map_active) is set once at probe and then changes only in
+	 * ua_io_map_commit(), with ua->lock, io_lock and dma_sem (write) held
+	 * and the transport stopped; the PCM copy path reads it under dma_sem
+	 * (read).  io_lock alone guards the descriptor copies and the readers
+	 * (proc, ioctl, pcm_open's count).
+	 * Lock order: ua->lock -> io_lock -> dma_sem, and
+	 * ua->lock -> io_lock -> audio->lock -> PCM stream lock (forced
+	 * re-prepare, see ua_io_map_force_reprepare()).
+	 */
+	const struct ua_model_desc *model;     /* NULL: no generated data */
+	bool io_ready;              /* io_lock initialised (ua_audio_init) */
+	struct mutex io_lock;
+	struct ua_io_desc io_desc[UA_DIRS];    /* last valid firmware descriptor */
+	bool io_desc_bad[UA_DIRS];  /* last read not usable, io_desc kept */
+	u32 io_desc_bad_hdr[UA_DIRS][UA_IO_DESC_HDR_WORDS]; /* its header */
+	struct ua_chan_map chan_map[UA_DIRS];  /* ALSA channel -> slot */
+	bool io_map_active;         /* io_map=1 layout applied to transport */
+	bool io_layout_stale;       /* layout changed while running */
+	unsigned int io_map_rate;   /* sample rate the map was built for */
+	unsigned int io_map_mode[UA_DIRS];  /* UA_DIG_* each list was built for */
+	unsigned int dig_in_mode;   /* UA_DIG_*: TOSLink input type (host side) */
 
 	/* ALSA mixer control cache (write-through) */
 	struct ua_preamp_state preamp[UA_MAX_PREAMP_CH];
@@ -822,6 +1034,24 @@ struct ua_device {
 	 * entries whose cmd[0] has bit31 set). */
 	struct ua_plugin_dma_buf *plugin_bufs;
 	unsigned int plugin_bufs_count;
+
+	/* Coherent buffers a timed-out ring command may still reference.
+	 * Freeing them would let a late descriptor fetch or response write
+	 * land in reused memory, so they are parked here until the ring has
+	 * provably moved past them (ua_dsp_reclaim_orphans()) or remove
+	 * tears them down (ua_dsp_rings_fini()).
+	 * Bounded by UA_DMA_ORPHAN_MAX / UA_DMA_ORPHAN_MAX_BYTES: at the cap
+	 * new DMA-carrying ring commands fail with -EBUSY.  ua->lock. */
+	struct list_head dma_orphans;
+	unsigned int dma_orphan_count;
+	size_t dma_orphan_bytes;
+
+	/* System resume: anything that may block for seconds (cold DSP
+	 * re-init with firmware load, the full ACEFACE connect) runs from
+	 * resume_work; until it has finished pcm_prepare fails -EBUSY. */
+	struct work_struct resume_work;
+	bool resume_pending;        /* resume_work queued or running */
+	bool resume_need_init;      /* resume_work must (re)init the DSP */
 
 	/* Mixer batch write state (matches kext CPcieDeviceMixer protocol) */
 	u32 mixer_val[UA_MIXER_BATCH_COUNT];   /* Cached setting values */
@@ -922,42 +1152,109 @@ static inline int ua_vector_to_hwbit(unsigned int vector)
 	}
 }
 
-static inline void ua_enable_vector(struct ua_device *ua, unsigned int vector)
+/*
+ * Mirrors CPcieIntrManager::EnableVector(vector, clearPending) (kext 12.0.0
+ * x86 0x9ecc): under the interrupt lock, set the cached enable bit, W1C the
+ * vector's pending ISR bit when @clear_pending, write the IMR, then read
+ * FPGA_REV to flush the posted writes.  irq_lock is the lock the ISR holds
+ * while it reads ISR & mask, so the cached masks and the IMR cannot be
+ * torn by a concurrent hard-IRQ re-arm.
+ *
+ * Pass clear_pending=true when (re)arming a vector from a stopped state, so
+ * an event left over from a previous session does not fire immediately;
+ * false when re-arming from the ISR, where clearing could drop a new event.
+ * The flush read is done only with clear_pending: the ISR re-arm runs on
+ * every period, and a BAR0 read there would put an MMIO round trip (a
+ * completion-timeout stall on a dead link) back into hard-IRQ context.
+ */
+static inline void ua_enable_vector(struct ua_device *ua, unsigned int vector,
+				    bool clear_pending)
 {
 	int hwbit = ua_vector_to_hwbit(vector);
+	unsigned long flags;
 
-	if (hwbit < 0)
+	if (hwbit < 0 || (hwbit >= 32 && !ua->fw_v2))
 		return;
 
+	spin_lock_irqsave(&ua->irq_lock, flags);
 	if (hwbit < 32) {
 		ua->irq_mask_lo |= BIT(hwbit);
+		if (clear_pending)
+			ua_write(ua, UA_REG_IRQ_STATUS, BIT(hwbit));
 		ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
-	} else if (ua->fw_v2) {
+	} else {
 		ua->irq_mask_hi |= BIT(hwbit - 32);
+		if (clear_pending)
+			ua_write(ua, UA_REG_EXT_IRQ_STATUS, BIT(hwbit - 32));
 		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, ua->irq_mask_hi);
 	}
+	if (clear_pending)
+		(void)ua_read(ua, UA_REG_FPGA_REV);	/* posted-write flush */
+	spin_unlock_irqrestore(&ua->irq_lock, flags);
 }
 
+/*
+ * Mask every vector (IMR = IMR_HI = 0) and, with @clear_pending, W1C
+ * everything pending (ISR = ISR_HI = ~0), keeping the cached masks the ISR
+ * filters with equal to the hardware.  CPcieIntrManager::DisableInterrupts
+ * (x86 0xa154) / ProgramRegisters (0x996a), plus CPcieDevice::
+ * ProgramRegisters' ISR = ~0.  The one place "mask all" is implemented, so
+ * the cache == IMR invariant ua_enable_vector() relies on holds everywhere.
+ * With the shutdown flag set the register writes are no-ops and only the
+ * caches are cleared.
+ */
+static inline void ua_irq_mask_all(struct ua_device *ua, bool clear_pending)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ua->irq_lock, flags);
+	ua->irq_mask_lo = 0;
+	ua->irq_mask_hi = 0;
+	ua_write(ua, UA_REG_IRQ_ENABLE, 0);
+	if (ua->fw_v2)
+		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, 0);
+	if (clear_pending) {
+		ua_write(ua, UA_REG_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
+		if (ua->fw_v2)
+			ua_write(ua, UA_REG_EXT_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
+	}
+	spin_unlock_irqrestore(&ua->irq_lock, flags);
+}
+
+/* CPcieIntrManager::DisableVector (x86 0xa088): same lock, no flush */
 static inline void ua_disable_vector(struct ua_device *ua, unsigned int vector)
 {
 	int hwbit = ua_vector_to_hwbit(vector);
+	unsigned long flags;
 
-	if (hwbit < 0)
+	if (hwbit < 0 || (hwbit >= 32 && !ua->fw_v2))
 		return;
 
+	spin_lock_irqsave(&ua->irq_lock, flags);
 	if (hwbit < 32) {
 		ua->irq_mask_lo &= ~BIT(hwbit);
 		ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
-	} else if (ua->fw_v2) {
+	} else {
 		ua->irq_mask_hi &= ~BIT(hwbit - 32);
 		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, ua->irq_mask_hi);
 	}
+	spin_unlock_irqrestore(&ua->irq_lock, flags);
 }
 
 /* Audio subsystem interface (ua_audio.c) */
 int ua_audio_preinit_dma(struct ua_device *ua);
+int ua_audio_reprogram_dma(struct ua_device *ua);
 int ua_audio_init(struct ua_device *ua);
 void ua_audio_fini(struct ua_device *ua);
+void ua_audio_suspend(struct ua_device *ua);
+
+/* ua_audio_resume() modes */
+enum ua_resume_how {
+	UA_RESUME_CONTROLS,	/* reopen the ALSA controls only */
+	UA_RESUME_CONNECT_FAST,	/* connect if it cannot block long, else -EAGAIN */
+	UA_RESUME_CONNECT,	/* the full connect, as at probe */
+};
+int ua_audio_resume(struct ua_device *ua, enum ua_resume_how how);
 void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate);
 int ua_audio_reconnect(struct ua_device *ua);
@@ -966,10 +1263,21 @@ void ua_dsp_service_start(struct ua_device *ua);
 void ua_dsp_service_stop(struct ua_device *ua);
 const char *ua_device_name(u32 device_type);
 
+/* Model data and IO map (ua_audio.c) */
+const struct ua_model_desc *ua_model_lookup(u32 device_type,
+					    const char **type_name);
+bool ua_io_map_enabled(void);
+void ua_io_map_digital_mode_changed(struct ua_device *ua);	/* ua->lock */
+int ua_chan_name(u16 ch_id, char *buf, size_t len);
+struct ua_io_map_info;
+void ua_io_map_get_info(struct ua_device *ua, struct ua_io_map_info *info);
+
 /* Mixer batch protocol (ua_core.c) */
 int ua_mixer_write_setting_locked(struct ua_device *ua,
 				  unsigned int index, u32 value, u32 mask);
 void ua_mixer_flush_settings(struct ua_device *ua);
+void ua_set_output_mute_locked(struct ua_device *ua, bool mute,
+			       bool flush_now);
 
 /* Preamp/monitor hardware access wrappers (ua_core.c) */
 int ua_preamp_set_param(struct ua_device *ua, unsigned int ch,
@@ -978,8 +1286,11 @@ int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 			 u32 param_id, u32 value);
 
 /* DSP ring buffer and firmware (ua_dsp.c) */
-int ua_dsp_rings_init(struct ua_device *ua);
-void ua_dsp_rings_fini(struct ua_device *ua);
+int ua_dsp_rings_init(struct ua_device *ua);	/* also re-arms on resume */
+void ua_dsp_rings_fini(struct ua_device *ua, bool dma_quiet);
+void ua_dsp_rings_quiesce(struct ua_device *ua);
+void ua_dsp_rings_neutralize(struct ua_device *ua);
+void ua_dsp_cache_firmware(struct ua_device *ua);
 void ua_dsp_rings_reprogram(struct ua_device *ua);
 void ua_dsp_ring_diagnostic(struct ua_device *ua);
 void ua_dsp_test_dma_locality(struct ua_device *ua);

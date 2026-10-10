@@ -302,7 +302,74 @@ struct ua_routing_table {
 };
 
 #define UA_IOCTL_SET_ROUTING_TABLE _IOW(UA_IOCTL_MAGIC, 0x60, struct ua_routing_table)
+
+/*
+ * UA_IOCTL_SEND_ROUTING writes a macOS-captured IO descriptor over the
+ * firmware's own at BAR0+0xC1A4/0xC2C4 (x4 and x8p only).  Kept for
+ * experiments; nothing in userspace calls it.  The kext never does this:
+ * SetDriverIoRoutings (SEL171) only stores the host-side channel ->
+ * {device, channel ID, name} table, nothing is sent to the DSP, and the
+ * descriptor areas are firmware-written and only read by the kext.  With
+ * io_map=1 the ioctl is a no-op that returns 0.
+ */
 #define UA_IOCTL_SEND_ROUTING      _IO(UA_IOCTL_MAGIC, 0x61)
+
+/*
+ * IO map: the firmware IO descriptors and the ALSA channel -> DMA slot
+ * map the driver derived from them (UA_IOCTL_GET_IO_MAP, read-only).
+ *
+ * Channel IDs are UA channel IDs, type << 8 | number (number 1-based):
+ *   0x00 MIC/LINE/HIZ  0x01 MIC/LINE  0x02 AUX  0x03 LINE  0x04 ADAT
+ *   0x05 S/PDIF  0x06 AES/EBU  0x07 VIRTUAL  0x08 MADI  0x09 MON
+ *   0x0a CUE  0x0b TALKBACK  0x0c RESERVED  0x0d DANTE  else UNKNOWN
+ * AUX, S/PDIF, AES/EBU, MON and CUE are stereo pairs: number n is pair
+ * (n + 1) / 2, L when n is odd.
+ *
+ * With io_map=0 (legacy) the map is the identity over the first
+ * hw_channels slots and the names are the model's route-table names for
+ * that legacy layout; with io_map=1 each ALSA channel is placed on the
+ * descriptor slot carrying its channel ID.
+ *
+ * desc_* describe the last valid descriptor the firmware published for
+ * the direction: a read that is not usable (all-ones, mid-republish)
+ * does not replace it, it only sets desc_last_bad and last_hdr.
+ */
+#define UA_IO_MAP_MAX_CH	64
+#define UA_IO_MAP_NAME_LEN	24
+#define UA_IO_MAP_HDR_WORDS	6
+
+struct ua_io_map_chan {
+	__u16 ch_id;		/* UA channel ID, 0 = unknown */
+	__u16 slot;		/* Slot in the DMA frame, 0xFFFF = none at this rate */
+	char name[UA_IO_MAP_NAME_LEN];	/* NUL-terminated */
+};
+
+struct ua_io_map_dir {
+	__u32 desc_valid;	/* 1 = a valid firmware descriptor was read */
+	__u32 desc_count;	/* Slots listed by that descriptor */
+	__u32 desc_flags;	/* Its word 5 */
+	__u32 desc_last_bad;	/* 1 = the latest read was not usable */
+	__u32 last_hdr[UA_IO_MAP_HDR_WORDS];	/* Header of the latest read */
+	__u32 hw_channels;	/* AX_*_CH / DMA frame stride in samples */
+	__u32 channels;		/* ALSA-visible channels (entries in chan[]) */
+	__u32 digital_mode;	/* Route-list TOSLink mode: 0 S/PDIF, 1 ADAT */
+	__u32 reserved;
+	__u16 desc_ids[UA_IO_MAP_MAX_CH];	/* Channel ID per descriptor slot */
+	struct ua_io_map_chan chan[UA_IO_MAP_MAX_CH];	/* ALSA order */
+};
+
+struct ua_io_map_info {
+	__u32 io_map;		/* Module parameter: 0 legacy, 1 descriptor */
+	__u32 active;		/* 1 = descriptor-mapped layout in use */
+	__u32 stale;		/* 1 = layout changed, streams re-prepare */
+	__u32 device_type;
+	__u32 sample_rate;	/* Rate the map was built for */
+	__u32 reserved[3];
+	struct ua_io_map_dir rec;
+	struct ua_io_map_dir play;
+};
+
+#define UA_IOCTL_GET_IO_MAP        _IOR(UA_IOCTL_MAGIC, 0x62, struct ua_io_map_info)
 
 /*
  * Raw ring buffer inline entry (4 words) to DSP 0 command ring.

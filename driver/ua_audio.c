@@ -19,24 +19,32 @@
 #include <linux/jiffies.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
+#include <linux/uio.h>
 #include <linux/vmalloc.h>
 #include <linux/version.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/control.h>
+#include <sound/info.h>
 #include <sound/tlv.h>
 #include <sound/initval.h>
 
 #include "ua_apollo.h"
 #include "ua_ioctl.h"
+#include "ua_models_gen.h"
 
-/* Module parameters for channel count override */
+/* Module parameters for channel count override (legacy layout only) */
 static int play_ch = -1;
 static int rec_ch = -1;
 module_param(play_ch, int, 0444);
-MODULE_PARM_DESC(play_ch, "Override playback channel count (default: auto-detect)");
+MODULE_PARM_DESC(play_ch, "Override playback channel count (legacy io_map=0 only)");
 module_param(rec_ch, int, 0444);
-MODULE_PARM_DESC(rec_ch, "Override record channel count (default: auto-detect)");
+MODULE_PARM_DESC(rec_ch, "Override record channel count (legacy io_map=0 only)");
+
+static int io_map;
+module_param(io_map, int, 0444);
+MODULE_PARM_DESC(io_map,
+		 "Channel layout: 0 = legacy (route-table DMA counts, ALSA ch N = DMA slot N; default), 1 = firmware IO descriptor, channels mapped by ID like the macOS kext");
 
 static bool no_connect;
 module_param(no_connect, bool, 0444);
@@ -54,83 +62,166 @@ static bool no_plugins;
 module_param(no_plugins, bool, 0444);
 MODULE_PARM_DESC(no_plugins, "Skip plugin chain entirely (keep ACEFACE)");
 
+/*
+ * The macOS driver never writes PCI config space (UAD2System.kext only
+ * reads it), and the April Thunderbolt link drops followed these writes
+ * by ~3 ms.  Off by default; kept for anyone who depended on them.
+ */
+static bool pcie_tuning;
+module_param(pcie_tuning, bool, 0444);
+MODULE_PARM_DESC(pcie_tuning,
+		 "Legacy PCIe tweaks: disable ASPM on the Apollo endpoint (via the ASPM core) and raise the completion timeout to 65-210 ms on the Apollo and every upstream bridge (default: off)");
+
 /* Forward declarations */
 static void ua_pcie_setup(struct ua_device *ua);
 
 /* ----------------------------------------------------------------
- * Per-model channel counts
+ * Per-model data
  *
- * These are the PCIe DMA channel counts from kext analysis, not the
- * physical I/O count.  The kext adds +1 to playback channels by
- * default (flag bit 1 clear) to carry a sync/timestamp channel.
+ * Model identity, preamp/HiZ counts and route tables come from the
+ * generated ua_models_gen.h (devices/<model>.json, tools/gen-driver-models.py).
+ *
+ * Legacy layout (io_map=0): ALSA channel N is DMA slot N, and the DMA
+ * channel and preamp counts come from ua_legacy_dma[] below for every
+ * type the old table knew.  The kext instead sizes
+ * the DMA frame from the firmware IO descriptor and maps channels by ID;
+ * that is io_map=1, see "IO descriptor and channel map" below.
  * ---------------------------------------------------------------- */
 
-struct ua_model_info {
+/*
+ * io_map=0 DMA channel and preamp counts, frozen per device type NUMBER
+ * so the default layout keeps the frame size and the ALSA controls every
+ * existing install has today.
+ *
+ * These are the values the old hand-written ua_models[] gave each type
+ * value, even where that table had the wrong model on the type (0x23 was
+ * called a Twin X, 0x20 an x8p, ...): a user whose unit resolves to a
+ * given type keeps the stride it streams with and every control it has.
+ * Only the x4 (22/24, macOS IOAudioEngine) and x8p (32/34, hardware-
+ * tested) are known-good.  The one change is the x8p itself: it was
+ * pinned to 0x20 by subsystem 0x0014 and resolves to 0x22 now, so 0x22
+ * carries its 34/32 and 8 preamps.  Types not listed (the v12 serials
+ * 2090-2110 master did not know) fall back to 3/2 and take the
+ * generated preamp counts.  io_map=1 uses the firmware descriptor and
+ * the generated counts throughout.
+ */
+struct ua_legacy_dma {
 	u32 device_type;
-	unsigned int play_ch;     /* DMA playback channel count */
-	unsigned int rec_ch;      /* DMA record channel count */
-	unsigned int num_preamps; /* Preamp channels with ALSA controls */
-	unsigned int num_hiz;     /* HiZ-capable channels (first N preamps) */
+	unsigned int play;
+	unsigned int rec;
+	unsigned int preamps;
+	unsigned int hiz;
 };
+
+static const struct ua_legacy_dma ua_legacy_dma[] = {
+	/* type                     play rec pre hiz    old ua_models[] row */
+	{ UA_DEV_APOLLO_SOLO,         3,  2,  1, 0 },  /* 0x27 Solo */
+	{ UA_DEV_ARROW,               3,  2,  1, 0 },  /* 0x28 Arrow */
+	{ UA_DEV_APOLLO_X16,          8,  8,  2, 2 },  /* 0x23 "Twin X" */
+	{ UA_DEV_APOLLO_X16_GEN2,     8,  8,  2, 2 },  /* 0x3A "Twin X Gen 2" */
+	{ UA_DEV_APOLLO_X4,          24, 22,  4, 2 },  /* 0x1F x4 */
+	{ UA_DEV_APOLLO_X4_GEN2,     24, 22,  4, 2 },  /* 0x36 x4 Gen 2 */
+	{ UA_DEV_SERIAL_2016,        24, 22,  4, 2 },  /* 0x1E "x6" */
+	{ UA_DEV_APOLLO_X16D,        24, 22,  4, 2 },  /* 0x35 "x6 Gen 2" */
+	{ UA_DEV_APOLLO_X8P,         34, 32,  8, 2 },  /* 0x22 x8p (was the 0x20 pin) */
+	{ UA_DEV_APOLLO_X6_GEN2,     26, 26,  4, 2 },  /* 0x37 "x8 Gen 2" */
+	{ UA_DEV_APOLLO_8P,          26, 26,  8, 2 },  /* 0x0A 8p */
+	{ UA_DEV_APOLLO_X6,          34, 32,  8, 2 },  /* 0x20 "x8p" */
+	{ UA_DEV_APOLLO_X8_GEN2,     26, 26,  8, 2 },  /* 0x38 "x8p Gen 2" */
+	{ UA_DEV_APOLLO_X8,          34, 34,  8, 2 },  /* 0x21 "x16" */
+	{ UA_DEV_APOLLO_X8P_GEN2,    34, 34,  8, 2 },  /* 0x39 "x16 Gen 2" */
+	{ UA_DEV_SERIAL_2032,        34, 34,  0, 0 },  /* 0x2A "x16D" */
+};
+
+static const struct ua_legacy_dma *ua_legacy_row(u32 device_type)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(ua_legacy_dma); i++)
+		if (ua_legacy_dma[i].device_type == device_type)
+			return &ua_legacy_dma[i];
+	return NULL;
+}
+
+const struct ua_model_desc *ua_model_lookup(u32 device_type,
+					    const char **type_name)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(ua_gen_model_types); i++) {
+		const struct ua_model_type *t = &ua_gen_model_types[i];
+
+		if (t->device_type != device_type)
+			continue;
+		if (type_name)
+			*type_name = t->name ? t->name : t->model->name;
+		return t->model;
+	}
+
+	if (type_name)
+		*type_name = NULL;
+	return NULL;
+}
+
+bool ua_io_map_enabled(void)
+{
+	return io_map == 1;
+}
 
 /*
- * Channel counts from macOS IOKit IOAudioEngine properties.
- * Apollo x4: "Number of Output Channels: 24", "Number of Input Channels: 22"
- *
- * With diagnostic flags=0 (default), kext does NOT add +1 sync channel.
- * The formula: actualPlay = play + ((flags & 0x6) >= 1 ? 1 : 0)
- * With flags=0: (0 & 0x6) = 0, not >= 1, so +0.
+ * Legacy DMA channel counts: module overrides, else ua_legacy_dma[], else
+ * the stereo fallback.  rec_ch is bounded like play_ch (the channel map
+ * holds at most UA_MAX_CHANNELS).
  */
-static const struct ua_model_info ua_models[] = {
-	/*                             play rec preamps hiz */
-	{ UA_DEV_APOLLO_SOLO,          3,  2,  1, 0 },
-	{ UA_DEV_ARROW,                3,  2,  1, 0 },
-	{ UA_DEV_APOLLO_TWIN_X,        8,  8,  2, 2 },
-	{ UA_DEV_APOLLO_TWIN_X_GEN2,   8,  8,  2, 2 },
-	{ UA_DEV_APOLLO_X4,           24, 22,  4, 2 },
-	{ UA_DEV_APOLLO_X4_GEN2,     24, 22,  4, 2 },
-	{ UA_DEV_APOLLO_X6,           24, 22,  4, 2 },
-	{ UA_DEV_APOLLO_X6_GEN2,     24, 22,  4, 2 },
-	{ UA_DEV_APOLLO_X8,           26, 26,  4, 2 },
-	{ UA_DEV_APOLLO_X8_GEN2,     26, 26,  4, 2 },
-	{ UA_DEV_APOLLO_8P,           26, 26,  8, 2 },
-	{ UA_DEV_APOLLO_X8P,          34, 32,  8, 2 },
-	{ UA_DEV_APOLLO_X8P_GEN2,    26, 26,  8, 2 },
-	{ UA_DEV_APOLLO_X16,          34, 34,  8, 2 },
-	{ UA_DEV_APOLLO_X16_GEN2,    34, 34,  8, 2 },
-	{ UA_DEV_APOLLO_X16D,        34, 34,  0, 0 },
-};
-
-static void ua_get_model_channels(struct ua_device *ua)
+static void ua_legacy_counts(struct ua_device *ua, unsigned int *play,
+			     unsigned int *rec)
 {
-	struct ua_audio *audio = &ua->audio;
-	int i;
+	const struct ua_legacy_dma *row;
 
-	/* Module param overrides */
 	if (play_ch > 0 && play_ch <= UA_MAX_CHANNELS) {
-		audio->play_channels = play_ch;
-		audio->rec_channels = (rec_ch > 0) ? rec_ch : play_ch;
-		audio->num_preamps = 0;
-		audio->num_hiz = 0;
+		*play = play_ch;
+		*rec = (rec_ch > 0 && rec_ch <= UA_MAX_CHANNELS) ?
+			rec_ch : play_ch;
 		return;
 	}
 
-	/* Look up from model table */
-	for (i = 0; i < ARRAY_SIZE(ua_models); i++) {
-		if (ua_models[i].device_type == ua->device_type) {
-			audio->play_channels = ua_models[i].play_ch;
-			audio->rec_channels = ua_models[i].rec_ch;
-			audio->num_preamps = ua_models[i].num_preamps;
-			audio->num_hiz = ua_models[i].num_hiz;
-			return;
-		}
+	row = ua_legacy_row(ua->device_type);
+	if (row) {
+		*play = row->play;
+		*rec = row->rec;
+		return;
 	}
 
 	/* Fallback: safe stereo default */
-	audio->play_channels = UA_DEFAULT_PLAY_CH + 1;  /* +1 for sync */
-	audio->rec_channels = UA_DEFAULT_REC_CH;
-	audio->num_preamps = 0;
-	audio->num_hiz = 0;
+	*play = UA_DEFAULT_PLAY_CH + 1;  /* +1 for sync */
+	*rec = UA_DEFAULT_REC_CH;
+}
+
+/*
+ * Legacy map: ALSA channel N is DMA slot N.  When the legacy count equals
+ * the model's route count (x4, x8p) the channels are labelled with the
+ * route-table IDs that layout is meant to carry (labels only; whether the
+ * firmware puts them there is what io_map=1 settles).  Otherwise the
+ * legacy count is not the model's and the channels stay unlabelled.
+ */
+static void ua_chan_map_legacy(const struct ua_model_desc *m,
+			       unsigned int dir, unsigned int count,
+			       struct ua_chan_map *map)
+{
+	const struct ua_route_list *r = NULL;
+	unsigned int i;
+
+	if (m)
+		r = &m->routes[UA_RATE_BAND_LOMID][m->legacy_mode][dir];
+	if (r && r->count != count)
+		r = NULL;
+
+	memset(map, 0, sizeof(*map));
+	map->channels = min_t(unsigned int, count, UA_MAX_CHANNELS);
+	for (i = 0; i < map->channels; i++) {
+		map->slot[i] = i;
+		map->ch_id[i] = (r && i < r->count) ? r->ids[i] : 0;
+	}
 }
 
 /* ----------------------------------------------------------------
@@ -160,6 +251,65 @@ static unsigned int ua_calc_buf_frame_size(unsigned int play_ch,
 		frames = UA_MAX_BUF_FRAMES;
 
 	return frames;
+}
+
+/*
+ * The DMA frame geometry: hardware channel counts and the ring size in
+ * frames derived from them.  The only place play/rec_channels and
+ * buf_frame_size are set: once at probe (ua_get_model_channels(), before
+ * anything reads them) and in ua_io_map_commit() under dma_sem.
+ */
+static void ua_audio_set_hw_layout(struct ua_audio *audio, unsigned int play,
+				   unsigned int rec)
+{
+	audio->play_channels = play;
+	audio->rec_channels = rec;
+	audio->buf_frame_size = ua_calc_buf_frame_size(play, rec);
+}
+
+static void ua_get_model_channels(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	const struct ua_model_desc *m;
+	const struct ua_legacy_dma *row;
+	unsigned int play, rec;
+
+	m = ua_model_lookup(ua->device_type, NULL);
+	audio->model = m;
+
+	/*
+	 * Preamp/HiZ counts decide which ALSA controls exist.  The legacy
+	 * layout never drops a control a type has today, so types the old
+	 * table knew keep its counts; io_map=1 uses the generated ones.
+	 */
+	row = ua_legacy_row(ua->device_type);
+	if (!ua_io_map_enabled() && row) {
+		audio->num_preamps = row->preamps;
+		audio->num_hiz = row->hiz;
+	} else {
+		audio->num_preamps = m ? m->preamps : 0;
+		audio->num_hiz = m ? m->hiz : 0;
+	}
+	audio->num_preamps = min_t(unsigned int, audio->num_preamps,
+				   UA_MAX_PREAMP_CH);
+
+	/* Module param overrides keep their historical no-preamp behaviour */
+	if (play_ch > 0 && play_ch <= UA_MAX_CHANNELS) {
+		audio->num_preamps = 0;
+		audio->num_hiz = 0;
+	}
+
+	/*
+	 * The legacy layout.  Runs once at probe (callers check
+	 * play_channels), before the ALSA card and the ioctls exist, so
+	 * nothing reads it concurrently; from then on only
+	 * ua_io_map_commit() changes it (io_map=1).
+	 */
+	ua_legacy_counts(ua, &play, &rec);
+	ua_audio_set_hw_layout(audio, play, rec);
+	ua_chan_map_legacy(m, UA_DIR_REC, rec, &audio->chan_map[UA_DIR_REC]);
+	ua_chan_map_legacy(m, UA_DIR_PLAY, play, &audio->chan_map[UA_DIR_PLAY]);
+	audio->io_map_active = false;
 }
 
 /* ----------------------------------------------------------------
@@ -424,9 +574,26 @@ static void ua_audio_program_sg(struct ua_device *ua)
 	const dma_addr_t *play = audio->play_ring.dmas;
 	const dma_addr_t *rec = audio->rec_ring.dmas;
 	unsigned int i;
+	u32 ax;
 
 	dev_info(&ua->pdev->dev, "=== PROGRAM SG TABLE (%u entries, stride=0x%x) ===\n",
 		 UA_DMA_SG_ENTRIES, UA_PCIE_PAGE_SIZE);
+
+	/*
+	 * Never rewrite the table under a running transport.  Kext
+	 * CPcieAudioExtension::ProgramRegisters (12.0.0 x86 0x33f4a)
+	 * writes AX_CONTROL = 0 and reads it back as a flush immediately
+	 * before the 1024 SG pairs.  A no-op on the normal probe paths,
+	 * which have already stopped the transport.
+	 */
+	ax = ua_read(ua, UA_REG_AX_CONTROL);
+	if (ax && ax != 0xFFFFFFFF)
+		dev_info(&ua->pdev->dev,
+			 "  transport still armed (AX_CONTROL=0x%x), stopping before SG rewrite\n",
+			 ax);
+	ua_write(ua, UA_REG_AX_CONTROL, 0);
+	(void)ua_read(ua, UA_REG_AX_CONTROL);
+	audio->transport_running = false;
 
 	for (i = 0; i < UA_DMA_SG_ENTRIES; i++) {
 		ua_write(ua, UA_REG_PLAY_DMA_BASE + i * 8,
@@ -467,8 +634,8 @@ static void ua_audio_program_sg(struct ua_device *ua)
 			 ua_read(ua, UA_REG_DMA_CTRL));
 	}
 
-	/* Kext ProgramRegisters enables notification vector (0x28) here */
-	ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION);
+	/* Kext ProgramRegisters: EnableVector(0x28, clearPending=1) */
+	ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION, true);
 
 	dev_info(&ua->pdev->dev, "  SG[0]: play=0x%08x rec=0x%08x\n",
 		 lower_32_bits(play[0]), lower_32_bits(rec[0]));
@@ -499,12 +666,8 @@ int ua_audio_preinit_dma(struct ua_device *ua)
 	int ret;
 
 	/* Channel counts may already be set (ua_audio_init calls this too) */
-	if (!audio->play_channels) {
+	if (!audio->play_channels)
 		ua_get_model_channels(ua);
-		audio->buf_frame_size =
-			ua_calc_buf_frame_size(audio->play_channels,
-					       audio->rec_channels);
-	}
 
 	/* Skip if DMA buffers already allocated */
 	if (audio->play_buf)
@@ -518,38 +681,1022 @@ int ua_audio_preinit_dma(struct ua_device *ua)
 	return 0;
 }
 
+/*
+ * ua_audio_reprogram_dma - point the FPGA back at the existing audio rings.
+ *
+ * Resume path: the SG SRAM may have lost its contents (or still hold the
+ * previous session's entries) and ua_audio_preinit_dma() deliberately does
+ * nothing once the rings exist.  Allocates them first if an earlier preinit
+ * failed.
+ */
+int ua_audio_reprogram_dma(struct ua_device *ua)
+{
+	if (!ua->audio.play_buf)
+		return ua_audio_preinit_dma(ua);
+
+	ua_audio_program_sg(ua);
+	return 0;
+}
+
 /* ----------------------------------------------------------------
- * Channel name SRAM readout (for reverse engineering)
+ * IO descriptor and channel map
  *
- * Firmware populates channel name data at 0xC1A4 (input, 72 × u32)
- * and 0xC2C4 (output, 72 × u32) after connect.  Format unknown —
- * dump as hex for offline analysis.
+ * The firmware publishes one IO descriptor per direction at 0xC1A4
+ * (input) / 0xC2C4 (output): a slot count and the channel ID carried by
+ * each slot of the DMA frame (layout: UA_IO_DESC_* in ua_apollo.h).  The
+ * kext reads both after connect and on notification bits 0/1, never
+ * writes them, programs AX_PLAY_CH/AX_REC_CH from the counts and sizes
+ * the DMA frame from them.  CoreAudio channel j then reads or writes the
+ * slot FindIndexForChannelID() returns for the j-th route-table channel
+ * ID (first match in slot order; a channel with no slot reads silence).
  *
- * Enable with: echo 'module ua_apollo +p' > /sys/kernel/debug/dynamic_debug/control
+ * Here the descriptor is read and logged in both modes.  With io_map=1
+ * the driver also does what the kext does: AX_*_CH and the frame stride
+ * follow the descriptor, ALSA channels follow the model's route table
+ * for the current rate band and TOSLink mode(s), and the PCM copy path
+ * moves each ALSA channel to and from its slot.  A route channel that is
+ * missing from the descriptor (or hidden at this rate) keeps its ALSA
+ * channel without a slot, so the channel count does not change with the
+ * rate; a model without a route table exposes every descriptor slot.
+ *
+ * A read that is not usable (all-ones on a dropped link, a header caught
+ * mid-republish, an area not repopulated yet after a reconnect) never
+ * replaces the last valid descriptor; the legacy layout is used only
+ * until a valid one has been seen.
+ *
+ * Who changes the layout: ua_io_map_update_into(), with ua->lock and
+ * io_lock held (connect, notification, TOSLink mode or rate change,
+ * pcm_open, prepare).  With the transport stopped it commits the new
+ * layout at once; ua->lock keeps that from landing between the AX_*_CH
+ * writes and the transport start in prepare.  With the transport running
+ * it marks the layout stale and pushes the open streams into XRUN
+ * (ua_io_map_force_reprepare()), so userspace prepares again and
+ * ua_pcm_prepare() restarts the transport on the new layout.
+ *
+ * Per-slot names: dynamic debug ("module ua_apollo +p"), and the whole
+ * map: /proc/asound/cardN/io_map and UA_IOCTL_GET_IO_MAP.
  * ---------------------------------------------------------------- */
 
-#define UA_CHAN_NAME_WORDS  72
+#define UA_IO_DESC_SETTLE_MS    100     /* wait for a post-clock republish */
+#define UA_IO_DESC_POLL_MS      10
 
-static void __maybe_unused ua_dump_channel_names(struct ua_device *ua)
+/* devNames table (kext _parseIONames), indexed by channel ID >> 8 */
+static const char * const ua_chan_type_names[] = {
+	"MIC/LINE/HIZ", "MIC/LINE", "AUX", "LINE", "ADAT", "S/PDIF",
+	"AES/EBU", "VIRTUAL", "MADI", "MON", "CUE", "TALKBACK", "RESERVED",
+	"DANTE", "UNKNOWN",
+};
+
+#define UA_CHAN_TYPE_ADAT       0x04
+#define UA_CHAN_TYPE_UNKNOWN    0x0e
+#define UA_CHAN_STEREO_TYPES    0x0664  /* AUX, S/PDIF, AES/EBU, MON, CUE */
+#define UA_CHAN_NUMBERED_TYPES  0x7d9f  /* all but S/PDIF, AES/EBU, MON */
+
+/**
+ * ua_chan_name - Name a UA channel ID the way the kext does
+ * @ch_id: type << 8 | number (1-based)
+ * @buf: output buffer
+ * @len: size of @buf
+ *
+ * Follows _parseIONames: IDs above 0x0dff are UNKNOWN, stereo-pair types
+ * (mask 0x664) are named pair (n + 1) / 2 plus L (odd n) or R, numbered
+ * types (mask 0x7d9f) carry the number, and AUX/CUE run the pair number
+ * into the type ("AUX1 L").  The kext writes two spaces before L/R for
+ * S/PDIF, AES/EBU and MON; this uses one, the route-table spelling.
+ *
+ * Returns the length written.
+ */
+int ua_chan_name(u16 ch_id, char *buf, size_t len)
 {
-	u32 in_buf[UA_CHAN_NAME_WORDS];
-	u32 out_buf[UA_CHAN_NAME_WORDS];
-	unsigned int i;
+	unsigned int type = ch_id >> 8;
+	unsigned int num = ch_id & 0xff;
+	const char *lr = (num & 1) ? "L" : "R";
+	bool stereo, numbered;
 
-	for (i = 0; i < UA_CHAN_NAME_WORDS; i++) {
-		in_buf[i] = ua_read(ua, UA_REG_IN_NAMES_BASE + i * 4);
-		out_buf[i] = ua_read(ua, UA_REG_OUT_NAMES_BASE + i * 4);
+	if (ch_id > 0x0dff)
+		type = UA_CHAN_TYPE_UNKNOWN;
+	stereo = UA_CHAN_STEREO_TYPES & BIT(type);
+	numbered = UA_CHAN_NUMBERED_TYPES & BIT(type);
+	if (stereo)
+		num = (num + 1) / 2;
+
+	if (numbered && stereo)
+		return scnprintf(buf, len, "%s%u %s",
+				 ua_chan_type_names[type], num, lr);
+	if (numbered)
+		return scnprintf(buf, len, "%s %u",
+				 ua_chan_type_names[type], num);
+	if (stereo)
+		return scnprintf(buf, len, "%s %s",
+				 ua_chan_type_names[type], lr);
+	return scnprintf(buf, len, "%s", ua_chan_type_names[type]);
+}
+
+/* Label of ALSA channel @i of @map: its channel name, else "CH n" */
+static void ua_chan_map_label(const struct ua_chan_map *map, unsigned int i,
+			      char *buf, size_t len)
+{
+	if (map->ch_id[i])
+		ua_chan_name(map->ch_id[i], buf, len);
+	else
+		scnprintf(buf, len, "CH %u", i + 1);
+}
+
+static const char *ua_dir_name(unsigned int dir)
+{
+	return dir == UA_DIR_REC ? "record" : "playback";
+}
+
+static const char *ua_dig_name(unsigned int mode)
+{
+	return mode == UA_DIG_ADAT ? "ADAT" : "S/PDIF";
+}
+
+/* Slot count of @dir from a header, or 0 when the header is not usable */
+static unsigned int ua_io_desc_hdr_count(const u32 *hdr, unsigned int dir)
+{
+	unsigned int count = hdr[dir == UA_DIR_REC ? UA_IO_DESC_IN_COUNT :
+						     UA_IO_DESC_OUT_COUNT];
+
+	if (hdr[0] != UA_IO_DESC_VERSION || hdr[1] != UA_IO_DESC_LENGTH)
+		return 0;
+	if (!count || count > UA_MAX_CHANNELS)
+		return 0;
+	return count;
+}
+
+/*
+ * Read one direction's descriptor: the six header words first, then only
+ * the DIV_ROUND_UP(count, 2) ID words the count calls for (the rest of
+ * the 72-word area is padding), then the version, length and count words
+ * once more.  @d->valid stays false when the header is not usable or the
+ * second look differs from the first (the link dropped mid-read and reads
+ * all-ones, or the firmware republished meanwhile); @d->hdr always holds
+ * the first header read.
+ */
+static void ua_io_desc_fetch(struct ua_device *ua, unsigned int dir,
+			     struct ua_io_desc *d)
+{
+	u32 base = (dir == UA_DIR_REC) ? UA_REG_IN_NAMES_BASE :
+					 UA_REG_OUT_NAMES_BASE;
+	unsigned int cw = dir == UA_DIR_REC ? UA_IO_DESC_IN_COUNT :
+					      UA_IO_DESC_OUT_COUNT;
+	unsigned int count, i;
+
+	BUILD_BUG_ON(UA_IO_DESC_HDR_WORDS + DIV_ROUND_UP(UA_MAX_CHANNELS, 2) >
+		     UA_IO_DESC_WORDS);
+	BUILD_BUG_ON(UA_IO_MAP_HDR_WORDS != UA_IO_DESC_HDR_WORDS);
+
+	memset(d, 0, sizeof(*d));
+	for (i = 0; i < UA_IO_DESC_HDR_WORDS; i++)
+		d->hdr[i] = ua_read(ua, base + i * 4);
+
+	count = ua_io_desc_hdr_count(d->hdr, dir);
+	if (!count)
+		return;
+
+	for (i = 0; i < DIV_ROUND_UP(count, 2); i++) {
+		u32 word = ua_read(ua, base + (UA_IO_DESC_HDR_WORDS + i) * 4);
+
+		d->ids[2 * i] = word & 0xffff;
+		if (2 * i + 1 < count)
+			d->ids[2 * i + 1] = word >> 16;
 	}
 
-	dev_dbg(&ua->pdev->dev, "input channel name SRAM (0x%x, %u words):\n",
-		UA_REG_IN_NAMES_BASE, UA_CHAN_NAME_WORDS);
-	print_hex_dump_debug("  in:  ", DUMP_PREFIX_OFFSET, 32, 4,
-			     in_buf, sizeof(in_buf), false);
+	if (ua_read(ua, base) != d->hdr[0] ||
+	    ua_read(ua, base + 4) != d->hdr[1] ||
+	    ua_read(ua, base + cw * 4) != d->hdr[cw])
+		return;
 
-	dev_dbg(&ua->pdev->dev, "output channel name SRAM (0x%x, %u words):\n",
-		UA_REG_OUT_NAMES_BASE, UA_CHAN_NAME_WORDS);
-	print_hex_dump_debug("  out: ", DUMP_PREFIX_OFFSET, 32, 4,
-			     out_buf, sizeof(out_buf), false);
+	d->count = count;
+	d->valid = true;
+}
+
+static bool ua_io_desc_same(const struct ua_io_desc *a,
+			    const struct ua_io_desc *b)
+{
+	if (a->valid != b->valid)
+		return false;
+	if (!a->valid)
+		return true;
+	return a->count == b->count &&
+	       !memcmp(a->ids, b->ids, a->count * sizeof(a->ids[0]));
+}
+
+/*
+ * Take one read into audio->io_desc.  A usable read replaces the stored
+ * descriptor; one that is not usable only records its header (the last
+ * valid descriptor stays).  Returns true when the stored slots changed.
+ * Caller holds io_lock.
+ */
+static bool ua_io_desc_store(struct ua_audio *audio, unsigned int dir,
+			     const struct ua_io_desc *d)
+{
+	bool changed;
+
+	if (!d->valid) {
+		audio->io_desc_bad[dir] = true;
+		memcpy(audio->io_desc_bad_hdr[dir], d->hdr,
+		       sizeof(audio->io_desc_bad_hdr[dir]));
+		return false;
+	}
+
+	changed = !ua_io_desc_same(d, &audio->io_desc[dir]);
+	audio->io_desc[dir] = *d;
+	audio->io_desc_bad[dir] = false;
+	return changed;
+}
+
+/* One-line summary per direction (dev_info) + per-slot names (dev_dbg) */
+static void ua_io_desc_log(struct ua_device *ua, unsigned int dir,
+			   const char *why)
+{
+	struct ua_audio *audio = &ua->audio;
+	const struct ua_io_desc *d = &audio->io_desc[dir];
+	struct device *dev = &ua->pdev->dev;
+	char ids[UA_MAX_CHANNELS * 5 + 1];
+	unsigned int i, pos = 0;
+
+	if (audio->io_desc_bad[dir]) {
+		const u32 *h = audio->io_desc_bad_hdr[dir];
+
+		if (d->valid)
+			dev_info(dev,
+				 "IO desc %s (%s): read not usable (header %08x %08x %08x %08x %08x %08x), keeping the last valid %u-slot descriptor\n",
+				 ua_dir_name(dir), why, h[0], h[1], h[2],
+				 h[3], h[4], h[5], d->count);
+		else
+			dev_info(dev,
+				 "IO desc %s (%s): not usable, header %08x %08x %08x %08x %08x %08x\n",
+				 ua_dir_name(dir), why, h[0], h[1], h[2],
+				 h[3], h[4], h[5]);
+		return;
+	}
+	if (!d->valid)
+		return;		/* never read */
+
+	ids[0] = '\0';
+	for (i = 0; i < d->count; i++)
+		pos += scnprintf(ids + pos, sizeof(ids) - pos, " %04x",
+				 d->ids[i]);
+	dev_info(dev, "IO desc %s (%s): %u slots, word5 0x%x:%s\n",
+		 ua_dir_name(dir), why, d->count, d->hdr[UA_IO_DESC_FLAGS],
+		 ids);
+
+	for (i = 0; i < d->count; i++) {
+		char name[UA_IO_MAP_NAME_LEN];
+
+		ua_chan_name(d->ids[i], name, sizeof(name));
+		dev_dbg(dev, "  %s slot %2u: 0x%04x %s\n",
+			ua_dir_name(dir), i, d->ids[i], name);
+	}
+}
+
+/*
+ * Read both descriptors (ua_io_desc_store() semantics).  Logs a direction
+ * when @always_log is set, when it changed, or when a read turned bad.
+ * Returns true if either stored descriptor changed.  Caller holds io_lock.
+ */
+static bool ua_io_desc_read_locked(struct ua_device *ua, const char *why,
+				   bool always_log)
+{
+	struct ua_audio *audio = &ua->audio;
+	bool changed = false;
+	unsigned int dir;
+
+	lockdep_assert_held(&audio->io_lock);
+
+	if (atomic_read(&ua->shutdown))
+		return false;
+
+	for (dir = 0; dir < UA_DIRS; dir++) {
+		struct ua_io_desc d;
+		bool was_bad = audio->io_desc_bad[dir];
+		bool diff;
+
+		ua_io_desc_fetch(ua, dir, &d);
+		diff = ua_io_desc_store(audio, dir, &d);
+		changed |= diff;
+		if (always_log || diff || (audio->io_desc_bad[dir] && !was_bad))
+			ua_io_desc_log(ua, dir, why);
+	}
+	return changed;
+}
+
+/* kext FindIndexForChannelID: first slot carrying @ch_id, or -1 */
+static int ua_io_desc_find(const struct ua_io_desc *d, u16 ch_id)
+{
+	unsigned int i;
+
+	for (i = 0; i < d->count; i++)
+		if (d->ids[i] == ch_id)
+			return i;
+	return -1;
+}
+
+/* kext GetCurrentRouteTableIndex: Hi table when (rate >> 7) >= 0x55f */
+static unsigned int ua_rate_band(unsigned int rate)
+{
+	return (rate >> 7) >= 0x55f ? UA_RATE_BAND_HI : UA_RATE_BAND_LOMID;
+}
+
+/*
+ * TOSLink mode that picks @dir's route list (model->toslink, from the
+ * class's IsChannelShownForIORoute()).
+ *
+ * The output type is the "Digital Output Mode" the driver writes to the
+ * device (param 0x21, 0 = S/PDIF, 8 = ADAT).  The input type is host-side
+ * only: the Mixer Engine keeps it in GlobalSettings
+ * (CMxMixer::SetTOSLINKInputType stores it and refreshes the routes; no
+ * device parameter for it is known), and the firmware descriptor lists
+ * the S/PDIF and the ADAT input slots in either mode.  So dig_in_mode
+ * ("Digital Input Mode", default the class's DefaultTOSLinkInputType)
+ * only selects which input channels are exposed.
+ */
+static unsigned int ua_route_mode(const struct ua_audio *audio,
+				  unsigned int dir)
+{
+	unsigned int out = audio->monitor.digital_mode == 8 ? UA_DIG_ADAT :
+							      UA_DIG_SPDIF;
+
+	if (!audio->model)
+		return out;
+
+	switch (audio->model->toslink) {
+	case UA_TOSLINK_PER_DIR:
+		return dir == UA_DIR_REC ? audio->dig_in_mode : out;
+	case UA_TOSLINK_INPUT:
+		return audio->dig_in_mode;
+	default:
+		return out;	/* both lists are identical */
+	}
+}
+
+/*
+ * MixerTypeFreud/Stretch/Armstrong::IsChannelShownForIORoute hide ADAT
+ * channels from 5 up while 50001 <= rate <= 150000 (88.2/96 kHz S/MUX).
+ */
+static bool ua_route_hidden_at_rate(const struct ua_model_desc *m, u16 id,
+				    unsigned int rate)
+{
+	return m->adat_mid_rate_max &&
+	       (id >> 8) == UA_CHAN_TYPE_ADAT &&
+	       rate - 50001 < 99999 &&
+	       (id & 0xff) > m->adat_mid_rate_max;
+}
+
+/*
+ * Build one direction's ALSA map from the route table and the firmware
+ * descriptor.  @note receives the IDs that get no slot because the
+ * descriptor lacks them or the rate hides them (empty if none).
+ */
+static void ua_chan_map_build(struct ua_device *ua, unsigned int dir,
+			      unsigned int rate, unsigned int mode,
+			      struct ua_chan_map *map, char *note,
+			      size_t note_len)
+{
+	const struct ua_io_desc *d = &ua->audio.io_desc[dir];
+	const struct ua_model_desc *m = ua->audio.model;
+	const struct ua_route_list *r = NULL;
+	unsigned int i, pos = 0, matched = 0;
+
+	memset(map, 0, sizeof(*map));
+	note[0] = '\0';
+
+	if (m)
+		r = &m->routes[ua_rate_band(rate)][mode][dir];
+
+	if (r && r->ids && r->count) {
+		for (i = 0; i < r->count && map->channels < UA_MAX_CHANNELS;
+		     i++) {
+			u16 id = r->ids[i];
+			int slot = -1;
+
+			if (!ua_route_hidden_at_rate(m, id, rate))
+				slot = ua_io_desc_find(d, id);
+			if (slot < 0) {
+				pos += scnprintf(note + pos, note_len - pos,
+						 " %04x", id);
+				map->slot[map->channels] = UA_CHAN_NO_SLOT;
+			} else {
+				map->slot[map->channels] = slot;
+				matched++;
+			}
+			map->ch_id[map->channels] = id;
+			map->channels++;
+		}
+		if (matched)
+			return;
+		memset(map, 0, sizeof(*map));
+		scnprintf(note, note_len,
+			  " (no route channel matched, exposing all slots)");
+	}
+
+	/* No route table, or nothing matched: every descriptor slot */
+	for (i = 0; i < d->count; i++) {
+		map->slot[i] = i;
+		map->ch_id[i] = d->ids[i];
+	}
+	map->channels = d->count;
+}
+
+/* A complete io_map=1 layout, computed before it is committed */
+struct ua_io_layout {
+	struct ua_chan_map map[UA_DIRS];
+	char note[UA_DIRS][96];
+	unsigned int play_hw;
+	unsigned int rec_hw;
+	unsigned int rate;
+	unsigned int mode[UA_DIRS];
+	bool active;
+};
+
+/*
+ * Compute the layout the current descriptors, rate and TOSLink modes
+ * call for.  Legacy layout until both directions have had a valid
+ * descriptor.  Caller holds io_lock.
+ */
+static void ua_io_map_compute(struct ua_device *ua, struct ua_io_layout *l)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned int dir;
+
+	memset(l, 0, sizeof(*l));
+	l->rate = audio->sample_rate;
+	for (dir = 0; dir < UA_DIRS; dir++)
+		l->mode[dir] = ua_route_mode(audio, dir);
+
+	l->active = audio->io_desc[UA_DIR_REC].valid &&
+		    audio->io_desc[UA_DIR_PLAY].valid;
+	if (l->active) {
+		for (dir = 0; dir < UA_DIRS; dir++)
+			ua_chan_map_build(ua, dir, l->rate, l->mode[dir],
+					  &l->map[dir], l->note[dir],
+					  sizeof(l->note[dir]));
+		/* kext PrepareTransport: +1 flag channel per diag flags */
+		l->rec_hw = audio->io_desc[UA_DIR_REC].count +
+			    ((UA_AX_DIAG_FLAGS >> 2) & 1);
+		l->play_hw = audio->io_desc[UA_DIR_PLAY].count +
+			     ((UA_AX_DIAG_FLAGS & 6) ? 1 : 0);
+	} else {
+		ua_legacy_counts(ua, &l->play_hw, &l->rec_hw);
+		ua_chan_map_legacy(audio->model, UA_DIR_REC, l->rec_hw,
+				   &l->map[UA_DIR_REC]);
+		ua_chan_map_legacy(audio->model, UA_DIR_PLAY, l->play_hw,
+				   &l->map[UA_DIR_PLAY]);
+	}
+}
+
+/* Does @l differ from the layout the transport and copy path use? */
+static bool ua_io_layout_same(const struct ua_audio *audio,
+			      const struct ua_io_layout *l)
+{
+	return l->active == audio->io_map_active &&
+	       l->play_hw == audio->play_channels &&
+	       l->rec_hw == audio->rec_channels &&
+	       !memcmp(l->map, audio->chan_map, sizeof(l->map));
+}
+
+static void ua_io_map_log(struct ua_device *ua, const char *why,
+			  const struct ua_io_layout *l)
+{
+	struct ua_audio *audio = &ua->audio;
+	struct device *dev = &ua->pdev->dev;
+	unsigned int dir;
+
+	dev_info(dev, "io_map (%s): %s layout, %s, %u Hz (%s), record %s / playback %s mode, DMA frame %u play / %u rec\n",
+		 why, audio->io_map_active ? "descriptor" : "legacy",
+		 audio->model ? audio->model->name : "no model data",
+		 audio->io_map_rate,
+		 ua_rate_band(audio->io_map_rate) == UA_RATE_BAND_HI ?
+			"Hi" : "LoMid",
+		 ua_dig_name(audio->io_map_mode[UA_DIR_REC]),
+		 ua_dig_name(audio->io_map_mode[UA_DIR_PLAY]),
+		 audio->play_channels, audio->rec_channels);
+
+	for (dir = 0; dir < UA_DIRS; dir++) {
+		const struct ua_chan_map *map = &audio->chan_map[dir];
+		char slots[UA_MAX_CHANNELS * 3 + 1];
+		unsigned int i, pos = 0;
+
+		slots[0] = '\0';
+		for (i = 0; i < map->channels; i++)
+			pos += map->slot[i] == UA_CHAN_NO_SLOT ?
+			       scnprintf(slots + pos, sizeof(slots) - pos, " -") :
+			       scnprintf(slots + pos, sizeof(slots) - pos,
+					 " %u", map->slot[i]);
+		dev_info(dev, "io_map %s: %u ALSA ch -> slots%s\n",
+			 ua_dir_name(dir), map->channels, slots);
+		if (l->note[dir][0])
+			dev_info(dev,
+				 "io_map %s: not carried by the firmware at this rate, kept silent:%s\n",
+				 ua_dir_name(dir), l->note[dir]);
+	}
+}
+
+/*
+ * Make @l the layout the transport and the copy path use.  Caller holds
+ * ua->lock (the transport registers are only written under it, so
+ * nothing can arm the transport between this and the next prepare) and
+ * io_lock; the transport is stopped.  The copy path is held off by
+ * dma_sem.
+ */
+static void ua_io_map_commit(struct ua_device *ua,
+			     const struct ua_io_layout *l, const char *why)
+{
+	struct ua_audio *audio = &ua->audio;
+	bool stride_changed;
+
+	lockdep_assert_held(&ua->lock);
+	lockdep_assert_held(&audio->io_lock);
+
+	stride_changed = l->play_hw != audio->play_channels ||
+			 l->rec_hw != audio->rec_channels;
+
+	down_write(&audio->dma_sem);
+	memcpy(audio->chan_map, l->map, sizeof(audio->chan_map));
+	ua_audio_set_hw_layout(audio, l->play_hw, l->rec_hw);
+	audio->io_map_active = l->active;
+	/* Data laid out at the old stride would play back as noise */
+	if (stride_changed && audio->play_buf) {
+		memset(audio->play_buf, 0, UA_DMA_BUF_SIZE);
+		ua_dma_ring_sync(&ua->pdev->dev, &audio->play_ring, 0,
+				 UA_DMA_BUF_SIZE, true);
+	}
+	up_write(&audio->dma_sem);
+
+	audio->io_map_rate = l->rate;
+	memcpy(audio->io_map_mode, l->mode, sizeof(audio->io_map_mode));
+	audio->io_layout_stale = false;
+
+	ua_io_map_log(ua, why, l);
+}
+
+/*
+ * Push the open substreams that are running, paused or prepared into
+ * XRUN, so userspace prepares again and ua_pcm_prepare() restarts the
+ * transport on the new layout under ua->lock.  For a running stream this
+ * is what snd_pcm_stop_xrun() does; a paused or prepared one would
+ * otherwise go on (or start) on the old layout.  Process context;
+ * audio->lock keeps the substreams alive (pcm_close clears them under
+ * it) and is taken before the stream lock, as in the period timer.
+ */
+static void ua_io_map_force_reprepare(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	struct snd_pcm_substream *subs[UA_DIRS];
+	unsigned long flags, sflags;
+	unsigned int i;
+
+	spin_lock_irqsave(&audio->lock, flags);
+	subs[0] = audio->play_sub;
+	subs[1] = audio->rec_sub;
+	for (i = 0; i < ARRAY_SIZE(subs); i++) {
+		struct snd_pcm_substream *sub = subs[i];
+		snd_pcm_state_t state;
+
+		if (!sub || !sub->runtime)
+			continue;
+		snd_pcm_stream_lock_irqsave(sub, sflags);
+		state = sub->runtime->status->state;
+		if (state == SNDRV_PCM_STATE_RUNNING ||
+		    state == SNDRV_PCM_STATE_PAUSED ||
+		    state == SNDRV_PCM_STATE_PREPARED)
+			snd_pcm_stop(sub, SNDRV_PCM_STATE_XRUN);
+		snd_pcm_stream_unlock_irqrestore(sub, sflags);
+	}
+	spin_unlock_irqrestore(&audio->lock, flags);
+}
+
+/*
+ * io_map=1: bring the layout in line with the current descriptors, rate
+ * and TOSLink modes.  Transport stopped: commit now.  Running: if the
+ * layout would change, mark it stale and force the streams to re-prepare
+ * (the restart then happens under ua->lock in prepare).  @l receives the
+ * layout the next transport start uses.  Caller holds ua->lock and
+ * io_lock.
+ */
+static void ua_io_map_update_into(struct ua_device *ua, const char *why,
+				  struct ua_io_layout *l)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	lockdep_assert_held(&ua->lock);
+	lockdep_assert_held(&audio->io_lock);
+
+	ua_io_map_compute(ua, l);
+
+	if (ua_io_layout_same(audio, l)) {
+		/* Same slots: only the build parameters to record */
+		audio->io_map_rate = l->rate;
+		memcpy(audio->io_map_mode, l->mode, sizeof(audio->io_map_mode));
+		audio->io_layout_stale = false;
+	} else if (audio->transport_running) {
+		if (!audio->io_layout_stale)
+			dev_info(&ua->pdev->dev,
+				 "io_map (%s): IO layout changed while streaming, streams re-prepare\n",
+				 why);
+		audio->io_layout_stale = true;
+		ua_io_map_force_reprepare(ua);
+	} else {
+		ua_io_map_commit(ua, l, why);
+	}
+}
+
+/* ua_io_map_update_into() without a caller-side layout (io_map=1 only) */
+static void ua_io_map_update_locked(struct ua_device *ua, const char *why)
+{
+	struct ua_io_layout *l;
+
+	if (!ua_io_map_enabled())
+		return;
+
+	l = kzalloc(sizeof(*l), GFP_KERNEL);
+	if (!l)
+		return;
+	ua_io_map_update_into(ua, why, l);
+	kfree(l);
+}
+
+/*
+ * After connect: the kext synthesises notification bits 0 + 1 and reads
+ * both areas.  Caller holds ua->lock (probe, resume, prepare, reconnect).
+ */
+static void ua_io_map_connected(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (!audio->io_ready)
+		return;
+
+	mutex_lock(&audio->io_lock);
+	ua_io_desc_read_locked(ua, "connect", true);
+	ua_io_map_update_locked(ua, "connect");
+	mutex_unlock(&audio->io_lock);
+}
+
+/* Notification bits 0/1 (dsp service loop, ua->lock held) */
+static void ua_io_desc_notify(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (!audio->io_ready)
+		return;
+
+	mutex_lock(&audio->io_lock);
+	if (ua_io_desc_read_locked(ua, "notification", false))
+		ua_io_map_update_locked(ua, "notification");
+	mutex_unlock(&audio->io_lock);
+}
+
+/*
+ * Re-read and re-map after a TOSLink mode change: ALSA "Digital Output
+ * Mode" / "Digital Input Mode", or SET_MIXER_PARAM 0x21.  Caller holds
+ * ua->lock.
+ */
+void ua_io_map_digital_mode_changed(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (!audio->io_ready)
+		return;
+
+	mutex_lock(&audio->io_lock);
+	ua_io_desc_read_locked(ua, "digital mode", true);
+	ua_io_map_update_locked(ua, "digital mode");
+	mutex_unlock(&audio->io_lock);
+}
+
+/*
+ * io_map=1, transport about to be prepared (stopped): refresh the
+ * descriptors and commit the layout AX_*_CH is about to be written
+ * from.  Caller holds ua->lock.
+ */
+static void ua_io_map_prepare(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (!ua_io_map_enabled() || !audio->io_ready)
+		return;
+
+	mutex_lock(&audio->io_lock);
+	ua_io_desc_read_locked(ua, "prepare", false);
+	ua_io_map_update_locked(ua, "prepare");
+	mutex_unlock(&audio->io_lock);
+}
+
+/*
+ * pcm_prepare: a stream opened under one layout and prepared under
+ * another (descriptor or mode changed in between) keeps its channel
+ * count; the copy path pads or drops the difference.  Say so.
+ */
+static void ua_io_map_check_stream(struct ua_device *ua,
+				   struct snd_pcm_substream *sub)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned int dir = sub->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+			   UA_DIR_PLAY : UA_DIR_REC;
+	unsigned int ch;
+
+	if (!ua_io_map_enabled() || !audio->io_ready)
+		return;
+
+	mutex_lock(&audio->io_lock);
+	ch = audio->chan_map[dir].channels;
+	mutex_unlock(&audio->io_lock);
+
+	if (sub->runtime->channels != ch)
+		dev_warn(&ua->pdev->dev,
+			 "io_map %s: stream has %u channels but the layout now has %u; reopen the stream\n",
+			 ua_dir_name(dir), sub->runtime->channels, ch);
+}
+
+/* io_map=1: a layout change seen while streaming needs a restart */
+static bool ua_io_map_needs_restart(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	bool stale;
+
+	if (!ua_io_map_enabled() || !audio->io_ready)
+		return false;
+
+	mutex_lock(&audio->io_lock);
+	stale = audio->io_layout_stale && audio->transport_running;
+	mutex_unlock(&audio->io_lock);
+	return stale;
+}
+
+/*
+ * pcm_open: ALSA channel count for @dir and the ring size in frames.
+ * With io_map=1 the layout is brought up to date first, under ua->lock
+ * like every other layout change (warm_boot=1 never connects, so the
+ * descriptors may not have been read yet), and the count is the one of
+ * the layout the next transport start uses: the committed one, or the
+ * pending one when it changed while streaming.  Not while a resume
+ * re-init holds the lock for seconds: prepare refreshes the layout then.
+ */
+static unsigned int ua_io_map_open_channels(struct ua_device *ua,
+					    unsigned int dir,
+					    unsigned int *frames)
+{
+	struct ua_audio *audio = &ua->audio;
+	const struct ua_chan_map *map;
+	struct ua_io_layout *l = NULL;
+	unsigned int ch, hw;
+
+	/*
+	 * Up to UA_MAX_CHANNELS slots the ring is always UA_MAX_BUF_FRAMES
+	 * frames (ua_calc_buf_frame_size()), so a layout change never
+	 * changes the buffer size an open stream was constrained to.
+	 */
+	BUILD_BUG_ON(UA_DMA_BUF_SIZE / (UA_MAX_CHANNELS * UA_SAMPLE_BYTES) / 2 <
+		     UA_MAX_BUF_FRAMES);
+
+	if (!audio->io_ready) {
+		*frames = audio->buf_frame_size;
+		return dir == UA_DIR_PLAY ? audio->play_channels :
+					    audio->rec_channels;
+	}
+
+	if (ua_io_map_enabled() && !READ_ONCE(ua->resume_pending))
+		l = kzalloc(sizeof(*l), GFP_KERNEL);
+	if (l)
+		mutex_lock(&ua->lock);
+	mutex_lock(&audio->io_lock);
+
+	map = &audio->chan_map[dir];
+	hw = dir == UA_DIR_PLAY ? audio->play_channels : audio->rec_channels;
+	if (l && !atomic_read(&ua->shutdown)) {
+		if (!audio->io_desc[UA_DIR_REC].valid ||
+		    !audio->io_desc[UA_DIR_PLAY].valid)
+			ua_io_desc_read_locked(ua, "open", false);
+		ua_io_map_update_into(ua, "open", l);
+		map = &l->map[dir];
+		hw = dir == UA_DIR_PLAY ? l->play_hw : l->rec_hw;
+	}
+
+	ch = map->channels ? map->channels : hw;
+	*frames = audio->buf_frame_size;
+
+	mutex_unlock(&audio->io_lock);
+	if (l) {
+		mutex_unlock(&ua->lock);
+		kfree(l);
+	}
+	return ch;
+}
+
+/*
+ * After a clock change (the post-start clock write of a rate change in
+ * prepare, or ua_audio_set_clock()).  io_map=0: one read-only pass that
+ * logs the descriptors.  io_map=1: the firmware may republish its
+ * descriptors for the new rate, so poll them for UA_IO_DESC_SETTLE_MS;
+ * returns true when a valid layout that read back the same twice in a
+ * row differs from the stored one, and stores it.  Reads that are not
+ * usable never count as settled.  Caller holds ua->lock.
+ */
+static bool ua_io_map_settle(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	struct ua_io_desc *buf, *applied, *prev, *cur;
+	unsigned int t, dir;
+	bool changed = false;
+
+	if (!audio->io_ready)
+		return false;
+
+	if (!ua_io_map_enabled()) {
+		mutex_lock(&audio->io_lock);
+		ua_io_desc_read_locked(ua, "rate change", true);
+		mutex_unlock(&audio->io_lock);
+		return false;
+	}
+
+	buf = kcalloc(3 * UA_DIRS, sizeof(*buf), GFP_KERNEL);
+	if (!buf)
+		return false;
+	applied = buf;
+	prev = buf + UA_DIRS;
+	cur = buf + 2 * UA_DIRS;
+
+	mutex_lock(&audio->io_lock);
+	memcpy(applied, audio->io_desc, UA_DIRS * sizeof(*applied));
+	mutex_unlock(&audio->io_lock);
+	memcpy(prev, applied, UA_DIRS * sizeof(*prev));
+
+	for (t = 0; t < UA_IO_DESC_SETTLE_MS && !changed;
+	     t += UA_IO_DESC_POLL_MS) {
+		bool stable = true, differs = false;
+
+		msleep(UA_IO_DESC_POLL_MS);
+		if (atomic_read(&ua->shutdown))
+			break;
+		for (dir = 0; dir < UA_DIRS; dir++) {
+			ua_io_desc_fetch(ua, dir, &cur[dir]);
+			stable &= cur[dir].valid &&
+				  ua_io_desc_same(&cur[dir], &prev[dir]);
+			differs |= !ua_io_desc_same(&cur[dir], &applied[dir]);
+		}
+		memcpy(prev, cur, UA_DIRS * sizeof(*prev));
+		changed = stable && differs;
+	}
+
+	/*
+	 * Store a layout that settled.  Otherwise keep the stored one: the
+	 * last read only records a bad header, or confirms what is stored
+	 * (a valid read that differs but never repeated is left alone —
+	 * the notification bits report a republish that comes later).
+	 */
+	mutex_lock(&audio->io_lock);
+	for (dir = 0; dir < UA_DIRS; dir++) {
+		if (changed || !prev[dir].valid ||
+		    ua_io_desc_same(&prev[dir], &applied[dir]))
+			ua_io_desc_store(audio, dir, &prev[dir]);
+		ua_io_desc_log(ua, dir, "rate change");
+	}
+	mutex_unlock(&audio->io_lock);
+
+	kfree(buf);
+	return changed;
+}
+
+/*
+ * io_map=1, after a sample-rate change that did not go through prepare
+ * (ua_audio_set_clock(), possibly while streaming): the rate band and
+ * the ADAT S/MUX rule depend on the rate, and the firmware may republish
+ * its descriptors.  A changed layout is handled like any other (commit,
+ * or stale + forced re-prepare).  Caller holds ua->lock.
+ */
+static void ua_io_map_rate_changed(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (!ua_io_map_enabled() || !audio->io_ready)
+		return;
+
+	ua_io_map_settle(ua);
+
+	mutex_lock(&audio->io_lock);
+	ua_io_map_update_locked(ua, "rate change");
+	mutex_unlock(&audio->io_lock);
+}
+
+/*
+ * Snapshot of the map for UA_IOCTL_GET_IO_MAP and /proc (one walk, one
+ * naming rule, one rate/mode source: the parameters the applied layout
+ * was built for, or the legacy layout's).
+ */
+void ua_io_map_get_info(struct ua_device *ua, struct ua_io_map_info *info)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned int dir, i;
+
+	memset(info, 0, sizeof(*info));
+	info->io_map = io_map;
+	info->device_type = ua->device_type;
+
+	if (!audio->io_ready)
+		return;
+
+	BUILD_BUG_ON(UA_IO_MAP_MAX_CH < UA_MAX_CHANNELS);
+	BUILD_BUG_ON(UA_IO_MAP_NAME_LEN < 17);
+
+	mutex_lock(&audio->io_lock);
+	info->active = audio->io_map_active;
+	info->stale = audio->io_layout_stale;
+	info->sample_rate = audio->io_map_active ? audio->io_map_rate :
+						    audio->sample_rate;
+
+	for (dir = 0; dir < UA_DIRS; dir++) {
+		struct ua_io_map_dir *o = dir == UA_DIR_REC ? &info->rec :
+							      &info->play;
+		const struct ua_io_desc *d = &audio->io_desc[dir];
+		const struct ua_chan_map *map = &audio->chan_map[dir];
+
+		o->desc_valid = d->valid;
+		o->desc_count = d->count;
+		o->desc_flags = d->hdr[UA_IO_DESC_FLAGS];
+		o->desc_last_bad = audio->io_desc_bad[dir];
+		memcpy(o->last_hdr, audio->io_desc_bad[dir] ?
+				    audio->io_desc_bad_hdr[dir] : d->hdr,
+		       sizeof(o->last_hdr));
+		o->hw_channels = dir == UA_DIR_REC ? audio->rec_channels :
+						     audio->play_channels;
+		o->channels = map->channels;
+		if (audio->io_map_active)
+			o->digital_mode = audio->io_map_mode[dir];
+		else
+			o->digital_mode = audio->model ?
+					  audio->model->legacy_mode :
+					  UA_DIG_SPDIF;
+		for (i = 0; i < d->count; i++)
+			o->desc_ids[i] = d->ids[i];
+		for (i = 0; i < map->channels; i++) {
+			o->chan[i].ch_id = map->ch_id[i];
+			o->chan[i].slot = map->slot[i] == UA_CHAN_NO_SLOT ?
+					  0xFFFF : map->slot[i];
+			ua_chan_map_label(map, i, o->chan[i].name,
+					  sizeof(o->chan[i].name));
+		}
+	}
+	mutex_unlock(&audio->io_lock);
+}
+
+/* /proc/asound/cardN/io_map: prints ua_io_map_get_info() */
+static void ua_io_map_proc_read(struct snd_info_entry *entry,
+				struct snd_info_buffer *buf)
+{
+	struct ua_device *ua = entry->private_data;
+	struct ua_audio *audio = &ua->audio;
+	struct ua_io_map_info *info;
+	unsigned int dir, i;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return;
+	ua_io_map_get_info(ua, info);
+
+	snd_iprintf(buf, "io_map\t\t%u (%s layout)%s\n", info->io_map,
+		    info->active ? "descriptor" : "legacy",
+		    info->stale ? ", stale: streams re-prepare" : "");
+	snd_iprintf(buf, "model\t\t%s (device type 0x%02x)\n",
+		    audio->model ? audio->model->name : "no model data",
+		    info->device_type);
+	snd_iprintf(buf, "rate\t\t%u Hz\n", info->sample_rate);
+
+	for (dir = 0; dir < UA_DIRS; dir++) {
+		const struct ua_io_map_dir *o = dir == UA_DIR_REC ?
+						&info->rec : &info->play;
+		const u32 *h = o->last_hdr;
+
+		snd_iprintf(buf, "\n%s: %u ALSA channels, DMA frame %u slots, %s mode\n",
+			    ua_dir_name(dir), o->channels, o->hw_channels,
+			    ua_dig_name(o->digital_mode));
+		for (i = 0; i < o->channels; i++)
+			snd_iprintf(buf, "  ch %2u  slot %2u  0x%04x  %s\n",
+				    i, o->chan[i].slot, o->chan[i].ch_id,
+				    o->chan[i].name);
+
+		if (o->desc_last_bad)
+			snd_iprintf(buf, "%s descriptor: last read not usable (%08x %08x %08x %08x %08x %08x)%s\n",
+				    ua_dir_name(dir), h[0], h[1], h[2], h[3],
+				    h[4], h[5],
+				    o->desc_valid ? ", last valid one below" :
+						    "");
+		if (!o->desc_valid)
+			continue;
+		snd_iprintf(buf, "%s descriptor: %u slots, word5 0x%x\n",
+			    ua_dir_name(dir), o->desc_count, o->desc_flags);
+		for (i = 0; i < o->desc_count; i++) {
+			char name[UA_IO_MAP_NAME_LEN];
+
+			ua_chan_name(o->desc_ids[i], name, sizeof(name));
+			snd_iprintf(buf, "  slot %2u  0x%04x  %s\n", i,
+				    o->desc_ids[i], name);
+		}
+	}
+
+	kfree(info);
 }
 
 /* ----------------------------------------------------------------
@@ -615,6 +1762,10 @@ static void ua_dsp_service_handler(struct work_struct *work)
 			dev_info(&ua->pdev->dev,
 				 "dsp_service[%u]: notif=0x%08x (cleared)\n",
 				 audio->dsp_service_count, notif);
+
+		/* Bits 0/1: the firmware republished an IO descriptor */
+		if (notif & (UA_NOTIF_BIT_OUT_IO | UA_NOTIF_BIT_IN_IO))
+			ua_io_desc_notify(ua);
 	}
 
 	rb_status = ua_read(ua, UA_REG_MIXER_RB_STATUS);
@@ -719,6 +1870,23 @@ static void ua_audio_read_connect_readback(struct ua_device *ua);
  * The full ua_audio_connect() handles channel counts, routing,
  * SEQ sync, and service handler start.
  * ---------------------------------------------------------------- */
+/*
+ * A host that went away without disconnecting (rmmod, a reboot, a crash, or
+ * a hand-off from macOS/Windows) leaves the audio extension connected, and
+ * it ignores a new ACEFACE until it has seen the disconnect doorbell.  On an
+ * x4 (2026-10-09) no connect ack ever came after a quiesce without the
+ * doorbell; writing 0x10 to AX_CONNECT, then ACEFACE + connect, was acked at
+ * once and left the mixer DSP's SEQ counters untouched.
+ */
+static void ua_aceface_clear_stale(struct ua_device *ua)
+{
+	dev_info(&ua->pdev->dev,
+		 "no ACEFACE ack yet: sending the disconnect doorbell to clear a stale host connection\n");
+	ua_write(ua, UA_REG_AX_CONNECT, UA_AX_DISCONNECT);
+	(void)ua_read(ua, UA_REG_FPGA_REV);
+	msleep(50);
+}
+
 int ua_aceface_handshake(struct ua_device *ua)
 {
 	int retry, poll;
@@ -744,6 +1912,9 @@ int ua_aceface_handshake(struct ua_device *ua)
 		 UA_REG_NOTIF_STATUS);
 
 	for (retry = 0; retry < EARLY_ACEFACE_RETRIES; retry++) {
+		if (retry == 1)
+			ua_aceface_clear_stale(ua);
+
 		ua_write(ua, UA_REG_NOTIF_ACEFACE, UA_AX_CONNECT_MAGIC);
 		ua_write(ua, UA_REG_AX_CONNECT, UA_AX_CONNECT);
 
@@ -801,21 +1972,24 @@ int ua_aceface_handshake(struct ua_device *ua)
 
 int ua_boot_transport_start(struct ua_device *ua)
 {
-	struct ua_audio *audio = &ua->audio;
-	unsigned int block_size;
+	unsigned int block_size, play, rec, frames;
 	u32 readback, dma, frame_ctr;
 	int ret, retries;
 
-	/* Set up channel counts from model table */
-	ua_get_model_channels(ua);
-
-	audio->buf_frame_size = ua_calc_buf_frame_size(audio->play_channels,
-						       audio->rec_channels);
+	/*
+	 * Legacy model counts, in locals.  This pre-firmware transport only
+	 * has to run for the ring engine; it writes the counts it always
+	 * wrote, and it leaves the layout the PCM copy path uses alone —
+	 * on the resume cold path (ua_resume_work()) that layout belongs
+	 * to ua_io_map_commit() and may be the io_map=1 one.  The next
+	 * connect and prepare re-read the descriptors and re-apply it.
+	 */
+	ua_legacy_counts(ua, &play, &rec);
+	frames = ua_calc_buf_frame_size(play, rec);
 
 	dev_info(&ua->pdev->dev,
 		 "cold boot transport: play=%u rec=%u buf=%u\n",
-		 audio->play_channels, audio->rec_channels,
-		 audio->buf_frame_size);
+		 play, rec, frames);
 
 	/*
 	 * Full PrepareTransport register sequence (from kext disassembly).
@@ -823,10 +1997,10 @@ int ua_boot_transport_start(struct ua_device *ua)
 	 */
 
 	/* BUF_SIZE (0x2240) = frameSize - 1 */
-	ua_write(ua, UA_REG_AX_BUF_SIZE, audio->buf_frame_size - 1);
+	ua_write(ua, UA_REG_AX_BUF_SIZE, frames - 1);
 
 	/* DMA_BLKSZ (0x226C) = ((frameSize-1) * playCh) >> 10 */
-	block_size = ((audio->buf_frame_size - 1) * audio->play_channels) >> 10;
+	block_size = ((frames - 1) * play) >> 10;
 	ua_write(ua, UA_REG_AX_DMA_BLKSZ, block_size);
 
 	/* Clear SAMPLE_POS (0x2244) */
@@ -839,12 +2013,11 @@ int ua_boot_transport_start(struct ua_device *ua)
 	ua_write(ua, UA_REG_AX_FRAME_CFG, 0x10);
 
 	/* Channel counts */
-	ua_write(ua, UA_REG_AX_PLAY_CH, audio->play_channels);
-	ua_write(ua, UA_REG_AX_REC_CH, audio->rec_channels);
+	ua_write(ua, UA_REG_AX_PLAY_CH, play);
+	ua_write(ua, UA_REG_AX_REC_CH, rec);
 
 	/* P2P_ROUTE (0x224C) = 0x100 | (play_ch - 1) */
-	ua_write(ua, UA_REG_AX_P2P_ROUTE,
-		 0x100 | (audio->play_channels - 1));
+	ua_write(ua, UA_REG_AX_P2P_ROUTE, 0x100 | (play - 1));
 
 	/* ARM — AX_CONTROL = 1 (DMA enable) */
 	ua_write(ua, UA_REG_AX_CONTROL, UA_AX_CTRL_DMA_EN);
@@ -1021,6 +2194,9 @@ static int ua_audio_connect(struct ua_device *ua)
 		 UA_REG_NOTIF_STATUS);
 
 	for (retry = 0; retry < UA_CONNECT_RETRIES; retry++) {
+		if (retry == 1)
+			ua_aceface_clear_stale(ua);
+
 		/* Write handshake magic to bank-shifted ACEFACE register */
 		ua_write(ua, UA_REG_NOTIF_ACEFACE, UA_AX_CONNECT_MAGIC);
 
@@ -1089,33 +2265,12 @@ post_handshake:
 				 * may not advance to active audio routing.
 				 */
 
-				/* Bit 0: Read full output IO descriptors */
-				{
-					u32 out_buf[UA_CHAN_NAME_WORDS];
-					unsigned int i;
-
-					for (i = 0; i < UA_CHAN_NAME_WORDS; i++)
-						out_buf[i] = ua_read(ua,
-							UA_REG_OUT_NAMES_BASE + i * 4);
-					dev_info(&ua->pdev->dev,
-						 "  out IO desc: ch_count=%u [0]=%08x [1]=%08x [2]=%08x\n",
-						 out_buf[4], out_buf[0],
-						 out_buf[1], out_buf[2]);
-				}
-
-				/* Bit 1: Read full input IO descriptors */
-				{
-					u32 in_buf[UA_CHAN_NAME_WORDS];
-					unsigned int i;
-
-					for (i = 0; i < UA_CHAN_NAME_WORDS; i++)
-						in_buf[i] = ua_read(ua,
-							UA_REG_IN_NAMES_BASE + i * 4);
-					dev_info(&ua->pdev->dev,
-						 "  in  IO desc: ch_count=%u [0]=%08x [1]=%08x [2]=%08x\n",
-						 in_buf[3], in_buf[0],
-						 in_buf[1], in_buf[2]);
-				}
+				/*
+				 * Bits 0 + 1: read both IO descriptors
+				 * (read-only), log them, and with io_map=1
+				 * rebuild the channel map from them.
+				 */
+				ua_io_map_connected(ua);
 
 				/* Bit 22: Read rate and clock info */
 				{
@@ -1243,6 +2398,16 @@ post_handshake:
 						ua->mixer_dirty = true;
 					}
 
+					/*
+					 * Kext CPcieDevice::Connect ends with
+					 * SetOutputMute(0): undo the mute the
+					 * shutdown/suspend quiesce applied.
+					 * Cache only — flushed with the batch
+					 * above.  No-op except on the device
+					 * types that have an output mute.
+					 */
+					ua_set_output_mute_locked(ua, false, false);
+
 					dev_info(&ua->pdev->dev,
 						 "  mixer init (SEQ=%u, s24=0x20)\n",
 						 seq_rd);
@@ -1349,13 +2514,21 @@ post_handshake:
 	return -ETIMEDOUT;
 }
 
-static void ua_audio_disconnect(struct ua_device *ua)
+/*
+ * Hardware part of the soft disconnect.  Safe under ua->lock: the DSP
+ * service handler takes ua->lock, so instead of cancel_delayed_work_sync()
+ * this only marks the loop stopped and cancels a pending run.  A handler
+ * already blocked on the lock runs once more and does not reschedule.
+ */
+static void ua_audio_disconnect_hw(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	u32 seq_wr, seq_rd;
 
-	/* Stop DSP service before tearing down connection */
-	ua_dsp_service_stop(ua);
+	if (audio->dsp_service_running) {
+		audio->dsp_service_running = false;
+		cancel_delayed_work(&audio->dsp_service_work);
+	}
 
 	if (!audio->connected)
 		return;
@@ -1364,10 +2537,12 @@ static void ua_audio_disconnect(struct ua_device *ua)
 	ua_write(ua, UA_REG_AX_CONTROL, 0);
 	audio->transport_running = false;
 
-	/* Clear DMA engine and disable all interrupts */
-	ua_write(ua, UA_REG_IRQ_ENABLE, 0);
-	if (ua->fw_v2)
-		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, 0);
+	/*
+	 * Disable all interrupts.  Through the shared helper so the cached
+	 * masks follow: the old direct IMR writes left them stale, and the
+	 * next ua_enable_vector() silently re-enabled every cached vector.
+	 */
+	ua_irq_mask_all(ua, false);
 
 	/* Give firmware time to stop DMA operations */
 	msleep(50);
@@ -1392,6 +2567,14 @@ static void ua_audio_disconnect(struct ua_device *ua)
 	audio->connected = false;
 }
 
+/* Caller must NOT hold ua->lock (waits for the DSP service handler) */
+static void ua_audio_disconnect(struct ua_device *ua)
+{
+	/* Stop DSP service before tearing down connection */
+	ua_dsp_service_stop(ua);
+	ua_audio_disconnect_hw(ua);
+}
+
 /**
  * ua_audio_reconnect - Reset connection state and re-do ACEFACE handshake.
  *
@@ -1400,24 +2583,25 @@ static void ua_audio_disconnect(struct ua_device *ua)
  * userspace loads firmware and then triggers this to establish the
  * ACEFACE connection with the now-ready DSP.
  *
- * Caller must NOT hold ua->lock.
+ * Caller must NOT hold ua->lock.  The connect itself runs under it, as
+ * it does from pcm_prepare.
  */
 int ua_audio_reconnect(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	int ret;
 
+	mutex_lock(&ua->lock);
+
 	/* Reset connection state so ua_audio_connect() will retry */
 	audio->connected = false;
 
 	ret = ua_audio_connect(ua);
-	if (ret)
-		return ret;
+	if (!ret)
+		ua_dsp_service_start(ua);	/* periodic readback drain */
 
-	/* Start periodic readback drain */
-	ua_dsp_service_start(ua);
-
-	return 0;
+	mutex_unlock(&ua->lock);
+	return ret;
 }
 
 /* ----------------------------------------------------------------
@@ -1427,16 +2611,28 @@ int ua_audio_reconnect(struct ua_device *ua)
 /*
  * Prepare the transport engine.
  * Mirrors CPcieAudioExtension::PrepareTransport().
+ *
+ * @timer_frames: periodic timer interval for TIMER_CFG, or 0 to leave it.
+ * The kext writes TIMER_CFG only here, i.e. only while the transport is
+ * stopped (PrepareTransport, 12.0.0 x86 0x34ee8); rewriting it under a
+ * running transport on every pcm_prepare is a suspect in issue #42.
+ * Caller holds ua->lock.
  */
-static int ua_audio_prepare_transport(struct ua_device *ua)
+static int ua_audio_prepare_transport(struct ua_device *ua,
+				      unsigned int timer_frames)
 {
 	struct ua_audio *audio = &ua->audio;
 	unsigned int block_size;
 	int retries;
 	u32 frame_ctr, acr, readback;
 
-	audio->buf_frame_size = ua_calc_buf_frame_size(audio->play_channels,
-						       audio->rec_channels);
+	/*
+	 * io_map=1: re-read the firmware IO descriptors and commit the
+	 * layout (play/rec_channels and buf_frame_size, written to AX_*_CH
+	 * and BUF_SIZE below) from them.  Every layout change happens under
+	 * ua->lock, held from here to the transport start.
+	 */
+	ua_io_map_prepare(ua);
 
 	dev_info(&ua->pdev->dev, "=== PREPARE TRANSPORT ===\n");
 	dev_info(&ua->pdev->dev, "  channels: play=%u rec=%u buf_frames=%u\n",
@@ -1483,8 +2679,12 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 	/* Step 3: Clear SAMPLE_POS (0x2244) = 0 */
 	ua_write(ua, UA_REG_AX_SAMPLE_POS, 0);
 
-	/* Step 4: Enable timer vector (TIMER_CFG set later in pcm_prepare) */
-	ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC);
+	/* Step 3b: TIMER_CFG (0x2270) = periodic timer interval */
+	if (timer_frames)
+		ua_write(ua, UA_REG_AX_TIMER_CFG, timer_frames);
+
+	/* Step 4: Enable timer vector — EnableVector(0x46, clearPending=1) */
+	ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC, true);
 
 	/* Step 5: Clear SAMPLE_POS again (kext does this twice) */
 	ua_write(ua, UA_REG_AX_SAMPLE_POS, 0);
@@ -1530,10 +2730,18 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 			 pos_offset, audio->rate_index);
 	}
 
-	/* Step 9: PLAY_CH (0x2250) = playback channel count */
+	/*
+	 * Step 9: PLAY_CH (0x2250) = playback channel count.
+	 * Legacy: route-table count.  io_map=1: output descriptor count,
+	 * +1 only when (UA_AX_DIAG_FLAGS & 6) (kext rule).
+	 */
 	ua_write(ua, UA_REG_AX_PLAY_CH, audio->play_channels);
 
-	/* Step 10: REC_CH (0x225C) = record channel count */
+	/*
+	 * Step 10: REC_CH (0x225C) = record channel count.
+	 * io_map=1: input descriptor count, +1 only when
+	 * (UA_AX_DIAG_FLAGS & 4).
+	 */
 	ua_write(ua, UA_REG_AX_REC_CH, audio->rec_channels);
 
 	/* Step 11: ARM — AX_CONTROL (0x2248) = 1 */
@@ -1547,9 +2755,15 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 	 * From kext: written AFTER DMA enable + status fence.
 	 * Tells FPGA how to route audio between DSP and DMA.
 	 * Previously written before DMA enable (wrong order).
+	 *
+	 * The kext only writes it when diagnostic flags bit 1 is set
+	 * (PrepareTransport tests +0x28b8 & 2), i.e. never in a normal
+	 * session.  io_map=1 follows the kext; the legacy layout keeps
+	 * the write it has always done.
 	 */
-	ua_write(ua, UA_REG_AX_P2P_ROUTE,
-		 0x100 | (audio->play_channels - 1));
+	if (!audio->io_map_active || (UA_AX_DIAG_FLAGS & 2))
+		ua_write(ua, UA_REG_AX_P2P_ROUTE,
+			 0x100 | (audio->play_channels - 1));
 
 	dev_info(&ua->pdev->dev,
 		 "  armed: BLKSZ=%u CTRL=0x%x STATUS=0x%x\n",
@@ -1574,8 +2788,8 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 	if (frame_ctr == 0)
 		dev_warn(&ua->pdev->dev, "frame counter still zero!\n");
 
-	/* Step 15: Enable end-of-buffer vector (0x47) — kext does this here */
-	ua_enable_vector(ua, UA_IRQ_VEC_END_BUFFER);
+	/* Step 15: Enable end-of-buffer vector — EnableVector(0x47, 1) */
+	ua_enable_vector(ua, UA_IRQ_VEC_END_BUFFER, true);
 
 	dev_info(&ua->pdev->dev,
 		 "transport prepared: %u frames, %u/%u ch, blksz=%u\n",
@@ -1586,10 +2800,16 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 }
 
 /*
- * One-time PCIe setup: disable ASPM, increase completion timeouts.
- * Called from probe/connect, NOT from pcm_prepare.
+ * One-time PCIe setup.  Called from probe/connect, NOT from pcm_prepare.
  * Walking the Thunderbolt bridge chain takes milliseconds and must
  * not run on PipeWire's real-time audio thread.
+ *
+ * By default this only logs the link state: the kext never writes config
+ * space.  With pcie_tuning=1 it disables ASPM on the Apollo's link through
+ * the ASPM core (pci_disable_link_state(), endpoint only — no raw LNKCTL
+ * writes behind the ASPM driver's back, no bridge LNKCTL writes), clears
+ * DevSta errors and raises the completion timeout on the Apollo and every
+ * upstream bridge, as the driver always did before.
  */
 static void ua_pcie_setup(struct ua_device *ua)
 {
@@ -1615,16 +2835,43 @@ static void ua_pcie_setup(struct ua_device *ua)
 				 128 << ((devctl >> 12) & 7),
 				 lnksta & 0xF,
 				 (lnksta >> 4) & 0x3F);
+		}
 
-			/* Disable ASPM on device */
-			if (lnkctl & 3) {
+		/*
+		 * L0s on the Apollo's own link.  The FPGA endpoint advertises
+		 * an unlimited L0s exit latency, and with L0s enabled (the
+		 * kernel's default ASPM policy) the Thunderbolt bridge above it
+		 * logs a steady stream of correctable Replay Timer Timeouts
+		 * while audio streams (x4 on kernel 7.2, 2026-10-09: ~15 in
+		 * 4 minutes with L0s on, none with it off).  Turn L0s off
+		 * through the ASPM core; this is not a raw config write.
+		 */
+		if (pos && (lnkctl & PCI_EXP_LNKCTL_ASPM_L0S)) {
+			int err = pci_disable_link_state(ua->pdev,
+							 PCIE_LINK_STATE_L0S);
+
+			dev_info(&ua->pdev->dev,
+				 "  ASPM L0s disabled on the Apollo link: %d\n",
+				 err);
+		}
+
+		if (!pcie_tuning) {
+			ua->pcie_setup_done = true;
+			dev_info(&ua->pdev->dev,
+				 "PCIe config otherwise left as enumerated (pcie_tuning=0)\n");
+			return;
+		}
+
+		if (pos) {
+			/* Disable ASPM on the Apollo's link via the ASPM core */
+			if (lnkctl & PCI_EXP_LNKCTL_ASPMC) {
+				int err = pci_disable_link_state(ua->pdev,
+							PCIE_LINK_STATE_L0S |
+							PCIE_LINK_STATE_L1);
+
 				dev_info(&ua->pdev->dev,
-					 "  Disabling device ASPM (was 0x%x)\n",
-					 lnkctl & 3);
-				lnkctl &= ~3;
-				pci_write_config_word(ua->pdev,
-						     pos + PCI_EXP_LNKCTL,
-						     lnkctl);
+					 "  Disabling device ASPM (was 0x%x): %d\n",
+					 lnkctl & PCI_EXP_LNKCTL_ASPMC, err);
 			}
 
 			/* Clear any pending error status */
@@ -1657,8 +2904,9 @@ static void ua_pcie_setup(struct ua_device *ua)
 			}
 		}
 
-		/* Also disable ASPM and increase completion timeout on
-		 * upstream bridge and all bridges up the chain */
+		/* Also increase completion timeout on the upstream bridge
+		 * and all bridges up the chain (ASPM on the Apollo's link
+		 * was handled by the ASPM core above) */
 		bridge = ua->pdev->bus->self;
 		while (bridge) {
 			pos = pci_find_capability(bridge, PCI_CAP_ID_EXP);
@@ -1671,16 +2919,6 @@ static void ua_pcie_setup(struct ua_device *ua)
 				dev_info(&ua->pdev->dev,
 					 "  Bridge %s: LnkCtl=0x%04x LnkSta=0x%04x DevCtl2=0x%04x\n",
 					 pci_name(bridge), lnkctl, lnksta, devctl2);
-
-				/* Disable ASPM */
-				if (lnkctl & 3) {
-					lnkctl &= ~3;
-					pci_write_config_word(bridge,
-							     pos + PCI_EXP_LNKCTL,
-							     lnkctl);
-					dev_info(&ua->pdev->dev,
-						 "  -> ASPM disabled\n");
-				}
 
 				/* Set completion timeout to range D
 				 * (65-210ms) on upstream bridges */
@@ -1869,7 +3107,7 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
 	wmb();
 
 	/* Start transport via proper prepare+start sequence */
-	ret = ua_audio_prepare_transport(ua);
+	ret = ua_audio_prepare_transport(ua, 0);
 	if (ret)
 		return ret;
 	ret = ua_audio_start_transport(ua);
@@ -1953,17 +3191,113 @@ static int ua_rate_to_index(unsigned int rate)
 	}
 }
 
+/*
+ * Notification bits taken as a clock-change acknowledgement.  The kext's
+ * ClockChangeEvent is signalled by bit 5 alone (_handleNotificationInterrupt);
+ * Linux has always also accepted bit 22 (rate-change notification) and
+ * bit 4 (transport/clock change), and hardware has been seen acking with
+ * those, so all three count.
+ */
+#define UA_CLOCK_ACK_BITS \
+	(UA_NOTIF_BIT_EVENT | UA_NOTIF_BIT_SRATE | UA_NOTIF_BIT_TRANSPORT)
+
+/*
+ * One clock-change attempt, as CPcieAudioExtension::_setSampleClock
+ * (kext 12.0.0 x86 0x35e3e): write the config, reset the clock-change
+ * event, ring doorbell 4, wait up to 2 s.  "Reset the event" clears only
+ * the ack bits in 0xC030 (a plain read/write register, not W1C), so a
+ * stale ack cannot satisfy the wait while IO-descriptor bits 0/1 stay for
+ * the service loop.  Caller holds ua->lock, which keeps the service loop
+ * from clearing the ack before we see it.
+ */
+static int ua_audio_clock_change_locked(struct ua_device *ua,
+					u32 clock_config)
+{
+	unsigned int waited;
+	u32 status;
+
+	/*
+	 * Write to bank-shifted clock config register.
+	 * 0xC074 = BAR0 + 0x28 + 0xC04C (bank_shift=0x0A).
+	 */
+	ua_write(ua, UA_REG_NOTIF_CLOCK_CFG, clock_config);
+	status = ua_read(ua, UA_REG_NOTIF_STATUS);
+	if (status == 0xFFFFFFFF)
+		return -ENODEV;
+	if (status & UA_CLOCK_ACK_BITS)
+		ua_write(ua, UA_REG_NOTIF_STATUS, status & ~UA_CLOCK_ACK_BITS);
+
+	/* Ring the clock doorbell */
+	ua_write(ua, UA_REG_AX_CONNECT, UA_AX_CLOCK_DOORBELL);
+
+	/* 0xC030 (bank-shifted), NOT 0x22C0 (transport status) */
+	for (waited = 0; waited < UA_CLOCK_TIMEOUT_MS; waited += 10) {
+		status = ua_read(ua, UA_REG_NOTIF_STATUS);
+		if (status == 0xFFFFFFFF)
+			return -ENODEV;
+		if (status & UA_CLOCK_ACK_BITS) {
+			dev_info(&ua->pdev->dev,
+				 "  clock ack: notif_status=0x%08x after %u ms\n",
+				 status, waited);
+			return 0;
+		}
+		msleep(10);
+	}
+
+	/* Kext: FPGA_REV == ~0 means offline, anything else a timeout */
+	if (ua_read(ua, UA_REG_FPGA_REV) == 0xFFFFFFFF)
+		return -ENODEV;
+
+	dev_warn(&ua->pdev->dev,
+		 "  clock change not acknowledged in %u ms (notif_status=0x%08x)\n",
+		 UA_CLOCK_TIMEOUT_MS, status);
+	return -ETIMEDOUT;
+}
+
+/*
+ * Mirrors CPcieAudioExtension::SetSampleClock (x86 0x35cfc) where it
+ * matters: retry the change once on timeout and report the error.
+ *
+ * Not connected yet (no ACEFACE handshake, so the notification block is
+ * not configured and nothing could ack): store the rate (the caller has
+ * stored the source) and return 0, as before; the connect/prepare path
+ * applies them — prepare_transport() programs the rate-dependent
+ * POS_OFFSET and the post-start clock write sends rate_index/source.
+ *
+ * Connected: commit only when the device acknowledged (any of
+ * UA_CLOCK_ACK_BITS, the bits the old code accepted).  A change that got
+ * no acknowledgement in two 2 s attempts returns -ETIMEDOUT and leaves
+ * sample_rate/rate_index at the last acknowledged values; the old code
+ * committed it regardless.
+ *
+ * Caller must NOT hold ua->lock.
+ */
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate)
 {
 	struct ua_audio *audio = &ua->audio;
 	int rate_idx;
 	u32 clock_config;
-	int timeout_ms;
-	u32 status;
+	int ret;
 
 	rate_idx = ua_rate_to_index(rate);
 	if (rate_idx < 0)
 		return rate_idx;
+
+	mutex_lock(&ua->lock);
+
+	if (atomic_read(&ua->shutdown)) {
+		ret = -ENODEV;
+		goto out;
+	}
+	if (!ua->aceface_done) {
+		dev_info(&ua->pdev->dev,
+			 "clock: %u Hz (source 0x%x) stored, applied at connect\n",
+			 rate, audio->clock_source);
+		audio->sample_rate = rate;
+		audio->rate_index = rate_idx;
+		ret = 0;
+		goto out;
+	}
 
 	/* clockConfig = clockSource | (rateIndex << 8) */
 	clock_config = audio->clock_source | (rate_idx << 8);
@@ -1972,48 +3306,29 @@ int ua_audio_set_clock(struct ua_device *ua, unsigned int rate)
 	dev_info(&ua->pdev->dev, "  rate=%u index=%d config=0x%08x\n",
 		 rate, rate_idx, clock_config);
 
-	/*
-	 * Write to bank-shifted clock config register.
-	 * 0xC074 = BAR0 + 0x28 + 0xC04C (bank_shift=0x0A).
-	 * Previous code wrote to 0xC04C (wrong — no bank shift).
-	 */
-	ua_write(ua, UA_REG_NOTIF_CLOCK_CFG, clock_config);
-
-	/* Ring the clock doorbell */
-	ua_write(ua, UA_REG_AX_CONNECT, UA_AX_CLOCK_DOORBELL);
-
-	/*
-	 * Wait for DSP acknowledgment via notification status register.
-	 * Read from 0xC030 (bank-shifted), NOT 0x22C0 (transport status).
-	 */
-	for (timeout_ms = 0; timeout_ms < UA_CLOCK_TIMEOUT_MS; timeout_ms += 10) {
-		status = ua_read(ua, UA_REG_NOTIF_STATUS);
-
-		if (status == 0xFFFFFFFF)
-			return -ENODEV;
-
-		/* Bit 22 = sample rate change ack (expected) */
-		if (status & UA_NOTIF_BIT_SRATE)
-			break;
-
-		/* Bit 4 = transport/clock change */
-		if (status & UA_NOTIF_BIT_TRANSPORT)
-			break;
-
-		/* Bit 5 = event signal — FPGA uses this for clock
-		 * ack after ACEFACE connect (observed on hardware) */
-		if (status & BIT(5))
-			break;
-
-		msleep(10);
+	ret = ua_audio_clock_change_locked(ua, clock_config);
+	if (ret == -ETIMEDOUT) {
+		dev_info(&ua->pdev->dev, "  retrying clock change once\n");
+		ret = ua_audio_clock_change_locked(ua, clock_config);
 	}
 
-	dev_info(&ua->pdev->dev, "  clock ack: notif_status=0x%08x after %d ms\n",
-		 status, timeout_ms);
-
-	audio->sample_rate = rate;
-	audio->rate_index = rate_idx;
-	return 0;
+	if (!ret) {
+		audio->sample_rate = rate;
+		audio->rate_index = rate_idx;
+		/*
+		 * io_map=1: the rate band and the firmware's descriptors may
+		 * have changed with the rate, possibly under a running
+		 * transport (re-read, then commit or force a re-prepare).
+		 */
+		ua_io_map_rate_changed(ua);
+	} else {
+		dev_err(&ua->pdev->dev,
+			"clock change to %u Hz (config 0x%08x) failed: %d\n",
+			rate, clock_config, ret);
+	}
+out:
+	mutex_unlock(&ua->lock);
+	return ret;
 }
 
 /* ----------------------------------------------------------------
@@ -2044,6 +3359,7 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	struct ua_audio *audio = &ua->audio;
 	struct snd_pcm_runtime *runtime = sub->runtime;
 	unsigned long flags;
+	unsigned int ch, frames;
 
 	if (atomic_read(&ua->shutdown))
 		return -ENODEV;
@@ -2055,13 +3371,16 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 
 	runtime->hw = ua_pcm_hw;
 
-	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		runtime->hw.channels_min = audio->play_channels;
-		runtime->hw.channels_max = audio->play_channels;
-	} else {
-		runtime->hw.channels_min = audio->rec_channels;
-		runtime->hw.channels_max = audio->rec_channels;
-	}
+	/*
+	 * ALSA channels come from the channel map: the DMA channel count in
+	 * the legacy layout, the route channels found in the firmware IO
+	 * descriptor with io_map=1.
+	 */
+	ch = ua_io_map_open_channels(ua,
+				     sub->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+				     UA_DIR_PLAY : UA_DIR_REC, &frames);
+	runtime->hw.channels_min = ch;
+	runtime->hw.channels_max = ch;
 
 	/*
 	 * Fix ALSA buffer_size to the hardware ring size (buf_frame_size,
@@ -2076,8 +3395,7 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	 * headroom at the same 10.7ms latency.
 	 */
 	snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_BUFFER_SIZE,
-				     audio->buf_frame_size,
-				     audio->buf_frame_size);
+				     frames, frames);
 
 	spin_lock_irqsave(&audio->lock, flags);
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK)
@@ -2113,11 +3431,22 @@ static int ua_pcm_close(struct snd_pcm_substream *sub)
 	both_closed = !audio->play_sub && !audio->rec_sub;
 	spin_unlock_irqrestore(&audio->lock, flags);
 
-	/* Stop transport when both substreams are closed */
+	/*
+	 * Stop transport when both substreams are closed.  Under ua->lock
+	 * so it cannot interleave with a pcm_prepare of a substream opened
+	 * meanwhile; re-check under the lock for that case.
+	 */
 	if (both_closed && audio->transport_running) {
-		dev_info(&ua->pdev->dev,
-			 "pcm_close: both subs closed, stopping transport\n");
-		ua_audio_stop_transport(ua);
+		mutex_lock(&ua->lock);
+		spin_lock_irqsave(&audio->lock, flags);
+		both_closed = !audio->play_sub && !audio->rec_sub;
+		spin_unlock_irqrestore(&audio->lock, flags);
+		if (both_closed) {
+			dev_info(&ua->pdev->dev,
+				 "pcm_close: both subs closed, stopping transport\n");
+			ua_audio_stop_transport(ua);
+		}
+		mutex_unlock(&ua->lock);
 	}
 
 	return 0;
@@ -2134,6 +3463,63 @@ static int ua_pcm_hw_params(struct snd_pcm_substream *sub,
 
 static int ua_pcm_hw_free(struct snd_pcm_substream *sub)
 {
+	return 0;
+}
+
+/*
+ * io_map=1 copy: move ALSA channel c to/from DMA frame slot map->slot[c]
+ * (kext ReadAudioInputData / WriteAudioOutputData).  Playback zeroes the
+ * whole hardware frame first so slots without an ALSA channel stay
+ * silent; capture returns silence for ALSA channels beyond the map
+ * (a stream opened before a layout change).  Caller holds dma_sem (read).
+ */
+static int ua_pcm_copy_mapped(struct ua_audio *audio,
+			      struct snd_pcm_runtime *rt, bool playback,
+			      char *dma_buf, unsigned int hw_frame_sz,
+			      unsigned long start_frame, unsigned long frames,
+			      struct iov_iter *iter)
+{
+	const struct ua_chan_map *map =
+		&audio->chan_map[playback ? UA_DIR_PLAY : UA_DIR_REC];
+	unsigned int hw_ch = hw_frame_sz / UA_SAMPLE_BYTES;
+	unsigned int user_ch = rt->channels;
+	size_t user_frame_sz = (size_t)user_ch * UA_SAMPLE_BYTES;
+	unsigned int n = min(user_ch, map->channels);
+	u32 tmp[UA_MAX_CHANNELS];
+	unsigned long i;
+	unsigned int c;
+
+	if (user_ch > UA_MAX_CHANNELS || hw_ch > UA_MAX_CHANNELS)
+		return -EINVAL;
+
+	/* Every slot must lie inside the hardware frame */
+	for (c = 0; c < n; c++)
+		if (map->slot[c] != UA_CHAN_NO_SLOT && map->slot[c] >= hw_ch)
+			return -EINVAL;
+
+	for (i = 0; i < frames; i++) {
+		unsigned long f = (start_frame + i) % audio->buf_frame_size;
+		u32 *hw = (u32 *)(dma_buf + f * hw_frame_sz);
+
+		if (playback) {
+			if (copy_from_iter(tmp, user_frame_sz, iter) !=
+			    user_frame_sz)
+				return -EFAULT;
+			memset(hw, 0, hw_frame_sz);
+			for (c = 0; c < n; c++)
+				if (map->slot[c] != UA_CHAN_NO_SLOT)
+					hw[map->slot[c]] = tmp[c];
+		} else {
+			for (c = 0; c < n; c++)
+				tmp[c] = map->slot[c] == UA_CHAN_NO_SLOT ?
+					 0 : hw[map->slot[c]];
+			for (; c < user_ch; c++)
+				tmp[c] = 0;
+			if (copy_to_iter(tmp, user_frame_sz, iter) !=
+			    user_frame_sz)
+				return -EFAULT;
+		}
+	}
 	return 0;
 }
 
@@ -2157,7 +3543,7 @@ static int ua_pcm_copy(struct snd_pcm_substream *sub, int channel,
 	unsigned int user_frame_sz = frames_to_bytes(rt, 1);
 	bool playback = sub->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	struct ua_dma_ring *ring;
-	unsigned int hw_ch, hw_frame_sz;
+	unsigned int hw_ch, hw_frame_sz, copy_sz;
 	char *dma_buf;
 	unsigned long frames, start_frame, i;
 	int ret = 0;
@@ -2188,22 +3574,45 @@ static int ua_pcm_copy(struct snd_pcm_substream *sub, int channel,
 	}
 	hw_frame_sz = hw_ch * UA_SAMPLE_BYTES;
 
+	/*
+	 * Legacy linear copy: ALSA channel N is slot N.  A stream opened
+	 * under another layout (io_map=1 before the first valid descriptor)
+	 * can be wider or narrower than the hardware frame: move the
+	 * channels both have, drop the extra playback channels and return
+	 * silence for the extra capture ones, never touching memory past a
+	 * hardware frame.
+	 */
+	copy_sz = min(user_frame_sz, hw_frame_sz);
+
 	frames = bytes / user_frame_sz;
 	start_frame = hwoff / user_frame_sz;
 
 	if (playback) {
-		for (i = 0; i < frames; i++) {
-			unsigned long f = (start_frame + i) % audio->buf_frame_size;
-			unsigned long dma_off = f * hw_frame_sz;
-
-			/* Zero unused channels to prevent stale data / noise */
-			if (hw_frame_sz > user_frame_sz)
-				memset(dma_buf + dma_off, 0, hw_frame_sz);
-
-			if (copy_from_iter(dma_buf + dma_off, user_frame_sz,
-					   iter) != user_frame_sz) {
-				ret = -EFAULT;
+		if (audio->io_map_active) {
+			ret = ua_pcm_copy_mapped(audio, rt, true, dma_buf,
+						 hw_frame_sz, start_frame,
+						 frames, iter);
+			if (ret)
 				goto out;
+		} else {
+			for (i = 0; i < frames; i++) {
+				unsigned long f = (start_frame + i) %
+						  audio->buf_frame_size;
+				unsigned long dma_off = f * hw_frame_sz;
+
+				/* Zero unused channels (stale data/noise) */
+				if (hw_frame_sz > copy_sz)
+					memset(dma_buf + dma_off, 0,
+					       hw_frame_sz);
+
+				if (copy_from_iter(dma_buf + dma_off,
+						   copy_sz, iter) != copy_sz) {
+					ret = -EFAULT;
+					goto out;
+				}
+				if (user_frame_sz > copy_sz)
+					iov_iter_advance(iter,
+							 user_frame_sz - copy_sz);
 			}
 		}
 
@@ -2216,6 +3625,13 @@ static int ua_pcm_copy(struct snd_pcm_substream *sub, int channel,
 		ua_dma_ring_sync_frames(dev, ring, start_frame, frames,
 					hw_frame_sz, audio->buf_frame_size,
 					false);
+
+		if (audio->io_map_active) {
+			ret = ua_pcm_copy_mapped(audio, rt, false, dma_buf,
+						 hw_frame_sz, start_frame,
+						 frames, iter);
+			goto out;
+		}
 
 		for (i = 0; i < frames; i++) {
 			unsigned long f = (start_frame + i) % audio->buf_frame_size;
@@ -2264,8 +3680,14 @@ static int ua_pcm_copy(struct snd_pcm_substream *sub, int channel,
 				audio->rec_debug_done = true;
 			}
 
-			if (copy_to_iter(dma_buf + dma_off, user_frame_sz,
-					 iter) != user_frame_sz) {
+			if (copy_to_iter(dma_buf + dma_off, copy_sz, iter) !=
+			    copy_sz) {
+				ret = -EFAULT;
+				goto out;
+			}
+			if (user_frame_sz > copy_sz &&
+			    iov_iter_zero(user_frame_sz - copy_sz, iter) !=
+			    user_frame_sz - copy_sz) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -2276,6 +3698,41 @@ out:
 	up_read(&audio->dma_sem);
 	return ret;
 }
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0)
+/*
+ * Before 6.5 the PCM core has separate copy_user/copy_kernel callbacks
+ * (same byte offset/count, plain buffer pointers) instead of the single
+ * iov_iter-based .copy.  Wrap the buffer in an iov_iter and reuse
+ * ua_pcm_copy().  Playback reads from the buffer (WRITE = data source),
+ * capture fills it (READ = destination).
+ */
+static int ua_pcm_copy_user(struct snd_pcm_substream *sub, int channel,
+			    unsigned long hwoff, void __user *buf,
+			    unsigned long bytes)
+{
+	struct iovec iov = { .iov_base = buf, .iov_len = bytes };
+	struct iov_iter iter;
+
+	iov_iter_init(&iter,
+		      sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? WRITE : READ,
+		      &iov, 1, bytes);
+	return ua_pcm_copy(sub, channel, hwoff, &iter, bytes);
+}
+
+static int ua_pcm_copy_kernel(struct snd_pcm_substream *sub, int channel,
+			      unsigned long hwoff, void *buf,
+			      unsigned long bytes)
+{
+	struct kvec kv = { .iov_base = buf, .iov_len = bytes };
+	struct iov_iter iter;
+
+	iov_iter_kvec(&iter,
+		      sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? WRITE : READ,
+		      &kv, 1, bytes);
+	return ua_pcm_copy(sub, channel, hwoff, &iter, bytes);
+}
+#endif
 
 /*
  * Fill silence — zero out the user channel slots in the DMA buffer.
@@ -2291,9 +3748,7 @@ static int ua_pcm_silence(struct snd_pcm_substream *sub, int channel,
 	bool playback = sub->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	struct ua_dma_ring *ring = playback ? &audio->play_ring :
 					     &audio->rec_ring;
-	unsigned int hw_ch = playback ? audio->play_channels :
-					audio->rec_channels;
-	unsigned int hw_frame_sz = hw_ch * UA_SAMPLE_BYTES;
+	unsigned int hw_ch, hw_frame_sz;
 	unsigned long frames, start_frame, i;
 	char *dma_buf;
 
@@ -2314,6 +3769,10 @@ static int ua_pcm_silence(struct snd_pcm_substream *sub, int channel,
 		return 0;
 	}
 
+	/* io_map=1 may change the frame width; read it under dma_sem */
+	hw_ch = playback ? audio->play_channels : audio->rec_channels;
+	hw_frame_sz = hw_ch * UA_SAMPLE_BYTES;
+
 	frames = bytes / user_frame_sz;
 	start_frame = hwoff / user_frame_sz;
 
@@ -2331,21 +3790,73 @@ static int ua_pcm_silence(struct snd_pcm_substream *sub, int channel,
 	return 0;
 }
 
-static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substream *sub)
+/*
+ * Clock write AFTER transport start enables capture.
+ *
+ * The clock write (0xC074 source=0xC + doorbell 4) transitions the DSP
+ * from passthrough to active processing mode.  If done BEFORE transport,
+ * the DSP activates with no audio flowing and routes silence.  After
+ * transport, playback passthrough is already established and capture
+ * routing activates correctly.
+ * (Discovered 2026-03-18: ordering is critical)
+ *
+ * Source 0xC (internal clock) is required for DSP active processing; the
+ * ALSA control init resets it, so it is forced here every time.  Caller
+ * holds ua->lock.
+ */
+static void ua_audio_post_start_clock(struct ua_device *ua)
 {
-	struct ua_device *ua = snd_pcm_substream_chip(sub);
 	struct ua_audio *audio = &ua->audio;
+
+	if (!ua->aceface_done)
+		return;
+
+	audio->clock_source = 0xC;
+	ua_write(ua, UA_REG_NOTIF_CLOCK_CFG,
+		 (audio->rate_index << 8) | audio->clock_source);
+	ua_write(ua, UA_REG_AX_CONNECT, UA_AX_CLOCK_DOORBELL);
+	dev_info(&ua->pdev->dev,
+		 "post-transport clock write (capture enable)\n");
+}
+
+/*
+ * io_map=1, in pcm_prepare: the firmware republished its descriptors
+ * after the post-start clock write of a rate change.  Restart the
+ * transport the way pcm_prepare starts it (prepare_transport() commits
+ * the new layout) so AX_*_CH, the frame stride and the channel map agree
+ * again.  Caller holds ua->lock.
+ */
+static int ua_io_map_restart_transport(struct ua_device *ua)
+{
+	int ret;
+
+	dev_info(&ua->pdev->dev,
+		 "io_map: IO layout changed, restarting transport\n");
+
+	ua_audio_stop_transport(ua);
+
+	ret = ua_audio_prepare_transport(ua, 0);	/* keep TIMER_CFG */
+	if (ret)
+		return ret;
+
+	ret = ua_audio_start_transport(ua);
+	if (ret)
+		return ret;
+
+	ua_audio_post_start_clock(ua);
+	return 0;
+}
+
+/* Body of ua_pcm_prepare(); caller holds ua->lock */
+static int __attribute__((optimize("O1")))
+ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
+{
+	struct ua_audio *audio = &ua->audio;
+	bool rate_changed = false;
 	int ret;
 
 	if (atomic_read(&ua->shutdown))
 		return -ENODEV;
-
-	/* Verify device is reachable before attempting any hardware access */
-	if (ua_read(ua, UA_REG_FPGA_REV) == 0xFFFFFFFF) {
-		dev_err(&ua->pdev->dev,
-			"pcm_prepare: device unreachable\n");
-		return -ENODEV;
-	}
 
 	/*
 	 * Prepare-churn guard (issue #42).
@@ -2395,15 +3906,78 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		 sub->runtime->period_size, sub->runtime->buffer_size,
 		 audio->connected, audio->transport_running, ua->aceface_done);
 
-	/* Connect to DSP firmware if not already connected */
+	if (sub->runtime->rate != audio->sample_rate) {
+		/*
+		 * Rate change: disconnect/reconnect cycle.
+		 *
+		 * DTrace RE (2026-03-20) shows macOS does a full DSP
+		 * disconnect/reconnect with FW reload on every rate
+		 * change.  We implement the minimum: soft-disconnect
+		 * (preserves mixer DSP) then re-run connect setup to
+		 * re-init mixer batch and notification state.
+		 *
+		 * The disconnect sets connected=false, so the connect
+		 * block below reconnects and restarts the DSP service
+		 * loop in this same prepare (it used to be an else-if
+		 * that never reached the connect, leaving the device
+		 * disconnected with the service loop — and so mixer
+		 * flushes — stopped until the next prepare).  Then
+		 * !transport_running handles transport + clock write.
+		 */
+		int new_idx = ua_rate_to_index(sub->runtime->rate);
+
+		if (new_idx < 0)
+			return new_idx;
+
+		if (audio->connected) {
+			dev_info(&ua->pdev->dev,
+				 "pcm_prepare: rate change %u → %u (disconnect/reconnect)\n",
+				 audio->sample_rate, sub->runtime->rate);
+
+			/* Stop hrtimer before disconnect (callback never
+			 * takes ua->lock, so waiting for it here is safe) */
+			audio->period_timer_running = false;
+			hrtimer_cancel(&audio->period_timer);
+
+			/*
+			 * Soft disconnect — stops transport, preserves
+			 * mixer DSP, sets connected=false.  Does NOT send
+			 * UA_AX_DISCONNECT when DSP SEQ is healthy.  The
+			 * _hw variant stops the DSP service loop without
+			 * waiting for it (its handler takes ua->lock); the
+			 * reconnect below restarts it.
+			 */
+			ua_audio_disconnect_hw(ua);
+		}
+
+		/*
+		 * Update rate for the (re)connect: prepare_transport()
+		 * and the post-start clock write below use rate_index.
+		 * Also applies when not connected, so the transport is
+		 * never started at the previous rate.
+		 */
+		audio->sample_rate = sub->runtime->rate;
+		audio->rate_index = new_idx;
+		rate_changed = true;
+	}
+
+	/* Connect to DSP firmware if not (or no longer) connected */
 	if (!audio->connected) {
 		/*
 		 * If ACEFACE already timed out, don't retry from pcm_prepare.
 		 * PipeWire retries pcm_prepare immediately on failure, which
 		 * creates an infinite 20s-blocking loop that freezes the system.
 		 * A power cycle (hot-replug) clears aceface_failed via probe.
+		 *
+		 * Only when the handshake would actually run: with
+		 * aceface_done set, ua_audio_connect() skips straight to
+		 * post-handshake setup (no loop).  aceface_failed is never
+		 * cleared by a later successful handshake — on a cold boot
+		 * the pre-firmware attempt sets it and the post-firmware
+		 * retry succeeds — so without this a rate change on such a
+		 * device would leave it disconnected for good.
 		 */
-		if (ua->aceface_failed) {
+		if (ua->aceface_failed && !ua->aceface_done) {
 			dev_dbg(&ua->pdev->dev,
 				"pcm_prepare: ACEFACE previously failed, "
 				"power-cycle Apollo to recover\n");
@@ -2414,52 +3988,23 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		if (ret)
 			return ret;
 
-		/* DSP connected — start periodic readback drain */
+		/*
+		 * The soft disconnect masked every vector; re-arm the
+		 * notification vector the kext keeps enabled for the whole
+		 * connected session (EnableVector(0x28, 1) in Program-
+		 * Registers, disabled only by Shutdown).  The transport
+		 * vectors follow in prepare_transport() below.
+		 */
+		if (rate_changed)
+			ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION, true);
+
+		/*
+		 * DSP connected — start periodic readback drain.  This
+		 * also resets dsp_service_count, so after a rate change
+		 * the mixer flush happens after 5 cycles (0.5 s) rather
+		 * than a cold-boot delay.
+		 */
 		ua_dsp_service_start(ua);
-	} else if (sub->runtime->rate != audio->sample_rate) {
-		/*
-		 * Rate change: disconnect/reconnect cycle.
-		 *
-		 * DTrace RE (2026-03-20) shows macOS does a full DSP
-		 * disconnect/reconnect with FW reload on every rate
-		 * change.  We implement the minimum: soft-disconnect
-		 * (preserves mixer DSP) then re-run connect setup to
-		 * re-init mixer batch and notification state.
-		 *
-		 * The disconnect sets connected=false, so the existing
-		 * !connected branch above handles reconnect.  Then
-		 * !transport_running handles transport + clock write.
-		 */
-		int new_idx = ua_rate_to_index(sub->runtime->rate);
-
-		if (new_idx < 0)
-			return new_idx;
-
-		dev_info(&ua->pdev->dev,
-			 "pcm_prepare: rate change %u → %u (disconnect/reconnect)\n",
-			 audio->sample_rate, sub->runtime->rate);
-
-		/* Stop hrtimer before disconnect */
-		audio->period_timer_running = false;
-		hrtimer_cancel(&audio->period_timer);
-
-		/*
-		 * Soft disconnect — stops transport, preserves mixer
-		 * DSP, sets connected=false.  Does NOT send
-		 * UA_AX_DISCONNECT when DSP SEQ is healthy.
-		 */
-		ua_audio_disconnect(ua);
-
-		/* Update rate for the reconnect */
-		audio->sample_rate = sub->runtime->rate;
-		audio->rate_index = new_idx;
-
-		/* Reset service count so mixer flush happens quickly
-		 * (5 cycles = 0.5s instead of 50 = 5s cold boot delay) */
-		audio->dsp_service_count = 0;
-
-		/* Fall through: !connected → ua_audio_connect() re-inits
-		 * mixer batch; !transport_running → transport + clock */
 	}
 
 	/*
@@ -2476,13 +4021,26 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 	 * Also, writing 1024 SG entries (instead of 4) corrupted
 	 * ring buffer control registers and the record SG table.
 	 */
+	if (ua_io_map_needs_restart(ua)) {
+		/* io_map=1: apply a layout change seen while streaming */
+		dev_info(&ua->pdev->dev,
+			 "pcm_prepare: IO layout is stale, restarting transport\n");
+		ua_audio_stop_transport(ua);
+	}
+
 	if (!audio->transport_running) {
 		dev_info(&ua->pdev->dev,
 			 "pcm_prepare: transport not running — restarting "
 			 "(play_sub=%p rec_sub=%p)\n",
 			 audio->play_sub, audio->rec_sub);
 
-		ret = ua_audio_prepare_transport(ua);
+		/*
+		 * TIMER_CFG from the ALSA period size, so interrupts fire
+		 * at the period boundary rather than the full buffer.  Only
+		 * written here, while the transport is stopped: the first
+		 * substream to prepare sets the shared interval.
+		 */
+		ret = ua_audio_prepare_transport(ua, sub->runtime->period_size);
 		if (ret)
 			return ret;
 
@@ -2490,42 +4048,26 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		if (ret)
 			return ret;
 
+		/* Clock write AFTER transport start enables capture */
+		ua_audio_post_start_clock(ua);
+
 		/*
-		 * Clock write AFTER transport start enables capture.
-		 *
-		 * The clock write (0xC074 source=0xC + doorbell 4)
-		 * transitions the DSP from passthrough to active
-		 * processing mode.  If done BEFORE transport, the
-		 * DSP activates with no audio flowing and routes
-		 * silence.  After transport, playback passthrough
-		 * is already established and capture routing
-		 * activates correctly.
-		 * (Discovered 2026-03-18: ordering is critical)
+		 * The firmware may republish its IO descriptors for the
+		 * new rate; they are logged either way, and with io_map=1
+		 * a changed layout restarts the transport once more.
 		 */
-		if (ua->aceface_done) {
-			/* Force source=0xC for internal clock — required for
-			 * DSP active processing. Gets reset by ALSA control
-			 * init, so we force it here every time. */
-			audio->clock_source = 0xC;
-			ua_write(ua, UA_REG_NOTIF_CLOCK_CFG,
-				 (audio->rate_index << 8) | audio->clock_source);
-			ua_write(ua, UA_REG_AX_CONNECT,
-				 UA_AX_CLOCK_DOORBELL);
-			dev_info(&ua->pdev->dev,
-				 "post-transport clock write (capture enable)\n");
+		if (rate_changed && ua_io_map_settle(ua)) {
+			ret = ua_io_map_restart_transport(ua);
+			if (ret)
+				return ret;
 		}
 	} else {
+		/* No TIMER_CFG rewrite under a running transport (#42) */
 		dev_info(&ua->pdev->dev,
 			 "pcm_prepare: transport already running, skip restart\n");
 	}
 
-	/*
-	 * Program TIMER_CFG from the ALSA period size so interrupts
-	 * fire at the period boundary rather than the full buffer.
-	 * Note: if both substreams are open, the last prepare wins
-	 * (shared timer — one interval for both directions).
-	 */
-	ua_write(ua, UA_REG_AX_TIMER_CFG, sub->runtime->period_size);
+	ua_io_map_check_stream(ua, sub);
 
 	/* Reset position for this direction */
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -2538,12 +4080,85 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 }
 
 /*
+ * pcm_prepare is serialized with the DSP service loop, the ioctls and the
+ * other substream's prepare by ua->lock (it used to touch the transport
+ * registers unlocked).
+ *
+ * Nothing is stopped before the lock is taken: whether a rate change
+ * happens is only known under it (the churn guard may refuse first, or
+ * ua_audio_set_clock() may have committed the rate meanwhile).  The rate
+ * change stops the service loop with the non-waiting
+ * ua_audio_disconnect_hw() — a handler blocked on ua->lock runs once more
+ * against the new state, the single delayed_work cannot run twice — and
+ * the period timer with hrtimer_cancel(), whose callback never takes
+ * ua->lock.  On the way out the two invariants are restored whatever
+ * path the body took: a connected device has its service loop, and a
+ * transport that runs again keeps the shared period timer another
+ * running substream relies on.
+ */
+static int ua_pcm_prepare(struct snd_pcm_substream *sub)
+{
+	struct ua_device *ua = snd_pcm_substream_chip(sub);
+	struct ua_audio *audio = &ua->audio;
+	bool timer_was_running;
+	int ret;
+
+	if (atomic_read(&ua->shutdown))
+		return -ENODEV;
+
+	/* System resume still re-initialising (ua_resume_work()) */
+	if (READ_ONCE(ua->resume_pending)) {
+		dev_info_ratelimited(&ua->pdev->dev,
+				     "pcm_prepare: device re-initialising after resume, try again shortly\n");
+		return -EBUSY;
+	}
+
+	/* Verify device is reachable before attempting any hardware access */
+	if (ua_read(ua, UA_REG_FPGA_REV) == 0xFFFFFFFF) {
+		dev_err(&ua->pdev->dev,
+			"pcm_prepare: device unreachable\n");
+		return -ENODEV;
+	}
+
+	mutex_lock(&ua->lock);
+	timer_was_running = audio->period_timer_running;
+
+	ret = ua_pcm_prepare_locked(ua, sub);
+
+	if (audio->connected && !audio->dsp_service_running &&
+	    !atomic_read(&ua->shutdown))
+		ua_dsp_service_start(ua);
+
+	/*
+	 * The prepared substream is never running (ALSA refuses prepare
+	 * then), so a timer that was running served the other one.
+	 */
+	if (timer_was_running && !audio->period_timer_running &&
+	    audio->transport_running) {
+		audio->period_timer_running = true;
+		hrtimer_start(&audio->period_timer, ms_to_ktime(1),
+			      HRTIMER_MODE_REL_SOFT);
+	}
+	mutex_unlock(&ua->lock);
+
+	return ret;
+}
+
+/*
  * Period elapsed polling timer.
  *
  * The Apollo's hardware periodic timer IRQ (vector 0x46, BIT 30)
  * is unreliable — fires once then stops.  Use an hrtimer to poll
  * SAMPLE_POS and call snd_pcm_period_elapsed() at ~1ms intervals.
  * This is the same approach used by USB audio drivers.
+ *
+ * The timer is a soft hrtimer (HRTIMER_MODE_REL_SOFT): the callback runs
+ * from the HRTIMER_SOFTIRQ right after the timer interrupt instead of
+ * inside it, so the 1 ms cadence is kept but the BAR0 read no longer
+ * happens in hard-IRQ context with interrupts off.  A read that stalls on
+ * a wedged link then holds up softirq processing on one CPU instead of
+ * a CPU with interrupts disabled.  A workqueue would cost jiffy
+ * granularity (4 ms at HZ=250), longer than a 256-frame period at 96 kHz.
  */
 static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 {
@@ -2566,24 +4181,42 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 
 	sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
 	if (sp == 0xFFFFFFFF) {
+		/*
+		 * Link down (Thunderbolt drop, power-off, AER): every
+		 * further read would stall a CPU for a full completion
+		 * timeout.  Stop polling and push the streams into XRUN
+		 * so userspace re-prepares, where pcm_prepare sees
+		 * FPGA_REV == ~0 and fails cleanly instead of hanging.
+		 */
 		audio->period_timer_running = false;
+		dev_err_ratelimited(&ua->pdev->dev,
+				    "period timer: BAR0 reads all-ones (link down), stopping streams\n");
+		spin_lock_irqsave(&audio->lock, flags);
+		if (audio->play_sub)
+			snd_pcm_stop_xrun(audio->play_sub);
+		if (audio->rec_sub)
+			snd_pcm_stop_xrun(audio->rec_sub);
+		spin_unlock_irqrestore(&audio->lock, flags);
 		return HRTIMER_NORESTART;
 	}
 
 	/*
-	 * Snapshot substream pointers under lock — pcm_close clears
-	 * these under the same lock, so without this we race and
-	 * deref a NULL pointer (crash on PipeWire restart).
+	 * Hold audio->lock while the substreams are used — pcm_close
+	 * clears these pointers under the same lock before ALSA frees the
+	 * runtime, so holding it (not just snapshotting) keeps the runtime
+	 * valid for the whole update.  Lock order audio->lock -> PCM
+	 * stream lock; nothing takes them the other way round.
 	 */
 	spin_lock_irqsave(&audio->lock, flags);
 	rec = audio->rec_sub;
 	play = audio->play_sub;
-	spin_unlock_irqrestore(&audio->lock, flags);
 
 	/* Check if a period boundary was crossed.
 	 * buffer_size == buf_frame_size (both 8192), so
-	 * sp % buffer_size is the correct position. */
-	if (play) {
+	 * sp % buffer_size is the correct position.  A substream that is
+	 * open but not configured yet has period/buffer size 0. */
+	if (play && play->runtime->period_size &&
+	    play->runtime->buffer_size) {
 		period_size = play->runtime->period_size;
 		pos = sp % play->runtime->buffer_size;
 		if (pos / period_size != audio->last_play_period_pos / period_size)
@@ -2591,13 +4224,14 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 		audio->last_play_period_pos = pos;
 	}
 
-	if (rec) {
+	if (rec && rec->runtime->period_size && rec->runtime->buffer_size) {
 		period_size = rec->runtime->period_size;
 		pos = sp % rec->runtime->buffer_size;
 		if (pos / period_size != audio->last_rec_period_pos / period_size)
 			snd_pcm_period_elapsed(rec);
 		audio->last_rec_period_pos = pos;
 	}
+	spin_unlock_irqrestore(&audio->lock, flags);
 
 	hrtimer_forward_now(timer, ms_to_ktime(1));
 	return HRTIMER_RESTART;
@@ -2618,7 +4252,7 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 		audio->last_rec_period_pos = 0;
 		audio->period_timer_running = true;
 		hrtimer_start(&audio->period_timer,
-			      ms_to_ktime(1), HRTIMER_MODE_REL);
+			      ms_to_ktime(1), HRTIMER_MODE_REL_SOFT);
 		return 0;
 
 	case SNDRV_PCM_TRIGGER_STOP:
@@ -2668,7 +4302,12 @@ static const struct snd_pcm_ops ua_pcm_playback_ops = {
 	.prepare      = ua_pcm_prepare,
 	.trigger      = ua_pcm_trigger,
 	.pointer      = ua_pcm_pointer,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
 	.copy         = ua_pcm_copy,
+#else
+	.copy_user    = ua_pcm_copy_user,
+	.copy_kernel  = ua_pcm_copy_kernel,
+#endif
 	.fill_silence = ua_pcm_silence,
 };
 
@@ -2680,7 +4319,12 @@ static const struct snd_pcm_ops ua_pcm_capture_ops = {
 	.prepare      = ua_pcm_prepare,
 	.trigger      = ua_pcm_trigger,
 	.pointer      = ua_pcm_pointer,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
 	.copy         = ua_pcm_copy,
+#else
+	.copy_user    = ua_pcm_copy_user,
+	.copy_kernel  = ua_pcm_copy_kernel,
+#endif
 };
 
 /* ----------------------------------------------------------------
@@ -2707,12 +4351,13 @@ void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 	if (!(status_hi & (BIT(30) | BIT(31))))
 		return;
 
-	sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
-
-	if (irq_count < 10)
+	/* BAR0 is read in hard IRQ only for the first few debug lines */
+	if (irq_count < 10) {
+		sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
 		dev_info(&ua->pdev->dev,
 			 "audio_irq[%u]: hi=0x%08x SP=0x%08x\n",
 			 irq_count, status_hi, sp);
+	}
 	irq_count++;
 
 	/*
@@ -2721,32 +4366,30 @@ void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 	 * Both the periodic timer (BIT 30) and end-of-buffer (BIT 31) are
 	 * ONE-SHOT: after firing, the hardware clears their enable bit.
 	 * We must re-enable them or the DMA engine stalls after one cycle.
+	 * No pending clear: the ISR just acked them, and clearing again
+	 * could drop an event that arrived since.
 	 */
 	if (status_hi & BIT(30))
-		ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC);
+		ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC, false);
 	if (status_hi & BIT(31))
-		ua_enable_vector(ua, UA_IRQ_VEC_END_BUFFER);
+		ua_enable_vector(ua, UA_IRQ_VEC_END_BUFFER, false);
 
 	/*
 	 * Notify ALSA of period elapsed.
 	 *
-	 * Snapshot substream pointers under lock — pcm_close clears
-	 * these under the same lock. Without this, we race and deref
-	 * a NULL pointer when PipeWire restarts.
+	 * Hold audio->lock across the calls — pcm_close clears these
+	 * pointers under the same lock, so the substream cannot be torn
+	 * down while we use it (same rule as the period timer).
 	 */
 	{
-		struct snd_pcm_substream *play, *rec;
 		unsigned long flags;
 
 		spin_lock_irqsave(&audio->lock, flags);
-		play = audio->play_sub;
-		rec = audio->rec_sub;
+		if (audio->play_sub)
+			snd_pcm_period_elapsed(audio->play_sub);
+		if (audio->rec_sub)
+			snd_pcm_period_elapsed(audio->rec_sub);
 		spin_unlock_irqrestore(&audio->lock, flags);
-
-		if (play)
-			snd_pcm_period_elapsed(play);
-		if (rec)
-			snd_pcm_period_elapsed(rec);
 	}
 }
 
@@ -2873,6 +4516,22 @@ static int ua_preamp_switch_put(struct snd_kcontrol *kctl,
 	return 1;
 }
 
+/*
+ * ALSA .put callbacks run from the control ioctl without ua->lock, but
+ * ua_monitor_set_param() merges into the cached mixer settings that the
+ * DSP service loop flushes under ua->lock.  Take it here.
+ */
+static int ua_ctl_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
+				    u32 param_id, u32 value)
+{
+	int ret;
+
+	mutex_lock(&ua->lock);
+	ret = ua_monitor_set_param(ua, ch_idx, param_id, value);
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
 /* --- Monitor Volume (INTEGER with dB scale) --- */
 
 /* raw = 192 + (dB × 2): 0 = -96 dB (mute), 192 = 0 dB (max) */
@@ -2911,7 +4570,7 @@ static int ua_monitor_vol_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.monitor.level)
 		return 0;
 
-	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_LEVEL, (u32)newval);
+	ret = ua_ctl_monitor_set_param(ua, 1, UA_MON_PARAM_LEVEL, (u32)newval);
 	if (ret)
 		return ret;
 
@@ -2943,7 +4602,7 @@ static int ua_monitor_mute_put(struct snd_kcontrol *kctl,
 	if (hw_val == ua->audio.monitor.mute)
 		return 0;
 
-	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, (u32)hw_val);
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, (u32)hw_val);
 	if (ret)
 		return ret;
 
@@ -2972,7 +4631,7 @@ static int ua_monitor_dim_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.monitor.dim)
 		return 0;
 
-	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_DIM, newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_DIM, newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3044,7 +4703,7 @@ static int ua_monitor_mono_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* VERIFIED 2026-02-20: mono uses param 0x03 value=1 (same param as mute) */
-	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3088,7 +4747,7 @@ static int ua_monitor_source_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* DTrace-verified 2026-02-22: Monitor Source uses ch_idx=1 */
-	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_SOURCE, idx);
+	ret = ua_ctl_monitor_set_param(ua, 1, UA_MON_PARAM_SOURCE, idx);
 	if (ret)
 		return ret;
 
@@ -3139,7 +4798,7 @@ static int ua_hp_source_put(struct snd_kcontrol *kctl,
 	if ((int)idx == *cache)
 		return 0;
 
-	ret = ua_monitor_set_param(ua, 1, param, idx);
+	ret = ua_ctl_monitor_set_param(ua, 1, param, idx);
 	if (ret)
 		return ret;
 
@@ -3186,7 +4845,7 @@ static int ua_dim_level_put(struct snd_kcontrol *kctl,
 	if (hw_val == ua->audio.monitor.dim_level)
 		return 0;
 
-	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_DIM_LEVEL, hw_val);
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_DIM_LEVEL, hw_val);
 	if (ret)
 		return ret;
 
@@ -3216,9 +4875,9 @@ static int ua_monitor_talkback_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* DTrace-verified 2026-02-22: ON uses ch_idx=1, OFF uses ch_idx=9 */
-	ret = ua_monitor_set_param(ua, newval ? 1 : 9,
-				   UA_MON_PARAM_TALKBACK,
-				   newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, newval ? 1 : 9,
+				       UA_MON_PARAM_TALKBACK,
+				       newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3260,14 +4919,69 @@ static int ua_digital_mode_put(struct snd_kcontrol *kctl,
 		return -EINVAL;
 
 	hw_val = idx ? 8 : 0;  /* ALSA 0→HW 0 (S/PDIF), ALSA 1→HW 8 (ADAT) */
-	if (hw_val == ua->audio.monitor.digital_mode)
+
+	/*
+	 * Under ua->lock: ua_monitor_set_param() requires it, and the IO
+	 * map update below may change the layout (io_map=1).
+	 */
+	mutex_lock(&ua->lock);
+	if (hw_val == ua->audio.monitor.digital_mode) {
+		mutex_unlock(&ua->lock);
 		return 0;
+	}
 
 	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_DIGITAL_MODE, hw_val);
-	if (ret)
-		return ret;
+	if (!ret) {
+		ua->audio.monitor.digital_mode = hw_val;
+		/* The TOSLink output type picks playback route channels */
+		ua_io_map_digital_mode_changed(ua);
+	}
+	mutex_unlock(&ua->lock);
 
-	ua->audio.monitor.digital_mode = hw_val;
+	return ret ? ret : 1;
+}
+
+/*
+ * --- Digital Input Mode (ENUMERATED: S/PDIF / ADAT; io_map=1) ---
+ *
+ * The TOSLink input type: it picks the record route channels on the x4,
+ * x8p and 8p, and both directions' on the Twin family (ua_route_mode()).
+ * Host side only, like the Mixer Engine's GlobalSettings value — no
+ * device parameter for it is known, so nothing is written to the
+ * hardware; the firmware descriptor lists the S/PDIF and the ADAT input
+ * slots in either mode.  Registered with io_map=1 on models whose route
+ * lists depend on it.
+ */
+static int ua_digital_in_mode_get(struct snd_kcontrol *kctl,
+				  struct snd_ctl_elem_value *val)
+{
+	struct ua_device *ua = snd_kcontrol_chip(kctl);
+
+	val->value.enumerated.item[0] =
+		ua->audio.dig_in_mode == UA_DIG_ADAT ? 1 : 0;
+	return 0;
+}
+
+static int ua_digital_in_mode_put(struct snd_kcontrol *kctl,
+				  struct snd_ctl_elem_value *val)
+{
+	struct ua_device *ua = snd_kcontrol_chip(kctl);
+	unsigned int idx = val->value.enumerated.item[0];
+	unsigned int mode;
+
+	if (idx >= ARRAY_SIZE(ua_digital_mode_names))
+		return -EINVAL;
+	mode = idx ? UA_DIG_ADAT : UA_DIG_SPDIF;
+
+	mutex_lock(&ua->lock);
+	if (mode == ua->audio.dig_in_mode) {
+		mutex_unlock(&ua->lock);
+		return 0;
+	}
+	ua->audio.dig_in_mode = mode;
+	ua_io_map_digital_mode_changed(ua);
+	mutex_unlock(&ua->lock);
+
 	return 1;
 }
 
@@ -3305,7 +5019,7 @@ static int ua_output_ref_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* VERIFIED 2026-02-20: OutputRef uses ch_idx=1 (was 0) */
-	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_OUTPUT_REF, idx);
+	ret = ua_ctl_monitor_set_param(ua, 1, UA_MON_PARAM_OUTPUT_REF, idx);
 	if (ret)
 		return ret;
 
@@ -3429,7 +5143,7 @@ static int ua_mirror_source_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=9 for mirror params */
-	ret = ua_monitor_set_param(ua, 9, param, hw_val);
+	ret = ua_ctl_monitor_set_param(ua, 9, param, hw_val);
 	if (ret)
 		return ret;
 
@@ -3469,7 +5183,7 @@ static int ua_mirror_enable_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=9 for mirror params */
-	ret = ua_monitor_set_param(ua, 9, param, newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 9, param, newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3499,8 +5213,8 @@ static int ua_digital_mirror_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=9 for digital mirror */
-	ret = ua_monitor_set_param(ua, 9, UA_MON_PARAM_DIGITAL_MIRROR,
-				   newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 9, UA_MON_PARAM_DIGITAL_MIRROR,
+				       newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3530,8 +5244,8 @@ static int ua_identify_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=0 for identify */
-	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_IDENTIFY,
-				   newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_IDENTIFY,
+				       newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3561,8 +5275,8 @@ static int ua_sr_convert_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=1 for SR convert */
-	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_SR_CONVERT,
-				   newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 1, UA_MON_PARAM_SR_CONVERT,
+				       newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3592,8 +5306,8 @@ static int ua_dsp_spanning_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=0 for DSP spanning */
-	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_DSP_SPANNING,
-				   newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_DSP_SPANNING,
+				       newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3633,7 +5347,7 @@ static int ua_cue_mono_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=0 for CUE mono */
-	ret = ua_monitor_set_param(ua, 0, param, newval ? 1 : 0);
+	ret = ua_ctl_monitor_set_param(ua, 0, param, newval ? 1 : 0);
 	if (ret)
 		return ret;
 
@@ -3677,7 +5391,7 @@ static int ua_cue_mix_put(struct snd_kcontrol *kctl,
 		return 0;
 
 	/* ch_idx=0 for CUE mix */
-	ret = ua_monitor_set_param(ua, 0, param, (u32)hw_val);
+	ret = ua_ctl_monitor_set_param(ua, 0, param, (u32)hw_val);
 	if (ret)
 		return ret;
 
@@ -3761,6 +5475,7 @@ static int ua_clock_source_put(struct snd_kcontrol *kctl,
 {
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 	unsigned int src = val->value.enumerated.item[0];
+	unsigned int old;
 	int ret;
 
 	if (src >= ARRAY_SIZE(ua_clock_source_names))
@@ -3769,10 +5484,14 @@ static int ua_clock_source_put(struct snd_kcontrol *kctl,
 	if (src == ua->audio.clock_source)
 		return 0;
 
+	old = ua->audio.clock_source;
 	ua->audio.clock_source = src;
 	ret = ua_audio_set_clock(ua, ua->audio.sample_rate);
-	if (ret)
+	if (ret) {
+		/* Not acknowledged: keep the source the device runs on */
+		ua->audio.clock_source = old;
 		return ret;
+	}
 
 	return 1;
 }
@@ -4117,6 +5836,26 @@ static int ua_mixer_init(struct ua_device *ua)
 		total++;
 	}
 
+	/* Digital Input Mode: io_map=1 route selection (see its put) */
+	if (ua_io_map_enabled() && audio->model &&
+	    audio->model->toslink != UA_TOSLINK_NONE) {
+		static const struct snd_kcontrol_new dig_in_mode = {
+			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.name = "Digital Input Mode",
+			.info = ua_digital_mode_info,
+			.get = ua_digital_in_mode_get,
+			.put = ua_digital_in_mode_put,
+		};
+
+		kctl = snd_ctl_new1(&dig_in_mode, ua);
+		if (!kctl)
+			return -ENOMEM;
+		ret = snd_ctl_add(card, kctl);
+		if (ret)
+			return ret;
+		total++;
+	}
+
 	/* Output Reference Level */
 	{
 		static const struct snd_kcontrol_new out_ref = {
@@ -4424,6 +6163,136 @@ static int ua_mixer_init(struct ua_device *ua)
  * ALSA card and PCM device registration
  * ---------------------------------------------------------------- */
 
+/*
+ * Connect to DSP firmware at init (and resume) time.
+ *
+ * The macOS kext defers this to first stream open, but we need
+ * the firmware connected early so the CLI interface (ARM MCU)
+ * is responsive for userspace mixer control via ioctl.
+ * Without this handshake, CLI commands timeout (status=0x24).
+ *
+ * Non-fatal: if connect fails (e.g. FW not ready), ALSA
+ * prepare will retry when a stream is actually opened.
+ * Returns the connect result for logging only.  Caller holds ua->lock.
+ */
+static int ua_audio_initial_connect(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	int ret = 0;
+
+	if (warm_boot) {
+		/*
+		 * Warm boot from Windows/macOS: DSP already fully
+		 * initialized with per-channel firmware.  Skip ACEFACE
+		 * (which conflicts with existing state) and mark
+		 * connected so pcm_prepare goes straight to transport.
+		 */
+		u32 seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
+
+		audio->connected = true;
+		ua->aceface_done = true;
+		ua->mixer_seq_wr = seq_rd;
+		ua_write(ua, UA_REG_MIXER_SEQ_WR, seq_rd);
+		ua->mixer_rb_seen = false;
+		ua->mixer_ready = true;
+		dev_info(&ua->pdev->dev,
+			 "warm_boot=1: skipping ACEFACE, marked connected (SEQ=%u)\n",
+			 seq_rd);
+
+		/*
+		 * Kext Connect() ends with SetOutputMute(0); the regular
+		 * connect does it in post-handshake, this path skips that,
+		 * so undo a shutdown/suspend mute here too.  Flushed by the
+		 * service loop; a no-op except on the output-mute types.
+		 */
+		ua_set_output_mute_locked(ua, false, false);
+
+		/*
+		 * The connect path reads the IO descriptors (read-only)
+		 * after the handshake; this one skips it, so read them here
+		 * and apply the io_map=1 layout before the first open.
+		 */
+		ua_io_map_connected(ua);
+
+		ua_dsp_service_start(ua);
+	} else if (no_connect) {
+		dev_info(&ua->pdev->dev,
+			 "no_connect=1: skipping ACEFACE connect (debug mode)\n");
+	} else {
+		ret = ua_audio_connect(ua);
+		if (ret) {
+			dev_warn(&ua->pdev->dev,
+				 "early firmware connect failed (%d), will retry on stream open\n",
+				 ret);
+		} else {
+			/* DSP connected — start periodic readback drain */
+			ua_dsp_service_start(ua);
+		}
+	}
+
+	return ret;
+}
+
+/*
+ * ua_audio_suspend - software half of the kext's _stopPowerGated.
+ *
+ * Blocks the ALSA controls (the PCM core has already suspended running
+ * streams: the PCM devices are children of this PCI device, so they
+ * suspend first and trigger(SUSPEND) has stopped the period timer) and
+ * stops everything that could touch BAR0 behind the hardware quiesce:
+ * the DSP service loop and the period timer.  Caller must NOT hold
+ * ua->lock (the service handler takes it).
+ */
+void ua_audio_suspend(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (audio->card)
+		snd_power_change_state(audio->card, SNDRV_CTL_POWER_D3hot);
+
+	ua_dsp_service_stop(ua);
+	audio->period_timer_running = false;
+	hrtimer_cancel(&audio->period_timer);
+}
+
+/*
+ * ua_audio_resume - connect half of the kext's _startPowerGated
+ * (ProgramRegisters has already run, from ua_resume()).
+ * @how: UA_RESUME_CONTROLS: no connect;
+ *       UA_RESUME_CONNECT_FAST: the same connect as probe, but only if the
+ *       ACEFACE handshake answers within the early probe's ~1 s
+ *       (ua_aceface_handshake()); -EAGAIN when the full connect loop is
+ *       still needed (ua_resume() then defers it to a worker);
+ *       UA_RESUME_CONNECT: the same connect as probe (up to ~20 s).
+ * Reopens the ALSA controls in every case.  Streams come back through a
+ * fresh prepare (no SNDRV_PCM_INFO_RESUME), which restarts the
+ * transport.  Caller must NOT hold ua->lock.
+ */
+int ua_audio_resume(struct ua_device *ua, enum ua_resume_how how)
+{
+	struct ua_audio *audio = &ua->audio;
+	int ret = 0;
+
+	mutex_lock(&ua->lock);
+	audio->connected = false;
+	audio->transport_running = false;
+
+	if (how == UA_RESUME_CONNECT_FAST && !warm_boot && !no_connect &&
+	    !ua->aceface_done && ua_aceface_handshake(ua)) {
+		/* Not answering yet: the worker runs the full loop */
+		ua->aceface_failed = false;
+		ret = -EAGAIN;
+	} else if (how != UA_RESUME_CONTROLS) {
+		ret = ua_audio_initial_connect(ua);
+	}
+	mutex_unlock(&ua->lock);
+
+	if (audio->card)
+		snd_power_change_state(audio->card, SNDRV_CTL_POWER_D0);
+
+	return ret;
+}
+
 __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
@@ -4433,12 +6302,15 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 
 	spin_lock_init(&audio->lock);
 	init_rwsem(&audio->dma_sem);
+	mutex_init(&audio->io_lock);
 	INIT_DELAYED_WORK(&audio->dsp_service_work, ua_dsp_service_handler);
+	/* Soft hrtimer: callback in softirq, not hard IRQ (see callback) */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&audio->period_timer, ua_period_timer_callback,
-		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		      CLOCK_MONOTONIC, HRTIMER_MODE_REL_SOFT);
 #else
-	hrtimer_init(&audio->period_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer_init(&audio->period_timer, CLOCK_MONOTONIC,
+		     HRTIMER_MODE_REL_SOFT);
 	audio->period_timer.function = ua_period_timer_callback;
 #endif
 	init_completion(&audio->connect_done);
@@ -4450,16 +6322,26 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 
 	/* Determine channel counts for this model.
 	 * ua_audio_preinit_dma() may have already set these up. */
-	if (!audio->play_channels) {
+	if (!audio->play_channels)
 		ua_get_model_channels(ua);
-		audio->buf_frame_size =
-			ua_calc_buf_frame_size(audio->play_channels,
-					       audio->rec_channels);
-	}
 
 	dev_info(&ua->pdev->dev, "audio: %u play ch, %u rec ch, %u frame buf\n",
 		 audio->play_channels, audio->rec_channels,
 		 audio->buf_frame_size);
+
+	/*
+	 * TOSLink input type for the io_map=1 route lists: the Mixer
+	 * Engine's DefaultTOSLinkInputType for the class ("Digital Input
+	 * Mode" changes it; host side only).
+	 */
+	audio->dig_in_mode = audio->model ? audio->model->default_in_mode :
+					    UA_DIG_SPDIF;
+
+	/* The IO map may be used from here on (connect, ioctl, PCM) */
+	audio->io_ready = true;
+	if (ua_io_map_enabled())
+		dev_info(&ua->pdev->dev,
+			 "io_map=1: DMA layout follows the firmware IO descriptor\n");
 
 	/*
 	 * Allocate DMA buffers and program the SG table.  A no-op when
@@ -4501,6 +6383,13 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &ua_pcm_playback_ops);
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &ua_pcm_capture_ops);
+
+	/* /proc/asound/cardN/io_map: channel names, slots, descriptors */
+	ret = snd_card_ro_proc_new(card, "io_map", ua, ua_io_map_proc_read);
+	if (ret) {
+		dev_warn(&ua->pdev->dev, "io_map proc entry failed: %d\n", ret);
+		ret = 0;
+	}
 
 	/* Initialize preamp/monitor cache to safe defaults */
 	{
@@ -4557,54 +6446,18 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 
 	dev_info(&ua->pdev->dev, "ALSA card registered: %s\n", card->longname);
 
-	/*
-	 * Connect to DSP firmware at init time.
-	 *
-	 * The macOS kext defers this to first stream open, but we need
-	 * the firmware connected early so the CLI interface (ARM MCU)
-	 * is responsive for userspace mixer control via ioctl.
-	 * Without this handshake, CLI commands timeout (status=0x24).
-	 *
-	 * Non-fatal: if connect fails (e.g. FW not ready), ALSA
-	 * prepare will retry when a stream is actually opened.
-	 */
+	/* Connect to DSP firmware at init time (non-fatal, see helper) */
 	ua->skip_bus_coeff = skip_bus_coeff;
 
-	if (warm_boot) {
-		/*
-		 * Warm boot from Windows/macOS: DSP already fully
-		 * initialized with per-channel firmware.  Skip ACEFACE
-		 * (which conflicts with existing state) and mark
-		 * connected so pcm_prepare goes straight to transport.
-		 */
-		u32 seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
-
-		audio->connected = true;
-		ua->aceface_done = true;
-		ua->mixer_seq_wr = seq_rd;
-		ua_write(ua, UA_REG_MIXER_SEQ_WR, seq_rd);
-		ua->mixer_rb_seen = false;
-		ua->mixer_ready = true;
-		dev_info(&ua->pdev->dev,
-			 "warm_boot=1: skipping ACEFACE, marked connected (SEQ=%u)\n",
-			 seq_rd);
-		ua_dsp_service_start(ua);
-	} else if (no_connect) {
-		dev_info(&ua->pdev->dev,
-			 "no_connect=1: skipping ACEFACE connect (debug mode)\n");
-	} else {
-		ret = ua_audio_connect(ua);
-		if (ret) {
-			dev_warn(&ua->pdev->dev,
-				 "early firmware connect failed (%d), will retry on stream open\n",
-				 ret);
-			/* Not fatal — reset ret so probe succeeds */
-			ret = 0;
-		} else {
-			/* DSP connected — start periodic readback drain */
-			ua_dsp_service_start(ua);
-		}
-	}
+	/*
+	 * Under ua->lock like every other connect (resume, pcm_prepare,
+	 * reconnect): the card is registered, so a PCM open, an ALSA control
+	 * or an ioctl can run concurrently, and the connect may change the
+	 * io_map=1 layout.
+	 */
+	mutex_lock(&ua->lock);
+	ua_audio_initial_connect(ua);
+	mutex_unlock(&ua->lock);
 
 	return 0;
 

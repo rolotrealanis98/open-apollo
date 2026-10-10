@@ -1458,7 +1458,7 @@ class HardwareBackend:
         device node isn't open or the driver is too old to support the ioctl.
 
         The daemon uses 'device_type' to pick the right device map
-        (e.g. 0x1F -> Apollo x4, 0x20 -> Apollo x8p).
+        (e.g. 0x1F -> Apollo x4, 0x22 -> Apollo x8p).
         """
         if self.fd < 0:
             return None
