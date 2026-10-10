@@ -1,0 +1,89 @@
+{
+  "model": "Arrow",
+  "device_type": "0x28",
+  "device_types": ["0x28"],
+  "serial_prefixes": ["2025"],
+  "status": "unverified",
+  "identity_note": "Internal type 0x28 (serial 2025) comes from the earlier kext analysis; UAD2System 12.0.0 Name() does not name 0x28.",
+  "mixer_class": "Conrad",
+  "mixer_type_id": 8,
+  "preamps": 2,
+  "hiz": 2,
+  "talkback": false,
+  "digital_io": "spdif",
+  "desktop": true,
+  "cue_buses": {"default": 2, "max": 1},
+  "talkback_synch_in": 10,
+  "route_rules": {"toslink": "none", "virtual_max": 2, "adat_mid_rate_max": null, "default_input": "spdif"},
+  "legacy_digital_mode": "spdif",
+  "channel_counts": {
+    "LoMid": {
+      "spdif": {"record": 10, "playback": 6},
+      "adat": {"record": 10, "playback": 6}
+    },
+    "Hi": {
+      "spdif": {"record": 10, "playback": 6},
+      "adat": {"record": 10, "playback": 6}
+    }
+  },
+  "routes": {
+    "LoMid": {
+      "record": [
+        {"ch_id": "0x0001", "name": "MIC/LINE/HIZ 1", "io": "MicLineHiZ"},
+        {"ch_id": "0x0002", "name": "MIC/LINE 2", "io": "MicLineHiZ"},
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0201", "name": "AUX1 L", "io": "Aux"},
+        {"ch_id": "0x0202", "name": "AUX1 R", "io": "Aux"},
+        {"ch_id": "0x0203", "name": "AUX2 L", "io": "Aux"},
+        {"ch_id": "0x0204", "name": "AUX2 R", "io": "Aux"}
+      ],
+      "playback": [
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0A01", "name": "HP L", "io": "Cue"},
+        {"ch_id": "0x0A02", "name": "HP R", "io": "Cue"}
+      ]
+    },
+    "Hi": {
+      "record": [
+        {"ch_id": "0x0001", "name": "MIC/LINE/HIZ 1", "io": "MicLineHiZ"},
+        {"ch_id": "0x0002", "name": "MIC/LINE 2", "io": "MicLineHiZ"},
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0201", "name": "AUX1 L", "io": "Aux"},
+        {"ch_id": "0x0202", "name": "AUX1 R", "io": "Aux"},
+        {"ch_id": "0x0203", "name": "AUX2 L", "io": "Aux"},
+        {"ch_id": "0x0204", "name": "AUX2 R", "io": "Aux"}
+      ],
+      "playback": [
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0A01", "name": "HP L", "io": "Cue"},
+        {"ch_id": "0x0A02", "name": "HP R", "io": "Cue"}
+      ]
+    }
+  },
+  "mixer_inputs": [
+    {"name": "ANALOG 1", "synch_in": 0, "preamp": true, "stereo": false},
+    {"name": "ANALOG 2", "synch_in": 1, "preamp": true, "stereo": false},
+    {"name": "VIRTUAL 1", "synch_in": 24, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 2", "synch_in": 25, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 3", "synch_in": 26, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 4", "synch_in": 27, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 5", "synch_in": 28, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 6", "synch_in": 29, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 7", "synch_in": 30, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 8", "synch_in": 31, "preamp": false, "stereo": false}
+  ],
+  "mixer_outputs": ["HP", "CUE 2", "CUE 3", "CUE 4", "MONITOR", "HP"],
+  "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: every route entry shown (MixerTypeBase/ReneBase IsChannelShownForIORoute returns true)."
+}

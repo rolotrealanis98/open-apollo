@@ -1,0 +1,91 @@
+{
+  "model": "Realtime Rack (MADI)",
+  "device_types": [],
+  "serial_prefixes": [],
+  "status": "unverified",
+  "mixer_class": "M64",
+  "mixer_type_id": 3,
+  "preamps": 0,
+  "hiz": 0,
+  "talkback": false,
+  "digital_io": "spdif",
+  "desktop": false,
+  "cue_buses": {"default": 0, "max": 0},
+  "talkback_synch_in": 10,
+  "route_rules": {"toslink": "none", "virtual_max": null, "adat_mid_rate_max": null, "default_input": "spdif"},
+  "legacy_digital_mode": "spdif",
+  "channel_counts": {
+    "LoMid": {
+      "spdif": {"record": 16, "playback": 0},
+      "adat": {"record": 16, "playback": 0}
+    },
+    "Hi": {
+      "spdif": {"record": 16, "playback": 0},
+      "adat": {"record": 16, "playback": 0}
+    }
+  },
+  "routes": {
+    "LoMid": {
+      "record": [
+        {"ch_id": "0x0801", "name": "MADI 1", "io": "MADI"},
+        {"ch_id": "0x0802", "name": "MADI 2", "io": "MADI"},
+        {"ch_id": "0x0803", "name": "MADI 3", "io": "MADI"},
+        {"ch_id": "0x0804", "name": "MADI 4", "io": "MADI"},
+        {"ch_id": "0x0805", "name": "MADI 5", "io": "MADI"},
+        {"ch_id": "0x0806", "name": "MADI 6", "io": "MADI"},
+        {"ch_id": "0x0807", "name": "MADI 7", "io": "MADI"},
+        {"ch_id": "0x0808", "name": "MADI 8", "io": "MADI"},
+        {"ch_id": "0x0809", "name": "MADI 9", "io": "MADI"},
+        {"ch_id": "0x080A", "name": "MADI 10", "io": "MADI"},
+        {"ch_id": "0x080B", "name": "MADI 11", "io": "MADI"},
+        {"ch_id": "0x080C", "name": "MADI 12", "io": "MADI"},
+        {"ch_id": "0x080D", "name": "MADI 13", "io": "MADI"},
+        {"ch_id": "0x080E", "name": "MADI 14", "io": "MADI"},
+        {"ch_id": "0x080F", "name": "MADI 15", "io": "MADI"},
+        {"ch_id": "0x0810", "name": "MADI 16", "io": "MADI"}
+      ],
+      "playback": []
+    },
+    "Hi": {
+      "record": [
+        {"ch_id": "0x0801", "name": "MADI 1", "io": "MADI"},
+        {"ch_id": "0x0802", "name": "MADI 2", "io": "MADI"},
+        {"ch_id": "0x0803", "name": "MADI 3", "io": "MADI"},
+        {"ch_id": "0x0804", "name": "MADI 4", "io": "MADI"},
+        {"ch_id": "0x0805", "name": "MADI 5", "io": "MADI"},
+        {"ch_id": "0x0806", "name": "MADI 6", "io": "MADI"},
+        {"ch_id": "0x0807", "name": "MADI 7", "io": "MADI"},
+        {"ch_id": "0x0808", "name": "MADI 8", "io": "MADI"},
+        {"ch_id": "0x0809", "name": "MADI 9", "io": "MADI"},
+        {"ch_id": "0x080A", "name": "MADI 10", "io": "MADI"},
+        {"ch_id": "0x080B", "name": "MADI 11", "io": "MADI"},
+        {"ch_id": "0x080C", "name": "MADI 12", "io": "MADI"},
+        {"ch_id": "0x080D", "name": "MADI 13", "io": "MADI"},
+        {"ch_id": "0x080E", "name": "MADI 14", "io": "MADI"},
+        {"ch_id": "0x080F", "name": "MADI 15", "io": "MADI"},
+        {"ch_id": "0x0810", "name": "MADI 16", "io": "MADI"}
+      ],
+      "playback": []
+    }
+  },
+  "mixer_inputs": [
+    {"name": "MADI 1", "synch_in": 0, "preamp": true, "stereo": false},
+    {"name": "MADI 2", "synch_in": 1, "preamp": true, "stereo": false},
+    {"name": "MADI 3", "synch_in": 2, "preamp": true, "stereo": false},
+    {"name": "MADI 4", "synch_in": 3, "preamp": true, "stereo": false},
+    {"name": "MADI 5", "synch_in": 4, "preamp": true, "stereo": false},
+    {"name": "MADI 6", "synch_in": 5, "preamp": true, "stereo": false},
+    {"name": "MADI 7", "synch_in": 6, "preamp": true, "stereo": false},
+    {"name": "MADI 8", "synch_in": 7, "preamp": true, "stereo": false},
+    {"name": "MADI 9", "synch_in": 12, "preamp": true, "stereo": false},
+    {"name": "MADI 10", "synch_in": 13, "preamp": true, "stereo": false},
+    {"name": "MADI 11", "synch_in": 14, "preamp": true, "stereo": false},
+    {"name": "MADI 12", "synch_in": 15, "preamp": true, "stereo": false},
+    {"name": "MADI 13", "synch_in": 20, "preamp": true, "stereo": false},
+    {"name": "MADI 14", "synch_in": 21, "preamp": true, "stereo": false},
+    {"name": "MADI 15", "synch_in": 22, "preamp": true, "stereo": false},
+    {"name": "MADI 16", "synch_in": 23, "preamp": true, "stereo": false}
+  ],
+  "mixer_outputs": [],
+  "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: every route entry shown (MixerTypeBase/ReneBase IsChannelShownForIORoute returns true)."
+}

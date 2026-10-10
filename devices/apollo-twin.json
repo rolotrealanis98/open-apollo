@@ -1,0 +1,131 @@
+{
+  "model": "Apollo Twin",
+  "device_types": [],
+  "serial_prefixes": [],
+  "status": "unverified",
+  "mixer_class": "Armstrong",
+  "mixer_type_id": 2,
+  "preamps": 2,
+  "hiz": 2,
+  "talkback": false,
+  "digital_io": "spdif",
+  "desktop": true,
+  "cue_buses": {"default": 2, "max": 2},
+  "talkback_synch_in": 10,
+  "route_rules": {"toslink": "input-mode", "virtual_max": 4, "adat_mid_rate_max": 4, "default_input": "spdif"},
+  "legacy_digital_mode": "spdif",
+  "channel_counts": {
+    "LoMid": {
+      "spdif": {"record": 14, "playback": 10},
+      "adat": {"record": 20, "playback": 10}
+    },
+    "Hi": {
+      "spdif": {"record": 14, "playback": 10},
+      "adat": {"record": 20, "playback": 10}
+    }
+  },
+  "routes": {
+    "LoMid": {
+      "record": [
+        {"ch_id": "0x0001", "name": "MIC/LINE/HIZ 1", "io": "MicLineHiZ"},
+        {"ch_id": "0x0002", "name": "MIC/LINE 2", "io": "MicLineHiZ"},
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0703", "name": "VIRTUAL 3", "io": "Virtual"},
+        {"ch_id": "0x0704", "name": "VIRTUAL 4", "io": "Virtual"},
+        {"ch_id": "0x0401", "name": "ADAT 1", "io": "ADAT"},
+        {"ch_id": "0x0402", "name": "ADAT 2", "io": "ADAT"},
+        {"ch_id": "0x0403", "name": "ADAT 3", "io": "ADAT"},
+        {"ch_id": "0x0404", "name": "ADAT 4", "io": "ADAT"},
+        {"ch_id": "0x0405", "name": "ADAT 5", "io": "ADAT"},
+        {"ch_id": "0x0406", "name": "ADAT 6", "io": "ADAT"},
+        {"ch_id": "0x0407", "name": "ADAT 7", "io": "ADAT"},
+        {"ch_id": "0x0408", "name": "ADAT 8", "io": "ADAT"},
+        {"ch_id": "0x0501", "name": "S/PDIF L", "io": "SPDIF"},
+        {"ch_id": "0x0502", "name": "S/PDIF R", "io": "SPDIF"},
+        {"ch_id": "0x0201", "name": "AUX1 L", "io": "Aux"},
+        {"ch_id": "0x0202", "name": "AUX1 R", "io": "Aux"},
+        {"ch_id": "0x0203", "name": "AUX2 L", "io": "Aux"},
+        {"ch_id": "0x0204", "name": "AUX2 R", "io": "Aux"}
+      ],
+      "playback": [
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0A03", "name": "LINE 3", "io": "Cue"},
+        {"ch_id": "0x0A04", "name": "LINE 4", "io": "Cue"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0703", "name": "VIRTUAL 3", "io": "Virtual"},
+        {"ch_id": "0x0704", "name": "VIRTUAL 4", "io": "Virtual"},
+        {"ch_id": "0x0A01", "name": "HP L", "io": "Cue"},
+        {"ch_id": "0x0A02", "name": "HP R", "io": "Cue"}
+      ]
+    },
+    "Hi": {
+      "record": [
+        {"ch_id": "0x0001", "name": "MIC/LINE/HIZ 1", "io": "MicLineHiZ"},
+        {"ch_id": "0x0002", "name": "MIC/LINE 2", "io": "MicLineHiZ"},
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0703", "name": "VIRTUAL 3", "io": "Virtual"},
+        {"ch_id": "0x0704", "name": "VIRTUAL 4", "io": "Virtual"},
+        {"ch_id": "0x0401", "name": "ADAT 1", "io": "ADAT"},
+        {"ch_id": "0x0402", "name": "ADAT 2", "io": "ADAT"},
+        {"ch_id": "0x0403", "name": "ADAT 3", "io": "ADAT"},
+        {"ch_id": "0x0404", "name": "ADAT 4", "io": "ADAT"},
+        {"ch_id": "0x0405", "name": "ADAT 5", "io": "ADAT"},
+        {"ch_id": "0x0406", "name": "ADAT 6", "io": "ADAT"},
+        {"ch_id": "0x0407", "name": "ADAT 7", "io": "ADAT"},
+        {"ch_id": "0x0408", "name": "ADAT 8", "io": "ADAT"},
+        {"ch_id": "0x0501", "name": "S/PDIF L", "io": "SPDIF"},
+        {"ch_id": "0x0502", "name": "S/PDIF R", "io": "SPDIF"},
+        {"ch_id": "0x0201", "name": "AUX1 L", "io": "Aux"},
+        {"ch_id": "0x0202", "name": "AUX1 R", "io": "Aux"},
+        {"ch_id": "0x0203", "name": "AUX2 L", "io": "Aux"},
+        {"ch_id": "0x0204", "name": "AUX2 R", "io": "Aux"}
+      ],
+      "playback": [
+        {"ch_id": "0x0901", "name": "MON L", "io": "CtrlRoom"},
+        {"ch_id": "0x0902", "name": "MON R", "io": "CtrlRoom"},
+        {"ch_id": "0x0A03", "name": "LINE 3", "io": "Cue"},
+        {"ch_id": "0x0A04", "name": "LINE 4", "io": "Cue"},
+        {"ch_id": "0x0701", "name": "VIRTUAL 1", "io": "Virtual"},
+        {"ch_id": "0x0702", "name": "VIRTUAL 2", "io": "Virtual"},
+        {"ch_id": "0x0703", "name": "VIRTUAL 3", "io": "Virtual"},
+        {"ch_id": "0x0704", "name": "VIRTUAL 4", "io": "Virtual"},
+        {"ch_id": "0x0A01", "name": "HP L", "io": "Cue"},
+        {"ch_id": "0x0A02", "name": "HP R", "io": "Cue"}
+      ]
+    }
+  },
+  "mixer_inputs": [
+    {"name": "ANALOG 1", "synch_in": 0, "preamp": true, "stereo": false},
+    {"name": "ANALOG 2", "synch_in": 1, "preamp": true, "stereo": false},
+    {"name": "ADAT 1", "synch_in": 12, "preamp": false, "stereo": false},
+    {"name": "ADAT 2", "synch_in": 13, "preamp": false, "stereo": false},
+    {"name": "ADAT 3", "synch_in": 14, "preamp": false, "stereo": false},
+    {"name": "ADAT 4", "synch_in": 15, "preamp": false, "stereo": false},
+    {"name": "ADAT 5", "synch_in": 20, "preamp": false, "stereo": false},
+    {"name": "ADAT 6", "synch_in": 21, "preamp": false, "stereo": false},
+    {"name": "ADAT 7", "synch_in": 22, "preamp": false, "stereo": false},
+    {"name": "ADAT 8", "synch_in": 23, "preamp": false, "stereo": false},
+    {"name": "S/PDIF L", "synch_in": 8, "preamp": false, "stereo": true},
+    {"name": "S/PDIF R", "synch_in": 9, "preamp": false, "stereo": true},
+    {"name": "VIRTUAL 1", "synch_in": 24, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 2", "synch_in": 25, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 3", "synch_in": 26, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 4", "synch_in": 27, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 5", "synch_in": 28, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 6", "synch_in": 29, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 7", "synch_in": 30, "preamp": false, "stereo": false},
+    {"name": "VIRTUAL 8", "synch_in": 31, "preamp": false, "stereo": false},
+    {"name": "TALKBACK", "synch_in": 2, "preamp": false, "stereo": false},
+    {"name": "UNAVAILABLE", "synch_in": 3, "preamp": false, "stereo": false}
+  ],
+  "mixer_outputs": ["HP", "LINE 3/4", "CUE 3", "CUE 4", "MONITOR", "HP", "LINE 3/4"],
+  "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: S/PDIF hidden in ADAT mode, ADAT hidden in S/PDIF mode (both directions follow the input TOSLink mode)."
+}
