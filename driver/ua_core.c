@@ -2264,19 +2264,19 @@ static long ua_ioctl_dsp_send_block(struct ua_device *ua, unsigned long arg)
 		return -EINVAL;
 	if (blk.data_size & 3)  /* Must be 4-byte aligned */
 		return -EINVAL;
-	if (blk.data_size > 256 * 1024)  /* 256 KB max */
+	if (blk.data_size > UA_FW_MAX_SIZE)  /* 4 MiB, as LoadFirmware */
 		return -EINVAL;
 
 	/* Allocate kernel buffer for data payload */
 	if (blk.data_size > 0) {
-		data_buf = kmalloc(blk.data_size, GFP_KERNEL);
+		data_buf = kvmalloc(blk.data_size, GFP_KERNEL);
 		if (!data_buf)
 			return -ENOMEM;
 
 		if (copy_from_user(data_buf,
 				   (void __user *)(unsigned long)blk.data,
 				   blk.data_size)) {
-			kfree(data_buf);
+			kvfree(data_buf);
 			return -EFAULT;
 		}
 	}
@@ -2287,7 +2287,7 @@ static long ua_ioctl_dsp_send_block(struct ua_device *ua, unsigned long arg)
 				data_buf, blk.data_size);
 	mutex_unlock(&ua->lock);
 
-	kfree(data_buf);
+	kvfree(data_buf);
 	return ret;
 }
 

@@ -446,7 +446,8 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_FW_LARGE_THRESHOLD   0x3FFFC     /* ≥256KB-4: use two-word command */
 #define UA_FW_LARGE_FLAG        0x40000000  /* BIT30 set for large transfers */
 #define UA_FW_RESP_MATCH        0x8004      /* Upper 16 bits of response word 0 */
-#define UA_FW_TIMEOUT_MS        30000       /* 30 seconds (generous) */
+#define UA_FW_TIMEOUT_MS        150000      /* kext LoadFirmware: 150 s */
+#define UA_BLOCK_TIMEOUT_MS     5000        /* kext authorization/demo blocks: 5 s */
 #define UA_FW_POLL_MS           10          /* Poll every 10ms */
 #define UA_FW_MAX_SIZE          (4 * 1024 * 1024)
 
@@ -1425,8 +1426,6 @@ void ua_dsp_cache_firmware(struct ua_device *ua);
 void ua_dsp_rings_reprogram(struct ua_device *ua);
 int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 			 size_t fw_size);
-int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
-			     const void *fw_data, size_t fw_size);
 int ua_dsp_load_mixer_blocks(struct ua_device *ua);
 int ua_dsp_connect_all(struct ua_device *ua);
 int ua_dsp_connect_retry(struct ua_device *ua);

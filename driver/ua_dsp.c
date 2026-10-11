@@ -1062,56 +1062,184 @@ void ua_dsp_rings_reprogram(struct ua_device *ua)
 }
 
 /* ----------------------------------------------------------------
+ * _sendBlock result decoding (parity note 13, section 4)
+ * ---------------------------------------------------------------- */
+
+/*
+ * The kext's _sendBlock error codes.  They have no readable names in the
+ * kext, so these are named after the DSP status word that produces them.
+ */
+#define UA_KERR_NO_DSPS		(-21)
+#define UA_KERR_STATUS_1	(-49)	/* 0xF0010001 */
+#define UA_KERR_STATUS_2	(-48)	/* 0xF0010002 */
+#define UA_KERR_BAD_RESPONSE	(-51)	/* 0xF0010003-5, other, hi mismatch */
+#define UA_KERR_CLASS_F002	(-50)	/* 0xF002xxxx */
+#define UA_KERR_STATUS_11	(-66)	/* 0xF0010011 */
+#define UA_KERR_STATUS_6	(-68)	/* 0xF0010006 */
+#define UA_KERR_STATUS_7	(-67)	/* 0xF0010007 */
+#define UA_KERR_STATUS_7_ARG1	(-79)	/* 0xF0010007, response word 2 == 1 */
+#define UA_KERR_STATUS_13	(-72)	/* 0xF0010013 */
+#define UA_KERR_STATUS_12	(-73)	/* 0xF0010012 */
+#define UA_KERR_TIMEOUT		(-96)
+#define UA_KERR_NOT_READY	(-92)
+
+static const char *ua_kext_err_name(int err)
+{
+	switch (err) {
+	case 0:				return "ok";
+	case UA_KERR_NO_DSPS:		return "no DSPs";
+	case UA_KERR_STATUS_1:		return "DSP status 0xF0010001";
+	case UA_KERR_STATUS_2:		return "DSP status 0xF0010002";
+	case UA_KERR_BAD_RESPONSE:	return "bad response";
+	case UA_KERR_CLASS_F002:	return "DSP status class 0xF002xxxx";
+	case UA_KERR_STATUS_11:		return "DSP status 0xF0010011";
+	case UA_KERR_STATUS_6:		return "DSP status 0xF0010006";
+	case UA_KERR_STATUS_7:		return "DSP status 0xF0010007";
+	case UA_KERR_STATUS_7_ARG1:	return "DSP status 0xF0010007 (arg 1)";
+	case UA_KERR_STATUS_13:		return "DSP status 0xF0010013";
+	case UA_KERR_STATUS_12:		return "DSP status 0xF0010012";
+	case UA_KERR_TIMEOUT:		return "no response (timeout)";
+	case UA_KERR_NOT_READY:		return "device not ready";
+	default:			return "unknown";
+	}
+}
+
+/* Response word 1 (DSP status) to the kext's result, section 4.2 */
+static int ua_kext_block_status(u32 status, u32 arg)
+{
+	switch (status) {
+	case 0:
+		return 0;
+	case 0xF0010001:
+		return UA_KERR_STATUS_1;
+	case 0xF0010002:
+		return UA_KERR_STATUS_2;
+	case 0xF0010006:
+		return UA_KERR_STATUS_6;
+	case 0xF0010007:
+		return arg == 1 ? UA_KERR_STATUS_7_ARG1 : UA_KERR_STATUS_7;
+	case 0xF0010011:
+		return UA_KERR_STATUS_11;
+	case 0xF0010012:
+		return UA_KERR_STATUS_12;
+	case 0xF0010013:
+		return UA_KERR_STATUS_13;
+	}
+	if ((status & 0xFFFF0000) == 0xF0020000)
+		return UA_KERR_CLASS_F002;
+	return UA_KERR_BAD_RESPONSE;	/* 0xF0010003-5 and anything else */
+}
+
+/* Response area: 4 dwords (16 bytes), the kext's response descriptor.
+ * The FPGA writes a 4-dword completion status to this buffer.
+ */
+#define SEND_BLOCK_RESP_DWORDS	4
+
+/*
+ * By default a block's outcome is only logged: any non-zero response word 0
+ * counts as success, as before.  With block_strict=1 a kext error code makes
+ * the send fail with -EIO.
+ */
+static bool block_strict;
+module_param(block_strict, bool, 0444);
+MODULE_PARM_DESC(block_strict,
+		 "Fail a DSP block/firmware send (-EIO) when the response carries a kext error status (parity note 13 section 4.2). Default off: the error is only logged and any non-zero response counts as success.");
+
+/*
+ * Size of one data DMA ref in ua_dsp_send_block().  The kext sends up to a
+ * 4KB physical page per descriptor.  An early Linux test stalled at 512+
+ * dwords, so the default stays at the proven 1KB; 2048 and 4096 are accepted
+ * for a hardware test.  Anything else falls back to 1024.
+ */
+static unsigned int sendblock_chunk = 1024;
+module_param(sendblock_chunk, uint, 0444);
+MODULE_PARM_DESC(sendblock_chunk,
+		 "Bytes per data DMA ref in DSP block sends: 1024 (default, proven), 2048 or 4096 (the kext's 4KB pieces; untested on hardware)");
+
+static size_t ua_sendblock_chunk(void)
+{
+	switch (sendblock_chunk) {
+	case 2048:
+	case 4096:
+		return sendblock_chunk;
+	default:
+		return 1024;
+	}
+}
+
+/**
+ * ua_dsp_block_result - Decode a 4-dword block response like _sendBlock
+ * @ua: device
+ * @dsp_idx: DSP the block went to
+ * @cmd: command word sent (for the log)
+ * @expect_hi: expected high half of response word 0 (0x8004 for firmware),
+ *             or 0 for no check
+ * @resp: the response area (little endian)
+ *
+ * Returns the kext's result (0 or a negative kext code) and logs it by name
+ * when it is not 0.
+ */
+static int ua_dsp_block_result(struct ua_device *ua, unsigned int dsp_idx,
+			       u32 cmd, u32 expect_hi, const __le32 *resp)
+{
+	u32 w0 = le32_to_cpu(READ_ONCE(resp[0]));
+	u32 w1 = le32_to_cpu(READ_ONCE(resp[1]));
+	u32 w2 = le32_to_cpu(READ_ONCE(resp[2]));
+	int kerr;
+
+	if (expect_hi && (w0 >> 16) != expect_hi)
+		kerr = UA_KERR_BAD_RESPONSE;
+	else
+		kerr = ua_kext_block_status(w1, w2);
+
+	if (kerr)
+		dev_warn(&ua->pdev->dev,
+			 "sendBlock DSP%u cmd 0x%08x: kext result %d (%s), resp=[%08x %08x %08x %08x]\n",
+			 dsp_idx, cmd, kerr, ua_kext_err_name(kerr),
+			 w0, w1, w2, le32_to_cpu(READ_ONCE(resp[3])));
+	return kerr;
+}
+
+/* ----------------------------------------------------------------
  * Firmware loading
  * ---------------------------------------------------------------- */
 
 /**
- * ua_dsp_load_firmware - Load firmware binary to DSP 0 via ring buffer DMA
+ * ua_dsp_load_firmware - Load a firmware image to DSP 0 via ring buffer DMA
  * @ua: device (must hold ua->lock)
- * @fw_data: kernel buffer containing firmware binary
- * @fw_size: size of firmware in bytes
+ * @fw_data: kernel buffer containing the image
+ * @fw_size: size of the image in bytes (multiple of 4, at most 4 MiB)
  *
- * Protocol (from kext _loadFirmware / _sendBlock):
- *   1. Allocate single contiguous DMA buffer for [cmd, count, param, fw_data]
- *   2. Allocate response DMA buffer
- *   3. Submit ONE DMA ref entry to cmd ring (entire payload)
- *   4. Submit ONE DMA ref entry to resp ring
- *   5. Ring doorbells (resp first, then cmd)
- *   6. Poll response buffer for 0x8004xxxx
- *   7. Free DMA buffers
+ * Mirrors CUAD2Device::LoadFirmware / _sendBlock (kext 12.0.0 x86 0x134e0,
+ * 0x12ed8; parity note 13 section 3.1).  DSP 0 only: _sendBlock takes no
+ * DSP index.
+ *   1. One contiguous DMA buffer: [header (1 or 2 dwords), image].  The
+ *      header is {(dwords + 1) | 0x120000} below 0x3FFFC bytes, otherwise
+ *      {0x120000 | BIT(30), dwords + 2}.
+ *   2. Response entry (4 dwords) on the response ring first.
+ *   3. DMA ref entries on the command ring, each below 0x10000 dwords
+ *      (SetMemory asserts that), then the doorbells.
+ *   4. Wait up to UA_FW_TIMEOUT_MS (150 s, the kext value) for response
+ *      word 0 with high half 0x8004, then decode word 1 (the DSP status).
  *
- * The kext uses a single large DMA buffer per sendBlock call.
- * The FPGA processes one ring entry per logical command — chained
- * entries do NOT work for firmware loading.
+ * Return: 0 on success, negative errno on failure.
  */
 int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 			 size_t fw_size)
 {
-	return ua_dsp_load_firmware_to(ua, 0, fw_data, fw_size);
-}
-
-/**
- * ua_dsp_load_firmware_to - Load firmware to a specific DSP
- * @ua: device
- * @dsp_idx: target DSP index
- * @fw_data: firmware image
- * @fw_size: size of @fw_data in bytes
- *
- * Return: 0 on success, negative errno on failure.
- */
-int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
-			     const void *fw_data, size_t fw_size)
-{
-	struct ua_dsp_state *dsp0 = &ua->dsp[dsp_idx];
-	u32 bank_base = ua_dsp_base(dsp_idx);
+	struct ua_dsp_state *dsp0 = &ua->dsp[0];
+	u32 bank_base = ua_dsp_base(0);
 	void *cmd_buf = NULL, *resp_buf = NULL;
 	dma_addr_t cmd_addr, resp_addr;
 	struct ua_ring_entry entry;
 	__le32 *cmd_words;
-	u32 fw_dwords;
-	u32 total_dwords;
+	u32 fw_dwords, hdr_dwords;
+	u32 total_dwords, left, done;
 	size_t cmd_buf_size;
+	unsigned long deadline;
 	unsigned int polls;
+	bool timed_out = false;
+	int kerr;
 	int ret;
 
 	if (!fw_size || fw_size > UA_FW_MAX_SIZE)
@@ -1129,14 +1257,15 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 		return ret;
 
 	fw_dwords = fw_size / 4;
+	/* The header form follows the payload size, as in _sendBlock */
+	hdr_dwords = fw_size >= UA_FW_LARGE_THRESHOLD ? 2 : 1;
 
 	/*
-	 * Allocate single contiguous DMA buffer for:
-	 *   [cmd_word, count_word, param_word, firmware_data...]
-	 * The FPGA reads this as one DMA ref entry.
+	 * One contiguous DMA buffer: [header..., image...].  The FPGA reads
+	 * it through DMA ref entries of at most 0xFFFF dwords each.
 	 */
-	cmd_buf_size = (3 + fw_dwords) * 4;
-	total_dwords = 3 + fw_dwords;
+	total_dwords = hdr_dwords + fw_dwords;
+	cmd_buf_size = total_dwords * 4;
 
 	dev_dbg(&ua->pdev->dev,
 		"firmware load: allocating %zu byte contiguous DMA buffer\n",
@@ -1158,12 +1287,15 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 		goto free_cmd;
 	}
 
-	/* Build command buffer: [cmd, count, param, fw_data...] */
+	/* Build the command buffer */
 	cmd_words = cmd_buf;
-	cmd_words[0] = cpu_to_le32(UA_FW_CMD | UA_FW_LARGE_FLAG);
-	cmd_words[1] = cpu_to_le32(fw_dwords + 2);
-	cmd_words[2] = cpu_to_le32(UA_FW_PARAM);
-	memcpy(&cmd_words[3], fw_data, fw_size);
+	if (hdr_dwords == 2) {
+		cmd_words[0] = cpu_to_le32(UA_FW_CMD | UA_FW_LARGE_FLAG);
+		cmd_words[1] = cpu_to_le32(fw_dwords + 2);
+	} else {
+		cmd_words[0] = cpu_to_le32((fw_dwords + 1) | UA_FW_CMD);
+	}
+	memcpy(&cmd_words[hdr_dwords], fw_data, fw_size);
 
 	/* Zero response buffer */
 	memset(resp_buf, 0, UA_PCIE_PAGE_SIZE);
@@ -1176,7 +1308,7 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 
 	/* Submit response ring entry FIRST (provide buffer before sending cmd) */
 	entry = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_RING_DMA_REF | (UA_PCIE_PAGE_SIZE / 4)),
+		.word0 = cpu_to_le32(UA_RING_DMA_REF | SEND_BLOCK_RESP_DWORDS),
 		.word1 = 0,
 		.word2 = cpu_to_le32(lower_32_bits(resp_addr)),
 		.word3 = cpu_to_le32(upper_32_bits(resp_addr)),
@@ -1190,31 +1322,36 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 	/* Small delay to let resp ring settle */
 	usleep_range(1000, 2000);
 
-	/* Submit command ring entry: single DMA ref for entire payload */
-	entry = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_RING_DMA_REF | total_dwords),
-		.word1 = 0,
-		.word2 = cpu_to_le32(lower_32_bits(cmd_addr)),
-		.word3 = cpu_to_le32(upper_32_bits(cmd_addr)),
-	};
-	ret = ua_dsp_ring_put_entry(ua, &dsp0->cmd, &entry);
-	if (ret) {
-		/* The response descriptor is already queued: keep its page */
-		ua_dsp_orphan_dma(ua, resp_buf, resp_addr, UA_PCIE_PAGE_SIZE,
-				  &dsp0->resp, NULL);
-		goto free_cmd;
+	/*
+	 * Command ring: DMA refs over the whole buffer, none above 0xFFFF
+	 * dwords.  The ring was just reprogrammed, so it is empty and the
+	 * few entries this needs (at most 17 for 4 MiB) always fit.
+	 */
+	for (done = 0, left = total_dwords; left; ) {
+		u32 n = min_t(u32, left, 0xFFFF);
+		dma_addr_t at = cmd_addr + (dma_addr_t)done * 4;
+
+		entry = (struct ua_ring_entry){
+			.word0 = cpu_to_le32(UA_RING_DMA_REF | n),
+			.word1 = 0,
+			.word2 = cpu_to_le32(lower_32_bits(at)),
+			.word3 = cpu_to_le32(upper_32_bits(at)),
+		};
+		ret = ua_dsp_ring_put_entry(ua, &dsp0->cmd, &entry);
+		if (ret) {
+			/* The response descriptor is already queued: keep its page */
+			ua_dsp_orphan_dma(ua, resp_buf, resp_addr,
+					  UA_PCIE_PAGE_SIZE, &dsp0->resp, NULL);
+			goto free_cmd;
+		}
+		done += n;
+		left -= n;
 	}
 
 	dev_dbg(&ua->pdev->dev,
-		"fw cmd entry: [%08x %08x %08x %08x] cmd_addr=%pad\n",
-		le32_to_cpu(entry.word0), le32_to_cpu(entry.word1),
-		le32_to_cpu(entry.word2), le32_to_cpu(entry.word3),
-		&cmd_addr);
-	dev_dbg(&ua->pdev->dev,
-		"fw cmd buf: [%08x %08x %08x %08x ...] total=%u dwords\n",
+		"fw cmd buf: [%08x %08x %08x ...] total=%u dwords\n",
 		le32_to_cpu(cmd_words[0]), le32_to_cpu(cmd_words[1]),
-		le32_to_cpu(cmd_words[2]), le32_to_cpu(cmd_words[3]),
-		total_dwords);
+		le32_to_cpu(cmd_words[2]), total_dwords);
 
 	ua_dsp_ring_doorbell(ua, &dsp0->cmd,
 			     bank_base + UA_RING_CMD_OFFSET);
@@ -1222,17 +1359,15 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 	dev_dbg(&ua->pdev->dev,
 		"firmware load: %zu bytes, polling...\n", fw_size);
 
-	/* Poll response buffer (DMA coherent — no lock needed) */
-	ret = -ETIMEDOUT;
-	for (polls = 0; polls < UA_FW_TIMEOUT_MS / UA_FW_POLL_MS; polls++) {
-		u32 resp_word0 = le32_to_cpu(((__le32 *)resp_buf)[0]);
+	/* Poll the response buffer (DMA coherent, no lock needed) */
+	deadline = jiffies + msecs_to_jiffies(UA_FW_TIMEOUT_MS);
+	for (polls = 0; ; polls++) {
+		u32 resp_word0 = le32_to_cpu(READ_ONCE(((__le32 *)resp_buf)[0]));
 
-		if ((resp_word0 >> 16) == UA_FW_RESP_MATCH) {
-			dev_info(&ua->pdev->dev,
-				 "firmware loaded successfully (response=0x%08x)\n",
-				 resp_word0);
-			ua->fw_loaded = true;
-			ret = 0;
+		if (resp_word0)
+			break;
+		if (time_after(jiffies, deadline)) {
+			timed_out = true;
 			break;
 		}
 		/* Log progress every 5 seconds */
@@ -1244,13 +1379,14 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 					       UA_RING_RESP_OFFSET +
 					       UA_RING_POSITION);
 			dev_dbg(&ua->pdev->dev,
-				"fw poll %us: cmd_pos=%u resp_pos=%u resp[0]=0x%08x\n",
-				polls / 100, cmd_pos, resp_pos, resp_word0);
+				"fw poll %ums: cmd_pos=%u resp_pos=%u resp[0]=0x%08x\n",
+				polls * UA_FW_POLL_MS, cmd_pos, resp_pos,
+				resp_word0);
 		}
 		msleep(UA_FW_POLL_MS);
 	}
 
-	if (ret) {
+	if (timed_out) {
 		u32 cmd_pos = ua_read(ua, bank_base + UA_RING_CMD_OFFSET +
 				      UA_RING_POSITION);
 		u32 resp_pos = ua_read(ua, bank_base + UA_RING_RESP_OFFSET +
@@ -1258,8 +1394,9 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 		__le32 *resp_words = resp_buf;
 
 		dev_err(&ua->pdev->dev,
-			"firmware load timeout after %u ms\n",
-			polls * UA_FW_POLL_MS);
+			"firmware load timeout after %u ms (kext result %d, %s)\n",
+			UA_FW_TIMEOUT_MS, UA_KERR_TIMEOUT,
+			ua_kext_err_name(UA_KERR_TIMEOUT));
 		dev_err(&ua->pdev->dev,
 			"  cmd: wrote=%u pos=%u  resp: wrote=%u pos=%u\n",
 			dsp0->cmd.write_ptr, cmd_pos,
@@ -1276,7 +1413,21 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 				  &dsp0->resp, NULL);
 		ua_dsp_orphan_dma(ua, cmd_buf, cmd_addr, cmd_buf_size,
 				  &dsp0->cmd, NULL);
-		return ret;
+		return -ETIMEDOUT;
+	}
+
+	/* Answered: validate the high half and decode the DSP status */
+	kerr = ua_dsp_block_result(ua, 0, UA_FW_CMD, UA_FW_RESP_MATCH,
+				   resp_buf);
+	if (kerr && ((le32_to_cpu(((__le32 *)resp_buf)[0]) >> 16) !=
+		     UA_FW_RESP_MATCH || block_strict)) {
+		ret = -EIO;
+	} else {
+		dev_info(&ua->pdev->dev,
+			 "firmware loaded successfully (response=0x%08x)\n",
+			 le32_to_cpu(((__le32 *)resp_buf)[0]));
+		ua->fw_loaded = true;
+		ret = 0;
 	}
 
 free_resp:
@@ -1633,14 +1784,17 @@ int ua_dsp_test_dma_ref(struct ua_device *ua)
  *   - Response ring entry is 4 dwords (16 bytes), NOT a full page
  *   - param is for response validation only, NOT sent to hardware
  *   - All cmd ring entries submitted as one batch, single doorbell
- *   - Data split at 4KB page boundaries (DMA page alignment)
+ *   - Data split into pieces that never cross a 4KB bus boundary: the
+ *     kext uses up to 4KB (1024 dwords) per descriptor; Linux defaults to
+ *     1KB pieces, see sendblock_chunk
+ *   - Header form follows the payload size: below 0x3FFFC bytes one dword
+ *     {(dwords + 1) | cmd}, from 0x3FFFC bytes the large form
+ *     {cmd | BIT(30), dwords + 2}
+ *   - Timeout is UA_BLOCK_TIMEOUT_MS (the kext's 5 s for blocks; 150 s for
+ *     firmware only in ua_dsp_load_firmware()); the wait ends at once on
+ *     the response
  *   - Doorbell order: DOORBELL(0x24) first, then WRITE_PTR(0x20)
  */
-
-/* Response buffer size: 4 dwords (16 bytes), matching kext descriptor2.
- * The FPGA writes a 4-dword completion status to this buffer.
- */
-#define SEND_BLOCK_RESP_DWORDS	4
 
 int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 		      u32 cmd, u32 param, const void *data,
@@ -1656,13 +1810,25 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	size_t data_alloc, offset, chunk;
 	unsigned int cmd_start;
 	bool resp_queued = false;
+	unsigned long deadline;
 	int polls, ret = 0;
 
+	if (!ua->num_dsps) {
+		dev_warn(&ua->pdev->dev,
+			 "sendBlock: kext result %d (%s)\n",
+			 UA_KERR_NO_DSPS, ua_kext_err_name(UA_KERR_NO_DSPS));
+		return -ENODEV;
+	}
 	if (dsp_idx >= ua->num_dsps)
 		return -EINVAL;
 	if (data_size & 3)
 		return -EINVAL;
-	if (data_size > 256 * 1024)
+	/*
+	 * The large header form (>= 0x3FFFC bytes) is reachable now; the
+	 * cap is UA_FW_MAX_SIZE and the ring-room check below rejects
+	 * transfers that need more than one ring's worth of entries.
+	 */
+	if (data_size > UA_FW_MAX_SIZE)
 		return -E2BIG;
 
 	ds = &ua->dsp[dsp_idx];
@@ -1674,7 +1840,7 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	resp_base = bank_base + UA_RING_RESP_OFFSET;
 
 	data_dwords = data_size / 4;
-	num_pages = DIV_ROUND_UP(data_size, 1024);  /* 1KB chunks */
+	num_pages = DIV_ROUND_UP(data_size, ua_sendblock_chunk());
 
 	ret = ua_dsp_orphan_room(ua);
 	if (ret)
@@ -1761,15 +1927,15 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	/*
 	 * Step 2: Build command header.
 	 *
-	 * Small format (data < 262140 bytes):
+	 * Small format (data < 0x3FFFC bytes):
 	 *   header[0] = (data_dwords + 1) | cmd
 	 *
-	 * Large format (data >= 262140 bytes):
+	 * Large format (data >= 0x3FFFC bytes):
 	 *   header[0] = cmd | BIT(30)
 	 *   header[1] = data_dwords + 2
 	 */
 	memset(hdr_buf, 0, UA_PCIE_PAGE_SIZE);
-	if (data_size < 262140) {
+	if (data_size < UA_FW_LARGE_THRESHOLD) {
 		((__le32 *)hdr_buf)[0] = cpu_to_le32((data_dwords + 1) | cmd);
 
 		/* Header DMA ref: 1 dword */
@@ -1798,16 +1964,15 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	/*
 	 * Step 3: Submit data as DMA ref entries.
 	 *
-	 * Kext splits data at 4KB page boundaries.  However, our DMA ref
-	 * size limit tests showed stalls at 512+ dwords (2KB+).  Use 1KB
-	 * chunks (256 dwords) which are verified working.  Try 4KB later
-	 * once basic flow works.
+	 * The kext walks the payload in physical-page pieces of at most 4KB
+	 * that never cross a 4KB bus boundary.  data_buf is page aligned and
+	 * the piece size divides 4KB, so the same holds here.  See
+	 * sendblock_chunk for why the default piece is 1KB.
 	 */
-#define SEND_BLOCK_CHUNK_SIZE	1024
 	for (offset = 0; offset < data_size; offset += chunk) {
 		u32 chunk_dwords;
 
-		chunk = min_t(size_t, data_size - offset, SEND_BLOCK_CHUNK_SIZE);
+		chunk = min_t(size_t, data_size - offset, ua_sendblock_chunk());
 		chunk_dwords = chunk / 4;
 
 		entry = (struct ua_ring_entry){
@@ -1827,17 +1992,24 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	ua_dsp_ring_doorbell(ua, &ds->cmd, cmd_base);
 
 	/*
-	 * Step 5: Poll response buffer for completion.
+	 * Step 5: Wait for the response (the kext's _sendBlock wait).
 	 *
-	 * Kext checks: (resp[0] >> 16) == (param >> 16)
-	 * For FW blocks with param=1: accept any non-zero response.
-	 * Timeout: ~150ms (1500 polls × 100us).
+	 * The kext checks the response word 0 high half against the
+	 * expected one (param >> 16 when param carries BIT(31)) and maps
+	 * word 1 to a result code (parity note 13, section 4).  Linux has
+	 * always accepted any non-zero word 0; that stays, the result is
+	 * decoded and logged by name (block_strict=1 makes it fatal).
+	 * Timeout: UA_BLOCK_TIMEOUT_MS, ended at once by the response.
 	 */
-	for (polls = 0; polls < 1500; polls++) {
-		usleep_range(100, 200);
-		/* Check if FPGA wrote anything to response buffer */
-		if (resp_words[0] != 0)
+	deadline = jiffies + msecs_to_jiffies(UA_BLOCK_TIMEOUT_MS);
+	for (polls = 0; !READ_ONCE(resp_words[0]); polls++) {
+		if (time_after(jiffies, deadline))
 			break;
+		/* A block completes in well under 20 ms: poll tightly first */
+		if (polls < 200)
+			usleep_range(100, 200);
+		else
+			usleep_range(1000, 2000);
 	}
 
 	dev_dbg(&ua->pdev->dev,
@@ -1849,9 +2021,11 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 		ua_read(ua, cmd_base + UA_RING_POSITION),
 		ds->cmd.write_ptr);
 
-	if (resp_words[0] == 0) {
+	if (READ_ONCE(resp_words[0]) == 0) {
 		dev_warn(&ua->pdev->dev,
-			 "sendBlock: no response after %d polls\n", polls);
+			 "sendBlock: no response after %d polls (kext result %d, %s)\n",
+			 polls, UA_KERR_TIMEOUT,
+			 ua_kext_err_name(UA_KERR_TIMEOUT));
 		ret = -ETIMEDOUT;
 
 		/*
@@ -1870,6 +2044,10 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 		ua_dsp_orphan_dma(ua, hdr_buf, hdr_dma, UA_PCIE_PAGE_SIZE,
 				  &ds->cmd, NULL);
 		hdr_buf = NULL;
+	} else if (ua_dsp_block_result(ua, dsp_idx, cmd,
+				       (param & BIT(31)) ? param >> 16 : 0,
+				       resp_words) && block_strict) {
+		ret = -EIO;
 	}
 	goto free_resp;
 
