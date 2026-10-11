@@ -6090,6 +6090,7 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 {
 	struct ua_device *ua = snd_pcm_substream_chip(sub);
 	struct ua_audio *audio = &ua->audio;
+	snd_pcm_uframes_t start_pos = 0;
 	unsigned long flags;
 	unsigned int dir;
 
@@ -6102,12 +6103,21 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 		if (atomic_read(&ua->shutdown))
 			return -ENODEV;
 
+		/*
+		 * pcm_live_start: the stream starts where ua_pcm_ioctl() put
+		 * hw_ptr, so the first period boundary is the one after it
+		 * (with the core's reset hw_ptr is 0 here anyway)
+		 */
+		if (READ_ONCE(pcm_live_start) && sub->runtime->buffer_size)
+			start_pos = sub->runtime->status->hw_ptr %
+				    sub->runtime->buffer_size;
+
 		spin_lock_irqsave(&audio->timer_lock, flags);
 		/* Only this direction's period tracking starts over */
 		if (dir == UA_DIR_PLAY)
-			audio->last_play_period_pos = 0;
+			audio->last_play_period_pos = start_pos;
 		else
-			audio->last_rec_period_pos = 0;
+			audio->last_rec_period_pos = start_pos;
 		__set_bit(dir, &audio->running_subs);
 		if (ua_period_irq_usable(ua, sub)) {
 			/* Period-timer interrupt ("Period tracking") */
