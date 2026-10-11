@@ -253,7 +253,7 @@ class MixerDaemon:
     # Regex for parsing meter subscription paths — compiled once
     _METER_PATH_RE = re_mod.compile(
         r'/devices/0/(inputs|outputs|auxs)/(\d+)/'
-        r'(?:sends/\d+/)?'
+        r'(?:sends/(\d+)/)?'
         r'meters/(\d+)/'
         r'(MeterLevel|MeterPeakLevel|MeterClip|Clip)/value$'
     )
@@ -422,14 +422,14 @@ class MixerDaemon:
     def _parse_meter_path(cls, path: str) -> dict | None:
         """Parse a meter subscription path into structured components.
 
-        Returns dict with keys: path, kind, channel, meter_idx, prop
-        or None if not a meter path.
+        Returns dict with keys: path, kind, channel, send (index or None),
+        meter_idx, prop, or None if not a meter path.
         """
         m = cls._METER_PATH_RE.search(path)
         if not m:
             return None
 
-        raw_prop = m.group(4)
+        raw_prop = m.group(5)
         if raw_prop == 'MeterLevel':
             prop = 'level'
         elif raw_prop == 'MeterPeakLevel':
@@ -439,9 +439,10 @@ class MixerDaemon:
 
         return {
             'path': path,
-            'kind': m.group(1),       # 'inputs' or 'outputs'
+            'kind': m.group(1),       # 'inputs', 'outputs' or 'auxs'
             'channel': int(m.group(2)),
-            'meter_idx': int(m.group(3)),
+            'send': int(m.group(3)) if m.group(3) is not None else None,
+            'meter_idx': int(m.group(4)),
             'prop': prop,
         }
 
@@ -468,6 +469,9 @@ class MixerDaemon:
             level, peak, clip = SILENCE_DB, SILENCE_DB, False
         else:
             level, peak, clip = self._metering.get_channel_meter(cap)
+            if entry['kind'] == 'inputs':
+                level, peak, clip = self._apply_meter_gain(
+                    entry, level, peak, clip)
 
         if entry['prop'] == 'level':
             return level
@@ -476,6 +480,74 @@ class MixerDaemon:
         elif entry['prop'] == 'clip':
             return clip
         return SILENCE_DB
+
+    def _meter_gain_db(self, entry: dict) -> float | None:
+        """The gain the host adds to an input's meter, or None (silent).
+
+        As the Mixer Engine does it (DoMetersMono; nothing in the readback
+        carries these): a send meter is the input level plus the send's
+        gain, plus the fader for a post-fader send; with /PostFaderMetering
+        the input meter itself is the level plus the fader.  A muted input
+        reads silent wherever the fader counts, a bypassed send always.
+        """
+        get = self.state.get_value
+        base = f"/devices/0/inputs/{entry['channel']}"
+
+        def db(path, default):
+            try:
+                return float(get(path))
+            except (TypeError, ValueError):
+                return default
+
+        fader = db(f"{base}/FaderLevel/value", 0.0)
+        muted = bool(get(f"{base}/Mute/value"))
+        send = entry.get('send')
+        if send is None:
+            if not get("/PostFaderMetering/value"):
+                return 0.0
+            return None if muted or fader <= -144.0 else fader
+
+        sbase = f"{base}/sends/{send}"
+        if get(f"{sbase}/Bypass/value"):
+            return None
+        gain = db(f"{sbase}/Gain/value", -144.0)
+        if gain <= -144.0:
+            return None
+        # Pre/post fader: the send's own override, else its bus setting
+        # (auxs/N/SendPostFader for AUX N, HPnSendPostFader for CUE n)
+        override = get(f"{sbase}/PostFaderOverride/value")
+        send_id = str(get(f"{sbase}/ID/value") or "")
+        num = send_id[3:]
+        if override in (0, 1):
+            post = override == 1
+        elif send_id.startswith("aux") and num.isdigit():
+            post = bool(get(f"/devices/0/auxs/{int(num) - 1}"
+                            "/SendPostFader/value"))
+        elif send_id.startswith("cue") and num.isdigit():
+            post = bool(get(f"/devices/0/HP{num}SendPostFader/value"))
+        else:
+            post = False
+        if post:
+            if muted or fader <= -144.0:
+                return None
+            gain += fader
+        return gain
+
+    def _apply_meter_gain(self, entry: dict, level: float, peak: float,
+                          clip: bool):
+        """Input meter -> post-fader or send meter (see _meter_gain_db)."""
+        gain = self._meter_gain_db(entry)
+        if gain is None:
+            return SILENCE_DB, SILENCE_DB, False
+        if not gain:
+            return level, peak, clip
+
+        def shift(v):
+            # Silence stays silence; the meter tops out at 0 dBFS
+            return v if v <= SILENCE_DB else max(SILENCE_DB, min(0.0, v + gain))
+
+        return shift(level), shift(peak), clip or (
+            level > SILENCE_DB and level + gain >= 0.0)
 
     def _readback_suppressed(self, path: str) -> bool:
         """Check if a readback push should be suppressed (recent client SET)."""
