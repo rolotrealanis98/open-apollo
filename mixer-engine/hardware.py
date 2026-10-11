@@ -1524,8 +1524,8 @@ class HardwareBackend:
         """Query DSP info for a single SHARC DSP.
 
         Returns dict with 'index', 'bank_base', 'status' (0=idle, 1=running),
-        or None on error. Maps to macOS SEL112 (GetDSPInfo) / SEL170
-        (GetPluginDSPLoad).
+        or None on error. The kext's DSP and session load figures come
+        from selectors 110 and 112 (SEL170 is GetMixerParam).
 
         The Apollo x4 has 4 DSPs (index 0-3).
         """

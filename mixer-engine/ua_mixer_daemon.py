@@ -688,12 +688,12 @@ class MixerDaemon:
     def _poll_dsp_load(self):
         """Poll DSP load and push to state tree at ~1 Hz.
 
-        On macOS, DSP load comes from SEL170 (GetPluginDSPLoad) which
-        returns an IEEE 754 float (0-100%) from the SHARC DSP.  On Linux,
-        we query each DSP's running status via GET_DSP_INFO ioctl.
+        On macOS, DSP and session load come from kext selectors 110 and
+        112 (parity/01-user-client.md).  On Linux, we query each DSP's
+        running status via GET_DSP_INFO ioctl.
 
-        The full SEL170-equivalent (which returns actual load percentage)
-        would require a DSP ring buffer command — not yet implemented.
+        The real load figures would need the kext's source for them,
+        which is not decoded yet.
         For now, we report whether DSPs are active (binary 0/100%) and
         will refine to actual load percentages when we identify the
         correct ring buffer query or register.
@@ -701,8 +701,7 @@ class MixerDaemon:
         if not self.hw_router or not self.hw_router.backend.connected:
             return
 
-        # Real DSP load requires SEL170-equivalent (ring buffer query to
-        # SHARC DSP).  The binary running/idle status from GET_DSP_INFO is
+        # Real DSP load needs the selector 110/112 equivalent (not decoded).  The binary running/idle status from GET_DSP_INFO is
         # not useful — it's always 100% when DSP is alive.  Report 0% until
         # we implement actual load polling.
         dsp_load = 0.0

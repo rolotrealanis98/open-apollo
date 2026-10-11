@@ -154,7 +154,7 @@ struct ua_mixer_param {
 };
 
 /*
- * Driver parameter (kext sel 68 / 0xA6).
+ * Driver parameter (kext selector 166 / 0xA6, SetDriverParameter).
  * Controls sample rate, clock source, etc.
  * Input size: 0x10 (16 bytes).
  */
@@ -165,7 +165,7 @@ struct ua_driver_param {
 };
 
 /*
- * Mixer readback (kext sel 25 / 0x88).
+ * Mixer readback (kext selector 136 / 0x88, GetMixerReadback).
  * Returns 41 × u32 words (0xA4 bytes) with XOR checksum.
  * word[38] = XOR of word[0..37], word[39] = ~word[38].
  */
