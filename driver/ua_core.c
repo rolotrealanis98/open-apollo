@@ -2279,6 +2279,32 @@ static long ua_ioctl_dsp_send_block(struct ua_device *ua, unsigned long arg)
 }
 
 /*
+ * UA_IOCTL_DMA_TEST.  The struct carries 1 KiB of capture data, so it is
+ * kept off ua_ioctl_dispatch()'s stack (the frame went past 1024 bytes
+ * with gcc 15) and built at -O2 for the same bogus GCC 12 copy-size
+ * error as the IO map below.
+ */
+static noinline UA_GCC_OPTIMIZE("O2,no-omit-frame-pointer") long
+ua_ioctl_dma_test(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_dma_test *dt;
+	long ret;
+
+	dt = memdup_user((void __user *)arg, sizeof(*dt));
+	if (IS_ERR(dt))
+		return PTR_ERR(dt);
+
+	mutex_lock(&ua->lock);
+	ret = ua_audio_dma_test(ua, dt);
+	mutex_unlock(&ua->lock);
+
+	if (!ret && copy_to_user((void __user *)arg, dt, sizeof(*dt)))
+		ret = -EFAULT;
+	kfree(dt);
+	return ret;
+}
+
+/*
  * UA_IOCTL_GET_IO_MAP: firmware IO descriptors + ALSA channel map.
  * Built at -O2: under this file's -Og, GCC 12 (Debian 12, 6.1 headers)
  * reports a bogus "copy source size is too small" for the heap buffer.
@@ -2530,25 +2556,8 @@ static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
 		return raw_ret;
 	}
 
-	case UA_IOCTL_DMA_TEST: {
-		struct ua_dma_test dt;
-
-		if (copy_from_user(&dt, (void __user *)arg, sizeof(dt)))
-			return -EFAULT;
-
-		mutex_lock(&ua->lock);
-		{
-			int ret = ua_audio_dma_test(ua, &dt);
-
-			mutex_unlock(&ua->lock);
-			if (ret)
-				return ret;
-		}
-
-		if (copy_to_user((void __user *)arg, &dt, sizeof(dt)))
-			return -EFAULT;
-		return 0;
-	}
+	case UA_IOCTL_DMA_TEST:
+		return ua_ioctl_dma_test(ua, arg);
 
 	default:
 		return -ENOTTY;
