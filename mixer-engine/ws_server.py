@@ -204,9 +204,11 @@ class WsServer:
         path = cmd.path
         if path.lower() == "/sleep":
             path = "/Sleep"
+        old = self.commands.value_of(path) if self.commands is not None \
+            else None
         self.state.set(path, cmd.value, source_client=client.id)
         if self.commands is not None:
-            self.commands.on_set(path, cmd.value)
+            self.commands.on_set(path, cmd.value, old=old, client=client.id)
         return []
 
     def _handle_subscribe(self, client: WsClient, cmd: WsCommand) -> list[str]:

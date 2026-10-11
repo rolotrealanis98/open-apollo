@@ -30,6 +30,13 @@ What is implemented needs no UA file format:
     SaveLastUsedSession            session XML and no UA tool reads it.
     SaveAsPreset, DeletePreset,    per-channel presets, in
     MovePreset                     <state>/<device>.presets.json
+    SaveIOMapPreset,               I/O map presets (the values of the
+    DeleteIOMapPreset,             IOMapPreset and route properties), in
+    RenameIOMapPreset              <state>/<device>.iomaps.json; host-side,
+                                   nothing goes to the driver
+    Undo, Redo                     the last client SET batches (50 deep);
+                                   volatile paths, the preamps and the
+                                   monitor level are never undone
 
 Every other command of the engine's list is known and answers "Unable to
 execute command."; the licensing commands (PluginStartDemo,
@@ -63,10 +70,13 @@ IDENTIFY_SECONDS = 5.0
 IDENTIFY_MAX_SECONDS = 30.0
 IDENTIFY_BLINK = 0.5
 
+UNDO_MAX = 50           # batches kept
+UNDO_GAP = 0.5          # seconds: SETs closer than this from one client are one batch
 NAME_MAX = 64
 FORMAT_SNAPSHOTS = "open-apollo-snapshots"
 FORMAT_SESSION = "open-apollo-session"
 FORMAT_PRESETS = "open-apollo-presets"
+FORMAT_IOMAPS = "open-apollo-iomap-presets"
 
 # Commands of CMxRoot::InitializeCommands that this daemon does not run
 # (UA file formats, plugin inserts, speaker/headphone correction, Dante,
@@ -76,8 +86,8 @@ KNOWN_UNSUPPORTED = frozenset(n.lower() for n in """
     CloseWindow OpenWindow ShuffleInserts MoveInsert CopyInsert PasteInsert
     MoveChannel ToXML FromXML LEDTest AddDevice RemoveDevice
     CloseModalDialog DeleteFolder NewFolder UpdatePlugInStatus
-    PluginBarCopySettings PluginBarPasteSettings SetTouch SaveIOMapPreset
-    DeleteIOMapPreset RenameIOMapPreset Import Export DumpChains
+    PluginBarCopySettings PluginBarPasteSettings SetTouch
+    Import Export DumpChains
     GetMidiBuffers SetSpeakerCorrectionSpec GetSpeakerCorrectionSpec
     SetSpeakerTrims GetSpeakerTrims SetHeadphoneCorrectionSpec
     GetHeadphoneCorrectionSpec SetHeadphone2CorrectionSpec
@@ -117,6 +127,13 @@ _VOLATILE = re.compile(
     r"^/openapollo/|"
     r"^/devices/0/DeviceOnline/value$|/meters/|/effects/")
 _RE_PREAMP = re.compile(r"^/devices/0/inputs/\d+/preamps/")
+# Never undone or redone: a 48V/pad flipped back under a microphone, a
+# monitor level jumping the speakers, or a recall (which sets many values
+# itself).  Same rule as the channel copy/paste.
+_UNDO_SKIP = re.compile(
+    r"/preamps/|/(CRMonitorLevel|CRMonitorLevelTapered)/value$|"
+    r"^/(Snapshot|PrimedSnapshot)/value$|/Preset/value$")
+_MISSING = object()
 _RE_INPUT_STRIP = re.compile(
     r"^/devices/0/inputs/(\d+)/(FaderLevel|FaderLevelTapered|Pan|Pan2|Mute)"
     r"/value$")
@@ -271,7 +288,17 @@ class CommandEngine:
             "saveaspreset": self._preset_save,
             "deletepreset": self._preset_delete,
             "movepreset": self._preset_move,
+            "saveiomappreset": self._iomap_save,
+            "deleteiomappreset": self._iomap_delete,
+            "renameiomappreset": self._iomap_rename,
+            "undo": self._undo,
+            "redo": self._redo,
         }
+        # Undo history: batches {client, t, values: {path: [old, new]}}
+        self._iomap_saved_names: list[str] = []
+        self._undo_stack: list[dict] = []
+        self._redo_stack: list[dict] = []
+        self._applying = False
 
     @property
     def state(self):
@@ -285,6 +312,7 @@ class CommandEngine:
         """Where snapshots, presets and sessions live: <directory>/<stem>.*"""
         self.store_dir = Path(directory)
         self.stem = stem
+        self._publish_iomap_list()
 
     # ── Dispatch ───────────────────────────────────────────────────
 
@@ -327,13 +355,31 @@ class CommandEngine:
         log.info("post %s ok", path)
         return (True if data is None else data), None
 
-    def on_set(self, path: str, value: Any):
-        """A client set a property: a Snapshot or a channel's Preset name
-        that exists is recalled (the engine recalls on the property set)."""
+    def value_of(self, path: str) -> Any:
+        """The current value at a client's SET path, to hand to on_set(old=)
+        before the set is applied (_MISSING when there is none)."""
+        vp = path if path.endswith("/value") else path + "/value"
+        if not self.state.path_exists(vp):
+            return _MISSING
+        return self.state.get_value(vp)
+
+    def on_set(self, path: str, value: Any, old: Any = _MISSING,
+               client: str | None = None):
+        """A client set a property: it joins the undo history (when `old`,
+        the value before the set, is given), and a Snapshot or a channel's
+        Preset name that exists is recalled (the engine recalls on the
+        property set)."""
+        if old is not _MISSING:
+            self._record(path, old, client)
         if not path.endswith(("/Snapshot", "/Snapshot/value",
-                              "/Preset", "/Preset/value")):
+                              "/Preset", "/Preset/value",
+                              "/IOMapPreset", "/IOMapPreset/value")):
             return
         try:
+            if path in self._IOMAP_PATHS:
+                if isinstance(value, str) and value:
+                    self._iomap_recall(value)
+                return
             if path in ("/Snapshot/value", "/Snapshot"):
                 if isinstance(value, str) and value in self._snapshots()[
                         "snapshots"]:
@@ -347,6 +393,75 @@ class CommandEngine:
             log.info("recall on %s=%r failed: %s", path, value, e)
         except Exception:
             log.exception("recall on %s=%r crashed", path, value)
+
+    # ── Undo / Redo (U33) ──────────────────────────────────────────
+
+    def _record(self, path: str, old: Any, client: str | None):
+        if self._applying:
+            return
+        vp = path if path.endswith("/value") else path + "/value"
+        if _VOLATILE.search(vp) or _UNDO_SKIP.search(vp):
+            return
+        if not self.state.path_exists(vp):
+            return
+        new = self.state.get_value(vp)
+        if new == old:
+            return          # rejected by the tree, or no change
+        now = self.clock()
+        top = self._undo_stack[-1] if self._undo_stack else None
+        if (top is not None and top["client"] == client
+                and now - top["t"] <= UNDO_GAP):
+            top["t"] = now
+            if vp in top["values"]:
+                top["values"][vp][1] = new      # keep the first old value
+            else:
+                top["values"][vp] = [old, new]
+        else:
+            self._undo_stack.append(
+                {"client": client, "t": now, "values": {vp: [old, new]}})
+            del self._undo_stack[:-UNDO_MAX]
+        self._redo_stack.clear()
+
+    def clear_history(self):
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+
+    def _apply_batch(self, batch: dict, which: int) -> int:
+        """Set every value of a batch (which 0 = old, 1 = new) through the
+        normal set path, last change first when undoing."""
+        n = 0
+        items = list(batch["values"].items())
+        if which == 0:
+            items.reverse()
+        self._applying = True
+        try:
+            for p, pair in items:
+                if self.state.path_exists(p):
+                    self.state.set(p, pair[which])
+                    n += 1
+        finally:
+            self._applying = False
+        return n
+
+    def _undo(self, obj: str, params: dict):
+        if not self._undo_stack:
+            raise CommandError("nothing to undo")
+        batch = self._undo_stack.pop()
+        n = self._apply_batch(batch, 0)
+        self._redo_stack.append(batch)
+        del self._redo_stack[:-UNDO_MAX]
+        return {"applied": n, "undo": len(self._undo_stack),
+                "redo": len(self._redo_stack)}
+
+    def _redo(self, obj: str, params: dict):
+        if not self._redo_stack:
+            raise CommandError("nothing to redo")
+        batch = self._redo_stack.pop()
+        n = self._apply_batch(batch, 1)
+        self._undo_stack.append(batch)
+        del self._undo_stack[:-UNDO_MAX]
+        return {"applied": n, "undo": len(self._undo_stack),
+                "redo": len(self._redo_stack)}
 
     def on_pause(self):
         """The device is being paused: an Identify blink ends now."""
@@ -771,6 +886,116 @@ class CommandEngine:
         self._file(".presets.json").save(data)
         return {"presets": b["order"]}
 
+    # I/O map presets ................................................
+
+    _IOMAP_ROOTS = ("inputroutes", "outputroutes", "asioinputs",
+                    "asiooutputs")
+    _IOMAP_PATHS = ("/IOMapPreset", "/IOMapPreset/value")
+
+    def _iomaps(self) -> dict:
+        data = self._file(".iomaps.json").load({})
+        presets = data.get("presets")
+        order = data.get("order")
+        if not isinstance(presets, dict):
+            presets = {}
+        order = [n for n in (order if isinstance(order, list) else [])
+                 if n in presets]
+        order += [n for n in presets if n not in order]
+        return {"format": FORMAT_IOMAPS, "version": 1,
+                "order": order, "presets": presets}
+
+    def _iomaps_save(self, data: dict):
+        self._file(".iomaps.json").save(data)
+
+    def _iomap_values(self) -> dict:
+        """{absolute /value path: value} of the I/O routes (not their
+        Type)."""
+        out: dict = {}
+        for root in self._IOMAP_ROOTS:
+            if not self.state.path_exists(f"/{root}"):
+                continue
+            try:
+                rel = self._collect(f"/{root}", frozenset({"Type"}))
+            except CommandError:
+                continue
+            for r, v in rel.items():
+                out[f"/{root}/{r}/value"] = v
+        return out
+
+    def _publish_iomap_list(self, current: str | None = None):
+        """Put the daemon's saved presets after the map's own in the
+        /IOMapPreset list (and point the property at `current`)."""
+        if not self.state.path_exists("/IOMapPreset/value"):
+            return
+        try:
+            saved = self._iomaps()["order"]
+        except CommandError:
+            saved = []
+        prop = self.state.get_prop_dict("/IOMapPreset") or {}
+        own = set(self._iomap_saved_names)
+        base = [v for v in (prop.get("values") or [])
+                if not (isinstance(v, dict) and v.get("value") in own)]
+        entries = [{"value": n, "type": "file", "locked": False}
+                   for n in saved]
+        self._iomap_saved_names = list(saved)
+        self.state.update_property("/IOMapPreset", {"values": base + entries})
+        if current is not None:
+            self.state.set("/IOMapPreset/value", current, hardware=False)
+            if self.state.path_exists("/IOMapPresetDirty/value"):
+                self.state.set("/IOMapPresetDirty/value", False,
+                               hardware=False)
+
+    def _iomap_save(self, obj: str, params: dict):
+        name = clean_name(params.get("name", params.get("value")))
+        data = self._iomaps()
+        data["presets"][name] = {"saved": _now(),
+                                 "values": self._iomap_values()}
+        if name not in data["order"]:
+            data["order"].append(name)
+        self._iomaps_save(data)
+        self._publish_iomap_list(name)
+        return {"name": name, "presets": data["order"]}
+
+    def _iomap_delete(self, obj: str, params: dict):
+        name = clean_name(params.get("name", params.get("value")))
+        data = self._iomaps()
+        if name not in data["presets"]:
+            raise CommandError("no such preset")
+        del data["presets"][name]
+        data["order"].remove(name)
+        self._iomaps_save(data)
+        cur = self.state.get_value("/IOMapPreset/value")
+        self._publish_iomap_list("" if cur == name else None)
+        return {"presets": data["order"]}
+
+    def _iomap_rename(self, obj: str, params: dict):
+        old = clean_name(params.get("name", params.get("from")))
+        new = clean_name(params.get("new_name", params.get("to")))
+        data = self._iomaps()
+        if old not in data["presets"]:
+            raise CommandError("no such preset")
+        if new in data["presets"] and new != old:
+            raise CommandError("name taken")
+        if new != old:
+            data["presets"][new] = data["presets"].pop(old)
+            data["order"][data["order"].index(old)] = new
+            self._iomaps_save(data)
+        cur = self.state.get_value("/IOMapPreset/value")
+        self._publish_iomap_list(new if cur == old else None)
+        return {"name": new, "presets": data["order"]}
+
+    def _iomap_recall(self, name: str):
+        item = self._iomaps()["presets"].get(name)
+        if not isinstance(item, dict):
+            return      # one of the map's own presets: nothing stored
+        n = 0
+        for p, v in (item.get("values") or {}).items():
+            if (isinstance(p, str) and self.state.path_exists(p)
+                    and p.split("/")[1] in self._IOMAP_ROOTS):
+                self.state.set(p, v)
+                n += 1
+        log.info("I/O map preset %r applied: %d values", name, n)
+
     # sessions .......................................................
 
     def _session_dir(self) -> Path:
@@ -880,6 +1105,7 @@ class CommandEngine:
         if "name" in params:
             name = clean_name(params["name"])
         self._publish_session(name)
+        self.clear_history()
         log.info("NewSession: %d controls back to their defaults", n)
         return {"name": name, "reset": n}
 
@@ -897,6 +1123,7 @@ class CommandEngine:
                   and not _VOLATILE.search(p)}
         n = self.apply_values(values)
         self._publish_session(name)
+        self.clear_history()
         return {"name": name, "applied": n}
 
     def apply_values(self, values: dict) -> int:

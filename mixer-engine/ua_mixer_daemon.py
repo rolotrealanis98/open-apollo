@@ -2134,6 +2134,7 @@ class MixerDaemon:
         path = cmd.path
         if path.lower() == "/sleep":
             path = "/Sleep"
+        old_value = self.commands.value_of(path)
 
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
 
@@ -2219,7 +2220,7 @@ class MixerDaemon:
                                       (monitor_tapered_to_hw(v) - 192) / 2.0)
 
         # A Snapshot or channel Preset name that exists is recalled
-        self.commands.on_set(path, cmd.value)
+        self.commands.on_set(path, cmd.value, old=old_value, client=client.id)
 
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
