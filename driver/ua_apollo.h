@@ -872,6 +872,16 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_CLOCK_ADAT       0x05
 #define UA_CLOCK_WORDCLOCK  0x07
 #define UA_CLOCK_INTERNAL   0x0C
+#define UA_CLOCK_PEER       0x0A    /* peer/slave: hidden from the Clock Source menu */
+
+/* Device clock-source list (see struct ua_audio) */
+#define UA_CLOCK_LIST_MAX       16
+#define UA_CLOCK_NAME_LEN       32
+#define UA_CLOCK_NAMES_BYTES    256
+#define UA_REG_NOTIF_CLOCK_NAMES (UA_REG_NOTIF_BASE + UA_NOTIF_BANK_OFFSET + 0x68)  /* 0xC090 */
+/* Firmware latency words, inside the 95-word connect readback [M: pairing] */
+#define UA_REG_NOTIF_LAT_OUT    0xC198
+#define UA_REG_NOTIF_LAT_IN     0xC19C
 
 /* Sample rate table indices (for UA_REG_AX_CONNECT clock doorbell) */
 #define UA_RATE_44100           1
@@ -1054,6 +1064,8 @@ struct ua_dma_ring {
 	unsigned int nr_pages;      /* pages successfully allocated */
 };
 
+struct pm_qos_request;
+
 struct ua_audio {
 	/* ALSA */
 	struct snd_card *card;
@@ -1179,6 +1191,56 @@ struct ua_audio {
 	 * hw_params set (0 = none), so the other can't pick another one */
 	unsigned int stream_rate[2];        /* [UA_DIR_PLAY], [UA_DIR_REC] */
 	u16 clock_src_mask;                 /* UA_REG_NOTIF_CLOCK_SRCS >> 16 */
+
+	/*
+	 * Clock and transport parity state (parity/12, ua_audio.c "Clock
+	 * parity").  Written under ua->lock; the proc file and the ALSA
+	 * controls read the cached values without it.
+	 */
+	/* Device's clock-source list (mask 0xC08C[31:16], names 0xC090) */
+	spinlock_t clock_list_lock;         /* guards the four fields below */
+	u8 clock_list_n;                    /* enum entries, 0 = none built */
+	u8 clock_list_val[UA_CLOCK_LIST_MAX]; /* source value per entry */
+	char clock_list_name[UA_CLOCK_LIST_MAX][UA_CLOCK_NAME_LEN];
+	u8 clock_names_raw[UA_CLOCK_NAMES_BYTES]; /* 0xC090.. as read */
+	bool clock_names_ok;                /* names parsed for the whole list */
+	u32 fw_rate_mask;                   /* 0xC08C[7:0], rate indexes offered */
+	/* Firmware latency words (0xC198 out [M], 0xC19C in [M]) per rate index */
+	u32 fw_lat_out[UA_RATE_192000 + 1];
+	u32 fw_lat_in[UA_RATE_192000 + 1];
+	bool fw_lat_seen[UA_RATE_192000 + 1];
+	/* Clock lock: (0xC07C & 3) == 1 */
+	bool clock_locked;
+	bool clock_lock_valid;
+	unsigned int clock_lock_changes;
+	u32 last_rate_info;                 /* 0xC07C as last read */
+	/* Reads before the 0xC030 ack on bits 4/22 (notif_kext_reads) */
+	u32 kr_clock_info, kr_rate_info, kr_xport_info;
+	unsigned int kr_count;
+	/* Clock-change acknowledgements by notification bit */
+	unsigned int clock_ack_count[3];    /* [0] bit 5, [1] bit 22, [2] bit 4 */
+	u32 clock_ack_last;                 /* 0xC030 at the last ack */
+	/* AX_CONTROL fault flags (bit 7, bit 8), latched until the next prepare */
+	u8 ax_fault_latch;                  /* bit 0: bit 7 seen, bit 1: bit 8 */
+	unsigned int ax_fault_count[2];     /* samples with bit 7 / bit 8 set */
+	u32 ax_fault_last_ctrl;
+	u32 ax_fault_status;                /* 0x22C0 when bit 7 first seen */
+	/* FRAME_CTR after the arm write, per rate band (0: 44.1/48, 1: 88.2/96, 2: 176.4/192) */
+	u32 frame_cfg_last;                 /* FRAME_CFG written */
+	u32 frame_ctr_first[3];             /* first read after the arm */
+	u32 frame_ctr_final[3];             /* value the gate ended on */
+	unsigned int frame_ctr_ms[3];       /* ms spent in the gate */
+	bool frame_ctr_seen[3];
+	/* Bus read latency while streaming (stall watchdog, count only) */
+	u64 stall_max_ns;
+	unsigned int stall_samples;
+	unsigned int stall_hist[5];         /* <10us, <50us, <100us, <1ms, >=1ms */
+	struct pm_qos_request *stall_qos;   /* stall_qos_us knob */
+	/* Rate ack {0x001A0002, rate} to every DSP (rate_ack_real) */
+	unsigned int rate_ack_sent;
+	unsigned int rate_acked;            /* rate of the last one, Hz */
+	/* Adopt the firmware's rate at the next connect (adopt_fw_rate) */
+	bool adopt_pending;
 };
 
 /* One allocated DMA buffer carrying a plugin-chain DMA_REF payload.
