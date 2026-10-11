@@ -2905,9 +2905,25 @@ post_handshake:
 						dev_warn(&ua->pdev->dev,
 							 "plugin chain activate failed: %d\n",
 							 pc_ret);
-					else
+					else {
 						ua->plugins_activated = true;
+						/* its default coefficients
+						 * overwrote the cached state */
+						ua->dspx.replay_pending = true;
+					}
 				}
+
+				/*
+				 * A DSP program load since the last connect
+				 * (cold start, resume re-init, userspace
+				 * firmware load) left the firmware defaults
+				 * in the DSP: put the cached bus coefficients
+				 * back.  No-op on a warm connect and when
+				 * nothing was cached.
+				 */
+				if (ua_dsp_replay_if_pending(ua, "audio connect"))
+					dev_warn(&ua->pdev->dev,
+						 "bus coefficient replay incomplete\n");
 
 				/* rate_ack_real: the firmware's rate to every DSP */
 				{

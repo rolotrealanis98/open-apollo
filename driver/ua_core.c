@@ -3127,6 +3127,8 @@ static long ua_ioctl_dsp_connect(struct ua_device *ua)
 	mutex_lock(&ua->lock);
 	ua_v12_aceface_first(ua);
 	ret = ua_dsp_connect_all(ua);
+	if (!ret && !ua_uses_audio_extension(ua->device_type))
+		(void)ua_dsp_replay_if_pending(ua, "dsp connect ioctl");
 	mutex_unlock(&ua->lock);
 
 	return ret;
@@ -3767,9 +3769,21 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 						dev_warn(&pdev->dev,
 							 "plugin chain activate failed: %d\n",
 							 pc_ret);
-					else
+					else {
 						ua->plugins_activated = true;
+						ua->dspx.replay_pending = true;
+					}
 				}
+				/*
+				 * Non-AudioExtension: the DSP is connected
+				 * now.  AudioExtension devices replay from
+				 * ua_audio_connect() (ring_connect_deferred).
+				 */
+				if (fw_ret == 0 &&
+				    !ua_uses_audio_extension(ua->device_type) &&
+				    ua_dsp_replay_if_pending(ua, "dsp init"))
+					dev_warn(&pdev->dev,
+						 "bus coefficient replay incomplete\n");
 			}
 
 			if (fw_ret == 0) {

@@ -1326,6 +1326,7 @@ struct ua_dsp_ext {
 	DECLARE_BITMAP(bus_coef_valid, UA_BUS_COEF_CELLS);
 	u8 bus_owner[UA_BUS_COEF_BUSES];	/* hosting DSP, 0 = DSP 0 */
 	u32 bus_replays;			/* ua_dsp_replay_bus_params() runs */
+	bool replay_pending;			/* a DSP program was (re)loaded, replay owed */
 
 	/* Message FIFO / DSP vectors (dsp_msg_irq) */
 	bool inited;			/* msg_work initialised */
@@ -1746,6 +1747,7 @@ int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 int ua_dsp_set_bus_param_flags(struct ua_device *ua, u32 bus_id, u32 param,
 			       u32 side, u32 value_u32, u32 flags);
 int ua_dsp_replay_bus_params(struct ua_device *ua);	/* ua->lock */
+int ua_dsp_replay_if_pending(struct ua_device *ua, const char *why); /* ua->lock */
 int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus_id, u32 dsp_idx);
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
 u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua);

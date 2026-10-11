@@ -1502,6 +1502,7 @@ int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 			 "firmware loaded successfully (response=0x%08x)\n",
 			 le32_to_cpu(((__le32 *)resp_buf)[0]));
 		ua->fw_loaded = true;
+		ua->dspx.replay_pending = true;
 		ret = 0;
 	}
 
@@ -2792,6 +2793,7 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 	}
 
 	ua->fw_loaded = true;
+	ua->dspx.replay_pending = true;
 	dev_info(&ua->pdev->dev,
 		 "mixer firmware loaded: %u blocks sent to DSP 0\n",
 		 num_blocks);
@@ -3668,11 +3670,11 @@ int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus_id, u32 dsp_idx)
  * Sleeps when a ring is full.  Nothing is replayed that was never set, so
  * on a driver that has not seen a coefficient yet it sends nothing.
  *
- * Where to call it (ua_core.c, not called yet): after a successful
- * ua_dsp_activate_plugin_chain() -- that chain carries the captured
- * default coefficients and would overwrite an earlier replay -- in
- * ua_dsp_init_and_load() and in ua_audio_connect(); and after any other
- * place that restarts the DSP program.
+ * Callers use ua_dsp_replay_if_pending(): it runs after the connect that
+ * follows a DSP program load (ua_audio_connect(), the non-AudioExtension
+ * connect in ua_dsp_init_and_load(), UA_IOCTL_DSP_CONNECT) and after a
+ * successful ua_dsp_activate_plugin_chain(), whose captured default
+ * coefficients would otherwise overwrite an earlier replay.
  *
  * Returns 0, or the first error (the replay continues past a failure).
  */
@@ -3686,6 +3688,11 @@ int ua_dsp_replay_bus_params(struct ua_device *ua)
 
 	if (!ua->dsp[0].rings_allocated)
 		return -ENODEV;
+
+	/* Nothing was ever set: nothing to replay, nothing to log */
+	if (bitmap_empty(ua->dspx.bus_coef_valid, UA_BUS_COEF_CELLS) &&
+	    !(ua->bus_enable_known & ua->bus_disabled_mask & 0x7f))
+		return 0;
 
 	for (bus = 0; bus < 7; bus++) {
 		if (!(ua->bus_enable_known & BIT(bus)) ||
@@ -3734,6 +3741,32 @@ int ua_dsp_replay_bus_params(struct ua_device *ua)
 		 "bus coefficient replay: %u command(s) sent, %u failed\n",
 		 sent, failed);
 	return err;
+}
+
+/**
+ * ua_dsp_replay_if_pending - Replay the mixer cache once after a DSP load
+ * @ua: device (caller must hold ua->lock)
+ * @why: short tag for the log
+ *
+ * ua_dsp_load_mixer_blocks() and ua_dsp_load_firmware() set replay_pending:
+ * the DSP program was (re)started and holds the firmware defaults.  The
+ * first call after that, from a point where the DSP rings are usable, sends
+ * the cached bus coefficients and clears the flag.  Warm paths never set it
+ * (the DSP kept its state), and a driver that has cached nothing sends
+ * nothing, so a warm probe is untouched.  The flag is cleared even when the
+ * cache is empty.
+ */
+int ua_dsp_replay_if_pending(struct ua_device *ua, const char *why)
+{
+	lockdep_assert_held(&ua->lock);
+
+	if (!ua->dspx.replay_pending)
+		return 0;
+	if (!ua->dsp[0].rings_allocated)
+		return -ENODEV;
+	ua->dspx.replay_pending = false;
+	dev_dbg(&ua->pdev->dev, "bus replay check after DSP load (%s)\n", why);
+	return ua_dsp_replay_bus_params(ua);
 }
 
 /**
