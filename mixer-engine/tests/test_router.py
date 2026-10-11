@@ -105,9 +105,10 @@ class TestMonitor:
         tree.set(MON + "/CRMonitorLevel/value", -30.0)
         assert backend.mixer_params == [(2, 1, 0x01, 132)]
 
-    def test_headphone_level_is_ganged_with_monitor(self, router, backend):
+    def test_headphone_level_does_not_touch_monitor_level(self, router, backend):
         router.on_set("/devices/0/outputs/19/CRMonitorLevel/value", -10.0)
-        assert backend.mixer_params == [(2, 1, 0x01, 172)]
+        assert backend.mixer_params == [(2, 1, 0x02, 172)]
+        assert only(backend, 0x01) == []
 
 
 class TestTalkback:

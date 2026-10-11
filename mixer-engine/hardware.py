@@ -251,31 +251,82 @@ MAX_PREAMP_CHANNELS = 4  # Apollo x4; other models vary
 #   0x0014-0x0017: ADAT In 5-8
 #   0x0018-0x001f: Virtual In 1-8 (DAW playback, 4 stereo pairs)
 
-# State tree input index → hardware bus ID mapping.
-# The state tree uses contiguous indices (0-21 for 22 inputs on Apollo x4),
-# but the hardware bus IDs have gaps (CUE/TB/AUX slots interleaved).
-_INPUT_IDX_TO_BUS = (
-    0x00, 0x01, 0x02, 0x03,  # Analog 1-4
-    0x08, 0x09,               # S/PDIF L/R
-    0x0C, 0x0D, 0x0E, 0x0F,  # ADAT 1-4
-    0x14, 0x15, 0x16, 0x17,  # ADAT 5-8
-    0x18, 0x19, 0x1A, 0x1B,  # Virtual 1-4
-    0x1C, 0x1D, 0x1E, 0x1F,  # Virtual 5-8
-    0x0A, 0x0B,               # Talkback 1/2 (inputs 22-23)
-)
-
 # Talkback bus constants (DTrace-verified)
-# Talkback faders use sub=0 ONLY (not the triplet sub=0,3,4).
+# Talkback faders write sub=0 only.
 # Unity gain ≈ 3.976353 (NOT 0.707 like normal inputs).
 TALKBACK_BUS_START = 0x0A
 TALKBACK_UNITY = 3.976353
 
+# Hardware bus IDs of the ADAT inputs: 1-4 sit at 0x0C-0x0F, 5-8 after the
+# AUX return slots at 0x14-0x17.
+_ADAT_BUS_IDS = (0x0C, 0x0D, 0x0E, 0x0F, 0x14, 0x15, 0x16, 0x17)
+_ANALOG_BUS_COUNT = 4        # analog inputs 1-4 at bus 0x00-0x03
+_SPDIF_BUS_IDS = (0x08, 0x09)
+_VIRTUAL_BUS_BASE = 0x18     # Virtual 1-8 at 0x18-0x1F
+_VIRTUAL_BUS_COUNT = 8
 
-def input_bus_id(input_idx: int) -> int:
-    """Get bus ID for an input channel (state tree index → hardware bus)."""
+_INPUT_NAME_RE = re.compile(r'^(ANALOG|ADAT|VIRTUAL)\s+(\d+)$')
+_SPDIF_NAME_RE = re.compile(r'^S/?PDIF\s*([LR])$')
+
+
+def bus_id_for_input_name(name) -> int | None:
+    """Hardware bus ID for a tree input, from its device-map name.
+
+    The state tree numbers inputs contiguously, in the order of the device
+    map (x4: ANALOG 1-4, ADAT 1-8, S/PDIF L/R, VIRTUAL 1-8, TALKBACK), while
+    the hardware bus IDs have gaps (CUE, talkback and AUX slots in between).
+    Deriving the ID from the name keeps the table right for any map that
+    names its inputs this way.  Returns None for a name with no bus (a
+    placeholder like "N/A 1", or a channel this table has no bus for).
+    """
+    if not isinstance(name, str):
+        return None
+    n = name.strip().upper()
+    if n == "TALKBACK":
+        return TALKBACK_BUS_START
+    m = _SPDIF_NAME_RE.match(n)
+    if m:
+        return _SPDIF_BUS_IDS[0 if m.group(1) == "L" else 1]
+    m = _INPUT_NAME_RE.match(n)
+    if not m:
+        return None
+    kind, num = m.group(1), int(m.group(2))
+    if kind == "ANALOG" and 1 <= num <= _ANALOG_BUS_COUNT:
+        return num - 1
+    if kind == "ADAT" and 1 <= num <= len(_ADAT_BUS_IDS):
+        return _ADAT_BUS_IDS[num - 1]
+    if kind == "VIRTUAL" and 1 <= num <= _VIRTUAL_BUS_COUNT:
+        return _VIRTUAL_BUS_BASE + num - 1
+    return None
+
+
+def build_input_bus_table(names) -> tuple:
+    """State tree input index -> bus ID (None = no bus) for a list of names."""
+    return tuple(bus_id_for_input_name(n) for n in names)
+
+
+# Apollo x4 device map input order (device_maps/device_map_apollo_x4.json).
+_X4_INPUT_NAMES = (
+    "ANALOG 1", "ANALOG 2", "ANALOG 3", "ANALOG 4",
+    "ADAT 1", "ADAT 2", "ADAT 3", "ADAT 4",
+    "ADAT 5", "ADAT 6", "ADAT 7", "ADAT 8",
+    "S/PDIF L", "S/PDIF R",
+    "VIRTUAL 1", "VIRTUAL 2", "VIRTUAL 3", "VIRTUAL 4",
+    "VIRTUAL 5", "VIRTUAL 6", "VIRTUAL 7", "VIRTUAL 8",
+    "TALKBACK", "N/A 1",
+)
+_INPUT_IDX_TO_BUS = build_input_bus_table(_X4_INPUT_NAMES)
+
+
+def input_bus_id(input_idx: int) -> int | None:
+    """Bus ID for an input of the Apollo x4 map (state tree index -> bus).
+
+    HardwareRouter derives its own table from the loaded device map; this
+    is the x4 default.  None when the index has no bus.
+    """
     if 0 <= input_idx < len(_INPUT_IDX_TO_BUS):
         return _INPUT_IDX_TO_BUS[input_idx]
-    return input_idx  # fallback
+    return None
 
 # Aux bus IDs: stride of 2 per aux index
 def aux_bus_id(aux_idx: int) -> int:
@@ -283,33 +334,56 @@ def aux_bus_id(aux_idx: int) -> int:
     return 0x0010 + aux_idx * 2
 
 # ── SEL130 Sub-Parameter Indices ──────────────────────────────────
-# From DTrace capture (verified all sends + fader + pan):
-#   Each input bus has 5 coefficients:
-#     sub=0: main mix coefficient (fader trigger + pan)
-#     sub=1: CUE1 send level
-#     sub=2: CUE2 send level
-#     sub=3: gain L (fader level / AUX1 send)
-#     sub=4: gain R (fader level / AUX2 send)
-#   Fader writes triplet: sub={0, 3, 4}
-#   Pan writes single: sub=0
-#   CUE sends write single: sub=1 or sub=2
-#   AUX sends write single: sub=3 or sub=4
+# From the Mixer Engine's CMxInput::_UpdateDSPBusParameters jump table
+# (apollo-linux/docs/re-notes/parity/04-engine-surface.md §0.1).  Each
+# input bus carries these coefficients:
+#     sub=0: main mix coefficient (fader x pan)
+#     sub=1: CUE 1 send level
+#     sub=2: CUE 2 send level
+#     sub=3: AUX 1 send level
+#     sub=4: AUX 2 send level
+#     sub=5: CUE 3 send level
+#     sub=6: CUE 4 send level
+# A fader or pan move writes sub 0 only.  (The DTrace "triplet" 0/3/4
+# wrote the fader value into the two AUX send slots; the engine never
+# does that.)  Aux buses use the same layout for their CUE sends.
 SUB_PARAM_MIX = 0           # Main mix coefficient (fader + pan)
 SUB_PARAM_CUE1 = 1          # CUE 1 send level
 SUB_PARAM_CUE2 = 2          # CUE 2 send level
-SUB_PARAM_GAIN_L = 3        # Gain L (fader / AUX 1 send)
-SUB_PARAM_GAIN_R = 4        # Gain R (fader / AUX 2 send)
-SUB_PARAM_MUTE_L = 5        # Bus mute L coefficient (DTrace-verified)
-SUB_PARAM_MUTE_R = 6        # Bus mute R coefficient (DTrace-verified)
+SUB_PARAM_AUX1 = 3          # AUX 1 send level
+SUB_PARAM_AUX2 = 4          # AUX 2 send level
+SUB_PARAM_CUE3 = 5          # CUE 3 send level
+SUB_PARAM_CUE4 = 6          # CUE 4 send level
+# Legacy names (the old DTrace reading of the same slots)
+SUB_PARAM_GAIN_L = SUB_PARAM_AUX1
+SUB_PARAM_GAIN_R = SUB_PARAM_AUX2
+SUB_PARAM_MUTE_L = SUB_PARAM_CUE3
+SUB_PARAM_MUTE_R = SUB_PARAM_CUE4
 
-# State tree send index → SEL130 sub-param mapping (DTrace-verified)
-# sends/0="AUX 1"→sub=3, sends/1="AUX 2"→sub=4,
-# sends/2="CUE 1"→sub=1, sends/3="CUE 2"→sub=2
+# Send ID (the "ID" property of a send in the device map) -> sub-param.
+_SEND_ID_TO_SUB = {
+    "aux1": SUB_PARAM_AUX1, "aux2": SUB_PARAM_AUX2,
+    "cue1": SUB_PARAM_CUE1, "cue2": SUB_PARAM_CUE2,
+    "cue3": SUB_PARAM_CUE3, "cue4": SUB_PARAM_CUE4,
+}
+
+# Input send index -> sub-param, used when the map has no send IDs.
+# x4 map: sends/0-1 = AUX 1-2, sends/2-5 = CUE 1-4.
 _SEND_IDX_TO_SUB = {
-    0: SUB_PARAM_GAIN_L,  # AUX 1
-    1: SUB_PARAM_GAIN_R,  # AUX 2
-    2: SUB_PARAM_CUE1,    # CUE 1
-    3: SUB_PARAM_CUE2,    # CUE 2
+    0: SUB_PARAM_AUX1,
+    1: SUB_PARAM_AUX2,
+    2: SUB_PARAM_CUE1,
+    3: SUB_PARAM_CUE2,
+    4: SUB_PARAM_CUE3,
+    5: SUB_PARAM_CUE4,
+}
+
+# Aux bus send index -> sub-param (x4 map: auxs/N/sends/0-3 = CUE 1-4).
+_AUX_SEND_IDX_TO_SUB = {
+    0: SUB_PARAM_CUE1,
+    1: SUB_PARAM_CUE2,
+    2: SUB_PARAM_CUE3,
+    3: SUB_PARAM_CUE4,
 }
 
 # ── Monitor Parameter IDs (SEL131, channel_type=2) ───────────────
@@ -343,6 +417,11 @@ MONITOR_PARAM = {
     "CUE2Mono":        0x08,   # ch_idx=0: CUE2 mono (1/0)
     "CUE1Mix":         0x05,   # ch_idx=0: CUE1 mix (0=on, 2=off — INVERTED!)
     "CUE2Mix":         0x07,   # ch_idx=0: CUE2 mix (0=on, 2=off — INVERTED!)
+    # Headphone level: the engine sends 0x02 for the first headphone output
+    # and 0x66 for the next (CMxOutput::UpdateHardwareState @0x10007efb8).
+    # HP1 = setting[2] bits 15:8 (readback word 2).
+    "HP1Level":        0x02,   # ch_idx=1: raw 192+dB*2
+    "HP2Level":        0x66,   # ch_idx=1: raw 192+dB*2 (setting[14] bits 7:0)
     # Device identification
     "Identify":        0x1d,   # ch_idx=0: flash front panel LEDs (1=on, 0=off)
     # TalkbackConfig
@@ -351,12 +430,12 @@ MONITOR_PARAM = {
 MONITOR_CHANNEL_TYPE = 2
 PREAMP_CHANNEL_TYPE = 1
 
-# Headphone output bus ID (from state tree: /devices/0/outputs/19/)
-# DTrace capture confirmed: HP volume on Apollo x4 uses
-# ch_type=2 ch_idx=1 param=0x0001 — SAME path as main monitor.
-# HP and monitor levels appear to be ganged at the IOKit level.
+# Headphone output level goes to its own monitor param (HP1Level /
+# HP2Level above), not the monitor's 0x01.  ch_idx is 1 like the monitor.
 HP_BUS_ID = 0x0019
-HP_CHANNEL_IDX = 1  # confirmed: same as monitor on Apollo x4
+HP_CHANNEL_IDX = 1
+# Headphone output (n-th of its IOType) -> monitor param for its level
+HP_LEVEL_PARAMS = {0: MONITOR_PARAM["HP1Level"], 1: MONITOR_PARAM["HP2Level"]}
 
 # ── Driver Parameter IDs ─────────────────────────────────────────
 DRIVER_PARAM_SAMPLE_RATE = 0
@@ -1410,17 +1489,14 @@ class HardwareBackend:
         Sends fader level, pan, and send gain values. Values are IEEE 754
         float (linear gain), packed as uint32 for the ioctl.
 
-        On macOS, each fader change sends 3 writes:
-            sub_param=0: main value
-            sub_param=3: companion L
-            sub_param=4: companion R
-        Pan sends only sub_param=0.
+        A fader or pan change writes sub_param 0 only; sub_param 1-6 are
+        the CUE 1/2, AUX 1/2 and CUE 3/4 send levels (see SUB_PARAM_*).
 
         Struct: {bus_id, sub_param, value_u32, flags=0x02} = 16 bytes.
 
         Args:
             bus_id:      Bus identifier (see INPUT_BUS_IDS, aux_bus_id())
-            sub_param:   0=main, 3=companion_L, 4=companion_R
+            sub_param:   0=main mix, 1/2=CUE 1/2, 3/4=AUX 1/2, 5/6=CUE 3/4
             value_float: Linear gain as float (0.0 = silence, 1.0 = unity)
         """
         value_u32 = float_to_uint32(value_float)
@@ -1451,21 +1527,20 @@ class HardwareBackend:
 
     def set_bus_fader(self, bus_id: int, linear_gain: float,
                      mix_coeff: float = 0.0) -> bool:
-        """Send a complete fader change (3 sub-param writes).
+        """Send a fader change: one write, sub 0 (fader x pan mix coefficient).
 
-        From DTrace capture: each fader change sends 3 writes:
-            sub=0: combined fader+pan mix coefficient
-            sub=3: effective gain, left channel
-            sub=4: effective gain, right channel
+        The Mixer Engine moves a fader through sub 0 only.  Sub 3 and 4 are
+        the AUX 1 / AUX 2 send levels (parity/04-engine-surface.md §0.1),
+        so a fader must never write them: an earlier version copied the
+        fader value into both, overwriting the AUX sends.
+
         mix_coeff = fader_linear × √2 × cos((pan + 1) × π/4)
         At center pan, mix_coeff == linear_gain (the √2 and cos(π/4) cancel).
+        `linear_gain` is accepted for call compatibility and not written.
         """
         write_fn = self.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
             else self.set_mixer_bus_param
-        ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
-        ok &= write_fn(bus_id, SUB_PARAM_GAIN_L, linear_gain)
-        ok &= write_fn(bus_id, SUB_PARAM_GAIN_R, linear_gain)
-        return ok
+        return write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
 
     def set_bus_pan(self, bus_id: int, mix_coeff: float) -> bool:
         """Send a pan change (single write to sub=0).
@@ -1803,6 +1878,7 @@ class HardwareRouter:
         # Rate-limit gain writes to prevent DSP overload.
         self._gain_last: dict[int, tuple[int, float]] = {}  # ch → (db, time)
         self._gain_pending: dict[int, int] = {}  # ch → deferred db value
+        self._input_bus_table: tuple | None = None
         self._sync_driver_state()
 
     def _sync_driver_state(self):
@@ -1822,6 +1898,73 @@ class HardwareRouter:
                     self.state_tree.set("/ClockSource/value", name)
                     log.info("Synced ClockSource from driver: %s", name)
                     break
+
+    # ── Device-map lookups (names, not hard-coded indices) ──────────
+
+    def _tree_value(self, path: str):
+        if not self.state_tree:
+            return None
+        return self.state_tree.get_value(path)
+
+    def _input_buses(self) -> tuple:
+        """State tree input index -> bus ID, derived from the input names.
+
+        Built once from the loaded device map's /inputs/N/Name values; the
+        x4 default table when the tree has no named inputs.
+        """
+        table = self._input_bus_table
+        if table is None:
+            names = []
+            while True:
+                name = self._tree_value(
+                    f"/devices/0/inputs/{len(names)}/Name/value")
+                if name is None:
+                    break
+                names.append(name)
+            table = build_input_bus_table(names) if names \
+                else _INPUT_IDX_TO_BUS
+            if names:
+                self._input_bus_table = table
+        return table
+
+    def _input_bus(self, ch: int) -> int | None:
+        """Bus ID of tree input `ch`, None when it has no bus."""
+        table = self._input_buses()
+        return table[ch] if 0 <= ch < len(table) else None
+
+    def _output_role(self, ch: int) -> tuple[str, int] | None:
+        """('cue' | 'hp' | 'monitor', n) for tree output `ch`, from IOType.
+
+        n counts outputs of that type in map order: x4 outputs 14-17 are
+        ('cue', 0..3), 19-20 are ('hp', 0..1), 18 is ('monitor', 0).
+        Falls back to the x4 layout when the tree has no IOType values.
+        """
+        kinds = {"cue": "cue", "headphone": "hp", "monitor": "monitor"}
+        io_type = self._tree_value(f"/devices/0/outputs/{ch}/IOType/value")
+        if io_type is None:
+            if 14 <= ch <= 17:
+                return ("cue", ch - 14)
+            if ch == 18:
+                return ("monitor", 0)
+            if ch in (19, 20):
+                return ("hp", ch - 19)
+            return None
+        kind = kinds.get(str(io_type).strip().lower())
+        if kind is None:
+            return None
+        n = 0
+        for i in range(ch):
+            t = self._tree_value(f"/devices/0/outputs/{i}/IOType/value")
+            if t is not None and kinds.get(str(t).strip().lower()) == kind:
+                n += 1
+        return (kind, n)
+
+    def _send_sub(self, base: str, send_idx: int, by_idx: dict) -> int | None:
+        """SEL130 sub-param of a send: from its map ID, else its index."""
+        send_id = self._tree_value(f"{base}/sends/{send_idx}/ID/value")
+        if isinstance(send_id, str) and send_id.lower() in _SEND_ID_TO_SUB:
+            return _SEND_ID_TO_SUB[send_id.lower()]
+        return by_idx.get(send_idx)
 
     def _get_input_pan(self, ch: int) -> float:
         """Read current Pan value for an input from the state tree."""
@@ -1895,6 +2038,10 @@ class HardwareRouter:
 
     # ── Solo recalculation ─────────────────────────────────────────
 
+    @staticmethod
+    def _talkback_coeff(db: float) -> float:
+        return 0.0 if db <= -144.0 else 10.0 ** (db / 20.0) * TALKBACK_UNITY
+
     def _handle_solo_recalc(self):
         """Recalculate all bus gains based on solo state.
 
@@ -1908,24 +2055,34 @@ class HardwareRouter:
 
         any_solo = False
         channels = []
-        for i in range(24):  # Apollo x4 has 24 input channels
+        for i in range(len(self._input_buses())):
+            bus = self._input_bus(i)
+            if bus is None:
+                continue
             solo = self.state_tree.get_value(
                 f"/devices/0/inputs/{i}/Solo/value")
             fader = self.state_tree.get_value(
                 f"/devices/0/inputs/{i}/FaderLevel/value")
             mute = self.state_tree.get_value(
                 f"/devices/0/inputs/{i}/Mute/value")
-            channels.append((i, bool(solo), float(fader or 0), bool(mute)))
+            channels.append((i, bus, bool(solo), float(fader or 0), bool(mute)))
             if solo:
                 any_solo = True
 
-        for i, soloed, fader_db, muted in channels:
-            bus = input_bus_id(i)
-            if muted or (any_solo and not soloed):
-                self.backend.set_bus_fader(bus, 0.0)
+        for i, bus, soloed, fader_db, muted in channels:
+            if bus == TALKBACK_BUS_START:
+                # Talkback has its own encoding (sub 0 only, unity 3.976)
+                db = -144.0 if (muted or (any_solo and not soloed)) \
+                    else fader_db
+                self.backend.set_bus_pan(bus, self._talkback_coeff(db))
+            elif muted or (any_solo and not soloed):
+                self.backend.set_bus_fader(bus, 0.0, 0.0)
             else:
-                linear = encode_input_fader(fader_db)
-                self.backend.set_bus_fader(bus, linear)
+                # sub 0 is fader x pan; it must carry the pan too, or the
+                # recalculation would drop a panned channel to centre.
+                mix = encode_mix_coeff(fader_db, self._get_input_pan(i))
+                self.backend.set_bus_fader(bus, encode_input_fader(fader_db),
+                                           mix)
 
         log.info("Solo recalc: any_solo=%s, %d channels updated",
                  any_solo, len(channels))
@@ -2038,10 +2195,19 @@ class HardwareRouter:
         - Pan → float coefficient, single sub_param=0 write
         - Solo → recalculates ALL bus gains (batch write)
 
-        Bus IDs: analog 0-3 = 0x0000-0x0003,
-                 digital 4+ = 0x000C + (idx-4)
+        Bus IDs come from the input's name in the device map (_input_bus):
+        analog 0x00-0x03, S/PDIF 0x08/0x09, ADAT 0x0C-0x0F / 0x14-0x17,
+        virtual 0x18-0x1F, talkback 0x0A.
         """
-        bus = input_bus_id(ch)
+        bus = self._input_bus(ch)
+        if bus is None and control in ("FaderLevel", "FaderLevelTapered",
+                                       "Mute", "Pan", "Pan2", "Solo"):
+            if control == "Solo":
+                self._handle_solo_recalc()
+            else:
+                log.debug("SET %s = %r (input %d has no mixer bus)",
+                          path, value, ch)
+            return
 
         if control in ("FaderLevel", "FaderLevelTapered"):
             if control == "FaderLevelTapered":
@@ -2052,7 +2218,7 @@ class HardwareRouter:
             # Talkback bus uses different encoding (DTrace-verified):
             # sub=0 only, unity≈3.976, sub=3/4 always 0.0
             if bus == TALKBACK_BUS_START:
-                linear = 0.0 if db <= -144.0 else 10.0 ** (db / 20.0) * TALKBACK_UNITY
+                linear = self._talkback_coeff(db)
                 log.info("HW BUS: talkback.Fader = %.1f dB → %.6f "
                          "(bus=0x%04x, sub=0 only)", db, linear, bus)
                 write_fn = self.backend.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
@@ -2129,23 +2295,32 @@ class HardwareRouter:
                      control: str, value: Any):
         """Route bus send controls via SetMixerBusParam (SEL130).
 
-        DTrace-verified: sends write to the INPUT bus
-        with different sub-params:
-            sends/0 (AUX 1) → sub=3 (GAIN_L) on input bus
-            sends/1 (AUX 2) → sub=4 (GAIN_R) on input bus
-            sends/2 (CUE 1) → sub=1 (CUE1)  on input bus
-            sends/3 (CUE 2) → sub=2 (CUE2)  on input bus
-        CUE/AUX sends use the same -3dB offset encoding as faders.
+        A send writes ONLY its own sub-param on the INPUT bus (the send's
+        map ID picks it; see SUB_PARAM_* for the numbering):
+            AUX 1 -> sub 3, AUX 2 -> sub 4, CUE 1 -> sub 1, CUE 2 -> sub 2,
+            CUE 3 -> sub 5, CUE 4 -> sub 6
+        Sends use the same -3 dB offset encoding as faders.  Bypass forces
+        the send to 0.0; clearing it restores the send's Gain.
         """
-        sub = _SEND_IDX_TO_SUB.get(send_idx)
+        sub = self._send_sub(f"/devices/0/inputs/{ch}", send_idx,
+                             _SEND_IDX_TO_SUB)
         if sub is None:
             log.debug("SET %s = %r (send_idx=%d has no sub-param mapping)",
                       path, value, send_idx)
             return
 
-        bus = input_bus_id(ch)
+        bus = self._input_bus(ch)
+        if bus is None:
+            log.debug("SET %s = %r (input %d has no mixer bus)",
+                      path, value, ch)
+            return
+        base = f"/devices/0/inputs/{ch}/sends/{send_idx}"
 
         if control in ("Gain", "GainTapered"):
+            if self._send_bypassed(base):
+                log.debug("SET %s = %r (send bypassed, hardware stays 0.0)",
+                          path, value)
+                return
             if control == "GainTapered":
                 db = fader_tapered_to_db(float(value))
             else:
@@ -2164,11 +2339,26 @@ class HardwareRouter:
             return
 
         if control == "Bypass":
-            log.info("HW BUS: input[%d].send[%d].Bypass = %r "
-                     "(DSP setting index unknown)", ch, send_idx, value)
+            if self._truthy(value):
+                linear = 0.0
+            else:
+                gain = self._tree_value(f"{base}/Gain/value")
+                linear = encode_input_fader(float(gain)) \
+                    if gain is not None else 0.0
+            log.info("HW BUS: input[%d].send[%d].Bypass = %r → %.6f "
+                     "(bus=0x%04x sub=%d)", ch, send_idx, value, linear,
+                     bus, sub)
+            self.backend.set_mixer_bus_param(bus, sub, linear)
             return
 
         log.debug("SET %s = %r (send control, unhandled)", path, value)
+
+    @staticmethod
+    def _truthy(value) -> bool:
+        return bool(value) and str(value).lower() not in ("0", "false")
+
+    def _send_bypassed(self, base: str) -> bool:
+        return self._truthy(self._tree_value(f"{base}/Bypass/value"))
 
     # ── Output/Monitor controls (SEL131 mixer param path) ────────
 
@@ -2183,12 +2373,19 @@ class HardwareRouter:
 
         Output 18 = MONITOR (Apollo x4), Output 19 = HP 1.
         """
-        # CUE outputs (14-15 = CUE1 L/R, 16-17 = CUE2 L/R)
+        # CUE outputs: one tree output per cue (x4 map: 14 = CUE 1,
+        # 15 = CUE 2, 16/17 = CUE 3/4, inactive), found by IOType.
         # From IOKit mapping: all ch_type=2, ch_idx=0
         #   CUE1 MONO=param 0x06 (1/0), CUE1 MIX=param 0x05 (0=on, 2=off)
         #   CUE2 MONO=param 0x08 (1/0), CUE2 MIX=param 0x07 (0=on, 2=off)
-        if ch in (14, 15, 16, 17):
-            cue_idx = 0 if ch in (14, 15) else 1  # CUE1 or CUE2
+        # CUE 3/4 params are not verified: no hardware write for them.
+        role = self._output_role(ch)
+        if role and role[0] == "cue":
+            cue_idx = role[1]
+            if cue_idx > 1:
+                log.debug("SET %s = %r (CUE %d: no verified hardware "
+                          "param)", path, value, cue_idx + 1)
+                return
 
             if control == "MixToMono":
                 param = 0x06 if cue_idx == 0 else 0x08
@@ -2251,7 +2448,7 @@ class HardwareRouter:
             log.debug("SET %s = %r (CUE output, unhandled control)", path, value)
             return
 
-        if ch == 18:
+        if role == ("monitor", 0):
             if control in ("CRMonitorLevel", "CRMonitorLevelTapered"):
                 if control == "CRMonitorLevelTapered":
                     hw_value = monitor_tapered_to_hw(float(value))
@@ -2356,26 +2553,47 @@ class HardwareRouter:
                     MONITOR_PARAM["Identify"], hw_value)
                 return
 
-        # Headphone output (ch=19 on Apollo x4)
-        # DTrace capture confirmed: HP uses same IOKit path as monitor
-        # (ch_type=2, ch_idx=1). HP and monitor are ganged on Apollo x4.
-        if ch == 19:
+        # Headphone outputs (x4: outputs 19/20 = HP 1/2, IOType Headphone).
+        # The level has its own monitor param: 0x02 for the first headphone
+        # output (setting[2] bits 15:8, readback word 2) and 0x66 for the
+        # next, as the Mixer Engine sends it.  It used to go to the
+        # monitor's param 0x01 ("ganged"), which moved the monitor level.
+        if role and role[0] == "hp":
+            hp_idx = role[1]
             if control in ("CRMonitorLevel", "CRMonitorLevelTapered"):
+                param = HP_LEVEL_PARAMS.get(hp_idx)
+                if param is None:
+                    log.debug("SET %s = %r (HP %d: no level param)",
+                              path, value, hp_idx + 1)
+                    return
                 if control == "CRMonitorLevelTapered":
                     hw_value = monitor_tapered_to_hw(float(value))
                     db = (hw_value - 192) / 2.0
                 else:
                     db = float(value)
                     hw_value = encode_monitor_level(db)
-                log.info("HW HP: Level = %.1f dB → %d (0x%02x) "
-                         "(ganged with monitor, ch_idx=%d)",
-                         db, hw_value, hw_value, HP_CHANNEL_IDX)
+                log.info("HW HP%d: Level = %.1f dB → %d (0x%02x) "
+                         "(param=0x%02x, ch_idx=%d)",
+                         hp_idx + 1, db, hw_value, hw_value, param,
+                         HP_CHANNEL_IDX)
                 self.backend.set_mixer_param(
-                    MONITOR_CHANNEL_TYPE, HP_CHANNEL_IDX,
-                    MONITOR_PARAM["CRMonitorLevel"], hw_value)
+                    MONITOR_CHANNEL_TYPE, HP_CHANNEL_IDX, param, hw_value)
                 return
 
-            if control == "Mute":
+            if control == "MixInSource":
+                # DTrace-verified: ch_idx=1, p=0x3f (HP1) / 0x40 (HP2),
+                # CUE1=0 / CUE2=1
+                src_param = {0: "HP1Source", 1: "HP2Source"}.get(hp_idx)
+                if src_param is not None:
+                    hw_value = HP_SOURCE_MAP.get(str(value).lower(), 0)
+                    log.info("HW HP%d: MixInSource = %r → %d",
+                             hp_idx + 1, value, hw_value)
+                    self.backend.set_mixer_param(
+                        MONITOR_CHANNEL_TYPE, 1,
+                        MONITOR_PARAM[src_param], hw_value)
+                    return
+
+            if hp_idx == 0 and control == "Mute":
                 hw_value = 2 if value and value != "0" and value != "false" else 0
                 log.info("HW HP: Mute = %r → %d (ganged with monitor)",
                          value, hw_value)
@@ -2384,7 +2602,7 @@ class HardwareRouter:
                     MONITOR_PARAM["MonitorMute"], hw_value)
                 return
 
-            if control == "DimOn":
+            if hp_idx == 0 and control == "DimOn":
                 hw_value = 1 if value and value != "0" and value != "false" else 0
                 log.info("HW HP: Dim = %r → %d (ganged with monitor)",
                          value, hw_value)
@@ -2393,28 +2611,8 @@ class HardwareRouter:
                     MONITOR_PARAM["DimOn"], hw_value)
                 return
 
-            if control == "MixInSource":
-                # DTrace-verified: ch_idx=1, p=0x3f, CUE1=0/CUE2=1
-                hw_value = HP_SOURCE_MAP.get(str(value).lower(), 0)
-                log.info("HW HP1: MixInSource = %r → %d", value, hw_value)
-                self.backend.set_mixer_param(
-                    MONITOR_CHANNEL_TYPE, 1,
-                    MONITOR_PARAM["HP1Source"], hw_value)
-                return
-
             log.info("HW HP: %s = %r (param not yet mapped)", control, value)
             return
-
-        # Headphone 2 output (ch=20 on Apollo x4)
-        if ch == 20:
-            if control == "MixInSource":
-                # DTrace-verified: ch_idx=1, p=0x40, CUE1=0/CUE2=1
-                hw_value = HP_SOURCE_MAP.get(str(value).lower(), 0)
-                log.info("HW HP2: MixInSource = %r → %d", value, hw_value)
-                self.backend.set_mixer_param(
-                    MONITOR_CHANNEL_TYPE, 1,
-                    MONITOR_PARAM["HP2Source"], hw_value)
-                return
 
         # Other outputs (individual analog/digital)
         log.debug("SET %s = %r (individual output, software-only)", path, value)
@@ -2465,24 +2663,51 @@ class HardwareRouter:
 
     def _handle_aux_send(self, path: str, bus: int, send_idx: int,
                          control: str, value: Any):
-        """Route aux bus send controls via SetMixerBusParam (SEL130)."""
+        """Route aux bus -> CUE send controls via SetMixerBusParam (SEL130).
+
+        An aux->CUE send writes the CUE's sub-param (CUE 1/2/3/4 = sub
+        1/2/5/6) on the AUX bus.  Sub 0 is the aux return fader and is
+        never touched by a send (it used to be: every aux send move
+        rewrote the aux return level).  The engine also sets pre/post-fader
+        flags with OP 0x0c/0x11/...; their encoding is not decoded, so
+        those are not sent.
+        """
         bus_id = aux_bus_id(bus)
+        base = f"/devices/0/auxs/{bus}"
+        sub = self._send_sub(base, send_idx, _AUX_SEND_IDX_TO_SUB)
+        if sub is None or sub == SUB_PARAM_MIX:
+            log.debug("SET %s = %r (aux send_idx=%d has no sub-param)",
+                      path, value, send_idx)
+            return
+        send_base = f"{base}/sends/{send_idx}"
 
         if control in ("Gain", "GainTapered"):
+            if self._send_bypassed(send_base):
+                log.debug("SET %s = %r (send bypassed, hardware stays 0.0)",
+                          path, value)
+                return
             if control == "GainTapered":
                 db = fader_tapered_to_db(float(value))
             else:
                 db = float(value)
             linear = encode_aux_fader(db)
             log.info("HW BUS: aux[%d].send[%d].Gain = %.1f dB → "
-                     "linear=%.6f (bus=0x%04x)", bus, send_idx, db,
-                     linear, bus_id)
-            self.backend.set_mixer_bus_param(bus_id, SUB_PARAM_MIX, linear)
+                     "linear=%.6f (bus=0x%04x sub=%d)", bus, send_idx, db,
+                     linear, bus_id, sub)
+            self.backend.set_mixer_bus_param(bus_id, sub, linear)
             return
 
         if control == "Bypass":
-            log.info("HW BUS: aux[%d].send[%d].Bypass = %r "
-                     "(DSP setting index unknown)", bus, send_idx, value)
+            if self._truthy(value):
+                linear = 0.0
+            else:
+                gain = self._tree_value(f"{send_base}/Gain/value")
+                linear = encode_aux_fader(float(gain)) \
+                    if gain is not None else 0.0
+            log.info("HW BUS: aux[%d].send[%d].Bypass = %r → %.6f "
+                     "(bus=0x%04x sub=%d)", bus, send_idx, value, linear,
+                     bus_id, sub)
+            self.backend.set_mixer_bus_param(bus_id, sub, linear)
             return
 
         log.debug("SET %s = %r (aux send control, unhandled)", path, value)

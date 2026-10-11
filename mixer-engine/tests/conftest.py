@@ -20,6 +20,18 @@ class FakeBackend:
     in `other` and reports success, so a router path can run end to end.
     """
 
+    # The real fader/pan helpers, run on this recorder: tests then see the
+    # sub-params HardwareBackend itself would write.
+    @property
+    def set_bus_fader(self):
+        from hardware import HardwareBackend
+        return HardwareBackend.set_bus_fader.__get__(self)
+
+    @property
+    def set_bus_pan(self):
+        from hardware import HardwareBackend
+        return HardwareBackend.set_bus_pan.__get__(self)
+
     def __init__(self, connected=True):
         self.connected = connected
         self.device_path = None
