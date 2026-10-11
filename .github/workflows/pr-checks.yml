@@ -46,6 +46,8 @@ jobs:
           python -m pytest mixer-engine/tests -q
       - name: Generated model header is up to date
         run: python3 tools/gen-driver-models.py --check
+      - name: Model data is consistent
+        run: python3 tools/check-models.py
 
   shellcheck:
     runs-on: ubuntu-latest

@@ -5,6 +5,7 @@
   "serial_prefixes": ["2024"],
   "status": "unverified",
   "identity_note": "Internal type 0x27 (serial 2024) comes from the earlier kext analysis and the driver pins it by PCI subsystem 0x000F; UAD2System 12.0.0 Name() does not name 0x27.",
+  "subsystem_id": "0x000F",
   "mixer_class": "ApolloSolo",
   "mixer_type_id": 16,
   "preamps": 2,
