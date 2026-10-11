@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/proc/asound/cardN/io_map` and `UA_IOCTL_GET_IO_MAP`: channel names, slots and the firmware IO descriptors.
 
 ### Changed
+- The transport starts with AX_CONTROL 0xF, as the macOS driver does for a unit on its own clock, instead of 0x20F (`ax_control_ext=1` restores it). Both passed every rate change on the x4; 0x20F is the peer-clocked (multi-unit) value.
 - Kernel log: per-stream, per-start and per-rate-change register dumps, IO descriptor slot lists and the DSP service ticks are debug-level (dynamic debug brings them back); a missing optional plugin-chain blob is reported once. A run of 14 duplex rate changes logs about 25 lines.
 - UCM2: the `HiFi` profile matches the Apollo x4 only (it describes the x4's layout) and documents the v2 channel layout; its devices are named `Outputs` and `Inputs`.
 - Device-type names follow the kext (`0x20` x6, `0x21` x8, `0x22` x8p, `0x23` x16, `0x35` x16D, `0x37`–`0x3a` Gen 2 rack units); serial prefixes 2107–2110 added. The x8p resolves by serial (device type `0x22`); PCI subsystem `0x0014` is only a fallback.

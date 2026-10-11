@@ -86,10 +86,10 @@ static bool post_start_clock = true;
 module_param(post_start_clock, bool, 0644);
 MODULE_PARM_DESC(post_start_clock,
 		 "Write the clock after every transport start (default: on; the kext only writes it on a rate or source change)");
-static bool ax_control_ext = true;
+static bool ax_control_ext;
 module_param(ax_control_ext, bool, 0644);
 MODULE_PARM_DESC(ax_control_ext,
-		 "Start the transport with AX_CONTROL 0x20F (default: on); off = 0xF, the kext's value for the internal clock");
+		 "Start the transport with AX_CONTROL 0x20F (on) or 0xF (default: off, the kext's value for a unit on its own clock; 0x20F is for a unit clocked from a peer)");
 
 /* Forward declarations */
 static void ua_pcie_setup(struct ua_device *ua);
@@ -2920,10 +2920,12 @@ static int ua_audio_start_transport(struct ua_device *ua)
 
 	/*
 	 * AX_CONTROL start value: 0xF (DMA + playback + record + interrupt),
-	 * or 0x20F with the extended-mode bit.  0x20F is what this driver has
-	 * always written; the kext's StartTransport writes it only for clock
-	 * source 0x0A (and 0x09 without a notify callback) and 0xF for the
-	 * internal clock (0x0C).  ax_control_ext=0 selects 0xF to test that.
+	 * or 0x20F with the extended-mode bit (a unit clocked from a peer).
+	 * The kext's StartTransport writes 0x20F only for clock source 0x0A
+	 * (and 0x09 without a notify callback) and 0xF otherwise, so 0xF is
+	 * the default (titan, 2026-10-11: 28 of 28 ratecheck runs through
+	 * every rate change; 0x20F, the old value, also passed 14 of 14).
+	 * ax_control_ext=1 brings 0x20F back.
 	 */
 	{
 		u32 fw_ver = ua_read(ua, UA_REG_FW_VERSION);
