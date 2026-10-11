@@ -1130,36 +1130,30 @@ static long ua_ioctl_get_plugin_caps(struct ua_device *ua, unsigned long arg)
 static long ua_ioctl_get_clock_sources(struct ua_device *ua, unsigned long arg)
 {
 	struct ua_audio *audio = &ua->audio;
-	struct ua_clock_sources *cs;
+	struct ua_clock_sources cs = { .struct_size = sizeof(cs) };
 	unsigned int i, n;
-	long ret = 0;
 
 	BUILD_BUG_ON(sizeof(struct ua_clock_sources) != 656);
 	BUILD_BUG_ON(UA_CLOCK_LIST_MAX > UA_CLOCK_SOURCES_MAX);
-	BUILD_BUG_ON(UA_CLOCK_NAME_LEN > sizeof(cs->src[0].name));
-
-	cs = kzalloc(sizeof(*cs), GFP_KERNEL);
-	if (!cs)
-		return -ENOMEM;
-	cs->struct_size = sizeof(*cs);
+	BUILD_BUG_ON(UA_CLOCK_NAME_LEN > sizeof(cs.src[0].name));
 
 	spin_lock(&audio->clock_list_lock);
 	n = min_t(unsigned int, audio->clock_list_n, UA_CLOCK_LIST_MAX);
 	for (i = 0; i < n; i++) {
-		cs->src[i].value = audio->clock_list_val[i];
+		cs.src[i].value = audio->clock_list_val[i];
 		if (audio->clock_list_named & BIT(i))
-			cs->src[i].flags |= UA_CLOCK_SRC_F_DEVICE_NAME;
-		strscpy(cs->src[i].name, audio->clock_list_name[i],
-			sizeof(cs->src[i].name));
+			cs.src[i].flags |= UA_CLOCK_SRC_F_DEVICE_NAME;
+		memcpy(cs.src[i].name, audio->clock_list_name[i],
+		       UA_CLOCK_NAME_LEN);
+		cs.src[i].name[sizeof(cs.src[i].name) - 1] = '\0';
 	}
-	cs->count = n;
-	cs->mask = audio->clock_src_mask;
+	cs.count = n;
+	cs.mask = audio->clock_src_mask;
 	spin_unlock(&audio->clock_list_lock);
 
-	if (copy_to_user((void __user *)arg, cs, sizeof(*cs)))
-		ret = -EFAULT;
-	kfree(cs);
-	return ret;
+	if (copy_to_user((void __user *)arg, &cs, sizeof(cs)))
+		return -EFAULT;
+	return 0;
 }
 
 static long ua_ioctl_get_device_info(struct ua_device *ua, unsigned long arg)
