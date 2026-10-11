@@ -1,5 +1,5 @@
 """The kext's public device type (CPcieDevice::GetCapabilities, kext
-12.0.0 x86 0x464c).
+12.0.0 x86 0x464c) and the device type of models no serial names.
 
 Checked against the disassembly:
   * the family jump table at 0x4d5c has 22 entries: families 20 and 21
@@ -8,7 +8,10 @@ Checked against the disassembly:
   * QUAD and HEXA fall back on the FPGA_REV type
     (CUAD2Device::_deviceTypeFromFPGAVersion 0x14528) when the serial does
     not decide; HEXA serial 0x35 gives 0x21 (the kext's fall-through at
-    0x4a30 / arm64e 0xcda8).
+    0x4a30 / arm64e 0xcda8);
+  * a v2 device the serial table cannot name gets 0x80 + its public type
+    (Apollo 5, Twin 8, Twin X 0x19 ...), and serials 2024/2025 on the Twin X
+    family are retyped as a Twin X.
 The functions are compiled from ua_core.c as they are.
 """
 import re
@@ -40,6 +43,17 @@ static u32 pub(u32 family, u32 st, u32 fpga)
 				.fpga_rev = fpga, .pdev = &pd };
 	serial_type = st;
 	return ua_compute_public_type(&ua);
+}
+
+static u32 resolve(u32 family, u32 st, u32 fpga, u32 type)
+{
+	struct ua_device ua = { .fw_v2 = true, .ext_caps = family << 20,
+				.fpga_rev = fpga, .pdev = &pd,
+				.device_type = type };
+	serial_type = st;
+	ua.public_type = ua_compute_public_type(&ua);
+	ua_resolve_public_model(&ua);
+	return ua.device_type;
 }
 
 int main(void)
@@ -91,6 +105,35 @@ int main(void)
 		struct ua_device ua = { .fw_v2 = false, .pdev = &pd };
 		assert(ua_compute_public_type(&ua) == 0);
 	}
+
+	/* device types from the public type */
+	assert(resolve(5, 0, old, 0) == UA_DEV_APOLLO_TWIN);
+	assert(resolve(10, 0, old, 0) == UA_DEV_APOLLO_TWIN_B);
+	assert(resolve(1, 0, old, 0) == UA_DEV_APOLLO_THUNDERBOLT);
+	assert(resolve(4, 0, old, 0) == UA_DEV_APOLLO_16);
+	assert(resolve(6, 0, old, 0) == UA_DEV_REALTIME_RACK);
+	assert(resolve(8, 0, old, 0) == UA_DEV_APOLLO_8);
+	assert(resolve(9, 0, old, 0) == UA_DEV_APOLLO_16_MKII);
+	assert(resolve(14, 0, old, 0) == UA_DEV_APOLLO_TWIN_MKII);
+	assert(resolve(19, 0, old, 0) == UA_DEV_APOLLO_TWIN_X);
+	assert(resolve(11, 0, old, 0) == UA_DEV_APOLLO_8P_PUBLIC);
+	/* pinned / serial-named types stay */
+	assert(resolve(11, 0, old, UA_DEV_APOLLO_8P) == UA_DEV_APOLLO_8P);
+	assert(resolve(16, UA_DEV_APOLLO_X4, x4_fpga, UA_DEV_APOLLO_X4) ==
+	       UA_DEV_APOLLO_X4);
+	assert(resolve(15, UA_DEV_SERIAL_2032, old, UA_DEV_APOLLO_SOLO) ==
+	       UA_DEV_APOLLO_SOLO);
+	/* serial 2024/2025 on the Twin X family */
+	assert(resolve(19, UA_DEV_APOLLO_SOLO, old, UA_DEV_APOLLO_SOLO) ==
+	       UA_DEV_APOLLO_TWIN_X);
+	assert(resolve(19, UA_DEV_ARROW, old, UA_DEV_ARROW) ==
+	       UA_DEV_APOLLO_TWIN_X);
+	/* no public type: unchanged */
+	assert(resolve(16, 0, old, 0) == 0);		/* QUAD, -1 */
+	assert(resolve(20, 0, old, 0) == 0);
+	assert(resolve(0x3f, 0, old, 0) == 0);
+	/* every such type takes the unresolved paths (>= 64) */
+	assert(UA_DEV_PUBLIC(0x05) >= 64 && UA_DEV_PUBLIC(0x29) <= 0xff);
 	return 0;
 }
 '''
@@ -103,9 +146,17 @@ def defines():
         r'UA_PUBTYPE_NONE)\s.*$', hdr, re.M)) + '\n'
 
 
-def test_public_type():
+def test_public_type_and_resolution():
     core = csrc.source('ua_core.c')
     code = '\n'.join(csrc.extract(core, sig) for sig in (
         'static u32 ua_type_from_fpga_rev(',
-        'static u32 ua_compute_public_type('))
+        'static u32 ua_compute_public_type(',
+        'static void ua_resolve_public_model('))
     csrc.build_and_run(PREFIX + defines() + code + MAIN)
+
+
+def test_resolution_runs_after_the_public_type():
+    core = csrc.source('ua_core.c')
+    detect = csrc.extract(core, 'static int ua_detect_capabilities(')
+    tail = detect[detect.index('ua->public_type = ua_compute_public_type'):]
+    assert 'ua_resolve_public_model(ua);' in tail

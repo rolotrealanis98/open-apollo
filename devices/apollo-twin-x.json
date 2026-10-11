@@ -1,9 +1,11 @@
 {
   "model": "Apollo Twin X",
-  "device_types": [],
+  "device_type": "0x99",
+  "device_types": ["0x99"],
+  "public_types": ["0x19"],
   "serial_prefixes": [],
   "status": "unverified",
-  "identity_note": "Twin X (Gen 1) is identified by ext_caps family, which the driver does not decode; no internal type.",
+  "identity_note": "ext_caps family 19 gives the kext's public type 0x19 (CPcieDevice::GetCapabilities, x86 jump table 0x4d5c) for any serial but the Gen 2 ones (2090/2091 -> 0x25, 2107/2108 -> 0x29); serials 2024/2025, which the serial table types 0x27/0x28, are refined to 0x19 too (x86 0x4b03), so the driver retypes them on this family; UA's Mixer Engine maps that type to this mixer class (CUAD2Info::CardType, arm64 0x1002b5ef0). No serial-table entry names it, so the driver's device type is 0x80 + the public type (ua_resolve_public_model).",
   "mixer_class": "Lavern",
   "mixer_type_id": 13,
   "preamps": 2,

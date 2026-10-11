@@ -1,8 +1,11 @@
 {
   "model": "Apollo 16 MkII",
-  "device_types": [],
+  "device_type": "0x8D",
+  "device_types": ["0x8D"],
+  "public_types": ["0x0D"],
   "serial_prefixes": [],
   "status": "unverified",
+  "identity_note": "ext_caps family 9 gives the kext's public type 0xD (CPcieDevice::GetCapabilities, x86 jump table 0x4d5c); UA's Mixer Engine maps that type to this mixer class (CUAD2Info::CardType, arm64 0x1002b5ef0). No serial-table entry names it, so the driver's device type is 0x80 + the public type (ua_resolve_public_model).",
   "mixer_class": "A16Black",
   "mixer_type_id": 6,
   "preamps": 0,

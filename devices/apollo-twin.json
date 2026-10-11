@@ -1,8 +1,11 @@
 {
   "model": "Apollo Twin",
-  "device_types": [],
+  "device_type": "0x88",
+  "device_types": ["0x88", "0x8F"],
+  "public_types": ["0x08", "0x0F"],
   "serial_prefixes": [],
   "status": "unverified",
+  "identity_note": "ext_caps family 5 (and 10) gives the kext's public type 8 (and 0xF) (CPcieDevice::GetCapabilities, x86 jump table 0x4d5c); Name() names only family 5; the Mixer Engine's Twin card types 14/15 come from type 8, 22/23 from type 0xF; UA's Mixer Engine maps that type to this mixer class (CUAD2Info::CardType, arm64 0x1002b5ef0). No serial-table entry names it, so the driver's device type is 0x80 + the public type (ua_resolve_public_model).",
   "mixer_class": "Armstrong",
   "mixer_type_id": 2,
   "preamps": 2,

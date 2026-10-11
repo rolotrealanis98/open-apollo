@@ -189,9 +189,28 @@ def check_device(d, rep, type_io):
     for t in (d.get('device_type_names') or {}):
         if t not in dts:
             rep.err(rel, f'device_type_names key {t} not in device_types')
+    # public_types: the kext's UAD2DeviceType values that are this model
+    # (the Mixer Engine's CardType classes).  A device type of 0x80 or more
+    # is 0x80 + one of them (driver ua_resolve_public_model()).
+    pts = []
+    for t in d.get('public_types') or []:
+        try:
+            v = hexint(t)
+        except ValueError:
+            rep.err(rel, f'bad public type {t!r}')
+            continue
+        if not 0 < v <= 0x29:
+            rep.err(rel, f'public type {t} out of range (1-0x29)')
+        pts.append(v)
+    if len(set(pts)) != len(pts):
+        rep.err(rel, 'duplicate public type')
     for t in dts:
         v = hexint(t)
-        if not 0 < v <= 0x3F + 0x10:
+        if v >= 0x80:
+            if v - 0x80 not in pts:
+                rep.err(rel, f'device type {t} is not 0x80 + one of its '
+                             f'public_types')
+        elif not 0 < v <= 0x3F + 0x10:
             rep.err(rel, f'device type {t} out of range')
     sp = d.get('serial_prefixes') or []
     for p in sp:
@@ -411,6 +430,16 @@ def check_cross(devs, rep):
             v = hexint(t)
             if v in seen:
                 rep.err(d['_rel'], f'device type {t} also in {seen[v]}')
+            seen[v] = d['_rel']
+    seen.clear()
+    for slug, d in devs.items():
+        for t in d.get('public_types') or []:
+            try:
+                v = hexint(t)
+            except ValueError:
+                continue
+            if v in seen:
+                rep.err(d['_rel'], f'public type {t} also in {seen[v]}')
             seen[v] = d['_rel']
     seen.clear()
     for slug, d in devs.items():

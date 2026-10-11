@@ -2,6 +2,7 @@
   "model": "Apollo x6 Gen 2",
   "device_type": "0x37",
   "device_types": ["0x37"],
+  "public_types": ["0x21"],
   "serial_prefixes": ["2086"],
   "status": "unverified",
   "mixer_class": "Rene2G2",

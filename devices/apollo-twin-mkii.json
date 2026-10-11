@@ -1,8 +1,11 @@
 {
   "model": "Apollo Twin MkII",
-  "device_types": [],
+  "device_type": "0x92",
+  "device_types": ["0x92"],
+  "public_types": ["0x12"],
   "serial_prefixes": [],
   "status": "unverified",
+  "identity_note": "ext_caps family 14 gives the kext's public type 0x12 (CPcieDevice::GetCapabilities, x86 jump table 0x4d5c); UA's Mixer Engine maps that type to this mixer class (CUAD2Info::CardType, arm64 0x1002b5ef0). No serial-table entry names it, so the driver's device type is 0x80 + the public type (ua_resolve_public_model).",
   "mixer_class": "Stretch",
   "mixer_type_id": 7,
   "preamps": 2,

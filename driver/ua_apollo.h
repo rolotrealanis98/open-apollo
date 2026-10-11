@@ -107,6 +107,24 @@
 #define UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B 0x41  /* Serial 2108 (v12) */
 
 /*
+ * Linux-only device types for the models no serial-table entry names:
+ * 0x80 + the kext's public type (ua_resolve_public_model()).  Products
+ * by the Mixer Engine's CardType -> mixer class (devices/<model>.json):
+ */
+#define UA_PUBLIC_DEVTYPE_BASE      0x80
+#define UA_DEV_PUBLIC(pt)           (UA_PUBLIC_DEVTYPE_BASE | (pt))
+#define UA_DEV_APOLLO_THUNDERBOLT   0x85  /* public 5, ext_caps family 1 */
+#define UA_DEV_APOLLO_16            0x87  /* public 7, family 4 */
+#define UA_DEV_APOLLO_TWIN          0x88  /* public 8, family 5 */
+#define UA_DEV_REALTIME_RACK        0x8B  /* public 0xB, family 6 */
+#define UA_DEV_APOLLO_8             0x8C  /* public 0xC, family 8 */
+#define UA_DEV_APOLLO_16_MKII       0x8D  /* public 0xD, family 9 */
+#define UA_DEV_APOLLO_8P_PUBLIC     0x8E  /* public 0xE, family 11 (no subsystem pin) */
+#define UA_DEV_APOLLO_TWIN_B        0x8F  /* public 0xF, family 10 (Twin card types 22/23) */
+#define UA_DEV_APOLLO_TWIN_MKII     0x92  /* public 0x12, family 14 */
+#define UA_DEV_APOLLO_TWIN_X        0x99  /* public 0x19, family 19, serial not Gen 2 */
+
+/*
  * AudioExtension vs legacy ring-buffer connect mechanism.
  *
  * From kext CPcieDevice::Connect() disassembly: a 40-bit bitmask at

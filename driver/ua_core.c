@@ -246,6 +246,7 @@ static irqreturn_t ua_irq_thread(int irq, void *data)
 /* Forward declarations */
 static void ua_read_serial_type(struct ua_device *ua);
 static u32 ua_compute_public_type(struct ua_device *ua);
+static void ua_resolve_public_model(struct ua_device *ua);
 static void ua_resume_work(struct work_struct *work);
 
 /* ----------------------------------------------------------------
@@ -451,6 +452,7 @@ static int ua_detect_capabilities(struct ua_device *ua)
 	}
 
 	ua->public_type = ua_compute_public_type(ua);
+	ua_resolve_public_model(ua);
 	return 0;
 }
 
@@ -617,6 +619,45 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 		    st == UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B)
 			return 0x29;
 		return 0x19;
+	}
+}
+
+/*
+ * Models the serial table cannot name (the pre-x Apollos, the Twin family,
+ * the Rack) are named by the public type, as the kext and UA's Mixer
+ * Engine do: GetCapabilities gives each its own ext_caps family and type
+ * (Apollo 5, Apollo 16 7, Twin 8/0xF, Rack 0xB, Apollo 8 0xC, Apollo 16
+ * MkII 0xD, 8p 0xE, Twin MkII 0x12, Twin X 0x19) and CUAD2Info::CardType
+ * (arm64 ME 0x1002b5ef0) picks the mixer class from it.  Such a device gets
+ * device type UA_DEV_PUBLIC(public type), which devices/<model>.json lists;
+ * a type >= 0x80 keeps every path an unresolved type 0 takes (AudioExtension
+ * connect, no legacy DMA row, no output mute).
+ *
+ * Serials 2024/2025 (0x27/0x28) on the Twin X family (public 0x19) are Twin
+ * X units, not a Solo/Arrow: the kext refines family 19 to 0x19 for them
+ * (x86 0x4b03) and the Mixer Engine's card types for 0x19 are the Lavern
+ * (Twin X) class.  Their legacy DMA row (3/2) is the 3/2 fallback, so only
+ * the name and the preamp counts change.
+ */
+static void ua_resolve_public_model(struct ua_device *ua)
+{
+	u32 pt = ua->public_type;
+
+	if (pt == 0 || pt == UA_PUBTYPE_NONE || pt >= UA_PUBLIC_DEVTYPE_BASE)
+		return;
+	if (pt == 0x19 && (ua->device_type == UA_DEV_APOLLO_SOLO ||
+			   ua->device_type == UA_DEV_ARROW)) {
+		dev_info(&ua->pdev->dev,
+			 "device type 0x%02x on the Twin X family (public type 0x19): Twin X\n",
+			 ua->device_type);
+		ua->device_type = UA_DEV_PUBLIC(pt);
+		return;
+	}
+	if (!ua->device_type) {
+		ua->device_type = UA_DEV_PUBLIC(pt);
+		dev_info(&ua->pdev->dev,
+			 "no serial-table type: device type 0x%02x from public type 0x%02x\n",
+			 ua->device_type, pt);
 	}
 }
 

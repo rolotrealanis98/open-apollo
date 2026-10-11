@@ -25,6 +25,40 @@ static const u16 ua_gen_arrow_play_spdif[] = {
 	0x0901, 0x0902, 0x0701, 0x0702, 0x0a01, 0x0a02,
 };
 
+/* Apollo 8: record, LoMid, SPDIF mode (32) */
+static const u16 ua_gen_8_rec_spdif[] = {
+	0x0001, 0x0002, 0x0103, 0x0104, 0x0305, 0x0306, 0x0307, 0x0308,
+	0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406, 0x0407, 0x0408,
+	0x0501, 0x0502, 0x0701, 0x0702, 0x0703, 0x0704, 0x0705, 0x0706,
+	0x0707, 0x0708, 0x0901, 0x0902, 0x0201, 0x0202, 0x0203, 0x0204,
+};
+
+/* Apollo 8: playback, LoMid, SPDIF mode (36) */
+static const u16 ua_gen_8_play_spdif[] = {
+	0x0901, 0x0902, 0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306,
+	0x0307, 0x0308, 0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406,
+	0x0407, 0x0408, 0x0501, 0x0502, 0x0701, 0x0702, 0x0703, 0x0704,
+	0x0705, 0x0706, 0x0707, 0x0708, 0x0a01, 0x0a02, 0x0a03, 0x0a04,
+	0x0a05, 0x0a06, 0x0a07, 0x0a08,
+};
+
+/* Apollo 16: record, LoMid, SPDIF mode (32) */
+static const u16 ua_gen_16_rec_spdif[] = {
+	0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306, 0x0307, 0x0308,
+	0x0309, 0x030a, 0x030b, 0x030c, 0x030d, 0x030e, 0x030f, 0x0310,
+	0x0601, 0x0602, 0x0701, 0x0702, 0x0703, 0x0704, 0x0705, 0x0706,
+	0x0707, 0x0708, 0x0901, 0x0902, 0x0201, 0x0202, 0x0203, 0x0204,
+};
+
+/* Apollo 16: playback, LoMid, SPDIF mode (36) */
+static const u16 ua_gen_16_play_spdif[] = {
+	0x0901, 0x0902, 0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306,
+	0x0307, 0x0308, 0x0309, 0x030a, 0x030b, 0x030c, 0x030d, 0x030e,
+	0x030f, 0x0310, 0x0601, 0x0602, 0x0701, 0x0702, 0x0703, 0x0704,
+	0x0705, 0x0706, 0x0707, 0x0708, 0x0a01, 0x0a02, 0x0a03, 0x0a04,
+	0x0a05, 0x0a06, 0x0a07, 0x0a08,
+};
+
 /* Apollo 8p: record, LoMid, SPDIF mode (24) */
 static const u16 ua_gen_8p_rec_spdif[] = {
 	0x0001, 0x0002, 0x0103, 0x0104, 0x0305, 0x0306, 0x0307, 0x0308,
@@ -112,15 +146,6 @@ static const u16 ua_gen_x8_rec_spdif[] = {
 	0x0b01, 0x0b02,
 };
 
-/* Apollo x8: playback, LoMid, SPDIF mode (36) */
-static const u16 ua_gen_x8_play_spdif[] = {
-	0x0901, 0x0902, 0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306,
-	0x0307, 0x0308, 0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406,
-	0x0407, 0x0408, 0x0501, 0x0502, 0x0701, 0x0702, 0x0703, 0x0704,
-	0x0705, 0x0706, 0x0707, 0x0708, 0x0a01, 0x0a02, 0x0a03, 0x0a04,
-	0x0a05, 0x0a06, 0x0a07, 0x0a08,
-};
-
 /* Apollo x16: record, LoMid, SPDIF mode (34) */
 static const u16 ua_gen_x16_rec_spdif[] = {
 	0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306, 0x0307, 0x0308,
@@ -128,15 +153,6 @@ static const u16 ua_gen_x16_rec_spdif[] = {
 	0x0601, 0x0602, 0x0701, 0x0702, 0x0703, 0x0704, 0x0705, 0x0706,
 	0x0707, 0x0708, 0x0901, 0x0902, 0x0201, 0x0202, 0x0203, 0x0204,
 	0x0b01, 0x0b02,
-};
-
-/* Apollo x16: playback, LoMid, SPDIF mode (36) */
-static const u16 ua_gen_x16_play_spdif[] = {
-	0x0901, 0x0902, 0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306,
-	0x0307, 0x0308, 0x0309, 0x030a, 0x030b, 0x030c, 0x030d, 0x030e,
-	0x030f, 0x0310, 0x0601, 0x0602, 0x0701, 0x0702, 0x0703, 0x0704,
-	0x0705, 0x0706, 0x0707, 0x0708, 0x0a01, 0x0a02, 0x0a03, 0x0a04,
-	0x0a05, 0x0a06, 0x0a07, 0x0a08,
 };
 
 /* Apollo x8p: record, LoMid, SPDIF mode (26) */
@@ -172,6 +188,25 @@ static const u16 ua_gen_x8p_play_adat[] = {
 	0x0a07, 0x0a08,
 };
 
+/* Apollo Twin: record, LoMid, SPDIF mode (14) */
+static const u16 ua_gen_twin_rec_spdif[] = {
+	0x0001, 0x0002, 0x0901, 0x0902, 0x0701, 0x0702, 0x0703, 0x0704,
+	0x0501, 0x0502, 0x0201, 0x0202, 0x0203, 0x0204,
+};
+
+/* Apollo Twin: playback, LoMid, SPDIF mode (10) */
+static const u16 ua_gen_twin_play_spdif[] = {
+	0x0901, 0x0902, 0x0a03, 0x0a04, 0x0701, 0x0702, 0x0703, 0x0704,
+	0x0a01, 0x0a02,
+};
+
+/* Apollo Twin: record, LoMid, ADAT mode (20) */
+static const u16 ua_gen_twin_rec_adat[] = {
+	0x0001, 0x0002, 0x0901, 0x0902, 0x0701, 0x0702, 0x0703, 0x0704,
+	0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406, 0x0407, 0x0408,
+	0x0201, 0x0202, 0x0203, 0x0204,
+};
+
 /* Apollo x16D: record, LoMid, SPDIF mode (34) */
 static const u16 ua_gen_x16d_rec_spdif[] = {
 	0x0d01, 0x0d02, 0x0d03, 0x0d04, 0x0d05, 0x0d06, 0x0d07, 0x0d08,
@@ -190,23 +225,125 @@ static const u16 ua_gen_x16d_play_spdif[] = {
 	0x0a05, 0x0a06, 0x0a07, 0x0a08,
 };
 
-/* Apollo Twin X Gen 2: record, LoMid, SPDIF mode (16) */
-static const u16 ua_gen_twin_x_gen_2_rec_spdif[] = {
+/* Apollo Twin X: record, LoMid, SPDIF mode (16) */
+static const u16 ua_gen_twin_x_rec_spdif[] = {
 	0x0001, 0x0002, 0x0901, 0x0902, 0x0701, 0x0702, 0x0703, 0x0704,
 	0x0501, 0x0502, 0x0201, 0x0202, 0x0203, 0x0204, 0x0b01, 0x0b02,
 };
 
-/* Apollo Twin X Gen 2: playback, LoMid, SPDIF mode (10) */
-static const u16 ua_gen_twin_x_gen_2_play_spdif[] = {
-	0x0901, 0x0902, 0x0a03, 0x0a04, 0x0701, 0x0702, 0x0703, 0x0704,
-	0x0a01, 0x0a02,
-};
-
-/* Apollo Twin X Gen 2: record, LoMid, ADAT mode (22) */
-static const u16 ua_gen_twin_x_gen_2_rec_adat[] = {
+/* Apollo Twin X: record, LoMid, ADAT mode (22) */
+static const u16 ua_gen_twin_x_rec_adat[] = {
 	0x0001, 0x0002, 0x0901, 0x0902, 0x0701, 0x0702, 0x0703, 0x0704,
 	0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406, 0x0407, 0x0408,
 	0x0201, 0x0202, 0x0203, 0x0204, 0x0b01, 0x0b02,
+};
+
+/* Realtime Rack (MADI): record, LoMid, SPDIF mode (16) */
+static const u16 ua_gen_realtime_rack_madi_rec_spdif[] = {
+	0x0801, 0x0802, 0x0803, 0x0804, 0x0805, 0x0806, 0x0807, 0x0808,
+	0x0809, 0x080a, 0x080b, 0x080c, 0x080d, 0x080e, 0x080f, 0x0810,
+};
+
+/* devices/apollo-16-mkii.json (unverified) */
+static const struct ua_model_desc ua_gen_model_apollo_16_mkii = {
+	.name = "Apollo 16 MkII",
+	.preamps = 0,
+	.hiz = 0,
+	.flags = UA_MODEL_F_AES,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_NONE,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 0,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+		},
+	},
+};
+
+/* devices/apollo-16.json (unverified) */
+static const struct ua_model_desc ua_gen_model_apollo_16 = {
+	.name = "Apollo 16",
+	.preamps = 0,
+	.hiz = 0,
+	.flags = UA_MODEL_F_AES,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_NONE,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 0,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_16_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
+			},
+		},
+	},
+};
+
+/* devices/apollo-8.json (unverified) */
+static const struct ua_model_desc ua_gen_model_apollo_8 = {
+	.name = "Apollo 8",
+	.preamps = 4,
+	.hiz = 2,
+	.flags = UA_MODEL_F_HP1 | UA_MODEL_F_HP2,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_NONE,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 0,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
+			},
+		},
+	},
 };
 
 /* devices/apollo-8p.json (unverified) */
@@ -238,6 +375,40 @@ static const struct ua_model_desc ua_gen_model_apollo_8p = {
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8p_rec_adat),
 				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8p_play_adat),
+			},
+		},
+	},
+};
+
+/* devices/apollo-firewire-thunderbolt-silver.json (unverified) */
+static const struct ua_model_desc ua_gen_model_apollo_firewire_thunderbolt_silver = {
+	.name = "Apollo (FireWire/Thunderbolt, silver)",
+	.preamps = 4,
+	.hiz = 2,
+	.flags = UA_MODEL_F_HP1 | UA_MODEL_F_HP2,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_NONE,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 0,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_8_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 		},
 	},
@@ -277,6 +448,40 @@ static const struct ua_model_desc ua_gen_model_apollo_solo = {
 	},
 };
 
+/* devices/apollo-twin-mkii.json (unverified) */
+static const struct ua_model_desc ua_gen_model_apollo_twin_mkii = {
+	.name = "Apollo Twin MkII",
+	.preamps = 2,
+	.hiz = 1,
+	.flags = UA_MODEL_F_TALKBACK | UA_MODEL_F_DESKTOP,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_INPUT,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 4,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+		},
+	},
+};
+
 /* devices/apollo-twin-x-gen-2.json (unverified) */
 static const struct ua_model_desc ua_gen_model_apollo_twin_x_gen_2 = {
 	.name = "Apollo Twin X Gen 2",
@@ -290,22 +495,90 @@ static const struct ua_model_desc ua_gen_model_apollo_twin_x_gen_2 = {
 	.routes = {
 		[UA_RATE_BAND_LOMID] = {
 			[UA_DIG_SPDIF] = {
-				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_play_spdif),
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
-				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_rec_adat),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_play_spdif),
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
 			},
 		},
 		[UA_RATE_BAND_HI] = {
 			[UA_DIG_SPDIF] = {
-				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_play_spdif),
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
-				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_rec_adat),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_x_gen_2_play_spdif),
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+		},
+	},
+};
+
+/* devices/apollo-twin-x.json (unverified) */
+static const struct ua_model_desc ua_gen_model_apollo_twin_x = {
+	.name = "Apollo Twin X",
+	.preamps = 2,
+	.hiz = 1,
+	.flags = UA_MODEL_F_TALKBACK | UA_MODEL_F_DESKTOP,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_INPUT,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 4,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_x_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+		},
+	},
+};
+
+/* devices/apollo-twin.json (unverified) */
+static const struct ua_model_desc ua_gen_model_apollo_twin = {
+	.name = "Apollo Twin",
+	.preamps = 2,
+	.hiz = 1,
+	.flags = UA_MODEL_F_DESKTOP,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_INPUT,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 4,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_rec_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_twin_rec_adat),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_twin_play_spdif),
 			},
 		},
 	},
@@ -325,21 +598,21 @@ static const struct ua_model_desc ua_gen_model_apollo_x16_gen_2 = {
 		[UA_RATE_BAND_LOMID] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 		},
 		[UA_RATE_BAND_HI] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 		},
 	},
@@ -359,21 +632,21 @@ static const struct ua_model_desc ua_gen_model_apollo_x16 = {
 		[UA_RATE_BAND_LOMID] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 		},
 		[UA_RATE_BAND_HI] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x16_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x16_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_16_play_spdif),
 			},
 		},
 	},
@@ -563,21 +836,21 @@ static const struct ua_model_desc ua_gen_model_apollo_x8_gen_2 = {
 		[UA_RATE_BAND_LOMID] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 		},
 		[UA_RATE_BAND_HI] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 		},
 	},
@@ -597,21 +870,21 @@ static const struct ua_model_desc ua_gen_model_apollo_x8 = {
 		[UA_RATE_BAND_LOMID] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 		},
 		[UA_RATE_BAND_HI] = {
 			[UA_DIG_SPDIF] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 			[UA_DIG_ADAT] = {
 				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_x8_rec_spdif),
-				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_x8_play_spdif),
+				[UA_DIR_PLAY] = UA_GEN_ROUTE(ua_gen_8_play_spdif),
 			},
 		},
 	},
@@ -719,6 +992,40 @@ static const struct ua_model_desc ua_gen_model_arrow = {
 	},
 };
 
+/* devices/realtime-rack-madi.json (unverified) */
+static const struct ua_model_desc ua_gen_model_realtime_rack_madi = {
+	.name = "Realtime Rack (MADI)",
+	.preamps = 0,
+	.hiz = 0,
+	.flags = 0,
+	.legacy_mode = UA_DIG_SPDIF,
+	.toslink = UA_TOSLINK_NONE,
+	.default_in_mode = UA_DIG_SPDIF,
+	.adat_mid_rate_max = 0,
+	.routes = {
+		[UA_RATE_BAND_LOMID] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_realtime_rack_madi_rec_spdif),
+				[UA_DIR_PLAY] = { NULL, 0 },
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_realtime_rack_madi_rec_spdif),
+				[UA_DIR_PLAY] = { NULL, 0 },
+			},
+		},
+		[UA_RATE_BAND_HI] = {
+			[UA_DIG_SPDIF] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_realtime_rack_madi_rec_spdif),
+				[UA_DIR_PLAY] = { NULL, 0 },
+			},
+			[UA_DIG_ADAT] = {
+				[UA_DIR_REC] = UA_GEN_ROUTE(ua_gen_realtime_rack_madi_rec_spdif),
+				[UA_DIR_PLAY] = { NULL, 0 },
+			},
+		},
+	},
+};
+
 static const struct ua_model_type ua_gen_model_types[] = {
 	{ 0x0A, NULL, &ua_gen_model_apollo_8p },
 	{ 0x1F, NULL, &ua_gen_model_apollo_x4 },
@@ -739,6 +1046,16 @@ static const struct ua_model_type ua_gen_model_types[] = {
 	{ 0x3F, "Apollo x4 Gen 2 TB4", &ua_gen_model_apollo_x4_gen_2 },
 	{ 0x40, "Apollo Twin X Gen 2 TB4", &ua_gen_model_apollo_twin_x_gen_2 },
 	{ 0x41, "Apollo Twin X Gen 2 TB4", &ua_gen_model_apollo_twin_x_gen_2 },
+	{ 0x85, "Apollo Thunderbolt", &ua_gen_model_apollo_firewire_thunderbolt_silver },
+	{ 0x87, NULL, &ua_gen_model_apollo_16 },
+	{ 0x88, NULL, &ua_gen_model_apollo_twin },
+	{ 0x8B, "Realtime Rack", &ua_gen_model_realtime_rack_madi },
+	{ 0x8C, NULL, &ua_gen_model_apollo_8 },
+	{ 0x8D, NULL, &ua_gen_model_apollo_16_mkii },
+	{ 0x8E, NULL, &ua_gen_model_apollo_8p },
+	{ 0x8F, NULL, &ua_gen_model_apollo_twin },
+	{ 0x92, NULL, &ua_gen_model_apollo_twin_mkii },
+	{ 0x99, NULL, &ua_gen_model_apollo_twin_x },
 };
 
 #undef UA_GEN_ROUTE

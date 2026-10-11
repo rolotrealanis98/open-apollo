@@ -2,6 +2,7 @@
   "model": "Apollo x8p",
   "device_type": "0x22",
   "device_types": ["0x22"],
+  "public_types": ["0x16"],
   "serial_prefixes": ["2017"],
   "subsystem_id": "0x0014",
   "serial_prefix": "2017",

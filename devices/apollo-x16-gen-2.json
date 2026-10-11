@@ -2,6 +2,7 @@
   "model": "Apollo x16 Gen 2",
   "device_type": "0x3A",
   "device_types": ["0x3A"],
+  "public_types": ["0x24"],
   "serial_prefixes": ["2089"],
   "status": "unverified",
   "mixer_class": "Rene16G2",

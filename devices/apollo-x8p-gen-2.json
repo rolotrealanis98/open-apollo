@@ -2,6 +2,7 @@
   "model": "Apollo x8p Gen 2",
   "device_type": "0x39",
   "device_types": ["0x39"],
+  "public_types": ["0x23"],
   "serial_prefixes": ["2088"],
   "status": "unverified",
   "mixer_class": "Rene8G2",
