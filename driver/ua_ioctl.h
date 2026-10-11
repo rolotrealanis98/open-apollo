@@ -388,7 +388,10 @@ struct ua_ring_cmd {
 
 #define UA_IOCTL_RING_SEND _IOW(UA_IOCTL_MAGIC, 0x70, struct ua_ring_cmd)
 
-/* Load mixer firmware to a specific DSP (0-3). Arg = DSP index as u32. */
+/*
+ * RETIRED: the number stays reserved and the ioctl returns -ENOTTY.  The
+ * kext loads firmware to DSP 0 only; DSPs 1+ boot themselves.
+ */
 #define UA_IOCTL_LOAD_FW_DSP  _IOW(UA_IOCTL_MAGIC, 0x71, __u32)
 
 /* Send raw DMA data to DSP (no cmd/param header). Same struct as dsp_block

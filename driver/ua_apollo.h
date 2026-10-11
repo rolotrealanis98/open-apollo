@@ -454,7 +454,10 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_DSP_CMD_CONNECT      0x00230002
 #define UA_DSP_CMD_FINALIZE     0x00100002
 
-/* Mixer firmware blob format (ua-apollo-mixer.bin) */
+/*
+ * Mixer blob format (ua-apollo-mixer.bin): captured SEL127 "Bill" resource
+ * streams, sent to DSP 0 as 0x12 transactions.  Not a DSP boot image.
+ */
 #define UA_MIXER_FW_MAGIC       0x5541464D      /* 'UAFM' */
 #define UA_MIXER_FW_VERSION     1
 #define UA_MIXER_FW_NAME        "ua-apollo-mixer.bin"
@@ -1425,7 +1428,6 @@ int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 			     const void *fw_data, size_t fw_size);
 int ua_dsp_load_mixer_blocks(struct ua_device *ua);
-int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_connect_all(struct ua_device *ua);
 int ua_dsp_connect_retry(struct ua_device *ua);
 int ua_dsp_wait_ready(struct ua_device *ua);

@@ -2472,25 +2472,13 @@ static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
 		return ring_ret;
 	}
 
-	case UA_IOCTL_LOAD_FW_DSP: {
-		u32 dsp_idx;
-		int fw_ret;
-
-		if (copy_from_user(&dsp_idx, (void __user *)arg,
-				   sizeof(dsp_idx)))
-			return -EFAULT;
-
-		if (dsp_idx >= ua->num_dsps)
-			return -EINVAL;
-
-		mutex_lock(&ua->lock);
-		fw_ret = ua_dsp_load_mixer_blocks_to(ua, dsp_idx);
-		mutex_unlock(&ua->lock);
-		dev_info(&ua->pdev->dev,
-			 "LOAD_FW_DSP[%u]: %s\n",
-			 dsp_idx, fw_ret ? "FAILED" : "OK");
-		return fw_ret;
-	}
+	case UA_IOCTL_LOAD_FW_DSP:
+		/*
+		 * Retired: the kext loads firmware to DSP 0 only and DSPs 1+
+		 * boot themselves.  The number stays reserved so a stale tool
+		 * fails cleanly.
+		 */
+		return -ENOTTY;
 
 	case UA_IOCTL_DSP_SRAM_DATA: {
 		struct ua_dsp_block blk;
@@ -2594,7 +2582,12 @@ static const struct file_operations ua_fops = {
 };
 
 /* ----------------------------------------------------------------
- * DSP init and cold boot firmware loading
+ * DSP init and the cold-start firmware stage
+ *
+ * The "firmware" stage sends ua-apollo-mixer.bin (captured SEL127 Bill
+ * resource streams) to DSP 0 as 0x12 transactions.  The macOS kext sends
+ * nothing at start; what the stage does on a cold x4 is unproven, so it
+ * stays.  See ua_dsp_load_mixer_blocks().
  *
  * Extracted from ua_probe() to reduce function complexity and
  * avoid GCC-13 internal compiler errors (cfgcleanup.cc ICE).
@@ -2784,11 +2777,11 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 
 		fw_ret = ua_dsp_load_mixer_blocks(ua);
 
-		/* TODO: DSPs 1-3 need firmware too.
-		 * Windows warm-boot shows 612/375/350 cmd entries to
-		 * DSPs 1-3. Loading the SAME firmware crashes the FPGA.
-		 * Need to study what Windows actually sends to each DSP
-		 * (likely different firmware segments or different cmds).
+		/*
+		 * DSP 0 only.  DSPs 1+ need no firmware: the kext never sends
+		 * any (its _sendBlock is hard-wired to DSP 0), they boot on
+		 * their own.  The Windows ring traffic seen on them is plugin
+		 * and strip work.
 		 */
 
 		if (fw_ret == 0) {
@@ -2821,10 +2814,11 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 
 			if (ua_uses_audio_extension(ua->device_type)) {
 				/*
-				 * On cold boot, ACEFACE fails before FW
-				 * load because the DSP bootloader can't
-				 * respond.  Now that FW is loaded, retry
-				 * with transport still running.
+				 * On cold boot, ACEFACE fails before the
+				 * firmware stage (observed on the x4; the
+				 * cause is unproven).  Now that the stage
+				 * has run, retry with transport still
+				 * running.
 				 */
 				if (!ua->aceface_done) {
 					dev_info(&pdev->dev,

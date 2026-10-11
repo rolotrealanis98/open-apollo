@@ -2387,16 +2387,30 @@ int UA_GCC_OPTIMIZE("O1") ua_dsp_test_send_block(struct ua_device *ua)
  * ---------------------------------------------------------------- */
 
 /**
- * ua_dsp_load_mixer_blocks - Load mixer firmware from filesystem blob
+ * ua_dsp_load_mixer_blocks - Send the ua-apollo-mixer.bin stream to DSP 0
  * @ua: device (must hold ua->lock)
  *
  * Uses the Linux request_firmware() API to load ua-apollo-mixer.bin
  * from /lib/firmware/.  The blob contains a header, block table, and
- * concatenated firmware payloads (packed by tools/pack-mixer-firmware.py).
+ * concatenated payloads (packed by tools/pack-mixer-firmware.py).
+ *
+ * What the blob is: 15 back-to-back streams of "Bill" DSP resources,
+ * captured from SEL127 (RegisterSharedResourceDMA) on macOS.  It is NOT a
+ * DSP boot image.  The macOS kext never uploads anything at start: the
+ * DSPs boot themselves, and Bill code reaches a DSP only when the
+ * resource manager places a plugin (parity note 13, findings 0.1/0.2).
+ * What the 0x12 firmware transaction does with these streams on a cold
+ * x4 is unproven (the Windows driver is where this behaviour comes from),
+ * so the cold start keeps sending them until a hardware test (note 13,
+ * experiments E1/E2) shows which part matters.
+ *
+ * Only DSP 0 is ever loaded.  The kext's _sendBlock hard-codes DSP 0 and
+ * DSPs 1+ need nothing: the traffic seen on them in Windows captures is
+ * resource-manager work for strips hosted there, not firmware.
  *
  * Each block is sent to DSP 0 via ua_dsp_send_block() with:
- *   cmd   = SRAM address (from block table)
- *   param = 1 (constant, matches macOS capture)
+ *   cmd   = UA_FW_CMD (0x120000)
+ *   param = UA_FW_PARAM (0x80040000, the expected response word)
  *   data  = block payload
  *
  * Returns 0 on success, negative errno on failure.
@@ -2476,20 +2490,12 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 		num_blocks, fw->size);
 
 	/*
-	 * 3-phase FW load (from Windows UAD2Pcie.sys Ghidra):
-	 *   0xD0000 (pre-load) → 0x120000 (upload) → 0xE0000 (post-load)
-	 *
-	 * Pre/post phases DISABLED: sending 0xD0000 before main FW
-	 * consumes ring entries and desyncs the ring when DSP can't
-	 * respond (bootloader only handles 0x120000). The pre/post
-	 * phases may only apply to SUBSEQUENT loads (rate changes),
-	 * not the initial cold boot load.
-	 *
-	 * TODO: Try pre/post after initial load succeeds, or for
-	 * DSPs 1-3 after DSP 0 is fully initialized.
+	 * Commands 0xD0000 and 0xE0000 are the kext's licensing block
+	 * loaders (authorization and demo blocks).  They are not firmware
+	 * phases and are never sent by this driver.
 	 */
 
-	/* Phase 2: Main firmware upload (0x120000) — iterate blocks */
+	/* Firmware transaction (0x120000) for each block */
 	for (i = 0; i < num_blocks; i++) {
 		u32 sram_addr, block_size, block_offset;
 		unsigned int entry_off = header_size + i * 12;
@@ -2517,22 +2523,13 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 		}
 
 		/*
-		 * Try cmd=0x120000 (kext LoadFirmware address) with param
-		 * 0x80040000 first.  The kext sends the entire firmware as
-		 * one _sendBlock with these values.  Our per-block SRAM
-		 * addresses (0x0e8cc000 etc.) may not be valid ring commands.
-		 *
-		 * If 0x120000 fails, fall back to per-block SRAM addresses.
+		 * The block table's sram_addr is the capture's host address
+		 * of the SEL127 buffer, not a DSP address (note 13, 0.2), so
+		 * it is never used as a command.  The kext's LoadFirmware is
+		 * always cmd 0x120000, expected response 0x80040000.
 		 */
-		ret = ua_dsp_send_block(ua, 0, 0x120000, 0x80040000,
+		ret = ua_dsp_send_block(ua, 0, UA_FW_CMD, UA_FW_PARAM,
 					&data[block_offset], block_size);
-		if (ret) {
-			dev_info(&ua->pdev->dev,
-				 "block %u: cmd=0x120000 failed (%d), trying sram=0x%08x\n",
-				 i, ret, sram_addr);
-			ret = ua_dsp_send_block(ua, 0, sram_addr, 1,
-						&data[block_offset], block_size);
-		}
 		if (ret) {
 			dev_err(&ua->pdev->dev,
 				"block %u (sram=0x%08x, %u bytes) send failed: %d\n",
@@ -2549,74 +2546,6 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 out:
 	release_firmware(fw);
 	return ret;
-}
-
-/**
- * ua_dsp_load_mixer_blocks_to - Load mixer firmware to a specific DSP
- * @ua: device
- * @dsp_idx: target DSP (1-3)
- *
- * Same as ua_dsp_load_mixer_blocks but sends blocks to dsp_idx
- * instead of DSP 0. Uses the same firmware file.
- */
-int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx)
-{
-	const struct firmware *fw;
-	const u8 *data;
-	u32 num_blocks;
-	unsigned int header_size, i;
-	int ret;
-
-	if (dsp_idx >= ua->num_dsps || !ua->dsp[dsp_idx].rings_allocated)
-		return -ENODEV;
-
-	ret = request_firmware(&fw, UA_MIXER_FW_NAME, &ua->pdev->dev);
-	if (ret)
-		return ret;
-
-	data = fw->data;
-	header_size = 16;
-	num_blocks = fw->size >= 16 ? le32_to_cpup((__le32 *)&data[8]) : 0;
-
-	/* The same header checks as ua_dsp_load_mixer_blocks() */
-	if (fw->size < 16 ||
-	    le32_to_cpup((__le32 *)&data[0]) != UA_MIXER_FW_MAGIC ||
-	    le32_to_cpup((__le32 *)&data[4]) != UA_MIXER_FW_VERSION ||
-	    num_blocks == 0 || num_blocks > 64 ||
-	    fw->size < header_size + num_blocks * 12) {
-		release_firmware(fw);
-		return -EINVAL;
-	}
-
-	for (i = 0; i < num_blocks; i++) {
-		u32 block_size, block_offset;
-		unsigned int entry_off = header_size + i * 12;
-
-		block_size = le32_to_cpup((__le32 *)&data[entry_off + 4]);
-		block_offset = le32_to_cpup((__le32 *)&data[entry_off + 8]);
-
-		if (block_size > fw->size ||
-		    block_offset > fw->size - block_size || (block_size & 3)) {
-			ret = -EINVAL;
-			break;
-		}
-
-		ret = ua_dsp_send_block(ua, dsp_idx, 0x120000, 0x80040000,
-					&data[block_offset], block_size);
-		if (ret) {
-			dev_warn(&ua->pdev->dev,
-				 "DSP %u block %u failed: %d\n",
-				 dsp_idx, i, ret);
-			break;
-		}
-	}
-
-	dev_dbg(&ua->pdev->dev,
-		"DSP %u: %u/%u firmware blocks loaded\n",
-		dsp_idx, i, num_blocks);
-
-	release_firmware(fw);
-	return (i == num_blocks) ? 0 : ret;
 }
 
 /* ----------------------------------------------------------------
