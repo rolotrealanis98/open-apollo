@@ -5882,7 +5882,7 @@ static void ua_period_timer_rearm(struct ua_device *ua)
 	u32 bit = BIT(ua_vector_to_hwbit(UA_IRQ_VEC_PERIODIC) - 32);
 	unsigned long flags;
 
-	if (!ua->fw_v2 || atomic_read(&ua->shutdown))
+	if (!ua_irq64(ua) || atomic_read(&ua->shutdown))
 		return;
 	spin_lock_irqsave(&ua->irq_lock, flags);
 	if (READ_ONCE(audio->transport_running) &&
