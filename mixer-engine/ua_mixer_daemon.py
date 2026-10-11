@@ -56,7 +56,8 @@ from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
                       device_clock_menu,
                       fader_db_to_tapered, pcie_link_below_minimum,
                       pcie_link_text, preamp_db_to_tapered)
-from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
+from metering import (NullMeter, ReadbackMeter, SILENCE_DB, find_apollo_card,
+                      make_meter,
                       meter_channel)
 from bonjour import BonjourAnnouncer, _default_name
 from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
@@ -769,6 +770,7 @@ class MixerDaemon:
                 self._poll_dsp_load()
                 self._poll_driver_rate()
                 self._poll_transport()
+                self._poll_buffer_size()
                 self._refresh_latency()
 
             if not meter_cache:
@@ -1463,6 +1465,21 @@ class MixerDaemon:
             log.warning("Firmware version %d is not one the UA driver "
                         "accepts (%s): this combination is untested",
                         fw, " or ".join(map(str, ACCEPTED_FW_MAJORS)))
+
+    def _poll_buffer_size(self):
+        """/BufferSize follows the period size of the Apollo's running
+        stream (on Linux PipeWire picks it, the quantum; the Mixer Engine
+        reports CoreAudio's buffer size).  Read-only: a client SET does not
+        change the stream.  Nothing changes while no stream runs."""
+        if not self.hw_router or not self.hw_router.backend.connected:
+            return
+        card = find_apollo_card(self.hw_router.backend.device_path)
+        frames = stream_period_frames(card)
+        if frames and self.state.get_value("/BufferSize/value") != frames:
+            log.info("Buffer size -> %d frames (stream period)", frames)
+            self._push_to_clients("/BufferSize", frames)
+            # device status, not a setting: not saved
+            self.state._dirty.pop("/BufferSize/value", None)
 
     def _poll_transport(self):
         """/AudioStreaming follows the driver's transport (running or
@@ -2744,6 +2761,27 @@ def descriptor_input_buses(slug: str | None) -> dict:
                 and e.get("synch_in") is not None}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return {}
+
+
+def stream_period_frames(card: int | None) -> int | None:
+    """Period size in frames of the card's running playback (else
+    capture) stream, from /proc/asound/cardN/pcm0{p,c}/sub0/hw_params, or
+    None when nothing runs."""
+    if card is None:
+        return None
+    for d in ("pcm0p", "pcm0c"):
+        try:
+            text = Path(f"/proc/asound/card{card}/{d}/sub0/hw_params"
+                        ).read_text()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if line.startswith("period_size:"):
+                try:
+                    return int(line.split(":", 1)[1])
+                except ValueError:
+                    return None
+    return None
 
 
 def descriptor_json(slug: str | None) -> dict | None:
