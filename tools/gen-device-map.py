@@ -61,7 +61,7 @@ DEVICES = os.path.join(ROOT, 'devices')
 MAPS = os.path.join(ROOT, 'mixer-engine', 'device_maps')
 TEMPLATE_NAME = 'device_map_apollo_x4.json'
 # Bump when the generator's output changes without its inputs changing.
-GENERATOR_VERSION = 1
+GENERATOR_VERSION = 2
 
 
 def _load_gen():
@@ -92,6 +92,100 @@ ASIO_RESERVED_BASE = 20
 
 class MapError(Exception):
     pass
+
+
+# Per-model /devices/0 capability flags (parity map 16 sec. 3.4, resolved
+# from the MixerType* classes; checked against the two captured trees, which
+# agree on every flag they carry).  The captured x4 values used to be copied
+# into every generated map.
+#   out_dsp    SupportsSpeakerCorrection and SupportsBassManagement
+#              (the engine gates both on SupportsOutputDSP)
+#   hp_corr    SupportsHeadphoneCorrection
+#   hp2_corr   SupportsHeadphone2Correction.  Unexplained in the engine (the
+#              x4 and x8p classes share one SupportsHPCorrection body); only
+#              the captured x8p says True, so True is assumed for the
+#              Rene2/4/8 family (HEXA) and False elsewhere
+#   autogain   SupportsAutogain (Gen 2 only)
+#   dante      SupportsDante
+#   alt_mons   MaxAltMons (x4 and Twin X drop by one while bass management
+#              is on; these are the bass-management-off values)
+#   spans      (MaxSpans, DefaultSpans)
+#   spanning   DSPSpanning (Apollo/A16: false in FireWire mode only)
+#   llm        AvailableLLMDiskChannels
+#   madi_first FirstMADIChannelBlockIndex
+CAPS_FIELDS = ('out_dsp', 'hp_corr', 'hp2_corr', 'autogain', 'dante',
+               'alt_mons', 'spans', 'spanning', 'llm', 'madi_first')
+
+
+def _caps(out_dsp, hp_corr, autogain, dante, alt_mons, spans, spanning, llm,
+          madi_first=0, hp2_corr=False):
+    return dict(zip(CAPS_FIELDS, (out_dsp, hp_corr, hp2_corr, autogain, dante,
+                                  alt_mons, spans, spanning, llm, madi_first)))
+
+
+CLASS_CAPS = {
+    # original Apollo line
+    'Apollo':      _caps(False, False, False, False, 2, (4, 4), True, 10),
+    'ApolloBlack': _caps(False, False, False, False, 2, (4, 4), True, 16),
+    'Peyton':      _caps(False, False, False, False, 2, (4, 4), True, 16),
+    'A16':         _caps(False, False, False, False, 2, (4, 4), True, 16),
+    'A16Black':    _caps(False, False, False, False, 2, (4, 4), True, 16),
+    # desktop: Twin family (2 spans) and the Conrad family (no spanning)
+    'Armstrong':   _caps(False, False, False, False, 1, (2, 2), True, 10),
+    'Stretch':     _caps(False, False, False, False, 1, (2, 2), True, 10),
+    'Lavern':      _caps(True, True, False, False, 1, (2, 2), True, 10),
+    'Shirley':     _caps(True, True, False, False, 1, (2, 2), True, 10),
+    'LavernG2':    _caps(True, True, True, False, 1, (2, 2), True, 10),
+    'Conrad':      _caps(False, False, False, False, 0, (4, 4), False, 6),
+    'ApolloSolo':  _caps(False, False, False, False, 0, (4, 4), False, 6),
+    'Cauldron':    _caps(False, False, False, False, 0, (4, 4), False, 6),
+    # x4
+    'Freud':       _caps(True, True, False, False, 2, (4, 4), True, 16),
+    'FreudG2':     _caps(True, True, True, False, 2, (4, 4), True, 16),
+    # x6 / x8 / x8p (+ Gen 2)
+    'Rene2':       _caps(True, True, False, False, 2, (4, 4), True, 16,
+                         hp2_corr=True),
+    'Rene4':       _caps(True, True, False, False, 2, (4, 4), True, 16,
+                         hp2_corr=True),
+    'Rene8':       _caps(True, True, False, False, 2, (4, 4), True, 16,
+                         hp2_corr=True),
+    'Rene2G2':     _caps(True, True, True, False, 2, (4, 4), True, 16,
+                         hp2_corr=True),
+    'Rene4G2':     _caps(True, True, True, False, 2, (4, 4), True, 16,
+                         hp2_corr=True),
+    'Rene8G2':     _caps(True, True, True, False, 2, (4, 4), True, 16,
+                         hp2_corr=True),
+    # x16 / x16D: output DSP but no headphone correction
+    'Rene16':      _caps(True, False, False, False, 2, (4, 4), True, 16),
+    'Rene16G2':    _caps(True, False, False, False, 2, (4, 4), True, 16),
+    'ReneLax':     _caps(True, False, False, True, 2, (4, 4), True, 16),
+    # Realtime Rack (MADI): no DSP spans, MADI channel blocks start at 1
+    'M64':         _caps(False, False, False, False, 0, (0, 0), True, 16,
+                         madi_first=1),
+}
+
+
+def device_caps(d):
+    """Capability flags for a model: {map path: value} (see CLASS_CAPS)."""
+    cls = d.get('mixer_class')
+    if cls not in CLASS_CAPS:
+        raise MapError(f'{d["_slug"]}: no capability row for mixer class '
+                       f'{cls!r}')
+    c = CLASS_CAPS[cls]
+    return {
+        '/devices/0/SupportsSpeakerCorrection': c['out_dsp'],
+        '/devices/0/SupportsBassManagement': c['out_dsp'],
+        '/devices/0/SupportsHeadphoneCorrection': c['hp_corr'],
+        '/devices/0/SupportsHeadphone2Correction': c['hp2_corr'],
+        '/devices/0/SupportsAutogain': c['autogain'],
+        '/devices/0/SupportsDante': c['dante'],
+        '/devices/0/MaxAltMons': c['alt_mons'],
+        '/devices/0/MaxSpans': c['spans'][0],
+        '/devices/0/DefaultSpans': c['spans'][1],
+        '/devices/0/DSPSpanning': c['spanning'],
+        '/devices/0/AvailableLLMDiskChannels': c['llm'],
+        '/FirstMADIChannelBlockIndex': c['madi_first'],
+    }
 
 
 # Plugin and licensing data is never carried into a generated map: the plugin
@@ -400,6 +494,25 @@ def set_value(row, rel, value):
     return False
 
 
+def clock_sources(d, digital, rec_ents):
+    """The /ClockSource names a model offers.
+
+    devices/<model>.json "clock_sources" is the list (parity map 16 finding
+    5: ADAT and S/PDIF both where the TOSLink type is not settable, the
+    active one where it is, AES/EBU on the Apollo 16 and x16, Dante too on
+    the x16D).  Without it: Internal, Word Clock (not on desktop units) and
+    one digital name chosen from the default mode.
+    """
+    if d.get('clock_sources'):
+        return list(d['clock_sources'])
+    clock = ['Internal']
+    if not d.get('desktop'):
+        clock.append('Word Clock')
+    if any(digital_kind(e['name']) for e in rec_ents):
+        clock.append(digital)
+    return clock
+
+
 # --------------------------------------------------------------- generation
 
 def generate(d, tpl):
@@ -559,11 +672,8 @@ def generate(d, tpl):
     model = d['model']
     digital = ('AES/EBU' if d.get('digital_io') == 'aes' else
                'ADAT' if default_mode == 'adat' else 'S/PDIF')
-    clock = ['Internal']
-    if not d.get('desktop'):
-        clock.append('Word Clock')
-    if any(digital_kind(e['name']) for e in rec_ents):
-        clock.append(digital)
+    clock = clock_sources(d, digital, rec_ents)
+    caps = device_caps(d)
 
     controls = []
     for kind, item in tpl.layout:
@@ -596,6 +706,8 @@ def generate(d, tpl):
         elif p == '/ClockSource':
             c['values'] = list(clock)
             c['value'] = 'Internal'
+        elif p in caps:
+            c['value'] = caps[p]
         controls.append(c)
 
     controls = [c for c in controls if not is_plugin_data(c['path'])]
