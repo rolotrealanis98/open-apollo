@@ -1892,30 +1892,84 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 }
 
 /**
- * ua_preamp_write_locked - write one preamp parameter to the mixer settings
+ * ua_preamp_write_locked - write one input parameter (SEL131 type 1)
  * @ua: device (caller holds ua->lock)
- * @ch: input (0-31 for the route/level params, else a preamp channel)
- * @param_id: UA_PREAMP_PARAM_*
- * @value: 0/1 for the flags (phase: 1 or a negative float), dB-9 for GainC,
- *         raw byte for the other gain params
+ * @ch: input (0-31 for the DSP params, else a preamp channel)
+ * @param_id: UA_PREAMP_PARAM_* (0x00-0x17)
+ * @value: see below
  *
- * Preamp controls go through DSP mixer settings only; CLI commands freeze the
- * ARM MCU (setInputParamARM routes everything to CPcieDeviceMixer::
- * WriteSetting in the kext).  Flags (0x00-0x05): setting[0] (inputs 1-4) or
- * [12], 6-bit stride, bit = param_id.  GainC (0x06): setting[3] or [14], the
- * 6-bit fields of UA_RB_PREAMP_GAINC().  Others (0x07-0x17): byte-packed in
- * setting[param_id+7] (+15 above input 4).  Returns the setting write result.
+ * Mirrors CUAD2DeviceMixer::SetInputParam (parity/14-mixer-params.md s3).
+ * Preamp controls go through DSP mixer settings only; CLI commands freeze
+ * the ARM MCU (setInputParamARM routes everything to CPcieDeviceMixer::
+ * WriteSetting in the kext).  Settings S+12 / S+8 are the channel 4-7 banks.
+ *
+ *   0x00-0x04, 0x05 (ch 0-3)  flags: S0 (S12), bit param << 6*(ch&3);
+ *                             phase takes +-1.0f (or 0/1)
+ *   0x02 Link                 even channel only; both pair bits (0x104 /
+ *                             0x104000) in one write; an odd channel is a no-op
+ *   0x06 GainC                S3 (S14), 6-bit at shifts 0/6/16/22
+ *   0x07 mic impedance        S1 (S13), nibble at 9/16/20/24
+ *   0x08 custom preamp        S11 bit 8+ch
+ *   0x09-0x0f                 S16-S22 (S24-S30) byte lanes
+ *   0x10 knob steps           S23 (S31), nibble at 4*(ch&3)
+ *   0x11 HiZ impedance        S13, nibble 0 / 1 for inputs 1 / 2 only
+ *   0x12 selected param       S23 (S31), 2 bits at 16+2*(ch&3)
+ *   0x13 route, 0x16 span     DSP ring {0x1E0004, ch, 7|8, v}
+ *   0x14 HiZ host write       S0 bit 24+ch
+ *   0x15 PGA line disable     S15 bit 24+ch; -EINVAL where the kext says -8
+ *   0x17 raw record enable    S5 bit 16+ch
+ *   0x05 (ch >= 4 on the x4)  DSP ring {0x1E0004, ch, 5, +-1.0f}
+ *
+ * Returns the setting write result, or -EINVAL where the kext returns -8
+ * (param > 0x17, channel beyond the device's preamps, param not on the kind).
  */
 int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 			   u32 param_id, u32 value)
 {
+	static const u8 imp_shift[4] = { 9, 16, 20, 24 };
 	unsigned int setting_idx, shift;
+	unsigned int max_arm_ch, dsp_phase_ch;
+	int kind = ua_mixer_kind(ua);
+	bool hi_bank = ch > 3;
 	u32 hw_mask, hw_val;
 
-	if (param_id <= UA_PREAMP_PARAM_PHASE) {
+	if (param_id > UA_PREAMP_PARAM_RAW_REC)
+		return -EINVAL;
+
+	/* DSP-side params: no mixer setting at all */
+	if (param_id == UA_PREAMP_PARAM_ROUTE)
+		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_ROUTE,
+					      value);
+	if (param_id == UA_PREAMP_PARAM_LEVEL)
+		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_SPAN, value);
+
+	/* Highest ARM preamp channel: 3 on the x4 (kind 14); 7 where unknown */
+	max_arm_ch = (kind == 14 || kind == 22) ? 3 : 7;
+	/* Phase goes to the DSP from the first channel without a preamp */
+	dsp_phase_ch = ua->audio.num_preamps ? ua->audio.num_preamps :
+					       max_arm_ch + 1;
+	if (param_id == UA_PREAMP_PARAM_PHASE && ch >= dsp_phase_ch) {
+		/* Scale float: +1.0f normal, -1.0f invert (0 / 1 accepted) */
+		if (value == 0)
+			value = 0x3f800000;
+		else if (value == 1)
+			value = 0xbf800000;
+		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_SCALE,
+					      value);
+	}
+
+	if (ch > max_arm_ch)
+		return -EINVAL;
+
+	switch (param_id) {
+	case UA_PREAMP_PARAM_MIC_LINE:
+	case UA_PREAMP_PARAM_PAD:
+	case UA_PREAMP_PARAM_48V:
+	case UA_PREAMP_PARAM_LOWCUT:
+	case UA_PREAMP_PARAM_PHASE: {
 		bool flag_set;
 
-		setting_idx = (ch > 3) ? 12 : 0;
+		setting_idx = hi_bank ? 12 : 0;
 		shift = (ch & 3) * 6;
 		hw_mask = (1u << param_id) << shift;
 
@@ -1929,26 +1983,90 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 			flag_set = !!value;
 
 		hw_val = flag_set ? hw_mask : 0;
-	} else if (param_id == UA_PREAMP_PARAM_GAIN_C) {
+		break;
+	}
+	case UA_PREAMP_PARAM_LINK:
+		/* The kext links a pair from its even channel, both bits at once */
+		if (ch & 1)
+			return 0;
+		setting_idx = hi_bank ? 12 : 0;
+		hw_mask = 0x104u << (12 * ((ch & 3) >> 1));
+		hw_val = value ? hw_mask : 0;
+		break;
+	case UA_PREAMP_PARAM_GAIN_C:
 		/*
 		 * Kext disasm (sub_48734): mask 0x3F with a 4-bit gap between
 		 * the pairs: inputs 1-4 at shifts 0/6/16/22.
 		 */
-		setting_idx = (ch > 3) ? 14 : 3;
+		setting_idx = hi_bank ? 14 : 3;
 		shift = (ch & 3) * 6;
 		if (ch & 2)
 			shift += 4;
 		hw_mask = 0x3Fu << shift;
 		hw_val = (value & 0x3F) << shift;
-	} else if (param_id <= 0x17) {
-		setting_idx = param_id + ((ch <= 3) ? 7 : 15);
-		if (setting_idx >= UA_MIXER_BATCH_COUNT)
-			return 0;
+		break;
+	case UA_PREAMP_PARAM_MIC_IMP:
+		setting_idx = hi_bank ? 13 : 1;
+		shift = imp_shift[ch & 3];
+		hw_mask = 0xFu << shift;
+		hw_val = (value & 0xF) << shift;
+		break;
+	case UA_PREAMP_PARAM_CUSTOM:
+		setting_idx = 11;
+		hw_mask = BIT(8 + ch);
+		hw_val = value ? hw_mask : 0;
+		break;
+	case 0x09 ... 0x0f:
+		/* S16-S22 for ch 0-3, S24-S30 above: byte lane per channel */
+		setting_idx = param_id + 7 + (hi_bank ? 8 : 0);
 		shift = (ch & 3) * 8;
 		hw_mask = 0xFFu << shift;
 		hw_val = (value & 0xFF) << shift;
-	} else {
-		return 0;
+		break;
+	case UA_PREAMP_PARAM_KNOB_STEPS:
+		setting_idx = hi_bank ? 31 : 23;
+		shift = 4 * (ch & 3);
+		hw_mask = 0xFu << shift;
+		hw_val = (value & 0xF) << shift;
+		break;
+	case UA_PREAMP_PARAM_HIZ_IMP:
+		/* The x4's two HiZ inputs only */
+		if (ch > 1)
+			return -EINVAL;
+		setting_idx = 13;
+		shift = 4 * ch;
+		hw_mask = 0xFu << shift;
+		hw_val = (value & 0xF) << shift;
+		break;
+	case UA_PREAMP_PARAM_SEL_PARAM:
+		setting_idx = hi_bank ? 31 : 23;
+		shift = 16 + 2 * (ch & 3);
+		hw_mask = 3u << shift;
+		hw_val = (value & 3) << shift;
+		break;
+	case UA_PREAMP_PARAM_HIZ:
+		if (hi_bank)
+			return -EINVAL;
+		setting_idx = 0;
+		hw_mask = BIT(24 + ch);
+		hw_val = value ? hw_mask : 0;
+		break;
+	case UA_PREAMP_PARAM_PGA_LINE:
+		if (!ua_kind_allows(kind, UA_KIND_SET_IN_15))
+			return -EINVAL;
+		setting_idx = 15;
+		hw_mask = BIT(24 + ch);
+		hw_val = value ? hw_mask : 0;
+		break;
+	case UA_PREAMP_PARAM_RAW_REC:
+		if (hi_bank)
+			return -EINVAL;
+		setting_idx = 5;
+		hw_mask = BIT(16 + ch);
+		hw_val = value ? hw_mask : 0;
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	return ua_mixer_write_setting_locked(ua, setting_idx, hw_val, hw_mask);
@@ -1999,15 +2117,17 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 		 * preamp params to CPcieDeviceMixer::WriteSetting.
 		 * CLI binary commands FREEZE the ARM MCU — never use them.
 		 *
-		 * FLAG params (0x00-0x05): setting 0 (ch0-3) or 12 (ch4-7),
-		 *   6-bit stride, bit position = param_id.
-		 * GAIN params (0x06+): setting param_id+7 (ch0-3) or +15,
-		 *   8-bit byte packing.
+		 * The setting and lane of every param are in
+		 * ua_preamp_write_locked().
 		 *
-		 * Route (0x13) and Level (0x16) are sent to ALL input
-		 * channels (0-31), not just physical preamps (0-3).
+		 * Route (0x13) and Level (0x16) are DSP ring commands for ALL
+		 * input channels (0-31), not just physical preamps (0-3); so
+		 * is the phase scale (0x05) above the last preamp channel.
 		 */
-		if (param.param_id == 0x13 || param.param_id == 0x16) {
+		if (param.param_id == UA_PREAMP_PARAM_ROUTE ||
+		    param.param_id == UA_PREAMP_PARAM_LEVEL ||
+		    (param.param_id == UA_PREAMP_PARAM_PHASE &&
+		     param.channel_idx >= ua->audio.num_preamps)) {
 			if (param.channel_idx > 31) {
 				ret = -EINVAL;
 				goto out_unlock;
@@ -2031,6 +2151,8 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 
 		/* Update ALSA cache and prepare notification */
 		ch = param.channel_idx;
+		if (ch >= ua->audio.num_preamps)	/* DSP-only input */
+			break;
 		switch (param.param_id) {
 		case UA_PREAMP_PARAM_MIC_LINE:
 			ua->audio.preamp[ch].mic_line = !!param.value;

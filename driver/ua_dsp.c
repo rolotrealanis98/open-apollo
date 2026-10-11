@@ -3604,6 +3604,55 @@ u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua)
 }
 
 /**
+ * ua_dsp_set_input_param - DSP-side input parameter (ring opcode 0x1E)
+ * @ua: device (caller must hold ua->lock)
+ * @input: input index (0-31)
+ * @sub: UA_DSP_INPUT_SCALE (5), _ROUTE (7) or _SPAN (8)
+ * @value: float bits for the scale, route mask, or span info
+ *
+ * Kext CUAD2DeviceMixer::setDSPInputParam{Scale,DirectOutputRoute,
+ * SpanInfo}: {0x001E0004, input, sub, value} to the DSP that hosts the
+ * input.  Every input is hosted by DSP 0 here (no MoveInputToDSP).  A route
+ * also goes to every other DSP as the "not routed here" default 0x1FFFF,
+ * as the kext does for the DSPs that do not host the input.  The partner
+ * link table the kext keeps for spanned inputs is not modelled.
+ */
+int ua_dsp_set_input_param(struct ua_device *ua, u32 input, u32 sub,
+			   u32 value)
+{
+	unsigned int dsp;
+	int ret;
+
+	if (input > 31)
+		return -EINVAL;
+	if (sub != UA_DSP_INPUT_SCALE && sub != UA_DSP_INPUT_ROUTE &&
+	    sub != UA_DSP_INPUT_SPAN)
+		return -EINVAL;
+	if (!ua->dsp[0].rings_allocated)
+		return -ENODEV;
+
+	ret = ua_dsp_ring_send_raw(ua, 0, UA_DSP_CMD_INPUT_PARAM, input, sub,
+				   value);
+	if (ret)
+		return ret;
+
+	if (sub == UA_DSP_INPUT_ROUTE) {
+		for (dsp = 1; dsp < ua->num_dsps; dsp++) {
+			if (!ua->dsp[dsp].rings_allocated)
+				continue;
+			ret = ua_dsp_ring_send_raw(ua, dsp,
+						   UA_DSP_CMD_INPUT_PARAM,
+						   input, sub,
+						   UA_DSP_ROUTE_NONE);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
+/**
  * ua_dsp_send_rate_ack - Tell every DSP the new sample rate
  * @ua: device (caller must hold ua->lock)
  * @rate: sample rate in Hz

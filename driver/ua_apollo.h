@@ -557,8 +557,36 @@ static inline bool ua_public_output_mute(u32 pt)
 /* Mixer gain range the preamps take (dB) */
 #define UA_PREAMP_GAIN_MIN_DB   10
 #define UA_PREAMP_GAIN_MAX_DB   65
-#define UA_PREAMP_PARAM_ROUTE   0x13    /* Channel routing mask (0x0001ffff) */
-#define UA_PREAMP_PARAM_LEVEL   0x16    /* Default level (0xa0 = -16dB) */
+/*
+ * The rest of the SetInputParam (SEL131 type 1) ids, from the kext's
+ * setInputParamARM jump table (parity/14-mixer-params.md s3).  Settings are
+ * mailbox indices; "S+12/8" means the +12 (flags) or +8 (byte lanes)
+ * channel 4-7 bank, which no x4 channel reaches.
+ */
+#define UA_PREAMP_PARAM_LINK    0x02    /* stereo link, even channel only: both pair bits */
+#define UA_PREAMP_PARAM_MIC_IMP 0x07    /* mic impedance code, S1 nibble 9/16/20/24 */
+#define UA_PREAMP_PARAM_CUSTOM  0x08    /* custom (Unison) preamp on, S11 bit 8+ch */
+/* 0x09-0x0f: custom-preamp byte lanes S16-S22 (GainB 0x09, GainA 0x0a) */
+#define UA_PREAMP_PARAM_KNOB_STEPS 0x10 /* preamp knob steps, S23 nibble */
+#define UA_PREAMP_PARAM_HIZ_IMP 0x11    /* HiZ impedance code, S13 nibble, inputs 1/2 only */
+#define UA_PREAMP_PARAM_SEL_PARAM 0x12  /* preamp selected param, S23 2-bit lane at 16+2*ch */
+#define UA_PREAMP_PARAM_ROUTE   0x13    /* DSP ring: direct-output route mask (default 0x1ffff) */
+#define UA_PREAMP_PARAM_HIZ     0x14    /* HiZ host write, S0 bit 24+ch */
+#define UA_PREAMP_PARAM_PGA_LINE 0x15   /* not on the x4 (kind 14): rejected */
+#define UA_PREAMP_PARAM_LEVEL   0x16    /* DSP ring: span info (0x20 = none) */
+#define UA_PREAMP_PARAM_RAW_REC 0x17    /* raw record enable, S5 bit 16+ch */
+
+/*
+ * DSP-side input parameters: ring command {0x001E0004, input, sub, value}.
+ * Param 0x05 (phase scale) reaches the ring on channels >= 4 of the x4;
+ * 0x13 and 0x16 always do.  A route of UA_DSP_ROUTE_NONE means "not routed
+ * from this DSP".
+ */
+#define UA_DSP_INPUT_SCALE      5
+#define UA_DSP_INPUT_ROUTE      7
+#define UA_DSP_INPUT_SPAN       8
+#define UA_DSP_ROUTE_NONE       0x0001FFFF
+#define UA_DSP_SPAN_NONE        0x20
 
 /* Legacy aliases — do NOT use for new code */
 #define UA_ARM_PARAM_PAD        UA_PREAMP_PARAM_PAD
@@ -1507,6 +1535,8 @@ int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 			 u32 param, u32 side, u32 value_u32);
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
 u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua);
+int ua_dsp_set_input_param(struct ua_device *ua, u32 input, u32 sub,
+			   u32 value);
 int ua_dsp_send_rate_ack(struct ua_device *ua, u32 rate);
 void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
