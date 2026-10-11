@@ -1101,7 +1101,7 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 	void *cmd_buf = NULL, *resp_buf = NULL;
 	dma_addr_t cmd_addr, resp_addr;
 	struct ua_ring_entry entry;
-	u32 *cmd_words;
+	__le32 *cmd_words;
 	u32 fw_dwords;
 	u32 total_dwords;
 	size_t cmd_buf_size;
@@ -1219,7 +1219,7 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 	/* Poll response buffer (DMA coherent — no lock needed) */
 	ret = -ETIMEDOUT;
 	for (polls = 0; polls < UA_FW_TIMEOUT_MS / UA_FW_POLL_MS; polls++) {
-		u32 resp_word0 = le32_to_cpu(((u32 *)resp_buf)[0]);
+		u32 resp_word0 = le32_to_cpu(((__le32 *)resp_buf)[0]);
 
 		if ((resp_word0 >> 16) == UA_FW_RESP_MATCH) {
 			dev_info(&ua->pdev->dev,
@@ -1249,7 +1249,7 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 				      UA_RING_POSITION);
 		u32 resp_pos = ua_read(ua, bank_base + UA_RING_RESP_OFFSET +
 				       UA_RING_POSITION);
-		u32 *resp_words = resp_buf;
+		__le32 *resp_words = resp_buf;
 
 		dev_err(&ua->pdev->dev,
 			"firmware load timeout after %u ms\n",
@@ -1308,7 +1308,7 @@ int ua_dsp_test_dma_ref(struct ua_device *ua)
 	u32 cmd_base = bank_base + UA_RING_CMD_OFFSET;
 	void *dma_buf;
 	dma_addr_t dma_addr;
-	u32 *words;
+	__le32 *words;
 	u32 pos, cmd_gen, resp_gen;
 	unsigned int base, done;
 	struct ua_ring_entry entry;
@@ -1646,7 +1646,7 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	dma_addr_t hdr_dma, data_dma, resp_dma;
 	struct ua_ring_entry entry;
 	u32 data_dwords, num_pages;
-	u32 *resp_words;
+	__le32 *resp_words;
 	size_t data_alloc, offset, chunk;
 	unsigned int cmd_start;
 	bool resp_queued = false;
@@ -1764,7 +1764,7 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	 */
 	memset(hdr_buf, 0, UA_PCIE_PAGE_SIZE);
 	if (data_size < 262140) {
-		((u32 *)hdr_buf)[0] = cpu_to_le32((data_dwords + 1) | cmd);
+		((__le32 *)hdr_buf)[0] = cpu_to_le32((data_dwords + 1) | cmd);
 
 		/* Header DMA ref: 1 dword */
 		entry = (struct ua_ring_entry){
@@ -1774,8 +1774,8 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 			.word3 = cpu_to_le32(upper_32_bits(hdr_dma)),
 		};
 	} else {
-		((u32 *)hdr_buf)[0] = cpu_to_le32(cmd | BIT(30));
-		((u32 *)hdr_buf)[1] = cpu_to_le32(data_dwords + 2);
+		((__le32 *)hdr_buf)[0] = cpu_to_le32(cmd | BIT(30));
+		((__le32 *)hdr_buf)[1] = cpu_to_le32(data_dwords + 2);
 
 		/* Header DMA ref: 2 dwords */
 		entry = (struct ua_ring_entry){
@@ -2086,7 +2086,7 @@ int UA_GCC_OPTIMIZE("O1") ua_dsp_test_send_block(struct ua_device *ua)
 	u32 resp_base = bank_base + UA_RING_RESP_OFFSET;
 	void *cmd_buf, *resp_buf;
 	dma_addr_t cmd_addr, resp_addr;
-	u32 *cmd_words, *resp_words;
+	__le32 *cmd_words, *resp_words;
 	struct ua_ring_entry entry;
 	u32 cmd_pos, resp_pos, cmd_gen, resp_gen;
 	int i;
@@ -2248,7 +2248,7 @@ int UA_GCC_OPTIMIZE("O1") ua_dsp_test_send_block(struct ua_device *ua)
 
 	/* Also check if the resp ring page itself has data */
 	{
-		u32 *ring_page = dsp0->resp.pages[0];
+		__le32 *ring_page = dsp0->resp.pages[0];
 
 		dev_info(&ua->pdev->dev,
 			 "Resp ring page[0]: [%08x %08x %08x %08x]\n",
