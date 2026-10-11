@@ -164,6 +164,24 @@ module_param(period_irq, bool, 0644);
 MODULE_PARM_DESC(period_irq,
 		 "Period wakeups from the hardware period-timer interrupt (threaded IRQ handler) instead of the 1 ms SAMPLE_POS poll (default: off; off leaves the timer unprogrammed and its vector masked, as the macOS driver; a change applies once all streams are closed and the transport restarts)");
 
+/*
+ * Where a stream starts in the ring (titan, x4, 2026-10-11: a PipeWire
+ * duplex start xruns the playback node about 7 times, "snd_pcm_avail after
+ * recover: Broken pipe").  Playback and capture share one free-running
+ * transport, which pcm_prepare starts or finds running, so SAMPLE_POS is
+ * anywhere in the ring when a stream starts.  The ALSA core puts hw_ptr and
+ * appl_ptr at 0 at every prepare; the first pointer read after START moves
+ * hw_ptr to SAMPLE_POS, and a playback stream whose prefill is shorter than
+ * that xruns (avail >= buffer), again after each recovery until a start
+ * lands early enough in the ring (PipeWire's recovery prefills one quantum,
+ * so at quantum 1024 one retry in 8 gets through).  pcm_live_start=1
+ * starts the pointers at the live position instead (ua_pcm_ioctl()).
+ */
+static bool pcm_live_start;
+module_param(pcm_live_start, bool, 0644);
+MODULE_PARM_DESC(pcm_live_start,
+		 "Start each stream at the shared transport's live position: prepare sets the ALSA hardware pointer to SAMPLE_POS instead of 0, so the application's first frame goes where the running transport reads or writes next (default: off: hw_ptr 0, and a stream that starts on a transport already past its prefill xruns until a retry lands early in the ring). Read at every prepare");
+
 /* Forward declarations */
 static void ua_pcie_setup(struct ua_device *ua);
 static void ua_ctl_notify_info_name(struct ua_device *ua, const char *name);
@@ -6176,6 +6194,73 @@ static snd_pcm_uframes_t ua_pcm_pointer(struct snd_pcm_substream *sub)
 	return sp % sub->runtime->buffer_size;
 }
 
+/*
+ * SNDRV_PCM_IOCTL1_RESET with pcm_live_start=1.  Everything else, and every
+ * command with pcm_live_start=0, goes to snd_pcm_lib_ioctl(), which is what
+ * the core calls when there is no .ioctl.
+ *
+ * snd_pcm_do_reset() sends RESET after every successful prepare and for
+ * SNDRV_PCM_IOCTL_RESET, in process context without the stream lock, then
+ * sets hw_ptr_base = 0 and the period and silence marks from hw_ptr; post
+ * prepare (post reset) sets appl_ptr = hw_ptr.  The same in every kernel
+ * from 5.15 to 7.3.  For a stream that is not running the core's handler
+ * sets hw_ptr = 0, which on this device claims the hardware is at ring
+ * offset 0 while SAMPLE_POS is wherever the shared transport has got to.
+ * Here hw_ptr is SAMPLE_POS in the ring (below buffer_size, so hw_ptr_base
+ * 0 still holds): the application's first frame lands at the offset the
+ * transport reads (playback) or writes (capture) next, and the first
+ * update after START moves hw_ptr only by the frames since this prepare.
+ * The RME Hammerfall drivers (rme9652, hdsp, hdspm), whose two directions
+ * also share one free-running pointer, do the same.
+ *
+ * An offset between SAMPLE_POS and the reported pointer would not do: ALSA
+ * puts frame n at ring offset n % buffer_size (the copy callback's hwoff),
+ * so the hardware would play a part of the ring the application never
+ * wrote.
+ *
+ * A running stream (SNDRV_PCM_IOCTL_RESET while running) keeps the core's
+ * handling, which already keeps the live position; with no transport (or a
+ * dead link) nothing moves and the core's 0 is right.
+ */
+static int ua_pcm_ioctl(struct snd_pcm_substream *sub, unsigned int cmd,
+			void *arg)
+{
+	struct ua_device *ua = snd_pcm_substream_chip(sub);
+	struct snd_pcm_runtime *rt = sub->runtime;
+	snd_pcm_uframes_t pos = 0;
+	unsigned long flags;
+	bool live;
+	u32 sp = 0;
+
+	if (cmd != SNDRV_PCM_IOCTL1_RESET || !READ_ONCE(pcm_live_start) ||
+	    atomic_read(&ua->shutdown) ||
+	    !READ_ONCE(ua->audio.transport_running) || !rt->buffer_size)
+		return snd_pcm_lib_ioctl(sub, cmd, arg);
+
+	snd_pcm_stream_lock_irqsave(sub, flags);
+	live = !snd_pcm_running(sub);
+	if (live) {
+		sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
+		live = sp != 0xFFFFFFFF;
+	}
+	if (live) {
+		pos = sp % rt->buffer_size;
+		pos -= pos % rt->min_align;
+		rt->status->hw_ptr = pos;
+		rt->hw_ptr_wrap = 0;
+	}
+	snd_pcm_stream_unlock_irqrestore(sub, flags);
+
+	if (!live)
+		return snd_pcm_lib_ioctl(sub, cmd, arg);
+
+	dev_dbg(&ua->pdev->dev,
+		"pcm_reset: %s starts at the live position %lu (SAMPLE_POS 0x%x)\n",
+		sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
+		pos, sp);
+	return 0;
+}
+
 static const struct snd_pcm_ops ua_pcm_playback_ops = {
 	.open         = ua_pcm_open,
 	.close        = ua_pcm_close,
@@ -6184,6 +6269,7 @@ static const struct snd_pcm_ops ua_pcm_playback_ops = {
 	.prepare      = ua_pcm_prepare,
 	.trigger      = ua_pcm_trigger,
 	.pointer      = ua_pcm_pointer,
+	.ioctl        = ua_pcm_ioctl,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
 	.copy         = ua_pcm_copy,
 #else
@@ -6201,6 +6287,7 @@ static const struct snd_pcm_ops ua_pcm_capture_ops = {
 	.prepare      = ua_pcm_prepare,
 	.trigger      = ua_pcm_trigger,
 	.pointer      = ua_pcm_pointer,
+	.ioctl        = ua_pcm_ioctl,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
 	.copy         = ua_pcm_copy,
 #else
