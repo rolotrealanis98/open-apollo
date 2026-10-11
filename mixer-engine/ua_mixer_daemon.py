@@ -760,60 +760,62 @@ class MixerDaemon:
             del self._readback_suppress[path]
         return False
 
+    def _push_if_present(self, path: str, value, force: bool = False):
+        """Push a readback-derived value to a control this model's device
+        map has (it changed, or `force`); a control the map lacks is
+        skipped."""
+        cur = self.state.get_value(path + "/value")
+        if cur is not None and (force or cur != value):
+            self._push_to_clients(path, value)
+
     def _sync_hw_readback(self, rb: dict, last_rb: dict):
         """Push hardware readback changes to helper tree + subscribers.
 
         Compares current readback with previous values. When a field
         changes (physical knob turned, button pressed), updates the
-        helper tree and notifies all subscribed console clients.
+        helper tree and notifies all subscribed console clients.  An
+        empty last_rb pushes everything.
 
-        Readback pushes are suppressed for 300ms after a client SET
+        Readback pushes are suppressed for 2 s after a client SET
         to prevent echo/trailing on UI controls.
+
+        Output and input indexes come from the device map (monitor x4 18 /
+        x8p 22, HP outputs, the preamp inputs); readback preamp N is the
+        N-th preamp input.
         """
-        # Monitor level — push both the dB value and the tapered one (as
-        # for gain below), so CRMonitorLevel doesn't go stale.
-        tapered = rb.get("monitor_level_tapered", 0.0)
-        level_path = "/devices/0/outputs/18/CRMonitorLevel"
-        path = "/devices/0/outputs/18/CRMonitorLevelTapered"
-        if abs(tapered - last_rb.get("monitor_level_tapered", -1)) > 0.002:
-            if not any(self._readback_suppressed(p) for p in
-                       (level_path, path, level_path + "/value",
-                        path + "/value")):
-                self._push_to_clients(level_path,
-                                      rb.get("monitor_level_db", -96.0))
-                self._push_to_clients(path, tapered)
+        router = self.hw_router
+        mon_out = router.monitor_output_index()
+        if mon_out is not None:
+            mon_base = f"/devices/0/outputs/{mon_out}"
+            # Monitor level — push both the dB value and the tapered one
+            # (as for gain below), so CRMonitorLevel doesn't go stale.
+            tapered = rb.get("monitor_level_tapered", 0.0)
+            level_path = f"{mon_base}/CRMonitorLevel"
+            path = f"{mon_base}/CRMonitorLevelTapered"
+            if abs(tapered - last_rb.get("monitor_level_tapered", -1)) > 0.002:
+                if not any(self._readback_suppressed(p) for p in
+                           (level_path, path, level_path + "/value",
+                            path + "/value")):
+                    self._push_to_clients(level_path,
+                                          rb.get("monitor_level_db", -96.0))
+                    self._push_to_clients(path, tapered)
 
-        # Monitor mute
-        mute = rb.get("monitor_mute", False)
-        if mute != last_rb.get("monitor_mute"):
-            self._push_to_clients(
-                "/devices/0/outputs/18/Mute", mute)
+            for ctrl, key in (("Mute", "monitor_mute"), ("DimOn", "monitor_dim"),
+                              ("MixToMono", "monitor_mono")):
+                val = rb.get(key, False)
+                if val != last_rb.get(key):
+                    self._push_to_clients(f"{mon_base}/{ctrl}", val)
 
-        # Monitor dim
-        dim = rb.get("monitor_dim", False)
-        if dim != last_rb.get("monitor_dim"):
-            self._push_to_clients(
-                "/devices/0/outputs/18/DimOn", dim)
-
-        # HP1 level (tapered 0.0-1.0) — output 19 on Apollo x4
-        hp1_path = "/devices/0/outputs/19/CRMonitorLevelTapered"
-        hp1_tap = rb.get("hp1_level_tapered", 0.0)
-        if abs(hp1_tap - last_rb.get("hp1_level_tapered", -1)) > 0.002:
-            if not self._readback_suppressed(hp1_path):
-                self._push_to_clients(hp1_path, hp1_tap)
-
-        # HP2 level (tapered 0.0-1.0) — output 20 on Apollo x4
-        hp2_path = "/devices/0/outputs/20/CRMonitorLevelTapered"
-        hp2_tap = rb.get("hp2_level_tapered", 0.0)
-        if abs(hp2_tap - last_rb.get("hp2_level_tapered", -1)) > 0.002:
-            if not self._readback_suppressed(hp2_path):
-                self._push_to_clients(hp2_path, hp2_tap)
-
-        # Monitor mono
-        mono = rb.get("monitor_mono", False)
-        if mono != last_rb.get("monitor_mono"):
-            self._push_to_clients(
-                "/devices/0/outputs/18/MixToMono", mono)
+        # HP1/HP2 level (tapered 0.0-1.0) — x4 outputs 19 and 20
+        for n, key in ((0, "hp1_level_tapered"), (1, "hp2_level_tapered")):
+            hp_out = router.output_index("hp", n)
+            if hp_out is None:
+                continue
+            hp_path = f"/devices/0/outputs/{hp_out}/CRMonitorLevelTapered"
+            hp_tap = rb.get(key, 0.0)
+            if abs(hp_tap - last_rb.get(key, -1)) > 0.002:
+                if not self._readback_suppressed(hp_path):
+                    self._push_to_clients(hp_path, hp_tap)
 
         # Talkback active (TalkbackOn is at the tree root in the device maps)
         talkback = rb.get("talkback_active", False)
@@ -825,16 +827,39 @@ class MixerDaemon:
         if locked is not None and locked != last_rb.get("clock_locked"):
             self._push_to_clients("/ClockLocked", locked)
 
-        # Preamp gain readback — 4 individual channels.
-        # rb_data[3]: ch0=[7:0], ch1=[15:8], ch2=[23:16], ch3=[31:24]
-        for ch in range(4):
-            gain_dB = rb.get(f"preamp_{ch}_gain", 10)
-            last_gain = last_rb.get(f"preamp_{ch}_gain")
-            if gain_dB != last_gain:
-                gain_raw = rb.get(f"preamp_{ch}_gain_raw", 0)
-                log.info("GAIN ch%d: raw=0x%02x dB=%d", ch, gain_raw, gain_dB)
-                gain_path = f"/devices/0/inputs/{ch}/preamps/0/Gain"
-                tapered_path = f"/devices/0/inputs/{ch}/preamps/0/GainTapered"
+        # Alt-monitor selection (word 6 [29:28]), as the Mixer Engine's
+        # SetAltMonSelectionFromHardware: ignored right after a client SET
+        alt = rb.get("altmon_selection")
+        alt_path = "/devices/0/AltMonSelection"
+        if alt is not None and alt != last_rb.get("altmon_selection") and \
+                not self._readback_suppressed(alt_path) and \
+                not self._readback_suppressed(alt_path + "/value"):
+            self._push_if_present(alt_path, alt, force=True)
+
+        # Device-level state with no x4 map control: pushed only on a model
+        # whose map has it
+        for ctrl, key, conv in (("LowNoisePreamps", "low_noise_preamps", bool),
+                                ("Temperature", "temperature_raw", float),
+                                ("AnalogBoardID", "analog_board_id", int)):
+            if key in rb and rb[key] != last_rb.get(key):
+                self._push_if_present(f"/devices/0/{ctrl}", conv(rb[key]),
+                                      force=True)
+
+        preamps = sorted(router.preamp_inputs())
+        for ch, inp in enumerate(preamps):
+            prefix = f"preamp_{ch}"
+            if f"{prefix}_gain" not in rb:
+                break           # readback carries no more preamps
+            in_base = f"/devices/0/inputs/{inp}"
+            path_base = f"{in_base}/preamps/0"
+
+            # Preamp gain
+            gain_dB = rb[f"{prefix}_gain"]
+            if gain_dB != last_rb.get(f"{prefix}_gain"):
+                gain_raw = rb.get(f"{prefix}_gain_raw", 0)
+                log.info("GAIN ch%d: raw=0x%02x dB=%d", inp, gain_raw, gain_dB)
+                gain_path = f"{path_base}/Gain"
+                tapered_path = f"{path_base}/GainTapered"
                 dragging = (self._readback_suppressed(gain_path) or
                             self._readback_suppressed(tapered_path) or
                             self._readback_suppressed(gain_path + "/value") or
@@ -845,15 +870,9 @@ class MixerDaemon:
                     # The gain moved outside the daemon (front-panel knob):
                     # update the router's duplicate filter, or a client
                     # SET back to its previous value would be dropped.
-                    if self.hw_router:
-                        self.hw_router._gain_last[ch] = (gain_dB,
-                                                         time.monotonic())
+                    router._gain_last[inp] = (gain_dB, time.monotonic())
 
-        # Preamp controls (4 channels) — flags + IOType
-        for ch in range(4):
-            prefix = f"preamp_{ch}"
-            path_base = f"/devices/0/inputs/{ch}/preamps/0"
-
+            # Flags
             for ctrl, key in [("48V", "48v"), ("Pad", "pad"),
                               ("LowCut", "lowcut"), ("Phase", "phase"),
                               ("HiZ", "hiz")]:
@@ -863,12 +882,53 @@ class MixerDaemon:
                 if val != last_rb.get(f"{prefix}_{key}"):
                     self._push_to_clients(f"{path_base}/{ctrl}", val)
 
-            # IOType is at input level, not preamps/0 level
+            # IOType and Link (Stereo) are at input level, not preamps/0
             micline = rb.get(f"{prefix}_micline", False)
             if micline != last_rb.get(f"{prefix}_micline"):
                 iotype = "Line" if micline else "Mic"
-                self._push_to_clients(
-                    f"/devices/0/inputs/{ch}/IOType", iotype)
+                self._push_to_clients(f"{in_base}/IOType", iotype)
+            link = rb.get(f"{prefix}_link", False)
+            if link != last_rb.get(f"{prefix}_link"):
+                self._push_if_present(f"{in_base}/Stereo", link, force=True)
+
+        self._sync_front_panel(rb, last_rb, preamps)
+
+    def _sync_front_panel(self, rb: dict, last_rb: dict, preamps: list):
+        """SelectedOnFront of the monitor, CUE 1 and the preamp inputs.
+
+        As the Mixer Engine (applySettings1, applyInputGainSettings): when
+        word 0 changes, bit 27 set means the front panel is on the
+        headphones (bit 26; CUE 1, the cue with SynchOut 2 in every UA
+        template) or else the monitor, and no input is selected; bit 27
+        clear selects nothing on the outputs and the preamp in word 3
+        [30:28] on the inputs.  A change of word 3 [30:28] alone re-selects
+        the inputs.
+        """
+        words, last = rb.get("words"), last_rb.get("words")
+        if not words:
+            return
+        router = self.hw_router
+        force = last is None
+        select_inputs = False
+        if force or words[0] != last[0]:
+            focus = rb["hp_focus_valid"]
+            on_hp = focus and rb["hp_focus_headphone"]
+            for out, val in ((router.monitor_output_index(), focus and not on_hp),
+                             (router.output_index("cue", 0), on_hp)):
+                if out is not None:
+                    self._push_if_present(
+                        f"/devices/0/outputs/{out}/SelectedOnFront", val, force)
+            if focus:
+                for inp in preamps:
+                    self._push_if_present(
+                        f"/devices/0/inputs/{inp}/SelectedOnFront", False, force)
+            else:
+                select_inputs = True
+        if select_inputs or (not force and (words[3] ^ last[3]) & 0x70000000):
+            sel = rb["front_panel_input"]
+            for ch, inp in enumerate(preamps):
+                self._push_if_present(
+                    f"/devices/0/inputs/{inp}/SelectedOnFront", ch == sel, force)
 
     def _poll_driver_rate(self):
         """Report the driver's sample rate when it changes under the daemon.
@@ -1137,7 +1197,16 @@ class MixerDaemon:
         if not self.hw_router:
             return
 
-        rb = self.hw_router.poll_hw_readback() or {}
+        rb = self.hw_router.poll_hw_readback()
+        # A snapshot dropped on its check words is not "no readback": wait
+        # for the next one (the driver refreshes it at 100 Hz) rather than
+        # resetting the Apollo to the defaults
+        for _ in range(10):
+            if rb or not self.hw_router.readback_skipped:
+                break
+            time.sleep(0.02)
+            rb = self.hw_router.poll_hw_readback()
+        rb = rb or {}
         if rb:
             log.info("Init keeps the hardware's preamp and monitor settings "
                      "(monitor %.1f dB)", rb["monitor_level_db"])

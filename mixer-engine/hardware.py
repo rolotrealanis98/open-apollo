@@ -3108,32 +3108,53 @@ class HardwareRouter:
 
     # ── Readback / metering ──────────────────────────────────────
 
+    # True when the last poll_hw_readback() dropped a snapshot on its check
+    # words (a valid one follows shortly), False otherwise
+    readback_skipped = False
+
     def poll_hw_readback(self) -> dict | None:
         """Poll hardware readback and decode known fields.
 
         Called by the meter pump at ~50Hz. Returns a dict of decoded
         values, or None if readback is unavailable (--no-hardware or
-        readback not ready).
+        readback not ready) or the snapshot is one the Mixer Engine skips
+        (word 38 or 39 all ones).
 
-        Verified register map (docs/hw-readback-map.md):
-            data[0]: Preamp flags — 4ch × 6-bit stride
-                     Per ch: bit+0=Mic/Line, +1=PAD, +2=Link, +3=48V,
-                             +4=LowCut, +5=Phase.  HiZ jack detect: bit 24
-                     = input 1, bit 25 = input 2 (kext / Mixer Engine).
-            data[2]: Monitor section — [7:0]=MonVol, [15:8]=HP1Vol,
-                     bit16=Mute, bit17=Mono, bit31=Dim
-            data[3]: Preamp gain — 4ch × 8 bits
-            data[6]: bit8=Talkback active
-            data[7]: HP2 volume — [7:0]=vol, [31:24]=0xa0 always
+        Register map (hardware-verified on the x4 where noted; the rest
+        from the Mixer Engine's decoders, apollo-linux parity/14 section 7):
+            data[0]: preamp flags of preamps 1-4, 6 bits each:
+                     +0 Mic/Line, +1 PAD, +2 Link, +3 48V, +4 LowCut,
+                     +5 Phase (verified).  Bit 24/25: HiZ jack in input
+                     1/2.  Bit 27: the front panel is on an output, bit 26
+                     set = on the headphones (CUE 1), clear = on the monitor
+            data[2]: [7:0] monitor level, [15:8] HP1 level, bit 16 mute,
+                     bit 17 mono, bit 31 dim (verified); bit 30
+                     LowNoisePreamps
+            data[3]: GainC of preamps 1-4, 6 bits at shifts 0/6/16/22
+                     (verified); [30:28] the preamp selected on the front
+                     panel
+            data[5], data[7]: the same as words 0 and 3 for preamps 5-8
+                     (models with more than four); on the x4 data[7] [7:0]
+                     is the HP2 level instead (verified)
+            data[6]: bit 8 talkback, bit 31 clock locked when bit 30 is set
+                     (verified); [29:28] alt-monitor selection
             data[8]-[25]: level meters the DSP writes (metering.py
                      X4_READBACK_METERS); returned raw in "words".
+            data[17]: [15:8] temperature byte (reads 0 on the x4)
+            data[33]: [28:26] analog board id
         """
+        self.readback_skipped = False
         rb = self.backend.get_hw_readback()
         if rb is None:
             return None
 
         status, data = rb
         if status != 1:
+            return None
+        # The Mixer Engine drops the whole snapshot when either check word
+        # is all ones (CMxMixer::TimerCallback)
+        if len(data) < 40 or 0xFFFFFFFF in (data[38], data[39]):
+            self.readback_skipped = True
             return None
 
         result = {}
@@ -3150,6 +3171,7 @@ class HardwareRouter:
         result["monitor_mute"] = bool(d2 & (1 << 16))
         result["monitor_mono"] = bool(d2 & (1 << 17))
         result["monitor_dim"] = bool(d2 & (1 << 31))
+        result["low_noise_preamps"] = bool(d2 & (1 << 30))
 
         # Decode HP2 volume from data[7]
         d7 = data[7]
@@ -3163,49 +3185,47 @@ class HardwareRouter:
         # Clock lock: bit 31, valid when bit 30 is set (kext)
         if d6 & (1 << 30):
             result["clock_locked"] = bool(d6 & (1 << 31))
+        result["altmon_selection"] = (d6 >> 28) & 3
 
-        # Decode preamp flags from data[0] — 6-bit stride per channel
-        d0 = data[0]
-        for ch in range(4):
-            base = ch * 6
-            result[f"preamp_{ch}_micline"] = bool(d0 & (1 << (base + 0)))
-            result[f"preamp_{ch}_pad"] = bool(d0 & (1 << (base + 1)))
-            result[f"preamp_{ch}_link"] = bool(d0 & (1 << (base + 2)))
-            result[f"preamp_{ch}_48v"] = bool(d0 & (1 << (base + 3)))
-            result[f"preamp_{ch}_lowcut"] = bool(d0 & (1 << (base + 4)))
-            result[f"preamp_{ch}_phase"] = bool(d0 & (1 << (base + 5)))
+        # Preamp flags and gains, by preamp index (the input's position
+        # among the preamps; FWSynchIn in the Mixer Engine).  Preamps 1-4
+        # are in words 0 and 3, 5-8 in words 5 and 7; models with four or
+        # fewer get keys for 0-3.
+        n = max(4, min(MAX_PREAMP_CHANNELS, len(self.preamp_inputs())))
+        for ch in range(n):
+            flags = (data[0] if ch < 4 else data[5]) >> ((ch & 3) * 6)
+            result[f"preamp_{ch}_micline"] = bool(flags & (1 << 0))
+            result[f"preamp_{ch}_pad"] = bool(flags & (1 << 1))
+            result[f"preamp_{ch}_link"] = bool(flags & (1 << 2))
+            result[f"preamp_{ch}_48v"] = bool(flags & (1 << 3))
+            result[f"preamp_{ch}_lowcut"] = bool(flags & (1 << 4))
+            result[f"preamp_{ch}_phase"] = bool(flags & (1 << 5))
 
-        # Decode preamp gain from data[3].
-        # GainC encoding split across bytes (verified via macOS DTrace
-        # full 1dB sweep):
-        #   b0[5:0]  = ch0 GainC (6 bits)
-        #   b0[7:6]  = ch1 GainC low 2 bits
-        #   b1[4:0]  = ch1 GainC high 5 bits
-        #   b1[7:5]  = constant (0b111)
-        #   b2[5:0]  = ch2 GainC (6 bits)
-        #   b2[7:6]  = ch3 GainC low 2 bits
-        #   b3[3:0]  = ch3 GainC high 4 bits
-        #   b3[7:4]  = preamp selection indicator
-        # dB = GainC + 9, range 10-65dB, 1dB resolution all channels
-        d3 = data[3]
-        b0 = d3 & 0xFF
-        b1 = (d3 >> 8) & 0xFF
-        b2 = (d3 >> 16) & 0xFF
-        b3 = (d3 >> 24) & 0xFF
-        gains_c = [
-            b0 & 0x3F,                          # ch0
-            ((b1 & 0x1F) << 2) | (b0 >> 6),     # ch1
-            b2 & 0x3F,                           # ch2
-            ((b3 & 0x0F) << 2) | (b2 >> 6),     # ch3
-        ]
-        for ch in range(4):
-            db = min(65, max(10, gains_c[ch] + 9))
-            result[f"preamp_{ch}_gain_raw"] = gains_c[ch]
-            result[f"preamp_{ch}_gain"] = db
+            # GainC: 6 bits at shift 0/6/16/22 (verified via a macOS DTrace
+            # 1 dB sweep).  dB = GainC + 9; GainC 0 reads as 0 dB and
+            # anything from 0x39 up as 65 dB, as the Mixer Engine does
+            # (applyInputGainSettings)
+            shift = (ch & 1) * 6 + (ch & 2) * 8
+            gain_c = ((data[3] if ch < 4 else data[7]) >> shift) & 0x3F
+            result[f"preamp_{ch}_gain_raw"] = gain_c
+            result[f"preamp_{ch}_gain"] = (
+                0 if gain_c == 0 else 65 if gain_c >= 0x39 else gain_c + 9)
 
         # HiZ jack detect: word 0 bit 24 = input 1, bit 25 = input 2
+        d0 = data[0]
         result["preamp_0_hiz"] = bool(d0 & (1 << 24))
         result["preamp_1_hiz"] = bool(d0 & (1 << 25))
+
+        # Front panel: on an output (bit 27; bit 26 = the headphones, else
+        # the monitor) or on the preamp in word 3 [30:28]
+        result["hp_focus_valid"] = bool(d0 & (1 << 27))
+        result["hp_focus_headphone"] = bool(d0 & (1 << 26))
+        result["front_panel_input"] = (data[3] >> 28) & 7
+
+        # Temperature byte (kPropTemperature; the Mixer Engine passes the
+        # raw byte on as a float) and analog board id (kPropAnalogBoardID)
+        result["temperature_raw"] = (data[17] >> 8) & 0xFF
+        result["analog_board_id"] = (data[33] >> 26) & 7
 
         # The raw words, for the readback level meters (words 8-25, see
         # metering.ReadbackMeter); the Mixer Engine reads its meters from

@@ -123,11 +123,16 @@ class TestPreampGain:
             r = poll(router, backend, make_readback(gains_c=g))
             assert [r[f"preamp_{c}_gain_raw"] for c in range(4)] == g
 
-    def test_clamped_to_10_65(self, router, backend):
-        r = poll(router, backend, make_readback(gains_c=[0, 63, 0, 63]))
-        assert r["preamp_0_gain"] == 10      # GainC 0 -> 9 dB, floored
-        assert r["preamp_1_gain"] == 65      # GainC 63 -> 72 dB, capped
-        assert r["preamp_3_gain"] == 65
+    def test_mixer_engine_range_rule(self, router, backend):
+        # applyInputGainSettings: GainC 0 reads as 0 dB, 0x39 and up as 65
+        r = poll(router, backend, make_readback(gains_c=[0, 63, 0x38, 0x39]))
+        assert [r[f"preamp_{c}_gain"] for c in range(4)] == [0, 65, 65, 65]
+
+    def test_ch1_field_is_six_bits(self, router, backend):
+        # bit 12 lies above ch1's field [11:6]
+        w = make_readback(gains_c=[0, 21, 0, 0])
+        w[3] |= 1 << 12
+        assert poll(router, backend, w)["preamp_1_gain_raw"] == 21
 
     def test_selection_indicator_bits_do_not_change_gain(self, router, backend):
         w = make_readback(gains_c=[21, 21, 21, 21])
@@ -143,6 +148,91 @@ class TestPreampGain:
             backend.clear()
             r = poll(router, backend, make_readback(gains_c=[gain_c, 0, 0, 0]))
             assert r["preamp_0_gain"] == db
+
+
+class TestCheckWords:
+    @pytest.mark.parametrize("idx", [38, 39])
+    def test_snapshot_with_allones_check_word_is_dropped(self, router, backend, idx):
+        w = make_readback(mon_raw=100)
+        w[idx] = 0xFFFFFFFF
+        assert poll(router, backend, w) is None
+        assert router.readback_skipped is True
+
+    def test_valid_snapshot_clears_the_flag(self, router, backend):
+        w = make_readback()
+        w[38] = 0xFFFFFFFF
+        poll(router, backend, w)
+        assert poll(router, backend, make_readback()) is not None
+        assert router.readback_skipped is False
+
+    def test_not_ready_is_not_a_skip(self, router, backend):
+        assert poll(router, backend, make_readback(), status=0) is None
+        assert router.readback_skipped is False
+
+
+class TestFrontPanelAndStatus:
+    def test_defaults(self, router, backend):
+        r = poll(router, backend, make_readback())
+        assert (r["hp_focus_valid"], r["hp_focus_headphone"],
+                r["front_panel_input"], r["altmon_selection"],
+                r["low_noise_preamps"], r["temperature_raw"],
+                r["analog_board_id"]) == (False, False, 0, 0, False, 0, 0)
+
+    @pytest.mark.parametrize("focus, valid, hp", [
+        ("monitor", True, False), ("headphone", True, True)])
+    def test_focus(self, router, backend, focus, valid, hp):
+        r = poll(router, backend, make_readback(focus=focus))
+        assert (r["hp_focus_valid"], r["hp_focus_headphone"]) == (valid, hp)
+
+    def test_focus_bits_do_not_touch_hiz_or_flags(self, router, backend):
+        r = poll(router, backend, make_readback(focus="headphone"))
+        assert not r["preamp_0_hiz"] and not r["preamp_1_hiz"]
+        assert not any(r[f"preamp_3_{k}"] for k in
+                       ("micline", "pad", "link", "48v", "lowcut", "phase"))
+
+    @pytest.mark.parametrize("sel", range(8))
+    def test_selected_input_does_not_change_gains(self, router, backend, sel):
+        r = poll(router, backend, make_readback(gains_c=[56, 56, 56, 56],
+                                                sel_input=sel))
+        assert r["front_panel_input"] == sel
+        assert [r[f"preamp_{c}_gain"] for c in range(4)] == [65] * 4
+
+    def test_altmon_temperature_board_low_noise(self, router, backend):
+        r = poll(router, backend, make_readback(
+            altmon=2, temperature=0x2D, board_id=5, low_noise=True,
+            talkback=True, clock_lock=True))
+        assert (r["altmon_selection"], r["temperature_raw"],
+                r["analog_board_id"], r["low_noise_preamps"]) == (2, 0x2D, 5, True)
+        assert r["talkback_active"] and r["clock_locked"]
+
+    def test_low_noise_does_not_touch_dim(self, router, backend):
+        r = poll(router, backend, make_readback(low_noise=True))
+        assert r["monitor_dim"] is False
+
+
+class TestEightPreamps:
+    @pytest.fixture
+    def x8p(self):
+        from conftest import ENGINE_DIR, FakeBackend
+        from hardware import HardwareRouter
+        from state_tree import StateTree
+        t = StateTree()
+        t.load_device_map(ENGINE_DIR / "device_maps" / "device_map_apollo_x8p.json")
+        be = FakeBackend()
+        return HardwareRouter(be, t), be
+
+    def test_x4_decodes_four(self, router, backend):
+        assert "preamp_4_gain" not in poll(router, backend, make_readback())
+
+    def test_preamps_5_to_8_from_words_5_and_7(self, x8p):
+        router, backend = x8p
+        w = make_readback(flags={4: {"48v"}, 7: {"pad", "phase"}})
+        w[7] = 1 | 21 << 6 | 41 << 16 | 56 << 22
+        r = poll(router, backend, w)
+        assert [r[f"preamp_{c}_gain"] for c in range(4, 8)] == [10, 30, 50, 65]
+        assert r["preamp_4_48v"] and not r["preamp_4_pad"]
+        assert r["preamp_7_pad"] and r["preamp_7_phase"]
+        assert not r["preamp_0_48v"]          # word 0 untouched
 
 
 class TestRawWords:

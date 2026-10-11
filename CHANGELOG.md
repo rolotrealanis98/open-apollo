@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Mixer daemon: the front panel's selection reaches clients as `SelectedOnFront` (the monitor or CUE 1 when the front panel is on an output, else the selected preamp input; readback word 0 bits 26/27 and word 3 [30:28], applied as the Mixer Engine does), and `AltMonSelection` (word 6 [29:28]), Link (`Stereo`), `AnalogBoardID` (word 33 [28:26]), `LowNoisePreamps` (word 2 bit 30) and `Temperature` (word 17 [15:8]) follow the hardware on maps that have those controls. Readback preamps 5-8 (words 5 and 7) are decoded on models with more than four preamps.
 - Event channel: `read()`/`poll()`/SIGIO on `/dev/ua_apolloN` return `struct ua_event {code, arg, time_ns}` records (per-open queue of 64, oldest dropped and reported). Codes follow the macOS driver (0x64-0x68, 0x6e: rate, IO descriptor, clock source, notification status) plus Linux ones (device offline, connected, layout changed, events lost); see `ua_ioctl.h` and `tools/ua-events.py`.
 - The macOS driver's public device type (UAD2DeviceType, x4 = 0x1A) is computed at probe, logged, returned in `UA_IOCTL_GET_DEVICE_INFO` (`public_type`) and shown in `/proc/asound/cardN/io_map`; the output-mute and mixer-kind decisions use it.
 - `/proc/asound/cardN/mixer_state`: front-panel fields of the hardware readback (headphone focus, selected input, alt-monitor selection, low-noise preamps, temperature, analog board id).
@@ -29,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/proc/asound/cardN/io_map` and `UA_IOCTL_GET_IO_MAP`: channel names, slots and the firmware IO descriptors.
 
 ### Changed
+- Mixer daemon: readback pushes use the device map's monitor, headphone and preamp inputs instead of the x4's outputs 18-20 and inputs 0-3. A preamp GainC of 0 reads as 0 dB (was 10 dB) and preamp 2's gain field is 6 bits, as in the Mixer Engine.
 - Mixer daemon: the router reads each model's monitor, headphone and CUE outputs and its preamp inputs (up to 8) from the device map, and derives input buses for analog 1-8, Dante/MADI/analog 9-16 and AES/EBU; it was hard-wired to the x4 (on the x8p the monitor is output 22).
 - Mixer params the macOS driver rejects for the device's mixer kind return `-EINVAL` (on the x4: other params 0x2a-0x2d, 0x33-0x37, 0x42, 0x49, 0x83-0x86 and input param 0x15), as do ids above 0x8a. Input params 0x13 (route) and 0x16, and phase on inputs past the preamps, go to the DSP as ring commands as the macOS driver sends them, instead of overwriting mixer settings 26/29/34/37. A bus enable is sent only when it changes the bus's state (the first request per bus after probe always goes out).
 - DSP block responses are decoded into the macOS driver's result codes and logged by name; block and firmware sends wait up to 5 s and 150 s, as the macOS driver does, and end as soon as the DSP answers. `UA_IOCTL_LOAD_FW_DSP` is retired (`-ENOTTY`): the macOS driver loads DSP 0 only and the other DSPs boot themselves.
@@ -43,6 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documentation moved to the [GitHub wiki](https://github.com/rolotrealanis98/open-apollo/wiki). The `docs/` directory and the open-apollo-docs site are retired; old `open-apollo-docs.pages.dev` links redirect to the wiki.
 
 ### Fixed
+- Mixer daemon: a readback snapshot whose check word (38 or 39) is all ones is dropped, as the Mixer Engine drops it, instead of being decoded; at start the daemon waits for the next snapshot instead of falling back to the defaults.
 - Mixer bus params write both the left and the right coefficient entry (the side is in the DSP command, as the macOS driver sends it); the daemon writes both for fader, pan, mute and solo. Pan and stereo coefficients used to change only the left half.
 - CUE 1/2 mono, and other params 0x0a, 0x0f, 0x23 and 0x25, use the macOS driver's bit order; CUE mono used to set the bit the macOS driver uses for mute. Input params 0x07, 0x08, 0x10, 0x11 (HiZ impedance), 0x12, 0x14 and 0x17 write the setting, lane and width the macOS driver uses, and stereo Link writes both pair bits from the leader channel only. The identify param keeps to its 3-bit field.
 - The connect-finalize date counts days from 2007-01-01 UTC, as the macOS and Windows drivers do, not from 1970.
