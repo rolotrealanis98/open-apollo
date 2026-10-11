@@ -18,7 +18,7 @@ from conftest import ENGINE_DIR
 
 TOOLS = ENGINE_DIR.parent / "tools"
 if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+    sys.path.append(str(TOOLS))
 
 from uausb import device as ud  # noqa: E402
 from uausb import dspcmd as dc  # noqa: E402

@@ -59,7 +59,7 @@ log = logging.getLogger(__name__)
 
 _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 if _TOOLS.is_dir() and str(_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_TOOLS))
+    sys.path.append(str(_TOOLS))   # last: shadows nothing
 
 from uausb import device as udev  # noqa: E402
 from uausb import dspcmd  # noqa: E402
