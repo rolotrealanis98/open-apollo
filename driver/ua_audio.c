@@ -2332,7 +2332,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 
 	/* Device removed — stop servicing */
 	if (atomic_read(&ua->shutdown)) {
-		audio->dsp_service_running = false;
+		WRITE_ONCE(audio->dsp_service_running, false);
 		return;
 	}
 
@@ -2340,7 +2340,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 	 * A pass the interrupt queued as the loop was being stopped: do
 	 * nothing, and do not start the 10 ms chain again.
 	 */
-	if (irq_pass && !audio->dsp_service_running)
+	if (irq_pass && !READ_ONCE(audio->dsp_service_running))
 		return;
 
 	if (irq_pass)
@@ -2368,7 +2368,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 		mutex_unlock(&ua->lock);
 		dev_warn(&ua->pdev->dev,
 			 "dsp_service: device gone (0xFFFFFFFF), stopping\n");
-		audio->dsp_service_running = false;
+		WRITE_ONCE(audio->dsp_service_running, false);
 		return;
 	}
 
@@ -2452,7 +2452,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 		audio->dsp_service_count++;
 
 	/* Re-schedule if still running */
-	if (audio->dsp_service_running)
+	if (READ_ONCE(audio->dsp_service_running))
 		schedule_delayed_work(&audio->dsp_service_work,
 				      msecs_to_jiffies(UA_DSP_SERVICE_INTERVAL_MS));
 }
@@ -2506,33 +2506,54 @@ void ua_audio_notif_irq(struct ua_device *ua, u32 status_hi)
 	mod_delayed_work(system_wq, &audio->dsp_service_work, 0);
 }
 
+/*
+ * Start the 10 ms service loop.  Callers hold ua->lock (connect, prepare,
+ * reconnect, resume).  Never on a device being removed or failed: the
+ * handler would stop itself at once, but a pass queued after remove()'s
+ * last join could still be pending when the struct goes.
+ */
 void ua_dsp_service_start(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 
-	if (audio->dsp_service_running)
+	if (READ_ONCE(audio->dsp_service_running) ||
+	    atomic_read(&ua->shutdown))
 		return;
 
 	dev_dbg(&ua->pdev->dev, "starting DSP service loop (%u ms)\n",
 		UA_DSP_SERVICE_INTERVAL_MS);
 
-	audio->dsp_service_running = true;
+	WRITE_ONCE(audio->dsp_service_running, true);
 	audio->dsp_service_count = 0;
 	schedule_delayed_work(&audio->dsp_service_work,
 			      msecs_to_jiffies(UA_DSP_SERVICE_INTERVAL_MS));
 }
 
+/*
+ * Stop the service loop and wait until no pass runs or is queued.
+ *
+ * Always joins the work, whatever dsp_service_running says: the flag is
+ * also cleared by the handler itself (device gone) and by the
+ * non-waiting ua_audio_disconnect_hw() under ua->lock, both of which can
+ * leave a pass running or blocked on ua->lock when this is called; the
+ * old early return on !running let remove() and suspend go on with that
+ * pass still alive.  cancel_delayed_work_sync() on an idle work returns
+ * at once.
+ *
+ * Caller must NOT hold ua->lock (the handler takes it).  The callers are
+ * remove, the PCI error handler, the .shutdown/suspend quiesce,
+ * ua_audio_suspend() and ua_audio_fini(), none of which holds it.
+ */
 void ua_dsp_service_stop(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 
-	if (!audio->dsp_service_running)
-		return;
+	if (READ_ONCE(audio->dsp_service_running))
+		dev_dbg(&ua->pdev->dev,
+			"stopping DSP service loop (%u cycles)\n",
+			audio->dsp_service_count);
 
-	dev_dbg(&ua->pdev->dev, "stopping DSP service loop (%u cycles)\n",
-		audio->dsp_service_count);
-
-	audio->dsp_service_running = false;
+	WRITE_ONCE(audio->dsp_service_running, false);
 	cancel_delayed_work_sync(&audio->dsp_service_work);
 }
 
@@ -3335,8 +3356,8 @@ static void ua_audio_disconnect_hw(struct ua_device *ua)
 	struct ua_audio *audio = &ua->audio;
 	u32 seq_wr, seq_rd;
 
-	if (audio->dsp_service_running) {
-		audio->dsp_service_running = false;
+	if (READ_ONCE(audio->dsp_service_running)) {
+		WRITE_ONCE(audio->dsp_service_running, false);
 		cancel_delayed_work(&audio->dsp_service_work);
 	}
 
