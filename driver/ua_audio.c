@@ -133,6 +133,10 @@ static bool frame_cfg_win;
 module_param(frame_cfg_win, bool, 0644);
 MODULE_PARM_DESC(frame_cfg_win,
 		 "FRAME_CFG per rate band: Windows values 0x0B/0x16/0x2C (on) or the kext's 8/0x10/0x20 (default: off)");
+static bool report_delay = true;
+module_param(report_delay, bool, 0644);
+MODULE_PARM_DESC(report_delay,
+		 "Report the driver's known delay to ALSA (snd_pcm_runtime.delay, set at pcm_prepare): the FRAME_CFG safety offset on playback, the converter latency where known (Apollo x4 input) on capture. Changes only the reported latency (status delay, timestamps), never the audio path (default: on)");
 static bool clock_src_from_device;
 module_param(clock_src_from_device, bool, 0644);
 MODULE_PARM_DESC(clock_src_from_device,
@@ -1840,6 +1844,64 @@ static unsigned int ua_rate_hz(unsigned int idx)
 	return idx < ARRAY_SIZE(hz) ? hz[idx] : 0;
 }
 
+/*
+ * FRAME_CFG for a rate index: 8 frames at 44.1/48 kHz, 16 at 88.2/96, 32 at
+ * 176.4/192 (the kext's _setSafetyOffset values), or the Windows 0x0B/0x16/
+ * 0x2C with frame_cfg_win.  The same number is the safety offset the kext
+ * hands CoreAudio (parity/12 L01).
+ */
+static u32 ua_frame_cfg_for_rate(unsigned int rate_index)
+{
+	static const u32 kext_cfg[3] = { 0x08, 0x10, 0x20 };
+	static const u32 win_cfg[3] = { 0x0B, 0x16, 0x2C };
+	unsigned int band = ua_rate_idx_band(rate_index);
+
+	return frame_cfg_win ? win_cfg[band] : kext_cfg[band];
+}
+
+/*
+ * Converter latency in milli-frames per rate index (parity/12 L05, the
+ * Mixer Engine's MixerTypeFreud::GetInputDelay for the analog input path).
+ * Apollo x4 only; every other model reports 0 until its tables are read.
+ * Index 0 is unused.  There is no output entry: the DAC figure depends on a
+ * flag and an IO type the x4 values for which are not pinned down yet, so
+ * playback reports the safety offset alone.
+ */
+static const u16 ua_x4_adc_mframes[UA_RATE_192000 + 1] = {
+	[UA_RATE_44100]  = 4807,
+	[UA_RATE_48000]  = 4796,
+	[UA_RATE_88200]  = 4681,
+	[UA_RATE_96000]  = 4658,
+	[UA_RATE_176400] = 4428,
+	[UA_RATE_192000] = 4383,
+};
+
+/*
+ * The delay the driver knows about, in frames at @rate_index, for
+ * direction @dir: playback = safety offset (+ DAC latency, unknown),
+ * capture = ADC latency rounded to a whole frame.  @safety/@conv_mf get the
+ * parts (milli-frames for the converter), for /proc/asound/cardN/clock.
+ */
+static unsigned int ua_known_delay(const struct ua_device *ua,
+				   unsigned int rate_index, unsigned int dir,
+				   u32 *safety, u32 *conv_mf)
+{
+	u32 sfty = 0, conv = 0;
+
+	if (rate_index >= UA_RATE_44100 && rate_index <= UA_RATE_192000 &&
+	    ua_uses_audio_extension(ua->device_type)) {
+		if (dir == UA_DIR_PLAY)
+			sfty = ua_frame_cfg_for_rate(rate_index);
+		else if (ua->device_type == UA_DEV_APOLLO_X4)
+			conv = ua_x4_adc_mframes[rate_index];
+	}
+	if (safety)
+		*safety = sfty;
+	if (conv_mf)
+		*conv_mf = conv;
+	return sfty + DIV_ROUND_CLOSEST(conv, 1000);
+}
+
 /* The rate index (1..6) the firmware reports in a 0xC07C word, else 0 */
 static unsigned int ua_fw_rate_index(u32 rate_info)
 {
@@ -3353,29 +3415,8 @@ static int ua_audio_prepare_transport(struct ua_device *ua,
 	 * Previously hardcoded to 0x10 (wrong for 48kHz!).
 	 */
 	{
-		u32 pos_offset;
-		static const u32 win_cfg[3] = { 0x0B, 0x16, 0x2C };
+		u32 pos_offset = ua_frame_cfg_for_rate(audio->rate_index);
 
-		switch (audio->rate_index) {
-		case UA_RATE_44100:
-		case UA_RATE_48000:
-			pos_offset = 0x08;
-			break;
-		case UA_RATE_88200:
-		case UA_RATE_96000:
-			pos_offset = 0x10;
-			break;
-		case UA_RATE_176400:
-		case UA_RATE_192000:
-			pos_offset = 0x20;
-			break;
-		default:
-			pos_offset = 0x08;
-			break;
-		}
-		/* Windows caches 0x0B/0x16/0x2C per band (parity/18 C01) */
-		if (frame_cfg_win)
-			pos_offset = win_cfg[ua_rate_idx_band(audio->rate_index)];
 		audio->frame_cfg_last = pos_offset;
 		ua_write(ua, UA_REG_AX_FRAME_CFG, pos_offset);
 		dev_dbg(&ua->pdev->dev,
@@ -5179,6 +5220,18 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 	}
 
 	ua_io_map_check_stream(ua, sub);
+
+	/*
+	 * Delay the driver knows about, at the rate this stream will run at.
+	 * snd_pcm_runtime.delay is added to the ring fill level in
+	 * snd_pcm_delay() / SNDRV_PCM_IOCTL_STATUS and to the audio
+	 * timestamps; it moves no data and no pointer.  Prepare runs after
+	 * every rate change, so the value follows the rate band.
+	 */
+	sub->runtime->delay = report_delay ?
+		ua_known_delay(ua, audio->rate_index,
+			       sub->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+			       UA_DIR_PLAY : UA_DIR_REC, NULL, NULL) : 0;
 
 	/* Reset position for this direction */
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -8408,6 +8461,19 @@ static void ua_clock_proc_read(struct snd_info_entry *entry,
 				    bands[i], audio->frame_ctr_first[i],
 				    audio->frame_ctr_final[i],
 				    audio->frame_ctr_ms[i]);
+
+	snd_iprintf(buf, "\nreported delay (report_delay=%d, snd_pcm_runtime.delay set at pcm_prepare; parity/12 L01/L05):\n",
+		    report_delay);
+	for (i = UA_RATE_44100; i <= UA_RATE_192000; i++) {
+		u32 sfty, conv_mf, none;
+
+		ua_known_delay(ua, i, UA_DIR_PLAY, &sfty, &none);
+		ua_known_delay(ua, i, UA_DIR_REC, &none, &conv_mf);
+		snd_iprintf(buf, "  %6u Hz  playback %u frames (safety offset %u + DAC unknown)  capture %u frames (ADC %u.%03u)\n",
+			    ua_rate_hz(i), sfty, sfty,
+			    DIV_ROUND_CLOSEST(conv_mf, 1000),
+			    conv_mf / 1000, conv_mf % 1000);
+	}
 
 	snd_iprintf(buf, "\nclock acks (clock_ack_bit5=%d): bit5 %u  bit22 %u  bit4 %u  last status 0x%08x\n",
 		    clock_ack_bit5, audio->clock_ack_count[0],
