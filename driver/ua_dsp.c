@@ -3064,8 +3064,9 @@ int ua_dsp_load_plugin_payloads(struct ua_device *ua)
 		if (ret == -ENOENT)
 			dev_warn_once(&ua->pdev->dev,
 				      "plugin chain firmware '%s' not found; "
-				      "DMA_REF entries will be skipped (preamp "
-				      "PAD/48V/MicLine relays will not work)\n",
+				      "plugin chain not activated (optional: "
+				      "the preamp and monitor controls use the "
+				      "mixer settings)\n",
 				      UA_PLUGIN_CHAIN_FW_NAME);
 		else
 			dev_err(&ua->pdev->dev,
@@ -3265,8 +3266,9 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 	 * Refuse to send the plugin chain without payloads.  Sending it
 	 * with every DMA_REF skipped leaves the DSP in a partially
 	 * configured state: DSP programs that depend on DMA-fetched
-	 * code or tables (including the ARM flag-forwarder driving
-	 * PAD/48V/MicLine relays) never initialize.  Returning an error
+	 * code or tables never initialize.  (The PAD/48V/Mic-Line relays
+	 * do not depend on it: they follow the one-shot mixer settings,
+	 * see mixer_mailbox.)  Returning an error
 	 * here keeps ua->plugins_activated = false in the caller so a
 	 * subsequent reconnect retries once the firmware blob is in
 	 * /lib/firmware/.
@@ -3274,7 +3276,7 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 	if (!ua->plugin_bufs) {
 		dev_warn_once(&ua->pdev->dev,
 			      "plugin chain: payloads not loaded, activation skipped "
-			      "(install %s to enable preamp relays)\n",
+			      "(%s is optional)\n",
 			      UA_PLUGIN_CHAIN_FW_NAME);
 		return -ENODATA;
 	}
