@@ -3847,6 +3847,104 @@ static int ua_io_map_restart_transport(struct ua_device *ua)
 	return 0;
 }
 
+/*
+ * A 192 kHz restart needs a short 48 kHz session first (x4, 2026-10-10 on
+ * titan).
+ *
+ * Started while the hardware clock is already at 176.4 or 192 kHz, a
+ * 192 kHz stream records nothing: the transport runs at the right rate and
+ * playback timing is fine, but the record DMA never writes the ring.
+ * Started from 44.1, 48 or 96 kHz it works (8 of 8), and 176.4 kHz works
+ * from any rate.  A 0.3 s or longer 48 kHz stream before the 192 kHz
+ * start fixed it 4 of 4 times, a 50 ms one never did, and moving only the
+ * clock to 48 kHz without running the transport left capture dead.  So on
+ * a 192 kHz start with the clock at 192 kHz, run the transport at 48 kHz
+ * the way a 48 kHz stream would (rate-change reconnect, start, clock
+ * write, restart on the republished 48 kHz layout) for UA_LOMID_HOLD_MS,
+ * then let the regular rate-change path take it from 48 kHz to 192 kHz.
+ * That made 192 kHz restarts work 10 of 10 times.
+ *
+ * Not from 176.4 kHz: this in-driver session did not help there (0 of
+ * 12), although a real 0.3 s 48 kHz stream in between did (2 of 2).  The
+ * difference is not understood yet; 176.4 -> 192 kHz stays broken.
+ *
+ * The hardware rate comes from the notification block (rate index << 8),
+ * not from sample_rate, which says 48 kHz after a reload whatever the
+ * clock runs at.  Caller holds ua->lock (the service loop cannot clear the
+ * notification bits meanwhile); the transport is stopped.
+ */
+#define UA_LOMID_HOLD_MS	300
+
+static void ua_audio_192k_restart(struct ua_device *ua, unsigned int rate)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned int hw_idx, waited;
+	u32 status = 0;
+
+	if (rate != 192000 || !audio->connected || !ua->aceface_done)
+		return;
+
+	hw_idx = (ua_read(ua, UA_REG_NOTIF_RATE_INFO) >> 8) & 0xf;
+	if (hw_idx != UA_RATE_192000)
+		return;
+
+	dev_info(&ua->pdev->dev,
+		 "192 kHz start with the clock already at 192 kHz: running 48 kHz first\n");
+
+	/* The rate-change path of ua_pcm_prepare_locked(), to 48 kHz */
+	audio->period_timer_running = false;
+	hrtimer_cancel(&audio->period_timer);
+	ua_audio_disconnect_hw(ua);
+	audio->sample_rate = 48000;
+	audio->rate_index = UA_RATE_48000;
+	if (ua_audio_connect(ua))
+		return;
+	ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION, true);
+
+	if (ua_audio_prepare_transport(ua, 0) || ua_audio_start_transport(ua))
+		return;
+	ua_audio_post_start_clock(ua);
+
+	/* io_map=1: restart on the 48 kHz layout once it is republished */
+	if (ua_io_map_settle(ua) && ua_io_map_restart_transport(ua))
+		return;
+
+	/*
+	 * Keep it running for UA_LOMID_HOLD_MS, doing what the DSP service
+	 * loop does (it is stopped and blocked on ua->lock): clear the
+	 * notification block (the firmware posts nothing new while earlier
+	 * bits stay set), drain the mixer readback, flush the mixer batch.
+	 */
+	for (waited = 0; waited < UA_LOMID_HOLD_MS; waited += 10) {
+		u32 notif = ua_read(ua, UA_REG_NOTIF_STATUS);
+
+		if (notif == 0xFFFFFFFF)
+			return;
+		if (notif) {
+			ua_write(ua, UA_REG_NOTIF_STATUS, 0);
+			status |= notif;
+		}
+		if (ua_read(ua, UA_REG_MIXER_RB_STATUS) == 1) {
+			unsigned int i;
+
+			for (i = 0; i < UA_MIXER_RB_WORDS; i++)
+				ua->mixer_rb_data[i] =
+					ua_read(ua, UA_REG_MIXER_RB_DATA + i * 4);
+			ua->mixer_rb_status = 1;
+			ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
+		}
+		/* The connect-time mixer batch, after the loop's 5-cycle delay */
+		if (waited >= 50)
+			ua_mixer_flush_settings(ua);
+		msleep(10);
+	}
+	ua_audio_stop_transport(ua);
+
+	dev_info(&ua->pdev->dev,
+		 "48 kHz session done (notifications 0x%08x), going on to 192 kHz\n",
+		 status);
+}
+
 /* Body of ua_pcm_prepare(); caller holds ua->lock */
 static int __attribute__((optimize("O1")))
 ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
@@ -3905,6 +4003,9 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 		 sub->runtime->rate, sub->runtime->channels,
 		 sub->runtime->period_size, sub->runtime->buffer_size,
 		 audio->connected, audio->transport_running, ua->aceface_done);
+
+	if (!audio->transport_running)
+		ua_audio_192k_restart(ua, sub->runtime->rate);
 
 	if (sub->runtime->rate != audio->sample_rate) {
 		/*
