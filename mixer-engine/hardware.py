@@ -49,6 +49,7 @@ import math
 import os
 import re
 import struct
+import subprocess
 import time
 from typing import Any
 
@@ -365,6 +366,35 @@ CLOCK_SOURCE_MAP = {
     "WordClock": 3,
 }
 VALID_SAMPLE_RATES = {44100, 48000, 88200, 96000, 176400, 192000}
+
+
+def pipewire_force_rate(rate: int) -> bool:
+    """Ask the PipeWire that holds the Apollo's streams to run at `rate`.
+
+    Sets clock.force-rate, or clears it (0) when `rate` is PipeWire's own
+    default rate.  It is global: PipeWire's other devices follow too.
+    Returns False when PipeWire doesn't hold the Apollo's streams.
+    """
+    from metering import apollo_stream_owner, find_apollo_card, pipewire_env
+
+    card = find_apollo_card()
+    owner = apollo_stream_owner(card) if card is not None else None
+    if not owner or owner[1] != "pipewire":
+        return False
+    env = pipewire_env(owner[0])
+    if env is None:
+        return False
+    cmd = ["pw-metadata", "-n", "settings", "0"]
+    try:
+        out = subprocess.run(cmd + ["clock.rate"], capture_output=True,
+                             text=True, timeout=3, env=env).stdout
+        m = re.search(r"key:'clock\.rate' value:'(\d+)'", out)
+        force = 0 if m and int(m.group(1)) == rate else rate
+        r = subprocess.run(cmd + ["clock.force-rate", str(force)],
+                           capture_output=True, timeout=3, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
 
 # ── Mirror Source value encoding (CUE OutputDestination) ─────────
 # CUE Mirror Source: param 0x2e (MirrorA) / 0x2f (MirrorB), ch_idx=9.
@@ -2452,7 +2482,14 @@ class HardwareRouter:
                             rate, sorted(VALID_SAMPLE_RATES))
                 return
 
-            # Check transport state (warn but proceed, matches macOS)
+            # While streams are open, the app that owns them re-prepares at
+            # its own rate and undoes a clock change made under it.  When
+            # that's PipeWire, ask it to run its graph at this rate instead,
+            # as Console changes the system rate on macOS.
+            if pipewire_force_rate(rate):
+                log.info("HW DRV: SampleRate → %d Hz (PipeWire "
+                         "clock.force-rate)", rate)
+                return
             transport = self.backend.get_driver_param(DRIVER_PARAM_TRANSPORT_RUNNING)
             if transport and transport > 0:
                 log.warning("HW DRV: changing SampleRate while transport "

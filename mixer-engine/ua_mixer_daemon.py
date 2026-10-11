@@ -38,7 +38,8 @@ from protocol import (MessageFramer, Command, parse_command, encode_response_byt
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
 from helper_tree import HelperTree
-from hardware import (HardwareBackend, HardwareRouter, fader_db_to_tapered,
+from hardware import (DRIVER_PARAM_SAMPLE_RATE, HardwareBackend,
+                      HardwareRouter, fader_db_to_tapered,
                       preamp_db_to_tapered)
 from metering import NullMeter, SILENCE_DB, make_meter, meter_channel
 from bonjour import BonjourAnnouncer
@@ -327,6 +328,7 @@ class MixerDaemon:
             if dsp_tick >= 50:
                 dsp_tick = 0
                 self._poll_dsp_load()
+                self._poll_driver_rate()
 
             if not meter_cache:
                 continue
@@ -581,6 +583,23 @@ class MixerDaemon:
                 iotype = "Line" if micline else "Mic"
                 self._push_to_clients(
                     f"/devices/0/inputs/{ch}/IOType", iotype)
+
+    def _poll_driver_rate(self):
+        """Report the driver's sample rate when it changes under the daemon.
+
+        An app re-preparing its streams, an ALSA control or a SET that
+        didn't take changes the rate without a client SET; without this
+        /SampleRate keeps showing the last value a client set.
+        """
+        if not self.hw_router or not self.hw_router.backend.connected:
+            return
+        if self._readback_suppressed("/SampleRate/value"):
+            return
+        rate = self.hw_router.backend.get_driver_param(
+            DRIVER_PARAM_SAMPLE_RATE)
+        if rate and self.state.get_value("/SampleRate/value") != rate:
+            log.info("Driver sample rate is now %d Hz", rate)
+            self._push_to_clients("/SampleRate", rate)
 
     def _poll_dsp_load(self):
         """Poll DSP load and push to state tree at ~1 Hz.
