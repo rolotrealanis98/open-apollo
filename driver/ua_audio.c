@@ -177,10 +177,10 @@ MODULE_PARM_DESC(period_irq,
  * so at quantum 1024 one retry in 8 gets through).  pcm_live_start=1
  * starts the pointers at the live position instead (ua_pcm_ioctl()).
  */
-static bool pcm_live_start;
+static bool pcm_live_start = true;
 module_param(pcm_live_start, bool, 0644);
 MODULE_PARM_DESC(pcm_live_start,
-		 "Start each stream at the shared transport's live position: prepare sets the ALSA hardware pointer to SAMPLE_POS instead of 0, so the application's first frame goes where the running transport reads or writes next (default: off: hw_ptr 0, and a stream that starts on a transport already past its prefill xruns until a retry lands early in the ring). Read at every prepare");
+		 "Start each stream at the shared transport's live position: prepare sets the ALSA hardware pointer to SAMPLE_POS instead of 0, so the application's first frame goes where the running transport reads or writes next (default: on; 0 = hw_ptr 0 as before, and a stream that starts on a transport already past its prefill xruns until a retry lands early in the ring). Read at every prepare");
 
 /* Forward declarations */
 static void ua_pcie_setup(struct ua_device *ua);
