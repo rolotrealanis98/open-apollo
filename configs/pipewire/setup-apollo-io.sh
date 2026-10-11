@@ -18,6 +18,18 @@
 #   --virtual        also create Virtual In/Out loopbacks (off by default:
 #                    Virtual channels need the DSP strip engine, not there yet)
 #   --no-virtual     do not create them (the default)
+#   --output-delay NAME=FRAMES
+#                    delay the output sink NAME (a node.name such as
+#                    apollo_line_out_12 or apollo_monitor) by FRAMES frames
+#                    (0-255) with a PipeWire filter-chain "delay" in front of
+#                    the loopback, e.g. to line up outputs that feed gear
+#                    with different latency.  Repeatable.  Default: none, and
+#                    the generated config is then unchanged.
+#   --output-delay-file FILE
+#                    the same, one NAME=FRAMES per line (# comments allowed)
+#   --rate HZ        sample rate used to turn FRAMES into the delay time the
+#                    filter takes in seconds (default 48000); the delay is a
+#                    fixed time, so at another rate re-run with that --rate
 #   -v, --verbose    with --dry-run, also print the generated config
 #   -h, --help       show this text
 
@@ -33,6 +45,9 @@ VERBOSE=0
 WITH_VIRTUAL=0
 IO_MAP_FILE=""
 CARD=""
+RATE=48000
+DELAY_NAMES=()
+DELAY_FRAMES=()
 
 # ── Helpers ──
 
@@ -40,6 +55,36 @@ log() { echo "[apollo-io] $*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' | sed '$d'; }
+
+add_delay() {   # NAME=FRAMES
+    local spec=$1 name frames
+    case "$spec" in *=*) ;; *) die "bad --output-delay '$spec' (want NAME=FRAMES)" ;; esac
+    name=${spec%%=*}; frames=${spec#*=}
+    [ -n "$name" ] || die "bad --output-delay '$spec': empty name"
+    case "$frames" in ''|*[!0-9]*) die "bad --output-delay '$spec': FRAMES must be an integer" ;; esac
+    [ "$frames" -le 255 ] || die "--output-delay $name: $frames frames is over the 255 frame limit"
+    DELAY_NAMES+=("$name"); DELAY_FRAMES+=("$frames")
+}
+
+load_delay_file() {
+    local f=$1 line
+    [ -r "$f" ] || die "cannot read output-delay file: $f"
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%%#*}
+        line=$(echo "$line" | tr -d '[:space:]')
+        [ -n "$line" ] && add_delay "$line"
+    done < "$f"
+}
+
+# Delay in frames for sink NAME; empty when none or 0 is configured
+delay_for() {
+    local i f=""
+    for ((i = 0; i < ${#DELAY_NAMES[@]}; i++)); do
+        [ "${DELAY_NAMES[i]}" = "$1" ] && f=${DELAY_FRAMES[i]}
+    done
+    [ "${f:-0}" -gt 0 ] && echo "$f"
+    return 0
+}
 
 wait_for_pipewire() {
     local i=0
@@ -57,6 +102,9 @@ while [ $# -gt 0 ]; do
         --card)    [ $# -ge 2 ] || die "--card needs a number"; CARD="$2"; shift ;;
         --virtual) WITH_VIRTUAL=1 ;;
         --no-virtual) WITH_VIRTUAL=0 ;;
+        --output-delay) [ $# -ge 2 ] || die "--output-delay needs NAME=FRAMES"; add_delay "$2"; shift ;;
+        --output-delay-file) [ $# -ge 2 ] || die "--output-delay-file needs a file"; load_delay_file "$2"; shift ;;
+        --rate)    [ $# -ge 2 ] || die "--rate needs a number"; RATE="$2"; shift ;;
         -v|--verbose) VERBOSE=1 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
@@ -321,10 +369,72 @@ build_items() {
     [ ${#ITEMS[@]} -gt 0 ] || die "no usable channels in the io_map"
 }
 
+# Every --output-delay name must be an output sink this run creates
+check_delays() {
+    local i name item kind iname rest ok sinks=""
+    case "$RATE" in ''|*[!0-9]*|0) die "--rate must be a positive integer" ;; esac
+    for item in "${ITEMS[@]}"; do
+        IFS='|' read -r kind iname rest <<< "$item"
+        [ "$kind" = snk ] && sinks="$sinks${sinks:+, }$iname"
+    done
+    for ((i = 0; i < ${#DELAY_NAMES[@]}; i++)); do
+        name=${DELAY_NAMES[i]}; ok=0
+        for item in "${ITEMS[@]}"; do
+            IFS='|' read -r kind iname rest <<< "$item"
+            [ "$kind" = snk ] && [ "$iname" = "$name" ] && ok=1
+        done
+        [ "$ok" -eq 1 ] || die "--output-delay: no output sink named '$name' (have: $sinks)"
+    done
+}
+
 # ── Step 3: Config generation ──
 
+# An output sink with a host delay: a filter-chain of builtin "delay" nodes,
+# one per channel, between the Audio/Sink apps write to and the ALSA output.
+# The delay is a fixed time (frames / RATE seconds).
+emit_delayed_sink() {   # name desc pos names silent frames out_node
+    local name=$1 desc=$2 pos=$3 names=$4 silent=$5 frames=$6 out_node=$7
+    local secs maxsecs n c in_ports="" out_ports=""
+    local -a p
+    read -r -a p <<< "$pos"
+    n=${#p[@]}
+    secs=$(awk -v f="$frames" -v r="$RATE" 'BEGIN { printf "%.9f", f / r }')
+    maxsecs=$(awk -v r="$RATE" 'BEGIN { printf "%.9f", 255 / r }')
+    echo
+    echo "    # $desc  [$names]  + output delay $frames frames ($secs s at $RATE Hz)"
+    [ "$silent" -gt 0 ] && echo "    # $silent channel(s) have no DMA slot at the current rate (silent)"
+    echo "    { name = libpipewire-module-filter-chain"
+    echo "        args = {"
+    echo "            node.description = \"$desc\""
+    echo "            filter.graph = {"
+    echo "                nodes = ["
+    for ((c = 0; c < n; c++)); do
+        echo "                    { type = builtin name = delay$c label = delay"
+        echo "                      config = { \"max-delay\" = $maxsecs }"
+        echo "                      control = { \"Delay (s)\" = $secs } }"
+        in_ports="$in_ports${in_ports:+ }\"delay$c:In\""
+        out_ports="$out_ports${out_ports:+ }\"delay$c:Out\""
+    done
+    echo "                ]"
+    echo "                inputs  = [ $in_ports ]"
+    echo "                outputs = [ $out_ports ]"
+    echo "            }"
+    echo "            capture.props = {"
+    echo "                node.name           = \"$name\""
+    echo "                media.class         = \"Audio/Sink\""
+    echo "                audio.position      = [ FL FR ]"
+    echo "            }"
+    echo "            playback.props = {"
+    echo "                node.target         = \"$out_node\""
+    echo "                audio.position      = [ $pos ]"
+    echo "                stream.dont-remix   = true"
+    echo "            }"
+    echo "        }"
+    echo "    }"
+}
+
 emit_config() {   # input_node output_node
-    local in_node=$1 out_node=$2 item kind name desc pos silent names
+    local in_node=$1 out_node=$2 item kind name desc pos silent names delay
     local -a p
     echo "# Auto-generated by setup-apollo-io.sh — do not edit manually"
     echo "# Apollo virtual I/O devices mapped to pro-audio channels"
@@ -335,6 +445,12 @@ emit_config() {   # input_node output_node
     for item in "${ITEMS[@]}"; do
         IFS='|' read -r kind name desc pos silent names <<< "$item"
         read -r -a p <<< "$pos"
+        delay=""
+        [ "$kind" = snk ] && delay=$(delay_for "$name")
+        if [ -n "$delay" ]; then
+            emit_delayed_sink "$name" "$desc" "$pos" "$names" "$silent" "$delay" "$out_node"
+            continue
+        fi
         echo
         echo "    # $desc  [$names]"
         [ "$silent" -gt 0 ] && echo "    # $silent channel(s) have no DMA slot at the current rate (silent)"
@@ -386,6 +502,9 @@ print_items() {
         IFS='|' read -r kind name desc pos silent names <<< "$item"
         note=""
         [ "$silent" -gt 0 ] && note=" (silent at this rate: $silent)"
+        if [ "$kind" = snk ] && [ -n "$(delay_for "$name")" ]; then
+            note="$note (delay $(delay_for "$name") frames)"
+        fi
         if [ "$kind" = src ]; then kind=source; else kind=sink; fi
         printf '[apollo-io] %-6s %-24s "%s" <- %s [%s]%s\n' \
             "$kind" "$name" "$desc" "$pos" "$names" "$note"
@@ -403,6 +522,7 @@ summary_line() {   # kind
 
 load_io_map
 build_items
+check_delays
 
 if [ "$DRY_RUN" -eq 1 ]; then
     print_items
