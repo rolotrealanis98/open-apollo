@@ -478,7 +478,7 @@ struct ua_dma_test {
  * The struct is fixed size: never change sizeof(struct ua_version).
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		3
+#define UA_ABI_MINOR		4
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -494,6 +494,7 @@ struct ua_dma_test {
 #define UA_FEAT_BUS_SOLO_FLAG	(1u << 11) /* UA_BUS_PARAM_F_SOLO_MUTE */
 #define UA_FEAT_SYSINFO_EXT	(1u << 12) /* pcie_link_*, clock_src_mask, fw_rate_mask in SYSTEM_INFO */
 #define UA_FEAT_PLUGIN_CAPS	(1u << 13) /* UA_IOCTL_GET_PLUGIN_CAPS (ABI 1.3) */
+#define UA_FEAT_FW_RELEASE	(1u << 14) /* fw_release, dev_info in SYSTEM_INFO (ABI 1.4) */
 
 struct ua_version {
 	__u32 abi_major;
@@ -570,8 +571,26 @@ struct ua_system_info {
 	__u32 pcie_link_width;
 	__u32 clock_src_mask;
 	__u32 fw_rate_mask;
-	__u32 reserved[4];
+	/*
+	 * UA_FEAT_FW_RELEASE (ABI 1.4); an older driver returns 0 here.
+	 * fw_release: BAR0 0x0008, the firmware version word the macOS driver
+	 * returns in UAD2DeviceInfo+0x24 (x4: 0x0b0fc9b3).  Decode it with
+	 * UA_FW_MAJOR/MINOR/BUILD; UA's Mixer Engine shows it "%d.%02d.%03d"
+	 * and accepts a major equal to the model's (9 or 11).  fw_version above
+	 * is BAR0 0x0000, DSP 0's status word, and is not a version.
+	 * dev_info: BAR0 0x01AC (UAD2DeviceInfo+0x80) for the public types the
+	 * macOS driver reads it for, 0xFFFFFFFF for the others, as it reports
+	 * them.  Bits [19:16] are the revision the Mixer Engine's per-device
+	 * firmware checks test (x6/x8/x8p/x16/x16D).
+	 */
+	__u32 fw_release;
+	__u32 dev_info;
+	__u32 reserved[2];
 };
+
+#define UA_FW_MAJOR(v)		(((v) >> 24) & 0xff)
+#define UA_FW_MINOR(v)		(((v) >> 16) & 0xff)
+#define UA_FW_BUILD(v)		((v) & 0xffff)
 
 #define UA_IOCTL_GET_SYSTEM_INFO	_IOR(UA_IOCTL_MAGIC, 0x05, struct ua_system_info)
 

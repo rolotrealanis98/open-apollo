@@ -208,8 +208,26 @@ static inline bool ua_public_output_mute(u32 pt)
  * All offsets from BAR0 base.
  */
 
-/* Global / Identification */
-#define UA_REG_FW_VERSION       0x0000  /* Firmware version / ID */
+/*
+ * Global / Identification.  0x0000-0x07FF is also DSP 0's register window.
+ *
+ * UA_REG_FW_VERSION keeps its historical name (it fills the ABI's
+ * fw_version fields) but is DSP 0's status word, not a version: 0x1c00 on
+ * the x4.  The firmware version is UA_REG_FW_RELEASE: CPcieDevice::
+ * GetDeviceInfo (kext 12.0.0 x86 0x50ae) returns it as UAD2DeviceInfo+0x24,
+ * which the Mixer Engine prints "%d.%02d.%03d" (major [31:24], minor
+ * [23:16], build [15:0]; CUAD2Info::GetFirmwareVersion) and whose major it
+ * compares with the mixer class's FWMajorVersion, 9 or 11
+ * (MixerTypeBase::CheckFirmwareVersionCompatibility).  x4: 0x0b0fc9b3 =
+ * 11.15.51635.  UA_REG_DEV_INFO is UAD2DeviceInfo+0x80, read only for the
+ * public types in UA_DEVINFO_TYPES (else 0xFFFFFFFF); its [19:16] is the
+ * revision the Mixer Engine's per-device firmware checks test.
+ */
+#define UA_REG_FW_VERSION       0x0000  /* DSP 0 status word (not a version) */
+#define UA_REG_ID_WORD          0x0004  /* identity word, UAD2DeviceInfo+0x28 */
+#define UA_REG_FW_RELEASE       0x0008  /* firmware version, UAD2DeviceInfo+0x24 */
+#define UA_REG_DEV_INFO         0x01AC  /* device info word, UAD2DeviceInfo+0x80 */
+#define UA_DEVINFO_TYPES        0x3ff16fcf9a0ULL  /* public types, <= 0x29 */
 #define UA_REG_HW_UID_LO        0x0030  /* Hardware UID low 32 bits */
 #define UA_REG_HW_UID_HI        0x0034  /* Hardware UID high 32 bits */
 #define UA_REG_FPGA_REV         0x2218  /* FPGA revision (cached on init) */

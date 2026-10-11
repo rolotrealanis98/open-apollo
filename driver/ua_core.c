@@ -901,7 +901,7 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
 			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT |
-			    UA_FEAT_PLUGIN_CAPS,
+			    UA_FEAT_PLUGIN_CAPS | UA_FEAT_FW_RELEASE,
 	};
 
 	/*
@@ -916,6 +916,20 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 	if (copy_to_user((void __user *)arg, &v, sizeof(v)))
 		return -EFAULT;
 	return 0;
+}
+
+/*
+ * UAD2DeviceInfo+0x80 as CPcieDevice::GetDeviceInfo (kext x86 0x5156)
+ * fills it: BAR0 0x01AC for the public types in UA_DEVINFO_TYPES,
+ * 0xFFFFFFFF for every other type.
+ */
+static u32 ua_read_dev_info(struct ua_device *ua)
+{
+	u32 pt = ua->public_type;
+
+	if (pt > 0x29 || !((UA_DEVINFO_TYPES >> pt) & 1))
+		return 0xFFFFFFFFu;
+	return ua_read(ua, UA_REG_DEV_INFO);
 }
 
 static long ua_ioctl_get_system_info(struct ua_device *ua, unsigned long arg)
@@ -935,6 +949,8 @@ static long ua_ioctl_get_system_info(struct ua_device *ua, unsigned long arg)
 	si.pci_device = ua->pdev->device;
 	si.num_dsps = ua->num_dsps;
 	si.fw_version = ua_read(ua, UA_REG_FW_VERSION);
+	si.fw_release = ua_read(ua, UA_REG_FW_RELEASE);
+	si.dev_info = ua_read_dev_info(ua);
 	si.fw_v2 = ua->fw_v2 ? 1 : 0;
 	si.ext_caps = ua_read(ua, UA_REG_EXT_CAPS);
 	si.hw_uid_lo = ua_read(ua, UA_REG_HW_UID_LO);
@@ -4193,6 +4209,15 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev_info(&pdev->dev, "device type 0x%02x, public type 0x%02x%s\n",
 		 ua->device_type, ua->public_type,
 		 ua->public_type == UA_PUBTYPE_NONE ? " (unresolved)" : "");
+	{
+		u32 rel = ua_read(ua, UA_REG_FW_RELEASE);
+
+		/* UA's Mixer Engine shows this word "%d.%02d.%03d" */
+		dev_info(&pdev->dev,
+			 "firmware %u.%02u.%03u (BAR0 0x0008 = 0x%08x)\n",
+			 UA_FW_MAJOR(rel), UA_FW_MINOR(rel), UA_FW_BUILD(rel),
+			 rel);
+	}
 
 	if (ua->fw_v2) {
 		/*
