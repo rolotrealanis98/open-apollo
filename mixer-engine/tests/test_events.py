@@ -613,3 +613,16 @@ class TestSettleRouter:
     def test_end_without_begin(self, srouter, backend):
         assert not srouter.end_settle_mute()
         assert backend.mixer_params == []
+
+
+class TestOutputsAttenuateModels:
+    def test_classes_from_the_descriptors(self):
+        import ua_mixer_daemon as d
+        assert d.descriptor_mixer_class("apollo-x4") == "Freud"
+        assert "Freud" in d.OUTPUTS_ATTENUATE_CLASSES
+        assert d.descriptor_mixer_class("apollo-x8p") in \
+            d.OUTPUTS_ATTENUATE_CLASSES                      # Rene8
+        assert d.descriptor_mixer_class("apollo-8p") not in \
+            d.OUTPUTS_ATTENUATE_CLASSES                      # Peyton: Base
+        assert d.descriptor_mixer_class(None) is None
+        assert d.descriptor_mixer_class("no-such-model") is None

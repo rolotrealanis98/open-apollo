@@ -123,10 +123,31 @@ EVENT_SAFETY_POLL = 10.0
 # seconds after a rate change (MuteUntilSettleDown); its default is not
 # known, 1 s is a placeholder.  0 turns the mute off.
 MUTE_ON_RATE_CHANGE_SECS = 1.0
-# Driver device types whose Mixer Engine mixer type supports
-# OutputsAttenuate (CMxRoot::MuteUntilSettleDown's mute): the Apollo x4
-# (MixerTypeFreud, SupportsOutputsAttenuate() = 1).
-OUTPUTS_ATTENUATE_TYPES = frozenset({0x1F})
+# Mixer Engine mixer types (devices/*.json "mixer_class") whose
+# SupportsOutputsAttenuate() returns 1, i.e. the models CMxRoot::
+# MuteUntilSettleDown attenuates on a rate change (arm64 disassembly):
+# A16, A16Black, Armstrong, Stretch, Conrad, Freud and ReneBase with its
+# Rene subclasses; the Gen 2 classes override only DAC/autogain/line-PGA
+# (parity/16) and inherit it.  Base (Apollo, ApolloBlack, Peyton, M64)
+# returns 0.  Lavern, Shirley, LavernG2, ApolloSolo and Cauldron derive
+# from Stretch/Conrad but are not checked for an override, so they are
+# left out.  Only the x4 (Freud) is hardware-tested.
+OUTPUTS_ATTENUATE_CLASSES = frozenset({
+    "A16", "A16Black", "Armstrong", "Stretch", "Conrad", "Freud", "FreudG2",
+    "Rene2", "Rene4", "Rene8", "Rene16", "ReneLax",
+    "Rene2G2", "Rene4G2", "Rene8G2", "Rene16G2"})
+
+
+def descriptor_mixer_class(slug: str | None) -> str | None:
+    """The Mixer Engine mixer type of devices/<slug>.json, or None."""
+    if not slug:
+        return None
+    try:
+        desc = json.loads((DEVICES_DIR / f"{slug}.json").read_text())
+        cls = desc.get("mixer_class")
+        return cls if isinstance(cls, str) else None
+    except (OSError, ValueError, AttributeError):
+        return None
 # The driver's rate index (UA_RATE_*) of a sample rate
 RATE_INDEX = {44100: 1, 48000: 2, 88200: 3, 96000: 4, 176400: 5, 192000: 6}
 
@@ -2472,10 +2493,12 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             input_buses=descriptor_input_buses(
                 find_descriptor(device_type)[0]
                 if device_type is not None else None))
-        # MixerTypeFreud (the x4) supports OutputsAttenuate, which the
-        # settle mute uses; other mixer types are unconfirmed
-        hw_router.supports_outputs_attenuate = (
-            device_type in OUTPUTS_ATTENUATE_TYPES)
+        # The settle mute uses OutputsAttenuate, which only some mixer
+        # types support (OUTPUTS_ATTENUATE_CLASSES)
+        hw_router.supports_outputs_attenuate = descriptor_mixer_class(
+            find_descriptor(device_type)[0]
+            if device_type is not None else None) \
+            in OUTPUTS_ATTENUATE_CLASSES
         log.info("Hardware backend: %s", backend.device_path)
         log.info("Safe mode: %s (monitor+preamp+analog bus enabled, "
                  "digital/send/aux bus writes %s)",
