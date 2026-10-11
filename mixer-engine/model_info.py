@@ -74,9 +74,8 @@ _X4_FIXED_DEFAULTS = (0x1F, 0x19, 0x1A, 0x43)
 def monitor_param_is_gated(param: int) -> bool:
     """Whether some mixer kind refuses monitor param `param`, or the init
     sets it to an x4 default (for a mixer of unknown kind)."""
-    return (param in (0x36, 0x37, 0x32, 0x3E, 0x41, 0x42, 0x49, 0x69, 0x67,
-                      0x68) + _X4_FIXED_DEFAULTS or 0x2A <= param <= 0x2D
-            or 0x33 <= param <= 0x35 or 0x83 <= param <= 0x8A)
+    return param in _X4_FIXED_DEFAULTS or not all(
+        monitor_param_allowed(param, k) for k in range(32))
 
 
 def monitor_param_allowed(param: int, kind: int | None,
