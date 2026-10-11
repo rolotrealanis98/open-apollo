@@ -57,6 +57,36 @@ static dev_t ua_devno;
 static struct class *ua_class;
 static DEFINE_IDA(ua_ida);
 
+/*
+ * probe_only — identification-only probe.
+ *
+ * Rationale: ring-connect devices (device_type 32..38) need per-model
+ * transport verification. Twin X DUO 0x23 has observed raw audio on Linux;
+ * that does not establish support for other ring-connect models.
+ * Upstream issue #46 reports the x8p 0x22 never clocking audio, with
+ * SAMPLE_POS frozen at 0 and a host lockup when PipeWire initialises its
+ * Pro profile. The x4 (0x1F) is an AudioExtension device and takes a
+ * different connect path, so its success does not carry over.
+ *
+ * With probe_only=1 the driver maps BAR0, reads the identity registers
+ * (FPGA revision, firmware version, DSP count, device type, serial) and
+ * stops. It does not:
+ *   - run the WARM SNAPSHOT block, which memremap()s physical addresses
+ *     read out of device registers
+ *   - allocate MSI vectors or request an IRQ
+ *   - program registers, load firmware, or submit DSP programs
+ *   - start the transport or touch the DMA engine
+ *   - create the chardev or register an ALSA card
+ *
+ * That makes first contact on untested hardware observational: enough to
+ * confirm the device is identified correctly and to capture real register
+ * values, with no DMA programming and nothing for userspace to open.
+ */
+static bool probe_only;
+module_param(probe_only, bool, 0444);
+MODULE_PARM_DESC(probe_only,
+	"Identify device and stop: no IRQ, no firmware, no DMA, no ALSA (safe first contact on untested hardware)");
+
 /* ----------------------------------------------------------------
  * PCI device table
  * ---------------------------------------------------------------- */
@@ -222,6 +252,14 @@ static void ua_detect_capabilities(struct ua_device *ua)
 			break;
 		case UA_SUBSYS_APOLLO_SOLO:
 			ua->device_type = UA_DEV_APOLLO_SOLO;
+			break;
+		case UA_SUBSYS_APOLLO_TWIN_X_DUO:
+			/* Twin X DUO pinned by subsystem ID 0x0019, read off real
+			 * hardware via macOS IOKit rather than inferred from the
+			 * serial table. Serial-prefix matching is documented as
+			 * unreliable, so prefer this whenever it is available.
+			 */
+			ua->device_type = UA_DEV_APOLLO_TWIN_X;
 			break;
 		default:
 			ua_read_serial_type(ua);
@@ -2629,8 +2667,6 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	pci_set_master(pdev);
-
 	/*
 	 * Force 32-bit DMA mask.
 	 *
@@ -2676,12 +2712,67 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		 ua->fpga_rev, ua->subsystem_id, ua->num_dsps,
 		 ua->fw_v2 ? "v2" : "v1");
 
+	/*
+	 * probe_only: stop here, before anything programs the hardware.
+	 *
+	 * Everything above this point is register reads plus the PCI
+	 * enable/BAR map, both of which are devres-managed (pcim_*) and
+	 * unwind automatically. pci_enable_device() leaves the bus-master
+	 * bit as the previous OS left it, so clear it explicitly: a config
+	 * space write only, no BAR0 access, and it stops the device issuing
+	 * new DMA from stale ring state. Bus mastering is enabled again only
+	 * on the normal path below. Nothing below has run, so ua_remove()
+	 * must not attempt the normal teardown — hence probe_minimal.
+	 */
+	if (probe_only) {
+		char serial[UA_REG_SERIAL_LEN + 1];
+		u32 sregs[UA_REG_SERIAL_LEN / 4];
+		unsigned int i;
+
+		pci_clear_master(pdev);
+
+		for (i = 0; i < ARRAY_SIZE(sregs); i++)
+			sregs[i] = ua_read(ua, UA_REG_SERIAL_BASE + i * 4);
+		memcpy(serial, sregs, UA_REG_SERIAL_LEN);
+		serial[UA_REG_SERIAL_LEN] = '\0';
+		for (i = 0; i < UA_REG_SERIAL_LEN; i++) {
+			if (serial[i] < 0x20 || serial[i] > 0x7e)
+				serial[i] = '.';
+		}
+
+		ua->probe_minimal = true;
+
+		dev_info(&pdev->dev, "=== probe_only: identification ===\n");
+		dev_info(&pdev->dev, "  model        : %s\n",
+			 ua_device_name(ua->device_type));
+		dev_info(&pdev->dev, "  device_type  : 0x%02x\n", ua->device_type);
+		dev_info(&pdev->dev, "  connect path : %s\n",
+			 ua_uses_audio_extension(ua->device_type) ?
+			 "AudioExtension (as verified on x4)" :
+			 "ring-buffer connect (verify transport per model, see issue #46)");
+		dev_info(&pdev->dev, "  subsys id    : 0x%04x\n", ua->subsystem_id);
+		dev_info(&pdev->dev, "  FPGA rev     : 0x%08x\n", ua->fpga_rev);
+		dev_info(&pdev->dev, "  firmware     : %s\n",
+			 ua->fw_v2 ? "v2 (extended)" : "v1");
+		dev_info(&pdev->dev, "  SHARC DSPs   : %u\n", ua->num_dsps);
+		dev_info(&pdev->dev, "  serial raw   : '%s'\n", serial);
+		dev_info(&pdev->dev, "  BAR0         : %pa size 0x%llx\n",
+			 &ua->regs_phys, (unsigned long long)ua->regs_size);
+		dev_info(&pdev->dev,
+			 "  transport    : NOT started (probe_only=1)\n");
+		dev_info(&pdev->dev, "=== end probe_only ===\n");
+		dev_info(&pdev->dev,
+			 "probe_only=1: no IRQ, no firmware, no DMA, no ALSA. rmmod to release.\n");
+		return 0;
+	}
+
+	pci_set_master(pdev);
+
 	/* Ring buffer + DMA page dump for warm-boot analysis.
 	 * Reads the PREVIOUS OS's ring buffer pages via memremap
 	 * BEFORE ua_dsp_rings_init() overwrites the page registers.
 	 */
 	{
-		u32 v;
 		int d;
 
 		dev_info(&pdev->dev, "=== WARM SNAPSHOT ===\n");
@@ -2834,6 +2925,23 @@ static void ua_remove(struct pci_dev *pdev)
 	atomic_set(&ua->shutdown, 1);
 
 	/*
+	 * probe_only teardown: ua_probe() returned before allocating IRQ
+	 * vectors, initialising the period hrtimer, creating the chardev or
+	 * registering the ALSA card. The steps below would then call
+	 * free_irq() on an IRQ that was never requested, hrtimer_cancel() on
+	 * an uninitialised timer, and device_destroy()/cdev_del()/ida_free()
+	 * on objects that were never created — each of which is its own oops.
+	 * The BAR mapping and PCI enable are devres-managed and released for
+	 * us, so there is nothing to undo by hand.
+	 */
+	if (ua->probe_minimal) {
+		dev_info(&pdev->dev,
+			 "%s: probe_only device, nothing to tear down\n",
+			 __func__);
+		return;
+	}
+
+	/*
 	 * 2. Drain IRQ — synchronize_irq ensures any in-flight handler
 	 *    finishes, then free_irq removes it.  Must happen before
 	 *    tearing down any state the handler references.
@@ -2932,20 +3040,32 @@ static pci_ers_result_t ua_slot_reset(struct pci_dev *pdev)
 		return PCI_ERS_RESULT_DISCONNECT;
 	}
 
-	pci_set_master(pdev);
-
-	/* Verify device is actually reachable after re-enable */
-	ua->fpga_rev = ua_read(ua, UA_REG_FPGA_REV);
+	/* shutdown stays set during recovery, so ua_read() returns all ones.
+	 * Check the mapped register directly while other BAR0 access is blocked.
+	 */
+	ua->fpga_rev = ioread32(ua->regs + UA_REG_FPGA_REV);
 	if (ua->fpga_rev == 0xFFFFFFFF) {
 		dev_err(&pdev->dev,
 			"device still unreachable after slot reset\n");
 		return PCI_ERS_RESULT_DISCONNECT;
 	}
 
+	/* probe_only must stay observational even through error recovery;
+	 * the re-init below would program registers we promised not to touch.
+	 */
+	if (ua->probe_minimal) {
+		dev_info(&pdev->dev,
+			 "slot reset: probe_only device, skipping re-init\n");
+		return PCI_ERS_RESULT_RECOVERED;
+	}
+
+	pci_set_master(pdev);
+	atomic_set(&ua->shutdown, 0);
 	ua_detect_capabilities(ua);
 
 	ret = ua_program_registers(ua);
 	if (ret) {
+		atomic_set(&ua->shutdown, 1);
 		dev_err(&pdev->dev, "hardware re-init after slot reset failed\n");
 		return PCI_ERS_RESULT_DISCONNECT;
 	}

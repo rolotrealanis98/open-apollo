@@ -40,6 +40,7 @@ jobs:
           # green at this level; do not widen without fixing findings first
           pipx run ruff check --select E9,F63,F7,F82 mixer-engine tools
           python -m compileall -q mixer-engine
+          python tests/test-device-lookup.py
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -49,6 +50,18 @@ jobs:
         run: |
           sudo apt-get install -y shellcheck
           find scripts tools configs tests -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+
+  helper-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Helper and recovery regression tests (no hardware)
+        run: |
+          bash tests/test-macos-capture-sip.sh
+          bash tests/test-dev-module.sh
+          bash tests/test-autoload.sh
+          bash tests/test-apollo-init.sh
+          python3 tests/test-slot-reset.py
 
   installer-tests:
     runs-on: ubuntu-latest

@@ -105,7 +105,8 @@ Talkback audio routing, virtual/monitor loopback, console UI, multi-device suppo
 | Apollo x8p / Gen 2 | Needs Testing |
 | Apollo x16 / Gen 2 | Needs Testing |
 | Apollo x16D | Needs Testing |
-| Apollo Twin X / Gen 2 | Needs Testing |
+| Apollo Twin X (DUO) | **Identification + raw I/O verified** — Thunderbolt 3, ring-buffer connect; analog play/capture via PipeWire Multichannel, Discord voice confirmed. Preamp relays / Twin-X DSP programs / routing tables incomplete. Gen 2 and QUAD untested. |
+| Apollo Twin X Gen 2 | Needs Testing |
 | Apollo Solo (Thunderbolt) | Needs Testing |
 | Apollo 8P (original) | Needs Testing |
 | Arrow | Needs Testing |

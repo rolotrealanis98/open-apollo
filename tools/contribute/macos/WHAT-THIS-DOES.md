@@ -3,6 +3,11 @@
 This document explains exactly what `capture.sh` does, line by line, so you can
 make an informed decision before running it.
 
+The macOS contribution tools have two entry points:
+
+- `capture-nosip.sh` collects device identity and channel counts without DTrace.
+- `capture.sh` runs `apollo-selectors.d` to capture routing and program payloads.
+
 ## What is SIP?
 
 **System Integrity Protection (SIP)** is a macOS security feature that prevents
