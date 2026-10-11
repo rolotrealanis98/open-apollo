@@ -386,6 +386,8 @@ _AUX_SEND_IDX_TO_SUB = {
     3: SUB_PARAM_CUE4,
 }
 
+IN_BASE = "/devices/0/inputs"
+
 # ── Monitor Parameter IDs (SEL131, channel_type=2) ───────────────
 # From IOKit capture of SetMixerParam with w2=2 (monitor type).
 MONITOR_PARAM = {
@@ -1966,6 +1968,82 @@ class HardwareRouter:
             return _SEND_ID_TO_SUB[send_id.lower()]
         return by_idx.get(send_idx)
 
+    def _send_is_post_fader(self, base: str, send_idx: int) -> bool:
+        """Pre/post-fader for input send `send_idx` (same rule the host
+        meters use, ua_mixer_daemon._meter_gain_db): the send's own
+        PostFaderOverride (0/1) if set, else auxs/N/SendPostFader for AUX N,
+        else /HPnSendPostFader for CUE n."""
+        sbase = f"{base}/sends/{send_idx}"
+        override = self._tree_value(f"{sbase}/PostFaderOverride/value")
+        if override in (0, 1):
+            return override == 1
+        send_id = str(self._tree_value(f"{sbase}/ID/value") or "")
+        num = send_id[3:]
+        if send_id.startswith("aux") and num.isdigit():
+            return bool(self._tree_value(
+                f"/devices/0/auxs/{int(num) - 1}/SendPostFader/value"))
+        if send_id.startswith("cue") and num.isdigit():
+            return bool(self._tree_value(
+                f"/devices/0/HP{num}SendPostFader/value"))
+        return False
+
+    def _input_send_linear(self, ch: int, send_idx: int,
+                           fader_db: float | None = None,
+                           muted: bool | None = None,
+                           gain_db: float | None = None) -> float:
+        """SEL130 coefficient of an input send.
+
+        Pre-fader: encode_input_fader(send dB).  Post-fader: the fader is
+        added in dB (as the engine does), so with the send at 0 dB it equals
+        the fader's own encode_input_fader() value.  Bypassed sends and,
+        when post-fader, muted or -inf faders give 0.0.  Pass fader_db /
+        muted / gain_db for a value that is being set right now and may not
+        be in the tree yet.
+        """
+        base = f"/devices/0/inputs/{ch}"
+        sbase = f"{base}/sends/{send_idx}"
+        if self._truthy(self._tree_value(f"{sbase}/Bypass/value")):
+            return 0.0
+        if gain_db is None:
+            gain_db = self._float(self._tree_value(f"{sbase}/Gain/value"),
+                                  -144.0)
+        if gain_db <= -144.0:
+            return 0.0
+        if not self._send_is_post_fader(base, send_idx):
+            return encode_input_fader(gain_db)
+        if fader_db is None:
+            fader_db = self._float(
+                self._tree_value(f"{base}/FaderLevel/value"), 0.0)
+        if muted is None:
+            muted = self._truthy(self._tree_value(f"{base}/Mute/value"))
+        if muted or fader_db <= -144.0:
+            return 0.0
+        return encode_input_fader(gain_db + fader_db)
+
+    @staticmethod
+    def _float(v, default: float) -> float:
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    def _write_post_fader_sends(self, ch: int, bus: int, fader_db: float,
+                                muted: bool):
+        """Re-write the input's post-fader sends after a fader/mute change.
+
+        The engine recomputes a post-fader send's coefficient whenever the
+        fader moves; with the sends at unity and AUX post-fader this is the
+        sub 0/3/4 triplet the macOS capture shows.
+        """
+        base = f"/devices/0/inputs/{ch}"
+        for send_idx in range(len(_SEND_IDX_TO_SUB)):
+            sub = self._send_sub(base, send_idx, _SEND_IDX_TO_SUB)
+            if sub is None or not self._send_is_post_fader(base, send_idx):
+                continue
+            self.backend.set_mixer_bus_param(
+                bus, sub, self._input_send_linear(
+                    ch, send_idx, fader_db=fader_db, muted=muted))
+
     def _get_input_pan(self, ch: int) -> float:
         """Read current Pan value for an input from the state tree."""
         if self.state_tree:
@@ -2077,12 +2155,14 @@ class HardwareRouter:
                 self.backend.set_bus_pan(bus, self._talkback_coeff(db))
             elif muted or (any_solo and not soloed):
                 self.backend.set_bus_fader(bus, 0.0, 0.0)
+                self._write_post_fader_sends(i, bus, fader_db, True)
             else:
                 # sub 0 is fader x pan; it must carry the pan too, or the
                 # recalculation would drop a panned channel to centre.
                 mix = encode_mix_coeff(fader_db, self._get_input_pan(i))
                 self.backend.set_bus_fader(bus, encode_input_fader(fader_db),
                                            mix)
+                self._write_post_fader_sends(i, bus, fader_db, False)
 
         log.info("Solo recalc: any_solo=%s, %d channels updated",
                  any_solo, len(channels))
@@ -2234,6 +2314,9 @@ class HardwareRouter:
                      "mix=%.6f pan=%.2f (bus=0x%04x)",
                      ch, db, linear, mix, pan, bus)
             self.backend.set_bus_fader(bus, linear, mix)
+            self._write_post_fader_sends(
+                ch, bus, db,
+                self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Mute/value")))
             return
 
         if control == "Mute":
@@ -2241,6 +2324,8 @@ class HardwareRouter:
                 log.info("HW BUS: input[%d].Mute ON (fader→0.0, bus=0x%04x)",
                          ch, bus)
                 self.backend.set_bus_fader(bus, 0.0, 0.0)
+                self._write_post_fader_sends(
+                    ch, bus, self._get_input_fader_db(ch), True)
             else:
                 # Mute OFF → recalc in case solo is active
                 log.info("HW BUS: input[%d].Mute OFF (bus=0x%04x)", ch, bus)
@@ -2325,7 +2410,7 @@ class HardwareRouter:
                 db = fader_tapered_to_db(float(value))
             else:
                 db = float(value)
-            linear = encode_input_fader(db)
+            linear = self._input_send_linear(ch, send_idx, gain_db=db)
             log.info("HW BUS: input[%d].send[%d].Gain = %.1f dB → "
                      "linear=%.6f (bus=0x%04x sub=%d)",
                      ch, send_idx, db, linear, bus, sub)
@@ -2342,9 +2427,7 @@ class HardwareRouter:
             if self._truthy(value):
                 linear = 0.0
             else:
-                gain = self._tree_value(f"{base}/Gain/value")
-                linear = encode_input_fader(float(gain)) \
-                    if gain is not None else 0.0
+                linear = self._input_send_linear(ch, send_idx)
             log.info("HW BUS: input[%d].send[%d].Bypass = %r → %.6f "
                      "(bus=0x%04x sub=%d)", ch, send_idx, value, linear,
                      bus, sub)

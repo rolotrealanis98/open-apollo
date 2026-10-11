@@ -91,7 +91,8 @@ class TestInputBusTable:
         (14, 0x18), (21, 0x1F)])                        # virtual
     def test_fader_addresses_the_right_bus(self, router, backend, ch, bus):
         router.on_set(f"{IN}/{ch}/FaderLevel/value", -6.0)
-        assert subs(backend) == [(bus, 0)]
+        assert {b for b, _ in subs(backend)} == {bus}
+        assert subs(backend)[0] == (bus, 0)
 
     def test_input_without_a_bus_writes_nothing(self, router, backend):
         router.on_set(f"{IN}/23/FaderLevel/value", -6.0)
@@ -99,14 +100,125 @@ class TestInputBusTable:
         assert backend.bus_params == []
 
 
-class TestFaderLeavesSendsAlone:
-    def test_fader_writes_sub0_only(self, router, backend):
-        router.on_set(f"{IN}/0/FaderLevel/value", -6.0)
-        assert subs(backend) == [(0x00, 0)]
+UNITY = 0.7071067811865476      # encode_input_fader(0 dB)
 
-    def test_mute_writes_sub0_only(self, router, backend):
-        router.on_set(f"{IN}/0/Mute/value", True)
-        assert backend.bus_params == [(0x00, 0, 0.0)]
+
+class TestPostFaderSends:
+    """Fader moves re-write the post-fader sends (engine: sub = send x fader)."""
+
+    def test_default_fader_matches_the_macos_triplet(self, wired, backend):
+        # Sends at 0 dB, AUX post-fader (map default): a fader change writes
+        # sub 0, 3, 4 with the fader's linear value, as the IOKit capture.
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        wired.set(f"{IN}/0/sends/1/Gain/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        lin = 10 ** (-10 / 20) * UNITY
+        assert backend.bus_params == [
+            (0x00, 0, pytest.approx(lin)),
+            (0x00, 3, pytest.approx(lin)),
+            (0x00, 4, pytest.approx(lin))]
+
+    def test_send_level_scales_with_fader(self, wired, backend):
+        wired.set(f"{IN}/0/sends/0/Gain/value", -6.0)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        sub3 = [v for b, s, v in backend.bus_params if s == 3]
+        assert sub3 == [pytest.approx(10 ** (-16 / 20) * UNITY)]
+
+    def test_silent_send_stays_silent(self, wired, backend):
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        assert [(s, v) for _, s, v in backend.bus_params] == [
+            (0, pytest.approx(10 ** (-10 / 20) * UNITY)), (3, 0.0), (4, 0.0)]
+
+    def test_cue_sends_are_pre_fader_by_default(self, wired, backend):
+        wired.set(f"{IN}/0/sends/2/Gain/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        assert 1 not in {s for _, s, _ in backend.bus_params}
+
+    def test_cue_send_follows_hp_send_post_fader(self, wired, backend):
+        wired.set("/devices/0/HP1SendPostFader/value", True)
+        wired.set(f"{IN}/0/sends/2/Gain/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        sub1 = [v for b, s, v in backend.bus_params if s == 1]
+        assert sub1 == [pytest.approx(10 ** (-10 / 20) * UNITY)]
+
+    def test_aux_pre_fader_setting(self, wired, backend):
+        wired.set("/devices/0/auxs/0/SendPostFader/value", False)
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        assert 3 not in {s for _, s, _ in backend.bus_params}
+        assert 4 in {s for _, s, _ in backend.bus_params}   # AUX 2 still post
+
+    def test_override_beats_the_bus_setting(self, wired, backend):
+        wired.set(f"{IN}/0/sends/0/PostFaderOverride/value", 0)    # pre
+        wired.set(f"{IN}/0/sends/2/PostFaderOverride/value", 1)    # post
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        wired.set(f"{IN}/0/sends/2/Gain/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        written = {s for _, s, _ in backend.bus_params}
+        assert 3 not in written and 1 in written
+
+    def test_mute_zeroes_post_fader_sends(self, wired, backend):
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/0/Mute/value", True)
+        assert backend.bus_params == [(0x00, 0, 0.0), (0x00, 3, 0.0),
+                                      (0x00, 4, 0.0)]
+
+    def test_fader_while_muted_keeps_sends_silent(self, wired, backend):
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        wired.set(f"{IN}/0/Mute/value", True)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -3.0)
+        assert [v for _, s, v in backend.bus_params if s == 3] == [0.0]
+
+    def test_bypassed_send_stays_zero_on_fader_move(self, wired, backend):
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        wired.set(f"{IN}/0/sends/0/Bypass/value", True)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevel/value", -3.0)
+        assert [v for _, s, v in backend.bus_params if s == 3] == [0.0]
+
+    def test_send_gain_includes_the_fader_when_post(self, wired, backend):
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        backend.clear()
+        wired.set(f"{IN}/0/sends/0/Gain/value", -4.0)
+        assert backend.bus_params == [
+            (0x00, 3, pytest.approx(10 ** (-14 / 20) * UNITY))]
+
+    def test_send_gain_ignores_the_fader_when_pre(self, wired, backend):
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        backend.clear()
+        wired.set(f"{IN}/0/sends/2/Gain/value", -4.0)
+        assert backend.bus_params == [
+            (0x00, 1, pytest.approx(10 ** (-4 / 20) * UNITY))]
+
+    def test_send_gain_when_muted_post_is_zero(self, wired, backend):
+        wired.set(f"{IN}/0/Mute/value", True)
+        backend.clear()
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        assert backend.bus_params == [(0x00, 3, 0.0)]
+
+    def test_bypass_off_restores_with_the_fader(self, wired, backend):
+        wired.set(f"{IN}/0/FaderLevel/value", -10.0)
+        wired.set(f"{IN}/0/sends/0/Gain/value", -4.0)
+        wired.set(f"{IN}/0/sends/0/Bypass/value", True)
+        backend.clear()
+        wired.set(f"{IN}/0/sends/0/Bypass/value", False)
+        assert backend.bus_params == [
+            (0x00, 3, pytest.approx(10 ** (-14 / 20) * UNITY))]
+
+    def test_fader_uses_the_value_just_set_for_tapered(self, wired, backend):
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/0/FaderLevelTapered/value", 0.0)   # -inf
+        assert [v for _, s, v in backend.bus_params if s == 3] == [0.0]
 
     def test_pan_writes_sub0_only(self, router, backend):
         router.on_set(f"{IN}/0/Pan/value", 0.5)
@@ -116,9 +228,17 @@ class TestFaderLeavesSendsAlone:
         router.on_set(f"{IN}/22/FaderLevel/value", 0.0)
         assert backend.bus_params == [(0x0A, 0, pytest.approx(3.976353))]
 
-    def test_solo_recalc_never_writes_sends(self, router, backend):
-        router.on_set(f"{IN}/1/Solo/value", True)
-        assert {s for _, s in subs(backend)} == {0}
+    def test_solo_recalc_rewrites_post_fader_sends(self, wired, backend):
+        wired.set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        wired.set(f"{IN}/0/FaderLevel/value", 0.0)
+        backend.clear()
+        wired.set(f"{IN}/1/Solo/value", True)       # input 0 goes silent
+        sub3 = [v for b, s, v in backend.bus_params if b == 0x00 and s == 3]
+        assert sub3 == [0.0]
+        backend.clear()
+        wired.set(f"{IN}/1/Solo/value", False)
+        sub3 = [v for b, s, v in backend.bus_params if b == 0x00 and s == 3]
+        assert sub3 == [pytest.approx(UNITY)]
 
     def test_solo_recalc_keeps_pan_in_the_mix_coefficient(self, wired,
                                                           backend):
@@ -127,15 +247,17 @@ class TestFaderLeavesSendsAlone:
         backend.clear()
         wired.set(f"{IN}/5/Solo/value", True)      # silences input 0
         wired.set(f"{IN}/5/Solo/value", False)     # restores it
-        restored = [v for b, s, v in backend.bus_params if b == 0x00][-1]
+        restored = [v for b, s, v in backend.bus_params
+                    if b == 0x00 and s == 0][-1]
         # hard right at 0 dB: cos(pi/2) ~ 0 (the pan law), not centre gain
         assert restored == pytest.approx(0.0, abs=1e-6)
         wired.set(f"{IN}/0/Pan/value", 0.0)
         backend.clear()
         wired.set(f"{IN}/5/Solo/value", True)
         wired.set(f"{IN}/5/Solo/value", False)
-        restored = [v for b, s, v in backend.bus_params if b == 0x00][-1]
-        assert restored == pytest.approx(0.7071067811865476)
+        restored = [v for b, s, v in backend.bus_params
+                    if b == 0x00 and s == 0][-1]
+        assert restored == pytest.approx(UNITY)
 
     def test_solo_recalc_talkback_uses_its_own_encoding(self, wired,
                                                         backend):
