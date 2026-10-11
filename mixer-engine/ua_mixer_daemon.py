@@ -25,6 +25,7 @@ Usage:
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import logging
 import os
@@ -1562,31 +1563,15 @@ class MixerDaemon:
 
 
 def device_map_path(slug: str) -> Path:
-    """Map file for a devices/<slug>.json model: apollo-x8p -> device_map_apollo_x8p.json.
-
-    Captured maps (x4, x8p) and generated ones (tools/gen-device-map.py) share
-    the naming; a generated map says so with a top-level "generated": true.
-    """
+    """Captured map file for a devices/<slug>.json model: apollo-x8p -> device_map_apollo_x8p.json."""
     return SCRIPT_DIR / "device_maps" / f"device_map_{slug.replace('-', '_')}.json"
 
 
-def is_generated_map(path: Path) -> bool:
-    """True if the device map is marked "generated": true (written first in the file)."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            head = f.read(2048)
-    except OSError:
-        return False
-    return '"generated":true' in head or '"generated": true' in head
-
-
-def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
-    """Resolve a driver device_type to (model, device_map_path) via devices/*.json.
+def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
+    """Resolve a driver device_type to (slug, model) via devices/*.json.
 
     Each devices/*.json descriptor lists its driver "device_types" (hex strings)
-    and its "model" (e.g. "Apollo x8p"); the map file is named after the
-    descriptor file (apollo-x8p.json -> device_maps/device_map_apollo_x8p.json).
-    Returns (model, path) where path is None if the map file doesn't exist yet.
+    and its "model" (e.g. "Apollo x8p"). (None, None) if no descriptor matches.
     """
     if not DEVICES_DIR.is_dir():
         return None, None
@@ -1622,9 +1607,41 @@ def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
         model = desc.get("model")
         if not isinstance(model, str) or not model.strip():
             model = None
-        candidate = device_map_path(desc_path.stem)
-        return model, (candidate if candidate.exists() else None)
+        return desc_path.stem, model
     return None, None
+
+
+def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
+    """Resolve a driver device_type to (model, captured_map_path).
+
+    The path is None if the model has no captured map (x4 and x8p do).
+    """
+    slug, model = find_descriptor(device_type)
+    if slug is None:
+        return None, None
+    candidate = device_map_path(slug)
+    return model, (candidate if candidate.exists() else None)
+
+
+def generate_device_map(slug: str) -> Path | None:
+    """Generate (or reuse) the cached map for a model, via tools/gen-device-map.py.
+
+    The map lives in $XDG_CACHE_HOME/open-apollo/device_maps (default
+    ~/.cache/open-apollo/device_maps), keyed on the x4 template, the model's
+    JSON and the generator, so it is rebuilt when any of them changes.
+    Returns None if the generator is missing or fails.
+    """
+    gen_path = SCRIPT_DIR.parent / "tools" / "gen-device-map.py"
+    try:
+        spec = importlib.util.spec_from_file_location("gen_device_map", gen_path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return Path(mod.ensure_cached(slug))
+    except Exception as e:   # missing tools/, bad JSON, unwritable cache ...
+        log.warning("Could not generate a device map for %s: %s", slug, e)
+        return None
 
 
 def device_model_name(device_type: int) -> str:
@@ -1638,25 +1655,28 @@ def find_device_map(device_type: int | None = None) -> Path | None:
 
     Order, when the connected hardware's device_type is known:
       1. the model's captured map (live UA Mixer Engine session: x4, x8p);
-      2. the model's generated map (tools/gen-device-map.py: x4 structure with
-         the model's channel counts; "generated": true), with a warning;
+      2. a map generated from devices/<model>.json (tools/gen-device-map.py:
+         x4 structure with the model's channel counts), cached under
+         ~/.cache/open-apollo/device_maps, with a warning;
       3. the Apollo x4 map, with a warning that controls/routing may not match.
     """
     if device_type is not None:
-        model, dev_map = lookup_device(device_type)
+        slug, model = find_descriptor(device_type)
         label = model or f"device_type 0x{device_type:02x}"
-        if dev_map:
-            if is_generated_map(dev_map):
-                log.warning("Using the generated device map for %s (%s): structure "
-                            "from the Apollo x4 capture, channels from devices/*.json; "
-                            "not captured from this model.", label, dev_map.name)
-            else:
+        if slug is not None:
+            captured = device_map_path(slug)
+            if captured.exists():
                 log.info("Selected device map for %s", label)
-            return dev_map
-        if model:
+                return captured
+            generated = generate_device_map(slug)
+            if generated is not None and generated.exists():
+                log.warning("Using a generated device map for %s (%s): structure "
+                            "from the Apollo x4 capture, channels from devices/%s.json; "
+                            "not captured from this model.", label, generated, slug)
+                return generated
             log.warning("No device map for %s (device_type 0x%02x) — falling back "
                         "to Apollo x4. Controls/routing may not match this device.",
-                        model, device_type)
+                        label, device_type)
         else:
             log.warning("Unrecognised device_type 0x%02x (no matching descriptor in "
                         "%s) — falling back to Apollo x4. Controls/routing may not "
