@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/proc/asound/cardN/io_map` and `UA_IOCTL_GET_IO_MAP`: channel names, slots and the firmware IO descriptors.
 
 ### Changed
+- The transport starts only once FRAME_CTR has reached FRAME_CFG (`frame_ctr_gate=2`, the macOS driver's 3 reads 1 ms apart), instead of on its first non-zero value: at 176.4/192 kHz that was 4 of 0x20. On the x4 the default rate-change path stays 28/28, and the macOS driver's own rate-change sequence (`rate_change=1`) records 11 of 14 runs instead of 5. `frame_ctr_gate=0` restores the old start.
 - With `period_irq=0` (the default) the driver no longer programs the period timer or enables its interrupt (vector 0x46), and no longer calls `snd_pcm_period_elapsed()` from the hard interrupt: the 1 ms hrtimer alone drives period wakeups, under the stream lock. The device now raises only end-of-buffer and notification interrupts (about 6 a second at 48 kHz).
 - README: the driver builds clean on kernels 5.15 to 7.3; hardware testing is on 7.2 and Ubuntu 24.04's 6.8.
 - Mixer daemon: readback pushes use the device map's monitor, headphone and preamp inputs instead of the x4's outputs 18-20 and inputs 0-3. A preamp GainC of 0 reads as 0 dB (was 10 dB) and preamp 2's gain field is 6 bits, as in the Mixer Engine.

@@ -109,10 +109,10 @@ MODULE_PARM_DESC(ax_control_ext,
  * titan A/B).  Every one defaults to the behaviour the driver had before
  * it existed; the reads, logs and counters next to them are always on.
  */
-static int frame_ctr_gate;
+static int frame_ctr_gate = 2;
 module_param(frame_ctr_gate, int, 0644);
 MODULE_PARM_DESC(frame_ctr_gate,
-		 "PrepareTransport FRAME_CTR gate: 0 = accept the first non-zero value, as before (default); N > 0 = wait up to N ms (1 ms sleeps) for FRAME_CTR == FRAME_CFG as the kext does (2 = kext-exact, 3 reads; 20 = bounded). A mismatch is logged, not an error");
+		 "PrepareTransport FRAME_CTR gate: wait up to N ms (1 ms sleeps) for FRAME_CTR == FRAME_CFG as the kext does (default 2 = kext-exact, 3 reads; 20 = bounded); 0 = accept the first non-zero value, the old behaviour, which starts a Hi-band transport at FRAME_CTR 4 of 0x20. A mismatch is logged, not an error");
 static bool notif_kext_reads;
 module_param(notif_kext_reads, bool, 0644);
 MODULE_PARM_DESC(notif_kext_reads,
