@@ -11,7 +11,8 @@ Checks, and fails (exit 1) on any error:
      `channel_counts` / `channels`; route channel IDs (unique, type byte
      <-> io kind, name <-> channel number); cue buses, talkback, TOSLink
      rules against the routes; the shape of the per-rate converter latency
-     tables ("latency") and of the monitor taper.
+     tables ("latency") and of the monitor taper; the per-rate channel
+     counts ("rate_channels") against the routes.
   2. driver/ua_models_gen.h against the JSON (the same test as
      `gen-driver-models.py --check`).
   3. The hand-written per-model tables against the JSON: the UA_DEV_*
@@ -394,6 +395,7 @@ def check_device(d, rep, type_io):
                       f'(highest virtual channel {max(virt)})')
     check_latency(d, rep)
     check_monitor_taper(d, rep)
+    check_rate_channels(d, rep)
     return lists
 
 
@@ -477,6 +479,57 @@ def check_monitor_taper(d, rep):
     if d.get('desktop') and steps != 54:
         rep.warn(rel, 'desktop model with a 48-step taper (every desktop '
                       'class seen uses 54)')
+
+
+RATE_CHANNEL_TYPES = {'adat': gen.TYPE_ADAT, 'spdif': gen.TYPE_SPDIF,
+                      'aes': 0x06, 'virtual': gen.TYPE_VIRTUAL, 'madi': 0x08,
+                      'dante': 0x0D}
+
+
+def check_rate_channels(d, rep):
+    """Digital/virtual channel counts per rate (ChannelCount, N29): one
+    count per rate for each channel type the routes carry, never above the
+    route count, falling or flat as the rate rises."""
+    rel = d['_rel']
+    rc = d.get('rate_channels')
+    if rc is None:
+        rep.err(rel, 'missing field \'rate_channels\'')
+        return
+    if rc.get('rates') != RATE_LIST:
+        rep.err(rel, f'rate_channels.rates must be {RATE_LIST}')
+    rules = d.get('route_rules') or {}
+    for dk in DIRS:
+        row = rc.get(dk)
+        if not isinstance(row, dict):
+            rep.err(rel, f'rate_channels.{dk} missing')
+            continue
+        routes = d['routes']['LoMid'].get(dk, [])
+        for k, t in RATE_CHANNEL_TYPES.items():
+            n = sum(1 for e in routes if int(e['ch_id'], 16) >> 8 == t)
+            if t == gen.TYPE_VIRTUAL and rules.get('virtual_max'):
+                n = min(n, rules['virtual_max'])
+            v = row.get(k)
+            if v is None:
+                if n:
+                    rep.err(rel, f'rate_channels.{dk} lacks {k} ({n} routes)')
+                continue
+            if not n:
+                rep.err(rel, f'rate_channels.{dk}.{k} without {k} routes')
+            if not (isinstance(v, list) and len(v) == len(RATE_LIST) and
+                    all(isinstance(x, int) and 0 <= x <= n for x in v)):
+                rep.err(rel, f'rate_channels.{dk}.{k} {v!r}: one count per '
+                             f'rate, 0-{n}')
+                continue
+            if v[0] != n:
+                rep.err(rel, f'rate_channels.{dk}.{k} at 44.1 kHz is {v[0]}, '
+                             f'the routes have {n}')
+            if any(b > a for a, b in zip(v, v[1:])):
+                rep.err(rel, f'rate_channels.{dk}.{k} {v}: rises with the '
+                             f'rate')
+            mid = rules.get('adat_mid_rate_max')
+            if k == 'adat' and dk == 'record' and mid and v[2] != mid:
+                rep.err(rel, f'rate_channels.record.adat at 88.2 kHz is '
+                             f'{v[2]}, adat_mid_rate_max {mid}')
 
 
 def check_cross(devs, rep):
