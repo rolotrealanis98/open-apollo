@@ -48,6 +48,7 @@ from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UA_EVT_CONNECTED, UA_EVT_LAYOUT_CHANGED,
                     UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK,
                     UA_EVT_PAUSED, UA_EVT_RESUMED, UA_PAUSE_DEVICE)
+from model_info import ModelInfo, monitor_param_allowed
 from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
                       HardwareBackend, HardwareRouter, clock_source_names,
@@ -1676,14 +1677,17 @@ class MixerDaemon:
         # Talkback also sets the dim bit, and init turns talkback off
         mon_dim = rb.get("monitor_dim", False) and not rb.get(
             "talkback_active", False)
-        gain_db = [rb.get(f"preamp_{ch}_gain", 10) for ch in range(4)]
+        # Every preamp of the model (x4 0-3, x8p 0-7, Twin 0-1)
+        model = self.hw_router.model
+        preamps = sorted(self.hw_router.preamp_inputs())
+        gain_db = {ch: rb.get(f"preamp_{ch}_gain", 10) for ch in preamps}
 
         def flag(ch, key):
             return 1 if rb.get(f"preamp_{ch}_{key}", False) else 0
 
         defaults = {
             f"/devices/0/inputs/{ch}/preamps/0/Gain/value": float(gain_db[ch])
-            for ch in range(4)
+            for ch in preamps
         }
         mon_out = self.hw_router.monitor_output_index()
         if mon_out is not None:   # x4 18, x8p 22
@@ -1723,8 +1727,8 @@ class MixerDaemon:
         # the default DSP processing level per channel.
         # DTrace capture: macOS sends Route to 19 channels and
         # Level to all 32 channels before any other mixer params.
-        # Currently limited to ch 0-3 (physical preamps) — kernel
-        # setting encoding for extended ch_idx (8+) needs kext RE.
+        # The channel lists come from the model's synch-in numbers
+        # (model_info.ModelInfo); the x4's are the DTrace's.
         if self.hw_router and self.hw_router.backend:
             be = self.hw_router.backend
             PREAMP = 1  # ch_type=1
@@ -1732,15 +1736,16 @@ class MixerDaemon:
             # Route bitmask for ALL input channels (macOS sends first).
             # 0x0001FFFF enables routing to buses 0-16 (MIX, CUE1,
             # CUE2, AUX, virtual outputs).
-            route_chs = [0,1,2,3, 8,9,10, 12,13,14,15,
-                         20,21,22,23, 24,25,26,27]
+            route_chs = model.route_channels()
             for ch in route_chs:
                 be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF)
             # S/PDIF L gets extended route mask
-            be.set_mixer_param(PREAMP, 8, 0x13, 0x0003FFFF)
+            spdif_l = model.spdif_left_channel()
+            if spdif_l is not None:
+                be.set_mixer_param(PREAMP, spdif_l, 0x13, 0x0003FFFF)
 
             # Default DSP processing level for ALL channels (-16 dB).
-            level_chs = list(range(16)) + list(range(20, 32))
+            level_chs = model.level_channels()
             for ch in level_chs:
                 be.set_mixer_param(PREAMP, ch, 0x16, 0xA0)
             log.info("Sent Route (0x13) to %d channels + Level (0x16) "
@@ -1758,12 +1763,15 @@ class MixerDaemon:
         # Disable talkback + dim matching macOS init sequence.
         # DTrace (talkback-init capture): TB_CONFIG(0x47)=1 must precede
         # TALKBACK(0x46)=0. Send to ch_idx 0 and 1 (varies by capture).
+        # (The driver ignores the monitor ch_idx; 0, 1, 7 are the capture's.)
+        # A model without talkback gets the dim write only.
         if self.hw_router and self.hw_router.backend:
             be = self.hw_router.backend
             for ch_idx in (0, 1, 7):
-                be.set_mixer_param(2, ch_idx, 0x47, 1)   # TB_CONFIG
-                be.set_mixer_param(2, ch_idx, 0x48, 0)   # param 0x48
-                be.set_mixer_param(2, ch_idx, 0x46, 0)   # TALKBACK OFF
+                if model.talkback:
+                    be.set_mixer_param(2, ch_idx, 0x47, 1)   # TB_CONFIG
+                    be.set_mixer_param(2, ch_idx, 0x48, 0)   # param 0x48
+                    be.set_mixer_param(2, ch_idx, 0x46, 0)   # TALKBACK OFF
                 be.set_mixer_param(2, ch_idx, 0x44, int(mon_dim))  # DIM
             log.info("Sent talkback/dim init sequence (TB_CONFIG + OFF)")
 
@@ -1787,12 +1795,13 @@ class MixerDaemon:
             # Working hypothesis (plans/260424-0922-dsp-arm-relay-propagation/
             # research/findings.md): 0x16=0xA0 is the ARM-relay arm signal.
             # Matching macOS exactly makes hypothesis bisection unnecessary.
-            for ch in range(4):
+            link_chs = model.link_channels(preamps)
+            for ch in preamps:
                 be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route (leading)
-            for ch in range(4):
+            for ch in preamps:
                 be.set_mixer_param(PREAMP, ch, 0x16, 0xA0)       # Level = -16 dB (leading)
 
-            for ch in range(4):
+            for ch in preamps:
                 be.set_mixer_param(PREAMP, ch, 0x04, flag(ch, "lowcut"))
                 be.set_mixer_param(PREAMP, ch, 0x00, flag(ch, "micline"))
                 be.set_mixer_param(PREAMP, ch, 0x08, 0)          # Unknown
@@ -1809,22 +1818,45 @@ class MixerDaemon:
                 # the hardware keeps what it has.)
                 be.set_mixer_param(PREAMP, ch, 0x01, flag(ch, "pad"))
                 be.set_mixer_param(PREAMP, ch, 0x03, flag(ch, "48v"))
-                if ch in (0, 2):  # Link on first of each pair
+                if ch in link_chs:  # Link on first of each pair
                     be.set_mixer_param(PREAMP, ch, 0x02, flag(ch, "link"))
                 be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route pass 2
                 be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route pass 3
 
-            for ch in range(4):
+            for ch in preamps:
                 be.set_mixer_param(PREAMP, ch, 0x16, 0xA0)       # Level = -16 dB (trailing)
-            log.info("Sent full preamp init: 4 ch × (Route + Level + 10 flags + 2×Route) + Level")
+            log.info("Sent full preamp init: %d ch × (Route + Level + 10 flags + 2×Route) + Level",
+                     len(preamps))
 
             # Full monitor section init — replicate macOS UA Mixer Engine
             # connect sequence. DTrace capture shows macOS sends
             # 56 unique ch_type=2 params during init. Without all of them,
             # the DSP monitor module never activates (no dim/mono buttons,
             # volume changes ignored). Order matches macOS capture.
-            mon = be.set_mixer_param  # shorthand
             MON = 2  # ch_type=2 (monitor)
+            # What the model does not have is not sent: params the mixer
+            # kind refuses (0x87, 0x3e, ... ; model_info), talkback params
+            # on a model without talkback, the HP2 params on a one-
+            # headphone model, MirrorsToDigital without mirror-to-digital,
+            # and DigOutMode (0x21) except on the Freud mixers, whose
+            # DTrace sets it: the x8p / 8p default to ADAT and keep theirs.
+            kind = self.hw_router.mixer_kind()
+            skipped = set()
+            if not model.talkback:
+                skipped |= {0x46, 0x47, 0x48}
+            if self.hw_router.output_index("hp", 1) is None:
+                skipped |= {0x40, 0x4c, 0x54, 0x5c}
+            if not model.mirror_to_digital:
+                skipped.add(0x1e)
+            if not model.digout_on_connect():
+                skipped.add(0x21)
+            nskipped = [0]
+
+            def mon(ch_type, ch_idx, param, value):
+                if param in skipped or not monitor_param_allowed(param, kind):
+                    nskipped[0] += 1
+                    return True
+                return be.set_mixer_param(ch_type, ch_idx, param, value)
             mon(MON, 0, 0x6a, 5)       # Unknown init signal (sent 3x by macOS)
             mon(MON, 1, 0x21, 0)       # DigOutMode = SPDIF
             mon(MON, 1, 0x6a, 5)       # Unknown init signal
@@ -1884,7 +1916,8 @@ class MixerDaemon:
             mon(MON, 1, 0x5c, 0)       # HP2 flag (setting[32] bit17)
             mon(MON, 0, 0x48, 1)       # Unknown = 1
             mon(MON, 0, 0x6a, 5)       # Channel config count (final)
-            log.info("Monitor init: full 57-param sequence sent")
+            log.info("Monitor init: %d of 57 params sent (%d not for this "
+                     "model)", 57 - nskipped[0], nskipped[0])
 
             # CUE 3 / CUE 4 sends (sub=5/6) for all 21 buses, start silent.
             # macOS sends 7 sub-params per bus; we were missing sub 5/6.
@@ -1893,14 +1926,12 @@ class MixerDaemon:
             # Like every bus param, each has a left (side 0) and a right
             # (side 1) entry and the engine writes both; the state re-apply
             # below sets the saved CUE 3/4 send levels of a 4-cue model.
+            # The buses are the map's inputs (x4: analog 1-4, S/PDIF, talkback,
+            # ADAT 1-8, Virtual 1-4) plus the AUX returns of the map; a model
+            # with no CUE 3 output in its map has no CUE 3/4 sends.
             from hardware import SUB_PARAM_CUE3, SUB_PARAM_CUE4
-            all_buses = [0x00, 0x01, 0x02, 0x03,       # Analog In 1-4
-                         0x08, 0x09,                     # S/PDIF L/R
-                         0x0a,                           # Talkback
-                         0x0c, 0x0d, 0x0e, 0x0f,         # ADAT 1-4
-                         0x10, 0x12,                     # AUX 1/2 Return
-                         0x14, 0x15, 0x16, 0x17,         # ADAT 5-8
-                         0x18, 0x19, 0x1a, 0x1b]         # Virtual 1-4
+            all_buses = self.hw_router.init_send_buses() \
+                if self.hw_router.output_index("cue", 2) is not None else []
             for bus in all_buses:
                 for sub in (SUB_PARAM_CUE3, SUB_PARAM_CUE4):
                     be.set_mixer_bus_param(bus, sub, 0.0)
@@ -2502,6 +2533,18 @@ def descriptor_input_buses(slug: str | None) -> dict:
         return {}
 
 
+def descriptor_model(slug: str | None) -> ModelInfo | None:
+    """The init-sequence facts of devices/<slug>.json, or None (the router
+    then assumes the Apollo x4)."""
+    if not slug:
+        return None
+    try:
+        desc = json.loads((DEVICES_DIR / f"{slug}.json").read_text())
+        return ModelInfo.from_descriptor(slug, desc)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
 def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
     """Resolve a driver device_type to (model, captured_map_path).
 
@@ -2794,6 +2837,9 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         hw_router = HardwareRouter(
             backend, state, stereo_sends=args.stereo_sends,
             input_buses=descriptor_input_buses(
+                find_descriptor(device_type)[0]
+                if device_type is not None else None),
+            model=descriptor_model(
                 find_descriptor(device_type)[0]
                 if device_type is not None else None))
         # The settle mute uses OutputsAttenuate, which only some mixer

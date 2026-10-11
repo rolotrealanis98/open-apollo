@@ -2267,7 +2267,7 @@ class HardwareRouter:
 
     def __init__(self, backend: HardwareBackend, state_tree=None,
                  input_buses: dict | None = None,
-                 stereo_sends: bool = False):
+                 stereo_sends: bool = False, model=None):
         """`input_buses` maps an input name of the device map to its bus ID
         (the model's devices/<model>.json mixer_inputs synch_in); it wins
         over the name rule of bus_id_for_input_name().  Only needed where a
@@ -2280,6 +2280,12 @@ class HardwareRouter:
         self.backend = backend
         self.stereo_sends = stereo_sends
         self.state_tree = state_tree
+        # model_info.ModelInfo of the attached Apollo (its devices/*.json);
+        # the Apollo x4 when nothing says otherwise
+        from model_info import ModelInfo
+        self.model = model or ModelInfo.x4()
+        if input_buses is None and model is not None:
+            input_buses = dict(model.inputs)
         self._input_bus_overrides = {
             str(k).strip().upper(): v for k, v in (input_buses or {}).items()}
         self._output_roles_cache: dict | None = None
@@ -2430,6 +2436,37 @@ class HardwareRouter:
             if role == (kind, n):
                 return ch
         return None
+
+    def talkback_bus(self) -> int:
+        """Hardware bus of the talkback input: the model's talkback
+        synch-in (Twin MkII 2), else 0x0A."""
+        return self._input_bus_overrides.get("TALKBACK", TALKBACK_BUS_START)
+
+    def mixer_kind(self) -> int | None:
+        """The driver's mixer kind (GET_SYSTEM_INFO), None when unknown."""
+        get = getattr(self.backend, "get_system_info", None)
+        info = get() if callable(get) else None
+        kind = info.get("mixer_kind") if isinstance(info, dict) else None
+        return kind if isinstance(kind, int) and kind >= 0 else None
+
+    def aux_count(self) -> int:
+        """AUX buses in the loaded map (x4: 2); 2 without a state tree."""
+        if self.state_tree is None:
+            return 2
+        n = 0
+        while self._tree_value(f"/devices/0/auxs/{n}/FaderLevel/value") \
+                is not None:
+            n += 1
+        return n
+
+    def init_send_buses(self) -> list:
+        """Hardware buses the connect sequence zeroes the CUE 3/4 sends of:
+        the map's input buses (Virtual 1-4 only, as macOS) and its AUX
+        returns, in bus order (x4: 0-3, 8-0x0A, 0x0C-0x10, 0x12, 0x14-0x1B)."""
+        buses = {b for b in self._input_buses()
+                 if b is not None and b < _VIRTUAL_BUS_BASE + 4}
+        buses.update(aux_bus_id(i) for i in range(self.aux_count()))
+        return sorted(buses)
 
     def monitor_output_index(self) -> int | None:
         """Tree output index of the monitor (x4 18, x8p 22)."""
@@ -2785,7 +2822,7 @@ class HardwareRouter:
 
         solo_flag = any_solo and self._has_feature(UA_FEAT_BUS_SOLO_FLAG)
         for i, bus, soloed, fader_db, muted in channels:
-            if bus == TALKBACK_BUS_START:
+            if bus == self.talkback_bus():
                 # Talkback has its own encoding (sub 0 only, unity 3.976)
                 db = -144.0 if (muted or (any_solo and not soloed)) \
                     else fader_db
@@ -2950,7 +2987,7 @@ class HardwareRouter:
 
             # Talkback bus uses different encoding (DTrace-verified):
             # sub=0 only, unity≈3.976, sub=3/4 always 0.0
-            if bus == TALKBACK_BUS_START:
+            if bus == self.talkback_bus():
                 linear = self._talkback_coeff(db)
                 log.info("HW BUS: talkback.Fader = %.1f dB → %.6f "
                          "(bus=0x%04x, sub=0 only)", db, linear, bus)
