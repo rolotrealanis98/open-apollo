@@ -49,6 +49,64 @@ def find_device():
     return None, None
 
 
+def usb_link_speed_mbps(dev=None):
+    """Return the Apollo's USB link speed in Mbps from sysfs, or None.
+
+    Read-only. Matches the device by bus/address when given, otherwise by
+    VID/PID (same live PIDs as scripts/install-usb.sh).
+    """
+    base = "/sys/bus/usb/devices"
+    try:
+        entries = os.listdir(base)
+    except OSError:
+        return None
+
+    def rd(path):
+        try:
+            with open(path) as f:
+                return f.read().strip()
+        except OSError:
+            return None
+
+    for e in entries:
+        d = os.path.join(base, e)
+        if rd(os.path.join(d, "idVendor")) != "2b5a":
+            continue
+        if dev is not None:
+            if (rd(os.path.join(d, "busnum")) != str(dev.bus)
+                    or rd(os.path.join(d, "devnum")) != str(dev.address)):
+                continue
+        else:
+            try:
+                if int(rd(os.path.join(d, "idProduct")) or "", 16) not in LIVE_PIDS:
+                    continue
+            except ValueError:
+                continue
+        try:
+            return int(float(rd(os.path.join(d, "speed")) or ""))
+        except ValueError:
+            return None
+    return None
+
+
+def warn_if_not_superspeed(dev=None):
+    """Warn when the Apollo enumerated below SuperSpeed (5000 Mbps).
+
+    Mirrors the check in scripts/install-usb.sh: at USB 2.0 the audio
+    interfaces are not available, so a bad cable or port otherwise shows
+    up only as a missing ALSA card.
+    """
+    speed = usb_link_speed_mbps(dev)
+    if speed is None:
+        return
+    if speed < 5000:
+        print("WARNING: Apollo USB link is {} Mbps (NOT SuperSpeed). Audio "
+              "needs a USB 3.0 cable and port; use a USB 3.0 (blue) or "
+              "USB-C/Thunderbolt connection.".format(speed), file=sys.stderr)
+    else:
+        print("USB link: {} Mbps (SuperSpeed)".format(speed))
+
+
 def drain_ep6(dev, stop_event):
     """Continuously drain EP6 JFK notifications.
 
@@ -182,6 +240,7 @@ def main():
         sys.exit(1)
 
     print("Found: {}".format(name))
+    warn_if_not_superspeed(dev)
 
     # Detach kernel driver from Interface 0 (vendor DSP) only.
     # Do NOT touch interfaces 1-3 (audio) — snd-usb-audio needs them.
