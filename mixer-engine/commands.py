@@ -56,6 +56,7 @@ import os
 import re
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote, unquote
@@ -742,10 +743,11 @@ class CommandEngine:
         if not snap:
             raise CommandError("no such snapshot")
         n = 0
-        for p, v in snap.get("values", {}).items():
-            if self.state.path_exists(p):
-                self.state.set(p, v)
-                n += 1
+        with self._session_load():
+            for p, v in snap.get("values", {}).items():
+                if self.state.path_exists(p):
+                    self.state.set(p, v)
+                    n += 1
         self._session_clean()       # as CMxRoot::setSnapshot
         log.info("Snapshot %r recalled: %d values", name, n)
         return n
@@ -756,6 +758,12 @@ class CommandEngine:
         dirty = getattr(self.d, "session_dirty", None)
         if dirty is not None:
             dirty.clear()
+
+    def _session_load(self):
+        """The sets of a load are not edits (no /Dirty blip before the
+        clear that follows it)."""
+        dirty = getattr(self.d, "session_dirty", None)
+        return dirty.suppress() if dirty is not None else nullcontext()
 
     def _snapshot_move(self, obj: str, params: dict):
         name = clean_name(params.get("name"))
@@ -1118,13 +1126,14 @@ class CommandEngine:
         the preamps and the monitor level, which stay the hardware's."""
         tree = self.state
         n = 0
-        for p, base in list(tree._base.items()):
-            if (not p.endswith("/value") or _VOLATILE.search(p)
-                    or _RE_PREAMP.match(p) or _MONITOR_LEVEL.search(p)):
-                continue
-            if tree.get_value(p) != base:
-                tree.set(p, base)
-                n += 1
+        with self._session_load():
+            for p, base in list(tree._base.items()):
+                if (not p.endswith("/value") or _VOLATILE.search(p)
+                        or _RE_PREAMP.match(p) or _MONITOR_LEVEL.search(p)):
+                    continue
+                if tree.get_value(p) != base:
+                    tree.set(p, base)
+                    n += 1
         name = ""
         if "name" in params:
             name = clean_name(params["name"])
@@ -1146,7 +1155,8 @@ class CommandEngine:
         values = {p: v for p, v in data["values"].items()
                   if isinstance(p, str) and p.endswith("/value")
                   and not _VOLATILE.search(p)}
-        n = self.apply_values(values)
+        with self._session_load():
+            n = self.apply_values(values)
         self._publish_session(name)
         self.clear_history()
         self._session_clean()       # LoadXml / SessionFileManager::Open

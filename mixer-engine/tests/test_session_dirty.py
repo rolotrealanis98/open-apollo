@@ -233,3 +233,22 @@ def test_helper_edit_mirrors_into_the_state_tree(tree):
     assert seen == [("/status/timeout_ms/value", 7000)]
     assert hw == [("/status/timeout_ms/value", 7000)]
     assert tree._dirty["/status/timeout_ms/value"] == 7000
+
+
+def test_a_load_does_not_blip_dirty(setup):
+    """The sets of a recall or an open are not edits: a clean session stays
+    clean without a true/false pair on the wire."""
+    daemon, tree, client, writer, writes = setup
+    daemon._session_ready = True
+    daemon._dispatch(client, 'post /SaveAsSnapshot {"name": "s"}')
+    daemon._dispatch(client, 'post /SaveSessionAs {"name": "a"}')
+    tree.set(FADER, -5.0)
+    daemon._dispatch(client, "post /SaveSession")
+    tree.set(FADER, -8.0)
+    daemon._dispatch(client, "post /SaveSession")
+    writer.frames.clear()
+    daemon._handle_set(client, Command("set", "/Snapshot/value", "s"))
+    daemon._dispatch(client, 'post /OpenSession {"name": "a"}')
+    daemon._dispatch(client, "post /NewSession")
+    assert dirty_pushes(writer) == []
+    assert tree.get_value("/Dirty/value") is False
