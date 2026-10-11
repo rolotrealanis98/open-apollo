@@ -247,14 +247,17 @@ check_kmsg() {   # check_kmsg NAME DIR
     kmsg_new > "$2/dmesg.txt"
     grep -E "$KBAD" "$2/dmesg.txt" > "$2/dmesg.all"
     # A correctable AER that names another device (e.g. a Thunderbolt
-    # port) is not the driver's: INFO.  Anything else, or the Apollo: FAIL.
+    # port) is not the driver's, and the settle restart after a rate change
+    # ("clock locked at rate index", period_irq_settle) is expected: INFO.
+    # Anything else, or an AER naming the Apollo: FAIL.
     : > "$2/dmesg.info"
     : > "$2/dmesg.bad"
     awk -v bdf="${APOLLO_BDF:-ua_apollo}" -v info="$2/dmesg.info" -v bad="$2/dmesg.bad" '
         /AER: Correctable/ && index($0, bdf) == 0 { print > info; next }
+        /period_irq: clock locked at rate index/ { print > info; next }
         { print > bad }' "$2/dmesg.all"
     if [ -s "$2/dmesg.info" ]; then
-        result INFO "$1" "kernel (other device): $(head -n 1 "$2/dmesg.info")"
+        result INFO "$1" "kernel (info): $(head -n 1 "$2/dmesg.info")"
     fi
     if [ -s "$2/dmesg.bad" ]; then
         result FAIL "$1" "kernel: $(head -n 1 "$2/dmesg.bad")"
