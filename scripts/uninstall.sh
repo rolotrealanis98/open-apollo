@@ -61,8 +61,9 @@ pw_run() {
 # Step 1: Stop and remove the mixer daemon (systemd user unit)
 if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
     pw_run systemctl --user disable --now ua-mixer-daemon.service 2>/dev/null || true
+    pw_run systemctl --user disable --now 'ua-mixer-daemon@*.service' 2>/dev/null || true
 fi
-rm -f /etc/systemd/user/ua-mixer-daemon.service
+rm -f /etc/systemd/user/ua-mixer-daemon.service /etc/systemd/user/ua-mixer-daemon@.service
 [ -n "$USER_HOME" ] && rm -f "$USER_HOME/.config/systemd/user/ua-mixer-daemon.service" \
     "$USER_HOME/.config/systemd/user/default.target.wants/ua-mixer-daemon.service"
 if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then

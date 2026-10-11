@@ -1,0 +1,27 @@
+# Mixer daemon for the Nth Apollo (instance = device index), for setups with
+# two or more Apollos attached.  Not enabled by the installer; ua-mixer-daemon.service
+# stays the single-device default (/dev/ua_apollo0).
+#
+#   systemctl --user enable --now ua-mixer-daemon@1.service
+#
+# Instance 1 serves /dev/ua_apollo1 on TCP 4810, helper 4820, WS 4821 (the
+# daemon adds 100 x index to its default ports), keeps its own state file and
+# announces itself over Bonjour as "<hostname> 2".  Point each Console /
+# ConsoleLink at the port of the device it should control.  Run instance 0 as
+# ua-mixer-daemon.service (or ua-mixer-daemon@0.service, not both).
+# Deployed by configs/deploy.sh to /etc/systemd/user/ (@MIXER_DIR@ replaced).
+[Unit]
+Description=Open Apollo mixer daemon for /dev/ua_apollo%i
+After=pipewire.service wireplumber.service
+Wants=pipewire.service
+ConditionPathExists=/dev/ua_apollo%i
+
+[Service]
+Type=simple
+WorkingDirectory=@MIXER_DIR@
+ExecStart=/usr/bin/python3 @MIXER_DIR@/ua_mixer_daemon.py --no-bonjour --device /dev/ua_apollo%i
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

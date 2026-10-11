@@ -148,27 +148,27 @@ class TestSampleRate:
                                                       monkeypatch):
         calls = []
         monkeypatch.setattr(hardware, "pipewire_force_rate",
-                            lambda r: calls.append(r) or False)
+                            lambda r, device=None: calls.append(r) or False)
         router.on_set("/SampleRate/value", 96000)
         assert calls == [96000]
         assert backend.driver_params == [(DRIVER_PARAM_SAMPLE_RATE, 96000)]
         assert DRIVER_PARAM_SAMPLE_RATE == 0
 
     def test_no_ioctl_when_pipewire_takes_it(self, router, backend, monkeypatch):
-        monkeypatch.setattr(hardware, "pipewire_force_rate", lambda r: True)
+        monkeypatch.setattr(hardware, "pipewire_force_rate", lambda r, device=None: True)
         router.on_set("/SampleRate/value", 96000)
         assert backend.driver_params == []
 
     @pytest.mark.parametrize("bad", [12345, "abc", None])
     def test_invalid_rate_never_reaches_hardware(self, router, backend,
                                                  monkeypatch, bad):
-        monkeypatch.setattr(hardware, "pipewire_force_rate", lambda r: False)
+        monkeypatch.setattr(hardware, "pipewire_force_rate", lambda r, device=None: False)
         router.on_set("/SampleRate/value", bad)
         assert backend.driver_params == []
 
     @pytest.mark.parametrize("rate", sorted(hardware.VALID_SAMPLE_RATES))
     def test_all_valid_rates(self, router, backend, monkeypatch, rate):
-        monkeypatch.setattr(hardware, "pipewire_force_rate", lambda r: False)
+        monkeypatch.setattr(hardware, "pipewire_force_rate", lambda r, device=None: False)
         router.on_set("/SampleRate/value", rate)
         assert backend.driver_params == [(0, rate)]
 

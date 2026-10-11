@@ -44,7 +44,7 @@ from hardware import (DRIVER_PARAM_SAMPLE_RATE, HardwareBackend,
                       preamp_db_to_tapered)
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
                       meter_channel)
-from bonjour import BonjourAnnouncer
+from bonjour import BonjourAnnouncer, _default_name
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
 try:
@@ -1788,6 +1788,29 @@ def find_device_map(device_type: int | None = None) -> Path | None:
     return None
 
 
+PORT_STRIDE = 100  # per-device-index offset for the default TCP/WS ports
+
+
+def device_index(path) -> int:
+    """N of a /dev/ua_apolloN node (symlinks resolved); 0 when unknown."""
+    if not path:
+        return 0
+    m = re_mod.search(r"ua_apollo(\d+)$", os.path.realpath(str(path)))
+    return int(m.group(1)) if m else 0
+
+
+def state_file_for(device_map: Path, index: int, serial: int | None = None) -> Path:
+    """Per-device state file.  /dev/ua_apollo0 keeps the historical
+    <map>.state.json name; other indexes get .devN (and the serial when the
+    driver reported one) so two Apollos of one model never share a file."""
+    stem = device_map.stem
+    if index:
+        stem += f".dev{index}"
+        if serial:
+            stem += f"-{serial:08x}"
+    return SCRIPT_DIR / "state" / f"{stem}.state.json"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="UA Mixer Engine daemon for Linux",
@@ -1798,25 +1821,35 @@ Examples:
   %(prog)s --no-hardware            Software-only mode (for testing)
   %(prog)s -v --port 4711           Verbose, alternate port
   %(prog)s --device-map custom.json Use custom device map
+
+Two or more Apollos: one daemon per device.  Ports default to the base
+port + 100 x the device index, so --device /dev/ua_apollo1 serves TCP 4810,
+helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
+--ws-port to override, and --name to tell the Bonjour entries apart.
 """)
     parser.add_argument("--device-map", "-m", type=Path,
                         help="Path to device map JSON")
     parser.add_argument("--host", default=DEFAULT_HOST,
                         help=f"Bind address (default: {DEFAULT_HOST})")
-    parser.add_argument("--port", "-p", type=int, default=DEFAULT_PORT,
-                        help=f"Mixer Engine TCP port (default: {DEFAULT_PORT})")
-    parser.add_argument("--helper-port", type=int, default=DEFAULT_HELPER_PORT,
-                        help=f"Mixer Helper TCP port (default: {DEFAULT_HELPER_PORT})")
+    parser.add_argument("--port", "-p", type=int, default=None,
+                        help=f"Mixer Engine TCP port (default: {DEFAULT_PORT} "
+                             f"+ {PORT_STRIDE} x device index)")
+    parser.add_argument("--helper-port", type=int, default=None,
+                        help=f"Mixer Helper TCP port (default: {DEFAULT_HELPER_PORT} "
+                             f"+ {PORT_STRIDE} x device index)")
     parser.add_argument("--no-helper", action="store_true",
                         help="Disable Mixer Helper TCP:4720 server")
     parser.add_argument("--device", "-d",
-                        help="Device path (default: auto-detect /dev/ua_apollo*)")
+                        help="Device node, e.g. /dev/ua_apollo1 (default: the first "
+                             "/dev/ua_apollo*). One daemon serves one Apollo: "
+                             "run one instance per device")
     parser.add_argument("--no-hardware", action="store_true",
                         help="Software-only mode (no hardware writes)")
     parser.add_argument("--safe-mode", action="store_true",
                         help="Enable safe mode (block unmapped DSP writes)")
-    parser.add_argument("--ws-port", type=int, default=DEFAULT_WS_PORT,
-                        help=f"WebSocket port for UA Connect (default: {DEFAULT_WS_PORT})")
+    parser.add_argument("--ws-port", type=int, default=None,
+                        help=f"WebSocket port for UA Connect (default: {DEFAULT_WS_PORT} "
+                             f"+ {PORT_STRIDE} x device index)")
     parser.add_argument("--no-ws", action="store_true",
                         help="Disable WebSocket server")
     parser.add_argument("--no-bonjour", action="store_true",
@@ -1842,6 +1875,7 @@ Examples:
     # Apollo model and load the device map that matches it.
     backend = None
     device_type = None
+    info = None
     if not args.no_hardware:
         backend = HardwareBackend(args.device, safe_mode=args.safe_mode)
         if backend.open():
@@ -1858,6 +1892,15 @@ Examples:
         else:
             log.warning("No hardware device found — running in software-only mode")
             backend = None
+
+    index = device_index(backend.device_path if backend else args.device)
+    serial = info.get("serial") if info else None
+    if args.port is None:
+        args.port = DEFAULT_PORT + PORT_STRIDE * index
+    if args.helper_port is None:
+        args.helper_port = DEFAULT_HELPER_PORT + PORT_STRIDE * index
+    if args.ws_port is None:
+        args.ws_port = DEFAULT_WS_PORT + PORT_STRIDE * index
 
     # Find device map (prefer one matching the attached device; --device-map wins)
     device_map = args.device_map or find_device_map(device_type)
@@ -1885,7 +1928,7 @@ Examples:
             log.debug("Set runtime value: %s = %r", rpath, rprops.get("value"))
 
     # Enable persistent state (saves modified values across restarts)
-    state_file = SCRIPT_DIR / "state" / f"{device_map.stem}.state.json"
+    state_file = state_file_for(device_map, index, serial)
     state_file.parent.mkdir(exist_ok=True)
     state.enable_persistence(state_file)
 
@@ -1914,7 +1957,8 @@ Examples:
     # Initialize software metering (through PipeWire when it holds the
     # Apollo, else ALSA capture)
     if not args.no_hardware:
-        metering = make_meter(args.alsa_device, device_type)
+        metering = make_meter(args.alsa_device, device_type,
+                              backend.device_path if backend else None)
         metering.start()
     else:
         metering = NullMeter()
@@ -1942,7 +1986,9 @@ Examples:
     # Start Bonjour announcement
     bonjour = None
     if not args.no_bonjour:
-        bonjour = BonjourAnnouncer(port=args.port, name=args.name)
+        bonjour = BonjourAnnouncer(
+            port=args.port,
+            name=args.name or (f"{_default_name()} {index + 1}" if index else None))
         bonjour.start()
 
     log.info("Starting ua-mixer-daemon...")
@@ -1951,8 +1997,8 @@ Examples:
     log.info("  Hardware: %s", "connected" if hw_router else "software-only")
     log.info("  Metering: %s", type(metering).__name__ if not args.no_hardware
              else "disabled")
-    log.info("  TCP:4710 (Mixer Engine): tcp://%s:%d", args.host, args.port)
-    log.info("  TCP:4720 (Mixer Helper): %s",
+    log.info("  TCP (Mixer Engine): tcp://%s:%d", args.host, args.port)
+    log.info("  TCP (Mixer Helper): %s",
              f"tcp://{args.host}:{helper_port}" if helper_port else "disabled")
     log.info("  WS (UA Connect): %s",
              f"ws://{args.host}:{args.ws_port}" if ws_server else "disabled")

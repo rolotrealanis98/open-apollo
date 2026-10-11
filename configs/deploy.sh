@@ -133,6 +133,9 @@ if [ -f "$UNIT_SRC" ] && [ -f "$MIXER_DIR/ua_mixer_daemon.py" ]; then
     mkdir -p /etc/systemd/user
     sed "s|@MIXER_DIR@|$MIXER_DIR|g" "$UNIT_SRC" > /etc/systemd/user/ua-mixer-daemon.service
     echo "  -> /etc/systemd/user/ua-mixer-daemon.service (runs $MIXER_DIR)"
+    # Per-device template for a second Apollo (not enabled automatically)
+    sed "s|@MIXER_DIR@|$MIXER_DIR|g" "$SCRIPT_DIR/systemd/ua-mixer-daemon@.service" \
+        > /etc/systemd/user/ua-mixer-daemon@.service
 else
     echo "  Warning: mixer daemon unit or script not found, skipping"
 fi

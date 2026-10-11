@@ -370,7 +370,7 @@ CLOCK_SOURCE_MAP = {
 VALID_SAMPLE_RATES = {44100, 48000, 88200, 96000, 176400, 192000}
 
 
-def pipewire_force_rate(rate: int) -> bool:
+def pipewire_force_rate(rate: int, device: str | None = None) -> bool:
     """Ask the PipeWire that holds the Apollo's streams to run at `rate`.
 
     Sets clock.force-rate, or clears it (0) when `rate` is PipeWire's own
@@ -379,7 +379,7 @@ def pipewire_force_rate(rate: int) -> bool:
     """
     from metering import apollo_stream_owner, find_apollo_card, pipewire_env
 
-    card = find_apollo_card()
+    card = find_apollo_card(device)
     owner = apollo_stream_owner(card) if card is not None else None
     if not owner or owner[1] != "pipewire":
         return False
@@ -2488,7 +2488,8 @@ class HardwareRouter:
             # its own rate and undoes a clock change made under it.  When
             # that's PipeWire, ask it to run its graph at this rate instead,
             # as Console changes the system rate on macOS.
-            if pipewire_force_rate(rate):
+            if pipewire_force_rate(
+                    rate, device=getattr(self.backend, "device_path", None)):
                 log.info("HW DRV: SampleRate → %d Hz (PipeWire "
                          "clock.force-rate)", rate)
                 return

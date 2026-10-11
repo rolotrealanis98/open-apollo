@@ -22,6 +22,7 @@ class FakeBackend:
 
     def __init__(self, connected=True):
         self.connected = connected
+        self.device_path = None
         self.mixer_params = []       # (channel_type, channel_idx, param_id, value)
         self.bus_params = []         # (bus_id, sub_param, value)
         self.driver_params = []      # (param_id, value)

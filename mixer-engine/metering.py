@@ -262,15 +262,26 @@ class AlsaMeter:
             self._clip_times[c] = now
 
 
-def find_apollo_card():
-    """ALSA card number of the first ua_apollo device, or None."""
+def find_apollo_card(device=None):
+    """ALSA card number of a ua_apollo device, or None.
+
+    With `device` (a /dev/ua_apolloN node) the card that hangs off the same
+    PCI device as that node; without, the first ua_apollo card.
+    """
+    pci = None
+    if device:
+        node = os.path.basename(os.path.realpath(device))
+        pci = os.path.realpath(f"/sys/class/ua_apollo/{node}/device")
     for card in sorted(glob.glob("/sys/class/sound/card*")):
         driver = os.path.realpath(os.path.join(card, "device", "driver"))
-        if os.path.basename(driver) == "ua_apollo":
-            try:
-                return int(card.rsplit("card", 1)[1])
-            except ValueError:
-                pass
+        if os.path.basename(driver) != "ua_apollo":
+            continue
+        if pci and os.path.realpath(os.path.join(card, "device")) != pci:
+            continue
+        try:
+            return int(card.rsplit("card", 1)[1])
+        except ValueError:
+            pass
     return None
 
 
@@ -519,7 +530,7 @@ class ReadbackMeter(AlsaMeter):
                 self._update_channel(c, max(SILENCE_DB, db), clip, now)
 
 
-def make_meter(alsa_device=None, device_type=None):
+def make_meter(alsa_device=None, device_type=None, device=None):
     """The meter that can work right now.
 
     ReadbackMeter on the Apollo x4 (device type 0x1F), whose readback meter
@@ -529,7 +540,7 @@ def make_meter(alsa_device=None, device_type=None):
     """
     if device_type == 0x1F and not alsa_device:
         return ReadbackMeter()
-    card = find_apollo_card()
+    card = find_apollo_card(device)
     if card is not None and not alsa_device:
         owner = apollo_stream_owner(card)
         if owner and owner[1] == "pipewire":
@@ -537,6 +548,8 @@ def make_meter(alsa_device=None, device_type=None):
             if env and read_record_channel_ids(card):
                 return PipeWireMeter(card, env)
     ids = read_record_channel_ids(card) if card is not None else []
+    if card is not None and not alsa_device:
+        alsa_device = f"hw:{card},0"
     meter = AlsaMeter(device=alsa_device, capture_channels=len(ids) or 22)
     meter.channel_ids = ids
     return meter
