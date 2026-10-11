@@ -252,3 +252,22 @@ class TestDispatch:
         out = MixerDaemon._coerce_params({"message_id": "5", "other": "x",
                                           "func_id": "bad"})
         assert out == {"message_id": 5, "other": "x", "func_id": "bad"}
+
+
+class TestMonitorLevelCompanion:
+    def test_db_set_updates_tapered(self, daemon, tree):
+        from hardware import encode_monitor_level, monitor_hw_to_tapered
+        c = FakeClient()
+        daemon._dispatch(c, "set /devices/0/outputs/18/CRMonitorLevel/value -40")
+        want = monitor_hw_to_tapered(encode_monitor_level(-40.0))
+        assert tree.get_value(
+            "/devices/0/outputs/18/CRMonitorLevelTapered/value") == want
+
+    def test_tapered_set_updates_db(self, daemon, tree):
+        from hardware import monitor_tapered_to_hw
+        c = FakeClient()
+        daemon._dispatch(
+            c, "set /devices/0/outputs/18/CRMonitorLevelTapered/value 0.5")
+        want = (monitor_tapered_to_hw(0.5) - 192) / 2.0
+        assert tree.get_value(
+            "/devices/0/outputs/18/CRMonitorLevel/value") == want

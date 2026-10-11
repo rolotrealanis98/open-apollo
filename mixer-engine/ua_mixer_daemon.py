@@ -1384,6 +1384,28 @@ class MixerDaemon:
                         client.send(encode_response_bytes(
                             f"{base}/GainTapered/value", tapered))
 
+        # Monitor level SETs: keep the dB and tapered values in step (as
+        # for gain), or a later readback push to the companion's stale
+        # value is dropped as unchanged.
+        m = re_mod.match(r'^(/devices/0/outputs/\d+)/'
+                         r'(CRMonitorLevelTapered|CRMonitorLevel)(?:/value)?$',
+                         path)
+        if m:
+            from hardware import (encode_monitor_level,
+                                  monitor_hw_to_tapered, monitor_tapered_to_hw)
+            base, ctrl = m.groups()
+            try:
+                v = float(cmd.value)
+            except (TypeError, ValueError):
+                v = None
+            if v is not None and ctrl == "CRMonitorLevel":
+                self._push_to_clients(f"{base}/CRMonitorLevelTapered",
+                                      monitor_hw_to_tapered(
+                                          encode_monitor_level(v)))
+            elif v is not None:
+                self._push_to_clients(f"{base}/CRMonitorLevel",
+                                      (monitor_tapered_to_hw(v) - 192) / 2.0)
+
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
             self._send_response(client, path, cmd.value, resp_params)
