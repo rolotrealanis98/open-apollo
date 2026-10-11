@@ -3548,32 +3548,59 @@ int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
  * @bus_idx: bus group index (0-6)
  * @enable: 1=enable, 0=disable
  *
- * Kext RE: CUAD2DeviceMixer::SetBusEnable sends ring buffer command
- * {0x001C0003, bus_idx, enable, 0} to EVERY DSP (not just DSP 0).
- * This enables audio routing paths through the DSP fabric.
+ * Kext RE: CUAD2DeviceMixer::SetBusEnable keeps a 7-entry cache that starts
+ * at 1 (all buses enabled) and, only when the requested state differs,
+ * sends {0x001C0003, bus_idx, enable, 0} to EVERY DSP.  Same here:
+ * ua->bus_disabled_mask holds the buses that are off (zero = all on, the
+ * kext's initial state), so enabling a bus that is already on sends
+ * nothing.  The cache is updated only once the command reached a ring.
  */
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable)
 {
-	unsigned int dsp;
+	unsigned int dsp, sent = 0;
 	int ret, err = 0;
+	bool on = !!enable;
 
 	if (bus_idx > 6)
 		return -EINVAL;
 
+	if (on == !(ua->bus_disabled_mask & BIT(bus_idx)))
+		return 0;
+
 	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
 		if (!ua->dsp[dsp].rings_allocated)
 			continue;
-		ret = ua_dsp_ring_send_raw(ua, dsp,
-					   0x001C0003, bus_idx, enable, 0);
+		ret = ua_dsp_ring_send_raw(ua, dsp, UA_DSP_CMD_BUS_ENABLE,
+					   bus_idx, on, 0);
 		if (ret) {
 			dev_warn(&ua->pdev->dev,
 				 "bus_enable ring full (dsp=%u bus=%u)\n",
 				 dsp, bus_idx);
 			err = ret;
+		} else {
+			sent++;
 		}
 	}
 
+	if (!err && sent) {
+		if (on)
+			ua->bus_disabled_mask &= ~BIT(bus_idx);
+		else
+			ua->bus_disabled_mask |= BIT(bus_idx);
+	}
+
 	return err;
+}
+
+/**
+ * ua_dsp_get_bus_enable_mask - Bus enable state as the kext's GetBusEnabled
+ * @ua: device
+ *
+ * Returns the mask of enabled buses, bit n = bus n (n < 7).
+ */
+u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua)
+{
+	return ~ua->bus_disabled_mask & 0x7f;
 }
 
 /**

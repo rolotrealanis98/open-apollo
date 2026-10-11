@@ -2208,11 +2208,12 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 	case 0:  /* DSP bus enable (ch_type=0) */
 		/*
 		 * Kext RE: SetBusEnable(bus_idx=ch_idx, enable=param_id).
-		 * Sends ring buffer cmd 0x1C to ALL DSPs.
+		 * Sends ring buffer cmd 0x1C to ALL DSPs, but only when the
+		 * state differs from the cache (which starts all-enabled).
 		 * Note: param_id IS the enable value; value field ignored.
 		 *
-		 * macOS init sends: bus 1,2 enable=1 (S/PDIF, ADAT)
-		 *                   bus 5,6 enable=1 (CUE routing)
+		 * The Mixer Engine asks for bus 1,2,5,6 enable=1 at start;
+		 * on a fresh mixer those change nothing and send nothing.
 		 */
 		ret = ua_dsp_set_bus_enable(ua, param.channel_idx,
 					    param.param_id);
@@ -2260,6 +2261,11 @@ static long ua_ioctl_get_mixer_param(struct ua_device *ua, unsigned long arg)
 	mutex_lock(&ua->lock);
 
 	switch (param.channel_type) {
+	case 0:  /* GetBusEnabled: mask of enabled buses, bit n = bus n (n < 7) */
+		param.value = ua_dsp_get_bus_enable_mask(ua);
+		ret = 0;
+		break;
+
 	case 1:  /* Preamp → CLI query (refused: see ua_cli_send_locked()) */
 		if (param.channel_idx >= ua->audio.num_preamps ||
 		    param.channel_idx >= UA_MAX_PREAMP_CH) {

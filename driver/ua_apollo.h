@@ -1202,6 +1202,7 @@ struct ua_device {
 	bool mixer_rb_seen;                    /* DSP produced at least one readback */
 	u32 mixer_rb_data[UA_MIXER_RB_WORDS];  /* Cached readback (filled by service loop) */
 	u32 mixer_rb_status;                   /* Cached readback status */
+	u32 bus_disabled_mask;                 /* SetBusEnable cache: bit n = bus n off (0 = all on, as the kext starts) */
 
 	/*
 	 * Character device.  chardev owns this struct: its release frees it
@@ -1505,6 +1506,7 @@ int ua_dsp_send_routing(struct ua_device *ua);
 int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 			 u32 param, u32 side, u32 value_u32);
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
+u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua);
 int ua_dsp_send_rate_ack(struct ua_device *ua, u32 rate);
 void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
