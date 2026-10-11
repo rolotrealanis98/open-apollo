@@ -3625,9 +3625,11 @@ static bool ua_mixer_dsp_alive(struct ua_device *ua)
 	seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
 	mixer_state = ua_read(ua, UA_REG_MIXER_BASE);
 
+	/* DSP 0's boot word (+0x1A4, the kext's ready word) and +0x1AC */
 	dev_info(&pdev->dev,
-		 "pre-init: SEQ_WR=%u SEQ_RD=%u mixer_state=0x%08x\n",
-		 seq_wr, seq_rd, mixer_state);
+		 "pre-init: SEQ_WR=%u SEQ_RD=%u mixer_state=0x%08x boot=0x%08x/0x%08x\n",
+		 seq_wr, seq_rd, mixer_state, ua_read(ua, 0x1A4),
+		 ua_read(ua, 0x1AC));
 
 	if (!(seq_rd > 0 && seq_rd == seq_wr))
 		return false;
