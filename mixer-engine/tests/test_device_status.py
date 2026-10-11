@@ -14,7 +14,8 @@ from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_TRANSPORT_RUNNING,
                       UA_FEAT_SYSTEM_INFO, clock_source_names,
                       pcie_link_below_minimum, pcie_link_text)
 from test_driver_features import FakeDriver
-from ua_mixer_daemon import MixerDaemon, apply_runtime_properties
+from ua_mixer_daemon import (MixerDaemon, apply_runtime_properties,
+                             firmware_problem, firmware_text)
 
 MASK_X4 = (1 << 12) | (1 << 0)               # Internal + S/PDIF
 MASK_ALL = (1 << 12) | (1 << 0) | (1 << 5) | (1 << 7)
@@ -221,6 +222,97 @@ class TestFirmwareMajor:
     def test_no_info_is_silent(self, daemon, caplog):
         daemon._check_firmware(None)
         assert not caplog.records
+
+
+X4_FW = 0x0b0fc9b3          # titan: BAR0 0x0008 = 11.15.51635
+
+
+class FwDriver(ExtDriver):
+    def ioctl(self, fd, req, buf):
+        out = super().ioctl(fd, req, buf)
+        if req == hardware.UA_IOCTL_GET_SYSTEM_INFO:
+            out = out[:132] + struct.pack('<2I', X4_FW, 0x0322007a) + \
+                bytes(8)
+            assert len(out) == 148
+        return out
+
+
+class TestFirmwareRelease:
+    def test_decoded_with_the_feature_bit(self, monkeypatch):
+        FwDriver(monkeypatch, UA_FEAT_SYSTEM_INFO | UA_FEAT_SYSINFO_EXT |
+                 hardware.UA_FEAT_FW_RELEASE)
+        be = HardwareBackend()
+        be.fd, be.connected = 3, True
+        info = be.get_system_info()
+        assert info["fw_release"] == X4_FW
+        assert info["dev_info"] == 0x0322007a
+        assert info["fw_rate_mask"] == 0x7E
+
+    def test_ignored_without_the_feature_bit(self, monkeypatch):
+        FwDriver(monkeypatch, UA_FEAT_SYSTEM_INFO | UA_FEAT_SYSINFO_EXT)
+        be = HardwareBackend()
+        be.fd, be.connected = 3, True
+        assert "fw_release" not in be.get_system_info()
+
+    def test_feature_bit_value(self):
+        assert hardware.UA_FEAT_FW_RELEASE == 1 << 14
+
+    def test_text(self):
+        assert firmware_text(X4_FW) == "11.15.51635"
+
+    def test_x4_passes(self):
+        i = info(fw_release=X4_FW, public_type=0x1A, dev_info=0x0322007a)
+        assert firmware_problem(i, "Freud") is None
+
+    def test_wrong_major_for_the_class(self):
+        i = info(fw_release=X4_FW, public_type=0x1A)
+        assert "major 11" in firmware_problem(i, "Peyton")
+        nine = info(fw_release=0x09010000, public_type=0x1A)
+        assert "needs 11" in firmware_problem(nine, "Freud")
+
+    def test_unknown_class_takes_either_major(self):
+        assert firmware_problem(info(fw_release=X4_FW, public_type=0x1A),
+                                None) is None
+        assert firmware_problem(info(fw_release=0x07000000,
+                                     public_type=0x1A), None)
+
+    def test_unchecked_types_and_words(self):
+        # Satellite (0x04) and unresolved types are not checked; neither
+        # is a missing or all-ones word
+        assert firmware_problem(info(fw_release=0x07000000,
+                                     public_type=0x04), "Freud") is None
+        assert firmware_problem(info(fw_release=0x07000000,
+                                     public_type=0xFFFFFFFF), "Freud") is None
+        assert firmware_problem(info(fw_release=0xFFFFFFFF), "Freud") is None
+        assert firmware_problem(info(), "Freud") is None
+
+    @pytest.mark.parametrize("cls,dev,ok", [
+        ("Rene8", 0x00030000, True), ("Rene8", 0x00020000, False),
+        ("Rene4G2", 0x00030000, True),
+        ("Rene16", 0x00040000, True), ("Rene16", 0x00030000, False),
+        ("Rene16G2", 0x00080000, True),
+        ("ReneLax", 0x00060000, True), ("ReneLax", 0x00050000, False),
+        ("Rene2", 0xFFFFFFFF, True)])
+    def test_rene_minimums(self, cls, dev, ok):
+        i = info(fw_release=0x0b000000, public_type=0x16, dev_info=dev)
+        assert (firmware_problem(i, cls) is None) is ok
+
+    def test_check_logs_the_version(self, daemon, caplog):
+        with caplog.at_level(logging.INFO, logger="ua-mixer-daemon"):
+            daemon._check_firmware(info(fw_release=X4_FW, public_type=0x1A,
+                                        device_type=0x1F, fw_version=0x1c00))
+        msgs = [r.getMessage() for r in caplog.records]
+        assert "Firmware 11.15.51635" in msgs
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_check_warns_once_on_a_wrong_major(self, daemon, caplog):
+        bad = info(fw_release=0x09000000, public_type=0x1A,
+                   device_type=0x1F)          # x4 descriptor: Freud, 11
+        with caplog.at_level(logging.WARNING, logger="ua-mixer-daemon"):
+            daemon._check_firmware(bad)
+            daemon._check_firmware(bad)
+        warned = [r for r in caplog.records if "9.00.000" in r.getMessage()]
+        assert len(warned) == 1
 
 
 class TestAudioStreaming:

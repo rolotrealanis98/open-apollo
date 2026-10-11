@@ -218,6 +218,17 @@ _SYSTEM_INFO_EXT = ("pcie_link_speed", "pcie_link_width", "clock_src_mask",
                     "fw_rate_mask")
 _SYSTEM_INFO_EXT_OFF = 64 + 4 * len(_SYSTEM_INFO_TAIL)
 
+# ABI 1.4 (UA_FEAT_FW_RELEASE): two more u32 after fw_rate_mask, then
+# reserved[2]; the size stays 148.
+#   fw_release  BAR0 0x0008, the firmware version word UA's driver reports
+#               (major [31:24], minor [23:16], build [15:0]; x4 0x0b0fc9b3
+#               = 11.15.51635).  fw_version is DSP 0's status word.
+#   dev_info    BAR0 0x01AC for the types UA's driver reads it for, else
+#               0xFFFFFFFF; [19:16] feed the per-device firmware checks
+UA_FEAT_FW_RELEASE = 1 << 14
+_SYSTEM_INFO_FW = ("fw_release", "dev_info")
+_SYSTEM_INFO_FW_OFF = _SYSTEM_INFO_EXT_OFF + 4 * len(_SYSTEM_INFO_EXT)
+
 _FW_LOAD_SIZE = 16
 UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
 UA_IOCTL_DSP_CONNECT = _IO(UA_IOCTL_MAGIC, 0x51)
@@ -2089,6 +2100,9 @@ class HardwareBackend:
         if self.has_feature(UA_FEAT_SYSINFO_EXT):
             info.update(zip(_SYSTEM_INFO_EXT, struct.unpack_from(
                 '<4I', raw, _SYSTEM_INFO_EXT_OFF)))
+        if self.has_feature(UA_FEAT_FW_RELEASE):
+            info.update(zip(_SYSTEM_INFO_FW, struct.unpack_from(
+                '<2I', raw, _SYSTEM_INFO_FW_OFF)))
         # NUL-padded after the first NUL, unterminated when all 16 are used
         info["serial"] = raw[48:64].split(b'\0', 1)[0].decode(
             'ascii', 'replace').strip()
