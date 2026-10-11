@@ -17,7 +17,8 @@ choice, not the engine's.
 
 What is implemented needs no UA file format:
 
-    Identify                       blink the front panel (OP 0x1d), then off
+    Identify                       flash the front panel red/green as the
+                                   Mixer Engine does (OP 0x1d), then off
     ClearClips, ClearSolos         reset clip holds; clear every Solo
     CopyChannel, PasteChannel,     a channel's property values, held in memory
     CopyToSends
@@ -77,9 +78,14 @@ def refused_set(path: str, value: Any) -> bool:
         (value is None or str(value) == "")
 
 IDENTIFY_PATH = "/devices/0/Identify/value"
-IDENTIFY_SECONDS = 5.0
 IDENTIFY_MAX_SECONDS = 30.0
-IDENTIFY_BLINK = 0.5
+# The Mixer Engine's IdentifyDevice sequence (_gIdentifySequence, apollo-
+# linux kext-re-rows §4): {OP 0x1d value, ms}.  On the x4 1 lights the
+# whole front panel red, 2 green, 3 and 0 leave it normal (titan
+# 2026-10-11), so it flashes red/green for about 1.4 s
+IDENTIFY_SEQUENCE = ((3, 250), (1, 125), (2, 250), (1, 125), (3, 250),
+                     (1, 125), (2, 250), (1, 1), (0, 1))
+IDENTIFY_SEQUENCE_SECONDS = sum(ms for _, ms in IDENTIFY_SEQUENCE) / 1000.0
 
 UNDO_MAX = 50           # batches kept
 UNDO_GAP = 0.5          # seconds: SETs closer than this from one client are one batch
@@ -277,6 +283,7 @@ class CommandEngine:
         self._identify = None       # pending timer handle
         self._identify_end = 0.0
         self._identify_on = False
+        self._identify_step = 0
         self._handlers: dict[str, Callable] = {
             "identify": self._identify_cmd,
             "clearclips": self._clear_clips,
@@ -499,17 +506,24 @@ class CommandEngine:
             except Exception:
                 pass
 
-    def _write_identify(self, on: bool) -> bool:
+    def _write_identify(self, value: int) -> bool:
         router = self.router
         if router is None or router.paused:
             return False
-        self._identify_on = on
-        # the router's monitor-param path: OP 0x1d, the driver masks the
-        # value to 3 bits
-        router.on_set(IDENTIFY_PATH, 1 if on else 0)
+        self._identify_on = bool(value)
+        # OP 0x1d through the router's monitor-param path; the driver
+        # masks the value to 3 bits
+        set_identify = getattr(router, "set_identify", None)
+        if callable(set_identify):
+            set_identify(value)
+        else:
+            router.on_set(IDENTIFY_PATH, 1 if value else 0)
         return True
 
     def _identify_cmd(self, obj: str, params: dict):
+        """post /Identify: the Mixer Engine's red/green sequence once, or
+        repeated for {"seconds": N}; {"blink": false} holds red for N s;
+        {"off": true} stops."""
         router = self.router
         if router is None or not router.backend.connected or router.paused:
             raise CommandError("no device")
@@ -517,28 +531,37 @@ class CommandEngine:
             self.cancel_identify(write=True)
             return None
         try:
-            secs = float(params.get("seconds", IDENTIFY_SECONDS))
+            secs = float(params.get("seconds", IDENTIFY_SEQUENCE_SECONDS))
         except (TypeError, ValueError):
             raise CommandError("seconds")
-        secs = max(0.5, min(IDENTIFY_MAX_SECONDS, secs))
         self.cancel_identify(write=False)
-        blink = _bool(params.get("blink"), True)
+        if not _bool(params.get("blink"), True):
+            secs = max(0.5, min(IDENTIFY_MAX_SECONDS, secs))
+            self._identify_end = self.clock() + secs
+            self._write_identify(1)
+            self._identify = self._schedule(secs, self._identify_tick)
+            self._identify_step = len(IDENTIFY_SEQUENCE)
+            return None
+        # at least one whole sequence, as the Mixer Engine always runs it
+        secs = max(IDENTIFY_SEQUENCE_SECONDS,
+                   min(IDENTIFY_MAX_SECONDS, secs))
         self._identify_end = self.clock() + secs
-        self._write_identify(True)
-        self._identify = self._schedule(
-            IDENTIFY_BLINK if blink else secs, self._identify_tick)
+        self._identify_step = 0
+        self._identify_tick()
         return None
 
     def _identify_tick(self):
         self._identify = None
         if self.clock() >= self._identify_end - 1e-3:
-            self._write_identify(False)
+            if self._identify_on:
+                self._write_identify(0)
             return
-        remaining = self._identify_end - self.clock()
-        # toggle, but never overshoot the end
-        self._write_identify(not self._identify_on)
-        self._identify = self._schedule(
-            min(IDENTIFY_BLINK, max(0.01, remaining)), self._identify_tick)
+        if self._identify_step >= len(IDENTIFY_SEQUENCE):
+            self._identify_step = 0
+        value, ms = IDENTIFY_SEQUENCE[self._identify_step]
+        self._identify_step += 1
+        self._write_identify(value)
+        self._identify = self._schedule(ms / 1000.0, self._identify_tick)
 
     def cancel_identify(self, write: bool = True):
         self._cancel(self._identify)

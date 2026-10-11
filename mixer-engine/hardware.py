@@ -2709,6 +2709,13 @@ class HardwareRouter:
         mixer that may refuse or misapply them."""
         return getattr(self.backend, "gate_unknown_kind", False) is True
 
+    def set_identify(self, value: int):
+        """OP 0x1d (Identify) with a raw value: the Mixer Engine's sequence
+        uses 3, 1, 2 and 0 (x4: 1 red, 2 green, 3 and 0 normal)."""
+        log.info("HW MONITOR: Identify → %d (param=0x1d, ch_idx=0)", value)
+        self.backend.set_mixer_param(MONITOR_CHANNEL_TYPE, 0,
+                                     MONITOR_PARAM["Identify"], value & 7)
+
     def aux_count(self) -> int:
         """AUX buses in the loaded map (x4: 2); 2 without a state tree."""
         if self.state_tree is None:

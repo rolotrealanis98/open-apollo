@@ -227,18 +227,39 @@ def identify_writes(be):
 
 
 class TestIdentify:
-    def test_blinks_then_off(self, stack):
-        ok(stack, "/Identify", {"seconds": 2})
-        be = stack.be
-        assert identify_writes(be) == [1]
+    SEQ = [v for v, _ in cmdmod.IDENTIFY_SEQUENCE]
+
+    def run_out(self, stack, limit=40):
         loop = stack.commands.scheduler
-        for _ in range(8):
+        for _ in range(limit):
             if not loop.timers:
                 break
             loop.fire()
-        w = identify_writes(be)
-        assert w[0] == 1 and w[-1] == 0
-        assert w == [1, 0, 1, 0, 0]    # toggles every 0.5 s, final off at 2 s
+
+    def test_the_mixer_engine_sequence_once(self, stack):
+        ok(stack, "/Identify")
+        self.run_out(stack)
+        # 3,1,2,1,3,1,2,1,0 (x4: 1 red, 2 green), nothing after the 0
+        assert identify_writes(stack.be) == self.SEQ
+
+    def test_sequence_holds(self, stack):
+        ok(stack, "/Identify")
+        loop = stack.commands.scheduler
+        holds = []
+        while loop.timers:
+            holds.append(round(loop.timers[0].delay * 1000))
+            loop.fire()
+        # the last 1 ms step may be cut by the end time; the 0 still goes out
+        want = [ms for _, ms in cmdmod.IDENTIFY_SEQUENCE]
+        assert len(holds) >= len(want) - 1 and holds == want[:len(holds)]
+        assert identify_writes(stack.be)[-1] == 0
+
+    def test_seconds_repeat_the_sequence(self, stack):
+        ok(stack, "/Identify", {"seconds": 3})
+        self.run_out(stack, limit=60)
+        w = identify_writes(stack.be)
+        assert w[:len(self.SEQ)] == self.SEQ
+        assert len(w) > len(self.SEQ) and w[-1] == 0
 
     def test_ends_with_off_even_when_timers_run_late(self, stack):
         ok(stack, "/devices/0/Identify", {"seconds": 1})
@@ -292,7 +313,8 @@ class TestIdentify:
         monkeypatch.setattr(stack.hw_router, "on_set",
                             lambda p, v: (seen.append((p, v)), orig(p, v)))
         ok(stack, "/Identify")
-        assert seen[0] == ("/devices/0/Identify/value", 1)
+        # the raw value goes out (set_identify), not a bool through on_set
+        assert identify_writes(stack.be)[0] == 3
 
     def test_pause_ends_a_running_blink_first(self, stack):
         ok(stack, "/Identify", {"seconds": 5})
