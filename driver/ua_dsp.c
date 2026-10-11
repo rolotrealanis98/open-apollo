@@ -4039,7 +4039,13 @@ void ua_dsp_flush_bus_params(struct ua_device *ua)
  * transport restart.  Bus coefficients from the mixer daemon will fill
  * the coefficient blocks afterward.
  *
- * Returns 0 on success, negative errno on failure.
+ * Nothing calls this at present (no connect path sends the module
+ * sequence); it is kept for the multichannel-capture experiments.
+ *
+ * Returns 0 on success, -EBUSY when the ring has no room for the
+ * sequence, -ETIMEDOUT when the DSP did not consume it (its DMA page is
+ * then parked, see ua_dsp_orphan_dma()), another negative errno on
+ * failure.
  */
 int ua_dsp_configure_modules(struct ua_device *ua)
 {
@@ -4050,6 +4056,7 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 	struct ua_ring_entry ent;
 	const struct ua_module_addrs *mod;
 	unsigned int i, j;
+	int ret = 0;
 
 	if (!ds->rings_allocated) {
 		dev_warn(&ua->pdev->dev, "module_cfg: DSP 0 rings not ready\n");
@@ -4064,8 +4071,10 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 
 	/*
 	 * Allocate a single DMA page for all module payloads.
-	 * Layout: 6 modules × (header at +0x00, I/O desc at +0x40)
-	 * each in a 128-byte slot = 768 bytes total + zeros at offset 0.
+	 * Layout: a zero slot at offset 0 (the source of the header-area
+	 * clears below), then 6 modules × (header at +0x00, I/O desc at
+	 * +0x40) in 256-byte slots, and the extended wiring block at the
+	 * end of the page.
 	 */
 	dma_page = dma_alloc_coherent(&ua->pdev->dev, UA_PCIE_PAGE_SIZE,
 				      &dma_addr, GFP_KERNEL);
@@ -4075,13 +4084,30 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 
 	/*
 	 * Build DMA payloads for all 6 modules.
-	 * Slot layout per module (128 bytes each):
+	 * Slot layout per module (256 bytes each):
 	 *   +0x00: 9-dword header (36 bytes)
 	 *   +0x40: I/O descriptor (up to 88 bytes = 22 dwords)
+	 *
+	 * The slot was 128 bytes: module 0's 22-dword descriptor at +0x40
+	 * runs to +0x98 (152), so module 1's header overwrote its last six
+	 * words (the biquad coefficients) before the page was sent.  The
+	 * checks below keep every template inside its slot, the slots off
+	 * the extended wiring block, and the zero-source reads inside the
+	 * zero slot.
 	 */
-#define MOD_SLOT_SIZE	128
+#define MOD_SLOT_SIZE	256
 #define MOD_HDR_OFF	0x00
 #define MOD_IO_OFF	0x40
+	BUILD_BUG_ON(MOD_HDR_OFF + sizeof(ua_mod_hdr_template) > MOD_IO_OFF);
+	BUILD_BUG_ON(MOD_IO_OFF + sizeof(ua_mod0_io_template) > MOD_SLOT_SIZE);
+	BUILD_BUG_ON(MOD_IO_OFF + sizeof(ua_mod_code_io_template) >
+		     MOD_SLOT_SIZE);
+	BUILD_BUG_ON(MOD_IO_OFF + sizeof(ua_mod_passthru_io_template) >
+		     MOD_SLOT_SIZE);
+	BUILD_BUG_ON(MOD_IO_OFF + sizeof(ua_mod5_io_template) > MOD_SLOT_SIZE);
+	BUILD_BUG_ON((UA_MODULE_COUNT + 1) * MOD_SLOT_SIZE >
+		     UA_PCIE_PAGE_SIZE - sizeof(ua_mod_extended_wiring));
+	BUILD_BUG_ON(15 * sizeof(u32) > MOD_SLOT_SIZE);	/* zero-source reads */
 
 	for (i = 0; i < UA_MODULE_COUNT; i++) {
 		u32 *hdr, *io;
@@ -4135,6 +4161,7 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 		dev_warn(&ua->pdev->dev,
 			 "module_cfg: ring too full (pos=%u wr=%u cap=%u)\n",
 			 ds->cmd.hw_pos, ds->cmd.write_ptr, ds->cmd.capacity);
+		ret = -EBUSY;
 		goto out_free;
 	}
 
@@ -4339,7 +4366,7 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 		/* DMA refs into dma_page may still be fetched */
 		ua_dsp_orphan_dma(ua, dma_page, dma_addr, UA_PCIE_PAGE_SIZE,
 				  &ds->cmd, NULL);
-		return 0;
+		return -ETIMEDOUT;
 	}
 	dev_dbg(&ua->pdev->dev,
 		"module_cfg: DSP consumed all entries (pos=%u)\n",
@@ -4348,7 +4375,7 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 out_free:
 	dma_free_coherent(&ua->pdev->dev, UA_PCIE_PAGE_SIZE,
 			  dma_page, dma_addr);
-	return 0;
+	return ret;
 }
 
 /* ----------------------------------------------------------------
