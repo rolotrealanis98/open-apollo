@@ -268,6 +268,7 @@ class TestPostFaderSends:
     def test_solo_recalc_talkback_uses_its_own_encoding(self, wired,
                                                         backend):
         wired.set(f"{IN}/22/FaderLevel/value", 0.0)
+        wired.set(f"{IN}/22/Isolate/value", False)   # the capture isolates it
         backend.clear()
         wired.set(f"{IN}/1/Solo/value", True)
         wired.set(f"{IN}/1/Solo/value", False)

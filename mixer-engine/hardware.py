@@ -2142,7 +2142,11 @@ class HardwareBackend:
 # Input channel controls: /devices/0/inputs/<ch>/<control>/value
 _RE_INPUT = re.compile(
     r'^/devices/0/inputs/(\d+)/(Mute|Solo|Pan|Pan2|FaderLevel|FaderLevelTapered|'
-    r'IOType|RecordPreEffects|Isolate|Stereo|Active|SRConvert|HiZImpedance)/value$')
+    r'IOType|RecordPreEffects|Isolate|SoloSafe|Stereo|Active|SRConvert|'
+    r'HiZImpedance)/value$')
+
+# RemoteSolo: a remote surface holds the solo engaged (device-wide flag)
+_RE_REMOTE_SOLO = re.compile(r'^/RemoteSolo/value$')
 
 # Preamp controls: /devices/0/inputs/<ch>/preamps/0/<control>/value
 _RE_PREAMP = re.compile(
@@ -2559,6 +2563,10 @@ class HardwareRouter:
             self._handle_input(path, ch, control, value)
             return
 
+        if _RE_REMOTE_SOLO.match(path):
+            self._handle_solo_recalc()
+            return
+
         m = _RE_SEND.match(path)
         if m:
             ch, send_idx, control = int(m.group(1)), int(m.group(2)), m.group(3)
@@ -2659,6 +2667,16 @@ class HardwareRouter:
         self.backend.set_bus_pan(
             bus, coeff, coeff if self.stereo_sends else None)
 
+    def _solo_engaged(self) -> bool:
+        tree = self.state_tree
+        if not tree:
+            return False
+        if self._truthy(tree.get_value("/RemoteSolo/value")):
+            return True
+        return any(self._truthy(tree.get_value(
+            f"/devices/0/inputs/{i}/Solo/value"))
+            for i in range(len(self._input_buses())))
+
     def _handle_solo_recalc(self):
         """Recalculate all bus gains based on solo state.
 
@@ -2669,6 +2687,12 @@ class HardwareRouter:
         pair / -1.0e-9 rule).  Their sends are still written as 0.0.
         When no channels are soloed, all channels get their real fader gain.
         Muted channels always get 0.0 regardless of solo state.
+
+        Host rules of the engine's UpdateSoloState (parity M5): a channel
+        with SoloSafe or Isolate set is not muted by another channel's
+        solo, and /RemoteSolo (a remote surface holding the solo) engages
+        the solo rule like a soloed channel does, without exempting any
+        channel itself.  Mute still wins over every exemption.
         """
         if not self.state_tree:
             return
@@ -2685,9 +2709,16 @@ class HardwareRouter:
                 f"/devices/0/inputs/{i}/FaderLevel/value")
             mute = self.state_tree.get_value(
                 f"/devices/0/inputs/{i}/Mute/value")
-            channels.append((i, bus, bool(solo), float(fader or 0), bool(mute)))
+            exempt = any(self._truthy(self.state_tree.get_value(
+                f"/devices/0/inputs/{i}/{n}/value"))
+                for n in ("SoloSafe", "Isolate"))
+            # an exempt channel is audible during a solo like a soloed one
+            channels.append((i, bus, bool(solo) or exempt,
+                             float(fader or 0), bool(mute)))
             if solo:
                 any_solo = True
+        if self._truthy(self.state_tree.get_value("/RemoteSolo/value")):
+            any_solo = True
 
         solo_flag = any_solo and self._has_feature(UA_FEAT_BUS_SOLO_FLAG)
         for i, bus, soloed, fader_db, muted in channels:
@@ -2940,7 +2971,13 @@ class HardwareRouter:
             self._write_link(path, ch, value)
             return
 
-        # Software-only controls (RecordPreEffects, Isolate, Active)
+        if control in ("SoloSafe", "Isolate"):
+            # Changes who a running solo mutes; nothing to do without one
+            if self._solo_engaged():
+                self._handle_solo_recalc()
+            return
+
+        # Software-only controls (RecordPreEffects, Active)
         log.debug("SET %s = %r (software-only)", path, value)
 
     def _write_hiz_impedance(self, path: str, ch: int, value: Any):

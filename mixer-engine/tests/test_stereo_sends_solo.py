@@ -141,6 +141,7 @@ class TestStereoSends:
 
     def test_talkback_in_solo_recalc(self, stereo, tree, backend):
         tree.set(f"{IN}/22/FaderLevel/value", 0.0)
+        tree.set(f"{IN}/22/Isolate/value", False)   # the capture isolates it
         backend.clear()
         tree.set(f"{IN}/1/Solo/value", True)        # talkback goes silent
         assert [v for b, s, v in backend.bus_params_r if b == 0x0A][0] == 0.0
