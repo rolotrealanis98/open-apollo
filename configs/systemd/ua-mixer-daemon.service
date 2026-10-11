@@ -4,6 +4,13 @@
 # Deployed by configs/deploy.sh to /etc/systemd/user/ua-mixer-daemon.service
 # (@MIXER_DIR@ is replaced with the mixer-engine path) and enabled with
 # `systemctl --user enable --now ua-mixer-daemon.service`.
+#
+# The daemon follows the device: it starts without the Apollo (DeviceOnline
+# false), picks it up when /dev/ua_apollo0 appears and again after an unplug
+# or module reload.  70-ua-apollo-access.rules also starts this unit when
+# the node appears (SYSTEMD_USER_WANTS), so it comes up on hot-plug even if
+# it was stopped.  Bonjour is on when the python zeroconf package is
+# installed; without it the daemon logs one warning and runs on.
 [Unit]
 Description=Open Apollo mixer daemon
 After=pipewire.service wireplumber.service
@@ -12,7 +19,7 @@ Wants=pipewire.service
 [Service]
 Type=simple
 WorkingDirectory=@MIXER_DIR@
-ExecStart=/usr/bin/python3 @MIXER_DIR@/ua_mixer_daemon.py --no-bonjour
+ExecStart=/usr/bin/python3 @MIXER_DIR@/ua_mixer_daemon.py
 Restart=on-failure
 RestartSec=5
 

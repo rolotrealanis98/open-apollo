@@ -1,6 +1,8 @@
 # Mixer daemon for the Nth Apollo (instance = device index), for setups with
-# two or more Apollos attached.  Not enabled by the installer; ua-mixer-daemon.service
-# stays the single-device default (/dev/ua_apollo0).
+# two or more Apollos attached.  Not enabled by the installer; instead
+# 70-ua-apollo-access.rules starts instance N for the logged-in user when
+# /dev/ua_apolloN (N >= 1) appears.  ua-mixer-daemon.service stays the
+# single-device default (/dev/ua_apollo0).
 #
 #   systemctl --user enable --now ua-mixer-daemon@1.service
 #
@@ -19,7 +21,7 @@ ConditionPathExists=/dev/ua_apollo%i
 [Service]
 Type=simple
 WorkingDirectory=@MIXER_DIR@
-ExecStart=/usr/bin/python3 @MIXER_DIR@/ua_mixer_daemon.py --no-bonjour --device /dev/ua_apollo%i
+ExecStart=/usr/bin/python3 @MIXER_DIR@/ua_mixer_daemon.py --device /dev/ua_apollo%i
 Restart=on-failure
 RestartSec=5
 

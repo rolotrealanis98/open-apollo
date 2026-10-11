@@ -62,6 +62,13 @@ else
     printf '  %b[--]%b  wireplumber — not found (optional, for PipeWire integration)\n' "$YELLOW" "$NC"
 fi
 
+if python3 -c "import zeroconf" > /dev/null 2>&1; then
+    printf "  ${GREEN}[OK]${NC}  python zeroconf\n"
+else
+    printf "  ${YELLOW}[--]${NC}  python zeroconf — not found (optional, Bonjour discovery of the mixer daemon)\n"
+    printf "        Fedora/Ubuntu/Debian: python3-zeroconf   Arch: python-zeroconf\n"
+fi
+
 if command -v pw-cli > /dev/null 2>&1; then
     printf '  %b[OK]%b  pipewire\n' "$GREEN" "$NC"
 else

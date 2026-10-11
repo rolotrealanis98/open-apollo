@@ -5,3 +5,13 @@
 # mixer ioctls the daemon uses.
 # Deploy to: /etc/udev/rules.d/70-ua-apollo-access.rules
 KERNEL=="ua_apollo[0-9]*", MODE="0660", GROUP="audio", TAG+="uaccess"
+
+# Start the mixer daemon for the logged-in user when the node appears
+# (also covers a replug or module reload; the daemon reopens a lost device
+# by itself, this just makes sure it is running).  TAG+="systemd" makes the
+# node visible to the user service manager, SYSTEMD_USER_WANTS pulls the
+# unit in.  Node 0 is the single-device unit; node N >= 1 is the template
+# instance (ports 4710 + 100 x N).  A RUN+= would run as root inside
+# udev's sandbox, hence a user unit.
+ACTION=="add|change", KERNEL=="ua_apollo0", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="ua-mixer-daemon.service"
+ACTION=="add|change", KERNEL=="ua_apollo[1-9]*", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="ua-mixer-daemon@%n.service"

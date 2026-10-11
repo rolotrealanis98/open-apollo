@@ -242,7 +242,7 @@ check_install_deps() {
     # NixOS: dependencies should be declared in configuration.nix, not installed imperatively
     if [ "$PKG_MGR" = "nix" ]; then
         warn "NixOS detected — install dependencies declaratively in configuration.nix"
-        info "Required packages: gcc, gnumake, linux-headers, python3, python3-websockets,"
+        info "Required packages: gcc, gnumake, linux-headers, python3, python3-websockets, python3-zeroconf,"
         info "  pipewire, wireplumber, alsa-utils, dkms, pciutils, usbutils"
         info "Then run: sudo nixos-rebuild switch"
         echo ""
@@ -366,6 +366,18 @@ check_install_deps() {
         esac
     else
         ok "python websockets"
+    fi
+    # zeroconf: the daemon's Bonjour announcement (_uamixer/_uamixerhelper)
+    # so Console and ConsoleLink find it.  Without it the daemon still runs
+    # and just logs that Bonjour is off.
+    if ! python3 -c "import zeroconf" 2>/dev/null; then
+        missing+=("python zeroconf")
+        case "$PKG_MGR" in
+            dnf|apt|zypper) missing_pkgs+=("python3-zeroconf") ;;
+            pacman)         missing_pkgs+=("python-zeroconf") ;;
+        esac
+    else
+        ok "python zeroconf"
     fi
     # AppIndicator3 for tray indicator
     if ! python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
