@@ -207,6 +207,12 @@ if [ -n "$CARD" ]; then
     else
         note "no io_map entry (driver older than v2)"
     fi
+    section "ALSA card $CARD: dsp_state (DSP window, pool and ring registers; read only)"
+    if [ -r "/proc/asound/card$CARD/dsp_state" ]; then
+        run cat "/proc/asound/card$CARD/dsp_state"
+    else
+        note "no dsp_state entry (driver without the DSP diagnostics)"
+    fi
     section "ALSA card $CARD: mixer controls (amixer -c $CARD contents)"
     if have amixer; then
         run amixer -c "$CARD" contents

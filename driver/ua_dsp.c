@@ -34,6 +34,8 @@
 #include <linux/slab.h>
 #include <linux/timekeeping.h>
 #include <linux/workqueue.h>
+#include <sound/core.h>
+#include <sound/info.h>
 
 #include "ua_dsp_modules.h"
 
@@ -4737,4 +4739,131 @@ int ua_dsp_disconnect_notify(struct ua_device *ua)
 	dev_dbg(&ua->pdev->dev, "kext_connect: date-only disconnect (%d)\n",
 		ret);
 	return ret;
+}
+
+/* ----------------------------------------------------------------
+ * /proc/asound/cardN/dsp_state (parity/03 E6): read-only DSP window dump
+ * ---------------------------------------------------------------- */
+
+static const struct {
+	u32 off;
+	const char *name;
+} ua_dsp_win_regs[] = {
+	{ 0x000, "status (A01)" },
+	{ 0x00c, "property 0 (A03)" },
+	{ 0x010, "pool size 0 code (A04)" },
+	{ 0x014, "pool size 2 (A04)" },
+	{ 0x018, "pool size 1 (A04)" },
+	{ 0x01c, "pool size 3 (A04)" },
+	{ 0x184, "pool base 0 (A08)" },
+	{ 0x188, "pool base 2 (A08)" },
+	{ 0x18c, "pool base 1 (A08)" },
+	{ 0x190, "pool base 3 (A08)" },
+	{ 0x194, "scratch 2 (A08)" },
+	{ 0x198, "scratch 1 (A08)" },
+	{ 0x19c, "scratch 3 (A08)" },
+	{ 0x1a0, "property 7 (A09)" },
+	{ 0x1a4, "boot word (A10)" },
+	{ 0x1a8, "reset slot (A11)" },
+	{ 0x1ac, "device info (A12)" },
+};
+
+static void ua_dsp_state_proc_read(struct snd_info_entry *entry,
+				   struct snd_info_buffer *buf)
+{
+	struct ua_device *ua = entry->private_data;
+	struct ua_dsp_ext *x = &ua->dspx;
+	unsigned int dsp, i, j;
+	u32 ext_caps, cap, lo, hi, isr;
+
+	if (mutex_lock_interruptible(&ua->lock)) {
+		snd_iprintf(buf, "interrupted\n");
+		return;
+	}
+	if (atomic_read(&ua->shutdown)) {
+		mutex_unlock(&ua->lock);
+		snd_iprintf(buf, "device removed\n");
+		return;
+	}
+
+	ext_caps = ua->fw_v2 ? ua_read(ua, UA_REG_EXT_CAPS) : 0;
+	cap = (ext_caps >> 4) & 0xf;
+	lo = ua_read(ua, UA_REG_IRQ_ENABLE);
+	hi = ua->fw_v2 ? ua_read(ua, UA_REG_EXT_IRQ_ENABLE) : 0;
+	isr = ua_read(ua, UA_REG_IRQ_STATUS);
+
+	snd_iprintf(buf, "dsps\t\t%u (connected %s, firmware %s)\n",
+		    ua->num_dsps, ua->dsps_connected ? "yes" : "no",
+		    ua->fw_loaded ? "loaded" : "not loaded");
+	snd_iprintf(buf, "ext_caps\t0x%08x (capability nibble %u)\n",
+		    ext_caps, cap);
+	snd_iprintf(buf, "kext_connect\t%d\n", ua_kext_connect);
+	snd_iprintf(buf, "bus_enable\tmask 0x%02x enabled, known 0x%02x\n",
+		    ua_dsp_get_bus_enable_mask(ua), ua->bus_enable_known & 0x7f);
+	snd_iprintf(buf, "bus_coef_cache\t%u of %u cells, %u replay(s)\n",
+		    (unsigned int)bitmap_weight(x->bus_coef_valid,
+						UA_BUS_COEF_CELLS),
+		    UA_BUS_COEF_CELLS, x->bus_replays);
+	snd_iprintf(buf, "irq\t\tIMR 0x%08x (cached 0x%08x) IMR_HI 0x%08x ISR 0x%08x\n",
+		    lo, ua->irq_mask_lo, hi, isr);
+	snd_iprintf(buf, "dsp_msg_irq\t%d (armed %s, storm guard %s, vector mask 0x%08x)\n",
+		    dsp_msg_irq, x->msg_armed ? "yes" : "no",
+		    x->storm_tripped ? "TRIPPED" : "ok", x->vec_mask);
+
+	for (dsp = 0; dsp < ua->num_dsps && dsp < UA_MAX_DSPS; dsp++) {
+		struct ua_dsp_state *ds = &ua->dsp[dsp];
+		u32 win = ua_dsp_window(dsp);
+
+		snd_iprintf(buf, "\ndsp %u: window BAR0+0x%04x, rings %s\n",
+			    dsp, win, ds->rings_allocated ? "allocated" : "none");
+		for (i = 0; i < ARRAY_SIZE(ua_dsp_win_regs); i++)
+			snd_iprintf(buf, "  +0x%03x %-24s 0x%08x\n",
+				    ua_dsp_win_regs[i].off,
+				    ua_dsp_win_regs[i].name,
+				    ua_read(ua, win + ua_dsp_win_regs[i].off));
+		if (cap == 1)
+			snd_iprintf(buf, "  +0x3c8 %-24s 0x%08x\n",
+				    "extra info (A13)", ua_read(ua, win + 0x3c8));
+		snd_iprintf(buf, "  +0x040 %-24s 0x%08x (sw read index %u)\n",
+			    "message FIFO write idx",
+			    ua_read(ua, win + UA_DSP_WIN_FIFO_IDX),
+			    x->msg_rd[dsp]);
+		if (ds->rings_allocated) {
+			struct ua_dsp_ring *rings[] = { &ds->cmd, &ds->resp };
+			static const char *const rn[] = { "cmd ", "resp" };
+
+			for (i = 0; i < 2; i++) {
+				u32 rb = rings[i]->reg_base;
+
+				snd_iprintf(buf,
+					    "  %s ring: sw write %u, last pos %u; hw WRITE_PTR %u DOORBELL %u POSITION %u%s\n",
+					    rn[i], rings[i]->write_ptr,
+					    rings[i]->hw_pos,
+					    ua_read(ua, rb + UA_RING_WRITE_PTR),
+					    ua_read(ua, rb + UA_RING_DOORBELL),
+					    ua_read(ua, rb + UA_RING_POSITION),
+					    rings[i]->live ? "" : " (not live)");
+			}
+		}
+		snd_iprintf(buf, "  vectors fired:");
+		for (j = 0; j < 5; j++)
+			snd_iprintf(buf, " %u", atomic_read(&x->vec_count[dsp][j]));
+		snd_iprintf(buf, " (cmd resp fifo errA errB)\n");
+		snd_iprintf(buf, "  fifo: %u message(s) (F001 %u, F002 %u), %u stale index\n",
+			    x->msg_total[dsp], x->msg_f001[dsp],
+			    x->msg_f002[dsp], x->msg_stale[dsp]);
+		if (x->msg_total[dsp])
+			snd_iprintf(buf, "  last message: %08x %08x %08x %08x %08x\n",
+				    x->msg_last[dsp][0], x->msg_last[dsp][1],
+				    x->msg_last[dsp][2], x->msg_last[dsp][3],
+				    x->msg_last[dsp][4]);
+	}
+
+	mutex_unlock(&ua->lock);
+}
+
+int ua_dsp_proc_init(struct ua_device *ua, struct snd_card *card)
+{
+	return snd_card_ro_proc_new(card, "dsp_state", ua,
+				    ua_dsp_state_proc_read);
 }

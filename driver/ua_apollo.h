@@ -1643,6 +1643,8 @@ void ua_dsp_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
 void ua_dsp_irq_arm(struct ua_device *ua);		/* ua->lock */
 int ua_dsp_start_transport_notify(struct ua_device *ua);	/* ua->lock */
 int ua_dsp_disconnect_notify(struct ua_device *ua);	/* ua->lock */
+struct snd_card;
+int ua_dsp_proc_init(struct ua_device *ua, struct snd_card *card);
 void ua_dsp_flush_bus_params(struct ua_device *ua);
 int ua_dsp_configure_modules(struct ua_device *ua);
 struct ua_dma_test;

@@ -7215,6 +7215,10 @@ int ua_audio_init(struct ua_device *ua)
 		ret = 0;
 	}
 
+	/* /proc/asound/cardN/dsp_state: DSP window and ring registers (ua_dsp.c) */
+	if (ua_dsp_proc_init(ua, card))
+		dev_warn(&ua->pdev->dev, "dsp_state proc entry failed\n");
+
 	/* Initialize preamp/monitor cache to safe defaults */
 	{
 		unsigned int i;
