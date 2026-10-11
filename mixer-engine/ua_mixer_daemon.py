@@ -58,7 +58,8 @@ from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
                       meter_channel)
 from bonjour import BonjourAnnouncer, _default_name
-from model_features import load_descriptor
+from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
+                            latency_figures, load_descriptor)
 from commands import CommandEngine, parse_cmdparams
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
@@ -115,6 +116,19 @@ RUNTIME_PROPERTIES = {
                                     "readonly": True},
     "/openapollo/pcie_link_width": {"type": "int", "value": 0,
                                     "readonly": True},
+    # open-apollo's own, read-only: the converter latency of the attached
+    # model at the current rate and analog board (devices/*.json latency,
+    # the Mixer Engine's MixerType* tables; model_features.latency_figures)
+    "/openapollo/latency/input_frames": {"type": "float", "value": 0.0,
+                                         "readonly": True},
+    "/openapollo/latency/output_frames": {"type": "float", "value": 0.0,
+                                          "readonly": True},
+    "/openapollo/latency/additional_input": {"type": "int", "value": 0,
+                                             "readonly": True},
+    "/openapollo/latency/additional_output": {"type": "int", "value": 0,
+                                              "readonly": True},
+    "/openapollo/latency/output_delay_comp": {"type": "string", "value": "",
+                                              "readonly": True},
 }
 
 
@@ -422,6 +436,12 @@ class MixerDaemon:
         self._model_clock_sources = list(values) if values else None
         self._fw_warned = False
         self._link_warned = False
+        # devices/<model>.json of the attached model (main() fills it) and
+        # the latency figures last published / ADC delay comp last sent
+        self.model_data: dict = {}
+        self._latency_key = None
+        self._latency_fig: dict | None = None
+        self._adc_comp_sent: tuple | None = None
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -675,6 +695,7 @@ class MixerDaemon:
                 self._poll_dsp_load()
                 self._poll_driver_rate()
                 self._poll_transport()
+                self._refresh_latency()
 
             if not meter_cache:
                 continue
@@ -1194,6 +1215,56 @@ class MixerDaemon:
             self._settle_timer = None
         if self.hw_router:
             self.hw_router.cancel_settle_mute()
+
+    # ── Converter latency and delay compensation (A10/D5) ──────────
+
+    def _refresh_latency(self, force: bool = False) -> bool:
+        """Recompute the model's latency figures when the rate, the analog
+        board id (readback word 33) or /MaxDelayComp changed: publish them
+        under /openapollo/latency/ and send the ADC delay comp (other param
+        0x6a) as CMxMixer::UpdateADCDelayComp does after every rate change.
+        Returns True when it recomputed."""
+        lat = self.model_data.get("latency") if self.model_data else None
+        if not lat:
+            return False
+        rate = self.state.get_value("/SampleRate/value")
+        board = self.state.get_value("/devices/0/AnalogBoardID/value")
+        mdc = MAX_DELAY_COMP_SAMPLES.get(
+            str(self.state.get_value("/MaxDelayComp/value")), 0)
+        key = (rate, board, mdc)
+        changed = False
+        if key != self._latency_key or force:
+            fig = latency_figures(lat, rate, board, mdc,
+                                  lines34_hp=self.model_data.get("mixer_class")
+                                  in LINES34_HP_CLASSES)
+            if fig is None:
+                return False
+            self._latency_key, self._latency_fig = key, fig
+            changed = True
+            for name, value in (
+                    ("input_frames", round(fig["adc"], 4)),
+                    ("output_frames", round(fig["dac"], 4)),
+                    ("additional_input", fig["additional_input"]),
+                    ("additional_output", fig["additional_output"]),
+                    ("output_delay_comp",
+                     json.dumps(fig["dac_comp"], sort_keys=True))):
+                self._push_to_clients(f"/openapollo/latency/{name}", value)
+            log.info("Latency at %s Hz (board %s): in %.4f, out %.4f "
+                     "frames; ADC delay comp %d; reported %d/%d", rate, board,
+                     fig["adc"], fig["dac"], fig["adc_comp"],
+                     fig["additional_input"], fig["additional_output"])
+        fig = self._latency_fig
+        # the init sequence writes its own 0x6a: send again after every
+        # (re-)init, and whenever the figure changes
+        sent = (fig["adc_comp"], self._readback_start_time) if fig else None
+        router = self.hw_router
+        if (fig and router and self._hw_init_done and self._hw_online
+                and not self.hw_paused and sent != self._adc_comp_sent):
+            from hardware import ADC_DELAY_COMP_PARAM
+            if router._set_other(ADC_DELAY_COMP_PARAM, fig["adc_comp"],
+                                 what="ADC delay comp"):
+                self._adc_comp_sent = sent
+        return changed
 
     # ── Device status from GET_SYSTEM_INFO / the transport ──────────
 
@@ -2910,6 +2981,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                          loaded_map=None if args.device_map else device_map)
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
+    daemon.model_data = hw_router.model_data if hw_router else {}
     daemon.commands.set_store(state_file.parent, store_stem)
 
     # Create WebSocket server (shares state tree + hw router)

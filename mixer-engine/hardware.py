@@ -559,6 +559,7 @@ HIZ_IMPEDANCES_OHM = (2_200_000, 1_000_000, 453_000, 232_000,
                       100_000, 70_000, 47_000, 21_000)
 HIZ_IMPEDANCE_PARAM = 0x11
 LINK_PARAM = 0x02            # kPropStereo: pair leader (even channel) only
+ADC_DELAY_COMP_PARAM = 0x6a  # CMxMixer::UpdateADCDelayComp (setting[35])
 
 
 def hiz_impedance_code(value) -> int | None:
