@@ -1302,26 +1302,53 @@ int ua_preamp_set_param(struct ua_device *ua, unsigned int ch,
 }
 
 /*
- * Mixer "kind": CUAD2DeviceMixer::Initialize derives it from the family
- * UAD2DeviceType, and the kext's parameter handlers gate on it (parity/14
- * section 2).  The Apollo x4 is family 0x1a, kind 14 (32 buses, 7 bus params,
- * preamp channels 0-3); the x4 Gen2 / Gen2 TB4 (family 0x26 / 0x28) are
- * kind 22.
- *
- * TODO: ua->device_type is the serial-table type (0x1F for the x4), not the
- * kext's family type; another change adds the public type.  Until then only
- * the models whose fold is known are mapped, the rest are UA_MIXER_KIND_NONE
- * and are not gated (the writes they get today stay as they are).
+ * Mixer "kind": CUAD2DeviceMixer::Initialize derives it from the public
+ * UAD2DeviceType (ua->public_type, from GetCapabilities), and the kext's
+ * parameter handlers gate on it (parity/14 section 2).  The Apollo x4 is
+ * public type 0x1a, kind 14 (32 buses, 7 bus params, preamp channels 0-3).
+ * Types the kext creates no mixer for, v1 parts and an unresolved public
+ * type are UA_MIXER_KIND_NONE and are not gated.
  */
 #define UA_MIXER_KIND_NONE	(-1)
 
 static int ua_mixer_kind(const struct ua_device *ua)
 {
-	switch (ua->device_type) {
-	case UA_DEV_APOLLO_X4:
+	u32 pt = ua->public_type;
+
+	switch (pt) {
+	case 0x03: case 0x05:
+		return 0;
+	case 0x06: case 0x07:
+		return 1;
+	case 0x08: case 0x09: case 0x10:
+		return 2;
+	case 0x0a: case 0x0b:		/* original Apollo: 24 buses, 1 param */
+		return 3;
+	case 0x0c:
+		return 4;
+	case 0x0d:
+		return 5;
+	case 0x0e:
+		return 6;
+	case 0x0f:
+		return 7;
+	case 0x12:
+		return 8;
+	case 0x13: case 0x1b: case 0x1c: case 0x27:
+		return 9;
+	case 0x14 ... 0x17:		/* x6, x8, x8p, x16 */
+		return 0x0a + (pt - 0x14);
+	case 0x19: case 0x1d:
+		return 0x0f;
+	case 0x1a:			/* Apollo x4 */
 		return 14;
-	case UA_DEV_APOLLO_X4_GEN2:
-	case UA_DEV_APOLLO_X4_GEN2_TB4:
+	case 0x20:			/* x16D */
+		return 0x10;
+	case 0x21 ... 0x24:		/* x6/x8/x8p/x16 Gen 2 */
+		return 0x11 + (pt - 0x21);
+	case 0x25: case 0x29:
+		return 0x15;
+	case 0x26: case 0x28:		/* x4 Gen 2, Gen 2 TB4 */
 		return 22;
 	default:
 		return UA_MIXER_KIND_NONE;
@@ -1352,7 +1379,7 @@ static bool ua_other_param_allowed(const struct ua_device *ua, u32 param)
 	switch (param) {
 	case 0x36:	/* S4 / S5 full words: the original Apollo (kind 3) only */
 	case 0x37:
-		return kind == 3;
+		return kind == UA_MIXER_KIND_NONE || kind == 3;
 	case 0x2a ... 0x2d:
 		return ua_kind_allows(kind, UA_KIND_SET_2A_2D);
 	case 0x33 ... 0x35:
@@ -1374,7 +1401,7 @@ static bool ua_other_param_allowed(const struct ua_device *ua, u32 param)
 	case 0x87 ... 0x8a:
 		return ua_kind_allows(kind, UA_KIND_SET_10_22);
 	case 0x83 ... 0x86:	/* Dante-class kind 16 only */
-		return kind == 16;
+		return kind == UA_MIXER_KIND_NONE || kind == 16;
 	default:
 		return true;
 	}
