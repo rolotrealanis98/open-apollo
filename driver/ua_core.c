@@ -89,10 +89,10 @@ module_param(warm_transport0, bool, 0444);
 MODULE_PARM_DESC(warm_transport0,
 		 "Write TRANSPORT (0x2220) = 0 at every probe/resume, also with a live mixer DSP, as the macOS MapHardware does (default: off; a warm probe leaves the previous owner's value)");
 
-bool ua_kext_connect;
+bool ua_kext_connect = true;
 module_param_named(kext_connect, ua_kext_connect, bool, 0444);
 MODULE_PARM_DESC(kext_connect,
-		 "EXPERIMENTAL A/B: ring-connect every device the macOS driver does, chosen by its public device type (the Apollo x4 included): per-DSP {0x230002,1} plus the dated finalize after the ACEFACE handshake, on every start; supersedes v12_connect (default: off, the x4 starts exactly as before)");
+		 "Ring-connect every device the macOS driver does, chosen by its public device type (every v2 Apollo, the x4 included): per-DSP {0x230002,1} plus the dated finalize after the ACEFACE handshake on every start, and the date-only disconnect at stop; supersedes v12_connect (default: on; titan's x4 cold- and warm-starts the same with it. 0 = the old choice by serial type, which never ring-connects the x4)");
 
 static bool v12_connect;
 module_param(v12_connect, bool, 0444);
@@ -3119,14 +3119,18 @@ static long ua_ioctl_load_firmware(struct ua_device *ua, unsigned long arg)
 
 /*
  * Does this device need the ring-buffer DSP connect (_connectToDsps)?
- * Default: the v11.8.1 set, which is exactly the complement of
+ * kext_connect (default): the kext's rule, the public type in the
+ * ring-connect set, which holds every type a v2 Apollo gets (parity/11
+ * R1).  An unresolved public type keeps the serial-type rule below, so a
+ * device the decode misses still connects as it did before.
+ * kext_connect=0: the v11.8.1 set on the serial type, the complement of
  * ua_uses_audio_extension().  v12_connect=1: the v12 set, which also
  * covers Solo TB / Arrow / 0x29 — those keep their AudioExtension
  * bring-up and get the ring connect on top, as in the kext's Connect().
  */
 static bool ua_needs_ring_connect(struct ua_device *ua)
 {
-	if (ua_kext_connect)
+	if (ua_kext_connect && ua->public_type != UA_PUBTYPE_NONE)
 		return ua_public_ring_connect(ua->public_type);
 	if (v12_connect)
 		return ua_ring_connect_v12(ua->device_type);

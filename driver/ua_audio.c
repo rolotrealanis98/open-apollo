@@ -47,7 +47,7 @@ MODULE_PARM_DESC(rec_ch, "Override record channel count (legacy io_map=0 only; a
 static int io_map = -1;
 module_param(io_map, int, 0444);
 MODULE_PARM_DESC(io_map,
-		 "Channel layout (applies to every Apollo): -1 = auto (default: firmware IO descriptor on models verified with it, the Apollo x4; legacy elsewhere), 0 = legacy (route-table DMA counts, ALSA ch N = DMA slot N), 1 = firmware IO descriptor on every model, channels mapped by ID like the macOS kext");
+		 "Channel layout (applies to every Apollo): -1 = auto (default: the firmware IO descriptor, channels mapped by ID like the macOS kext, on every model except the x8p, which owners verified on the legacy layout), 0 = legacy (DMA counts per device type, ALSA ch N = DMA slot N), 1 = firmware IO descriptor on every model");
 
 static bool no_connect;
 module_param(no_connect, bool, 0444);
@@ -289,18 +289,22 @@ const struct ua_model_desc *ua_model_lookup(u32 device_type,
 }
 
 /*
- * io_map=-1 (the default) picks the firmware descriptor layout on the
- * models it has been verified on with hardware, the legacy layout on the
- * rest: only the Apollo x4 so far (titan, 2026-10-09/10: every route
- * channel on its labelled ALSA channel at all six rates, where the legacy
- * layout mislabels everything past MIC 4).  io_map=0/1 force one layout
- * on every model.
+ * io_map=-1 (the default) picks the firmware descriptor layout, which is
+ * how the macOS kext sizes the DMA frame and maps channels on every
+ * Apollo (per-model-device-data.md section 3).  Verified on the Apollo
+ * x4 (titan, 2026-10-09/10: every route channel on its labelled ALSA
+ * channel at all six rates, where the legacy layout mislabels everything
+ * past MIC 4).  The one exception is the x8p, which owners verified on
+ * the legacy layout (issues #46/#52: 34/32 channels, channel identity
+ * 1:1); it stays there until one of them runs io_map=1.  Without a valid
+ * descriptor the layout stays legacy (ua_io_map_compute()).  io_map=0/1
+ * force one layout on every model.
  */
 bool ua_io_map_enabled(const struct ua_device *ua)
 {
 	if (io_map >= 0)
 		return io_map == 1;
-	return ua->device_type == UA_DEV_APOLLO_X4;
+	return ua->device_type != UA_DEV_APOLLO_X8P;
 }
 
 /*

@@ -725,9 +725,10 @@ deploy_configs() {
     fi
 }
 
-# Driver v2 defaults (io_map=-1 auto, mixer_mailbox=1) are right for every
-# supported model; an old override in /etc/modprobe.d can silently pin the
-# legacy layout.  The installer never writes modprobe options, so only warn.
+# Driver v2 defaults (io_map=-1 auto, mixer_mailbox=1) follow the macOS driver
+# on every model (hardware-verified on the x4 and x8p only); an old override in
+# /etc/modprobe.d can silently pin the legacy layout.  The installer never
+# writes modprobe options, so only warn.
 check_modprobe_options() {
     local f hits=""
     for f in /etc/modprobe.d/*.conf; do
