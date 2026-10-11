@@ -21,10 +21,11 @@ stack for USB models, along with a mixer daemon and system tray indicator.
 
 ## What Works (Apollo x4 — Thunderbolt, Ubuntu 24.04)
 
-- **Full duplex audio** — 4 analog inputs + 6 analog outputs verified (24/22 total ALSA channels exposed; S/PDIF, ADAT, and virtual channels are unverified)
-- **All sample rates** — 44.1, 48, 88.2, 96, 176.4, 192 kHz
-- **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching
-- **Monitor control** — volume, mute, dim, mono, headphone routing
+- **Full duplex audio** — 4 analog inputs + 6 analog outputs verified (24/22 total ALSA channels exposed, mapped to the firmware's channel slots by ID; S/PDIF, ADAT, and virtual channels are unverified)
+- **All sample rates** — 44.1, 48, 88.2, 96, 176.4, 192 kHz (playback and capture share one clock; a Hi-band restart takes about a second longer)
+- **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching (PAD, 48V and mic/line need the `driver-v2` branch; they did nothing on v1.0.0)
+- **Monitor control** — volume, mute, dim, mono, headphone routing, talkback button state
+- **Level meters and status** — meters read from the Apollo's DSP, HiZ jack detect and clock lock (`driver-v2`)
 - **DSP mixer** — input faders, pan, sends (AUX1/AUX2, CUE1/CUE2), solo, mute
 - **PipeWire virtual I/O** — named Mic 1-4, Line In 3+4, Monitor L/R, Line Out devices
 - **Desktop audio** — YouTube, system sounds, GNOME volume control all work through Apollo Monitor
@@ -70,7 +71,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 | **Ardour JACK routing** — Ardour via JACK can steal ALSA device from PipeWire | Moderate | Launch with `pw-jack ardour7`; restart PipeWire if audio stops |
 | **Audacity ALSA-only** — Ubuntu's Audacity package lacks PipeWire backend | Minor | Install Audacity via Flatpak for PipeWire support |
 | **GNOME Sound Settings** — input level meter may not show activity | Cosmetic | Audio works; meter is a GNOME UI limitation with pro-audio devices |
-| **Warm reboot requires Apollo power cycle** — rebooting Linux while Apollo stays powered leaves firmware in a stale state; audio won't work until Apollo is power-cycled | Moderate | After reboot: turn Apollo off, wait 5s, turn back on. Hot-replug auto-recovers within ~7s. Cold boot (Apollo powered on after Linux) works without issues. |
+| **Warm reboot requires Apollo power cycle** — on v1.0.0, rebooting Linux while Apollo stays powered leaves firmware in a stale state; audio won't work until Apollo is power-cycled. `driver-v2` quiesces the Apollo at reboot, power-off and unload and reconnects on the next load; not yet re-tested on a release build | Moderate | After reboot: turn Apollo off, wait 5s, turn back on. Hot-replug auto-recovers within ~7s. Cold boot (Apollo powered on after Linux) works without issues. |
 | **No hot-plug on desktop Thunderbolt add-in cards** — powering on the Apollo while Linux runs produces no PCIe hotplug event at all; only cold boot enumerates it. The TB bridge/NHI/ports runtime-suspend to D3cold, and a port in D3cold cannot signal presence-detect | Moderate | Fixed by `configs/udev/60-thunderbolt-no-rtd3.rules` (deployed by `configs/deploy.sh`), which pins the Maple Ridge bridge/ports (`0x1136`) and NHI (`0x1137`) to `power/control=on` and `d3cold_allowed=0` |
 
 ## App Compatibility
@@ -90,7 +91,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 ## Not Yet Implemented
 
-Talkback audio routing, virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD plugins require PACE licensing — not planned). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
+Talkback audio routing, virtual/monitor loopback, console UI, multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), plugin chain (UAD plugins require PACE licensing — not planned). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
 
 ## Supported Devices
 
