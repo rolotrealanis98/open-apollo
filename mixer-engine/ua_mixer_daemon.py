@@ -41,7 +41,8 @@ from helper_tree import HelperTree
 from hardware import (DRIVER_PARAM_SAMPLE_RATE, HardwareBackend,
                       HardwareRouter, fader_db_to_tapered,
                       preamp_db_to_tapered)
-from metering import NullMeter, SILENCE_DB, make_meter, meter_channel
+from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
+                      meter_channel)
 from bonjour import BonjourAnnouncer
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
@@ -322,6 +323,8 @@ class MixerDaemon:
                 if rb:
                     self._sync_hw_readback(rb, last_rb)
                     last_rb = rb
+                    if isinstance(self._metering, ReadbackMeter):
+                        self._metering.feed(rb["words"])
 
             # Poll DSP load at ~1 Hz (every 50 ticks of the 50 Hz pump)
             dsp_tick += 1
@@ -572,8 +575,11 @@ class MixerDaemon:
             path_base = f"/devices/0/inputs/{ch}/preamps/0"
 
             for ctrl, key in [("48V", "48v"), ("Pad", "pad"),
-                              ("LowCut", "lowcut"), ("Phase", "phase")]:
-                val = rb.get(f"{prefix}_{key}", False)
+                              ("LowCut", "lowcut"), ("Phase", "phase"),
+                              ("HiZ", "hiz")]:
+                if f"{prefix}_{key}" not in rb:
+                    continue    # HiZ: inputs 1-2 only
+                val = rb[f"{prefix}_{key}"]
                 if val != last_rb.get(f"{prefix}_{key}"):
                     self._push_to_clients(f"{path_base}/{ctrl}", val)
 
@@ -937,8 +943,9 @@ class MixerDaemon:
             # Enables S/PDIF, ADAT, and CUE bus routing paths.
             be.set_mixer_param(0, 1, 0x01, 1)  # S/PDIF output path
             be.set_mixer_param(0, 2, 0x01, 1)  # ADAT output path
-            be.set_mixer_param(0, 5, 0x00, 1)  # CUE bus routing
-            be.set_mixer_param(0, 6, 0x00, 1)  # CUE bus routing
+            # The driver takes param_id as the enable value (SetBusEnable)
+            be.set_mixer_param(0, 5, 0x01, 1)  # CUE bus routing
+            be.set_mixer_param(0, 6, 0x01, 1)  # CUE bus routing
             log.info("Sent TYPE0 DSP path routing (4 calls)")
 
         # Disable talkback + dim matching macOS init sequence.
@@ -1758,7 +1765,7 @@ Examples:
     # Initialize software metering (through PipeWire when it holds the
     # Apollo, else ALSA capture)
     if not args.no_hardware:
-        metering = make_meter(args.alsa_device)
+        metering = make_meter(args.alsa_device, device_type)
         metering.start()
     else:
         metering = NullMeter()

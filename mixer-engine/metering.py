@@ -245,18 +245,21 @@ class AlsaMeter:
                 else:
                     db = SILENCE_DB
 
-                # Peak hold: reaching the held peak again restarts the hold
-                # (a steady signal keeps it), so it only decays once the
-                # level has dropped for PEAK_HOLD_SEC
-                if db >= self._held_peak(c, now):
-                    self._peaks[c] = db
-                    self._peak_times[c] = now
-                self._levels[c] = db
+                # Clip: within 0.1 dB of 0 dBFS
+                self._update_channel(c, db, db >= -0.1, now)
 
-                # Clip detection (within 0.1 dB of 0 dBFS)
-                if db >= -0.1:
-                    self._clips[c] = True
-                    self._clip_times[c] = now
+    def _update_channel(self, c, db, clip, now):
+        """Take a new level for channel c (caller holds the lock)."""
+        # Peak hold: reaching the held peak again restarts the hold (a
+        # steady signal keeps it), so it only decays once the level has
+        # dropped for PEAK_HOLD_SEC
+        if db >= self._held_peak(c, now):
+            self._peaks[c] = db
+            self._peak_times[c] = now
+        self._levels[c] = db
+        if clip:
+            self._clips[c] = True
+            self._clip_times[c] = now
 
 
 def find_apollo_card():
@@ -451,12 +454,81 @@ def meter_channel(kind, index, meter_idx, name, stereo, channel_ids):
     return None
 
 
-def make_meter(alsa_device=None):
+# Level meters the DSP writes into the hardware readback block, as the Mixer
+# Engine reads them (CMxMixer::MeterTimerCallback_Base, through the kext's
+# readback copy; Apollo x4).  (word, shift, bits, channel ID): the 16-bit
+# meters carry the even channel in bits 31:16 and the odd one in 15:0, the
+# 12-bit bus meters use bits 27:16 and 11:0.  Channel IDs as in the io_map.
+X4_READBACK_METERS = (
+    (8, 16, 16, 0x0001), (8, 0, 16, 0x0002),        # analog 1-4
+    (9, 16, 16, 0x0003), (9, 0, 16, 0x0004),
+    (12, 16, 16, 0x0401), (12, 0, 16, 0x0402),      # ADAT 1-8
+    (13, 16, 16, 0x0403), (13, 0, 16, 0x0404),
+    (14, 16, 16, 0x0405), (14, 0, 16, 0x0406),
+    (15, 16, 16, 0x0407), (15, 0, 16, 0x0408),
+    (16, 16, 16, 0x0501), (16, 0, 16, 0x0502),      # S/PDIF L/R
+    (17, 16, 16, 0x0b01),                           # talkback
+    (18, 16, 12, 0x0901), (18, 0, 12, 0x0902),      # monitor L/R
+    (19, 16, 12, 0x0201), (19, 0, 12, 0x0202),      # AUX 1 L/R
+    (20, 16, 12, 0x0203), (20, 0, 12, 0x0204),      # AUX 2 L/R
+    (22, 16, 16, 0x0701), (22, 0, 16, 0x0702),      # Virtual 1-8
+    (23, 16, 16, 0x0703), (23, 0, 16, 0x0704),
+    (24, 16, 16, 0x0705), (24, 0, 16, 0x0706),
+    (25, 16, 16, 0x0707), (25, 0, 16, 0x0708),
+)
+
+
+class ReadbackMeter(AlsaMeter):
+    """Hardware meters: the levels the DSP writes into readback words 8-25.
+
+    What the Mixer Engine shows on macOS: no audio capture involved, so it
+    works whoever holds the streams, and it covers every input (Virtual
+    included) and the monitor and AUX buses.  The daemon feeds it each
+    readback it polls (feed()).
+    """
+
+    def __init__(self, table=X4_READBACK_METERS):
+        self._table = table
+        self.channel_ids = [m[3] for m in table]
+        super().__init__(device="readback", capture_channels=len(table))
+        self._available = True
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def feed(self, words):
+        """Take one readback snapshot (40 words)."""
+        # The Mixer Engine skips a snapshot whose check words read all-ones
+        if len(words) < 40 or 0xFFFFFFFF in (words[38], words[39]):
+            return
+        now = time.monotonic()
+        with self._lock:
+            for c, (word, shift, bits, _cid) in enumerate(self._table):
+                full = (1 << bits) - 1
+                v = (words[word] >> shift) & full
+                if bits == 16:
+                    clip = v >= 0xFFFE
+                    lin = v / 65535.0
+                else:
+                    clip = v == full
+                    lin = v / 4095.0
+                db = 20.0 * math.log10(lin) if lin >= 1e-4 else SILENCE_DB
+                self._update_channel(c, max(SILENCE_DB, db), clip, now)
+
+
+def make_meter(alsa_device=None, device_type=None):
     """The meter that can work right now.
 
-    PipeWireMeter when PipeWire holds the Apollo's streams (the usual
-    desktop case), else AlsaMeter on the capture device directly.
+    ReadbackMeter on the Apollo x4 (device type 0x1F), whose readback meter
+    layout is known; else PipeWireMeter when PipeWire holds the Apollo's
+    streams (the usual desktop case), else AlsaMeter on the capture device
+    directly.
     """
+    if device_type == 0x1F and not alsa_device:
+        return ReadbackMeter()
     card = find_apollo_card()
     if card is not None and not alsa_device:
         owner = apollo_stream_owner(card)

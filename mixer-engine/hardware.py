@@ -2548,17 +2548,15 @@ class HardwareRouter:
         Verified register map (docs/hw-readback-map.md):
             data[0]: Preamp flags — 4ch × 6-bit stride
                      Per ch: bit+0=Mic/Line, +1=PAD, +2=Link, +3=48V,
-                             +4=LowCut, +5=Phase. bit24=HiZ active.
+                             +4=LowCut, +5=Phase.  HiZ jack detect: bit 24
+                     = input 1, bit 25 = input 2 (kext / Mixer Engine).
             data[2]: Monitor section — [7:0]=MonVol, [15:8]=HP1Vol,
                      bit16=Mute, bit17=Mono, bit31=Dim
             data[3]: Preamp gain — 4ch × 8 bits
             data[6]: bit8=Talkback active
             data[7]: HP2 volume — [7:0]=vol, [31:24]=0xa0 always
-
-        NOT present in readback:
-            data[8]-[17]: Static 0xf0000000 — NOT audio meter data.
-                          Audio meters must be computed in software from
-                          PCM samples (CMxMeter-equivalent logic).
+            data[8]-[25]: level meters the DSP writes (metering.py
+                     X4_READBACK_METERS); returned raw in "words".
         """
         rb = self.backend.get_hw_readback()
         if rb is None:
@@ -2632,12 +2630,14 @@ class HardwareRouter:
             result[f"preamp_{ch}_gain_raw"] = gains_c[ch]
             result[f"preamp_{ch}_gain"] = db
 
-        # NOTE: rb_data[8]-[17] are NOT audio metering data.
-        # Confirmed static 0xf0000000 even with live audio playing.
-        # Audio meters must be computed in software from PCM samples
-        # in the DMA buffers (CMxMeter-equivalent logic), not read
-        # from hardware readback registers.  See docs/hw-readback-map.md
-        # and docs/STATUS.md issue #32.
+        # HiZ jack detect: word 0 bit 24 = input 1, bit 25 = input 2
+        result["preamp_0_hiz"] = bool(d0 & (1 << 24))
+        result["preamp_1_hiz"] = bool(d0 & (1 << 25))
+
+        # The raw words, for the readback level meters (words 8-25, see
+        # metering.ReadbackMeter); the Mixer Engine reads its meters from
+        # there, the old "static 0xf0000000" captures predate an active DSP
+        result["words"] = list(data)
 
         # Log at debug level
         log.debug("HW readback: status=%d data[0:8]=%s",
