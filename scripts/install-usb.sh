@@ -694,6 +694,10 @@ run_sudo cp "$PROJECT_DIR/tools/fx3-load.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-full-init.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-dsp-init.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-re/init-bulk-sequence.bin" "$UA_USB_LIB/"
+# usb-full-init.py builds its stream with the uausb package (it replays the
+# capture when the package is missing)
+run_sudo mkdir -p "$UA_USB_LIB/uausb"
+run_sudo cp "$PROJECT_DIR"/tools/uausb/*.py "$UA_USB_LIB/uausb/"
 run_sudo cp "$PROJECT_DIR/scripts/ua-usb-init.sh" "$UA_USB_BIN/ua-usb-init"
 run_sudo cp "$PROJECT_DIR/scripts/ua-usb-dsp-init.sh" "$UA_USB_BIN/ua-usb-dsp-init"
 run_sudo chmod +x "$UA_USB_BIN/ua-usb-init" "$UA_USB_BIN/ua-usb-dsp-init"

@@ -9,9 +9,24 @@ controllers.
 Must run after firmware is loaded (device at PID 000d/0002/000f).
 Can be called standalone or from udev via ua-usb-dsp-init.sh.
 
+Before the first command it polls the DSP boot word (vendor request 0x04,
+FPGA word 0x1069) until the DSP has started, as the Windows driver does
+before its connect (uausb/device.py wait_dsp_started; untested on
+hardware).  That is the readiness signal the fixed 30 s sleeps of the Twin
+USB reports (#69) stand in for.  If the word cannot be read the init goes
+ahead as before.
+
+The commands, in the DSP command language (uausb/dspcmd.py): CONNECT
+{0x00230002, 1}, the connect date word {0x00100002, d} twice, the query
+{0x00110002, tag} (the DSP answers with an 0x8003 reply), then DSP input
+params {0x001E0004, input, 8 (span), 0x20 (none)} for inputs 0x00-0x1F
+except 0x10-0x13.  The date and tag words are the ones of the Cauldron 1.3
+capture this sequence came from.
+
 Usage:
   sudo python3 usb-dsp-init.py            # init + exit
   sudo python3 usb-dsp-init.py --daemon   # init + keep draining EP6
+  sudo python3 usb-dsp-init.py --no-ready-poll
 """
 import os
 import struct
@@ -20,6 +35,14 @@ import threading
 import time
 import usb.core
 import usb.util
+
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+try:
+    from uausb import device as udev
+except ImportError:             # an install with only this script copied
+    udev = None
 
 UA_VID = 0x2B5A
 LIVE_PIDS = {
@@ -129,15 +152,33 @@ def drain_ep6(dev, stop_event):
             break
 
 
+def wait_dsp_ready(dev):
+    """Poll the DSP boot word before the first command.  Returns True when
+    the DSP reported started, False when it did not or the word could not
+    be read (the init then goes ahead as before)."""
+    if udev is None:
+        return False
+    res = udev.wait_dsp_started(udev.UsbRegs(dev), 0)
+    if res.error:
+        print("DSP boot word unreadable ({}): continuing".format(res.error))
+        return False
+    if not res.started:
+        print("DSP did not start in {} tries (boot word {:#010x}): "
+              "continuing".format(res.tries, res.value))
+        return False
+    print("DSP started (boot word {:#010x}, {} read(s))".format(
+        res.value, res.tries))
+    return True
+
+
 def dsp_init(dev):
-    """Send DSP init: activate FPGA, set hardware config, write identity
-    routing table.
+    """Send DSP init: connect, date words, query, input span params.
 
     Sequence verified from Cauldron 1.3 build 3 USBPcap capture (2026-04-05).
     """
     seq = 0
 
-    # Packet 0: FPGA_ACTIVATE + CONFIG_A x2
+    # Packet 0: CONNECT {0x230002, 1} + date word {0x100002, d} x2
     pkt = struct.pack("<HBB", 6, seq, MAGIC_CMD)
     pkt += struct.pack("<HHI", 0x0002, 0x0023, 0x00000001)
     pkt += struct.pack("<HHI", 0x0002, 0x0010, 0x01B7A1FA)
@@ -145,7 +186,7 @@ def dsp_init(dev):
     dev.write(EP_BULK_OUT, pkt, timeout=1000)
     seq += 1
 
-    # Packet 1: CONFIG_B
+    # Packet 1: query {0x110002, tag} (answered with an 0x8003 reply)
     pkt = struct.pack("<HBB", 2, seq, MAGIC_CMD)
     pkt += struct.pack("<HHI", 0x0002, 0x0011, 0x82607600)
     dev.write(EP_BULK_OUT, pkt, timeout=1000)
@@ -158,7 +199,8 @@ def dsp_init(dev):
     except usb.core.USBTimeoutError:
         pass
 
-    # Packets 2-14: Identity routing table (slots 0x00-0x1F)
+    # Packets 2-14: DSP input span params {0x1E0004, input, 8, 0x20}
+    # (inputs 0x00-0x1F, as the capture sends them)
     ROUTING_GROUPS = [
         [0x00, 0x01],
         [0x02, 0x03, 0x04, 0x05, 0x06],
@@ -259,7 +301,11 @@ def main():
                                   daemon=True)
     ep6_thread.start()
 
-    # Step 1: DSP init (activate FPGA + routing table)
+    # Step 0: wait for the DSP to report started (boot word)
+    if "--no-ready-poll" not in sys.argv:
+        wait_dsp_ready(dev)
+
+    # Step 1: DSP init (connect + input span params)
     dsp_init(dev)
     print("DSP init done")
 

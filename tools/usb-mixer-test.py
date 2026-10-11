@@ -2,27 +2,38 @@
 """Test USB mixer settings writes on Apollo Solo USB.
 
 Requires: Apollo Solo USB connected, FX3 firmware loaded, DSP initialized.
-Run after: tools/usb-dsp-init.py
+Run after: tools/usb-full-init.py (or the udev init)
 
-Tests:
-  1. Open USB device (interface 0)
-  2. Write vendor control request 0x03 (mixer settings batch)
-  3. Set monitor level, preamp gain, verify no errors
-  4. Check if capture channels show signal
+Sends the daemon's SetMixerParam values through the same path the mixer
+daemon's USB backend uses (uausb/mixer.py): the PCIe driver's param ->
+setting mapping, the one-shot mailbox, the SEQ_WR/SEQ_RD handshake on
+vendor requests 0x03/0x04, and reads the 40-word readback (request 0x10)
+after each step to show what the hardware reports.  Earlier versions wrote
+fixed buffers with a blind sequence number; GainB/GainA went to the wrong
+settings for input 2 and "mute" set the mono bit.
+
+Tests (listen to the monitor output; untested on hardware):
+  1. Monitor level sweep (setting 2 bits 7:0)
+  2. Preamp gain sweep on input 1 (settings 17, 16, 3)
+  3. 48V on input 1 on/off (setting 0 bit 3)
+  4. Monitor mute on/off (setting 2 bit 16)
+
+Vendor control requests need no interface claim, so this runs next to
+snd-usb-audio.  Stop the mixer daemon first if it uses the USB backend.
 
 Usage: sudo python3 tools/usb-mixer-test.py
 """
 
-import struct
+import os
 import sys
 import time
 
-try:
-    import usb.core
-    import usb.util
-except ImportError:
-    print("pip install pyusb")
-    sys.exit(1)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
+from uausb import device as udev  # noqa: E402
+from uausb import mixer as umix  # noqa: E402
 
 UA_VID = 0x2B5A
 LIVE_PIDS = {
@@ -32,7 +43,7 @@ LIVE_PIDS = {
 }
 
 
-def find_live_device():
+def find_live_device(usb):
     """Return (device, model_name) for whichever live Apollo USB is present."""
     for pid, name in LIVE_PIDS.items():
         dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
@@ -41,147 +52,110 @@ def find_live_device():
     return None, None
 
 
-# FPGA addresses for vendor request 0x03
-SETTINGS_SEQ = 0x0602       # 4B: sequence counter
-SETTINGS_MASK = 0x062D      # 128B: mask+value buffer
-SETTINGS_VALUES = 0x064F    # 128B: gain value buffer
+class Mixer:
+    def __init__(self, dev):
+        self.regs = udev.UsbRegs(dev)
+        self.mb = umix.SettingsMailbox()
+        self.mb.adopt_seq(self.regs)
+        self.protocol = self.regs.protocol_word()
 
-SETTING_PREAMP_CH0 = 0      # offset +0
-SETTING_PREAMP_CH1 = 1      # offset +8
-SETTING_MONITOR = 2         # offset +16
-SETTING_GAIN_C = 3          # offset +24
+    def set(self, channel_type, ch, param, value):
+        res = umix.map_param(channel_type, ch, param, value)
+        if isinstance(res, umix.SettingWrite):
+            self.mb.merge(res.setting, res.value, res.mask)
 
+    def commit(self, timeout=1.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.mb.flush(self.regs) is not False:
+                return True
+            time.sleep(0.02)
+        print("  DSP did not acknowledge (SEQ_RD stuck)")
+        return False
 
-def setting_word(mask, value):
-    return ((mask & 0xFFFF) << 16) | (value & 0xFFFF)
-
-
-def find_device():
-    dev, model = find_live_device()
-    if not dev:
-        print("No live Apollo USB device found "
-              "(expected one of: %s)" %
-              ", ".join(LIVE_PIDS.values()))
-        print("Is firmware loaded? Run: sudo python3 tools/fx3-load.py")
-        sys.exit(1)
-    print(f"Found: {dev.manufacturer} {dev.product}")
-    return dev
-
-
-def claim_dsp(dev):
-    """Prepare DSP interface — DON'T claim interface 0.
-
-    Vendor control requests (bmRequestType=0x41) go through the
-    default control pipe (EP0) and don't need interface claiming.
-    Claiming interface 0 would detach snd-usb-audio and kill audio.
-    """
-    print("Using vendor control requests on EP0 (no interface claim needed)")
+    def readback(self):
+        status, words = self.regs.readback(self.protocol)
+        return words if status == 1 else None
 
 
-def vendor_write(dev, request, wvalue, data=b""):
-    """Send vendor control OUT request (bmRequestType=0x41)."""
-    dev.ctrl_transfer(0x41, request, wvalue, 0, data, timeout=1000)
+def show(mx, what):
+    time.sleep(0.1)
+    rb = mx.readback()
+    if rb is None:
+        print(f"  {what}: no readback")
+        return
+    print(f"  {what}: readback w0={rb[0]:08x} w2={rb[2]:08x} w3={rb[3]:08x}")
 
 
-def write_settings(dev, seq, mask_buf, value_buf=None):
-    """Write a mixer settings batch."""
-    vendor_write(dev, 0x03, SETTINGS_MASK, mask_buf)
-    if value_buf and any(b != 0 for b in value_buf):
-        vendor_write(dev, 0x03, SETTINGS_VALUES, value_buf)
-    vendor_write(dev, 0x03, SETTINGS_SEQ, struct.pack("<I", seq))
-    return seq + 1
-
-
-def test_monitor_level(dev, seq):
-    """Test monitor level writes."""
+def test_monitor_level(mx):
     print("\n=== Monitor Level ===")
     for db in [-96, -48, -24, -12, 0, -12]:
         raw = max(0, min(0xC0, int(192 + db * 2)))
-        mask_buf = bytearray(128)
-        word = setting_word(0x00FF, raw)
-        struct.pack_into("<I", mask_buf, SETTING_MONITOR * 8, word)
-        seq = write_settings(dev, seq, mask_buf)
-        print(f"  Monitor = {db:4d} dB (raw=0x{raw:02x}, seq={seq-1})")
+        mx.set(umix.MONITOR_CHANNEL_TYPE, 1, 0x01, raw)
+        mx.commit()
+        show(mx, f"monitor {db:4d} dB (raw 0x{raw:02x})")
         time.sleep(0.3)
-    return seq
 
 
-def test_preamp_gain(dev, seq):
-    """Test preamp gain writes."""
-    print("\n=== Preamp Gain (ch0) ===")
+def test_preamp_gain(mx):
+    print("\n=== Preamp Gain (input 1) ===")
     for gain_db in [10, 20, 30, 40, 50, 60, 30, 10]:
-        val_a = max(0, min(54, gain_db - 10))
-        val_c = val_a + 0x41
-
-        mask_buf = bytearray(128)
-        value_buf = bytearray(128)
-
-        # Gain A in value buffer
-        struct.pack_into("<I", value_buf, SETTING_PREAMP_CH0 * 8,
-                         setting_word(0x00FF, val_a))
-        # Gain C in mask buffer
-        struct.pack_into("<I", mask_buf, SETTING_GAIN_C * 8,
-                         setting_word(0x003F, val_c))
-
-        seq = write_settings(dev, seq, mask_buf, value_buf)
-        print(f"  Gain = {gain_db:2d} dB (val_a={val_a}, val_c=0x{val_c:02x}, "
-              f"seq={seq-1})")
+        ab = max(0, min(54, gain_db - 10))
+        c = max(0, min(56, gain_db - 9))
+        for param, value in ((0x0A, ab), (0x09, ab), (0x06, c)):
+            mx.set(umix.PREAMP_CHANNEL_TYPE, 0, param, value)
+        mx.commit()
+        show(mx, f"gain {gain_db:2d} dB")
         time.sleep(0.3)
-    return seq
 
 
-def test_phantom(dev, seq):
-    """Test 48V phantom power toggle."""
-    print("\n=== 48V Phantom (ch0) ===")
+def test_phantom(mx):
+    print("\n=== 48V Phantom (input 1) ===")
     for enabled in [True, False]:
-        mask_buf = bytearray(128)
-        val = 0x0008 if enabled else 0x0000
-        struct.pack_into("<I", mask_buf, SETTING_PREAMP_CH0 * 8,
-                         setting_word(0x0008, val))
-        seq = write_settings(dev, seq, mask_buf)
-        print(f"  48V = {enabled} (seq={seq-1})")
+        mx.set(umix.PREAMP_CHANNEL_TYPE, 0, 0x03, int(enabled))
+        mx.commit()
+        show(mx, f"48V {'on' if enabled else 'off'}")
         time.sleep(0.5)
-    return seq
 
 
-def test_mute(dev, seq):
-    """Test monitor mute toggle."""
+def test_mute(mx):
     print("\n=== Monitor Mute ===")
     for muted in [True, False]:
-        mask_buf = bytearray(128)
-        val = 0x0002 if muted else 0x0000
-        struct.pack_into("<I", mask_buf, SETTING_MONITOR * 8 + 4,
-                         setting_word(0x0003, val))
-        seq = write_settings(dev, seq, mask_buf)
-        print(f"  Mute = {muted} (seq={seq-1})")
+        mx.set(umix.MONITOR_CHANNEL_TYPE, 0, 0x03, 2 if muted else 0)
+        mx.commit()
+        show(mx, f"mute {'on' if muted else 'off'}")
         time.sleep(0.5)
-    return seq
 
 
 def main():
-    dev = find_device()
-    claim_dsp(dev)
-
-    # Start sequence counter at 7 (matching init capture)
-    seq = 7
-
-    print("\nSending mixer settings via vendor request 0x03...")
-    print("Listen to the monitor output for audio changes.")
-
     try:
-        seq = test_monitor_level(dev, seq)
-        seq = test_preamp_gain(dev, seq)
-        seq = test_phantom(dev, seq)
-        seq = test_mute(dev, seq)
+        import usb.core
+    except ImportError:
+        print("pip install pyusb")
+        return 1
+    import usb as usb_pkg
+
+    dev, model = find_live_device(usb_pkg)
+    if not dev:
+        print("No live Apollo USB device found "
+              "(expected one of: %s)" % ", ".join(LIVE_PIDS.values()))
+        print("Is firmware loaded? Run: sudo python3 tools/fx3-load.py")
+        return 1
+    print(f"Found: {model} ({dev.product})")
+    mx = Mixer(dev)
+    print(f"SEQ_RD {mx.mb.seq_wr}, protocol {mx.protocol:#010x}")
+    show(mx, "start")
+    try:
+        test_monitor_level(mx)
+        test_preamp_gain(mx)
+        test_phantom(mx)
+        test_mute(mx)
     except usb.core.USBError as e:
         print(f"\nUSB ERROR: {e}")
-        print("This might mean the vendor request format is wrong.")
-        sys.exit(1)
-
-    print(f"\nAll tests passed! Final seq={seq-1}")
-    print("\nIf you heard monitor level changes and gain changes,")
-    print("the mixer settings protocol is working.")
+        return 1
+    print(f"\nDone. Final SEQ_WR={mx.mb.seq_wr}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

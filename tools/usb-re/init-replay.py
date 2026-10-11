@@ -23,12 +23,18 @@ Usage:
     sudo python3 init-replay.py init.seq --dry-run      # list phases, send nothing
     sudo python3 init-replay.py init.seq                # replay every phase
     sudo python3 init-replay.py init.seq --phases 0-5   # bring-up only
+    sudo python3 init-replay.py init.seq --wait-dsp     # poll the DSP boot word first
+
+--wait-dsp measures what the 30 s wait above stands in for: the DSP boot
+word the Windows driver polls before its first command (untested on
+hardware; uausb/device.py).
 
 Requires: pyusb.
 """
 
 import argparse
 import collections
+import os
 import struct
 import sys
 import time
@@ -45,6 +51,24 @@ LIVE_PIDS = {
 EP_BULK_OUT = 0x01
 EP_BULK_IN = 0x81
 HANDSHAKE_REQUESTS = (5, 7, 12, 13)   # arm / commit / apply: the DSP replies to these
+
+
+def wait_dsp(dev):
+    """Poll the DSP boot word (uausb/device.py wait_dsp_started); report only."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from uausb import device as udev
+    except ImportError:
+        print("uausb not found next to tools/: --wait-dsp skipped")
+        return
+    t0 = time.time()
+    res = udev.wait_dsp_started(udev.UsbRegs(dev), 0)
+    if res.error:
+        print(f"boot word unreadable: {res.error}")
+    else:
+        print(f"boot word {res.value:#010x} after {time.time() - t0:.1f} s, "
+              f"{res.tries} read(s): "
+              f"{'started' if res.started else 'NOT started'}")
 
 
 def find_device():
@@ -138,6 +162,10 @@ def main():
                     help="cap on any single captured pause, seconds (default 5)")
     ap.add_argument("--dry-run", action="store_true",
                     help="list what would be sent and exit")
+    ap.add_argument("--wait-dsp", action="store_true",
+                    help="first poll the DSP boot word (FPGA word 0x1069, "
+                         "request 0x04) until the DSP has started, as the "
+                         "Windows driver does, and print how long it took")
     a = ap.parse_args()
 
     events = read_seq(a.seq)
@@ -175,6 +203,8 @@ def main():
     if dev.is_kernel_driver_active(0):
         dev.detach_kernel_driver(0)
     usb.util.claim_interface(dev, 0)
+    if a.wait_dsp:
+        wait_dsp(dev)
 
     stats = collections.defaultdict(lambda: {"bulk": 0, "ctrl": 0, "resp": 0, "err": 0, "t": 0.0})
     cur = None
