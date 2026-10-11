@@ -530,25 +530,38 @@ static void ua_read_serial_type(struct ua_device *ua)
 }
 
 /*
+ * CUAD2Device::_deviceTypeFromFPGAVersion (kext x86 0x14528): a new-format
+ * FPGA_REV ((rev & 0x60) == 0x20) carries the serial-table type in bits
+ * [30:24] (titan's x4: 0x9f0ea929 -> 0x1F), an old one only rev >> 28.
+ */
+static u32 ua_type_from_fpga_rev(u32 rev)
+{
+	return (rev & 0x60) == 0x20 ? (rev >> 24) & 0x7f : rev >> 28;
+}
+
+/*
  * ua_compute_public_type - the kext's UAD2DeviceType (CPcieDevice::
  * GetCapabilities, x86 0x464c; parity/11 rows B5 and section 2.3).
  *
- * v1 firmware: 0.  v2: the ext_caps family ((ext_caps >> 20) & 0x3f)
- * indexes a table at 0x4d5c; the entries for the x-series families are
- * then refined by the serial-table type (_deviceTypeFromSerialNumber).
- * The kext's FPGA-version fallback (_deviceTypeFromFPGAVersion) is not
- * ported: where it would be consulted the type stays at the family value
- * (HEXA, 0x19) or UA_PUBTYPE_NONE (QUAD, as the kext's -1 when that check
- * fails too).  The serial is read independently of device_type, which the
- * Solo and 8p subsystem pins override.
+ * v1 firmware: 0.  v2: the ext_caps family ((ext_caps >> 20) & 0x3f) - 1
+ * indexes a 22-entry jump table at 0x4d5c (families 20 and 21 give 0,
+ * family 22 the x16D's 0x20); the entries for the x-series families are
+ * then refined by the serial-table type (_deviceTypeFromSerialNumber,
+ * tables at 0x4db4, 0x4de4, 0x4dd4) and, for QUAD and HEXA, by the
+ * FPGA_REV type when the serial does not decide.  HEXA serial 0x35 (x16D)
+ * gives 0x21, not 0x20: the kext stores 0x20 and falls through into the
+ * 0x37 case (x86 0x4a30, arm64e 0xcda8), so the value is mirrored; an
+ * x16D on its own family 22 gets 0x20.  The serial is read independently
+ * of device_type, which the Solo and 8p subsystem pins override.
  */
 static u32 ua_compute_public_type(struct ua_device *ua)
 {
 	static const u8 family_map[] = {
 		0x05, 0x04, 0x00, 0x07, 0x08, 0x0B, 0x04, 0x0C, 0x0D, 0x0F,
-		0x0E, 0x00, 0x00, 0x12, 0x13, 0x1A, 0x16, 0x18, 0x19, 0x20,
+		0x0E, 0x00, 0x00, 0x12, 0x13, 0x1A, 0x16, 0x18, 0x19, 0x00,
+		0x00, 0x20,
 	};
-	u32 fam, base, st;
+	u32 fam, base, st, ft;
 
 	if (!ua->fw_v2)
 		return 0;
@@ -564,6 +577,7 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 		return base;
 
 	st = ua_serial_lookup(ua, false);
+	ft = ua_type_from_fpga_rev(ua->fpga_rev);
 
 	switch (base) {
 	case 0x13:
@@ -573,6 +587,9 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 			return 0x27;
 		return 0x1C;		/* serial 2032 or any other */
 	case 0x1A:
+		if (st != UA_DEV_APOLLO_X4 && st != UA_DEV_APOLLO_X4_GEN2 &&
+		    st != UA_DEV_APOLLO_X4_GEN2_TB4)
+			st = ft;
 		if (st == UA_DEV_APOLLO_X4)
 			return 0x1A;
 		if (st == UA_DEV_APOLLO_X4_GEN2)
@@ -584,11 +601,11 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 		if (st >= UA_DEV_APOLLO_X6 && st <= UA_DEV_APOLLO_X16)
 			return 0x14 + (st - UA_DEV_APOLLO_X6);
 		if (st == UA_DEV_APOLLO_X16D)
-			return 0x20;
+			return 0x21;	/* the kext's fall-through, see above */
 		if (st >= UA_DEV_APOLLO_X6_GEN2 &&
 		    st <= UA_DEV_APOLLO_X16_GEN2)
 			return 0x21 + (st - UA_DEV_APOLLO_X6_GEN2);
-		return 0x16;
+		return ft == UA_DEV_APOLLO_X16D ? 0x20 : 0x16;
 	default:			/* 0x19 */
 		if (st == UA_DEV_APOLLO_SOLO || st == UA_DEV_ARROW ||
 		    st == 0x26 || st == 0x2E || st == 0x2F)
