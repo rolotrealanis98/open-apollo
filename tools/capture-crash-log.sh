@@ -1,10 +1,11 @@
 #!/bin/bash
 # capture-crash-log.sh — Stream Apollo kernel logs from Ubuntu to local file
-# Run from Mac: bash tools/capture-crash-log.sh
+# Run from another machine: HOST=user@machine bash tools/capture-crash-log.sh
 # Then reproduce the crash on Ubuntu. Logs save locally even if machine hangs.
 
-HOST="dev@192.168.1.3"
-LOG_DIR="/Users/rolo/Documents/Github/open-apollo/tools/captures/crash-logs"
+# Usage: HOST=user@machine bash tools/capture-crash-log.sh
+HOST="${HOST:?set HOST=user@machine (the Linux box with the Apollo)}"
+LOG_DIR="${LOG_DIR:-$(dirname "$0")/captures/crash-logs}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 LOG_FILE="$LOG_DIR/crash-$TIMESTAMP.log"
 
@@ -16,5 +17,5 @@ echo "Reproduce the crash now. Ctrl+C to stop."
 echo ""
 
 # Stream dmesg -w (kernel log follow) via SSH, tee to local file
-# Uses sudo on remote to access dmesg
-ssh -t "$HOST" "echo 'O6TCB1k!' | sudo -S dmesg -w 2>/dev/null" 2>/dev/null | tee "$LOG_FILE"
+# sudo asks for the remote password on the terminal (-t)
+ssh -t "$HOST" "sudo dmesg -w" | tee "$LOG_FILE"
