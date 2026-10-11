@@ -3917,8 +3917,8 @@ out_free:
  * SetDriverIoRoutings (SEL171) just stores the host-side channel map.
  * Writing a captured descriptor over the firmware's is a Linux-only
  * experiment kept for the legacy layout (UA_IOCTL_SEND_ROUTING; nothing
- * in userspace calls it).  With io_map=1 it is a no-op so the descriptor
- * the driver maps by stays the firmware's.
+ * in userspace calls it).  With the descriptor layout (ua_io_map_enabled())
+ * it is a no-op so the descriptor the driver maps by stays the firmware's.
  * ---------------------------------------------------------------- */
 
 #include "ua_routing.h"
@@ -3928,7 +3928,8 @@ out_free:
  * @ua: device (must hold ua->lock)
  *
  * Writes the macOS-captured IO descriptor data (x4, x8p) to the SRAM
- * regions at 0xC1A4 (input) and 0xC2C4 (output).  No-op with io_map=1.
+ * regions at 0xC1A4 (input) and 0xC2C4 (output).  No-op with the
+ * descriptor layout.
  *
  * Returns 0 on success, negative errno on failure.
  */
@@ -3937,9 +3938,9 @@ int ua_dsp_send_routing(struct ua_device *ua)
 	const struct ua_routing_config *cfg;
 	unsigned int i;
 
-	if (ua_io_map_enabled()) {
+	if (ua_io_map_enabled(ua)) {
 		dev_info(&ua->pdev->dev,
-			 "io_map=1: not writing captured IO descriptors (the firmware owns them)\n");
+			 "descriptor layout: not writing captured IO descriptors (the firmware owns them)\n");
 		return 0;
 	}
 

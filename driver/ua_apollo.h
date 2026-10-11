@@ -1266,7 +1266,7 @@ const char *ua_device_name(u32 device_type);
 /* Model data and IO map (ua_audio.c) */
 const struct ua_model_desc *ua_model_lookup(u32 device_type,
 					    const char **type_name);
-bool ua_io_map_enabled(void);
+bool ua_io_map_enabled(const struct ua_device *ua);
 void ua_io_map_digital_mode_changed(struct ua_device *ua);	/* ua->lock */
 int ua_chan_name(u16 ch_id, char *buf, size_t len);
 struct ua_io_map_info;

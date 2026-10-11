@@ -94,7 +94,9 @@ log "Output node: $OUTPUT_NODE"
 
 # ── Step 4: Generate loopback config ──
 #
-# Apollo x4 channel map at 48kHz:
+# Apollo x4 channel map at 48kHz (the driver's descriptor layout, the
+# default on the x4; with io_map=0 forced, everything past Mic 4 carries
+# other channels' audio):
 #
 # CAPTURE (22ch, AUX0-21):
 #   AUX0-1:   Mic/Line/HiZ 1-2

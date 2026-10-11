@@ -41,10 +41,10 @@ MODULE_PARM_DESC(play_ch, "Override playback channel count (legacy io_map=0 only
 module_param(rec_ch, int, 0444);
 MODULE_PARM_DESC(rec_ch, "Override record channel count (legacy io_map=0 only)");
 
-static int io_map;
+static int io_map = -1;
 module_param(io_map, int, 0444);
 MODULE_PARM_DESC(io_map,
-		 "Channel layout: 0 = legacy (route-table DMA counts, ALSA ch N = DMA slot N; default), 1 = firmware IO descriptor, channels mapped by ID like the macOS kext");
+		 "Channel layout: -1 = auto (default: firmware IO descriptor on models verified with it, the Apollo x4; legacy elsewhere), 0 = legacy (route-table DMA counts, ALSA ch N = DMA slot N), 1 = firmware IO descriptor on every model, channels mapped by ID like the macOS kext");
 
 static bool no_connect;
 module_param(no_connect, bool, 0444);
@@ -163,9 +163,19 @@ const struct ua_model_desc *ua_model_lookup(u32 device_type,
 	return NULL;
 }
 
-bool ua_io_map_enabled(void)
+/*
+ * io_map=-1 (the default) picks the firmware descriptor layout on the
+ * models it has been verified on with hardware, the legacy layout on the
+ * rest: only the Apollo x4 so far (titan, 2026-10-09/10: every route
+ * channel on its labelled ALSA channel at all six rates, where the legacy
+ * layout mislabels everything past MIC 4).  io_map=0/1 force one layout
+ * on every model.
+ */
+bool ua_io_map_enabled(const struct ua_device *ua)
 {
-	return io_map == 1;
+	if (io_map >= 0)
+		return io_map == 1;
+	return ua->device_type == UA_DEV_APOLLO_X4;
 }
 
 /*
@@ -283,7 +293,7 @@ static void ua_get_model_channels(struct ua_device *ua)
 	 * table knew keep its counts; io_map=1 uses the generated ones.
 	 */
 	row = ua_legacy_row(ua->device_type);
-	if (!ua_io_map_enabled() && row) {
+	if (!ua_io_map_enabled(ua) && row) {
 		audio->num_preamps = row->preamps;
 		audio->num_hiz = row->hiz;
 	} else {
@@ -1308,7 +1318,7 @@ static void ua_io_map_update_locked(struct ua_device *ua, const char *why)
 {
 	struct ua_io_layout *l;
 
-	if (!ua_io_map_enabled())
+	if (!ua_io_map_enabled(ua))
 		return;
 
 	l = kzalloc(sizeof(*l), GFP_KERNEL);
@@ -1376,7 +1386,7 @@ static void ua_io_map_prepare(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 
-	if (!ua_io_map_enabled() || !audio->io_ready)
+	if (!ua_io_map_enabled(ua) || !audio->io_ready)
 		return;
 
 	mutex_lock(&audio->io_lock);
@@ -1398,7 +1408,7 @@ static void ua_io_map_check_stream(struct ua_device *ua,
 			   UA_DIR_PLAY : UA_DIR_REC;
 	unsigned int ch;
 
-	if (!ua_io_map_enabled() || !audio->io_ready)
+	if (!ua_io_map_enabled(ua) || !audio->io_ready)
 		return;
 
 	mutex_lock(&audio->io_lock);
@@ -1417,7 +1427,7 @@ static bool ua_io_map_needs_restart(struct ua_device *ua)
 	struct ua_audio *audio = &ua->audio;
 	bool stale;
 
-	if (!ua_io_map_enabled() || !audio->io_ready)
+	if (!ua_io_map_enabled(ua) || !audio->io_ready)
 		return false;
 
 	mutex_lock(&audio->io_lock);
@@ -1458,7 +1468,7 @@ static unsigned int ua_io_map_open_channels(struct ua_device *ua,
 					    audio->rec_channels;
 	}
 
-	if (ua_io_map_enabled() && !READ_ONCE(ua->resume_pending))
+	if (ua_io_map_enabled(ua) && !READ_ONCE(ua->resume_pending))
 		l = kzalloc(sizeof(*l), GFP_KERNEL);
 	if (l)
 		mutex_lock(&ua->lock);
@@ -1505,7 +1515,7 @@ static bool ua_io_map_settle(struct ua_device *ua)
 	if (!audio->io_ready)
 		return false;
 
-	if (!ua_io_map_enabled()) {
+	if (!ua_io_map_enabled(ua)) {
 		mutex_lock(&audio->io_lock);
 		ua_io_desc_read_locked(ua, "rate change", true);
 		mutex_unlock(&audio->io_lock);
@@ -1571,7 +1581,7 @@ static void ua_io_map_rate_changed(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 
-	if (!ua_io_map_enabled() || !audio->io_ready)
+	if (!ua_io_map_enabled(ua) || !audio->io_ready)
 		return;
 
 	ua_io_map_settle(ua);
@@ -1592,7 +1602,7 @@ void ua_io_map_get_info(struct ua_device *ua, struct ua_io_map_info *info)
 	unsigned int dir, i;
 
 	memset(info, 0, sizeof(*info));
-	info->io_map = io_map;
+	info->io_map = ua_io_map_enabled(ua) ? 1 : 0;
 	info->device_type = ua->device_type;
 
 	if (!audio->io_ready)
@@ -1656,8 +1666,9 @@ static void ua_io_map_proc_read(struct snd_info_entry *entry,
 		return;
 	ua_io_map_get_info(ua, info);
 
-	snd_iprintf(buf, "io_map\t\t%u (%s layout)%s\n", info->io_map,
+	snd_iprintf(buf, "io_map\t\t%u (%s layout%s)%s\n", info->io_map,
 		    info->active ? "descriptor" : "legacy",
+		    io_map < 0 ? ", auto" : "",
 		    info->stale ? ", stale: streams re-prepare" : "");
 	snd_iprintf(buf, "model\t\t%s (device type 0x%02x)\n",
 		    audio->model ? audio->model->name : "no model data",
@@ -5941,7 +5952,7 @@ static int ua_mixer_init(struct ua_device *ua)
 	}
 
 	/* Digital Input Mode: io_map=1 route selection (see its put) */
-	if (ua_io_map_enabled() && audio->model &&
+	if (ua_io_map_enabled(ua) && audio->model &&
 	    audio->model->toslink != UA_TOSLINK_NONE) {
 		static const struct snd_kcontrol_new dig_in_mode = {
 			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
@@ -6443,9 +6454,10 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 
 	/* The IO map may be used from here on (connect, ioctl, PCM) */
 	audio->io_ready = true;
-	if (ua_io_map_enabled())
-		dev_info(&ua->pdev->dev,
-			 "io_map=1: DMA layout follows the firmware IO descriptor\n");
+	dev_info(&ua->pdev->dev, "io_map=%d: %s\n", io_map,
+		 ua_io_map_enabled(ua) ?
+		 "DMA layout follows the firmware IO descriptor" :
+		 "legacy DMA layout (ALSA channel N = DMA slot N)");
 
 	/*
 	 * Allocate DMA buffers and program the SG table.  A no-op when

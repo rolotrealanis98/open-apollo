@@ -310,7 +310,8 @@ struct ua_routing_table {
  * SetDriverIoRoutings (SEL171) only stores the host-side channel ->
  * {device, channel ID, name} table, nothing is sent to the DSP, and the
  * descriptor areas are firmware-written and only read by the kext.  With
- * io_map=1 the ioctl is a no-op that returns 0.
+ * the descriptor layout selected (io_map=1, or the io_map=-1 default on
+ * the x4) the ioctl is a no-op that returns 0.
  */
 #define UA_IOCTL_SEND_ROUTING      _IO(UA_IOCTL_MAGIC, 0x61)
 
@@ -325,10 +326,11 @@ struct ua_routing_table {
  * AUX, S/PDIF, AES/EBU, MON and CUE are stereo pairs: number n is pair
  * (n + 1) / 2, L when n is odd.
  *
- * With io_map=0 (legacy) the map is the identity over the first
+ * In the legacy layout the map is the identity over the first
  * hw_channels slots and the names are the model's route-table names for
- * that legacy layout; with io_map=1 each ALSA channel is placed on the
- * descriptor slot carrying its channel ID.
+ * that layout; in the descriptor layout (io_map=1, or the io_map=-1
+ * default on the x4) each ALSA channel is placed on the descriptor slot
+ * carrying its channel ID.
  *
  * desc_* describe the last valid descriptor the firmware published for
  * the direction: a read that is not usable (all-ones, mid-republish)
@@ -359,7 +361,8 @@ struct ua_io_map_dir {
 };
 
 struct ua_io_map_info {
-	__u32 io_map;		/* Module parameter: 0 legacy, 1 descriptor */
+	__u32 io_map;		/* Layout selected for this device: 0 legacy,
+				 * 1 descriptor (io_map=-1 resolves per model) */
 	__u32 active;		/* 1 = descriptor-mapped layout in use */
 	__u32 stale;		/* 1 = layout changed, streams re-prepare */
 	__u32 device_type;
