@@ -1638,6 +1638,26 @@ static int ua_mixer_kind(const struct ua_device *ua)
 	}
 }
 
+/*
+ * Highest ARM-preamp channel per mixer kind (CUAD2DeviceMixer +0x16ec,
+ * parity/14 section 2); -1 = the kind has no ARM preamps.  Kind 0x10
+ * (x16D) says 23, but only the two four-channel banks of channels 0-7
+ * are known, so ua_kind_max_arm_ch() stops there.
+ */
+static const s8 ua_kind_arm_ch[] = {
+	3, -1, 1, -1, 3, -1, 7, 1,	/* kinds 0-7 */
+	1, 1, 1, 3, 7, -1, 3, 1,	/* 8-15: x6 1, x8 3, x8p 7, x16 -, x4 3 */
+	23, 1, 3, 7, -1, 1, 3,		/* 16-22: x16D, Gen 2 x6..x16, x4 Gen 2 */
+};
+
+/* -1: no ARM preamps; an unknown kind keeps the old limit, channel 7 */
+static int ua_kind_max_arm_ch(int kind)
+{
+	if (kind < 0 || kind >= (int)ARRAY_SIZE(ua_kind_arm_ch))
+		return UA_MAX_PREAMP_CH - 1;
+	return min_t(int, ua_kind_arm_ch[kind], UA_MAX_PREAMP_CH - 1);
+}
+
 /* Allowed-kind bit sets from the kext's gates (parity/14 section 2) */
 #define UA_KIND_SET_2A_2D	0x00112022u	/* 1,5,13,16,20 */
 #define UA_KIND_SET_33_35	0x0011202au	/* 1,3,5,13,16,20 */
@@ -2312,8 +2332,9 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 {
 	static const u8 imp_shift[4] = { 9, 16, 20, 24 };
 	unsigned int setting_idx, shift;
-	unsigned int max_arm_ch, dsp_phase_ch;
+	unsigned int dsp_phase_ch, hiz_inputs;
 	int kind = ua_mixer_kind(ua);
+	int max_arm_ch;
 	bool hi_bank = ch > 3;
 	u32 hw_mask, hw_val;
 
@@ -2327,8 +2348,8 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 	if (param_id == UA_PREAMP_PARAM_LEVEL)
 		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_SPAN, value);
 
-	/* Highest ARM preamp channel: 3 on the x4 (kind 14); 7 where unknown */
-	max_arm_ch = (kind == 14 || kind == 22) ? 3 : 7;
+	/* Highest ARM preamp channel by kind: 3 on the x4 (kind 14) */
+	max_arm_ch = ua_kind_max_arm_ch(kind);
 	/* Phase goes to the DSP from the first channel without a preamp */
 	dsp_phase_ch = ua->audio.num_preamps ? ua->audio.num_preamps :
 					       max_arm_ch + 1;
@@ -2342,8 +2363,12 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 					      value);
 	}
 
-	if (ch > max_arm_ch)
+	if ((int)ch > max_arm_ch)
 		return -EINVAL;
+
+	/* HiZ inputs of the model (2 without model data, as before) */
+	hiz_inputs = ua->audio.model ? min_t(unsigned int,
+					     ua->audio.num_hiz, 2) : 2;
 
 	switch (param_id) {
 	case UA_PREAMP_PARAM_MIC_LINE:
@@ -2414,8 +2439,8 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 		hw_val = (value & 0xF) << shift;
 		break;
 	case UA_PREAMP_PARAM_HIZ_IMP:
-		/* The x4's two HiZ inputs only */
-		if (ch > 1)
+		/* The model's HiZ inputs only (two on the x4, one on a Twin) */
+		if (ch >= hiz_inputs)
 			return -EINVAL;
 		setting_idx = 13;
 		shift = 4 * ch;

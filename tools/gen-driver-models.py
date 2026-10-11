@@ -144,6 +144,11 @@ def load_models():
             flags.append('UA_MODEL_F_AES')
         if d.get('desktop'):
             flags.append('UA_MODEL_F_DESKTOP')
+        outputs = d.get('mixer_outputs') or []
+        if 'HP 1' in outputs:
+            flags.append('UA_MODEL_F_HP1')
+        if 'HP 2' in outputs:
+            flags.append('UA_MODEL_F_HP2')
         models.append({
             'slug': slug, 'path': rel, 'name': d['model'], 'types': dtypes,
             'type_names': names, 'preamps': preamps, 'hiz': hiz,

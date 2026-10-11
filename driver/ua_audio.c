@@ -268,6 +268,15 @@ static const struct ua_legacy_dma *ua_legacy_row(u32 device_type)
 	return NULL;
 }
 
+/*
+ * Does the model have this feature (UA_MODEL_F_*)?  Without model data
+ * every control is offered, as before.
+ */
+static bool ua_model_has(const struct ua_audio *audio, unsigned int flag)
+{
+	return !audio->model || (audio->model->flags & flag);
+}
+
 const struct ua_model_desc *ua_model_lookup(u32 device_type,
 					    const char **type_name)
 {
@@ -763,14 +772,11 @@ static void ua_audio_program_sg(struct ua_device *ua)
 		u32 dma_ctrl = ua_read(ua, UA_REG_DMA_CTRL);
 
 		/*
-		 * Enable global DMA + per-engine enables, clear reset
-		 * strobes.  On warm boot the engine reset is skipped so
-		 * bit 0 (global enable) may not be set.
+		 * Enable global DMA + the engines of the DSPs that exist,
+		 * clear reset strobes.  On warm boot the engine reset is
+		 * skipped so bit 0 (global enable) may not be set.
 		 */
-		if (ua->fw_v2)
-			dma_ctrl = (dma_ctrl | 0x1FF) & ~0x1FE00;
-		else
-			dma_ctrl = (dma_ctrl | 0x1F) & ~0x1E00;
+		dma_ctrl = ua_dsp_dma_ctrl_clean(ua, dma_ctrl);
 
 		ua_write(ua, UA_REG_DMA_CTRL, dma_ctrl);
 		dma_ctrl = ua_read(ua, UA_REG_DMA_CTRL);
@@ -3655,13 +3661,12 @@ static int ua_audio_prepare_transport(struct ua_device *ua,
 	 * holding the DMA engines in reset: transport arms and acks
 	 * (CTRL readback 0x28f) but SAMPLE_POS/FRAME_CTR never advance.
 	 * Re-apply the enable/clear mask here; no-op on devices where the
-	 * strobes are already clear (x4 reads 0x1FF at this point).
+	 * strobes are already clear (x4 reads 0x1F at this point, one enable
+	 * per DSP).
 	 */
 	{
 		u32 dma_ctrl = ua_read(ua, UA_REG_DMA_CTRL);
-		u32 clean = ua->fw_v2 ?
-			((dma_ctrl | 0x1FF) & ~0x1FE00) :
-			((dma_ctrl | 0x1F) & ~0x1E00);
+		u32 clean = ua_dsp_dma_ctrl_clean(ua, dma_ctrl);
 
 		if (dma_ctrl != clean) {
 			ua_write(ua, UA_REG_DMA_CTRL, clean);
@@ -8192,41 +8197,47 @@ void ua_mixer_sync_readback(struct ua_device *ua)
 	memcpy(old, rb, sizeof(audio->rb_synced));
 	audio->rb_synced_valid = true;
 
-	/* Word 0, 3: the four inputs the words describe */
-	n = min_t(unsigned int, audio->num_preamps, 4);
+	/*
+	 * Words 0 and 3: inputs 1-4; words 5 and 7: inputs 5-8, same lanes
+	 * (parity/14 section 7, the Mixer Engine's applySettings1 and
+	 * applyInputGainSettings)
+	 */
+	n = min_t(unsigned int, audio->num_preamps, UA_MAX_PREAMP_CH);
 	for (ch = 0; ch < n; ch++) {
 		struct ua_preamp_state *st = &audio->preamp[ch];
-		u32 flags = (chg[0] >> (ch * 6)) & 0x3f;
+		unsigned int wf = ch < 4 ? 0 : 5, wg = ch < 4 ? 3 : 7;
+		unsigned int lane = ch & 3;
+		u32 flags = (chg[wf] >> (lane * 6)) & 0x3f;
 
 		if (flags & BIT(0)) {
 			snprintf(name, sizeof(name), "Line %u Input Select",
 				 ch + 1);
 			ua_sync_bool(ua, &st->mic_line,
-				     UA_RB_PREAMP_MICLINE(rb[0], ch), name);
+				     UA_RB_PREAMP_MICLINE(rb[wf], lane), name);
 		}
 		if (flags & BIT(1)) {
 			snprintf(name, sizeof(name), "Line %u Pad Switch",
 				 ch + 1);
-			ua_sync_bool(ua, &st->pad, UA_RB_PREAMP_PAD(rb[0], ch),
+			ua_sync_bool(ua, &st->pad, UA_RB_PREAMP_PAD(rb[wf], lane),
 				     name);
 		}
 		if (flags & BIT(3)) {
 			snprintf(name, sizeof(name),
 				 "Mic %u 48V Phantom Power Switch", ch + 1);
 			ua_sync_bool(ua, &st->phantom,
-				     UA_RB_PREAMP_48V(rb[0], ch), name);
+				     UA_RB_PREAMP_48V(rb[wf], lane), name);
 		}
 		if (flags & BIT(4)) {
 			snprintf(name, sizeof(name), "Line %u LowCut Switch",
 				 ch + 1);
 			ua_sync_bool(ua, &st->lowcut,
-				     UA_RB_PREAMP_LOWCUT(rb[0], ch), name);
+				     UA_RB_PREAMP_LOWCUT(rb[wf], lane), name);
 		}
 		if (flags & BIT(5)) {
 			snprintf(name, sizeof(name),
 				 "Line %u Phase Invert Switch", ch + 1);
 			ua_sync_bool(ua, &st->phase,
-				     UA_RB_PREAMP_PHASE(rb[0], ch), name);
+				     UA_RB_PREAMP_PHASE(rb[wf], lane), name);
 		}
 		if (ch < 2 && ch < audio->num_hiz && (chg[0] & BIT(24 + ch))) {
 			snprintf(name, sizeof(name),
@@ -8234,12 +8245,12 @@ void ua_mixer_sync_readback(struct ua_device *ua)
 			ua_sync_bool(ua, &st->hiz, UA_RB_HIZ_DETECT(rb[0], ch),
 				     name);
 		}
-		if (UA_RB_PREAMP_GAINC(chg[3], ch)) {
+		if (UA_RB_PREAMP_GAINC(chg[wg], lane)) {
 			snprintf(name, sizeof(name), "Line %u Capture Volume",
 				 ch + 1);
 			ua_sync_int(ua, &st->gain,
 				    min_t(int, max_t(int,
-					    UA_RB_PREAMP_GAIN_DB(rb[3], ch),
+					    UA_RB_PREAMP_GAIN_DB(rb[wg], lane),
 					    UA_PREAMP_GAIN_MIN_DB),
 					  UA_PREAMP_GAIN_MAX_DB), name);
 		}
@@ -8266,11 +8277,15 @@ void ua_mixer_sync_readback(struct ua_device *ua)
 		ua_sync_bool(ua, &audio->monitor.dim, UA_RB_MON_DIM(rb[2]),
 			     "Monitor Dim Switch");
 
-	/* Word 6: talkback button; word 7: HP2 knob */
+	/*
+	 * Word 6: talkback button; word 7 [7:0]: the HP2 knob on the x4
+	 * (observed).  With more than four preamps word 7 carries the gain
+	 * lanes of inputs 5-8 instead.
+	 */
 	if (chg[6] & BIT(8))
 		ua_sync_bool(ua, &audio->monitor.talkback,
 			     UA_RB_TALKBACK(rb[6]), "Monitor Talkback Switch");
-	if (chg[7] & 0xff)
+	if (audio->num_preamps <= 4 && (chg[7] & 0xff))
 		ua_sync_int(ua, &audio->monitor.hp2_vol,
 			    min_t(int, UA_RB_HP2_VOLUME(rb[7]), 192),
 			    "Headphone 2 Playback Volume");
@@ -8574,7 +8589,7 @@ static int ua_mixer_init(struct ua_device *ua)
 	}
 
 	/* Headphone 1 Source */
-	{
+	if (ua_model_has(audio, UA_MODEL_F_HP1)) {
 		ctl = (struct snd_kcontrol_new){};
 		ctl.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 		ctl.name = "Headphone 1 Source";
@@ -8592,7 +8607,7 @@ static int ua_mixer_init(struct ua_device *ua)
 	}
 
 	/* Headphone 2 Source */
-	{
+	if (ua_model_has(audio, UA_MODEL_F_HP2)) {
 		ctl = (struct snd_kcontrol_new){};
 		ctl.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 		ctl.name = "Headphone 2 Source";
@@ -8615,6 +8630,10 @@ static int ua_mixer_init(struct ua_device *ua)
 
 		for (hp = 1; hp <= 2; hp++) {
 			char name[32];
+
+			if (!ua_model_has(audio, hp == 1 ? UA_MODEL_F_HP1 :
+							   UA_MODEL_F_HP2))
+				continue;
 
 			ctl = (struct snd_kcontrol_new){};
 			ctl.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
@@ -8660,7 +8679,7 @@ static int ua_mixer_init(struct ua_device *ua)
 	}
 
 	/* Monitor Talkback */
-	{
+	if (ua_model_has(audio, UA_MODEL_F_TALKBACK)) {
 		static const struct snd_kcontrol_new mon_tb = {
 			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 			.name = "Monitor Talkback Switch",
@@ -8678,8 +8697,8 @@ static int ua_mixer_init(struct ua_device *ua)
 		total++;
 	}
 
-	/* Digital Output Mode */
-	{
+	/* Digital Output Mode: only where TOSLink output is settable */
+	if (!audio->model || audio->model->toslink == UA_TOSLINK_PER_DIR) {
 		static const struct snd_kcontrol_new dig_mode = {
 			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 			.name = "Digital Output Mode",

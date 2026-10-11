@@ -770,6 +770,33 @@ module_param(dma_per_dsp, bool, 0444);
 MODULE_PARM_DESC(dma_per_dsp,
 		 "Ring init sets one DMA_CTRL enable bit per DSP (macOS EnableDMA) and never leaves a reset strobe set (default: on; 0 = the old OR of 0x1FFFE, which after a cold start can leave DMA_CTRL at 0x1ffff with every reset strobe asserted and the DSP command rings unserviced)");
 
+/**
+ * ua_dsp_dma_ctrl_clean - DMA_CTRL with the engine enables the device uses
+ * @ua: device
+ * @dma_ctrl: the value read from DMA_CTRL
+ *
+ * Global enable (bit 0) on, every reset strobe off.  dma_per_dsp: one
+ * enable bit per DSP the device has (kext EnableDMA(idx); the audio
+ * extension's ProgramRegisters writes no DMA_CTRL bit at all), so a
+ * 1- or 2-DSP unit never gets enables for engines it lacks and an enable
+ * an earlier all-bits write left for an absent DSP is dropped.  Off: the
+ * long-standing OR of every engine enable (0x1FF, v1 0x1F).
+ */
+u32 ua_dsp_dma_ctrl_clean(struct ua_device *ua, u32 dma_ctrl)
+{
+	unsigned int i;
+	u32 en = 0;
+
+	if (!ua->fw_v2)
+		return (dma_ctrl | 0x1F) & ~UA_DMA_RESET_V1_MASK;
+	if (!dma_per_dsp)
+		return (dma_ctrl | 0x1FF) & ~UA_DMA_RESET_V2_MASK;
+
+	for (i = 0; i < ua->num_dsps && i < 8; i++)
+		en |= BIT(i + 1);
+	return (dma_ctrl & ~(UA_DMA_RESET_V2_MASK | 0x1FE)) | BIT(0) | en;
+}
+
 /* ----------------------------------------------------------------
  * Ring init / cleanup for all DSPs
  * ---------------------------------------------------------------- */

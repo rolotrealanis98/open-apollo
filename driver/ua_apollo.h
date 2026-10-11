@@ -1013,6 +1013,8 @@ struct ua_monitor_state {
 #define UA_MODEL_F_TALKBACK     BIT(0)
 #define UA_MODEL_F_AES          BIT(1)  /* digital I/O is AES/EBU */
 #define UA_MODEL_F_DESKTOP      BIT(2)
+#define UA_MODEL_F_HP1          BIT(3)  /* mixer output "HP 1" */
+#define UA_MODEL_F_HP2          BIT(4)  /* mixer output "HP 2" */
 
 struct ua_route_list {
 	const u16 *ids;         /* UA channel IDs, ALSA channel order */
@@ -1828,6 +1830,7 @@ void ua_dsp_rings_fini(struct ua_device *ua, bool dma_quiet);
 void ua_dsp_rings_quiesce(struct ua_device *ua);
 void ua_dsp_rings_neutralize(struct ua_device *ua);
 void ua_dsp_cache_firmware(struct ua_device *ua, bool mixer, bool chain);
+u32 ua_dsp_dma_ctrl_clean(struct ua_device *ua, u32 dma_ctrl);
 void ua_dsp_rings_reprogram(struct ua_device *ua);
 int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 			 size_t fw_size);
