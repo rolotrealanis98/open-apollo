@@ -4279,8 +4279,7 @@ static void ua_remove(struct pci_dev *pdev)
 	cancel_work_sync(&ua->resume_work);
 	ua_dsp_service_stop(ua);
 	ua_audio_period_wd_cancel(ua);
-	ua->audio.period_timer_running = false;
-	hrtimer_cancel(&ua->audio.period_timer);
+	ua_audio_stop_period_timer(ua);
 
 	/*
 	 * 2. If the device is still present (unbind / rmmod), run the
@@ -4334,8 +4333,7 @@ static void ua_remove(struct pci_dev *pdev)
 	 *    timer; both see the flag now, stop them for good.
 	 */
 	ua_audio_period_wd_cancel(ua);	/* first: it can start the timer */
-	ua->audio.period_timer_running = false;
-	hrtimer_cancel(&ua->audio.period_timer);
+	ua_audio_stop_period_timer(ua);
 	ua_dsp_service_stop(ua);
 
 	/*
@@ -4524,8 +4522,7 @@ static void ua_quiesce_device(struct ua_device *ua, const char *why,
 	} else {
 		ua_dsp_service_stop(ua);
 		ua_audio_period_wd_cancel(ua);
-		ua->audio.period_timer_running = false;
-		hrtimer_cancel(&ua->audio.period_timer);
+		ua_audio_stop_period_timer(ua);
 	}
 
 	mutex_lock(&ua->lock);

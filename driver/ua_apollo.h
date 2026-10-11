@@ -1775,6 +1775,7 @@ void ua_audio_irq_thread(struct ua_device *ua);
 void ua_audio_notif_irq(struct ua_device *ua, u32 status_hi);
 bool ua_notif_irq_enabled(void);
 void ua_audio_period_wd_cancel(struct ua_device *ua);
+void ua_audio_stop_period_timer(struct ua_device *ua);
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate);
 int ua_audio_set_clock_source(struct ua_device *ua, unsigned int source);
 bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source);

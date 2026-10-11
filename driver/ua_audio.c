@@ -6092,6 +6092,29 @@ void ua_audio_period_wd_cancel(struct ua_device *ua)
 }
 
 /*
+ * Remove, shutdown, suspend, ua_audio_fini(): stop the 1 ms period timer
+ * and wait for a callback in progress.  period_timer_running is cleared
+ * under timer_lock, which trigger(START) holds while it checks the
+ * shutdown flag and arms the timer: once remove() has raised the flag, a
+ * START that got past its first check before that cannot arm the timer
+ * after this stop.  hrtimer_cancel() runs outside the lock (the callback
+ * can reach trigger(STOP) through an XRUN, which takes it).  Cancel the
+ * watchdog first where it may run: its fallback starts the timer.
+ * Caller holds no lock the callback takes (audio->lock, a PCM stream
+ * lock, timer_lock).
+ */
+void ua_audio_stop_period_timer(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned long flags;
+
+	spin_lock_irqsave(&audio->timer_lock, flags);
+	audio->period_timer_running = false;
+	spin_unlock_irqrestore(&audio->timer_lock, flags);
+	hrtimer_cancel(&audio->period_timer);
+}
+
+/*
  * May the period-timer interrupt serve @sub (trigger(START), under
  * timer_lock)?  It needs period_irq=1; the 64-vector interrupt block (the
  * timer is ISR_HI bit 30, which ua_enable_vector() only arms with fw_v2);
@@ -6411,6 +6434,17 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 				    sub->runtime->buffer_size;
 
 		spin_lock_irqsave(&audio->timer_lock, flags);
+		/*
+		 * Again under timer_lock: remove() raises the shutdown flag,
+		 * then stops the timer under this lock
+		 * (ua_audio_stop_period_timer()), so a START that passed the
+		 * check above just before the flag rose must not arm the
+		 * timer after that stop.
+		 */
+		if (atomic_read(&ua->shutdown)) {
+			spin_unlock_irqrestore(&audio->timer_lock, flags);
+			return -ENODEV;
+		}
 		/* Only this direction's period tracking starts over */
 		if (dir == UA_DIR_PLAY)
 			audio->last_play_period_pos = start_pos;
@@ -9077,8 +9111,7 @@ void ua_audio_suspend(struct ua_device *ua)
 	ua_dsp_service_stop(ua);
 	/* The watchdog first: its fallback can start the hrtimer */
 	ua_audio_period_wd_cancel(ua);
-	audio->period_timer_running = false;
-	hrtimer_cancel(&audio->period_timer);
+	ua_audio_stop_period_timer(ua);
 }
 
 /*
@@ -9484,12 +9517,17 @@ void ua_audio_fini(struct ua_device *ua)
 
 	/*
 	 * No trigger can run any more: a START that raced the removal may
-	 * have queued the period_irq watchdog after remove cancelled it.
+	 * have queued the period_irq watchdog after remove cancelled it, or
+	 * armed the period timer (the last trigger(STOP) only tries to
+	 * cancel it, and a callback in progress then runs once more).  Stop
+	 * both for good: this struct can be freed as soon as remove()
+	 * returns.  The watchdog first, its fallback starts the timer.
 	 * The proc files went with the card; the IRQ is freed before this on
 	 * remove and never served a stream on a probe failure: the trace has
 	 * no user left.
 	 */
 	ua_audio_period_wd_cancel(ua);
+	ua_audio_stop_period_timer(ua);
 	kfree(audio->pirq_trace);
 	audio->pirq_trace = NULL;
 
