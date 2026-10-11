@@ -81,6 +81,8 @@ def test_stop_callers_do_not_hold_the_lock():
             core, 'static pci_ers_result_t ua_error_detected('),
         'ua_quiesce_device': csrc.extract(
             core, 'static void ua_quiesce_device('),
+        'ua_probe_unwind_dsp': csrc.extract(
+            core, 'static void ua_probe_unwind_dsp('),
         'ua_audio_suspend': csrc.extract(audio, 'void ua_audio_suspend('),
         'ua_audio_fini': csrc.extract(audio, 'void ua_audio_fini('),
         'ua_audio_disconnect': csrc.extract(
@@ -100,4 +102,4 @@ def test_stop_callers_do_not_hold_the_lock():
             if 'ua_dsp_service_stop(ua)' in line:
                 assert line.strip() == 'ua_dsp_service_stop(ua);'
     assert audio.count('ua_dsp_service_stop(ua);') == 3
-    assert core.count('ua_dsp_service_stop(ua);') == 4
+    assert core.count('ua_dsp_service_stop(ua);') == 5

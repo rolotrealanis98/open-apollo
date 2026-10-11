@@ -3915,21 +3915,48 @@ static void ua_chardev_release(struct device *dev)
 }
 
 /*
- * Probe failed after ua_dsp_init_and_load(): stop the device, then free
- * what that allocated (DSP rings and the buffers parked on them, plugin
- * payloads, the audio DMA rings).  With bus mastering off nothing can
- * DMA into them any more.
+ * Probe failed after ua_dsp_init_and_load(): stop the device as remove()
+ * does, then free what probe allocated (the ALSA card when @audio, the
+ * DSP rings and the buffers parked on them, plugin payloads, the audio
+ * DMA rings).  @audio: ua_audio_init() was called, successfully or not
+ * (it sets up its work items and timer before anything can fail).
+ *
+ * The order is remove()'s: the service loop and the period timers
+ * stopped, the kext Shutdown sequence and TRANSPORT = 0 under ua->lock,
+ * the shutdown flag raised before the lock is dropped (a PCM opened on
+ * the card ua_audio_init() registered, or the IRQ, cannot reach BAR0 and
+ * restart anything after that), an IRQ handler or thread already running
+ * waited for (remove() frees the IRQ at this point; here it stays until
+ * the caller's free_irq()), 100 ms for the firmware, bus mastering off,
+ * and only then ua_audio_fini() and the frees.  Buffers parked by a
+ * timed-out ring command are freed only when the device can no longer
+ * write them, as remove() decides (gone, or DMA engines reset by
+ * full_shutdown); otherwise they are leaked, since the next probe turns
+ * bus mastering back on.  The audio rings used to be freed by
+ * ua_audio_fini() with bus mastering still on and the DSP rings live.
  */
-static void ua_probe_unwind_dsp(struct ua_device *ua)
+static void ua_probe_unwind_dsp(struct ua_device *ua, bool audio)
 {
+	bool dead = !pci_device_is_present(ua->pdev);
+
+	if (audio) {
+		ua_dsp_service_stop(ua);
+		ua_audio_period_wd_cancel(ua);
+		ua_audio_stop_period_timer(ua);
+	}
+
 	mutex_lock(&ua->lock);
 	ua_hw_quiesce_locked(ua);
 	ua_write(ua, UA_REG_TRANSPORT, 0);
+	atomic_set(&ua->shutdown, 1);
 	mutex_unlock(&ua->lock);
+	synchronize_irq(pci_irq_vector(ua->pdev, 0));
 	msleep(100);
 	pci_clear_master(ua->pdev);
 
-	ua_dsp_rings_fini(ua, true);
+	if (audio)
+		ua_audio_fini(ua);
+	ua_dsp_rings_fini(ua, dead || full_shutdown);
 	ua_dsp_free_plugin_payloads(ua);
 	ua_audio_free_dma(ua);
 }
@@ -4193,7 +4220,8 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = ua_audio_init(ua);
 	if (ret) {
 		dev_err(&pdev->dev, "audio init failed: %d\n", ret);
-		goto err_dsp;
+		/* Its work items and timer exist: the audio-side unwind */
+		goto err_audio;
 	}
 
 	/* The kext's _checkDSPs is the tail of Connect(): fatal there */
@@ -4237,9 +4265,11 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 err_ida:
 	ida_free(&ua_ida, devno);
 err_audio:
-	ua_audio_fini(ua);
+	ua_probe_unwind_dsp(ua, true);
+	goto err_irq;
 err_dsp:
-	ua_probe_unwind_dsp(ua);
+	ua_probe_unwind_dsp(ua, false);
+err_irq:
 	free_irq(pci_irq_vector(pdev, 0), ua);
 err_free_irq_vectors:
 	pci_free_irq_vectors(pdev);

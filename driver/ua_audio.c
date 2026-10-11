@@ -2541,8 +2541,9 @@ void ua_dsp_service_start(struct ua_device *ua)
  * at once.
  *
  * Caller must NOT hold ua->lock (the handler takes it).  The callers are
- * remove, the PCI error handler, the .shutdown/suspend quiesce,
- * ua_audio_suspend() and ua_audio_fini(), none of which holds it.
+ * remove, the PCI error handler, the .shutdown/suspend quiesce, the
+ * probe unwind, ua_audio_suspend() and ua_audio_fini(), none of which
+ * holds it.
  */
 void ua_dsp_service_stop(struct ua_device *ua)
 {
@@ -9334,7 +9335,7 @@ int ua_audio_init(struct ua_device *ua)
 	ret = snd_card_new(&ua->pdev->dev, -1, NULL, THIS_MODULE, 0, &card);
 	if (ret) {
 		dev_err(&ua->pdev->dev, "snd_card_new failed: %d\n", ret);
-		goto err_dma;
+		return ret;
 	}
 
 	audio->card = card;
@@ -9476,8 +9477,11 @@ int ua_audio_init(struct ua_device *ua)
 err_card:
 	snd_card_free(card);
 	audio->card = NULL;
-err_dma:
-	ua_audio_free_dma(ua);
+	/*
+	 * The DMA rings stay: the SG table points at them and bus mastering
+	 * is on.  The probe unwind frees them once the device is quiesced
+	 * and off the bus (ua_probe_unwind_dsp()).
+	 */
 	return ret;
 }
 
