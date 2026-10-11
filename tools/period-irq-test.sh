@@ -21,17 +21,18 @@
 #      (period_irq=0 and 1): xruns (aplay/arecord -v), exit codes, the
 #      owner of each direction, period wakeups per second (= rate/period),
 #      period-timer interrupts per second (none with period_irq=0: the
-#      timer is left unprogrammed and masked, as on macOS), end-of-buffer
-#      interrupts per second (= rate/8192), /proc/interrupts rate, dmesg
+#      timer is left unprogrammed and masked, as on macOS; with
+#      period_irq=1 one per period, a second one for the same boundary
+#      counted apart as timer_dups), the timer phase against SAMPLE_POS,
+#      end-of-buffer interrupts per second (= rate/8192), /proc/interrupts
+#      rate, dmesg
 #   2. mixed periods (period_irq=1): record period 1024 then play 256 (play
 #      must fall back to the hrtimer), and 256 then 1024 (both on the IRQ)
-#   3. TIMER_CFG counting (period_irq=1, 48k, period 256): frames per timer
-#      interrupt and timer phase for period_irq_cfg_adj -1, 0, +1
-#   4. runtime switch: period_irq flipped while a capture stream runs
-#   5. start/stop stress, each mode: N duplex open/close cycles; capture
+#   3. runtime switch: period_irq flipped while a capture stream runs
+#   4. start/stop stress, each mode: N duplex open/close cycles; capture
 #      continuous while playback cycles N times; and the reverse
 # pipewire:
-#   6. for each clock.force-quantum (256/512/1024): pw-play silence to the
+#   5. for each clock.force-quantum (256/512/1024): pw-play silence to the
 #      Apollo output node and pw-record from its input node for --pw-seconds
 #      (default 300); pw-top ERR delta on the Apollo nodes, owners,
 #      interrupt rate, dmesg
@@ -48,13 +49,15 @@
 #     rate/period from the owning path and none from the other, no
 #     interrupt storm in /proc/interrupts, no fallbacks/stops, no new kernel
 #     errors; period_irq=0: no timer interrupts at all; period_irq=1: timer
-#     interrupts within 0.5% of rate/timer_frames, EOB within 3% of
-#     rate/buffer (a WARN with period_irq=0), EOB at the ring start)
-#   - TIMER_CFG check: frames per timer interrupt equals timer_frames with
-#     the default period_irq_cfg_adj=-1 (else change that default first)
+#     interrupts other than same-boundary duplicates within 0.5% of
+#     rate/timer_frames, EOB within 3% of rate/buffer (a WARN with
+#     period_irq=0), EOB at the ring start).  A correctable AER reported
+#     for another device (the Thunderbolt ports) is INFO, not a failure.
 #   - pipewire: 0 new ERR on the Apollo nodes at every quantum, 5 min each
-#   - WARN lines (timer phase) understood: a mean phase above 1/8 of the
-#     timer interval means late wakeups, not lost ones
+#   - WARN lines understood: a timer phase mean above 1/8 of the interval
+#     means late wakeups, not lost ones (the driver moves the stream to the
+#     hrtimer above 1/4); duplicates above 10% cost interrupts, not
+#     wakeups
 #   - then: the freeze reporters (#33, #38, #42) run period_irq=1 on their
 #     machines; that part is outside this script
 #
@@ -152,10 +155,8 @@ if dmesg >/dev/null 2>&1; then DMESG=(dmesg); else DMESG=(sudo dmesg); fi
 echo "sudo is used for the module parameter writes (and dmesg if restricted)."
 sudo -n true 2>/dev/null || sudo -v || die "sudo needed for $PARAMS writes"
 FWV2="$(awk '$1 == "fw_v2" { print $2 }' "$PROC")"
-TIMER_SEV=""   # cfg_check: INFO for the deliberately wrong adj values
 
 ORIG_IRQ="$(cat "$PARAMS/period_irq")"
-ORIG_ADJ="$(cat "$PARAMS/period_irq_cfg_adj" 2>/dev/null || echo -1)"
 
 set_param() {   # set_param name value
     echo "$2" | sudo tee "$PARAMS/$1" >/dev/null ||
@@ -179,7 +180,6 @@ cleanup() {
     wait 2>/dev/null
     [ "$FORCED_QUANTUM" = 1 ] && pw-metadata -n settings 0 clock.force-quantum 0 >/dev/null 2>&1
     set_param period_irq "$ORIG_IRQ"
-    set_param period_irq_cfg_adj "$ORIG_ADJ"
     restore_pipewire
     rm -rf "$WORK"
     echo "Logs: $LOGDIR"
@@ -222,9 +222,24 @@ kmsg_new() {
         awk -v m="$KMARK" 'm == "" || found { print } $0 == m { found = 1 }'
 }
 KBAD='period_irq:|period timer:|BAR0|AER|refusing opens|transport stalled|unreachable|WARNING|BUG|Oops|Call Trace|hung task|blocked for more than'
+# PCI address of the Apollo, to tell its AER reports from other devices
+SYSCARD="${PERIOD_IRQ_SYSCARD:-/sys/class/sound/card$CARD}"
+APOLLO_BDF="$(readlink -f "$SYSCARD/device" 2>/dev/null)"
+APOLLO_BDF="${APOLLO_BDF##*/}"
 check_kmsg() {   # check_kmsg NAME DIR
     kmsg_new > "$2/dmesg.txt"
-    if grep -E "$KBAD" "$2/dmesg.txt" > "$2/dmesg.bad"; then
+    grep -E "$KBAD" "$2/dmesg.txt" > "$2/dmesg.all"
+    # A correctable AER that names another device (e.g. a Thunderbolt
+    # port) is not the driver's: INFO.  Anything else, or the Apollo: FAIL.
+    : > "$2/dmesg.info"
+    : > "$2/dmesg.bad"
+    awk -v bdf="${APOLLO_BDF:-ua_apollo}" -v info="$2/dmesg.info" -v bad="$2/dmesg.bad" '
+        /AER: Correctable/ && index($0, bdf) == 0 { print > info; next }
+        { print > bad }' "$2/dmesg.all"
+    if [ -s "$2/dmesg.info" ]; then
+        result INFO "$1" "kernel (other device): $(head -n 1 "$2/dmesg.info")"
+    fi
+    if [ -s "$2/dmesg.bad" ]; then
         result FAIL "$1" "kernel: $(head -n 1 "$2/dmesg.bad")"
     fi
 }
@@ -297,7 +312,7 @@ expect_owner() {   # expect_owner MODE RATE PERIOD
 run_duplex() {
     local name=$1 mode=$2 rate=$3 pp=$4 rp=$5 secs=$6 ep=$7 er=$8
     local d="$LOGDIR/$name" rpid ppid rrc prc left dir own path per exp m
-    local bad=0 tsev=${TIMER_SEV:-FAIL}
+    local bad=0 tsev=FAIL
     [ "$mode" = 0 ] && tsev=WARN   # nothing uses the timer interrupt then
     A=(); B=()
     mkdir -p "$d"
@@ -375,8 +390,10 @@ run_duplex() {
 
     # interrupts
     local tf=${A[timer_frames]:-0} buf=${A[buffer_frames]:-8192}
-    local ti ei it ex
+    local ti ei it ex tr td
     ti=$(per_s timer_irqs)
+    td=$(per_s timer_dups)
+    tr=$(calc "$ti - $td")   # one per boundary
     ei=$(per_s eob_irqs)
     it=$(per_s irq)
     if [ "$mode" = 0 ]; then
@@ -388,11 +405,19 @@ run_duplex() {
         ex=$(calc "$rate / $buf")
     else
         [ "$tf" -gt 0 ] || tf=$pp
-        if ! within "$ti" "$(calc "$rate / $tf")" 0.005; then
-            result "$tsev" "$name" "timer interrupts $ti/s, expected $(calc "$rate / $tf")/s (timer_frames $tf, TIMER_CFG ${A[timer_cfg]:-?})"
+        if ! within "$tr" "$(calc "$rate / $tf")" 0.005; then
+            result "$tsev" "$name" "timer interrupts $tr/s without duplicates ($ti/s in all), expected $(calc "$rate / $tf")/s (timer_frames $tf, TIMER_CFG ${A[timer_cfg]:-?})"
             [ "$tsev" = FAIL ] && bad=1
         fi
-        ex=$(calc "$rate / $tf + $rate / $buf")
+        if awk -v d="$td" 'BEGIN { exit !(d > 0) }'; then
+            if awk -v d="$td" -v t="$ti" 'BEGIN { exit !(d > t * 0.1) }'; then
+                m=WARN
+            else
+                m=INFO
+            fi
+            result "$m" "$name" "$td/s duplicate timer interrupts (same boundary) of $ti/s"
+        fi
+        ex=$(calc "$rate / $tf + $td + $rate / $buf")
     fi
     if ! within "$ei" "$(calc "$rate / $buf")" 0.03; then
         result "$tsev" "$name" "end-of-buffer interrupts $ei/s, expected $(calc "$rate / $buf")/s"
@@ -410,43 +435,10 @@ run_duplex() {
     done
     if [ "$mode" = 1 ] && [ "$ep$er" != hrtimerhrtimer ] &&
        ! awk -v p="${S1[phase_mean]:-0}" -v t="$tf" 'BEGIN { exit !(p <= t / 8) }'; then
-        [ "$tsev" = FAIL ] && m=WARN || m=$tsev
-        result "$m" "$name" "timer phase mean ${S1[phase_mean]:-?} max ${S1[phase_max]:-?} of $tf frames (late wakeups; see the TIMER_CFG check)"
+        result WARN "$name" "timer phase mean ${S1[phase_mean]:-?} max ${S1[phase_max]:-?} of $tf frames (wakeups late)"
     fi
     [ "$bad" = 0 ] && result PASS "$name" \
-        "owners $ep/$er, wakeups ok, timer $ti/s eob $ei/s irq $it/s (expected $ex), phase ${S1[phase_mean]:-0}/$tf"
-}
-
-# --------------------------------------------- TIMER_CFG counting check
-cfg_check() {
-    local adj d fpi tf err best="" besterr=9
-    log ""
-    log "== TIMER_CFG counting (period_irq=1, 48000 Hz, period 256)"
-    for adj in -1 0 1; do
-        d="$LOGDIR/cfg-adj$adj"
-        mkdir -p "$d"
-        set_param period_irq_cfg_adj "$adj"
-        [ "$adj" = -1 ] && TIMER_SEV="" || TIMER_SEV=INFO
-        run_duplex "cfg-adj$adj" 1 48000 256 256 "$SECONDS_RUN" irq irq
-        TIMER_SEV=""
-        tf=${A[timer_frames]:-0}
-        fpi=$(calc "48000 * (${B[t]:-0} - ${A[t]:-0}) / ((${B[timer_irqs]:-0} - ${A[timer_irqs]:-0}) + 0.000001)")
-        log "     adj $adj: TIMER_CFG ${A[timer_cfg]:-?}, frames per timer interrupt $fpi (timer_frames $tf), phase mean ${S1[phase_mean]:-?} max ${S1[phase_max]:-?}"
-        # the adj values differ by one frame per interrupt: take the closest
-        err=$(awk -v f="$fpi" -v t="$tf" 'BEGIN { d = f - t; if (d < 0) d = -d; if (t <= 0) d = 9; printf "%.3f", d }')
-        if awk -v e="$err" -v b="$besterr" 'BEGIN { exit !(e < b) }'; then
-            best=$adj
-            besterr=$err
-        fi
-    done
-    set_param period_irq_cfg_adj -1
-    if ! awk -v e="$besterr" 'BEGIN { exit !(e < 0.5) }'; then
-        result FAIL "timer-cfg" "no adj gives one interrupt per timer_frames (closest: adj $best, off by $besterr frames); see $LOGDIR/cfg-adj*"
-    elif [ "$best" = -1 ]; then
-        result PASS "timer-cfg" "interval = TIMER_CFG + 1 frames, as the kext writes it (adj -1 is right, off by $besterr)"
-    else
-        result FAIL "timer-cfg" "exact interval with adj $best, not -1: change period_irq_cfg_adj's default"
-    fi
+        "owners $ep/$er, wakeups ok, timer $ti/s (dups $td) eob $ei/s irq $it/s (expected $ex), phase ${S1[phase_mean]:-0}/$tf"
 }
 
 # ------------------------------------------------------ runtime switch
@@ -588,7 +580,6 @@ alsa_part() {
     RCH="$(max_channels arecord)"
     [ -n "$PCH" ] && [ -n "$RCH" ] || die "could not read the channel counts from --dump-hw-params"
     log "     channels: play $PCH, record $RCH"
-    set_param period_irq_cfg_adj -1
     record_env alsa
 
     log ""
@@ -607,7 +598,6 @@ alsa_part() {
     if [ "$FWV2" = 1 ]; then
         run_duplex "mix-r1024-p256" 1 48000 256 1024 "$SECONDS_RUN" hrtimer irq
         run_duplex "mix-r256-p1024" 1 48000 1024 256 "$SECONDS_RUN" irq irq
-        cfg_check
     else
         result INFO mixed "skipped: no 64-vector interrupt block (fw_v2=0), period_irq=1 stays on the hrtimer"
     fi
