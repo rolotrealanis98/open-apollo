@@ -136,7 +136,7 @@ If your Apollo uses a Thunderbolt 2 connector (Mini DisplayPort-shaped, not USB-
 ### Prerequisites
 
 - Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed, Linux Mint 22, Pop!_OS 24.04, Manjaro
-- Linux kernel 6.8+ with headers installed (required — uses `hrtimer_types.h` introduced in 6.8)
+- Linux kernel with headers installed. The driver compiles clean (`W=1`) on 5.15, 6.1, 6.6, 6.8, 6.12, 7.0, 7.2 and 7.3-rc3; hardware testing is on 7.2.x and Ubuntu 24.04's 6.8, so 6.8 or newer is the safe choice
 - Thunderbolt 3 or 4 connection (see [Thunderbolt 2 note](#thunderbolt-2-devices-not-supported) below)
 - GCC, Make
 - Python 3.10+ (for mixer daemon)
