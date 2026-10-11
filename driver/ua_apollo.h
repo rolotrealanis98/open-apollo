@@ -1382,6 +1382,7 @@ struct ua_audio {
 	char clock_list_name[UA_CLOCK_LIST_MAX][UA_CLOCK_NAME_LEN];
 	u8 clock_names_raw[UA_CLOCK_NAMES_BYTES]; /* 0xC090.. as read */
 	bool clock_names_ok;                /* names parsed for the whole list */
+	u16 clock_list_named;               /* bit i: entry i named by the device */
 	u32 fw_rate_mask;                   /* 0xC08C[7:0], rate indexes offered */
 	/* Firmware latency words (0xC198 out [M], 0xC19C in [M]) per rate index */
 	u32 fw_lat_out[UA_RATE_192000 + 1];

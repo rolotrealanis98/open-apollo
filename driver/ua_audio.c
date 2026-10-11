@@ -2267,6 +2267,7 @@ static void ua_clock_list_build(struct ua_device *ua, u16 mask)
 		u8 val[UA_CLOCK_LIST_MAX];
 	} *t;
 	unsigned int i, n = 0, named = 0;
+	u16 named_mask = 0;
 	bool changed;
 	char tmp[16];
 
@@ -2297,6 +2298,7 @@ static void ua_clock_list_build(struct ua_device *ua, u16 mask)
 		if (t->names[t->val[i]][0]) {
 			strscpy(t->out[i], t->names[t->val[i]], UA_CLOCK_NAME_LEN);
 			named++;
+			named_mask |= BIT(i);
 		} else {
 			strscpy(t->out[i], ua_clock_fallback_name(t->val[i], tmp,
 							       sizeof(tmp)),
@@ -2312,6 +2314,7 @@ static void ua_clock_list_build(struct ua_device *ua, u16 mask)
 	memcpy(audio->clock_list_val, t->val, n);
 	memcpy(audio->clock_list_name, t->out, n * UA_CLOCK_NAME_LEN);
 	audio->clock_names_ok = n && named == n;
+	audio->clock_list_named = named_mask;
 	WRITE_ONCE(audio->clock_list_n, n);
 	spin_unlock(&audio->clock_list_lock);
 

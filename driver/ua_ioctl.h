@@ -534,7 +534,7 @@ struct ua_dma_test {
  * The struct is fixed size: never change sizeof(struct ua_version).
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		6
+#define UA_ABI_MINOR		7
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -553,6 +553,7 @@ struct ua_dma_test {
 #define UA_FEAT_FW_RELEASE	(1u << 14) /* fw_release, dev_info in SYSTEM_INFO (ABI 1.4) */
 #define UA_FEAT_KEXT_DRIVER_PARAMS (1u << 15) /* UA_DRIVER_PARAM_KEXT(1..5) (ABI 1.5) */
 #define UA_FEAT_DSP_LOAD	(1u << 16) /* load words in ua_dsp_info (ABI 1.6) */
+#define UA_FEAT_CLOCK_SOURCES	(1u << 17) /* UA_IOCTL_GET_CLOCK_SOURCES (ABI 1.7) */
 
 struct ua_version {
 	__u32 abi_major;
@@ -723,6 +724,36 @@ struct ua_plugin_caps {
 };
 
 #define UA_IOCTL_GET_PLUGIN_CAPS	_IOR(UA_IOCTL_MAGIC, 0x07, struct ua_plugin_caps)
+
+/*
+ * The device's clock-source menu (UA_IOCTL_GET_CLOCK_SOURCES, read-only,
+ * ABI 1.7, UA_FEAT_CLOCK_SOURCES), as the kext's GetClockSourceInfo
+ * reports it: the sources the device offers (0xC08C[31:16]) with the
+ * names it publishes at 0xC090 (position = source value), Internal first,
+ * the peer source (0xA) left out.  `value` is what UA_DRIVER_PARAM 1
+ * (clock source) takes.  UA_CLOCK_SRC_F_DEVICE_NAME: the name is the
+ * device's own (an AES/EBU or MADI unit names its digital source itself);
+ * without it the driver filled in a generic name.  The list is read at
+ * every connect; count is 0 before the first one.
+ */
+#define UA_CLOCK_SOURCES_MAX		16
+#define UA_CLOCK_SRC_F_DEVICE_NAME	(1u << 0)
+
+struct ua_clock_source {
+	__u32 value;		/* clock-config low byte (UAD2ClockSource) */
+	__u32 flags;		/* UA_CLOCK_SRC_F_* */
+	char name[32];		/* NUL-terminated */
+};
+
+struct ua_clock_sources {
+	__u32 struct_size;	/* sizeof(struct ua_clock_sources) */
+	__u32 count;		/* valid entries in src[] */
+	__u32 mask;		/* 0xC08C[31:16] as read at connect */
+	__u32 reserved;
+	struct ua_clock_source src[UA_CLOCK_SOURCES_MAX];
+};
+
+#define UA_IOCTL_GET_CLOCK_SOURCES	_IOR(UA_IOCTL_MAGIC, 0x08, struct ua_clock_sources)
 
 /*
  * Batched bus params (kext selector 130 carries a batch of

@@ -53,6 +53,7 @@ from model_info import ModelInfo, monitor_param_allowed
 from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
                       HardwareBackend, HardwareRouter, clock_source_names,
+                      device_clock_menu,
                       fader_db_to_tapered, pcie_link_below_minimum,
                       pcie_link_text, preamp_db_to_tapered)
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
@@ -1375,7 +1376,23 @@ class MixerDaemon:
             return False
         if info is None:
             info = self._system_info()
-        names = clock_source_names(
+        # The device's own menu (UA_FEAT_CLOCK_SOURCES) wins: its names are
+        # what the Mixer Engine shows (AES/EBU, MADI included)
+        menu = {}
+        if self.hw_router and self.hw_router.backend.connected and \
+                hasattr(self.hw_router.backend, "get_clock_sources"):
+            menu = device_clock_menu(
+                self.hw_router.backend.get_clock_sources())
+            # Only the sources the model's menu has (devices/*.json): the
+            # x4 offers ADAT in its mask but UA's menu for it is Internal
+            # and S/PDIF.  A model whose names the device does not use
+            # keeps the device's whole menu.
+            kept = {n: v for n, v in menu.items() if n in model}
+            if len(kept) > 1:
+                menu = kept
+        if self.hw_router:
+            self.hw_router.clock_sources = menu
+        names = list(menu) or clock_source_names(
             info.get("clock_src_mask") if info else None, model) or model
         prop = self.state.get_prop_dict("/ClockSource")
         if prop is None or prop.get("values") == names:
@@ -1474,7 +1491,8 @@ class MixerDaemon:
         if source is None:
             source = self.hw_router.backend.get_driver_param(
                 DRIVER_PARAM_CLOCK_SOURCE)
-        for name, val in CLOCK_SOURCE_MAP.items():
+        menu = getattr(self.hw_router, "clock_sources", None) or {}
+        for name, val in list(menu.items()) + list(CLOCK_SOURCE_MAP.items()):
             if val == source:
                 if not self._readback_suppressed("/ClockSource/value"):
                     self._push_to_clients("/ClockSource", name)

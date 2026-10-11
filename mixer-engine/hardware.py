@@ -234,6 +234,14 @@ UA_DSP_INFO_F_LOADS = 0x1
 _SYSTEM_INFO_FW = ("fw_release", "dev_info")
 _SYSTEM_INFO_FW_OFF = _SYSTEM_INFO_EXT_OFF + 4 * len(_SYSTEM_INFO_EXT)
 
+# ABI 1.7 (UA_FEAT_CLOCK_SOURCES): the device's clock-source menu,
+# struct ua_clock_sources { u32 struct_size, count, mask, reserved;
+# { u32 value, flags; char name[32]; } src[16] } = 656 bytes
+UA_FEAT_CLOCK_SOURCES = 1 << 17
+_CLOCK_SOURCES_SIZE = 16 + 16 * 40
+UA_IOCTL_GET_CLOCK_SOURCES = _IOR(UA_IOCTL_MAGIC, 0x08, _CLOCK_SOURCES_SIZE)
+UA_CLOCK_SRC_F_DEVICE_NAME = 0x1
+
 _FW_LOAD_SIZE = 16
 UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
 UA_IOCTL_DSP_CONNECT = _IO(UA_IOCTL_MAGIC, 0x51)
@@ -654,6 +662,29 @@ CLOCK_SOURCE_MAP = {
     # reaches the driver.  The driver also rejects values the device does
     # not advertise (ua_clock_source_valid).
 }
+
+
+# The clock-source values UA's Mixer Engine knows (_s_KnownClockSourceList):
+# CMxRoot::UpdateClockNames shows the device's own name for each source the
+# device offers whose value is one of these, and drops the others.
+KNOWN_CLOCK_VALUES = frozenset(CLOCK_SOURCE_MAP.values())
+
+
+def device_clock_menu(sources: list | None) -> dict[str, int]:
+    """{name: value} of the device's clock-source menu (get_clock_sources),
+    as the Mixer Engine shows it: the device's own names, only for the
+    values it knows, in the device's order.  {} without a usable menu."""
+    menu = {}
+    if not isinstance(sources, (list, tuple)):
+        return menu
+    for entry in sources:
+        if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+            continue
+        value, name = entry[0], entry[1]
+        if isinstance(value, int) and isinstance(name, str) and \
+                value in KNOWN_CLOCK_VALUES and name not in menu:
+            menu[name] = value
+    return menu if len(menu) > 1 else {}
 
 
 def clock_source_names(mask: int | None,
@@ -2188,6 +2219,29 @@ class HardwareBackend:
             'ascii', 'replace').strip()
         return info
 
+    def get_clock_sources(self) -> list | None:
+        """The device's clock-source menu (UA_IOCTL_GET_CLOCK_SOURCES) as
+        [(value, name, named_by_device), ...], Internal first.  None
+        without UA_FEAT_CLOCK_SOURCES, without a device, before the first
+        connect (empty list from the driver) or when the call fails."""
+        if self.fd < 0 or not self.has_feature(UA_FEAT_CLOCK_SOURCES):
+            return None
+        try:
+            raw = fcntl.ioctl(self.fd, UA_IOCTL_GET_CLOCK_SOURCES,
+                              bytes(_CLOCK_SOURCES_SIZE))
+        except OSError as e:
+            log.debug("get_clock_sources: %s", e)
+            return None
+        _size, count, _mask, _res = struct.unpack_from('<4I', raw, 0)
+        out = []
+        for i in range(min(count, 16)):
+            value, flags, name = struct.unpack_from('<II32s', raw, 16 + 40 * i)
+            text = name.split(b'\0', 1)[0].decode('ascii', 'replace').strip()
+            if text:
+                out.append((value, text,
+                            bool(flags & UA_CLOCK_SRC_F_DEVICE_NAME)))
+        return out or None
+
     # ── Driver parameter access ──────────────────────────────────────
 
     def set_driver_param(self, param_id: int, value: int) -> bool:
@@ -2379,6 +2433,11 @@ class HardwareRouter:
         self.backend = backend
         self.stereo_sends = stereo_sends
         self.state_tree = state_tree
+        # The device's clock-source menu, {name: value} (device_clock_menu):
+        # the daemon sets it from UA_IOCTL_GET_CLOCK_SOURCES; it names an
+        # AES/EBU or MADI source as the device does.  CLOCK_SOURCE_MAP
+        # covers the names it does not list.
+        self.clock_sources: dict[str, int] = {}
         # model_info.ModelInfo of the attached Apollo (its devices/*.json);
         # the Apollo x4 when nothing says otherwise
         from model_info import ModelInfo
@@ -2437,7 +2496,9 @@ class HardwareRouter:
 
         clock = self.backend.get_driver_param(DRIVER_PARAM_CLOCK_SOURCE)
         if clock is not None:
-            for name, val in CLOCK_SOURCE_MAP.items():
+            menu = getattr(self, "clock_sources", None) or {}
+            for name, val in (list(menu.items()) +
+                              list(CLOCK_SOURCE_MAP.items())):
                 if val == clock:
                     self.state_tree.set("/ClockSource/value", name)
                     log.info("Synced ClockSource from driver: %s", name)
@@ -4316,11 +4377,13 @@ class HardwareRouter:
 
         if control == "ClockSource":
             source_str = str(value)
-            source_int = CLOCK_SOURCE_MAP.get(source_str)
+            menu = getattr(self, "clock_sources", None) or {}
+            source_int = menu.get(source_str,
+                                  CLOCK_SOURCE_MAP.get(source_str))
             if source_int is None:
                 log.warning("HW DRV: ClockSource unknown value: %r "
                             "(valid: %s)", value,
-                            list(CLOCK_SOURCE_MAP.keys()))
+                            list(menu or CLOCK_SOURCE_MAP))
                 return
 
             log.info("HW DRV: ClockSource → %s (value=%d)",

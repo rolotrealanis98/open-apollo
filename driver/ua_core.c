@@ -977,7 +977,8 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
 			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT |
 			    UA_FEAT_PLUGIN_CAPS | UA_FEAT_FW_RELEASE |
-			    UA_FEAT_KEXT_DRIVER_PARAMS | UA_FEAT_DSP_LOAD,
+			    UA_FEAT_KEXT_DRIVER_PARAMS | UA_FEAT_DSP_LOAD |
+			    UA_FEAT_CLOCK_SOURCES,
 	};
 
 	/*
@@ -1120,6 +1121,45 @@ static long ua_ioctl_get_plugin_caps(struct ua_device *ua, unsigned long arg)
 	if (copy_to_user((void __user *)arg, &caps, sizeof(caps)))
 		return -EFAULT;
 	return 0;
+}
+
+/*
+ * UA_IOCTL_GET_CLOCK_SOURCES: the clock-source menu ua_clock_list_build()
+ * read at the last connect (kext GetClockSourceInfo).  No register access.
+ */
+static long ua_ioctl_get_clock_sources(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_audio *audio = &ua->audio;
+	struct ua_clock_sources *cs;
+	unsigned int i, n;
+	long ret = 0;
+
+	BUILD_BUG_ON(sizeof(struct ua_clock_sources) != 656);
+	BUILD_BUG_ON(UA_CLOCK_LIST_MAX > UA_CLOCK_SOURCES_MAX);
+	BUILD_BUG_ON(UA_CLOCK_NAME_LEN > sizeof(cs->src[0].name));
+
+	cs = kzalloc(sizeof(*cs), GFP_KERNEL);
+	if (!cs)
+		return -ENOMEM;
+	cs->struct_size = sizeof(*cs);
+
+	spin_lock(&audio->clock_list_lock);
+	n = min_t(unsigned int, audio->clock_list_n, UA_CLOCK_LIST_MAX);
+	for (i = 0; i < n; i++) {
+		cs->src[i].value = audio->clock_list_val[i];
+		if (audio->clock_list_named & BIT(i))
+			cs->src[i].flags |= UA_CLOCK_SRC_F_DEVICE_NAME;
+		strscpy(cs->src[i].name, audio->clock_list_name[i],
+			sizeof(cs->src[i].name));
+	}
+	cs->count = n;
+	cs->mask = audio->clock_src_mask;
+	spin_unlock(&audio->clock_list_lock);
+
+	if (copy_to_user((void __user *)arg, cs, sizeof(*cs)))
+		ret = -EFAULT;
+	kfree(cs);
+	return ret;
 }
 
 static long ua_ioctl_get_device_info(struct ua_device *ua, unsigned long arg)
@@ -3527,6 +3567,9 @@ static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
 
 	case UA_IOCTL_GET_PLUGIN_CAPS:
 		return ua_ioctl_get_plugin_caps(ua, arg);
+
+	case UA_IOCTL_GET_CLOCK_SOURCES:
+		return ua_ioctl_get_clock_sources(ua, arg);
 
 	case UA_IOCTL_SET_MIXER_BUS_PARAMS:
 		return ua_ioctl_set_mixer_bus_params(ua, arg);
