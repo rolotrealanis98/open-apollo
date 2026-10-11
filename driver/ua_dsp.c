@@ -189,6 +189,15 @@ static int ua_dsp_ring_wait_space(struct ua_device *ua,
 	}
 }
 
+/*
+ * How long a command-buffer send waits for the command ring to consume it:
+ * the kext's 6000 ms (parity/13 R66).  A command buffer is one DMA ref entry
+ * (plus its inline header) queued on the command ring only; the wait is for
+ * the ring to pass it, not for an answer.  Ordinary inline commands keep
+ * their short waits.  Only a slow transfer ever waits this long.
+ */
+#define UA_DSP_CMDBUF_WAIT_MS	6000
+
 /**
  * ua_dsp_ring_wait_idle - Wait until the FPGA has consumed every entry
  * @ua: device
@@ -2250,7 +2259,7 @@ int ua_dsp_send_sram_data(struct ua_device *ua, unsigned int dsp_idx,
 	ua_dsp_ring_doorbell(ua, &ds->cmd, cmd_base);
 
 	/* Wait for DSP to consume both entries */
-	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, 150)) {
+	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, UA_DSP_CMDBUF_WAIT_MS)) {
 		dev_warn(&ua->pdev->dev,
 			 "sram_data: DSP %u timeout (pos=%u wr=%u)\n",
 			 dsp_idx, ds->cmd.hw_pos, ds->cmd.write_ptr);
@@ -2332,7 +2341,7 @@ int ua_dsp_send_raw_dma(struct ua_device *ua, unsigned int dsp_idx,
 	ua_dsp_ring_doorbell(ua, &ds->cmd, cmd_base);
 
 	/* Wait for DSP to consume the entry before freeing DMA buffer */
-	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, 150)) {
+	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, UA_DSP_CMDBUF_WAIT_MS)) {
 		dev_warn(&ua->pdev->dev,
 			 "raw_dma: DSP %u timeout (pos=%u wr=%u)\n",
 			 dsp_idx, ds->cmd.hw_pos, ds->cmd.write_ptr);
@@ -4323,7 +4332,7 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 		ds->cmd.write_ptr, UA_MODULE_COUNT);
 
 	/* Wait for DSP to process all entries */
-	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, 500)) {
+	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, UA_DSP_CMDBUF_WAIT_MS)) {
 		dev_warn(&ua->pdev->dev,
 			 "module_cfg: timeout (pos=%u target=%u)\n",
 			 ds->cmd.hw_pos, ds->cmd.write_ptr);
