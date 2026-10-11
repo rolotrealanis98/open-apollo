@@ -163,6 +163,14 @@ static bool period_irq;
 module_param(period_irq, bool, 0644);
 MODULE_PARM_DESC(period_irq,
 		 "Period wakeups from the hardware period-timer interrupt (threaded IRQ handler) instead of the 1 ms SAMPLE_POS poll (default: off; off leaves the timer unprogrammed and its vector masked, as the macOS driver; a change applies once all streams are closed and the transport restarts)");
+static bool period_irq_settle = true;
+module_param(period_irq_settle, bool, 0644);
+MODULE_PARM_DESC(period_irq_settle,
+		 "period_irq=1: when a rate change started the period timer before the clock locked at the new rate, wait for the lock (up to 500 ms) and start the transport once more so the timer runs on the settled clock (default: on)");
+static bool period_irq_trace;
+module_param(period_irq_trace, bool, 0644);
+MODULE_PARM_DESC(period_irq_trace,
+		 "Diagnostics: record the first 256 period-timer events of each transport session (time, SAMPLE_POS, clock rate word) and a register snapshot in /proc/asound/cardN/period_irq_trace (default: off)");
 
 /*
  * Where a stream starts in the ring (titan, x4, 2026-10-11: a PipeWire
@@ -3457,6 +3465,118 @@ static void ua_audio_set_timer(struct ua_device *ua, unsigned int period)
 }
 
 /*
+ * period_irq_trace=1: the period-timer events of the last two transport
+ * sessions that had a timer (struct ua_pirq_trace), for working out how
+ * the timer behaves around rate changes on hardware.  The register
+ * snapshot is taken at the transport start and after UA_PIRQ_TRACE_SNAP
+ * events; each event adds the time since the start, SAMPLE_POS and the
+ * clock rate word.  All BAR0 reads happen in process context (transport
+ * start under ua->lock, the IRQ thread).
+ */
+static const u32 ua_pirq_trace_regs[UA_PIRQ_TRACE_REGS] = {
+	UA_REG_AX_TIMER_CFG, UA_REG_AX_FRAME_CFG, UA_REG_AX_FRAME_CTR,
+	UA_REG_AX_BUF_SIZE, UA_REG_AX_DMA_BLKSZ, UA_REG_AX_PLAY_CH,
+	UA_REG_AX_REC_CH, UA_REG_AX_CONTROL, UA_REG_AX_STATUS,
+	UA_REG_AX_SAMPLE_POS, UA_REG_EXT_IRQ_ENABLE, UA_REG_NOTIF_RATE_INFO,
+};
+
+static const char * const ua_pirq_trace_reg_names[UA_PIRQ_TRACE_REGS] = {
+	"TIMER_CFG", "FRAME_CFG", "FRAME_CTR", "BUF_SIZE", "DMA_BLKSZ",
+	"PLAY_CH", "REC_CH", "AX_CONTROL", "AX_STATUS", "SAMPLE_POS",
+	"IMR_HI", "RATE_INFO",
+};
+
+/* A new transport session with a timer: caller holds ua->lock */
+static void ua_pirq_trace_start(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	u32 reg[UA_PIRQ_TRACE_REGS];
+	struct ua_pirq_trace *tr;
+	unsigned long flags;
+	unsigned int i;
+
+	if (!READ_ONCE(period_irq_trace))
+		return;
+	if (!audio->pirq_trace) {
+		tr = kcalloc(2, sizeof(*tr), GFP_KERNEL);
+		if (!tr)
+			return;
+		spin_lock_irqsave(&audio->pirq_trace_lock, flags);
+		audio->pirq_trace = tr;
+		spin_unlock_irqrestore(&audio->pirq_trace_lock, flags);
+	}
+	for (i = 0; i < UA_PIRQ_TRACE_REGS; i++)
+		reg[i] = ua_read(ua, ua_pirq_trace_regs[i]);
+
+	spin_lock_irqsave(&audio->pirq_trace_lock, flags);
+	audio->pirq_trace_cur ^= 1;
+	tr = &audio->pirq_trace[audio->pirq_trace_cur];
+	memset(tr, 0, sizeof(*tr));
+	tr->gen = audio->transport_gen;
+	tr->start = ktime_get();
+	tr->rate_index = audio->rate_index;
+	tr->timer_frames = audio->timer_frames;
+	tr->timer_cfg = audio->timer_cfg;
+	memcpy(tr->reg[0], reg, sizeof(reg));
+	spin_unlock_irqrestore(&audio->pirq_trace_lock, flags);
+}
+
+/* Is the current session's trace still recording? */
+static bool ua_pirq_tracing(struct ua_audio *audio)
+{
+	struct ua_pirq_trace *tr;
+	unsigned long flags;
+	bool on = false;
+
+	if (!READ_ONCE(period_irq_trace) || !READ_ONCE(audio->pirq_trace))
+		return false;
+	spin_lock_irqsave(&audio->pirq_trace_lock, flags);
+	tr = &audio->pirq_trace[audio->pirq_trace_cur];
+	on = tr->gen == READ_ONCE(audio->transport_gen) &&
+	     tr->n < UA_PIRQ_TRACE_N;
+	spin_unlock_irqrestore(&audio->pirq_trace_lock, flags);
+	return on;
+}
+
+/* IRQ thread: one timer event of the current session at SAMPLE_POS @sp */
+static void ua_pirq_trace_event(struct ua_device *ua, u32 sp)
+{
+	struct ua_audio *audio = &ua->audio;
+	u32 reg[UA_PIRQ_TRACE_REGS];
+	struct ua_pirq_trace *tr;
+	unsigned int i, n, gen;
+	unsigned long flags;
+	ktime_t now;
+	u32 info;
+
+	if (!ua_pirq_tracing(audio))
+		return;
+	spin_lock_irqsave(&audio->pirq_trace_lock, flags);
+	tr = &audio->pirq_trace[audio->pirq_trace_cur];
+	n = tr->n;
+	gen = tr->gen;
+	spin_unlock_irqrestore(&audio->pirq_trace_lock, flags);
+
+	now = ktime_get();
+	info = ua_read(ua, UA_REG_NOTIF_RATE_INFO);
+	if (n == UA_PIRQ_TRACE_SNAP)
+		for (i = 0; i < UA_PIRQ_TRACE_REGS; i++)
+			reg[i] = ua_read(ua, ua_pirq_trace_regs[i]);
+
+	spin_lock_irqsave(&audio->pirq_trace_lock, flags);
+	tr = &audio->pirq_trace[audio->pirq_trace_cur];
+	if (tr->gen == gen && tr->n == n && n < UA_PIRQ_TRACE_N) {
+		tr->ev[n].t_us = (u32)ktime_us_delta(now, tr->start);
+		tr->ev[n].sp = sp;
+		tr->ev[n].rate_info = info;
+		if (n == UA_PIRQ_TRACE_SNAP)
+			memcpy(tr->reg[1], reg, sizeof(reg));
+		tr->n = n + 1;
+	}
+	spin_unlock_irqrestore(&audio->pirq_trace_lock, flags);
+}
+
+/*
  * Prepare the transport engine.
  * Mirrors CPcieAudioExtension::PrepareTransport().
  *
@@ -3918,6 +4038,11 @@ static int ua_audio_start_transport(struct ua_device *ua)
 	audio->timer_last_valid = false;
 	audio->transport_running = true;
 	ua_audio_stall_qos(ua, true);
+	if (audio->timer_frames) {
+		/* The clock the period timer starts on (ua_period_irq_settle()) */
+		audio->timer_start_info = ua_read(ua, UA_REG_NOTIF_RATE_INFO);
+		ua_pirq_trace_start(ua);
+	}
 
 	/* Delayed check — verify DMA is advancing */
 	udelay(100);
@@ -5156,6 +5281,75 @@ static int ua_audio_rate_change_kext(struct ua_device *ua, unsigned int rate)
 	return 0;
 }
 
+/* The clock word (0xC07C) says locked at rate index @idx */
+static bool ua_clock_settled(u32 info, unsigned int idx)
+{
+	return info != 0xFFFFFFFF && (info & 3) == 1 &&
+	       ua_fw_rate_index(info) == idx;
+}
+
+/*
+ * period_irq=1, after a rate change in pcm_prepare.  On titan (x4,
+ * 2026-10-11) the first transport of every 192 -> 48 kHz change ran its
+ * period timer 2-14% fast and off the period boundaries for the whole
+ * session (the misaligned-timer fallback caught it), while the next
+ * transport at 48 kHz, with the same TIMER_CFG, was exact.  That first
+ * transport was started, and restarted for the new IO layout, while the
+ * clock word still read the old rate unlocked (0x600); the lock at 48 kHz
+ * came about 120 ms later.  So when the timer's transport started on an
+ * unsettled clock, wait for the lock at the new rate (the DSP service
+ * steps run meanwhile, as in the other waits under ua->lock) and start the
+ * transport once more, as pcm_prepare does.  If the clock does not settle
+ * within UA_PIRQ_SETTLE_MS, keep the timer: the misalignment check still
+ * protects the wakeups.  Caller holds ua->lock; no stream of the card runs
+ * (a rate change cannot happen under one).
+ */
+#define UA_PIRQ_SETTLE_MS	500
+
+static int ua_period_irq_settle(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned int waited;
+	u32 info;
+	int ret;
+
+	if (!READ_ONCE(period_irq_settle) || !audio->timer_frames ||
+	    !audio->transport_running ||
+	    ua_clock_settled(audio->timer_start_info, audio->rate_index))
+		return 0;
+
+	for (waited = 0; ; waited += 5) {
+		if (ua_audio_service_step(ua) == 0xFFFFFFFF)
+			return -ENODEV;
+		info = ua_read(ua, UA_REG_NOTIF_RATE_INFO);
+		if (info == 0xFFFFFFFF)
+			return -ENODEV;
+		if (ua_clock_settled(info, audio->rate_index))
+			break;
+		if (waited >= UA_PIRQ_SETTLE_MS) {
+			dev_info(&ua->pdev->dev,
+				 "period_irq: clock word 0x%08x after %u ms, not locked at rate index %u; period timer kept\n",
+				 info, waited, audio->rate_index);
+			return 0;
+		}
+		usleep_range(5000, 6000);
+	}
+
+	dev_info(&ua->pdev->dev,
+		 "period_irq: clock locked at rate index %u %u ms after the timer started on 0x%08x; restarting the transport\n",
+		 audio->rate_index, waited, audio->timer_start_info);
+	audio->pstats.settles++;
+	ua_audio_stop_transport(ua);
+	ret = ua_audio_prepare_transport(ua, 0);	/* rewrites TIMER_CFG */
+	if (ret)
+		return ret;
+	ret = ua_audio_start_transport(ua);
+	if (ret)
+		return ret;
+	ua_audio_post_start_clock(ua);
+	return 0;
+}
+
 /* Body of ua_pcm_prepare(); caller holds ua->lock */
 static int UA_GCC_OPTIMIZE("O1")
 ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
@@ -5383,6 +5577,13 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 		 */
 		if (rate_changed && ua_io_map_settle(ua)) {
 			ret = ua_io_map_restart_transport(ua);
+			if (ret)
+				return ret;
+		}
+
+		/* period_irq=1: the timer starts on the settled clock */
+		if (rate_changed) {
+			ret = ua_period_irq_settle(ua);
 			if (ret)
 				return ret;
 		}
@@ -5988,34 +6189,42 @@ static void ua_period_timer_rearm(struct ua_device *ua)
  * Threaded half of the interrupt (process context, the IRQ's kthread),
  * woken by ua_audio_irq() for every period-timer interrupt of a transport
  * with a timer and for end-of-buffer interrupts while a substream is
- * IRQ-served.  With IRQ-served substreams: one SAMPLE_POS read, then each
- * one's boundary test.  Then the timer vector is re-armed, and streams
- * whose timer does not mark the period boundaries go to the hrtimer.
+ * IRQ-served.  With IRQ-served substreams (or the trace recording): one
+ * SAMPLE_POS read, then each IRQ-served substream's boundary test.  Then
+ * the timer vector is re-armed, and streams whose timer does not mark the
+ * period boundaries go to the hrtimer.
  */
 void ua_audio_irq_thread(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct snd_pcm_substream *rec, *play;
 	unsigned long events, flags;
-	bool off = false;
+	bool serve, trace, off = false;
 	u32 sp = 0;
 
 	events = xchg(&audio->irq_events, 0);
 	if (!events || atomic_read(&ua->shutdown))
 		return;
 
-	if (READ_ONCE(audio->irq_subs)) {
-		/* Transport stopped: no read, ua_period_check() stops them */
-		if (READ_ONCE(audio->transport_running)) {
-			sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
-			if (sp == 0xFFFFFFFF) {
+	serve = READ_ONCE(audio->irq_subs) != 0;
+	trace = (events & BIT(UA_PIRQ_EV_TIMER)) && ua_pirq_tracing(audio);
+
+	/* Transport stopped: no read, ua_period_check() stops the streams */
+	if ((serve || trace) && READ_ONCE(audio->transport_running)) {
+		sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
+		if (sp == 0xFFFFFFFF) {
+			if (serve)
 				ua_period_irq_stop(ua, true,
 						   "BAR0 reads all-ones (link down)");
-				return;
-			}
-			off = ua_period_irq_stats(audio, events, sp);
+			return;
 		}
+		if (serve)
+			off = ua_period_irq_stats(audio, events, sp);
+		if (trace)
+			ua_pirq_trace_event(ua, sp);
+	}
 
+	if (serve) {
 		spin_lock_irqsave(&audio->lock, flags);
 		rec = audio->rec_sub;
 		play = audio->play_sub;
@@ -6027,12 +6236,79 @@ void ua_audio_irq_thread(struct ua_device *ua)
 		spin_unlock_irqrestore(&audio->lock, flags);
 	}
 
-	if (events & BIT(UA_PIRQ_EV_TIMER))
+	/*
+	 * Re-arm only while a stream is IRQ-served (or the trace records).
+	 * Otherwise the vector stays masked until a stream starts on it
+	 * (trigger), so a session with all streams on the hrtimer, or after
+	 * a fallback, takes no timer interrupts.
+	 */
+	if ((events & BIT(UA_PIRQ_EV_TIMER)) &&
+	    (READ_ONCE(audio->irq_subs) || trace))
 		ua_period_timer_rearm(ua);
 
 	if (off)
 		ua_period_irq_fallback(ua,
 			"period-timer interrupts land off the period boundaries");
+}
+
+/*
+ * /proc/asound/cardN/period_irq_trace (period_irq_trace=1): the last two
+ * transport sessions with a timer, older first.  Per timer event: time
+ * since the transport start and since the previous event (us), SAMPLE_POS,
+ * frames since the previous event (mod the ring) and the clock word.
+ */
+static void ua_pirq_trace_proc_read(struct snd_info_entry *entry,
+				    struct snd_info_buffer *buf)
+{
+	struct ua_device *ua = entry->private_data;
+	struct ua_audio *audio = &ua->audio;
+	unsigned int ring = audio->buf_frame_size ? audio->buf_frame_size : 8192;
+	struct ua_pirq_trace *copy, *tr;
+	unsigned int s, k, i, cur;
+	unsigned long flags;
+
+	if (!READ_ONCE(audio->pirq_trace)) {
+		snd_iprintf(buf, "no trace: echo 1 > /sys/module/ua_apollo/parameters/period_irq_trace, then start a stream with period_irq=1\n");
+		return;
+	}
+	copy = kmalloc_array(2, sizeof(*copy), GFP_KERNEL);
+	if (!copy)
+		return;
+	spin_lock_irqsave(&audio->pirq_trace_lock, flags);
+	memcpy(copy, audio->pirq_trace, 2 * sizeof(*copy));
+	cur = audio->pirq_trace_cur;
+	spin_unlock_irqrestore(&audio->pirq_trace_lock, flags);
+
+	for (s = 0; s < 2; s++) {
+		tr = &copy[(cur + 1 + s) % 2];
+		if (!tr->gen)
+			continue;
+		snd_iprintf(buf, "session %u: rate_index %u timer_frames %u timer_cfg %u events %u\n",
+			    tr->gen, tr->rate_index, tr->timer_frames,
+			    tr->timer_cfg, tr->n);
+		for (k = 0; k < 2; k++) {
+			if (k && tr->n <= UA_PIRQ_TRACE_SNAP)
+				break;
+			snd_iprintf(buf, "regs %s:", k ? "after 64 events" : "at start");
+			for (i = 0; i < UA_PIRQ_TRACE_REGS; i++)
+				snd_iprintf(buf, " %s=0x%x",
+					    ua_pirq_trace_reg_names[i],
+					    tr->reg[k][i]);
+			snd_iprintf(buf, "\n");
+		}
+		snd_iprintf(buf, "# n t_us dt_us sample_pos dframes rate_info\n");
+		for (i = 0; i < tr->n; i++) {
+			const struct ua_pirq_trace_ev *e = &tr->ev[i];
+			u32 dt = i ? e->t_us - tr->ev[i - 1].t_us : e->t_us;
+			u32 df = i ? (e->sp % ring + ring -
+				      tr->ev[i - 1].sp % ring) % ring :
+				     e->sp % ring;
+
+			snd_iprintf(buf, "%u %u %u %u %u 0x%x\n", i, e->t_us,
+				    dt, e->sp, df, e->rate_info);
+		}
+	}
+	kfree(copy);
 }
 
 /*
@@ -6083,6 +6359,7 @@ static void ua_period_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "eob_last_sp %u\n", st->eob_last_sp);
 	snd_iprintf(buf, "eob_pos_odd %lu\n", st->eob_pos_odd);
 	snd_iprintf(buf, "fallbacks %lu\n", st->fallbacks);
+	snd_iprintf(buf, "settles %lu\n", st->settles);
 	snd_iprintf(buf, "stops %lu\n", st->stops);
 }
 
@@ -6126,6 +6403,8 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 				   READ_ONCE(audio->transport_gen));
 			WRITE_ONCE(audio->timer_irq_jiffies, jiffies);
 			audio->wd_sp_jiffies = jiffies - 1;
+			/* The thread leaves it masked while nothing is served */
+			ua_period_timer_rearm(ua);
 			queue_delayed_work(system_highpri_wq, &audio->period_wd,
 					   msecs_to_jiffies(UA_PERIOD_WD_MS));
 		} else {
@@ -8937,6 +9216,7 @@ int ua_audio_init(struct ua_device *ua)
 
 	spin_lock_init(&audio->lock);
 	spin_lock_init(&audio->timer_lock);
+	spin_lock_init(&audio->pirq_trace_lock);
 	audio->running_subs = 0;
 	init_rwsem(&audio->dma_sem);
 	mutex_init(&audio->io_lock);
@@ -9059,6 +9339,13 @@ int ua_audio_init(struct ua_device *ua)
 			 ret);
 		ret = 0;
 	}
+	ret = snd_card_ro_proc_new(card, "period_irq_trace", ua,
+				   ua_pirq_trace_proc_read);
+	if (ret) {
+		dev_warn(&ua->pdev->dev,
+			 "period_irq_trace proc entry failed: %d\n", ret);
+		ret = 0;
+	}
 
 	/* Initialize preamp/monitor cache to safe defaults */
 	{
@@ -9177,8 +9464,13 @@ void ua_audio_fini(struct ua_device *ua)
 	/*
 	 * No trigger can run any more: a START that raced the removal may
 	 * have queued the period_irq watchdog after remove cancelled it.
+	 * The proc files went with the card; the IRQ is freed before this on
+	 * remove and never served a stream on a probe failure: the trace has
+	 * no user left.
 	 */
 	ua_audio_period_wd_cancel(ua);
+	kfree(audio->pirq_trace);
+	audio->pirq_trace = NULL;
 
 	/*
 	 * Free DMA buffers.  Take the write side of dma_sem so a PCM

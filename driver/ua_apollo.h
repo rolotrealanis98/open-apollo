@@ -1107,7 +1107,35 @@ struct ua_period_stats {
 	 */
 	unsigned long timer_dups;
 	unsigned long fallbacks;    /* timer silent or off the boundaries: hrtimer */
+	unsigned long settles;      /* transport restarted once the clock settled */
 	unsigned long stops;        /* streams the IRQ path pushed into XRUN */
+};
+
+/*
+ * period_irq_trace=1 (ua_audio.c "Period tracking"): the first
+ * UA_PIRQ_TRACE_N period-timer events of the last two transport sessions,
+ * with a register snapshot at the start and after UA_PIRQ_TRACE_SNAP
+ * events.  /proc/asound/cardN/period_irq_trace.
+ */
+#define UA_PIRQ_TRACE_N         256
+#define UA_PIRQ_TRACE_SNAP      64
+#define UA_PIRQ_TRACE_REGS      12
+
+struct ua_pirq_trace_ev {
+	u32 t_us;                   /* since the transport start */
+	u32 sp;                     /* SAMPLE_POS */
+	u32 rate_info;              /* 0xC07C: rate index << 8, lock in [1:0] */
+};
+
+struct ua_pirq_trace {
+	unsigned int gen;           /* transport_gen of this session, 0 = none */
+	ktime_t start;
+	unsigned int rate_index;
+	unsigned int timer_frames;
+	u32 timer_cfg;
+	u32 reg[2][UA_PIRQ_TRACE_REGS]; /* at the start, after _SNAP events */
+	unsigned int n;
+	struct ua_pirq_trace_ev ev[UA_PIRQ_TRACE_N];
 };
 
 /* Page-granular backing store for one audio DMA ring (ua_audio.c) */
@@ -1267,6 +1295,11 @@ struct ua_audio {
 	unsigned long wd_sp_jiffies;    /* ... and when it read it */
 	u32 timer_last_iv;              /* timer interval of the last timer event */
 	bool timer_last_valid;          /* ... set since the transport started */
+	u32 timer_start_info;           /* 0xC07C read at the timer's transport start */
+	bool timer_restart_settle;      /* settle restart done in this prepare */
+	struct ua_pirq_trace *pirq_trace; /* [2], period_irq_trace=1, lazily */
+	unsigned int pirq_trace_cur;    /* session being recorded */
+	spinlock_t pirq_trace_lock;
 	struct delayed_work period_wd;  /* IRQ-path watchdog */
 	struct ua_period_stats pstats;
 
