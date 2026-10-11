@@ -720,19 +720,23 @@ static void ua_dsp_ring_doorbell(struct ua_device *ua,
 }
 
 /*
- * Date word of the connect-finalize command, built exactly as
- * CUAD2Device::_connectToDsps does (kext 12.0.0 x86 0x13ef5) from
- * CUAOS::GetCurrentDate() (seconds since the epoch):
- *   w1 = (days_since_1970 << 12) + minute_of_day
+ * Date word of the connect-finalize command (CUAD2Device::_connectToDsps,
+ * kext 12.0.0 x86 0x13ef5):
+ *   w1 = (days_since_2007 << 12) + minute_of_day
+ * The day count starts at 2007-01-01 00:00 UTC, not 1970 (parity/18
+ * section 6.2; the Windows driver agrees and sends 0 for a clock before
+ * 2007).  The Unix-epoch count this used to send was 13514 days too large.
  */
+#define UA_DSP_DATE_EPOCH	1167609600LL	/* 2007-01-01 00:00:00 UTC */
+
 static u32 ua_dsp_connect_date(void)
 {
-	time64_t now = ktime_get_real_seconds();
+	time64_t now = ktime_get_real_seconds() - UA_DSP_DATE_EPOCH;
 	u32 secs_of_day;
 	u64 days;
 
 	if (now < 0)
-		now = 0;
+		return 0;
 	days = div_u64_rem((u64)now, 86400, &secs_of_day);
 
 	return ((u32)days << 12) + secs_of_day / 60;
