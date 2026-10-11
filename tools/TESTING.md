@@ -73,3 +73,9 @@ The tone generator, classifier and `io_map` parser are in
 `tools/apollo-wavcheck.py`; `python3 tools/test-apollo-wavcheck.py` checks the
 classifier on synthetic captures (tone, silence, stale repeating buffer, tone on
 the wrong channel) without hardware.
+
+`tools/daemon-protocol-check.py` checks a running mixer daemon's wire protocol
+as UA's Console uses it (text/UBJS/JSON framing, oversize frames, clock SET
+refusals, the clock-source menu); read-only by default, `--write` adds the
+gain-companion and `/Dirty` checks (each puts the setting back), `--hardware`
+the refused-source check. It also runs against a `--no-hardware` daemon.
