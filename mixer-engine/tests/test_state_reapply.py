@@ -38,7 +38,7 @@ class SeqBackend(FakeBackend):
         return super().set_mixer_bus_param(bus_id, sub_param, value, side)
 
 
-def build(tmp_path, saved, readback=None):
+def build(tmp_path, saved, readback=None, toslink_in_bit=False):
     """A daemon whose tree was restored from a state file with `saved`."""
     state_file = tmp_path / "state.json"
     state_file.write_text(json.dumps(saved))
@@ -47,6 +47,7 @@ def build(tmp_path, saved, readback=None):
     tree.enable_persistence(state_file)
     backend = SeqBackend()
     backend.readback = readback
+    backend.toslink_in_bit = toslink_in_bit
     daemon = MixerDaemon(tree, HardwareRouter(backend, tree))
     daemon._push_defaults_to_hardware()
     return daemon, backend, tree
@@ -253,6 +254,26 @@ class TestOutputsAndConfig:
         d, be, tree = build(tmp_path, saved)
         assert last_param(be, 2, 0x21) == 8                # ADAT
         assert last_param(be, 2, 0x43) == 4                # step for 34 dB
+
+    def test_saved_toslink_input_restored_in_the_device_mode_word(
+            self, tmp_path):
+        saved = {f"{DEV}/TOSLink/value": "ADAT"}
+        d, be, tree = build(tmp_path, saved, toslink_in_bit=True)
+        assert tree.get_value(f"{DEV}/TOSLink/value") == "ADAT"
+        assert last_param(be, 2, 0x21) == 0x10
+
+    def test_device_mode_fields_are_one_write(self, tmp_path):
+        saved = {f"{DEV}/TOSLink/value": "ADAT",
+                 f"{DEV}/TOSLinkOutput/value": "ADAT",
+                 f"{DEV}/MultiUnitOrder/value": 2}
+        d, be, tree = build(tmp_path, saved, toslink_in_bit=True)
+        writes = [e[4] for e in be.seq
+                  if e[0] == "param" and e[1] == 2 and e[3] == 0x21]
+        (tmp_path / "b").mkdir()
+        _, base, _ = build(tmp_path / "b", {})
+        init_writes = [e[4] for e in base.seq
+                       if e[0] == "param" and e[1] == 2 and e[3] == 0x21]
+        assert writes[len(init_writes):] == [0x18 | (2 << 6)]
 
     def test_hiz_impedance_and_src_restored(self, tmp_path):
         saved = {f"{IN}/0/HiZImpedance/value": 4,

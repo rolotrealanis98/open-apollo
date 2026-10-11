@@ -4580,11 +4580,16 @@ class HardwareRouter:
     # device-level settings, aux buses, input sends and solo, outputs.
     _REAPPLY_DEVICE = (
         "CueBusCount", "OutputsAttenuate", "InputJackSensingDisabled",
-        "DimAttenuation", "TOSLinkOutput", "AltMonSelection",
+        "DimAttenuation", "TOSLinkOutput", "TOSLink", "ConverterMode",
+        "MultiUnitOrder", "AltMonSelection",
         "RemoteMonitorController", "DSPSpanning",
         "TalkbackInPhysicalCR", "TalkbackMaster", "Enable24dBMode",
         "ClipHold", "PeakHold", "TalkbackMicSelect", "FuncSwitchMode",
         "FuncSwitch2Mode", "SurroundMonitorMode")
+    # These four share the device-mode word (other param 0x21): one write
+    # when any of them was saved
+    _DEVICE_MODE_FIELDS = ("TOSLinkOutput", "TOSLink", "ConverterMode",
+                           "MultiUnitOrder")
     # Per-input settings the hardware does not report back
     _REAPPLY_INPUT = ("SRConvert", "HiZImpedance", "PGADisabledInLineMode",
                       "OutputDestination", "Pad")
@@ -4622,10 +4627,16 @@ class HardwareRouter:
             count += 1
 
         # 1. device-level settings (the engine's mixer/root properties)
+        mode_done = False
         for name in self._REAPPLY_DEVICE:
             for path in (f"/devices/0/{name}/value", f"/{name}/value"):
-                if path in have:
-                    push(path)
+                if path not in have:
+                    continue
+                if name in self._DEVICE_MODE_FIELDS:
+                    if mode_done:
+                        continue    # the word already carries this field
+                    mode_done = True
+                push(path)
 
         # Group the rest by object
         aux_ctl: dict[int, set] = {}
