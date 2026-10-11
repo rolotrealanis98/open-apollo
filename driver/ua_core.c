@@ -211,11 +211,23 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	ua_irq_count++;
 
 	/* Dispatch audio-related interrupts */
-	ua_audio_irq(ua, status_lo, status_hi);
+	if (ua_audio_irq(ua, status_lo, status_hi))
+		return IRQ_WAKE_THREAD;
 
 	/* DSP message FIFO / error vectors (dsp_msg_irq, default off) */
 	ua_dsp_irq(ua, status_lo, status_hi);
 
+	return IRQ_HANDLED;
+}
+
+/*
+ * Threaded half: the period wakeups of period_irq=1 streams.  They read
+ * SAMPLE_POS (BAR0), which stays out of hard-IRQ context; the device is
+ * already acked by ua_irq_handler(), so no IRQF_ONESHOT.
+ */
+static irqreturn_t ua_irq_thread(int irq, void *data)
+{
+	ua_audio_irq_thread(data);
 	return IRQ_HANDLED;
 }
 
@@ -4068,8 +4080,9 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* An INTx line may be shared; the handler returns IRQ_NONE for
 	 * interrupts that are not ours */
-	ret = request_irq(pci_irq_vector(pdev, 0), ua_irq_handler,
-			  intx ? IRQF_SHARED : 0, DRIVER_NAME, ua);
+	ret = request_threaded_irq(pci_irq_vector(pdev, 0), ua_irq_handler,
+				   ua_irq_thread, intx ? IRQF_SHARED : 0,
+				   DRIVER_NAME, ua);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to request IRQ: %d\n", ret);
 		goto err_free_irq_vectors;
@@ -4167,6 +4180,7 @@ static void ua_remove(struct pci_dev *pdev)
 	 */
 	cancel_work_sync(&ua->resume_work);
 	ua_dsp_service_stop(ua);
+	ua_audio_period_wd_cancel(ua);
 	ua->audio.period_timer_running = false;
 	hrtimer_cancel(&ua->audio.period_timer);
 
@@ -4221,6 +4235,7 @@ static void ua_remove(struct pci_dev *pdev)
 	 *    shutdown flag could have restarted the service loop or the
 	 *    timer; both see the flag now, stop them for good.
 	 */
+	ua_audio_period_wd_cancel(ua);	/* first: it can start the timer */
 	ua->audio.period_timer_running = false;
 	hrtimer_cancel(&ua->audio.period_timer);
 	ua_dsp_service_stop(ua);
@@ -4269,8 +4284,9 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 
 	/*
 	 * Stop the software that touches BAR0: a resume re-init, the DSP
-	 * service loop.  The period timer sees the flag and pushes the
-	 * open streams into XRUN.
+	 * service loop.  The period timer (or, for period_irq=1 streams,
+	 * the period watchdog) sees the flag and pushes the open streams
+	 * into XRUN.
 	 */
 	cancel_work_sync(&ua->resume_work);
 	ua_dsp_service_stop(ua);
@@ -4408,6 +4424,7 @@ static void ua_quiesce_device(struct ua_device *ua, const char *why,
 		ua_audio_suspend(ua);
 	} else {
 		ua_dsp_service_stop(ua);
+		ua_audio_period_wd_cancel(ua);
 		ua->audio.period_timer_running = false;
 		hrtimer_cancel(&ua->audio.period_timer);
 	}

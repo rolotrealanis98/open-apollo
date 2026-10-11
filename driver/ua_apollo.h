@@ -1057,6 +1057,36 @@ struct ua_chan_map {
 	u16 ch_id[UA_MAX_CHANNELS];     /* ID of ALSA channel i, 0 = none */
 };
 
+/*
+ * Period-tracking counters (ua_audio.c "Period tracking"), shown in
+ * /proc/asound/cardN/period_irq.  Plain counters: each has one writer
+ * (the hard IRQ, the IRQ thread, the hrtimer callback or the watchdog) or
+ * is written under audio->lock; the proc reader tolerates a torn snapshot.
+ */
+#define UA_PERIOD_PATH_HRTIMER  0
+#define UA_PERIOD_PATH_IRQ      1
+
+struct ua_period_stats {
+	unsigned long timer_irqs;   /* period-timer interrupts (ISR_HI bit 30) */
+	unsigned long eob_irqs;     /* end-of-buffer interrupts (ISR_HI bit 31) */
+	unsigned long thread_runs;  /* IRQ-thread passes that served a stream */
+	unsigned long elapsed[2][UA_DIRS]; /* period_elapsed per path, dir */
+	unsigned long eob_pos_odd;  /* EOB with SAMPLE_POS far from the ring start */
+	u32 eob_last_sp;            /* SAMPLE_POS the IRQ thread read after an EOB */
+	/*
+	 * This transport session: how far past a timer-interval boundary
+	 * SAMPLE_POS was when the IRQ thread read it after a timer
+	 * interrupt.  Small and steady when TIMER_CFG counts as assumed; a
+	 * mean near half the interval means the interrupt drifts against
+	 * the period (see period_irq_cfg_adj).
+	 */
+	unsigned long phase_sum;
+	unsigned long phase_n;
+	unsigned int phase_max;
+	unsigned long fallbacks;    /* silent timer interrupt: moved to the hrtimer */
+	unsigned long stops;        /* streams the IRQ path pushed into XRUN */
+};
+
 /* Page-granular backing store for one audio DMA ring (ua_audio.c) */
 struct ua_dma_ring {
 	struct page **pages;        /* UA_DMA_SG_ENTRIES entries, kvcalloc()ed */
@@ -1161,7 +1191,7 @@ struct ua_audio {
 	bool dsp_service_running;
 	unsigned int dsp_service_count;
 
-	/* Period elapsed polling timer (replaces unreliable HW timer IRQ) */
+	/* Period elapsed polling timer (default; period_irq=1 uses the HW timer IRQ) */
 	struct hrtimer period_timer;
 	bool period_timer_running;
 	/*
@@ -1175,6 +1205,29 @@ struct ua_audio {
 	bool dma_test_active;       /* UA_IOCTL_DMA_TEST owns the transport */
 	snd_pcm_uframes_t last_play_period_pos;
 	snd_pcm_uframes_t last_rec_period_pos;
+
+	/*
+	 * Interrupt-driven period tracking (period_irq=1, ua_audio.c
+	 * "Period tracking").  irq_subs: running substreams whose period
+	 * wakeups come from the period-timer interrupt through the IRQ
+	 * thread instead of the hrtimer (bit = UA_DIR_*).  A bit changes
+	 * only under timer_lock and its substream's PCM stream lock (the
+	 * trigger, the watchdog's fallback), so each path tests its own
+	 * substream's bit under that stream lock and the two paths never
+	 * serve the same substream.
+	 */
+	unsigned long irq_subs;
+	unsigned long irq_events;       /* UA_PIRQ_EV_* from the hard IRQ */
+	unsigned int transport_gen;     /* incremented on every transport start */
+	unsigned int irq_gen[UA_DIRS];  /* transport_gen at that direction's START */
+	bool irq_dead;                  /* this transport's timer IRQ went silent */
+	unsigned int timer_frames;      /* TIMER_CFG interval in frames, 0 = none */
+	u32 timer_cfg;                  /* value last written to TIMER_CFG */
+	unsigned long timer_irq_jiffies; /* last period-timer interrupt */
+	u32 wd_last_sp;                 /* SAMPLE_POS at the watchdog's last read */
+	unsigned long wd_sp_jiffies;    /* ... and when it read it */
+	struct delayed_work period_wd;  /* IRQ-path watchdog */
+	struct ua_period_stats pstats;
 
 	/* Prepare-churn guard (issue #42).  A session manager opening the
 	 * raw PCM without the protective WirePlumber rule churns
@@ -1623,7 +1676,9 @@ enum ua_resume_how {
 	UA_RESUME_CONNECT,	/* the full connect, as at probe */
 };
 int ua_audio_resume(struct ua_device *ua, enum ua_resume_how how);
-void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
+bool ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
+void ua_audio_irq_thread(struct ua_device *ua);
+void ua_audio_period_wd_cancel(struct ua_device *ua);
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate);
 int ua_audio_set_clock_source(struct ua_device *ua, unsigned int source);
 bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source);
