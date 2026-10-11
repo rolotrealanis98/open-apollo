@@ -888,7 +888,7 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_KIND_GATES | UA_FEAT_MIXER_STATE |
 			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
-			    UA_FEAT_UNIT_GROUP,
+			    UA_FEAT_UNIT_GROUP | UA_FEAT_BUS_SOLO_FLAG,
 	};
 
 	strscpy(v.driver_name, DRIVER_VERSION, sizeof(v.driver_name));
@@ -2782,8 +2782,10 @@ static long ua_ioctl_set_mixer_bus_param(struct ua_device *ua,
 		int bus_ret;
 
 		mutex_lock(&ua->lock);
-		bus_ret = ua_dsp_set_bus_param(ua, bp.bus_id, bp.sub_param,
-					       side, bp.value);
+		bus_ret = ua_dsp_set_bus_param_flags(ua, bp.bus_id,
+				bp.sub_param, side, bp.value,
+				(bp.flags & UA_BUS_PARAM_F_SOLO_MUTE) ?
+					UA_DSP_BUSP_SOLO_MUTE : 0);
 		mutex_unlock(&ua->lock);
 		return bus_ret;
 	}

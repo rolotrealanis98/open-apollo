@@ -115,6 +115,15 @@ struct ua_mixer_bus_param {
 /* flags: this entry is the right-output weight (side 1); else side 0 */
 #define UA_BUS_PARAM_F_SIDE_R	0x100
 /*
+ * flags: this entry is a solo-muted weight (UA_FEAT_BUS_SOLO_FLAG).  With
+ * the bus_solo_sign module parameter on, the driver sends the value as the
+ * macOS Mixer Engine sends a solo-muted input: sign bit set, an exact zero
+ * replaced by -1.0e-9 (0xb089705f).  With it off (default) the flag is
+ * accepted and the value goes out as given.  The batch ioctl has no
+ * per-entry flags and never sets it.
+ */
+#define UA_BUS_PARAM_F_SOLO_MUTE	0x200
+/*
  * Complete Bus ID map (Apollo x4, verified Phase 3e 2026-02-19):
  *   0x0000-0x0003: Analog In 1-4 (mono, mic/line)
  *   0x0004-0x0005: CUE1 L/R (output mix bus)
@@ -453,7 +462,7 @@ struct ua_dma_test {
  * The struct is fixed size: never change sizeof(struct ua_version).
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		0
+#define UA_ABI_MINOR		1
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -466,6 +475,7 @@ struct ua_dma_test {
 #define UA_FEAT_PAUSE_INFO	(1u << 8)  /* UA_IOCTL_GET_PAUSE_INFO */
 #define UA_FEAT_PAUSE_EVENTS	(1u << 9)  /* UA_EVT_PAUSED / UA_EVT_RESUMED */
 #define UA_FEAT_UNIT_GROUP	(1u << 10) /* unit index/role in SYSTEM_INFO */
+#define UA_FEAT_BUS_SOLO_FLAG	(1u << 11) /* UA_BUS_PARAM_F_SOLO_MUTE */
 
 struct ua_version {
 	__u32 abi_major;
