@@ -43,6 +43,11 @@ class StateTree:
         self._subs: dict[str, set[str]] = defaultdict(set)
         # Callback registry: client_id → callback function
         self._callbacks: dict[str, Callable] = {}
+        # Internal observers: see every notified change, whatever the
+        # client subscriptions (derived state such as /Dirty).  Not wire
+        # clients: a SET's originator exclusion and a disconnect leave
+        # them alone.
+        self._change_observers: dict[str, Callable] = {}
         # Hardware write hook: called when a SET changes a value
         # signature: on_set(path: str, value: Any) → None
         self.on_set: Callable | None = None
@@ -58,6 +63,10 @@ class StateTree:
         self._save_path: Path | None = None
         self._save_timer: threading.Timer | None = None
         self._save_delay = 2.0  # seconds
+        # The debounced save runs on a Timer thread while save_now() (a
+        # client checkpoint, shutdown) runs on the event loop: one lock so
+        # two writers never share the .tmp file or interleave the rename
+        self._persistence_lock = threading.RLock()
 
     # ── Loading ──────────────────────────────────────────────────────
 
@@ -137,34 +146,44 @@ class StateTree:
 
     def _schedule_save(self):
         """Schedule a debounced save (2s after last change)."""
-        if self._save_path is None:
-            return
-        if self._save_timer is not None:
-            self._save_timer.cancel()
-        self._save_timer = threading.Timer(self._save_delay, self._save_state)
-        self._save_timer.daemon = True
-        self._save_timer.start()
+        with self._persistence_lock:
+            if self._save_path is None:
+                return
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+            self._save_timer = threading.Timer(self._save_delay, self._save_state)
+            self._save_timer.daemon = True
+            self._save_timer.start()
 
     def _save_state(self):
-        """Write modified values to disk."""
-        if self._save_path is None or not self._dirty:
-            return
-        try:
-            self._save_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._save_path.with_suffix(".tmp")
-            with open(tmp, "w") as f:
-                json.dump(self._dirty, f, separators=(",", ":"))
-            tmp.rename(self._save_path)
-            log.debug("Saved %d modified values to %s", len(self._dirty), self._save_path)
-        except OSError as e:
-            log.error("Failed to save state to %s: %s", self._save_path, e)
+        """Write modified values to disk (atomically: .tmp, then rename).
+        A failed write leaves the previous file as it was."""
+        with self._persistence_lock:
+            if self._save_path is None or not self._dirty:
+                return
+            # A copy: the event loop keeps changing _dirty while the Timer
+            # thread encodes (json.dump iterates in Python, so a live dict
+            # can change size under it)
+            snapshot = dict(self._dirty)
+            try:
+                self._save_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self._save_path.with_suffix(".tmp")
+                with open(tmp, "w") as f:
+                    json.dump(snapshot, f, separators=(",", ":"))
+                tmp.rename(self._save_path)
+                log.debug("Saved %d modified values to %s", len(snapshot),
+                          self._save_path)
+            except OSError as e:
+                log.error("Failed to save state to %s: %s", self._save_path, e)
 
     def save_now(self):
-        """Force an immediate save (e.g. on shutdown)."""
-        if self._save_timer is not None:
-            self._save_timer.cancel()
-            self._save_timer = None
-        self._save_state()
+        """Force an immediate save (e.g. on shutdown).  Waits for a
+        debounced save that is writing right now, then writes once."""
+        with self._persistence_lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+            self._save_state()
 
     def _insert_control(self, ctrl_path: str, ctrl: dict):
         """Insert a control into the nested tree."""
@@ -456,6 +475,17 @@ class StateTree:
         """Remove a client's callback."""
         self._callbacks.pop(client_id, None)
 
+    def register_change_observer(self, observer_id: str, callback: Callable):
+        """Observe every notified change, including properties added at
+        runtime, independent of client subscriptions.  For derived state
+        inside the daemon only: it creates no protocol subscription, and a
+        SET's originator exclusion or a client disconnect does not touch it.
+        """
+        self._change_observers[observer_id] = callback
+
+    def unregister_change_observer(self, observer_id: str):
+        self._change_observers.pop(observer_id, None)
+
     def _notify_subscribers(self, path: str, value: Any, exclude: str | None = None):
         """Send subscription notifications to all subscribed clients.
 
@@ -464,6 +494,16 @@ class StateTree:
             value: The new value
             exclude: Client ID to skip (the originator of the SET)
         """
+        # Internal observers first, from a snapshot (an observer may
+        # register or unregister one, or notify again for derived state);
+        # a failing observer never stops the client deliveries
+        for observer_id, callback in tuple(self._change_observers.items()):
+            try:
+                callback(path, value)
+            except Exception:
+                log.exception("Internal change observer %s failed for %s",
+                              observer_id, path)
+
         # Check exact path match
         subscribers = set()
         if path in self._subs:
