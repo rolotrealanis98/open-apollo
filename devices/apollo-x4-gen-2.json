@@ -165,7 +165,7 @@
     }
   },
   "mixer_inputs": [
-    {"name": "FREUD ANALOG 1", "synch_in": 0, "preamp": true, "stereo": false},
+    {"name": "ANALOG 1", "synch_in": 0, "preamp": true, "stereo": false},
     {"name": "ANALOG 2", "synch_in": 1, "preamp": true, "stereo": false},
     {"name": "ANALOG 3", "synch_in": 2, "preamp": true, "stereo": false},
     {"name": "ANALOG 4", "synch_in": 3, "preamp": true, "stereo": false},

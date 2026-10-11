@@ -281,9 +281,9 @@ def check_device(d, rep, type_io):
         if len(set(sy)) != len(sy):
             rep.err(rel, 'duplicate mixer input synch_in')
         for e in mi:
-            if d['mixer_class'].upper() in e['name'].upper().split():
-                rep.err(rel, f'mixer input {e["name"]!r} carries the mixer '
-                             f'class name; the live name is the channel name')
+            if not re.fullmatch(r'[A-Z/]+( \d+| [LR])?', e['name']):
+                rep.err(rel, f'mixer input name {e["name"]!r} is not '
+                             f'"<KIND> <n>" (a mixer class name leaked in?)')
         tb_in = [e for e in mi if e['name'] == 'TALKBACK']
         if d.get('talkback') and not tb_in:
             rep.err(rel, 'talkback model without a TALKBACK mixer input')
