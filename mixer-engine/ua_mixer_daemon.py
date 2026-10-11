@@ -40,6 +40,7 @@ from protocol import (MessageFramer, Command, parse_command, encode_response_byt
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
 from helper_tree import HelperTree
+from autogain import AutoGainService
 from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UNSUPPORTED as EVENTS_UNSUPPORTED, EVENT_NAMES,
                     UA_EVT_RATE_INFO, UA_EVT_IODESC_IN, UA_EVT_IODESC_OUT,
@@ -57,7 +58,7 @@ from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
                       meter_channel)
 from bonjour import BonjourAnnouncer, _default_name
-from commands import CommandEngine
+from commands import CommandEngine, parse_cmdparams
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
 try:
@@ -412,6 +413,8 @@ class MixerDaemon:
         self.hw_paused = False
         # `post` object commands (commands.py)
         self.commands = CommandEngine(self)
+        # Host-side preamp autogain, served as /auto_gain on the helper tree
+        self.autogain = AutoGainService(self)
         # The model's /ClockSource list (the static fallback) and the
         # warnings already given
         values = (self.state.get_prop_dict("/ClockSource") or {}).get("values")
@@ -2436,6 +2439,15 @@ class MixerDaemon:
                     1.0, self._fire_init_complete)
             return
 
+        # Mixer Helper /auto_gain/{start,stop}_auto_gain
+        if client.helper and self.autogain.owns(cmd.path):
+            data, error = self.autogain.execute(
+                cmd.path, parse_cmdparams(cmd.value, cmd.raw_params))
+            params = {k: v for k, v in (resp_params or {}).items()
+                      if k != "cmdparams"} or None
+            self._send_post_reply(client, cmd.path, data, error, params)
+            return
+
         # Object commands (`post <object>/<CommandName>`): the engine's
         # result, or its error string
         data, error = self.commands.execute(cmd.path, cmd.value,
@@ -2746,6 +2758,10 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                              "where the send has a pan (default off until a "
                              "listening test; needs a driver with "
                              "UA_FEAT_BUS_PARAM_SIDE)")
+    parser.add_argument("--autogain-any-model", action="store_true",
+                        help="offer /auto_gain on any model with preamps "
+                             "(default: only where the device map has "
+                             "SupportsAutogain, the Gen 2 models)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Debug logging")
     parser.add_argument("--trace", "-t", action="store_true",
@@ -2873,6 +2889,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                          helper_tree=helper_tree, metering=metering,
                          network_id=network_id,
                          loaded_map=None if args.device_map else device_map)
+    daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.commands.set_store(state_file.parent, store_stem)
 
@@ -2922,6 +2939,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             asyncio.create_task(daemon._meter_pump()),
             asyncio.create_task(daemon._meter_pulse_heartbeat()),
             asyncio.create_task(daemon._device_watchdog()),
+            asyncio.create_task(daemon.autogain.run()),
         ]
         if ws_server:
             tasks.append(asyncio.create_task(ws_server.start()))
