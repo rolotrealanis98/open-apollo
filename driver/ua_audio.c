@@ -74,6 +74,17 @@ MODULE_PARM_DESC(pcie_tuning,
 		 "Legacy PCIe tweaks: disable ASPM on the Apollo endpoint (via the ASPM core) and raise the completion timeout to 65-210 ms on the Apollo and every upstream bridge (default: off)");
 
 /*
+ * 64-bit audio DMA experiment (parity/18 s6.2 rank 6).  The probe keeps the
+ * device at DMA_BIT_MASK(32) after an old note (a buffer at 0x19f800000
+ * failed); Windows and macOS never constrain the range, and the SG table
+ * already carries the high dword.  Off: byte-identical to before.
+ */
+static bool dma64_audio;
+module_param(dma64_audio, bool, 0444);
+MODULE_PARM_DESC(dma64_audio,
+		 "Experiment: allocate the two 4 MiB audio rings with a 64-bit DMA mask (they may land above 4 GiB); DSP rings and everything else stay below 4 GiB (default: off)");
+
+/*
  * Rate-change experiments (titan A/B, 2026-10): the kext changes the rate
  * with the transport stopped and never writes the clock on a plain
  * transport start (apollo-linux kext-rate-meters-hiz-2026-10-10.md).
@@ -507,20 +518,80 @@ void ua_audio_free_dma(struct ua_device *ua)
 	ua_dma_ring_free(dev, &audio->rec_ring);
 }
 
+/* Span of a ring's bus addresses and how many pages sit above 4 GiB */
+static void ua_dma_ring_log64(struct device *dev, const char *name,
+			      const struct ua_dma_ring *ring)
+{
+	dma_addr_t lo = ~(dma_addr_t)0, hi = 0;
+	phys_addr_t first = page_to_phys(ring->pages[0]);
+	unsigned int i, above_bus = 0, above_phys = 0;
+
+	for (i = 0; i < ring->nr_pages; i++) {
+		if (ring->dmas[i] < lo)
+			lo = ring->dmas[i];
+		if (ring->dmas[i] > hi)
+			hi = ring->dmas[i];
+		if (upper_32_bits(ring->dmas[i]))
+			above_bus++;
+		if (upper_32_bits(page_to_phys(ring->pages[i])))
+			above_phys++;
+	}
+	dev_info(dev,
+		 "dma64_audio: %s ring bus %pad..%pad (page 0 phys %pa), %u/%u pages above 4 GiB (bus), %u above (phys)%s\n",
+		 name, &lo, &hi, &first, above_bus, ring->nr_pages,
+		 above_phys,
+		 above_bus ? "" : " - buffer stayed below 4 GiB");
+}
+
 static int ua_audio_alloc_dma(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct device *dev = &ua->pdev->dev;
+	bool wide = false;
 	int ret;
 
+	/*
+	 * dma64_audio: raise the mask only around the two ring allocations
+	 * and drop it to 32 bits again straight after, so the DSP rings,
+	 * command buffers and every later dma_alloc_coherent() stay below
+	 * 4 GiB.  Runs from probe/resume (connect path), before any ioctl
+	 * can allocate; the already mapped ring pages keep their addresses
+	 * (sync and free do not look at the mask).
+	 */
+	if (dma64_audio) {
+		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+		if (ret)
+			dev_warn(dev, "dma64_audio: 64-bit mask refused (%d), rings stay below 4 GiB\n",
+				 ret);
+		else
+			wide = true;
+	}
+
 	ret = ua_dma_ring_alloc(dev, &audio->play_ring, &audio->play_buf);
+	if (!ret) {
+		ret = ua_dma_ring_alloc(dev, &audio->rec_ring, &audio->rec_buf);
+		if (ret)
+			ua_audio_free_dma(ua);
+	}
+
+	if (wide) {
+		int mret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+
+		if (mret) {
+			dev_err(dev, "dma64_audio: cannot restore the 32-bit DMA mask (%d)\n",
+				mret);
+			if (!ret) {
+				ua_audio_free_dma(ua);
+				ret = mret;
+			}
+		}
+	}
 	if (ret)
 		return ret;
 
-	ret = ua_dma_ring_alloc(dev, &audio->rec_ring, &audio->rec_buf);
-	if (ret) {
-		ua_audio_free_dma(ua);
-		return ret;
+	if (dma64_audio) {
+		ua_dma_ring_log64(dev, "play", &audio->play_ring);
+		ua_dma_ring_log64(dev, "rec", &audio->rec_ring);
 	}
 
 	dev_info(dev, "DMA buffers: %u pages per direction, vmapped flat (4 MiB each)\n",
