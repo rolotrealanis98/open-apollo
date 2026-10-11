@@ -155,6 +155,7 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	struct ua_device *ua = data;
 	u32 status_lo, status_hi = 0;
 	unsigned long flags;
+	bool wake;
 
 	/* Device removed — don't touch BAR0 */
 	if (atomic_read(&ua->shutdown))
@@ -211,13 +212,12 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	ua_irq_count++;
 
 	/* Dispatch audio-related interrupts */
-	if (ua_audio_irq(ua, status_lo, status_hi))
-		return IRQ_WAKE_THREAD;
+	wake = ua_audio_irq(ua, status_lo, status_hi);
 
 	/* DSP message FIFO / error vectors (dsp_msg_irq, default off) */
 	ua_dsp_irq(ua, status_lo, status_hi);
 
-	return IRQ_HANDLED;
+	return wake ? IRQ_WAKE_THREAD : IRQ_HANDLED;
 }
 
 /*
