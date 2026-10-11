@@ -21,6 +21,12 @@ FX3_LOADER_PIDS = {
     0x000E: "Twin X USB",
 }
 
+# Other 2B5A PIDs seen in the Windows INFs (UAD2Usb.inf), recorded here only;
+# this tool does not load firmware onto them:
+#   0x0003  Twin USB, "updating" state (old-firmware Twin)
+#   0x0005  UAD-2 Satellite USB QUAD  (DSP accelerator, no audio)
+#   0x0006  UAD-2 Satellite USB OCTO  (DSP accelerator, no audio)
+
 # FX3 vendor request for firmware download
 FX3_FW_DOWNLOAD = 0xA0
 MAX_CHUNK = 4096

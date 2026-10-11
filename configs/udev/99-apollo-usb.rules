@@ -6,6 +6,12 @@
 #   Twin USB         (0x2b5a:0x0001 → 0x0002)
 #   Twin X USB       (0x2b5a:0x000e → 0x000f)
 #
+# Other 2b5a PIDs named by the Windows INFs, deliberately NOT matched below:
+#   0x0003  Twin USB in the "updating" state (old-firmware Twin)
+#   0x0005  UAD-2 Satellite USB QUAD  (DSP accelerator, no audio)
+#   0x0006  UAD-2 Satellite USB OCTO  (DSP accelerator, no audio)
+# They have no audio interface, so no access or init rules exist for them.
+#
 # Requires firmware in /lib/firmware/universal-audio/
 # See docs/usb-apollo-re/ for details.
 #

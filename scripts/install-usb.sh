@@ -105,6 +105,11 @@ PREEXISTING_HELPERS=0
 # ================================================================
 header "Checking for Apollo USB"
 
+# USB PIDs (vendor 2b5a):
+#   loader (pre-firmware): 0001 Twin, 000c Solo, 000e Twin X (0004 Satellite loader)
+#   live (post-firmware):  0002 Twin, 000d Solo, 000f Twin X
+#   recorded, not handled: 0003 Twin "updating" state; 0005 Satellite USB QUAD and
+#   0006 Satellite USB OCTO (DSP accelerators, no audio interface)
 # Check for loader PID (pre-firmware) or live PID (post-firmware)
 LOADER_DEV=$(lsusb 2>/dev/null | grep -i "2b5a:000c\|2b5a:0001\|2b5a:000e" || true)
 LIVE_DEV=$(lsusb 2>/dev/null | grep -i "2b5a:000d\|2b5a:0002\|2b5a:000f" || true)
