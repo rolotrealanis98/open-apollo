@@ -58,6 +58,7 @@ from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
                       meter_channel)
 from bonjour import BonjourAnnouncer, _default_name
+from model_features import load_descriptor
 from commands import CommandEngine, parse_cmdparams
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
@@ -2869,6 +2870,10 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             model=descriptor_model(
                 find_descriptor(device_type)[0]
                 if device_type is not None else None))
+        # Per-model facts (monitor taper, engine feature flags)
+        hw_router.set_model_data(load_descriptor(
+            find_descriptor(device_type)[0]
+            if device_type is not None else None))
         # The settle mute uses OutputsAttenuate, which only some mixer
         # types support (OUTPUTS_ATTENUATE_CLASSES)
         hw_router.supports_outputs_attenuate = descriptor_mixer_class(

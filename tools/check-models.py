@@ -11,7 +11,7 @@ Checks, and fails (exit 1) on any error:
      `channel_counts` / `channels`; route channel IDs (unique, type byte
      <-> io kind, name <-> channel number); cue buses, talkback, TOSLink
      rules against the routes; the shape of the per-rate converter latency
-     tables ("latency").
+     tables ("latency") and of the monitor taper.
   2. driver/ua_models_gen.h against the JSON (the same test as
      `gen-driver-models.py --check`).
   3. The hand-written per-model tables against the JSON: the UA_DEV_*
@@ -393,6 +393,7 @@ def check_device(d, rep, type_io):
         rep.warn(rel, f'virtual_max {vmax} hides nothing '
                       f'(highest virtual channel {max(virt)})')
     check_latency(d, rep)
+    check_monitor_taper(d, rep)
     return lists
 
 
@@ -453,6 +454,29 @@ def check_latency(d, rep):
         v = lat.get(k)
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
             rep.err(rel, f'latency.{k} must be a positive frame count')
+
+
+def check_monitor_taper(d, rep):
+    """Control-room level taper: 48 or 54 steps (GetCRPGATaperTodBTable),
+    steps + 1 dB values from -96 up to 0 dB (N28)."""
+    rel = d['_rel']
+    t = d.get('monitor_taper')
+    if t is None:
+        rep.err(rel, 'missing field \'monitor_taper\'')
+        return
+    steps, db = t.get('steps'), t.get('db')
+    if steps not in (48, 54):
+        rep.err(rel, f'monitor_taper.steps {steps!r}: the engine has 48 and '
+                     f'54-step tapers only')
+        return
+    if not isinstance(db, list) or len(db) != steps + 1:
+        rep.err(rel, f'monitor_taper.db needs {steps + 1} values')
+        return
+    if db[0] != -96 or db[-1] != 0 or any(b < a for a, b in zip(db, db[1:])):
+        rep.err(rel, 'monitor_taper.db must rise from -96 to 0 dB')
+    if d.get('desktop') and steps != 54:
+        rep.warn(rel, 'desktop model with a 48-step taper (every desktop '
+                      'class seen uses 54)')
 
 
 def check_cross(devs, rep):

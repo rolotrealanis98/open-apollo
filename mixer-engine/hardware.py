@@ -54,6 +54,8 @@ import subprocess
 import time
 from typing import Any
 
+import model_features as mf
+
 log = logging.getLogger(__name__)
 
 # ── Ioctl constants ─────────────────────────────────────────────────
@@ -1144,13 +1146,41 @@ _MONITOR_TAPER_REV = (
 )
 # fmt: on
 
+# The tables above are the x4's 54-step taper (MixerTypeFreud::
+# GetCRPGATaperTodBTable).  The Apollo/8/8p/A16/x6/x8/x8p/x16 classes use a
+# 48-step table instead (MixerTypeBase, CRPGATaperTodBTableApolloA16); the
+# daemon installs the attached model's LUTs with set_monitor_taper()
+# (model_features.taper_luts regenerates these two tables exactly from the
+# 54-step dB table).
+_monitor_lut = {"fwd": _MONITOR_TAPER_FWD, "rev": _MONITOR_TAPER_REV,
+                "steps": 54}
+
+
+def set_monitor_taper(db_table: list | None) -> int:
+    """Use the monitor taper of a model (its devices/*.json monitor_taper
+    dB table, steps + 1 values).  None or an unusable table restores the
+    x4's 54-step taper.  Returns the step count now in use."""
+    if db_table and len(db_table) >= 2:
+        fwd, rev = mf.taper_luts(list(db_table))
+        _monitor_lut.update(fwd=fwd, rev=rev, steps=len(db_table) - 1)
+    else:
+        _monitor_lut.update(fwd=_MONITOR_TAPER_FWD, rev=_MONITOR_TAPER_REV,
+                            steps=54)
+    return _monitor_lut["steps"]
+
+
+def monitor_taper_steps() -> int:
+    """Steps of the monitor taper in use (54 on the x4, 48 on HEXA)."""
+    return _monitor_lut["steps"]
+
 
 def monitor_tapered_to_hw(tapered: float) -> int:
     """Convert monitor tapered 0.0-1.0 to hardware value 0-192.
 
-    Uses a 361-entry lookup table captured from the real UA Mixer Engine.
-    For arbitrary float inputs, interpolates between the two nearest
-    table entries (1/360 step resolution).
+    Uses the 361-entry lookup table of the model's taper (the x4's was
+    captured from the real UA Mixer Engine).  For arbitrary float inputs,
+    interpolates between the two nearest table entries (1/360 step
+    resolution).
     """
     if tapered <= 0.0:
         return 0
@@ -1161,8 +1191,9 @@ def monitor_tapered_to_hw(tapered: float) -> int:
     if idx >= 360:
         return 192
     frac = pos - idx
-    hw_lo = _MONITOR_TAPER_FWD[idx]
-    hw_hi = _MONITOR_TAPER_FWD[idx + 1]
+    fwd = _monitor_lut["fwd"]
+    hw_lo = fwd[idx]
+    hw_hi = fwd[idx + 1]
     return max(0, min(192, round(hw_lo + frac * (hw_hi - hw_lo))))
 
 
@@ -1176,7 +1207,7 @@ def monitor_hw_to_tapered(hw_raw: int) -> float:
         return 0.0
     if hw_raw >= 192:
         return 1.0
-    return _MONITOR_TAPER_REV[hw_raw]
+    return _monitor_lut["rev"][hw_raw]
 
 
 def float_to_uint32(f: float) -> int:
@@ -2306,7 +2337,18 @@ class HardwareRouter:
         self.supports_outputs_attenuate = False
         # Device paused for system suspend: no hardware writes (set_paused)
         self.paused = False
+        # devices/<model>.json of the attached model ({} = not known; the
+        # handlers then fall back to what the device map has)
+        self.model_data: dict = {}
         self._sync_driver_state()
+
+    def set_model_data(self, desc: dict | None):
+        """Use the attached model's devices/*.json facts: its monitor
+        taper (48 or 54 steps).  None or {} keeps the x4 behaviour."""
+        self.model_data = dict(desc or {})
+        steps = set_monitor_taper(mf.monitor_taper_table(self.model_data))
+        log.info("Model data: %s (monitor taper %d steps)",
+                 self.model_data.get("model", "unknown model"), steps)
 
     def _sync_driver_state(self):
         """Read current rate/clock from driver and update state tree."""
