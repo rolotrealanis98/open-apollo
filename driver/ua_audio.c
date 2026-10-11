@@ -3848,48 +3848,51 @@ static int ua_io_map_restart_transport(struct ua_device *ua)
 }
 
 /*
- * A 192 kHz restart needs a short 48 kHz session first (x4, 2026-10-10 on
- * titan).
+ * A 192 kHz start from a Hi-band clock needs a 48 kHz session first (x4,
+ * 2026-10-10 on titan).
  *
  * Started while the hardware clock is already at 176.4 or 192 kHz, a
- * 192 kHz stream records nothing: the transport runs at the right rate and
- * playback timing is fine, but the record DMA never writes the ring.
- * Started from 44.1, 48 or 96 kHz it works (8 of 8), and 176.4 kHz works
- * from any rate.  A 0.3 s or longer 48 kHz stream before the 192 kHz
- * start fixed it 4 of 4 times, a 50 ms one never did, and moving only the
- * clock to 48 kHz without running the transport left capture dead.  So on
- * a 192 kHz start with the clock at 192 kHz, run the transport at 48 kHz
- * the way a 48 kHz stream would (rate-change reconnect, start, clock
- * write, restart on the republished 48 kHz layout) for UA_LOMID_HOLD_MS,
- * then let the regular rate-change path take it from 48 kHz to 192 kHz.
- * That made 192 kHz restarts work 10 of 10 times.
- *
- * Not from 176.4 kHz: this in-driver session did not help there (0 of
- * 12), although a real 0.3 s 48 kHz stream in between did (2 of 2).  The
- * difference is not understood yet; 176.4 -> 192 kHz stays broken.
+ * 192 kHz stream does not record: either the record DMA never writes the
+ * ring, or it records silence on the monitor channels, while the
+ * transport runs at the right rate and playback timing is fine.  Started
+ * from 44.1, 48, 88.2 or 96 kHz it works, and 176.4 kHz works from any
+ * rate.  Running the transport at 48 kHz before the 192 kHz start fixes
+ * it, provided the session is long enough: from 192 kHz 300 ms was enough
+ * (12 of 12), from 176.4 kHz it took 800 ms (600 ms: 2 of 4, 450 ms and
+ * shorter: never).  So run the transport at 48 kHz the way a 48 kHz
+ * stream would (rate-change reconnect, start, clock write, restart on the
+ * republished 48 kHz layout) for the per-rate hold below, then let the
+ * regular rate-change path take it from 48 kHz to 192 kHz.  Costs 0.5 s
+ * (from 192 kHz) or 1.3 s (from 176.4 kHz) on such a start.
  *
  * The hardware rate comes from the notification block (rate index << 8),
  * not from sample_rate, which says 48 kHz after a reload whatever the
  * clock runs at.  Caller holds ua->lock (the service loop cannot clear the
  * notification bits meanwhile); the transport is stopped.
  */
-#define UA_LOMID_HOLD_MS	300
+#define UA_LOMID_FROM_192K_MS		400	/* 300 worked 12 of 12 */
+#define UA_LOMID_FROM_176K4_MS		1200	/* 600 worked 2 of 4, 800 6 of 6 */
 
-static void ua_audio_192k_restart(struct ua_device *ua, unsigned int rate)
+static void ua_audio_192k_from_hi(struct ua_device *ua, unsigned int rate)
 {
 	struct ua_audio *audio = &ua->audio;
-	unsigned int hw_idx, waited;
+	unsigned int hw_idx, hold_ms, waited;
 	u32 status = 0;
 
 	if (rate != 192000 || !audio->connected || !ua->aceface_done)
 		return;
 
 	hw_idx = (ua_read(ua, UA_REG_NOTIF_RATE_INFO) >> 8) & 0xf;
-	if (hw_idx != UA_RATE_192000)
+	if (hw_idx == UA_RATE_192000)
+		hold_ms = UA_LOMID_FROM_192K_MS;
+	else if (hw_idx == UA_RATE_176400)
+		hold_ms = UA_LOMID_FROM_176K4_MS;
+	else
 		return;
 
 	dev_info(&ua->pdev->dev,
-		 "192 kHz start with the clock already at 192 kHz: running 48 kHz first\n");
+		 "192 kHz start with the clock at rate index %u: running 48 kHz first\n",
+		 hw_idx);
 
 	/* The rate-change path of ua_pcm_prepare_locked(), to 48 kHz */
 	audio->period_timer_running = false;
@@ -3910,12 +3913,12 @@ static void ua_audio_192k_restart(struct ua_device *ua, unsigned int rate)
 		return;
 
 	/*
-	 * Keep it running for UA_LOMID_HOLD_MS, doing what the DSP service
-	 * loop does (it is stopped and blocked on ua->lock): clear the
-	 * notification block (the firmware posts nothing new while earlier
-	 * bits stay set), drain the mixer readback, flush the mixer batch.
+	 * Keep it running for hold_ms, doing what the DSP service loop does
+	 * (it is stopped and blocked on ua->lock): clear the notification
+	 * block (the firmware posts nothing new while earlier bits stay
+	 * set), drain the mixer readback, flush the mixer batch.
 	 */
-	for (waited = 0; waited < UA_LOMID_HOLD_MS; waited += 10) {
+	for (waited = 0; waited < hold_ms; waited += 10) {
 		u32 notif = ua_read(ua, UA_REG_NOTIF_STATUS);
 
 		if (notif == 0xFFFFFFFF)
@@ -3941,8 +3944,8 @@ static void ua_audio_192k_restart(struct ua_device *ua, unsigned int rate)
 	ua_audio_stop_transport(ua);
 
 	dev_info(&ua->pdev->dev,
-		 "48 kHz session done (notifications 0x%08x), going on to 192 kHz\n",
-		 status);
+		 "48 kHz session done after %u ms (notifications 0x%08x), going on to 192 kHz\n",
+		 waited, status);
 }
 
 /* Body of ua_pcm_prepare(); caller holds ua->lock */
@@ -4005,7 +4008,7 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 		 audio->connected, audio->transport_running, ua->aceface_done);
 
 	if (!audio->transport_running)
-		ua_audio_192k_restart(ua, sub->runtime->rate);
+		ua_audio_192k_from_hi(ua, sub->runtime->rate);
 
 	if (sub->runtime->rate != audio->sample_rate) {
 		/*
