@@ -2082,6 +2082,13 @@ static void ua_audio_stall_qos(struct ua_device *ua, bool on)
  * reads 0xC084, 0xC07C and 0xC080 first when bit 4 or 22 is set
  * (parity/12 C08); notif_kext_reads does the same.  Without it this is the
  * single write the driver always did.
+ *
+ * INVARIANT: this is the LAST step of a notification pass.  The kext acts
+ * on every set bit of the pass (rate, lock, IO descriptors, events) and only
+ * then writes 0 to 0xC030; the firmware posts nothing new while earlier bits
+ * stay set, so an early ack lets a new event race the handling of the old
+ * one.  Callers must finish all work for @notif (io-descriptor re-read,
+ * ua_event_post_notif()) before calling this.
  */
 static void ua_audio_notif_ack(struct ua_device *ua, u32 notif)
 {
@@ -2323,19 +2330,19 @@ static void ua_dsp_service_handler(struct work_struct *work)
 	}
 
 	if (notif) {
-		ua_audio_notif_ack(ua, notif);
-
 		/* Log notification events (first 10 + every 100th) */
 		if (audio->dsp_service_count < 10 ||
 		    (audio->dsp_service_count % 100) == 0)
 			dev_dbg(&ua->pdev->dev,
-				"dsp_service[%u]: notif=0x%08x (cleared)\n",
+				"dsp_service[%u]: notif=0x%08x (clearing)\n",
 				audio->dsp_service_count, notif);
 
 		/* Bits 0/1: the firmware republished an IO descriptor */
 		if (notif & (UA_NOTIF_BIT_OUT_IO | UA_NOTIF_BIT_IN_IO))
 			ua_io_desc_notify(ua);
 		ua_event_post_notif(ua, notif);
+		/* Last: write 0 only after every bit has been acted on */
+		ua_audio_notif_ack(ua, notif);
 	}
 
 	/* Clock lock, AX_CONTROL fault flags and bus read latency (reads) */
@@ -4872,8 +4879,8 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 		if (notif == 0xFFFFFFFF)
 			return;
 		if (notif) {
-			ua_audio_notif_ack(ua, notif);
 			ua_event_post_notif(ua, notif);
+			ua_audio_notif_ack(ua, notif);	/* last, see its comment */
 			status |= notif;
 		}
 		ua_audio_poll_transport(ua);
@@ -4926,8 +4933,8 @@ static u32 ua_audio_service_step(struct ua_device *ua)
 	if (notif == 0xFFFFFFFF)
 		return notif;
 	if (notif) {
-		ua_audio_notif_ack(ua, notif);
 		ua_event_post_notif(ua, notif);
+		ua_audio_notif_ack(ua, notif);	/* last, see its comment */
 	}
 	if (ua_read(ua, UA_REG_MIXER_RB_STATUS) == 1) {
 		unsigned int i;
