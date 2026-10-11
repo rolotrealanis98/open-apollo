@@ -679,8 +679,24 @@ struct ua_mixer_bus_params {
  *                                 is 1.  A removed unit gets no RESUMED
  *                                 (DEVICE_OFFLINE follows its PAUSED)
  *
+ *   UA_EVT_DEVICE_ERROR   0x1007  the driver counted an error; arg = the
+ *                                 UA_ERR_* class below.  At most one event
+ *                                 per class per second; the counters
+ *                                 themselves are in /proc/asound/cardN/
+ *                                 dsp_state ("error counters")
+ *
  * PAUSED / RESUMED are posted when a reason bit changes, so they come in
  * pairs per reason.
+ *
+ * UA_EVT_DEVICE_ERROR classes (arg):
+ *   UA_ERR_XRUN_STOP   1  the driver forced a running stream into XRUN
+ *                         (period watchdog, dead link, vanished transport)
+ *   UA_ERR_PCIE        2  the PCIe core reported an error (AER
+ *                         error_detected)
+ *   UA_ERR_AX_FAULT    3  AX_CONTROL fault flag bit 7 or 8 seen
+ *   UA_ERR_DSP_VECTOR  4  a DSP error vector (DSPEvent 7/8) fired
+ *   UA_ERR_BLOCK_SEND  5  a DSP block/firmware send ended with a non-zero
+ *                         kext result code (including timeouts)
  */
 struct ua_event {
 	__u32 code;
@@ -703,5 +719,12 @@ struct ua_event {
 #define UA_EVT_CLOCK_LOCK	0x1004
 #define UA_EVT_PAUSED		0x1005
 #define UA_EVT_RESUMED		0x1006
+#define UA_EVT_DEVICE_ERROR	0x1007
+
+#define UA_ERR_XRUN_STOP	1
+#define UA_ERR_PCIE		2
+#define UA_ERR_AX_FAULT		3
+#define UA_ERR_DSP_VECTOR	4
+#define UA_ERR_BLOCK_SEND	5
 
 #endif /* UA_IOCTL_H */

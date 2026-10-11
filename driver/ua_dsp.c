@@ -1246,6 +1246,13 @@ static size_t ua_sendblock_chunk(void)
 	}
 }
 
+/* Count a block-send result (UA_KERR_*) and remember the last one */
+static void ua_err_block_send(struct ua_device *ua, int kerr)
+{
+	atomic_set(&ua->err.last_kerr, kerr);
+	ua_err_count(ua, UA_ERR_BLOCK_SEND);
+}
+
 /**
  * ua_dsp_block_result - Decode a 4-dword block response like _sendBlock
  * @ua: device
@@ -1271,11 +1278,13 @@ static int ua_dsp_block_result(struct ua_device *ua, unsigned int dsp_idx,
 	else
 		kerr = ua_kext_block_status(w1, w2);
 
-	if (kerr)
+	if (kerr) {
+		ua_err_block_send(ua, kerr);
 		dev_warn(&ua->pdev->dev,
 			 "sendBlock DSP%u cmd 0x%08x: kext result %d (%s), resp=[%08x %08x %08x %08x]\n",
 			 dsp_idx, cmd, kerr, ua_kext_err_name(kerr),
 			 w0, w1, w2, le32_to_cpu(READ_ONCE(resp[3])));
+	}
 	return kerr;
 }
 
@@ -1472,6 +1481,7 @@ int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 				       UA_RING_POSITION);
 		__le32 *resp_words = resp_buf;
 
+		ua_err_block_send(ua, UA_KERR_TIMEOUT);
 		dev_err(&ua->pdev->dev,
 			"firmware load timeout after %u ms (kext result %d, %s)\n",
 			UA_FW_TIMEOUT_MS, UA_KERR_TIMEOUT,
@@ -1894,6 +1904,7 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	int polls, ret = 0;
 
 	if (!ua->num_dsps) {
+		ua_err_block_send(ua, UA_KERR_NO_DSPS);
 		dev_warn(&ua->pdev->dev,
 			 "sendBlock: kext result %d (%s)\n",
 			 UA_KERR_NO_DSPS, ua_kext_err_name(UA_KERR_NO_DSPS));
@@ -2102,6 +2113,7 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 		ds->cmd.write_ptr);
 
 	if (READ_ONCE(resp_words[0]) == 0) {
+		ua_err_block_send(ua, UA_KERR_TIMEOUT);
 		dev_warn(&ua->pdev->dev,
 			 "sendBlock: no response after %d polls (kext result %d, %s)\n",
 			 polls, UA_KERR_TIMEOUT,
@@ -4672,12 +4684,14 @@ static void ua_dsp_msg_work(struct work_struct *work)
 	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
 		if (fifo & BIT(dsp))
 			ua_dsp_fifo_drain(ua, dsp);
-		if (err & (BIT(dsp * 2) | BIT(dsp * 2 + 1)))
+		if (err & (BIT(dsp * 2) | BIT(dsp * 2 + 1))) {
+			ua_err_count(ua, UA_ERR_DSP_VECTOR);
 			dev_warn_ratelimited(&ua->pdev->dev,
 					     "DSP %u error vector%s%s fired (DSPEvent 7/8)\n",
 					     dsp,
 					     err & BIT(dsp * 2) ? " A" : "",
 					     err & BIT(dsp * 2 + 1) ? " B" : "");
+		}
 	}
 
 	if (!rearm)
@@ -4852,6 +4866,15 @@ static void ua_dsp_state_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "dsp_msg_irq\t%d (armed %s, storm guard %s, vector mask 0x%08x)\n",
 		    dsp_msg_irq, x->msg_armed ? "yes" : "no",
 		    x->storm_tripped ? "TRIPPED" : "ok", x->vec_mask);
+
+	snd_iprintf(buf, "error counters\txrun stops %ld (+%ld for layout changes), pcie errors %ld, AX faults %ld, DSP error vectors %ld, block-send errors %ld (last kext result %d)\n",
+		    atomic_long_read(&ua->err.count[UA_ERR_XRUN_STOP]),
+		    atomic_long_read(&ua->err.xrun_layout),
+		    atomic_long_read(&ua->err.count[UA_ERR_PCIE]),
+		    atomic_long_read(&ua->err.count[UA_ERR_AX_FAULT]),
+		    atomic_long_read(&ua->err.count[UA_ERR_DSP_VECTOR]),
+		    atomic_long_read(&ua->err.count[UA_ERR_BLOCK_SEND]),
+		    atomic_read(&ua->err.last_kerr));
 
 	for (dsp = 0; dsp < ua->num_dsps && dsp < UA_MAX_DSPS; dsp++) {
 		struct ua_dsp_state *ds = &ua->dsp[dsp];

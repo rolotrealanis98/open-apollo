@@ -1066,6 +1066,18 @@ struct ua_chan_map {
 #define UA_PERIOD_PATH_HRTIMER  0
 #define UA_PERIOD_PATH_IRQ      1
 
+/*
+ * Error counters behind UA_EVT_DEVICE_ERROR and the "error counters" block
+ * of /proc/asound/cardN/dsp_state.  Index = UA_ERR_* class.
+ */
+#define UA_ERR_NR	6		/* classes 1..5 */
+struct ua_err_stats {
+	atomic_long_t count[UA_ERR_NR];
+	atomic64_t last_evt_ns[UA_ERR_NR];	/* rate limit: 1 event/class/s */
+	atomic_long_t xrun_layout;	/* XRUN stops for a layout re-prepare */
+	atomic_t last_kerr;		/* last block-send UA_KERR_* result */
+};
+
 struct ua_period_stats {
 	unsigned long timer_irqs;   /* period-timer interrupts (ISR_HI bit 30) */
 	unsigned long eob_irqs;     /* end-of-buffer interrupts (ISR_HI bit 31) */
@@ -1450,6 +1462,9 @@ struct ua_device {
 	wait_queue_head_t event_wq;
 	bool event_offline;		/* event_lock; DEVICE_OFFLINE posted */
 
+	/* Error counters (ua_err_count()), any context */
+	struct ua_err_stats err;
+
 	/* Synchronization */
 	struct mutex lock;          /* Device access lock */
 	spinlock_t irq_lock;        /* Interrupt handler lock */
@@ -1488,6 +1503,7 @@ struct ua_file {
 
 void ua_event_init(struct ua_device *ua);
 void ua_event_post(struct ua_device *ua, u32 code, u32 arg);
+void ua_err_count(struct ua_device *ua, unsigned int class);
 void ua_event_post_notif(struct ua_device *ua, u32 notif);
 void ua_event_offline(struct ua_device *ua, bool surprise);
 int ua_event_open(struct inode *inode, struct file *filp);

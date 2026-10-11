@@ -4302,6 +4302,7 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 	struct ua_device *ua = pci_get_drvdata(pdev);
 
 	dev_warn(&pdev->dev, "PCIe error detected (state %d)\n", state);
+	ua_err_count(ua, UA_ERR_PCIE);
 
 	/* Block all new BAR0 access */
 	atomic_set(&ua->shutdown, 1);

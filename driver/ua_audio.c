@@ -1404,8 +1404,10 @@ static void ua_io_map_force_reprepare(struct ua_device *ua)
 		state = sub->runtime->status->state;
 		if (state == SNDRV_PCM_STATE_RUNNING ||
 		    state == SNDRV_PCM_STATE_PAUSED ||
-		    state == SNDRV_PCM_STATE_PREPARED)
+		    state == SNDRV_PCM_STATE_PREPARED) {
+			atomic_long_inc(&ua->err.xrun_layout);
 			snd_pcm_stop(sub, SNDRV_PCM_STATE_XRUN);
+		}
 		snd_pcm_stream_unlock_irqrestore(sub, sflags);
 	}
 	spin_unlock_irqrestore(&audio->lock, flags);
@@ -1993,6 +1995,7 @@ static void ua_audio_check_ax_faults(struct ua_device *ua, u32 ctrl,
 
 	if (ctrl & BIT(7)) {
 		audio->ax_fault_count[0]++;
+		ua_err_count(ua, UA_ERR_AX_FAULT);
 		if (!(audio->ax_fault_latch & BIT(0))) {
 			audio->ax_fault_latch |= BIT(0);
 			audio->ax_fault_last_ctrl = ctrl;
@@ -2004,6 +2007,7 @@ static void ua_audio_check_ax_faults(struct ua_device *ua, u32 ctrl,
 	}
 	if (ctrl & BIT(8)) {
 		audio->ax_fault_count[1]++;
+		ua_err_count(ua, UA_ERR_AX_FAULT);
 		if (!(audio->ax_fault_latch & BIT(1))) {
 			audio->ax_fault_latch |= BIT(1);
 			audio->ax_fault_last_ctrl = ctrl;
@@ -5451,6 +5455,8 @@ static void ua_period_check(struct ua_audio *audio,
 	if (irq && ua_period_irq_stale(audio, dir)) {
 		if (snd_pcm_running(sub)) {
 			audio->pstats.stops++;
+			ua_err_count(container_of(audio, struct ua_device, audio),
+				     UA_ERR_XRUN_STOP);
 			snd_pcm_stop(sub, SNDRV_PCM_STATE_XRUN);
 		}
 		goto out;
@@ -5519,10 +5525,14 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 			dev_err_ratelimited(&ua->pdev->dev,
 					    "period timer: BAR0 reads all-ones (link down), stopping streams\n");
 		spin_lock_irqsave(&audio->lock, flags);
-		if (audio->play_sub)
+		if (audio->play_sub) {
+			ua_err_count(ua, UA_ERR_XRUN_STOP);
 			snd_pcm_stop_xrun(audio->play_sub);
-		if (audio->rec_sub)
+		}
+		if (audio->rec_sub) {
+			ua_err_count(ua, UA_ERR_XRUN_STOP);
 			snd_pcm_stop_xrun(audio->rec_sub);
+		}
 		spin_unlock_irqrestore(&audio->lock, flags);
 		return HRTIMER_NORESTART;
 	}
@@ -5577,6 +5587,7 @@ static void ua_period_irq_stop(struct ua_device *ua, bool dead,
 		if (sub && snd_pcm_running(sub)) {
 			if (dead || ua_period_irq_stale(audio, dir)) {
 				audio->pstats.stops++;
+				ua_err_count(ua, UA_ERR_XRUN_STOP);
 				snd_pcm_stop(sub, SNDRV_PCM_STATE_XRUN);
 				stopped++;
 			}
@@ -5968,8 +5979,10 @@ static snd_pcm_uframes_t ua_pcm_pointer(struct snd_pcm_substream *sub)
 	 * Called under the stream lock, so the owner bit is stable.
 	 */
 	if (test_bit(dir, &audio->irq_subs) &&
-	    (sp == 0xFFFFFFFF || ua_period_irq_stale(audio, dir)))
+	    (sp == 0xFFFFFFFF || ua_period_irq_stale(audio, dir))) {
+		ua_err_count(ua, UA_ERR_XRUN_STOP);
 		return SNDRV_PCM_POS_XRUN;
+	}
 
 	return sp % sub->runtime->buffer_size;
 }

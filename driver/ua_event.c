@@ -68,6 +68,28 @@ void ua_event_post(struct ua_device *ua, u32 code, u32 arg)
 }
 
 /*
+ * Count one error of @class (UA_ERR_*) and post UA_EVT_DEVICE_ERROR for it,
+ * at most once per class per second.  Any context; does not sleep.
+ */
+void ua_err_count(struct ua_device *ua, unsigned int class)
+{
+	u64 now, last;
+
+	if (class == 0 || class >= UA_ERR_NR)
+		return;
+
+	atomic_long_inc(&ua->err.count[class]);
+
+	now = ktime_get_ns();
+	last = atomic64_read(&ua->err.last_evt_ns[class]);
+	/* 0 = never posted */
+	if (last && now - last < NSEC_PER_SEC)
+		return;
+	if (atomic64_cmpxchg(&ua->err.last_evt_ns[class], last, now) == last)
+		ua_event_post(ua, UA_EVT_DEVICE_ERROR, class);
+}
+
+/*
  * The notification status the driver just read and cleared: the raw value,
  * then the decoded events as the kext's _handleNotificationInterrupt posts
  * them.  Caller holds ua->lock (audio->rate_index is stable).
