@@ -452,6 +452,9 @@ def meter_channel(kind, index, meter_idx, name, stereo, channel_ids):
         elif name in ("S/PDIF L", "S/PDIF R"):
             right = name.endswith("R") or (stereo and meter_idx == 1)
             want = [0x0502 if right else 0x0501]
+        elif re.match(r"AES/EBU [12]$", name):
+            n = int(name[-1]) + (1 if stereo and meter_idx == 1 else 0)
+            want = [0x0600 | n]
         elif name == "TALKBACK":
             want = [0x0b01 + min(meter_idx, 1)]
     elif kind == "outputs":
@@ -490,9 +493,106 @@ X4_READBACK_METERS = (
 
 
 # Device types whose DSP writes the X4_READBACK_METERS layout: the x4 and
-# the x4 Gen 2 / Gen 2 TB4 (same Freud mixer family).  Other models need a
-# readback capture of their own.
+# the x4 Gen 2 / Gen 2 TB4 (same Freud mixer family).  Other models get the
+# table readback_meter_table() builds from their devices/*.json.
 READBACK_METER_DEVICE_TYPES = frozenset({0x1F, 0x36, 0x3F})
+
+
+def _meter_lane(synch: int) -> tuple[int, int] | None:
+    """(word, shift) of an input meter by the input's synch-in channel.
+
+    CMxMixer::MeterTimerCallback_Base (Mixer Engine 11.9.0, arm64 0x1003550b0)
+    folds the synch-in channel s into a lane index f and reads word 8 + f/2
+    (Virtual 0x18-0x1f: word 22 + (s - 0x18)/2), even lanes in bits 31:16,
+    odd ones in 15:0:  s & ~1 == 8 (S/PDIF, AES/EBU): f = s + 8;  s == 0xa
+    (talkback): f = 0x12;  s & ~3 == 0xc (ADAT 1-4, analog 9-12): f = s - 4;
+    s & ~3 == 0x14 (ADAT 5-8, analog 13-16): f = s - 8;  else f = s.
+    """
+    if 0x18 <= synch <= 0x1F:
+        word, lane = 22 + (synch - 0x18) // 2, synch
+    else:
+        if synch & ~1 == 8:
+            lane = synch + 8
+        elif synch == 0xA:
+            lane = 0x12
+        elif synch & ~3 == 0xC:
+            lane = synch - 4
+        elif synch & ~3 == 0x14:
+            lane = synch - 8
+        else:
+            lane = synch
+        word = 8 + lane // 2
+    if word > 25:
+        return None
+    return word, 0 if lane & 1 else 16
+
+
+# 12-bit bus meters MeterTimerCallback_Base reads: monitor word 18
+# (CMxOutput meters), AUX 1/2 returns words 19/20 (CMxAuxBus::DoMeters)
+_BUS_METERS = (
+    (18, 16, 0x0901), (18, 0, 0x0902),
+    (19, 16, 0x0201), (19, 0, 0x0202),
+    (20, 16, 0x0203), (20, 0, 0x0204),
+)
+
+
+def _input_channel_id(name: str, record_ids: set) -> int | None:
+    """The io_map channel ID of a Mixer Engine input name, if the model's
+    record route table carries it."""
+    name = name.strip().upper()
+    parts = name.rsplit(" ", 1)
+    num = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else None
+    if name.startswith("ANALOG") and num:
+        # MIC/LINE/HIZ 0x00, MIC/LINE 0x01, LINE 0x03: the one with index n
+        cands = [t << 8 | num for t in (0x00, 0x01, 0x03)]
+    elif name.startswith("ADAT") and num:
+        cands = [0x0400 | num]
+    elif name.startswith("VIRTUAL") and num:
+        cands = [0x0700 | num]
+    elif name in ("S/PDIF L", "S/PDIF R"):
+        cands = [0x0501 if name.endswith("L") else 0x0502]
+    elif name.startswith("AES/EBU") and num:
+        cands = [0x0600 | num]
+    elif name.startswith("TALKBACK"):
+        cands = [0x0B01]
+    else:
+        return None
+    for cid in cands:
+        if cid in record_ids:
+            return cid
+    return None
+
+
+def readback_meter_table(desc: dict | None):
+    """The ReadbackMeter table for a model, from its devices/*.json.
+
+    Every Apollo mixer type but the MADI rack (MeterTimerCallback_M64) reads
+    its meters with MeterTimerCallback_Base, so the layout follows from each
+    input's synch-in channel (_meter_lane) plus the fixed bus meters.  Only
+    channels the model's record route table carries are listed.  None when
+    the descriptor cannot give a table.
+    """
+    if not isinstance(desc, dict) or desc.get("mixer_class") == "M64":
+        return None
+    try:
+        record = desc["routes"]["LoMid"]["record"]
+        record_ids = {int(e["ch_id"], 16) for e in record}
+        table = []
+        for e in desc.get("mixer_inputs") or []:
+            if e.get("synch_in") is None:
+                continue
+            cid = _input_channel_id(str(e.get("name", "")), record_ids)
+            lane = _meter_lane(int(e["synch_in"]))
+            if cid is None or lane is None:
+                continue
+            table.append((lane[0], lane[1], 16, cid))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+    table.sort(key=lambda m: (m[0], -m[1]))
+    table += [(w, sh, 12, cid) for w, sh, cid in _BUS_METERS
+              if cid in record_ids]
+    table.sort(key=lambda m: (m[0], -m[1]))
+    return tuple(table) if table else None
 
 
 class ReadbackMeter(AlsaMeter):
@@ -536,16 +636,21 @@ class ReadbackMeter(AlsaMeter):
                 self._update_channel(c, max(SILENCE_DB, db), clip, now)
 
 
-def make_meter(alsa_device=None, device_type=None, device=None):
+def make_meter(alsa_device=None, device_type=None, device=None,
+               model_desc=None):
     """The meter that can work right now.
 
     ReadbackMeter on the Apollo x4 (0x1F) and x4 Gen 2 (0x36, 0x3F: the same
-    FreudG2 mixer), whose readback meter layout is known; else PipeWireMeter when PipeWire holds the Apollo's
-    streams (the usual desktop case), else AlsaMeter on the capture device
-    directly.
+    FreudG2 mixer) with the captured x4 table, and on any other model whose
+    devices/*.json gives a table (readback_meter_table); else PipeWireMeter
+    when PipeWire holds the Apollo's streams (the usual desktop case), else
+    AlsaMeter on the capture device directly.
     """
     if device_type in READBACK_METER_DEVICE_TYPES and not alsa_device:
         return ReadbackMeter()
+    table = None if alsa_device else readback_meter_table(model_desc)
+    if table:
+        return ReadbackMeter(table)
     card = find_apollo_card(device)
     if card is not None and not alsa_device:
         owner = apollo_stream_owner(card)

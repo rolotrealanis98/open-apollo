@@ -2545,6 +2545,17 @@ def descriptor_input_buses(slug: str | None) -> dict:
         return {}
 
 
+def descriptor_json(slug: str | None) -> dict | None:
+    """devices/<slug>.json as a dict, or None."""
+    if not slug:
+        return None
+    try:
+        desc = json.loads((DEVICES_DIR / f"{slug}.json").read_text())
+        return desc if isinstance(desc, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
 def descriptor_model(slug: str | None) -> ModelInfo | None:
     """The init-sequence facts of devices/<slug>.json, or None (the router
     then assumes the Apollo x4)."""
@@ -2877,7 +2888,10 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     if not args.no_hardware:
         metering = make_meter(args.alsa_device, device_type,
                               backend.device_path
-                              if backend and backend.connected else None)
+                              if backend and backend.connected else None,
+                              model_desc=descriptor_json(
+                                  find_descriptor(device_type)[0]
+                                  if device_type is not None else None))
         metering.start()
     else:
         metering = NullMeter()
