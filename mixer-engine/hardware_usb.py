@@ -167,15 +167,31 @@ class PyUsbOpener:
     daemon never holds the interface tools/usb-full-init.py needs.  Only
     the bulk pipe (--usb-dsp-params) claims it, on first use."""
 
+    _warned = False
+
+    def _warn_once(self, msg):
+        # opened again on every hot-plug poll: one line, not one per poll
+        if not self._warned:
+            self._warned = True
+            log.error(msg)
+
     def __call__(self, pids):
         try:
             import usb.core
             import usb.util
         except ImportError:
-            log.error("USB backend needs pyusb (pip install pyusb)")
+            self._warn_once("USB backend needs pyusb (pip install pyusb)")
             return None
         for pid in pids:
-            dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
+            try:
+                dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
+            except Exception as e:  # noqa: BLE001
+                if not isinstance(e, getattr(usb.core, "NoBackendError", ())):
+                    raise
+                # pyusb is there but libusb is not: no USB device to open
+                self._warn_once("USB backend needs libusb (install "
+                                "libusb-1.0): no USB Apollo can be opened")
+                return None
             if dev is not None:
                 return _PyUsbHandle(dev, pid, usb)
         return None
@@ -407,6 +423,11 @@ class HardwareUSB:
             except Exception:  # noqa: BLE001
                 return None
 
+    # The mixer kind of the USB parts is not known (devices/*.json carry
+    # only mixer_type_id, which is not the kext's kind: x6 9 vs kind 10), so
+    # the init sequence gates conservatively (HardwareRouter.gate_unknown_kind)
+    gate_unknown_kind = True
+
     def features(self) -> int:
         return 0
 
@@ -614,6 +635,14 @@ class HardwareUSB:
             self._knob_writeback(words)
         if status == 1:
             self._rb_last = words
+        if status != 1 and len(words) >= udev.READBACK_WORDS:
+            # A snapshot whose check words are wrong is a dropped snapshot,
+            # as on PCIe (both check words all ones): report it that way so
+            # poll_hw_readback sets readback_skipped and init retries (and
+            # keeps the unit's settings) instead of pushing the defaults
+            words = list(words)
+            words[38] = words[39] = 0xFFFFFFFF
+            return 1, words
         return status, (words if words else [0] * udev.READBACK_WORDS)
 
     # setting 2 fields the front panel changes: level, mute+mono, dim

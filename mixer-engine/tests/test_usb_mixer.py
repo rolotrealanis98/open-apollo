@@ -270,3 +270,36 @@ def test_monitor_field_runs_match_driver_table():
             mask = ((1 << int(width)) - 1) << sh
             assert um.map_monitor(p, 0xFFFFFFFF) == um.SettingWrite(
                 int(setting), mask if int(width) > 1 else 1 << sh, mask)
+
+
+class FailingRegs(Regs):
+    """Raises on the n-th write (0-based), then behaves."""
+
+    def __init__(self, seq_reads, fail_at):
+        super().__init__(seq_reads)
+        self.fail_at = fail_at
+        self.count = 0
+
+    def write(self, addr, words):
+        n, self.count = self.count, self.count + 1
+        if n == self.fail_at:
+            raise OSError("USB error")
+        super().write(addr, words)
+
+
+@pytest.mark.parametrize("fail_at", [0, 1])      # group block, SEQ_WR bump
+def test_failed_flush_keeps_the_change_for_the_retry(fail_at):
+    mb = um.SettingsMailbox()
+    mb.seq_wr = 5
+    mb.merge(2, 0x2A, 0xFF)
+    regs = FailingRegs([5, 5], fail_at)
+    with pytest.raises(OSError):
+        mb.flush(regs)
+    assert mb.pending and mb.mask[2] == 0xFF and mb.value[2] == 0x2A
+    assert mb.seq_wr == 5                   # no bump went out
+    regs.writes.clear()
+    assert mb.flush(regs) is True
+    assert regs.writes[0][0] == 0x062D
+    assert regs.writes[0][1][4:6] == [0x00FF002A, 0]    # not zeros
+    assert regs.writes[-1] == (0x0602, [6])
+    assert not mb.pending

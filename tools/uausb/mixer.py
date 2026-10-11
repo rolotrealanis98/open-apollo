@@ -335,8 +335,21 @@ class SettingsMailbox:
             self.adopt_seq(regs)
         if regs.read1(SEQ_RD) != self.seq_wr:
             return False
-        for addr, data in self.build_flush():
-            regs.write(addr, struct.unpack(f"<{len(data) // 4}I", data))
-        self.seq_wr = (self.seq_wr + 1) & 0xFFFFFFFF
-        regs.write(SEQ_WR, [self.seq_wr])
+        # The masks are cleared by build_flush, but a change counts as sent
+        # only once its writes and the SEQ_WR bump went through: on a
+        # USBError midway the pending values+masks (and the zero-pass
+        # state) come back, so the next flush retries them instead of
+        # writing zeros over a change the DSP never saw.
+        saved_mask = list(self.mask)
+        saved_zeroed = list(self.zeroed)
+        try:
+            for addr, data in self.build_flush():
+                regs.write(addr, struct.unpack(f"<{len(data) // 4}I", data))
+            seq = (self.seq_wr + 1) & 0xFFFFFFFF
+            regs.write(SEQ_WR, [seq])
+        except Exception:
+            self.mask[:] = saved_mask
+            self.zeroed[:] = saved_zeroed
+            raise
+        self.seq_wr = seq
         return True

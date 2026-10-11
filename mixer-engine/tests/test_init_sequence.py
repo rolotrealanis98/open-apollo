@@ -219,3 +219,38 @@ def test_readback_meters_for_x4_family(device_type, readback, monkeypatch):
     monkeypatch.setattr(metering, "find_apollo_card", lambda device=None: None)
     meter = metering.make_meter(None, device_type, None)
     assert isinstance(meter, metering.ReadbackMeter) is readback
+
+
+# ── unknown mixer kind (USB backend) ─────────────────────────────────
+
+def test_unknown_kind_gates_conservatively_only_when_asked():
+    from model_info import monitor_param_is_gated
+    # PCIe behaviour is unchanged: no kind = not gated
+    for p in (0x3E, 0x32, 0x1F, 0x19, 0x43, 0x87):
+        assert monitor_param_allowed(p, None)
+        assert not monitor_param_allowed(p, None, gate_unknown=True)
+        assert monitor_param_is_gated(p)
+    # ungated params (volume, mute/mono, dim) still go out
+    for p in (0x01, 0x03, 0x44, 0x04, 0x6A):
+        assert monitor_param_allowed(p, None, gate_unknown=True)
+    # a known kind ignores the flag
+    assert monitor_param_allowed(0x3E, 14, gate_unknown=True)
+
+
+def test_usb_backend_init_sends_no_kind_gated_monitor_params():
+    def usb_like():
+        router, backend, tree = model_router(X4_MAP, "apollo-x4")
+        backend.gate_unknown_kind = True
+        return router, backend, tree
+    sent = {c[2] for c in mixer(init_calls(usb_like), MON)}
+    gated = {0x3E, 0x32, 0x41, 0x1F, 0x19, 0x1A, 0x43, 0x67, 0x68, 0x87}
+    assert not sent & gated
+    assert {0x01, 0x03, 0x44} <= sent       # the unit's own level/mute/dim
+    plain = {c[2] for c in mixer(init_calls(x4_router), MON)}
+    assert gated <= plain                   # the x4 sequence is unchanged
+
+
+def test_usb_backend_reports_the_unknown_kind():
+    import hardware_usb as hu
+    assert hu.HardwareUSB.gate_unknown_kind is True
+    assert HardwareRouter(RecordingBackend(), None).gate_unknown_kind() is False

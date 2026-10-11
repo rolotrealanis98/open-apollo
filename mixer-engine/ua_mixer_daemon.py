@@ -2087,6 +2087,9 @@ class MixerDaemon:
             # and DigOutMode (0x21) except on the Freud mixers, whose
             # DTrace sets it: the x8p / 8p default to ADAT and keep theirs.
             kind = self.hw_router.mixer_kind()
+            # A backend that cannot tell its mixer kind (USB) must not get
+            # the x4's kind-gated params: it skips them
+            gate_unknown = self.hw_router.gate_unknown_kind()
             skipped = set()
             if not model.talkback:
                 skipped |= {0x46, 0x47, 0x48}
@@ -2099,7 +2102,8 @@ class MixerDaemon:
             nskipped = [0]
 
             def mon(ch_type, ch_idx, param, value):
-                if param in skipped or not monitor_param_allowed(param, kind):
+                if param in skipped or not monitor_param_allowed(
+                        param, kind, gate_unknown):
                     nskipped[0] += 1
                     return True
                 return be.set_mixer_param(ch_type, ch_idx, param, value)

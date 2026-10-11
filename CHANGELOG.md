@@ -87,6 +87,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documentation moved to the [GitHub wiki](https://github.com/rolotrealanis98/open-apollo/wiki). The `docs/` directory and the open-apollo-docs site are retired; old `open-apollo-docs.pages.dev` links redirect to the wiki.
 
 ### Fixed
+- USB backend: a bad first readback retries instead of resetting the unit to the defaults, a failed settings flush keeps its change for the retry, init skips the kind-gated and x4-default monitor params (the mixer kind is unknown), and a missing libusb counts as no USB device instead of crashing.
 - DSP command rings work after an Apollo power cycle: ring init wrote all eight DMA reset strobes along with the enables (DMA_CTRL 0x1ffff, issue #46's readback, now seen on the x4), the DSP never consumed its command ring, and faders, pans and sends did not reach the DSP until the unit had been initialised by another OS. One enable bit per DSP is now written and no strobe is left set (`dma_per_dsp`, default on).
 - Teardown: the DSP service stop always waits for a running pass, the service and the period timer cannot be restarted on a removed device, and a failed probe quiesces the hardware and turns off bus mastering before freeing its DMA buffers (from the parallel Codex work).
 - The Dante clock source (0x09) is accepted on devices that offer it.

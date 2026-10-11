@@ -8,6 +8,8 @@ import json
 import struct
 import time
 
+import pytest
+
 import hardware_usb as hu
 from conftest import ENGINE_DIR
 from hardware import (MONITOR_CHANNEL_TYPE, PREAMP_CHANNEL_TYPE,
@@ -238,11 +240,19 @@ def test_readback_feeds_the_router_decode_and_meters():
 
 def test_bad_check_words_drop_the_snapshot():
     be, dev = make_backend()
+    good = dev.readback
     dev.readback = list(dev.readback)
     dev.readback[2] ^= 0xFF
-    status, _ = be.get_hw_readback()
-    assert status == 0
-    assert HardwareRouter(be, None).poll_hw_readback() is None
+    r = HardwareRouter(be, None)
+    # Reported as the PCIe "dropped" snapshot (check words all ones), so the
+    # daemon's init retry runs instead of pushing the defaults to the unit
+    status, words = be.get_hw_readback()
+    assert status == 1 and words[38] == words[39] == 0xFFFFFFFF
+    assert r.poll_hw_readback() is None
+    assert r.readback_skipped is True
+    dev.readback = good                      # the next snapshot is fine
+    assert r.poll_hw_readback() is not None
+    assert r.readback_skipped is False
 
 
 def test_old_protocol_readback_path():
@@ -384,3 +394,45 @@ def test_daemon_make_backend_picks_usb(monkeypatch):
     assert isinstance(d.make_backend(args), HardwareBackend)
     monkeypatch.setattr(hu, "select_backend", lambda dev, force: "usb")
     assert isinstance(d.make_backend(args), hu.HardwareUSB)
+
+
+def _fake_pyusb(monkeypatch, find):
+    import sys
+    import types
+    from usb_fake import FakeUsb
+    fake = FakeUsb(None)
+    fake.core.find = staticmethod(find)
+    pkg = types.ModuleType("usb")
+    pkg.core, pkg.util = fake.core, fake.util
+    monkeypatch.setitem(sys.modules, "usb", pkg)
+    monkeypatch.setitem(sys.modules, "usb.core", fake.core)
+    monkeypatch.setitem(sys.modules, "usb.util", fake.util)
+    return fake
+
+
+def test_missing_libusb_means_no_usb_device(monkeypatch, caplog):
+    """usb.core.find raises NoBackendError without libusb: no device, one
+    log line, no crash (so --require-hardware exits normally and the
+    default mode keeps waiting)."""
+    class NoBackendError(Exception):
+        pass
+
+    def find(**kw):
+        raise NoBackendError("No backend available")
+    fake = _fake_pyusb(monkeypatch, find)
+    fake.core.NoBackendError = NoBackendError
+    be = hu.HardwareUSB(init_stamp=None, auto_flush=False)
+    with caplog.at_level("ERROR"):
+        assert not be.open()
+        assert not be.open()                # the next hot-plug poll
+    assert not be.connected
+    assert [r for r in caplog.records if "libusb" in r.getMessage()].__len__() == 1
+
+
+def test_other_pyusb_errors_are_not_swallowed(monkeypatch):
+    def find(**kw):
+        raise RuntimeError("boom")
+    _fake_pyusb(monkeypatch, find)
+    be = hu.HardwareUSB(init_stamp=None, auto_flush=False)
+    with pytest.raises(RuntimeError):
+        be.open()

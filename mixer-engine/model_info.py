@@ -65,14 +65,31 @@ _KIND_SET_49 = _kinds(10, 11, 12, 13, 16, 17, 18, 19, 20)
 _KIND_SET_69 = _kinds(10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 22)
 
 
-def monitor_param_allowed(param: int, kind: int | None) -> bool:
+# Init writes of the x4 capture that overwrite a user setting with a fixed
+# value (SRConvert on, OutPad A/B off, DimLevel 7): not sent where the mixer
+# kind is unknown, as the unit's own value is the right one
+_X4_FIXED_DEFAULTS = (0x1F, 0x19, 0x1A, 0x43)
+
+
+def monitor_param_is_gated(param: int) -> bool:
+    """Whether some mixer kind refuses monitor param `param`, or the init
+    sets it to an x4 default (for a mixer of unknown kind)."""
+    return (param in (0x36, 0x37, 0x32, 0x3E, 0x41, 0x42, 0x49, 0x69, 0x67,
+                      0x68) + _X4_FIXED_DEFAULTS or 0x2A <= param <= 0x2D
+            or 0x33 <= param <= 0x35 or 0x83 <= param <= 0x8A)
+
+
+def monitor_param_allowed(param: int, kind: int | None,
+                          gate_unknown: bool = False) -> bool:
     """Whether the mixer of `kind` accepts monitor ("other") param `param`.
 
     The driver refuses a gated param with EINVAL; the init sequence skips
     it instead of sending it (x4, kind 14, passes every gate it uses).
+    A kind of None is not gated, as in the driver, unless `gate_unknown`
+    (the USB backend, whose kind is not known): then no gated param passes.
     """
     if kind is None or kind < 0:
-        return True
+        return not (gate_unknown and monitor_param_is_gated(param))
     bit = 1 << kind
     if param in (0x36, 0x37):
         return kind == 3

@@ -2681,6 +2681,12 @@ class HardwareRouter:
         kind = info.get("mixer_kind") if isinstance(info, dict) else None
         return kind if isinstance(kind, int) and kind >= 0 else None
 
+    def gate_unknown_kind(self) -> bool:
+        """True when the backend has no mixer kind to report (USB), so the
+        kind-gated monitor params stay unsent rather than going to a
+        mixer that may refuse or misapply them."""
+        return getattr(self.backend, "gate_unknown_kind", False) is True
+
     def aux_count(self) -> int:
         """AUX buses in the loaded map (x4: 2); 2 without a state tree."""
         if self.state_tree is None:
