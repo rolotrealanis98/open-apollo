@@ -3564,7 +3564,15 @@ int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable)
 	if (bus_idx > 6)
 		return -EINVAL;
 
-	if (on == !(ua->bus_disabled_mask & BIT(bus_idx)))
+	/*
+	 * The kext's cache starts at "all enabled" because its mixer is
+	 * created right after the DSPs boot.  Here a warm probe inherits a
+	 * running mixer DSP whose buses the previous driver or daemon may
+	 * have switched off, so the first request for each bus is always
+	 * sent; only repeats are filtered.
+	 */
+	if ((ua->bus_enable_known & BIT(bus_idx)) &&
+	    on == !(ua->bus_disabled_mask & BIT(bus_idx)))
 		return 0;
 
 	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
@@ -3583,6 +3591,7 @@ int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable)
 	}
 
 	if (!err && sent) {
+		ua->bus_enable_known |= BIT(bus_idx);
 		if (on)
 			ua->bus_disabled_mask &= ~BIT(bus_idx);
 		else

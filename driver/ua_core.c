@@ -2334,8 +2334,10 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 		 * state differs from the cache (which starts all-enabled).
 		 * Note: param_id IS the enable value; value field ignored.
 		 *
-		 * The Mixer Engine asks for bus 1,2,5,6 enable=1 at start;
-		 * on a fresh mixer those change nothing and send nothing.
+		 * The Mixer Engine asks for bus 1,2,5,6 enable=1 at start.
+		 * The first request per bus since probe is always sent (a
+		 * warm probe cannot know what the running DSP holds); later
+		 * ones only when they change the state.
 		 */
 		ret = ua_dsp_set_bus_enable(ua, param.channel_idx,
 					    param.param_id);

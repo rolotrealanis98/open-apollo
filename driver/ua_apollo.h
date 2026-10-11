@@ -1246,6 +1246,7 @@ struct ua_device {
 	u32 mixer_rb_data[UA_MIXER_RB_WORDS];  /* Cached readback (filled by service loop) */
 	u32 mixer_rb_status;                   /* Cached readback status */
 	u32 bus_disabled_mask;                 /* SetBusEnable cache: bit n = bus n off (0 = all on, as the kext starts) */
+	u32 bus_enable_known;                  /* SetBusEnable cache: bit n = bus n sent since probe */
 
 	/*
 	 * Character device.  chardev owns this struct: its release frees it
