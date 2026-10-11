@@ -15,7 +15,9 @@
 #   --io-map FILE    read the channel map from FILE instead of /proc
 #                    (a saved copy of /proc/asound/cardN/io_map)
 #   --card N         use ALSA card N (default: the card driven by ua_apollo)
-#   --no-virtual     do not create the Virtual loopbacks
+#   --virtual        also create Virtual In/Out loopbacks (off by default:
+#                    Virtual channels need the DSP strip engine, not there yet)
+#   --no-virtual     do not create them (the default)
 #   -v, --verbose    with --dry-run, also print the generated config
 #   -h, --help       show this text
 
@@ -28,7 +30,7 @@ MAX_WAIT=10  # seconds to wait for PipeWire
 
 DRY_RUN=0
 VERBOSE=0
-WITH_VIRTUAL=1
+WITH_VIRTUAL=0
 IO_MAP_FILE=""
 CARD=""
 
@@ -53,6 +55,7 @@ while [ $# -gt 0 ]; do
         --dry-run) DRY_RUN=1 ;;
         --io-map)  [ $# -ge 2 ] || die "--io-map needs a file"; IO_MAP_FILE="$2"; shift ;;
         --card)    [ $# -ge 2 ] || die "--card needs a number"; CARD="$2"; shift ;;
+        --virtual) WITH_VIRTUAL=1 ;;
         --no-virtual) WITH_VIRTUAL=0 ;;
         -v|--verbose) VERBOSE=1 ;;
         -h|--help) usage; exit 0 ;;
