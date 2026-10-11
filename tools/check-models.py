@@ -65,6 +65,13 @@ CLOCK_SOURCE_NAMES = ('Internal', 'Word Clock', 'ADAT', 'S/PDIF', 'AES/EBU',
                       'Dante', 'MADI')
 
 
+# Mixer classes that never have the monitor's digital mirror (parity map 16
+# F13): the Twin family, the Conrad family, and the M64 (no outputs).
+NO_MIRROR_CLASSES = frozenset((
+    'Armstrong', 'Stretch', 'Lavern', 'LavernG2', 'Shirley',
+    'Conrad', 'ApolloSolo', 'Cauldron', 'M64'))
+
+
 def expected_hiz(d, route_hiz):
     """HiZ inputs the engine exposes, given the MicLineHiZ route count."""
     if d.get('mixer_class') in HIZ_FIRST_INPUT_ONLY:
@@ -360,6 +367,25 @@ def check_device(d, rep, type_io):
                          f'{d.get("digital_io")!r})')
         if has_adat and 'ADAT' not in cs and rules.get('default_input') == 'adat':
             rep.err(rel, 'default_input adat but no ADAT clock source')
+    # --- digital mirror and output pad (gen-device-map)
+    for key in ('mirror_to_digital', 'output_pad'):
+        if key not in d:
+            rep.err(rel, f'missing field {key!r}')
+    mirror = d.get('mirror_to_digital')
+    if mirror is not None and not isinstance(mirror, bool):
+        rep.err(rel, f'mirror_to_digital {mirror!r}: must be a boolean')
+    elif mirror is True and d.get('mixer_class') in NO_MIRROR_CLASSES:
+        rep.err(rel, f'mirror_to_digital on {d.get("mixer_class")}, which '
+                     f'has no digital mirror (parity map 16 F13)')
+    elif mirror is False and d.get('mixer_class') not in NO_MIRROR_CLASSES:
+        rep.warn(rel, f'mirror_to_digital false on {d.get("mixer_class")}: '
+                      f'the engine offers the mirror on this class')
+    pad = d.get('output_pad')
+    if pad is not None:
+        if (not isinstance(pad, dict) or set(pad) != {'line', 'monitor'}
+                or not all(isinstance(v, bool) for v in pad.values())):
+            rep.err(rel, f'output_pad {pad!r}: must be {{"line": bool, '
+                         f'"monitor": bool}}')
     vmax = rules.get('virtual_max')
     virt = [c & 0xff for c in rec if c >> 8 == gen.TYPE_VIRTUAL]
     if vmax and virt and max(virt) <= vmax:
@@ -617,6 +643,12 @@ def check_reference(devs, ref, rep):
         rep.warn(ref, f'reference data not usable: {e}')
         return False
     where = 'model-data'
+    try:
+        with open(os.path.join(ref, 'templates_summary.json'),
+                  encoding='utf-8') as f:
+            templates = json.load(f)
+    except (OSError, ValueError):
+        templates = None
     idx = {row[0]: row for row in index}
     for d in devs.values():
         rel = d['_rel']
@@ -633,6 +665,15 @@ def check_reference(devs, ref, rep):
             if d.get(k) != v:
                 rep.err(rel, f'{k} = {d.get(k)!r}, {where}/caps.json says '
                              f'{v!r}')
+        tpl = templates.get(d['mixer_class'].lower()) if templates else None
+        pad = d.get('output_pad')
+        if tpl and isinstance(pad, dict):
+            has_pad = any('kPropPad' in o.get('_props', [])
+                          for o in tpl.get('outputs', []))
+            if pad.get('line') != has_pad:
+                rep.err(rel, f'output_pad.line {pad.get("line")}, {where}/'
+                             f'templates_summary.json says the line outputs '
+                             f'{"have" if has_pad else "have no"} a Pad')
         if c['DefaultCueBusCount'][0] != d['cue_buses']['default']:
             rep.err(rel, f'cue default {d["cue_buses"]["default"]}, '
                          f'{where}/caps.json says {c["DefaultCueBusCount"][0]}')

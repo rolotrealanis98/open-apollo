@@ -17,6 +17,8 @@
   "talkback": true,
   "digital_io": "spdif",
   "desktop": true,
+  "mirror_to_digital": true,
+  "output_pad": {"line": true, "monitor": true},
   "cue_buses": {"default": 2, "max": 4},
   "talkback_synch_in": 10,
   "clock_sources": ["Internal", "S/PDIF"],

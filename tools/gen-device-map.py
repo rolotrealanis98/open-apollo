@@ -21,7 +21,9 @@ tool derives a map for any other model:
     `preamps` analog inputs get a preamp, the first `hiz` of them HiZ), the
     TOSLink switches only where the route rules have them, the talkback
     controls only on models with talkback, the clock source list follows the
-    model's digital I/O.
+    model's digital I/O, the monitor's MirrorsToDigital only where the model
+    has "mirror_to_digital", and the output Pad on the line outputs and the
+    monitor only where "output_pad" says so.
 
 A generated map is structure from the x4 plus counts and names from the JSON;
 nothing in it was observed on the model.  It is marked "generated": true and
@@ -61,7 +63,7 @@ DEVICES = os.path.join(ROOT, 'devices')
 MAPS = os.path.join(ROOT, 'mixer-engine', 'device_maps')
 TEMPLATE_NAME = 'device_map_apollo_x4.json'
 # Bump when the generator's output changes without its inputs changing.
-GENERATOR_VERSION = 2
+GENERATOR_VERSION = 3
 
 
 def _load_gen():
@@ -527,6 +529,14 @@ def generate(d, tpl):
     pla_ents = d['routes']['LoMid'].get('playback', [])
     aux_n = sum(1 for e in rec_ents if e.get('io') == 'Aux') // 2
 
+    # devices/<model>.json: "mirror_to_digital" (the monitor's MirrorsToDigital
+    # switch; for a model with a settable TOSLink output it is only live
+    # while the output is S/PDIF, the control itself exists either way) and
+    # "output_pad": {"line": .., "monitor": ..}.  A model without the keys
+    # keeps the x4 behaviour (both present).
+    mirror = d.get('mirror_to_digital', True)
+    out_pad = d.get('output_pad') or {}
+
     in_roles = tpl.roles('/devices/0/inputs')
     out_roles = tpl.roles('/devices/0/outputs')
     ins = plan_inputs(d)
@@ -610,6 +620,16 @@ def generate(d, tpl):
                 else:
                     t = out_roles['line'][min(k, 2)]
                     surround_add = k < 6
+        # Per-model output reference level (Pad) and digital mirror
+        # (parity/16 F22, F13): the x4 rows carry both, so a model without
+        # them has the controls dropped, not inherited.
+        if e['role'] == 'line' and not out_pad.get('line', True):
+            drop.append('/Pad')
+        if e['role'] == 'monitor':
+            if not out_pad.get('monitor', True):
+                drop.append('/Pad')
+            if not mirror:
+                drop.append('/MirrorsToDigital')
         edits = {'/Name': e['name'], '/Stereo': e['stereo'],
                  '/IOType': e['io']}
         act = digital_active(e['role'], e['io'])
