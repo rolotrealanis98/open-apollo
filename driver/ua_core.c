@@ -3367,6 +3367,12 @@ void ua_kext_ring_connect(struct ua_device *ua)
 
 	if (!ua_ring_connect_deferred(ua) || atomic_read(&ua->shutdown))
 		return;
+	if (ua->dsp_inherited) {
+		/* Keep another session's input strips (see dsp_inherited) */
+		dev_info_once(&ua->pdev->dev,
+			      "kext_connect: mixer DSP was running at probe, ring connect skipped so the input strips another session built stay\n");
+		return;
+	}
 
 	ret = ua_dsp_connect_retry(ua);
 	dev_info(&ua->pdev->dev,
@@ -3852,6 +3858,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 	if (!dsp_was_dead) {
 		dev_info(&pdev->dev,
 			 "mixer DSP alive! Skipping DMA reset to preserve state\n");
+		if (!resume)
+			ua->dsp_inherited = true;
 		if (ua_read(ua, UA_REG_FPGA_REV) != ua->fpga_rev) {
 			dev_err(&pdev->dev, "FPGA revision mismatch\n");
 			return -EIO;

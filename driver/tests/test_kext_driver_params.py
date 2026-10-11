@@ -108,3 +108,16 @@ def test_wired_and_linux_ids_kept():
     assert 'ua_kext_param_get(ua, dp.param_id, &dp.value)' in get_
     version = csrc.extract(core, 'static long ua_ioctl_get_version(')
     assert 'UA_FEAT_KEXT_DRIVER_PARAMS' in version
+
+
+def test_inherited_dsp_keeps_its_input_strips():
+    """A mixer DSP found running at probe holds another session's state,
+    Console's input strips among it; the per-DSP ring connect makes the
+    DSPs drop them (titan 2026-10-11: a mic recorded only with it off), so
+    ua_kext_ring_connect() returns before connecting on such a device."""
+    core = csrc.source('ua_core.c')
+    fn = csrc.extract(core, 'void ua_kext_ring_connect(')
+    assert fn.index('ua->dsp_inherited') < fn.index('ua_dsp_connect_retry(')
+    init = csrc.extract(core, 'static int ua_dsp_init_and_load(')
+    alive = init.index('mixer DSP alive!')
+    assert 'ua->dsp_inherited = true' in init[alive:alive + 400]

@@ -1509,6 +1509,13 @@ struct ua_device {
 	bool dsps_connected;
 	bool aceface_done;          /* ACEFACE handshake completed */
 	bool aceface_failed;        /* ACEFACE timed out — don't retry from pcm_prepare */
+	/*
+	 * Probe found the mixer DSP running: its state (Console input strips
+	 * among it) came from an earlier session, possibly Windows or macOS.
+	 * The per-DSP ring connect is not sent then: it makes the DSPs drop
+	 * those strips, and Linux cannot build them again (titan 2026-10-11).
+	 */
+	bool dsp_inherited;
 	bool pcie_setup_done;       /* PCIe ASPM/timeout configured */
 	bool plugins_activated;     /* Plugin chain sent to DSP */
 	bool skip_bus_coeff;        /* Skip BUS_COEFF in plugin chain */
