@@ -888,8 +888,16 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_KIND_GATES | UA_FEAT_MIXER_STATE |
 			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
-			    UA_FEAT_UNIT_GROUP | UA_FEAT_BUS_SOLO_FLAG,
+			    UA_FEAT_UNIT_GROUP,
 	};
+
+	/*
+	 * The solo-mute flag only mutes when bus_solo_sign is on; a client
+	 * that relied on it with the knob off would leave soloed-out inputs
+	 * audible, so the bit is offered only while the driver honours it.
+	 */
+	if (ua_dsp_solo_flag_honoured())
+		v.features |= UA_FEAT_BUS_SOLO_FLAG;
 
 	strscpy(v.driver_name, DRIVER_VERSION, sizeof(v.driver_name));
 	if (copy_to_user((void __user *)arg, &v, sizeof(v)))

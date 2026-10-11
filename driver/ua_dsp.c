@@ -3499,6 +3499,12 @@ module_param(bus_solo_sign, bool, 0644);
 MODULE_PARM_DESC(bus_solo_sign,
 		 "Bus coefficient writes that carry UA_DSP_BUSP_SOLO_MUTE are sent as the macOS Mixer Engine sends a solo-muted weight: negative, an exact zero replaced by -1.0e-9 (default: off, values are sent as given)");
 
+/* Does the driver honour UA_DSP_BUSP_SOLO_MUTE (GET_VERSION feature bit)? */
+bool ua_dsp_solo_flag_honoured(void)
+{
+	return READ_ONCE(bus_solo_sign);
+}
+
 #define UA_BUS_SOLO_ZERO_BITS	0xb089705fu	/* -1.0e-9f (ME 0x100062268) */
 
 static u32 ua_bus_solo_mute_value(u32 value)
