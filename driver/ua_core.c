@@ -2800,28 +2800,14 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 					 plugin_ret);
 
 			/*
-			 * Upload DSP audio programs ("Bill" blocks) — EB,
-			 * A5, C2, DB, 12B.  The plugin-chain MODULE_ACTIVATE
-			 * commands reference these by module ID, but
-			 * without the program binaries in DSP SRAM the
-			 * activated modules are stubs with no relay
-			 * forwarding logic.  This is the current primary
-			 * suspect for PAD/48V/MicLine failing to toggle
-			 * (see plans/reports/hardware-re-260424-1258-
-			 * arm-relay-mechanism-hunt.md).
-			 *
-			 * Soft-fail: logs a warning but proceeds so we
-			 * can still observe DSP-internal controls working
-			 * if program upload goes wrong.
+			 * No DSP program upload here any more.  The old
+			 * ua_dsp_load_programs() step (command 0x00360000 on
+			 * DSP 0) has no counterpart in the kext, never got a
+			 * response on the x4 (sendBlock timed out after 300
+			 * ms, "DSP program load failed: -110" on every cold
+			 * start, titan 2026-10-10), and the cold start works
+			 * the same without it.
 			 */
-			{
-				int prog_ret = ua_dsp_load_programs(ua);
-
-				if (prog_ret)
-					dev_warn(&pdev->dev,
-						 "DSP program load failed: %d\n",
-						 prog_ret);
-			}
 
 			if (ua_uses_audio_extension(ua->device_type)) {
 				/*
