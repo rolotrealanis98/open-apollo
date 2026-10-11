@@ -650,7 +650,14 @@ struct ua_mixer_bus_params {
  *   UA_EVT_LAYOUT_CHANGED 0x1002  an io_map layout was committed; arg =
  *                                 (play_hw_channels << 16) | rec_hw_channels
  *   UA_EVT_EVENTS_LOST    0x1003  see above
- *   (0x1004 belongs to the clock lock event)
+ *   UA_EVT_CLOCK_LOCK     0x1004  the clock lock changed; arg = 1 locked,
+ *                                 0 not locked.  Locked is the kext's
+ *                                 definition, (BAR0 0xC07C & 3) == 1 (the
+ *                                 Mixer Engine's GetLockedState), polled
+ *                                 with the DSP service loop.  Not posted for
+ *                                 the first reading after a connect, only
+ *                                 for changes; the ALSA boolean "Clock
+ *                                 Locked" carries the same state.
  *   UA_EVT_PAUSED         0x1005  audio on this unit must stop (the kext's
  *                                 0x264); arg = the UA_PAUSE_* bit that was
  *                                 set: UA_PAUSE_RATE around a rate/clock
@@ -683,7 +690,7 @@ struct ua_event {
 #define UA_EVT_CONNECTED	0x1001
 #define UA_EVT_LAYOUT_CHANGED	0x1002
 #define UA_EVT_EVENTS_LOST	0x1003
-/* 0x1004: UA_EVT_CLOCK_LOCK (clock agent) */
+#define UA_EVT_CLOCK_LOCK	0x1004
 #define UA_EVT_PAUSED		0x1005
 #define UA_EVT_RESUMED		0x1006
 
