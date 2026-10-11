@@ -150,7 +150,7 @@ result() {   # result PASS|FAIL|WARN|INFO name detail
 
 if dmesg >/dev/null 2>&1; then DMESG=(dmesg); else DMESG=(sudo dmesg); fi
 echo "sudo is used for the module parameter writes (and dmesg if restricted)."
-sudo -v || die "sudo needed for $PARAMS writes"
+sudo -n true 2>/dev/null || sudo -v || die "sudo needed for $PARAMS writes"
 FWV2="$(awk '$1 == "fw_v2" { print $2 }' "$PROC")"
 TIMER_SEV=""   # cfg_check: INFO for the deliberately wrong adj values
 
