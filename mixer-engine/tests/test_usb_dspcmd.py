@@ -253,3 +253,21 @@ def test_eeprom_write_is_decodable_but_not_built():
     assert dc.OPCODES[dc.OP_EEPROM_WRITE][0] == "EEPROM_WRITE"
     builders = [n for n in dir(dc) if "eeprom" in n.lower() and callable(getattr(dc, n))]
     assert builders == []
+
+
+def test_parts_split_the_stream_for_the_u38_bisection(template, stream):
+    cap = stream.commands
+    tear = si.build_transactions(template, parts={"teardown"})
+    tear = [c for tx in tear for c in tx]
+    assert tear == cap[:35]                 # capture frames 0-9
+    assert all(c.op in (dc.OP_SYNCH, dc.OP_INPUT_PARAM, dc.OP_RELEASE)
+               for c in tear)
+    code = [c for tx in si.build_transactions(template, parts={"code"})
+            for c in tx]
+    assert code == [c for c in cap if c.op == dc.OP_LOAD_CODE]
+    no_enable = [c for tx in si.build_transactions(
+        template, parts={"teardown", "code", "strips"}) for c in tx]
+    assert no_enable == cap[:-30]           # all but the last frame's enables
+    plan = si.build_init(template, rate_ack=False, parts={"teardown", "code"})
+    assert not plan.capture_framing
+    assert plan.commands() == tear + code

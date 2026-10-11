@@ -303,25 +303,37 @@ def _synch(channels, instance: int) -> dc.Command:
     return dc.synch(in1, in2, instance, 0)
 
 
+# Phases of the bring-up, for build_transactions(parts=...): the U38
+# bisection (does capture need the code, the strips, the enables?)
+PARTS = ("teardown", "code", "strips", "enable")
+
+
 def build_transactions(template: Template, rate: int = 48000,
                        memory_map: MemoryMap = SOLO_USB_MEMORY_MAP,
                        strips=SOLO_STRIPS, teardown=SOLO_TEARDOWN,
-                       enable_order=SOLO_ENABLE_ORDER) -> list:
+                       enable_order=SOLO_ENABLE_ORDER, parts=None) -> list:
     """The bring-up as a list of transactions (lists of commands).
 
     A transaction is what the UA driver hands down in one go: one strip
     stop, one release, one code load, one instance's zero-fills, its
-    memspec, its parameter writes, the final SYNCH enables.
+    memspec, its parameter writes, the final SYNCH enables.  parts: the
+    PARTS to keep (default all); addresses stay those of the full init.
     """
+    return [tx for part, tx in _phased(template, rate, memory_map, strips,
+                                       teardown, enable_order)
+            if parts is None or part in parts]
+
+
+def _phased(template, rate, memory_map, strips, teardown, enable_order):
     txs: list = []
     for what, args in teardown:
         if what == "stop":
             cmds = [_synch(args, 0)]
             for ch in args:
                 cmds += _ip_triplet(ch)
-            txs.append(cmds)
+            txs.append(("teardown", cmds))
         elif what == "release":
-            txs.append([dc.release(m) for m in args])
+            txs.append(("teardown", [dc.release(m) for m in args]))
         else:
             raise ValueError(f"teardown step {what!r}")
 
@@ -337,22 +349,22 @@ def build_transactions(template: Template, rate: int = 48000,
             dest = pools.code(code_dwords(blob))
             resident[m] = dest
             # Bill header as transmitted: arch byte 0, word 2 = 0 (USB)
-            txs.append([dc.load_code(dest, blob)])
+            txs.append(("code", [dc.load_code(dest, blob)]))
         inst = Instance(kind, tuple(channels))
         for p in kind.privates:
             inst.addrs.append(pools.data(p.pool, p.dwords))
-        txs.append([dc.zero_fill(a, p.dwords)
-                    for a, p in zip(inst.addrs, kind.privates)])
+        txs.append(("strips", [dc.zero_fill(a, p.dwords)
+                               for a, p in zip(inst.addrs, kind.privates)]))
         if len(kind.privates) >= 2:
             pairs = [(inst.addrs[p.parent] + p.offset, a)
                      for a, p in zip(inst.addrs[1:], kind.privates[1:])]
-            txs.append([dc.memspec(pairs)])
+            txs.append(("strips", [dc.memspec(pairs)]))
         header = list(HEADER_WORDS)
         header[2], header[3], header[6] = kind.in_ch, kind.out_ch, kind.plugin_id
         writes = [dc.write_block(inst.header, header)]
         for idx, off, words in _param_blocks(template, kind, rate):
             writes.append(dc.write_block(inst.addrs[idx] + off, words))
-        txs.append(writes)
+        txs.append(("strips", writes))
         instances.append(inst)
 
     by_first = {inst.channels[0]: inst for inst in instances}
@@ -362,7 +374,7 @@ def build_transactions(template: Template, rate: int = 48000,
         enable.append(_synch(inst.channels, inst.header))
         for c in inst.channels:
             enable += _ip_triplet(c)
-    txs.append(enable)
+    txs.append(("enable", enable))
     return txs
 
 
@@ -403,7 +415,7 @@ class InitPlan:
 def build_init(template: Template, rate: int = 48000, rate_ack: bool = True,
                connect_date: int | None = None, query_tag: int = 0,
                memory_map: MemoryMap = SOLO_USB_MEMORY_MAP,
-               capture_framing: bool = True) -> InitPlan:
+               capture_framing: bool = True, parts=None) -> InitPlan:
     """The frames usb-full-init.py sends.
 
     preamble: the Windows bring-up's connect ({0x230002, 1}, the date word
@@ -415,7 +427,7 @@ def build_init(template: Template, rate: int = 48000, rate_ack: bool = True,
     keeps the capture's first sequence number (255); the preamble takes
     the numbers before it.
     """
-    txs = build_transactions(template, rate, memory_map)
+    txs = build_transactions(template, rate, memory_map, parts=parts)
     words = dc.encode_commands(c for tx in txs for c in tx)
     pre: list = []
     if connect_date is not None:

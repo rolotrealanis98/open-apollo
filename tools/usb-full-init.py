@@ -26,6 +26,7 @@ Untested on hardware: the generator, the boot-word poll and the ack waits
 are checked against captures only.
 
 Usage: sudo python3 tools/usb-full-init.py [--rate 48000] [--replay]
+       sudo python3 tools/usb-full-init.py --part teardown,code   # U38 bisection
        python3 tools/usb-full-init.py --dry-run [--write-bin out.bin]
 
 After running, reload snd-usb-audio:
@@ -168,13 +169,25 @@ def _send_old_paced(dev, usb, i, pkt_data, sleep, pause=True):
 
 
 def build_plan(rate=48000, rate_ack=True, connect=False, bin_path=None,
-               now=time.time):
+               now=time.time, parts=None):
     """The generated init (uausb.soloinit.InitPlan) for the Solo USB."""
     template = soloinit.Template.from_file(bin_path or INIT_BIN)
     date = dspcmd.connect_date_word(now()) if connect else None
     tag = int(now() * 1000) & 0xFFFFFFFF
     return soloinit.build_init(template, rate=rate, rate_ack=rate_ack,
-                               connect_date=date, query_tag=tag)
+                               connect_date=date, query_tag=tag, parts=parts)
+
+
+def parse_parts(text):
+    """--part teardown,code,... -> a set of soloinit.PARTS (None = all)."""
+    if not text or text == "all":
+        return None
+    parts = {p.strip() for p in text.split(",") if p.strip()}
+    bad = parts - set(soloinit.PARTS)
+    if bad:
+        raise SystemExit(f"--part: unknown {', '.join(sorted(bad))} "
+                         f"(choose from {', '.join(soloinit.PARTS)})")
+    return parts
 
 
 def _completed_loads(plan):
@@ -314,7 +327,8 @@ def want_rate_ack(args):
 
 
 def dry_run(args):
-    plan = build_plan(args.rate, want_rate_ack(args), args.connect)
+    plan = build_plan(args.rate, want_rate_ack(args), args.connect,
+                      parts=parse_parts(args.part))
     print(f"{len(plan.frames)} frames ({plan.preamble} preamble), "
           f"{len(plan.commands())} commands, rate {plan.rate}, "
           f"capture framing {'yes' if plan.capture_framing else 'no'}")
@@ -355,6 +369,10 @@ def main(argv=None, usb=None, sleep=time.sleep):
     ap.add_argument("--generate", action="store_true",
                     help="build the stream on a Twin USB / Twin X USB too "
                          "(the Solo USB's strip plan; see issue #69)")
+    ap.add_argument("--part", metavar="LIST", default="all",
+                    help="send only these phases of the generated init, "
+                         "comma-separated: teardown, code, strips, enable "
+                         "(the U38 bisection; default all)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the generated commands, touch no device")
     ap.add_argument("--write-bin", metavar="PATH",
@@ -428,7 +446,8 @@ def main(argv=None, usb=None, sleep=time.sleep):
         replay_init_sequence(dev, INIT_BIN, usb, sleep)
         rate = 48000
     else:
-        plan = build_plan(rate, want_rate_ack(args), args.connect)
+        plan = build_plan(rate, want_rate_ack(args), args.connect,
+                          parts=parse_parts(args.part))
         print(f"Generated init: {len(plan.frames)} frames, "
               f"{len(plan.commands())} commands, rate {rate}"
               + ("" if rate == 48000 else

@@ -223,3 +223,18 @@ def test_usb_mixer_test_tool_uses_the_mailbox(monkeypatch):
     assert any(w[0] == 0x00FF0014 and w[2] == 0x00FF0014 for w in g)
     mute = [w for a, w in dev.writes if a == 0x062D][-2]
     assert mute[5] == 0x00030001             # setting 2 word B: mute bit 16
+
+
+def test_part_option_sends_a_phase_subset(full_init):
+    from uausb import dspcmd
+    dev = FakeApollo()
+    dev.auto_ack = True
+    rc, _usb, _s = run(full_init, dev, ["--part", "teardown,code"])
+    assert rc == 0
+    sent = dspcmd.decode_commands(dspcmd.deframe(
+        [dspcmd.Frame.from_bytes(b) for b in dev.bulk_out]))
+    assert len(sent) == 40
+    assert [c.op for c in sent].count(dspcmd.OP_LOAD_CODE) == 5
+    assert dev.bulk_in == []                # every load acked and read
+    with pytest.raises(SystemExit):
+        full_init.main(["--part", "bogus", "--dry-run"])
