@@ -1919,6 +1919,8 @@ bool ua_dsp_solo_flag_honoured(void);
 void ua_dsp_irq_arm(struct ua_device *ua);		/* ua->lock */
 int ua_dsp_start_transport_notify(struct ua_device *ua);	/* ua->lock */
 int ua_dsp_disconnect_notify(struct ua_device *ua);	/* ua->lock */
+u32 ua_dsp_alloc_load(const struct ua_device *ua, u32 rate);
+u32 ua_dsp_measured_load(struct ua_device *ua, unsigned int dsp);
 struct snd_card;
 int ua_dsp_proc_init(struct ua_device *ua, struct snd_card *card);
 void ua_dsp_flush_bus_params(struct ua_device *ua);

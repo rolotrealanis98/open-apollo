@@ -960,7 +960,7 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
 			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT |
 			    UA_FEAT_PLUGIN_CAPS | UA_FEAT_FW_RELEASE |
-			    UA_FEAT_KEXT_DRIVER_PARAMS,
+			    UA_FEAT_KEXT_DRIVER_PARAMS | UA_FEAT_DSP_LOAD,
 	};
 
 	/*
@@ -1137,6 +1137,13 @@ static long ua_ioctl_get_dsp_info(struct ua_device *ua, unsigned long arg)
 
 	info.bank_base = ua_dsp_base(info.index);
 	info.status = ua_read(ua, info.bank_base) ? 1 : 0;
+	/* UA_FEAT_DSP_LOAD: no plugin allocations, so pools stay unused */
+	info.alloc_load = ua_dsp_alloc_load(ua,
+					    READ_ONCE(ua->audio.sample_rate));
+	info.measured_load = ua_dsp_measured_load(ua, info.index);
+	info.pgm_load = 0;
+	info.mem_load = 0;
+	info.flags = UA_DSP_INFO_F_LOADS;
 
 	if (copy_to_user((void __user *)arg, &info, sizeof(info)))
 		return -EFAULT;
