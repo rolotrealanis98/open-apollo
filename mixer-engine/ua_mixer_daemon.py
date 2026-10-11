@@ -71,6 +71,11 @@ except ImportError:
     HAS_WEBSOCKETS = False
     WsServer = None
 
+try:    # USB Apollos (needs ../tools/uausb; pyusb only when a device opens)
+    import hardware_usb
+except ImportError:
+    hardware_usb = None
+
 log = logging.getLogger("ua-mixer-daemon")
 
 # Runtime-only state properties that the real mixer engine provides
@@ -2693,6 +2698,8 @@ def find_descriptor(device_type: int,
     not retype it, and the serial types 0x1E (2016, the Arrow), 0x2A (2032)
     and 0x3E (2110, the Solo) the driver leaves unnamed.
     """
+    if hardware_usb and hardware_usb.is_usb_device_type(device_type):
+        return hardware_usb.descriptor_for_device_type(device_type)
     if not DEVICES_DIR.is_dir():
         return None, None
     found = _find_descriptor_by(device_type, ("device_types", "device_type"))
@@ -2954,6 +2961,22 @@ def seed_state_file(path: Path, legacy: Path) -> bool:
     return True
 
 
+def make_backend(args):
+    """HardwareUSB for a USB Apollo (--usb, or no /dev/ua_apollo* and one on
+    the bus: hardware_usb.select_backend), else HardwareBackend."""
+    if hardware_usb and hardware_usb.select_backend(
+            args.device, getattr(args, "usb", False)) == "usb":
+        log.info("Hardware: USB backend (%s)", "--usb" if args.usb else
+                 "a USB Apollo is plugged in and no /dev/ua_apollo* exists")
+        return hardware_usb.HardwareUSB(
+            safe_mode=args.safe_mode,
+            knob_writeback=getattr(args, "usb_knob_writeback", False),
+            dsp_params=getattr(args, "usb_dsp_params", False))
+    if getattr(args, "usb", False):
+        log.error("--usb: USB backend unavailable (tools/uausb missing)")
+    return HardwareBackend(args.device, safe_mode=args.safe_mode)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="UA Mixer Engine daemon for Linux",
@@ -3017,6 +3040,16 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                         help="offer /auto_gain on any model with preamps "
                              "(default: only where the device map has "
                              "SupportsAutogain, the Gen 2 models)")
+    parser.add_argument("--usb", action="store_true",
+                        help="drive a USB Apollo (Solo/Twin/Twin X USB) through "
+                             "its vendor interface; chosen by itself when no "
+                             "/dev/ua_apollo* exists and one is plugged in")
+    parser.add_argument("--usb-knob-writeback", action="store_true",
+                        help="USB: write a front-panel monitor change back "
+                             "into the monitor setting (issue #59; unverified)")
+    parser.add_argument("--usb-dsp-params", action="store_true",
+                        help="USB: send fader/pan/send and DSP input params "
+                             "as DSP commands on the bulk pipe (unverified)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Debug logging")
     parser.add_argument("--trace", "-t", action="store_true",
@@ -3037,7 +3070,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     public_type = None
     info = None
     if not args.no_hardware:
-        backend = HardwareBackend(args.device, safe_mode=args.safe_mode)
+        backend = make_backend(args)
         if backend.open():
             info = read_device_info(backend)
             if info:

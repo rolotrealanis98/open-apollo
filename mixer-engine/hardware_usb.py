@@ -1,381 +1,656 @@
+"""USB backend for the Apollo Solo USB, Twin USB and Twin X USB (N33/U39, J2).
+
+The daemon talks to a Thunderbolt Apollo through /dev/ua_apollo0 ioctls
+(hardware.HardwareBackend).  A USB Apollo has no kernel driver for its
+vendor interface (interface 0), so this backend does in user space what
+the PCIe driver does in the kernel, with the same method names, so the
+HardwareRouter and the daemon run unchanged on it:
+
+  set_mixer_param()   the PCIe driver's SetMixerParam mapping
+                      (tools/uausb/mixer.py) into the 38-setting one-shot
+                      mailbox, flushed with the SEQ_WR/SEQ_RD handshake over
+                      vendor requests 0x03/0x04 (settings at 0x062D...)
+  get_hw_readback()   the 40-word readback, request 0x10 (or 0x0604/0x0605
+                      on an old protocol word), check words verified; the
+                      daemon's readback decode and ReadbackMeter take it
+                      as they take the PCIe one (J2)
+  get_device_info()   identity from the vendor requests, with a device_type
+                      outside the PCIe range (USB_DEVICE_TYPE_BASE | PID)
+                      that find_descriptor() resolves to devices/<model>.json
+
+Off by default, opt-in with a constructor flag (daemon options):
+  dsp_params      send mixer bus coefficients and DSP input params as DSP
+                  commands ({0x1D0004...}, {0x1E0004...}) on the bulk pipe,
+                  the way the UA driver's command layer would.  The USB
+                  captures contain no such command: unverified.
+  knob_writeback  when the readback shows the front panel moved the
+                  monitor level/mute/mono/dim without a host write, write
+                  that value back into setting 2 (issue #59).  No capture
+                  shows what the UA driver does on a knob turn: unverified.
+
+The daemon picks this backend with --usb, or by itself when no
+/dev/ua_apollo* node exists and a USB Apollo (VID 0x2B5A, PID 0x000D,
+0x0002 or 0x000F) is on the bus (select_backend()).  It starts talking to
+the device only after the udev DSP init has finished
+(/run/ua-usb-dsp-init.done), and it does not claim interface 0 for its
+vendor requests (usbfs needs no claim for a vendor-type control
+transfer), so tools/usb-full-init.py keeps the interface to itself.  The
+user running the daemon needs access to the USB device node (root, or a
+uaccess udev rule for 2b5a:000d/0002/000f).
+
+UNTESTED ON HARDWARE: every path runs against a fake device in
+mixer-engine/tests/test_hardware_usb.py; the settings writes are checked
+byte for byte against a Windows capture of a Solo USB.
 """
-USB hardware backend for Apollo Solo/Twin/Twin X USB devices.
 
-Provides the same interface as HardwareBackend (hardware.py) but
-communicates via USB bulk endpoints instead of ioctl. Uses the
-0xDC/0xDD command/response protocol over EP1 IN/OUT.
+from __future__ import annotations
 
-Protocol:
-  Command (OUT):  [word_count:u16LE][type:u8][0xDC][payload]
-  Response (IN):  [word_count:u16LE][type:u8][0xDD][payload]
-  Sub-commands:   [opcode:u16LE][param:u16LE][value:u32LE]
-"""
-
+import glob
+import json
 import logging
+import os
 import struct
+import sys
+import threading
 import time
-import usb.core
-import usb.util
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+_TOOLS = Path(__file__).resolve().parent.parent / "tools"
+if _TOOLS.is_dir() and str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+
+from uausb import device as udev  # noqa: E402
+from uausb import dspcmd  # noqa: E402
+from uausb import mixer as umix  # noqa: E402
+
+DEVICES_DIR = Path(__file__).resolve().parent.parent / "devices"
+
 UA_VID = 0x2B5A
-LIVE_PIDS = {
-    0x000D: "Apollo Solo USB",
-    0x0002: "Twin USB",
-    0x000F: "Twin X USB",
+# live PID -> (model name, devices/<slug>.json or None)
+USB_MODELS = {
+    0x000D: ("Apollo Solo USB", "apollo-solo-usb"),
+    0x0002: ("Apollo Twin USB", None),          # no descriptor exists yet
+    0x000F: ("Apollo Twin X USB", "apollo-twin-x-usb"),
 }
+LIVE_PIDS = {pid: name for pid, (name, _slug) in USB_MODELS.items()}
+
+# device_type the daemon sees for a USB Apollo: above every PCIe type
+USB_DEVICE_TYPE_BASE = 0x10000
+
+INIT_STAMP = "/run/ua-usb-dsp-init.done"
+# Open anyway when the device has been on the bus this long without the
+# stamp (no udev init installed, or it failed and the user ran it by hand)
+INIT_STAMP_GRACE = 60.0
 
 EP_BULK_OUT = 0x01
 EP_BULK_IN = 0x81
-EP_INTR_IN = 0x86
+INTERFACE = 0
 
-MAGIC_CMD = 0xDC
-MAGIC_RSP = 0xDD
+FLUSH_INTERVAL = 0.01           # retry a busy flush every 10 ms
+FLUSH_GIVE_UP = 3.0             # ... for this long, then wait for the next trigger
 
-# DSP register params (from USB capture analysis)
-REG_INIT = 0x0023       # Write 1 to activate FPGA
-REG_CONFIG_A = 0x0010   # Config word A
-REG_CONFIG_B = 0x0011   # Config word B
-REG_STATUS = 0x0027     # Status query (opcode 0x01)
 
-# Opcodes
-OP_QUERY = 0x0001
-OP_READWRITE = 0x0002
+def usb_device_type(pid: int) -> int:
+    return USB_DEVICE_TYPE_BASE | (pid & 0xFFFF)
 
-# Vendor control requests (mixer settings, from USBPcap RE)
-VREQ_SETTINGS_WRITE = 0x03   # Write mixer settings block
-VREQ_COMMIT_A = 0x0C         # Commit/trigger (pre-write)
-VREQ_COMMIT_B = 0x0D         # Commit/trigger (post-write)
 
-# Settings FPGA addresses (wValue in vendor request 0x03)
-SETTINGS_SEQ = 0x0602        # 4 bytes: sequence counter (u32 LE)
-SETTINGS_MASK = 0x062D       # 128 bytes: settings mask+value buffer
-SETTINGS_VALUES = 0x064F     # 128 bytes: gain value buffer
-SETTINGS_EXT = 0x0670        # 48 bytes: extended settings
+def is_usb_device_type(device_type) -> bool:
+    return isinstance(device_type, int) and \
+        (device_type & ~0xFFFF) == USB_DEVICE_TYPE_BASE
 
-# Settings layout in the 128-byte buffer at 0x062d/0x064f:
-#   Each setting is 8 bytes (2 × u32 LE words: wordA + wordB).
-#   128 / 8 = 16 settings max.
-#
-#   Word format: (changed_mask[15:0] << 16) | value[15:0]
-#   If mask is 0, the DSP ignores that setting.
-#
-#   Setting map (from mixer-knobs.pcap analysis):
-#     set[0] (+0):  Preamp ch0 — gain in wordA, flags (48V=bit3, MicLine=bit0)
-#     set[1] (+8):  Preamp ch1 — same layout as set[0]
-#     set[2] (+16): Monitor — level in wordA (raw=192+dB*2), mute/mono in wordB
-#     set[3] (+24): Gain C — tracks with gain (val_c + 0x41 base offset)
-SETTING_PREAMP_CH0 = 0       # offset +0
-SETTING_PREAMP_CH1 = 1       # offset +8
-SETTING_MONITOR = 2          # offset +16
-SETTING_GAIN_C = 3           # offset +24
+
+def descriptor_for_device_type(device_type) -> tuple:
+    """(slug, model) of a USB device_type, as find_descriptor() returns."""
+    if not is_usb_device_type(device_type):
+        return None, None
+    name, slug = USB_MODELS.get(device_type & 0xFFFF, (None, None))
+    if slug and not (DEVICES_DIR / f"{slug}.json").exists():
+        slug = None
+    return slug, name
+
+
+def find_usb_apollos(sysfs: str = "/sys/bus/usb/devices") -> list:
+    """[(pid, busnum, devnum, sysfs path)] of live USB Apollos (no pyusb)."""
+    found = []
+    for d in sorted(glob.glob(os.path.join(sysfs, "*"))):
+        try:
+            with open(os.path.join(d, "idVendor")) as f:
+                if int(f.read().strip(), 16) != UA_VID:
+                    continue
+            with open(os.path.join(d, "idProduct")) as f:
+                pid = int(f.read().strip(), 16)
+            busnum = devnum = None
+            with open(os.path.join(d, "busnum")) as f:
+                busnum = int(f.read().strip())
+            with open(os.path.join(d, "devnum")) as f:
+                devnum = int(f.read().strip())
+        except (OSError, ValueError):
+            continue
+        if pid in USB_MODELS:
+            found.append((pid, busnum, devnum, d))
+    return found
+
+
+def select_backend(device: str | None, force_usb: bool = False,
+                   pcie_nodes=None, usb_apollos=None) -> str:
+    """'usb' or 'pcie': --usb, or no /dev/ua_apollo* node and a USB Apollo
+    on the bus (an explicit --device always means PCIe)."""
+    if force_usb:
+        return "usb"
+    if device:
+        return "pcie"
+    nodes = glob.glob("/dev/ua_apollo*") if pcie_nodes is None else pcie_nodes
+    if nodes:
+        return "pcie"
+    apollos = find_usb_apollos() if usb_apollos is None else usb_apollos
+    return "usb" if apollos else "pcie"
+
+
+def load_model(slug: str | None) -> dict:
+    if not slug:
+        return {}
+    try:
+        desc = json.loads((DEVICES_DIR / f"{slug}.json").read_text())
+        return desc if isinstance(desc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+class PyUsbOpener:
+    """Finds and opens a live USB Apollo with pyusb.  Returns an object with
+    ctrl_transfer/read/write (the pyusb device) plus claim()/release().
+
+    Interface 0 is not claimed for the vendor control requests: usbfs lets
+    a vendor-type request through without a claim (check_ctrlrecip), so the
+    daemon never holds the interface tools/usb-full-init.py needs.  Only
+    the bulk pipe (--usb-dsp-params) claims it, on first use."""
+
+    def __call__(self, pids):
+        try:
+            import usb.core
+            import usb.util
+        except ImportError:
+            log.error("USB backend needs pyusb (pip install pyusb)")
+            return None
+        for pid in pids:
+            dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
+            if dev is not None:
+                return _PyUsbHandle(dev, pid, usb)
+        return None
+
+
+class _PyUsbHandle:
+    def __init__(self, dev, pid, usb):
+        self.dev = dev
+        self.pid = pid
+        self._usb = usb
+        self.claimed = False
+        self.bus = getattr(dev, "bus", None)
+        self.address = getattr(dev, "address", None)
+
+    def ctrl_transfer(self, *a, **kw):
+        return self.dev.ctrl_transfer(*a, **kw)
+
+    def claim(self):
+        if self.claimed:
+            return
+        try:
+            if self.dev.is_kernel_driver_active(INTERFACE):
+                self.dev.detach_kernel_driver(INTERFACE)
+        except (self._usb.core.USBError, NotImplementedError):
+            pass
+        self._usb.util.claim_interface(self.dev, INTERFACE)
+        self.claimed = True
+
+    def write(self, *a, **kw):
+        return self.dev.write(*a, **kw)
+
+    def read(self, *a, **kw):
+        return self.dev.read(*a, **kw)
+
+    def release(self):
+        if self.claimed:
+            try:
+                self._usb.util.release_interface(self.dev, INTERFACE)
+            except Exception:  # noqa: BLE001 - device may be gone
+                pass
+            self.claimed = False
+        try:
+            self._usb.util.dispose_resources(self.dev)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class HardwareUSB:
-    """USB bulk endpoint backend for Apollo USB devices.
+    """The daemon's hardware backend for a USB Apollo (see module doc)."""
 
-    Drop-in replacement for HardwareBackend when device is USB.
-    """
-
-    def __init__(self):
-        self.dev = None
+    def __init__(self, device: str | None = None, safe_mode: bool = False,
+                 opener=None, auto_flush: bool = True,
+                 knob_writeback: bool = False, dsp_params: bool = False,
+                 init_stamp: str | None = INIT_STAMP,
+                 stamp_grace: float = INIT_STAMP_GRACE,
+                 clock=time.monotonic, sleep=time.sleep):
+        self.device_path = None
+        self.safe_mode = safe_mode
         self.connected = False
-        self.device_name = ""
-        self._claimed = False
-        self._seq = 0  # Mixer settings sequence counter
+        self.lost = False
+        self.paused = False
+        self.last_errno = 0
+        self.pid = None
+        self.model_name = ""
+        self.slug = None
+        self.model = {}
+        self.num_preamps = 2
+        self.num_hiz = 1
+        self.protocol = None
+        self.versions = {}
+        self.knob_writeback = knob_writeback
+        self.dsp_params = dsp_params
+        self.init_stamp = init_stamp
+        self.stamp_grace = stamp_grace
+        self._opener = opener or PyUsbOpener()
+        self._handle = None
+        self._regs = None
+        self._mailbox = umix.SettingsMailbox()
+        self._lock = threading.RLock()
+        self._auto_flush = auto_flush
+        self._flusher = None
+        self._clock = clock
+        self._sleep = sleep
+        self._first_seen = None
+        self._bulk_seq = 0
+        self._rb_last = None
+        self._host_write_t = 0.0
+        self._knob_seen = {}
+        self._warned = set()
 
-    def open(self) -> bool:
-        """Find and open the Apollo USB device."""
-        for pid, name in LIVE_PIDS.items():
-            self.dev = usb.core.find(idVendor=UA_VID, idProduct=pid)
-            if self.dev:
-                self.device_name = name
-                break
+    # ── open / close / hot-plug ───────────────────────────────────────
 
-        if not self.dev:
-            log.warning("No UA USB device found")
-            return False
+    def _init_done(self) -> bool:
+        """The udev DSP init has finished, there is none to wait for, or the
+        device has been present for stamp_grace seconds without it."""
+        if not self.init_stamp or os.path.exists(self.init_stamp):
+            return True
+        now = self._clock()
+        if self._first_seen is None:
+            self._first_seen = now
+        if now - self._first_seen >= self.stamp_grace:
+            self._warn_once("stamp", "%s not present after %.0f s: opening the "
+                            "USB Apollo anyway (udev DSP init missing?)",
+                            self.init_stamp, self.stamp_grace)
+            return True
+        return False
 
-        # Detach kernel driver from DSP interface
+    def open(self, device_path: str | None = None) -> bool:
+        with self._lock:
+            # Finding the device sends nothing to it (no claim, no request)
+            handle = self._opener(list(USB_MODELS))
+            if handle is None:
+                self._first_seen = None     # grace counts while it is present
+                return False
+            if not self._init_done():
+                log.info("USB Apollo: waiting for the DSP init (%s)",
+                         self.init_stamp)
+                try:
+                    handle.release()
+                except Exception:  # noqa: BLE001
+                    pass
+                return False
+            return self._attach(handle)
+
+    def _attach(self, handle) -> bool:
+        self._handle = handle
+        self._regs = udev.UsbRegs(handle)
+        self.pid = getattr(handle, "pid", None)
+        self.model_name, self.slug = USB_MODELS.get(self.pid, ("USB Apollo", None))
+        self.model = load_model(self.slug)
+        self.num_preamps = int(self.model.get("preamps", 2) or 2)
+        self.num_hiz = int(self.model.get("hiz", 1) or 0)
+        bus, addr = getattr(handle, "bus", None), getattr(handle, "address", None)
+        self.device_path = f"usb:{UA_VID:04x}:{(self.pid or 0):04x}" + (
+            f"@{bus}-{addr}" if bus is not None else "")
         try:
-            if self.dev.is_kernel_driver_active(0):
-                self.dev.detach_kernel_driver(0)
-        except Exception:
-            pass
-
-        try:
-            usb.util.claim_interface(self.dev, 0)
-            self._claimed = True
-        except usb.core.USBError as e:
-            log.error("Cannot claim DSP interface: %s", e)
+            self.versions = self._regs.versions()
+            self.protocol = self.versions.get("protocol")
+            self._mailbox = umix.SettingsMailbox()
+            self._mailbox.adopt_seq(self._regs)
+        except Exception as e:  # noqa: BLE001 - any transport error
+            log.error("USB Apollo %s: no answer on interface 0: %s",
+                      self.device_path, e)
+            self._drop_handle()
             return False
-
         self.connected = True
-        log.info("Opened USB device: %s", self.device_name)
+        self.lost = False
+        self._rb_last = None
+        self._knob_seen = {}
+        log.info("Opened %s (%s): protocol %#010x, versions %#010x/%#010x, "
+                 "SEQ %d", self.model_name, self.device_path,
+                 self.protocol or 0, self.versions.get("version_a", 0),
+                 self.versions.get("version_b", 0), self._mailbox.seq_wr)
         return True
 
-    def close(self):
-        """Release USB interface."""
-        if self._claimed and self.dev:
+    def _drop_handle(self):
+        if self._handle is not None:
             try:
-                usb.util.release_interface(self.dev, 0)
-            except Exception:
+                self._handle.release()
+            except Exception:  # noqa: BLE001
                 pass
-            self._claimed = False
-        self.connected = False
+        self._handle = None
+        self._regs = None
 
-    # ── Low-level protocol ──
+    def close(self):
+        with self._lock:
+            self._drop_handle()
+            self.connected = False
 
-    def _send_cmd(self, cmd_type, subcmds):
-        """Send a 0xDC command with sub-command pairs.
-        subcmds: list of (opcode, param, value) tuples.
-        Returns list of response packets (each a bytes object).
-        """
-        word_count = len(subcmds) * 2
-        header = struct.pack("<HBB", word_count, cmd_type, MAGIC_CMD)
-        payload = b""
-        for opcode, param, value in subcmds:
-            payload += struct.pack("<HHI", opcode, param, value)
-
-        self.dev.write(EP_BULK_OUT, header + payload, timeout=1000)
-
-        # Read response(s) — multi-packet responses use sequential type numbers
-        responses = []
-        for _ in range(20):  # max 20 response packets
+    def probe(self) -> bool:
+        """The device still answers (one 4-byte vendor read)."""
+        with self._lock:
+            if not self.connected or self._regs is None:
+                return False
             try:
-                data = bytes(self.dev.read(EP_BULK_IN, 1024, timeout=500))
-                responses.append(data)
-                # Last packet is shorter than max USB bulk size
-                if len(data) < 508:
-                    break
-            except usb.core.USBTimeoutError:
-                break
+                self._regs.protocol_word()
+                return True
+            except Exception:  # noqa: BLE001 - gone or wedged
+                return False
 
-        return responses
+    def mark_lost(self, reason: str = ""):
+        with self._lock:
+            self._drop_handle()
+            self.connected = False
+            self.lost = True
+            self._first_seen = None
+        log.warning("USB Apollo %s lost%s", self.device_path,
+                    f" ({reason})" if reason else "")
 
-    def _send_query(self, param):
-        """Send single-word query (opcode 0x01)."""
-        header = struct.pack("<HBB", 1, 1, MAGIC_CMD)
-        payload = struct.pack("<HH", OP_QUERY, param)
-        self.dev.write(EP_BULK_OUT, header + payload, timeout=1000)
+    def reopen(self) -> bool:
+        return self.open()
 
-        try:
-            data = bytes(self.dev.read(EP_BULK_IN, 1024, timeout=500))
-            return data
-        except usb.core.USBTimeoutError:
+    def _warn_once(self, key, msg, *args):
+        if key not in self._warned:
+            self._warned.add(key)
+            log.warning(msg, *args)
+
+    # ── identity ─────────────────────────────────────────────────────
+
+    def get_device_info(self) -> dict | None:
+        if not self.connected:
             return None
+        return {
+            "fpga_rev": self._read_quiet(udev.ID_VERSION) or 0,
+            "device_type": usb_device_type(self.pid or 0),
+            "subsystem_id": self.pid or 0,
+            "num_dsps": 1 if self.pid == 0x000D else 0,
+            "fw_version": self.versions.get("version_a", 0),
+            "fw_v2": False,
+            "serial": 0,
+            "ext_caps": 0,
+        }
 
-    def _parse_response_words(self, packets):
-        """Extract all 32-bit words from response packets."""
-        words = []
-        for pkt in packets:
-            wc = struct.unpack_from("<H", pkt, 0)[0]
-            for i in range(4, min(len(pkt), 4 + wc * 4), 4):
-                words.append(struct.unpack_from("<I", pkt, i)[0])
-        return words
+    def get_system_info(self) -> dict | None:
+        """The real serial (DSP 0 window +0x20) once the DSP wrote it."""
+        if not self.connected:
+            return None
+        with self._lock:
+            try:
+                serial = self._regs.serial(0)
+            except Exception:  # noqa: BLE001
+                serial = None
+        return {"serial": serial} if serial else None
 
-    # ── DSP init ──
+    def _read_quiet(self, addr):
+        with self._lock:
+            try:
+                return self._regs.read1(addr)
+            except Exception:  # noqa: BLE001
+                return None
 
-    def dsp_init(self):
-        """Send DSP init command to activate FPGA."""
-        responses = self._send_cmd(0, [
-            (OP_READWRITE, REG_INIT, 0x00000001),
-            (OP_READWRITE, REG_CONFIG_A, 0x01B71448),
-        ])
-        log.info("DSP init: %d response packets", len(responses))
-        return len(responses) > 0
+    def features(self) -> int:
+        return 0
 
-    def dsp_readback(self):
-        """Request full mixer state readback."""
-        responses = self._send_cmd(1, [
-            (OP_READWRITE, REG_CONFIG_A, 0x01B71448),
-            (OP_READWRITE, REG_CONFIG_B, 0x0AE52420),
-        ])
-        return self._parse_response_words(responses)
+    def has_feature(self, bit: int) -> bool:
+        return False
 
-    def dsp_status(self):
-        """Query DSP status."""
-        resp = self._send_query(REG_STATUS)
-        if resp and len(resp) >= 12:
-            words = self._parse_response_words([resp])
-            return words
+    def get_version(self):
         return None
 
-    # ── Clock control ──
+    def get_clock_sources(self):
+        """None: the firmware menu (request 0x08) lists S/PDIF and ADAT on a
+        Solo USB, which has neither, so the model's own list is used."""
+        return None
 
-    def set_sample_rate(self, rate=48000):
-        """Set UAC2 clock frequency via SET_CUR."""
-        # Detach audio control interface temporarily
-        try:
-            if self.dev.is_kernel_driver_active(1):
-                self.dev.detach_kernel_driver(1)
-        except Exception:
-            pass
+    def read_clock_menu(self) -> list:
+        """The firmware's clock menu (request 0x08), for diagnostics."""
+        with self._lock:
+            if not self.connected:
+                return []
+            return self._regs.clock_menu()
 
-        try:
-            self.dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
-                                   struct.pack("<I", rate), timeout=2000)
-        except usb.core.USBError:
-            pass  # May timeout, OK
+    # ── driver params ────────────────────────────────────────────────
 
-        # Read back
-        try:
-            data = self.dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001,
-                                          4, timeout=1000)
-            return struct.unpack("<I", bytes(data))[0]
-        except usb.core.USBError:
-            return 0
-
-    # ── Mixer state ──
-
-    def read_mixer_state(self):
-        """Read the full mixer routing matrix (770 words)."""
-        return self.dsp_readback()
-
-    def write_mixer_word(self, param, value):
-        """Write a single mixer register."""
-        self._send_cmd(0, [(OP_READWRITE, param, value)])
-
-    # ── Mixer settings (vendor control request 0x03) ──
-
-    def _vendor_write(self, request, wvalue, data=b""):
-        """Send a vendor control OUT request (bmRequestType=0x41)."""
-        self.dev.ctrl_transfer(0x41, request, wvalue, 0, data, timeout=1000)
-
-    def _write_settings(self, mask_buf, value_buf=None, ext_buf=None):
-        """Write a mixer settings batch via vendor request 0x03.
-
-        Protocol (from USBPcap RE of mixer-knobs.pcap):
-          1. Write 128-byte mask buffer to FPGA address 0x062D
-          2. Optionally write 128-byte value buffer to 0x064F
-          3. Optionally write 48-byte extended buffer to 0x0670
-          4. Write 4-byte sequence counter to 0x0602
-        """
-        self._vendor_write(VREQ_SETTINGS_WRITE, SETTINGS_MASK, mask_buf)
-        if value_buf and any(b != 0 for b in value_buf):
-            self._vendor_write(VREQ_SETTINGS_WRITE, SETTINGS_VALUES, value_buf)
-        if ext_buf and any(b != 0 for b in ext_buf):
-            self._vendor_write(VREQ_SETTINGS_WRITE, SETTINGS_EXT, ext_buf)
-        self._seq += 1
-        self._vendor_write(VREQ_SETTINGS_WRITE, SETTINGS_SEQ,
-                           struct.pack("<I", self._seq))
-
-    def _setting_word(self, mask, value):
-        """Encode a settings word: (mask << 16) | (value & 0xFFFF)."""
-        return ((mask & 0xFFFF) << 16) | (value & 0xFFFF)
-
-    def set_preamp_gain(self, channel, gain_db):
-        """Set preamp gain for a channel (0 or 1).
-
-        Encoding (from mixer-knobs.pcap correlation):
-          val_a = max(0, min(54, gain_dB - 10))  → setting[ch].wordA, mask=0x00FF
-          val_c = val_a + 0x41                   → setting[3].wordA, mask=0x003F
-        USB uses a +0x41 base offset for val_c (vs +1 on Thunderbolt).
-        """
-        gain_db = int(round(gain_db))
-        val_a = max(0, min(54, gain_db - 10))
-        val_c_encoded = val_a + 0x41  # USB base offset (verified across full range)
-
-        mask_buf = bytearray(128)
-        value_buf = bytearray(128)
-
-        # Gain A in value buffer at setting[channel]
-        setting_off = (SETTING_PREAMP_CH0 + channel) * 8
-        word = self._setting_word(0x00FF, val_a)
-        struct.pack_into("<I", value_buf, setting_off, word)
-
-        # Gain C in mask buffer at setting[3]
-        gc_word = self._setting_word(0x003F, val_c_encoded)
-        struct.pack_into("<I", mask_buf, SETTING_GAIN_C * 8, gc_word)
-
-        log.info("USB GAIN: ch%d = %d dB → val_a=%d val_c=0x%02x seq=%d",
-                 channel, gain_db, val_a, val_c_encoded, self._seq + 1)
-        self._write_settings(mask_buf, value_buf)
-
-    def set_phantom_power(self, channel, enabled):
-        """Toggle 48V phantom power (bit 3 of setting[ch].wordA)."""
-        mask_buf = bytearray(128)
-        setting_off = (SETTING_PREAMP_CH0 + channel) * 8
-        val = 0x0008 if enabled else 0x0000
-        word = self._setting_word(0x0008, val)
-        struct.pack_into("<I", mask_buf, setting_off, word)
-
-        log.info("USB 48V: ch%d = %s seq=%d", channel, enabled, self._seq + 1)
-        self._write_settings(mask_buf)
-
-    def set_mic_line(self, channel, line_mode):
-        """Switch Mic/Line input (bit 0 of setting[ch].wordA)."""
-        mask_buf = bytearray(128)
-        setting_off = (SETTING_PREAMP_CH0 + channel) * 8
-        val = 0x0001 if line_mode else 0x0000
-        word = self._setting_word(0x0001, val)
-        struct.pack_into("<I", mask_buf, setting_off, word)
-
-        log.info("USB MIC/LINE: ch%d = %s seq=%d",
-                 channel, "Line" if line_mode else "Mic", self._seq + 1)
-        self._write_settings(mask_buf)
-
-    def set_monitor_level(self, level_db):
-        """Set monitor level in dB (-96 to 0).
-
-        Encoding: raw = 192 + (dB * 2), range 0x00-0xC0.
-        """
-        raw = max(0, min(0xC0, int(192 + level_db * 2)))
-        mask_buf = bytearray(128)
-        word = self._setting_word(0x00FF, raw)
-        struct.pack_into("<I", mask_buf, SETTING_MONITOR * 8, word)
-
-        log.info("USB MONITOR: level=%.1f dB → raw=0x%02x seq=%d",
-                 level_db, raw, self._seq + 1)
-        self._write_settings(mask_buf)
-
-    def set_monitor_mute(self, muted):
-        """Toggle monitor mute (bit 1 of setting[2].wordB, value 2=muted)."""
-        mask_buf = bytearray(128)
-        val = 0x0002 if muted else 0x0000
-        word = self._setting_word(0x0003, val)
-        struct.pack_into("<I", mask_buf, SETTING_MONITOR * 8 + 4, word)
-
-        log.info("USB MONITOR: mute=%s seq=%d", muted, self._seq + 1)
-        self._write_settings(mask_buf)
-
-    def set_monitor_mono(self, mono):
-        """Toggle mono (bit 0 of setting[2].wordB)."""
-        mask_buf = bytearray(128)
-        val = 0x0001 if mono else 0x0000
-        word = self._setting_word(0x0003, val)
-        struct.pack_into("<I", mask_buf, SETTING_MONITOR * 8 + 4, word)
-
-        log.info("USB MONITOR: mono=%s seq=%d", mono, self._seq + 1)
-        self._write_settings(mask_buf)
-
-    # ── Vendor control requests ──
-
-    def read_device_info(self):
-        """Read the 512-byte device info block (vendor request 0x10)."""
-        try:
-            data = self.dev.ctrl_transfer(0xC0, 0x10, 0, 0, 512, timeout=500)
-            return bytes(data)
-        except usb.core.USBError:
+    def get_driver_param(self, param_id: int):
+        if not self.connected:
             return None
+        if param_id == 0:               # sample rate, request 0x06
+            with self._lock:
+                try:
+                    st = self._regs.status_block()
+                except Exception:  # noqa: BLE001
+                    return None
+            return st["rate"] if st and st["rate"] else None
+        return None
 
-    def read_protocol_version(self):
-        """Read protocol version (vendor request 0x00)."""
+    def set_driver_param(self, param_id: int, value: int) -> bool:
+        """Rate and clock changes are not sent over USB: a rate change needs
+        the DSP init re-run and snd-usb-audio's streams moved with it."""
+        self._warn_once(("drv", param_id),
+                        "USB Apollo: driver param %d not supported over USB "
+                        "(rate/clock changes need the USB init re-run)",
+                        param_id)
+        return False
+
+    # ── mixer settings ───────────────────────────────────────────────
+
+    def set_mixer_param(self, channel_type: int, channel_idx: int,
+                        param_id: int, value: int) -> bool:
+        if self.paused:
+            return False
+        if not self.connected:
+            log.info("HW MIXER_PARAM (USB, no device): type=%d ch=%d "
+                     "param=0x%02x value=%d", channel_type, channel_idx,
+                     param_id, value)
+            return False
+        self.last_errno = 0
         try:
-            data = self.dev.ctrl_transfer(0xC0, 0x00, 0, 0, 4, timeout=300)
-            return bytes(data)
-        except usb.core.USBError:
-            return None
+            res = umix.map_param(channel_type, channel_idx, param_id, value,
+                                 self.num_preamps, self.num_hiz)
+        except umix.MixerParamError as e:
+            self.last_errno = 22        # EINVAL, as the PCIe ioctl
+            log.debug("USB MIXER_PARAM rejected: %s", e)
+            return False
+        if res is None:
+            return True
+        if isinstance(res, umix.DspInputParam):
+            return self._send_dsp_input_param(res)
+        with self._lock:
+            self._mailbox.merge(res.setting, res.value, res.mask)
+            self._host_write_t = self._clock()
+            log.debug("USB mixer[%d] value=0x%08x mask=0x%08x (type=%d ch=%d "
+                      "param=0x%02x)", res.setting, res.value, res.mask,
+                      channel_type, channel_idx, param_id)
+        self._schedule_flush()
+        return True
 
-    # ── Interrupt endpoint (metering/notifications) ──
+    def flush_settings(self) -> bool | None:
+        """One flush attempt (see SettingsMailbox.flush)."""
+        with self._lock:
+            if not self.connected:
+                return None
+            try:
+                return self._mailbox.flush(self._regs)
+            except Exception as e:  # noqa: BLE001
+                log.error("USB settings flush failed: %s", e)
+                return False
 
-    def read_interrupt(self, timeout=100):
-        """Read from interrupt endpoint (EP6 IN). Returns bytes or None."""
-        try:
-            data = self.dev.read(EP_INTR_IN, 512, timeout=timeout)
-            return bytes(data)
-        except usb.core.USBTimeoutError:
+    def _schedule_flush(self):
+        """Flush from a short-lived thread FLUSH_INTERVAL from now, as the
+        UA driver flushes from its readback timer: the three writes of a
+        gain change then go out in one batch (one SEQ bump), as in the
+        Windows capture.  Without auto_flush the caller flushes
+        (flush_settings(), or get_hw_readback())."""
+        if not self._auto_flush:
+            return
+        with self._lock:
+            if self._flusher is not None and self._flusher.is_alive():
+                return
+            self._flusher = threading.Thread(target=self._flush_loop,
+                                             name="usb-settings-flush",
+                                             daemon=True)
+            self._flusher.start()
+
+    def _flush_loop(self):
+        deadline = self._clock() + FLUSH_GIVE_UP
+        while self._clock() < deadline:
+            self._sleep(FLUSH_INTERVAL)
+            r = self.flush_settings()
+            if r is None or (r and not self._mailbox.pending):
+                return
+        log.warning("USB settings: SEQ_RD did not catch up in %.1f s; "
+                    "the change goes out with the next one", FLUSH_GIVE_UP)
+
+    @property
+    def settings_pending(self) -> bool:
+        return self._mailbox.pending
+
+    # ── bus params / DSP commands (opt-in) ───────────────────────────
+
+    def set_mixer_bus_param(self, bus_id: int, sub_param: int,
+                            value_float: float, side: int = 0,
+                            solo_mute: bool = False) -> bool:
+        if self.paused or not self.connected:
+            return False
+        if not self.dsp_params:
+            self._warn_once("bus", "USB Apollo: mixer bus params are not sent "
+                            "(start the daemon with --usb-dsp-params to send "
+                            "them as DSP commands; unverified on USB)")
+            return False
+        if solo_mute:
+            value_float = 0.0
+        value = struct.unpack("<I", struct.pack("<f", value_float))[0]
+        return self._send_dsp([dspcmd.bus_coeff(bus_id, sub_param, value, side)])
+
+    def set_bus_fader(self, bus_id: int, linear_gain: float,
+                      mix_coeff: float = 0.0, mix_coeff_r: float | None = None,
+                      solo_mute: bool = False) -> bool:
+        ok = self.set_mixer_bus_param(bus_id, 0, mix_coeff, solo_mute=solo_mute)
+        if mix_coeff_r is not None:
+            ok = self.set_mixer_bus_param(bus_id, 0, mix_coeff_r, side=1,
+                                          solo_mute=solo_mute) and ok
+        return ok
+
+    def set_bus_pan(self, bus_id: int, mix_coeff: float,
+                    mix_coeff_r: float | None = None) -> bool:
+        ok = self.set_mixer_bus_param(bus_id, 0, mix_coeff)
+        if mix_coeff_r is not None:
+            ok = self.set_mixer_bus_param(bus_id, 0, mix_coeff_r, side=1) and ok
+        return ok
+
+    def _send_dsp_input_param(self, p: umix.DspInputParam) -> bool:
+        if not self.dsp_params:
+            self._warn_once("dspin", "USB Apollo: DSP input params (route, "
+                            "span, scale) are not sent without --usb-dsp-params")
+            return False
+        return self._send_dsp([dspcmd.input_param(p.input, p.param, p.value)])
+
+    def _send_dsp(self, cmds) -> bool:
+        with self._lock:
+            if not self.connected:
+                return False
+            frames = dspcmd.frame_stream(dspcmd.encode_commands(cmds),
+                                         self._bulk_seq)
+            try:
+                claim = getattr(self._handle, "claim", None)
+                if claim:
+                    claim()             # the bulk pipe needs interface 0
+                for f in frames:
+                    self._handle.write(EP_BULK_OUT, f.to_bytes(), timeout=1000)
+                    self._bulk_seq = (self._bulk_seq + 1) & 0xFF
+                self._drain_bulk_in()
+            except Exception as e:  # noqa: BLE001
+                log.error("USB DSP command failed: %s", e)
+                return False
+        return True
+
+    def _drain_bulk_in(self, limit: int = 8):
+        for _ in range(limit):
+            try:
+                data = self._handle.read(EP_BULK_IN, 1024, timeout=2)
+            except Exception:  # noqa: BLE001 - timeout: nothing queued
+                return
+            if not data:
+                return
+
+    # ── readback (J2) ────────────────────────────────────────────────
+
+    def get_hw_readback(self):
+        """(status, 40 words) like the PCIe GET_HW_READBACK; also runs a
+        pending settings flush, as the UA driver does from its readback."""
+        if not self.connected:
             return None
-        except usb.core.USBError:
-            return None
+        with self._lock:
+            try:
+                status, words = self._regs.readback(self.protocol)
+            except Exception as e:  # noqa: BLE001
+                log.debug("USB readback failed: %s", e)
+                return None
+            if self._mailbox.pending:
+                try:
+                    self._mailbox.flush(self._regs)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("USB settings flush (readback) failed: %s", e)
+        if status == 1 and self.knob_writeback:
+            self._knob_writeback(words)
+        if status == 1:
+            self._rb_last = words
+        return status, (words if words else [0] * udev.READBACK_WORDS)
+
+    # setting 2 fields the front panel changes: level, mute+mono, dim
+    _KNOB_FIELDS = (0x000000FF, 0x00030000, 0x80000000)
+
+    def _knob_writeback(self, words):
+        """Mirror a front-panel change of setting 2 into the mailbox."""
+        if len(words) < 3:
+            return
+        if self._rb_last is None:
+            # Adopt what the hardware has; nothing is written for it
+            with self._lock:
+                fields = 0
+                for mask in self._KNOB_FIELDS:
+                    fields |= mask
+                v = self._mailbox.value[2]
+                self._mailbox.value[2] = (v & ~fields) | (words[2] & fields)
+            return
+        now = self._clock()
+        with self._lock:
+            if now - self._host_write_t < 0.5 or self._mailbox.mask[2]:
+                self._knob_seen = {}
+                return
+            cached = self._mailbox.value[2]
+            for mask in self._KNOB_FIELDS:
+                hw = words[2] & mask
+                if hw == (cached & mask):
+                    self._knob_seen.pop(mask, None)
+                    continue
+                # the same new value in two snapshots in a row: the panel moved
+                if self._knob_seen.get(mask) == hw and \
+                        (self._rb_last[2] & mask) == hw:
+                    self._mailbox.merge(2, hw, mask)
+                    self._knob_seen.pop(mask, None)
+                    log.info("USB knob write-back: setting 2 field 0x%08x "
+                             "= 0x%08x", mask, hw)
+                else:
+                    self._knob_seen[mask] = hw
+        if self._mailbox.pending:
+            self._schedule_flush()
