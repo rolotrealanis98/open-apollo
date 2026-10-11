@@ -766,8 +766,8 @@ class MixerDaemon:
         the Apollo's record channels through PipeWire, or ALSA capture),
         not from hardware readback registers.
 
-        DSP load is polled at ~1 Hz (every 50 ticks) and pushed to
-        /TotalDSPLoad, /TotalPGMLoad, /TotalMEMLoad.
+        DSP load, rate, transport, buffer size and latency are polled at
+        ~1 Hz (every 50 ticks) even with no client connected.
         """
         meter_cache: list[dict] | None = None
         cache_gen = 0
@@ -776,6 +776,14 @@ class MixerDaemon:
 
         while True:
             await asyncio.sleep(0.02)  # 50 Hz — matches real UA Mixer Engine
+
+            # Device status at ~1 Hz (every 50 ticks), with or without
+            # clients, so a client that connects gets current values
+            # (/BufferSize, rate, transport, DSP load) and not start-up ones
+            dsp_tick += 1
+            if dsp_tick >= 50:
+                dsp_tick = 0
+                self._poll_device_status()
 
             if not self.state._callbacks:
                 meter_cache = None
@@ -819,16 +827,6 @@ class MixerDaemon:
                     last_rb = rb
                     if isinstance(self._metering, ReadbackMeter):
                         self._metering.feed(rb["words"])
-
-            # Poll DSP load at ~1 Hz (every 50 ticks of the 50 Hz pump)
-            dsp_tick += 1
-            if dsp_tick >= 50:
-                dsp_tick = 0
-                self._poll_dsp_load()
-                self._poll_driver_rate()
-                self._poll_transport()
-                self._poll_buffer_size()
-                self._refresh_latency()
 
             if not meter_cache:
                 continue
@@ -1528,6 +1526,14 @@ class MixerDaemon:
             log.warning("Firmware version %d is not one the UA driver "
                         "accepts (%s): this combination is untested",
                         fw, " or ".join(map(str, ACCEPTED_FW_MAJORS)))
+
+    def _poll_device_status(self):
+        """The 1 Hz read-only polls of the meter pump."""
+        self._poll_dsp_load()
+        self._poll_driver_rate()
+        self._poll_transport()
+        self._poll_buffer_size()
+        self._refresh_latency()
 
     def _poll_buffer_size(self):
         """/BufferSize follows the period size of the Apollo's running

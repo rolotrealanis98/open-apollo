@@ -24,3 +24,28 @@ def test_nothing_running(tmp_path, monkeypatch):
     monkeypatch.setattr(d, "Path", lambda p: real(str(tmp_path) + "/x" + str(p)))
     assert d.stream_period_frames(3) is None
     assert d.stream_period_frames(None) is None
+
+
+def test_device_status_is_polled_without_clients(tree, monkeypatch):
+    """The 1 Hz polls run with no client connected, so the first client
+    gets the current /BufferSize instead of the start-up default."""
+    import asyncio
+
+    import pytest
+
+    daemon = d.MixerDaemon(tree, None)
+    assert not daemon.state._callbacks
+    polls = []
+    monkeypatch.setattr(daemon, "_poll_device_status",
+                        lambda: polls.append(1))
+    ticks = [0]
+
+    async def fake_sleep(_):
+        ticks[0] += 1
+        if ticks[0] > 120:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(d.asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(daemon._meter_pump())
+    assert len(polls) == 2      # ticks 50 and 100
