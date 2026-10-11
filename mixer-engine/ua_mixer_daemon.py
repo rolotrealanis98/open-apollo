@@ -1244,7 +1244,7 @@ class MixerDaemon:
     def _publish_pcie_link(self, info: dict | None):
         """Report the PCIe link (UA_FEAT_SYSINFO_EXT) at
         /openapollo/pcie_link{,_speed,_width}; warn once when it is slower
-        than x1 Gen2."""
+        than x1 Gen1 (the Apollo endpoint's own link)."""
         if not info or "pcie_link_speed" not in info:
             return
         speed, width = info["pcie_link_speed"], info["pcie_link_width"]
@@ -1256,7 +1256,7 @@ class MixerDaemon:
                 self.state._dirty.pop(path + "/value", None)
         if pcie_link_below_minimum(speed, width) and not self._link_warned:
             self._link_warned = True
-            log.warning("PCIe link is %s, below x1 Gen2: audio and meters "
+            log.warning("PCIe link is %s, below x1 Gen1: audio and meters "
                         "can drop out (check the Thunderbolt cable, port "
                         "and any dock)", pcie_link_text(speed, width))
 

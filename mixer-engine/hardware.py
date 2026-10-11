@@ -648,12 +648,16 @@ _PCIE_LANE_MBPS = {1: 250, 2: 500, 3: 985, 4: 1969, 5: 3938}
 
 
 def pcie_link_below_minimum(speed: int | None, width: int | None) -> bool:
-    """True when the link is known and slower than x1 Gen2 (500 MB/s).
+    """True when the link is known and slower than x1 Gen1 (250 MB/s).
+
+    The Apollo's own endpoint trains at x1 Gen1 (titan's x4 behind
+    Thunderbolt reads LNKSTA speed 1 width 1), which carries every channel
+    at 192 kHz with room to spare, so only a link below that is reported.
     An unknown link (0 or None) is not reported."""
     if not speed or not width:
         return False
     lane = _PCIE_LANE_MBPS.get(speed, 985 if speed > 3 else 0)
-    return lane * width < _PCIE_LANE_MBPS[2]
+    return lane * width < _PCIE_LANE_MBPS[1]
 
 
 def pcie_link_text(speed: int | None, width: int | None) -> str:

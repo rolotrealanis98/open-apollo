@@ -88,7 +88,7 @@ class TestClockSourceNames:
 
 class TestPcieLink:
     @pytest.mark.parametrize("speed,width,below", [
-        (1, 1, True), (1, 2, False), (2, 1, False), (3, 1, False),
+        (1, 1, False), (1, 2, False), (2, 1, False), (3, 1, False),
         (2, 2, False), (0, 0, False), (1, 0, False), (0, 4, False)])
     def test_minimum(self, speed, width, below):
         assert pcie_link_below_minimum(speed, width) is below
@@ -186,12 +186,11 @@ class TestPcieLinkReport:
         daemon._publish_pcie_link({"fw_version": 9})
         assert tree.get_value("/openapollo/pcie_link/value") in ("", None)
 
-    def test_warns_once_below_x1_gen2(self, daemon, caplog):
+    def test_no_warning_for_the_apollo_x1_gen1_link(self, daemon, caplog):
+        # titan's x4 reads speed 1 width 1: the endpoint's own link
         with caplog.at_level(logging.WARNING, logger="ua-mixer-daemon"):
             daemon._publish_pcie_link(info(pcie_link_speed=1, pcie_link_width=1))
-            daemon._publish_pcie_link(info(pcie_link_speed=1, pcie_link_width=1))
-        warns = [r for r in caplog.records if "PCIe link" in r.getMessage()]
-        assert len(warns) == 1
+        assert not [r for r in caplog.records if "PCIe link" in r.getMessage()]
 
     def test_no_warning_at_gen2_x1(self, daemon, caplog):
         with caplog.at_level(logging.WARNING, logger="ua-mixer-daemon"):
