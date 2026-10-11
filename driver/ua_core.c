@@ -220,6 +220,46 @@ static void ua_dma_reset_pulse(struct ua_device *ua, bool eight, bool global)
 }
 
 /*
+ * CPcieIntrManager::EnableDMA(idx) (kext x86 0x9d5d): set the one enable
+ * bit of engine @idx (bit idx + 1) and write DMA_CTRL.  Strobes are not
+ * kept on the way in (the kext cache never holds any), so a strobe left
+ * asserted by an earlier all-bits write is dropped here.
+ */
+void ua_dma_enable_engine(struct ua_device *ua, unsigned int idx)
+{
+	u32 v;
+
+	if (idx >= 8)
+		return;
+	v = (ua_read(ua, UA_REG_DMA_CTRL) & ~UA_DMA_RESET_V2_MASK) |
+	    BIT(idx + 1);
+	ua_write(ua, UA_REG_DMA_CTRL, v);
+	ua->dma_ctrl_cache = v;
+}
+
+/*
+ * CPcieIntrManager::ResetDMAEngine(idx) (kext x86 0x9a98, also
+ * CPcieDSP::ResetDSP): clear engine @idx's enable bit, pulse its strobe
+ * (bit idx + 9), read back as a flush.  Leaves the engine disabled; the
+ * caller re-enables it (ua_dma_enable_engine()) once its ring is
+ * reprogrammed, as CPcieDSP::ProgramRegisters does.
+ */
+void ua_dma_reset_engine(struct ua_device *ua, unsigned int idx)
+{
+	u32 v;
+
+	if (idx >= 8)
+		return;
+	v = ua_read(ua, UA_REG_DMA_CTRL) &
+	    ~(UA_DMA_RESET_V2_MASK | BIT(idx + 1));
+
+	ua_write(ua, UA_REG_DMA_CTRL, v | BIT(idx + 9));	/* Assert */
+	ua_write(ua, UA_REG_DMA_CTRL, v);			/* Deassert */
+	(void)ua_read(ua, UA_REG_DMA_CTRL);			/* Flush */
+	ua->dma_ctrl_cache = v;
+}
+
+/*
  * Reset DMA engines (the driver's long-standing variant, cold path and
  * UA_IOCTL_RESET_DMA): 8-engine masks on every v2 device, global enable
  * forced on, then all pending interrupts cleared.

@@ -742,6 +742,17 @@ static u32 ua_dsp_connect_date(void)
 	return ((u32)days << 12) + secs_of_day / 60;
 }
 
+/*
+ * dma_per_dsp: set only the enable bit of each DSP that exists in DMA_CTRL
+ * (kext EnableDMA(idx)) instead of OR-ing 0x1FFFE, which also asserts the
+ * eight reset strobes and leaves them in the cached value (issue #46).
+ * Off: the long-standing x4 behaviour, byte for byte.
+ */
+static bool dma_per_dsp;
+module_param(dma_per_dsp, bool, 0444);
+MODULE_PARM_DESC(dma_per_dsp,
+		 "Ring init sets one DMA_CTRL enable bit per DSP (macOS EnableDMA) and never leaves a reset strobe set, instead of OR-ing 0x1FFFE (default: off; changes the x4 cold and warm DMA_CTRL value)");
+
 /* ----------------------------------------------------------------
  * Ring init / cleanup for all DSPs
  * ---------------------------------------------------------------- */
@@ -826,7 +837,44 @@ int ua_dsp_rings_init(struct ua_device *ua)
 	 * scatter-gather reads.  Without this, the FPGA won't process
 	 * ring entries (POSITION stays at 0).
 	 */
-	if (ua->fw_v2) {
+	if (ua->fw_v2 && dma_per_dsp) {
+		/*
+		 * CPcieDSP::ProgramRegisters -> EnableDMA(idx): one enable
+		 * bit (idx + 1) per DSP that exists, never a strobe.  The
+		 * kick below keeps its reset-while-enabled order but pulses
+		 * only those DSPs' strobes, and the value left behind has no
+		 * strobe set -- the all-bits OR left DMA_CTRL reading
+		 * 0x1ffff (issue #46, x8p).
+		 */
+		u32 en = 0, dma;
+
+		for (i = 0; i < ua->num_dsps; i++)
+			if (ua->dsp[i].rings_allocated)
+				en |= BIT(i + 1);
+
+		dma = ua_read(ua, UA_REG_DMA_CTRL);
+		dev_info(&ua->pdev->dev,
+			 "DMA_CTRL before per-DSP enable: 0x%08x (enables 0x%x)\n",
+			 dma, en);
+		ua_write(ua, UA_REG_DMA_CTRL,
+			 (dma & ~UA_DMA_RESET_V2_MASK) | en);
+		ua->dma_ctrl_cache = ua_read(ua, UA_REG_DMA_CTRL) &
+				     ~UA_DMA_RESET_V2_MASK;
+		ua_write(ua, UA_REG_DMA_CTRL,
+			 ua->dma_ctrl_cache | (en << 8));
+		ua_write(ua, UA_REG_DMA_CTRL, ua->dma_ctrl_cache);
+		(void)ua_read(ua, UA_REG_DMA_CTRL);	/* flush */
+		dev_info(&ua->pdev->dev,
+			 "DMA_CTRL after per-DSP enable: 0x%08x\n",
+			 ua_read(ua, UA_REG_DMA_CTRL));
+
+		for (i = 0; i < ua->num_dsps; i++) {
+			if (!ua->dsp[i].rings_allocated)
+				continue;
+			ua_dsp_ring_resync(ua, &ua->dsp[i].cmd);
+			ua_dsp_ring_resync(ua, &ua->dsp[i].resp);
+		}
+	} else if (ua->fw_v2) {
 		u32 dma = ua_read(ua, UA_REG_DMA_CTRL);
 
 		dev_dbg(&ua->pdev->dev,
