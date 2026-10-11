@@ -22,7 +22,9 @@ class Reached(Exception):
 
 def start(args, stack, *, opened=False, stop_at="StateTree"):
     stack.enter_context(patch("sys.argv", ["ua_mixer_daemon.py", *args]))
-    backend = stack.enter_context(patch.object(daemon_mod, "HardwareBackend"))
+    # make_backend picks HardwareBackend or the USB backend; whichever,
+    # the device node is what fails or opens here (host independent)
+    backend = stack.enter_context(patch.object(daemon_mod, "make_backend"))
     backend.return_value.open.return_value = opened
     backend.return_value.connected = opened
     backend.return_value.device_path = "/dev/ua_apollo0"
