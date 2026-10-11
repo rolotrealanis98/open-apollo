@@ -1091,14 +1091,22 @@ struct ua_period_stats {
 	/*
 	 * This transport session: how far past a timer-interval boundary
 	 * SAMPLE_POS was when the IRQ thread read it after a timer
-	 * interrupt.  Small and steady when TIMER_CFG counts as assumed; a
-	 * mean near half the interval means the interrupt drifts against
-	 * the period (see period_irq_cfg_adj).
+	 * interrupt.  Small and steady when the interrupt marks the period
+	 * boundaries; a large mean means it lands before them or drifts.
 	 */
 	unsigned long phase_sum;
 	unsigned long phase_n;
 	unsigned int phase_max;
-	unsigned long fallbacks;    /* silent timer interrupt: moved to the hrtimer */
+	unsigned long phase_win_sum; /* the last up to 64 of them, for the */
+	unsigned int phase_win_n;    /*   misaligned-timer fallback */
+	/*
+	 * Timer interrupts the IRQ thread saw in the same timer interval as
+	 * the previous one: a second interrupt for the same boundary (titan,
+	 * 48 kHz: 8-15% of them, none at 96/192 kHz).  The boundary test
+	 * ignores them; counted so the timer rate can be checked without.
+	 */
+	unsigned long timer_dups;
+	unsigned long fallbacks;    /* timer silent or off the boundaries: hrtimer */
 	unsigned long stops;        /* streams the IRQ path pushed into XRUN */
 };
 
@@ -1241,6 +1249,8 @@ struct ua_audio {
 	unsigned long timer_irq_jiffies; /* last period-timer interrupt */
 	u32 wd_last_sp;                 /* SAMPLE_POS at the watchdog's last read */
 	unsigned long wd_sp_jiffies;    /* ... and when it read it */
+	u32 timer_last_iv;              /* timer interval of the last timer event */
+	bool timer_last_valid;          /* ... set since the transport started */
 	struct delayed_work period_wd;  /* IRQ-path watchdog */
 	struct ua_period_stats pstats;
 

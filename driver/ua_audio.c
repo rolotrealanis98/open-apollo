@@ -159,10 +159,6 @@ static bool period_irq;
 module_param(period_irq, bool, 0644);
 MODULE_PARM_DESC(period_irq,
 		 "Period wakeups from the hardware period-timer interrupt (threaded IRQ handler) instead of the 1 ms SAMPLE_POS poll (default: off; off leaves the timer unprogrammed and its vector masked, as the macOS driver; a change applies once all streams are closed and the transport restarts)");
-static int period_irq_cfg_adj = -1;
-module_param(period_irq_cfg_adj, int, 0644);
-MODULE_PARM_DESC(period_irq_cfg_adj,
-		 "period_irq=1 only: TIMER_CFG = timer interval in frames + this (-1 = the macOS driver's value, default; 0 or 1 to test the register's counting); read at transport start");
 
 /* Forward declarations */
 static void ua_pcie_setup(struct ua_device *ua);
@@ -3341,17 +3337,20 @@ int ua_audio_reconnect(struct ua_device *ua)
  * period_irq=1 writes what the kext's one timer user writes, the interval
  * minus one (CUAD2AudioMixer::StartTransport → vtable +0xf0 =
  * SetPeriodicTimerIntervalInFrames(block - 1, 0), 12.0.0 x86 0xf958;
- * BUF_SIZE is frames - 1 too; see period_irq_cfg_adj), with an interval of
- * at least 1 ms: a shorter period gets a multiple of itself and its stream
- * stays on the hrtimer (ua_period_irq_usable()), so the interrupt rate
- * never exceeds the hrtimer's 1 kHz.
+ * BUF_SIZE is frames - 1 too), with an interval of at least 1 ms: a
+ * shorter period gets a multiple of itself and its stream stays on the
+ * hrtimer (ua_period_irq_usable()), so the interrupt rate never exceeds
+ * the hrtimer's 1 kHz.  Titan (x4, 2026-10-11) confirmed the counting at
+ * 48, 96 and 192 kHz: with interval - 1 the interrupt keeps a fixed phase
+ * against SAMPLE_POS over thousands of periods, with interval or
+ * interval + 1 it drifts by a frame per period (the period_irq_cfg_adj
+ * experiment, removed since).
  */
 static void ua_audio_set_timer(struct ua_device *ua, unsigned int period)
 {
 	struct ua_audio *audio = &ua->audio;
 	unsigned int min = DIV_ROUND_UP(audio->sample_rate, 1000);
 	unsigned int frames = period;
-	int adj = READ_ONCE(period_irq_cfg_adj);
 	u32 cfg;
 
 	if (!READ_ONCE(period_irq)) {
@@ -3359,11 +3358,9 @@ static void ua_audio_set_timer(struct ua_device *ua, unsigned int period)
 		return;
 	}
 
-	/* Only -1, 0, +1 (clamp() trips old kernels' minmax checks) */
-	adj = adj < 0 ? -1 : adj > 0 ? 1 : 0;
 	if (frames < min)
 		frames = roundup(min, period);
-	cfg = (u32)((int)frames + adj);
+	cfg = frames - 1;
 	ua_write(ua, UA_REG_AX_TIMER_CFG, cfg);
 	audio->timer_frames = frames;
 	audio->timer_cfg = cfg;
@@ -3448,12 +3445,19 @@ static int ua_audio_prepare_transport(struct ua_device *ua,
 	/*
 	 * Steps 3b/4: TIMER_CFG (0x2270) and EnableVector(0x46,
 	 * clearPending=1), as the kext: only with a timer interval, i.e.
-	 * period_irq=1 (ua_audio_set_timer()).  A restart (timer_frames 0)
-	 * keeps the session's choice.  Without a timer, mask a vector an
-	 * earlier period_irq=1 session left armed.
+	 * period_irq=1 (ua_audio_set_timer()), and then on every prepare.
+	 * A restart (timer_frames 0) keeps the session's interval but writes
+	 * it again, as PrepareTransport does: on titan the two 48 kHz runs
+	 * whose transport was restarted without the write (io_map layout
+	 * change after 192 kHz) had the timer 23 and 296 frames off the
+	 * period boundaries, every other run was within the IRQ latency.
+	 * Without a timer, mask a vector an earlier period_irq=1 session
+	 * left armed.
 	 */
 	if (timer_frames)
 		ua_audio_set_timer(ua, timer_frames);
+	else if (audio->timer_frames)
+		ua_write(ua, UA_REG_AX_TIMER_CFG, audio->timer_cfg);
 	if (audio->timer_frames)
 		ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC, true);
 	else if (ua->fw_v2 &&
@@ -3819,6 +3823,9 @@ static int ua_audio_start_transport(struct ua_device *ua)
 	audio->pstats.phase_sum = 0;
 	audio->pstats.phase_n = 0;
 	audio->pstats.phase_max = 0;
+	audio->pstats.phase_win_sum = 0;
+	audio->pstats.phase_win_n = 0;
+	audio->timer_last_valid = false;
 	audio->transport_running = true;
 	ua_audio_stall_qos(ua, true);
 
@@ -5400,11 +5407,13 @@ static int ua_pcm_prepare(struct snd_pcm_substream *sub)
  *  - the hrtimer (default): a 1 ms soft hrtimer reads SAMPLE_POS and calls
  *    snd_pcm_period_elapsed() when a period boundary was crossed;
  *  - the period-timer interrupt (period_irq=1): prepare programs TIMER_CFG
- *    from the period, the hard IRQ (ISR/ISR_HI read and ack, vector
- *    re-arm, nothing else on BAR0) wakes ua_audio_irq_thread(), which
- *    reads SAMPLE_POS once in process context and makes the same boundary
- *    test.  The reference drivers take their audio clock from interrupts
- *    too, never from a BAR0 poll, but from the end-of-buffer vector (kext:
+ *    from the period, the hard IRQ (ISR/ISR_HI read and ack, timer vector
+ *    masked, nothing else on BAR0) wakes ua_audio_irq_thread(), which
+ *    reads SAMPLE_POS once in process context, makes the same boundary
+ *    test and re-arms the vector with its pending bit cleared, the kext's
+ *    one-shot handling of a non-fast 0x46.  The reference drivers take
+ *    their audio clock from interrupts too, never from a BAR0 poll, but
+ *    from the end-of-buffer vector (kext:
  *    UAD2AudioEngine::_bufferCallback → takeTimeStamp, once per 8192-frame
  *    wrap; Windows: the same fast callback).  The kext's only timer user is
  *    its client audio mixer (CUAD2AudioMixer: the block size, capped at
@@ -5437,13 +5446,16 @@ static int ua_pcm_prepare(struct snd_pcm_substream *sub)
  * as the hrtimer does), and a timer interrupt that falls silent while
  * SAMPLE_POS keeps moving (the stream moves to the hrtimer for the rest of
  * the transport session).  It reads BAR0 only after a few silent timer
- * intervals.
+ * intervals.  The IRQ thread moves streams to the hrtimer the same way
+ * when the interrupt does not mark the period boundaries
+ * (ua_period_irq_stats()).
  * ---------------------------------------------------------------- */
 
 #define UA_PIRQ_EV_TIMER		0	/* irq_events: period timer fired */
 #define UA_PIRQ_EV_EOB			1	/* irq_events: end of buffer */
 #define UA_PERIOD_WD_MS			10	/* watchdog interval */
 #define UA_PERIOD_IRQ_SILENT_MS		20	/* least silence it acts on */
+#define UA_PERIOD_PHASE_WIN		64	/* timer events per phase check */
 
 /*
  * The transport an IRQ-served stream started on is gone: stopped, or
@@ -5644,11 +5656,12 @@ static void ua_period_irq_stop(struct ua_device *ua, bool dead,
 }
 
 /*
- * The period timer fell silent while SAMPLE_POS moves on: hand the
- * IRQ-served substreams to the hrtimer.  irq_dead keeps later starts on
- * the hrtimer too, until the next transport start.
+ * The period timer cannot serve the streams (silent while SAMPLE_POS moves
+ * on, or firing off the period boundaries): hand the IRQ-served substreams
+ * to the hrtimer.  irq_dead keeps later starts on the hrtimer too, until
+ * the next transport start.  Process context, no lock held.
  */
-static void ua_period_irq_fallback(struct ua_device *ua, unsigned long silent)
+static void ua_period_irq_fallback(struct ua_device *ua, const char *why)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct snd_pcm_substream *subs[UA_DIRS];
@@ -5682,9 +5695,9 @@ static void ua_period_irq_fallback(struct ua_device *ua, unsigned long silent)
 	if (moved) {
 		audio->pstats.fallbacks++;
 		dev_warn(&ua->pdev->dev,
-			 "period_irq: no period-timer interrupt for %u ms while SAMPLE_POS advances (TIMER_CFG 0x%x, %u frames); %u stream(s) moved to the 1 ms poll for this transport session\n",
-			 jiffies_to_msecs(silent), audio->timer_cfg,
-			 audio->timer_frames, moved);
+			 "period_irq: %s (TIMER_CFG 0x%x, %u frames at %u Hz); %u stream(s) moved to the 1 ms poll for this transport session\n",
+			 why, audio->timer_cfg, audio->timer_frames,
+			 audio->sample_rate, moved);
 	}
 }
 
@@ -5748,7 +5761,8 @@ static void ua_period_wd_handler(struct work_struct *work)
 					   "BAR0 reads all-ones (link down)");
 		else if (time_after(audio->wd_sp_jiffies, last) &&
 			 sp != audio->wd_last_sp)
-			ua_period_irq_fallback(ua, silent);
+			ua_period_irq_fallback(ua,
+				"no period-timer interrupt while SAMPLE_POS advances");
 		audio->wd_last_sp = sp;
 		audio->wd_sp_jiffies = jiffies;
 	}
@@ -5774,9 +5788,9 @@ void ua_audio_period_wd_cancel(struct ua_device *ua)
  * the period, so every period boundary in SAMPLE_POS falls on a timer
  * interrupt and the boundary test catches it at the first one after it.
  * And at least four periods in the ring: should the interrupt land just
- * before the boundary instead of after it (TIMER_CFG counting, see
- * period_irq_cfg_adj), a wakeup comes one period late, which then still
- * leaves headroom.
+ * before the boundary instead of after it, a wakeup comes one period
+ * late, which then still leaves headroom (and ua_period_irq_stats() moves
+ * such a stream to the hrtimer).
  */
 static bool ua_period_irq_usable(struct ua_device *ua,
 				 struct snd_pcm_substream *sub)
@@ -5793,24 +5807,53 @@ static bool ua_period_irq_usable(struct ua_device *ua,
 	       period * 4 <= audio->buf_frame_size;
 }
 
-/* IRQ-thread diagnostics for /proc/asound/cardN/period_irq */
-static void ua_period_irq_stats(struct ua_audio *audio, unsigned long events,
+/*
+ * IRQ-thread bookkeeping of a timer and/or end-of-buffer event at SAMPLE_POS
+ * @sp, for /proc/asound/cardN/period_irq and the misaligned-timer check.
+ *
+ * A timer event in the same timer interval as the previous one is a second
+ * interrupt for the same boundary (titan, 48 kHz only: 8-15% of the timer
+ * interrupts before the pending clear in ua_period_timer_rearm()); it is
+ * counted in timer_dups and left out of the phase.
+ *
+ * Returns true when the last UA_PERIOD_PHASE_WIN timer interrupts were read
+ * on average more than a quarter interval past a boundary: the interrupt
+ * does not mark the period boundaries (it lands before them, or drifts),
+ * so wakeups would come up to a period late.  Titan saw that after a
+ * transport restart that kept the timer without rewriting TIMER_CFG.
+ */
+static bool ua_period_irq_stats(struct ua_audio *audio, unsigned long events,
 				u32 sp)
 {
 	struct ua_period_stats *st = &audio->pstats;
 	unsigned int buf = audio->buf_frame_size;
 	unsigned int timer = READ_ONCE(audio->timer_frames);
+	bool off = false;
 
 	if (!buf)
-		return;
+		return false;
 	sp %= buf;
 	if ((events & BIT(UA_PIRQ_EV_TIMER)) && timer) {
 		unsigned int phase = sp % timer;
+		u32 iv = sp / timer;
 
-		st->phase_sum += phase;
-		st->phase_n++;
-		if (phase > st->phase_max)
-			st->phase_max = phase;
+		if (audio->timer_last_valid && iv == audio->timer_last_iv) {
+			st->timer_dups++;
+		} else {
+			audio->timer_last_iv = iv;
+			audio->timer_last_valid = true;
+			st->phase_sum += phase;
+			st->phase_n++;
+			if (phase > st->phase_max)
+				st->phase_max = phase;
+			st->phase_win_sum += phase;
+			if (++st->phase_win_n == UA_PERIOD_PHASE_WIN) {
+				off = st->phase_win_sum >
+				      (unsigned long)timer / 4 * UA_PERIOD_PHASE_WIN;
+				st->phase_win_sum = 0;
+				st->phase_win_n = 0;
+			}
+		}
 	}
 	if (events & BIT(UA_PIRQ_EV_EOB)) {
 		/* The ring just wrapped: SAMPLE_POS should be near 0 */
@@ -5818,46 +5861,88 @@ static void ua_period_irq_stats(struct ua_audio *audio, unsigned long events,
 		if (sp > buf / 8)
 			st->eob_pos_odd++;
 	}
+	return off;
+}
+
+/*
+ * Re-arm the period-timer vector the hard IRQ masked.  The kext treats
+ * 0x46 as one-shot when its owner registers it non-fast (CUAD2AudioMixer
+ * does): the filter masks it on every fire and the owner re-arms it after
+ * processing with EnableVector(0x46, clearPending=1)
+ * (ResetPeriodicTimerInterrupt).  The pending clear drops a second
+ * interrupt for the boundary just served, which titan raised for 8-15% of
+ * the boundaries at 48 kHz when the vector was re-enabled from the hard
+ * IRQ.  Only while the transport runs with a timer, decided under irq_lock
+ * against ua_audio_prepare_transport(), which masks the vector for a
+ * session without one.  Writes only: no flush read.
+ */
+static void ua_period_timer_rearm(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	u32 bit = BIT(ua_vector_to_hwbit(UA_IRQ_VEC_PERIODIC) - 32);
+	unsigned long flags;
+
+	if (!ua->fw_v2 || atomic_read(&ua->shutdown))
+		return;
+	spin_lock_irqsave(&ua->irq_lock, flags);
+	if (READ_ONCE(audio->transport_running) &&
+	    READ_ONCE(audio->timer_frames)) {
+		ua->irq_mask_hi |= bit;
+		ua_write(ua, UA_REG_EXT_IRQ_STATUS, bit);
+		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, ua->irq_mask_hi);
+	}
+	spin_unlock_irqrestore(&ua->irq_lock, flags);
 }
 
 /*
  * Threaded half of the interrupt (process context, the IRQ's kthread),
- * woken by ua_audio_irq() for a period-timer or end-of-buffer interrupt
- * while a substream is IRQ-served: one SAMPLE_POS read, then each
- * IRQ-served substream's boundary test.
+ * woken by ua_audio_irq() for every period-timer interrupt of a transport
+ * with a timer and for end-of-buffer interrupts while a substream is
+ * IRQ-served.  With IRQ-served substreams: one SAMPLE_POS read, then each
+ * one's boundary test.  Then the timer vector is re-armed, and streams
+ * whose timer does not mark the period boundaries go to the hrtimer.
  */
 void ua_audio_irq_thread(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct snd_pcm_substream *rec, *play;
 	unsigned long events, flags;
+	bool off = false;
 	u32 sp = 0;
 
 	events = xchg(&audio->irq_events, 0);
-	if (!events || !READ_ONCE(audio->irq_subs) ||
-	    atomic_read(&ua->shutdown))
+	if (!events || atomic_read(&ua->shutdown))
 		return;
 
-	/* Transport stopped: no read, ua_period_check() stops the streams */
-	if (READ_ONCE(audio->transport_running)) {
-		sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
-		if (sp == 0xFFFFFFFF) {
-			ua_period_irq_stop(ua, true,
-					   "BAR0 reads all-ones (link down)");
-			return;
+	if (READ_ONCE(audio->irq_subs)) {
+		/* Transport stopped: no read, ua_period_check() stops them */
+		if (READ_ONCE(audio->transport_running)) {
+			sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
+			if (sp == 0xFFFFFFFF) {
+				ua_period_irq_stop(ua, true,
+						   "BAR0 reads all-ones (link down)");
+				return;
+			}
+			off = ua_period_irq_stats(audio, events, sp);
 		}
-		ua_period_irq_stats(audio, events, sp);
+
+		spin_lock_irqsave(&audio->lock, flags);
+		rec = audio->rec_sub;
+		play = audio->play_sub;
+		if (play)
+			ua_period_check(audio, play, UA_DIR_PLAY, sp, true);
+		if (rec)
+			ua_period_check(audio, rec, UA_DIR_REC, sp, true);
+		audio->pstats.thread_runs++;
+		spin_unlock_irqrestore(&audio->lock, flags);
 	}
 
-	spin_lock_irqsave(&audio->lock, flags);
-	rec = audio->rec_sub;
-	play = audio->play_sub;
-	if (play)
-		ua_period_check(audio, play, UA_DIR_PLAY, sp, true);
-	if (rec)
-		ua_period_check(audio, rec, UA_DIR_REC, sp, true);
-	audio->pstats.thread_runs++;
-	spin_unlock_irqrestore(&audio->lock, flags);
+	if (events & BIT(UA_PIRQ_EV_TIMER))
+		ua_period_timer_rearm(ua);
+
+	if (off)
+		ua_period_irq_fallback(ua,
+			"period-timer interrupts land off the period boundaries");
 }
 
 /*
@@ -5879,7 +5964,6 @@ static void ua_period_proc_read(struct snd_info_entry *entry,
 	unsigned int dir;
 
 	snd_iprintf(buf, "period_irq %d\n", READ_ONCE(period_irq));
-	snd_iprintf(buf, "cfg_adj %d\n", READ_ONCE(period_irq_cfg_adj));
 	snd_iprintf(buf, "fw_v2 %d\n", ua->fw_v2);
 	snd_iprintf(buf, "transport %d\n", audio->transport_running);
 	snd_iprintf(buf, "transport_gen %u\n", audio->transport_gen);
@@ -5893,6 +5977,7 @@ static void ua_period_proc_read(struct snd_info_entry *entry,
 			    !test_bit(dir, &run) ? "idle" :
 			    test_bit(dir, &irq) ? "irq" : "hrtimer");
 	snd_iprintf(buf, "timer_irqs %lu\n", st->timer_irqs);
+	snd_iprintf(buf, "timer_dups %lu\n", st->timer_dups);
 	snd_iprintf(buf, "eob_irqs %lu\n", st->eob_irqs);
 	snd_iprintf(buf, "thread_runs %lu\n", st->thread_runs);
 	for (dir = 0; dir < UA_DIRS; dir++) {
@@ -6056,9 +6141,9 @@ static const struct snd_pcm_ops ua_pcm_capture_ops = {
  * IRQ dispatch — called from main ISR in ua_core.c (hard IRQ)
  *
  * ISR_HI bit 30 is the period timer (vector 0x46), bit 31 the end of
- * buffer (vector 0x47).  Hard-IRQ work is the vector re-arm and the
- * bookkeeping below; the period wakeups run in ua_audio_irq_thread().
- * Returns true to wake that thread.
+ * buffer (vector 0x47).  Hard-IRQ work is the vector mask/re-arm and the
+ * bookkeeping below; the period wakeups and the timer re-arm run in
+ * ua_audio_irq_thread().  Returns true to wake that thread.
  * ---------------------------------------------------------------- */
 
 bool ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
@@ -6083,18 +6168,18 @@ bool ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 	irq_count++;
 
 	/*
-	 * Re-arm the vectors that fired.  The original driver found them
-	 * one-shot (enable bit cleared on fire).  The kext does not support
-	 * that for the end of buffer: 0x47 is a fast vector its filter never
-	 * masks, so this re-arm is a no-op write there.  Its one timer user
-	 * registers 0x46 non-fast, so the filter masks it and the owner
-	 * re-arms it after processing with EnableVector(0x46, 1)
-	 * (ResetPeriodicTimerInterrupt).  Here the ISR has just acked both;
-	 * no pending clear, which could drop an event that arrived since.
-	 * One posted IMR_HI write each, no BAR0 read.
+	 * The period timer is one-shot here, as the kext's filter treats a
+	 * non-fast 0x46: mask it now, the IRQ thread re-arms it with the
+	 * pending bit cleared once the period is served
+	 * (ua_period_timer_rearm()).  Re-enabling it from here let a second
+	 * interrupt for the same boundary through at 48 kHz on titan.  The
+	 * end of buffer is re-enabled as the original driver found it
+	 * needed; the kext never masks that fast vector, so this is a no-op
+	 * write there.  The ISR has just acked both.  One posted IMR_HI
+	 * write each, no BAR0 read.
 	 */
 	if (status_hi & BIT(30))
-		ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC, false);
+		ua_disable_vector(ua, UA_IRQ_VEC_PERIODIC);
 	if (status_hi & BIT(31))
 		ua_enable_vector(ua, UA_IRQ_VEC_END_BUFFER, false);
 
@@ -6109,16 +6194,17 @@ bool ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 	/*
 	 * No snd_pcm_period_elapsed() here.  Streams on the hrtimer get
 	 * their wakeups from it alone; this used to wake them a second time
-	 * and read SAMPLE_POS in hard-IRQ context (pointer callback).  For
-	 * IRQ-served streams (period_irq=1) hand the event to the thread.
+	 * and read SAMPLE_POS in hard-IRQ context (pointer callback).  The
+	 * thread takes every timer event of a transport with a timer (it
+	 * re-arms the vector, and serves IRQ-served streams) and the end of
+	 * buffer while a stream is IRQ-served.  A timer that fires in a
+	 * session without one stays masked.
 	 */
-	if (!READ_ONCE(audio->irq_subs))
-		return false;
-	if (status_hi & BIT(30))
+	if ((status_hi & BIT(30)) && READ_ONCE(audio->timer_frames))
 		set_bit(UA_PIRQ_EV_TIMER, &audio->irq_events);
-	if (status_hi & BIT(31))
+	if ((status_hi & BIT(31)) && READ_ONCE(audio->irq_subs))
 		set_bit(UA_PIRQ_EV_EOB, &audio->irq_events);
-	return true;
+	return READ_ONCE(audio->irq_events) != 0;
 }
 
 /* ----------------------------------------------------------------
