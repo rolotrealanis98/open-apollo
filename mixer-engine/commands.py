@@ -746,8 +746,16 @@ class CommandEngine:
             if self.state.path_exists(p):
                 self.state.set(p, v)
                 n += 1
+        self._session_clean()       # as CMxRoot::setSnapshot
         log.info("Snapshot %r recalled: %d values", name, n)
         return n
+
+    def _session_clean(self):
+        """/Dirty back to False: a session or snapshot was loaded, created
+        or saved (session_dirty)."""
+        dirty = getattr(self.d, "session_dirty", None)
+        if dirty is not None:
+            dirty.clear()
 
     def _snapshot_move(self, obj: str, params: dict):
         name = clean_name(params.get("name"))
@@ -1050,6 +1058,7 @@ class CommandEngine:
         name = clean_name(params.get("name", params.get("value")))
         self._write_session(self._session_file(name), name)
         self._publish_session(name)
+        self._session_clean()       # SessionFileManager::Save, once written
         return {"name": name, "sessions": self.session_names()}
 
     def _session_save(self, obj: str, params: dict):
@@ -1058,11 +1067,16 @@ class CommandEngine:
         name = self._current_session()
         self._write_session(self._session_file(name), name)
         self._publish_session(name)
+        self._session_clean()
         return {"name": name, "sessions": self.session_names()}
 
     def _session_save_last_used(self, obj: str, params: dict):
-        # The engine reloads this one at its next start.  The daemon already
-        # restores its state file at start; this copy is kept for tools.
+        # The engine reloads this one at its next start.  The daemon
+        # restores its state file at start: write it now rather than at the
+        # end of the save debounce (Console sends this on its way out), and
+        # keep a session-format copy for tools.  /Dirty stays as it is
+        # (SessionFileManager::SaveLastUsedSession does not touch it).
+        self.state.save_now()
         self._write_session(JsonFile(self._session_dir()
                                      / ".last_used.session.json"),
                             "last used")
@@ -1116,6 +1130,7 @@ class CommandEngine:
             name = clean_name(params["name"])
         self._publish_session(name)
         self.clear_history()
+        self._session_clean()       # CreateMixerFromFactoryDefault
         log.info("NewSession: %d controls back to their defaults", n)
         return {"name": name, "reset": n}
 
@@ -1134,6 +1149,7 @@ class CommandEngine:
         n = self.apply_values(values)
         self._publish_session(name)
         self.clear_history()
+        self._session_clean()       # LoadXml / SessionFileManager::Open
         return {"name": name, "applied": n}
 
     def apply_values(self, values: dict) -> int:

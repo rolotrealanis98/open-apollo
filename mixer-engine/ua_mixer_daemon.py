@@ -65,6 +65,7 @@ from bonjour import BonjourAnnouncer, _default_name
 from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
                             latency_figures, load_descriptor)
 from commands import CommandEngine, parse_cmdparams, refused_set
+from session_dirty import SessionDirty
 from ubjson_codec import encode_response as ubjson_encode_response
 from json_frame_codec import JsonFrameError, encode_frame as json_encode_frame
 from wire_command_framer import WireCommandFramer, WireError
@@ -514,6 +515,12 @@ class MixerDaemon:
         # Wire state tree SET notifications to hardware router
         if hw_router:
             self.state.on_set = hw_router.on_set
+
+        # The session's /Dirty flag: set by a session edit once the session
+        # is up (_fire_init_complete), never by readback (session_dirty)
+        self._session_ready = False
+        self.session_dirty = SessionDirty(
+            state, ready=lambda: self._session_ready, helper=helper_tree)
 
         # Hot-plug state (see _device_watchdog).  When the daemon starts
         # without the device, the watchdog owns the init push, so the
@@ -1681,7 +1688,12 @@ class MixerDaemon:
         Updates the value and notifies subscribers, but does NOT trigger
         the state tree on_set callback (which is wired to hardware write).
         This prevents a readback → state → hardware → readback loop.
+        Not a session edit: /Dirty does not move.
         """
+        with self.session_dirty.suppress():
+            self._push_readback(path, value)
+
+    def _push_readback(self, path: str, value):
         # Update helper tree (for 4720 console clients).  set_value()
         # notifies when it stores the value; a path the helper tree lacks
         # still reaches helper subscribers of that path once.
@@ -1849,6 +1861,7 @@ class MixerDaemon:
         self.state.set_value("/initialized_percent", 100.0)
         self.state.set_value("/initialized_status", "")
         self.state.set_value("/initialized", True)
+        self._session_ready = True
 
     def _push_defaults_to_hardware(self):
         """Push the init sequence (macOS order) to hardware.
@@ -2424,6 +2437,12 @@ class MixerDaemon:
                 # Helper SET paths may omit /value suffix; normalize for
                 # HardwareRouter regex patterns which expect it.
                 hw_path = path if path.endswith("/value") else path + "/value"
+                # A control both trees hold: mirror it into the state tree
+                # (no second hardware write) so 4710 subscribers, the saved
+                # state and /Dirty see the edit
+                if self.state.path_exists(hw_path):
+                    self.state.set(hw_path, cmd.value, source_client=client.id,
+                                   hardware=False)
                 if self.hw_router:
                     self.hw_router.on_set(hw_path, cmd.value)
                 # Suppress readback echo for this path (300ms window)

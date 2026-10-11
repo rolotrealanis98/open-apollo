@@ -371,11 +371,14 @@ class StateTree:
         # Special paths
         if path == "/Sleep":
             return True  # Keepalive, always accept
-        if path == "/Dirty/value":
-            return True
 
         resolved, prop_name = self._resolve_path(path)
         if resolved is None:
+            if path == "/Dirty/value":
+                # Accepted on a tree without /Dirty, as always.  Where the
+                # tree has it, a client SET writes it, as the Mixer
+                # Engine's CMxRoot::SetProperty does (kPropDirty 0xba).
+                return True
             log.warning("SET: path not found: %s", path)
             return False
 
