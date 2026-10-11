@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Mixer daemon: plugin-slot lifecycle, publication, transactions and remote readback modules (ported from the Codex Wine work, `plugin_*.py`). Inert unless a plugin backend is injected: without one, effect-slot SETs and GETs and saved state behave as before. No driver plugin operations exist yet (GET_PLUGIN_CAPS reports none).
 - `tools/daemon-protocol-check.py`: checks a running mixer daemon's Console protocol (text/UBJS/JSON framing, split headers, oversize frames, clock SET refusals, the clock-source menu; `--write` for the gain companion and `/Dirty`, putting each setting back).
 - `UA_IOCTL_GET_PLUGIN_CAPS` (0x07, ABI 1.3): a read-only report of the DSP state (firmware/rings/audio connected, ring mask, parked DMA buffers) that advertises zero plugin operations.
 - Driver host tests (`driver/tests`, compiled C snippets and source checks) for the device lifetime, clock, DSP-send and payload-validation invariants, adapted from the parallel Codex work.
