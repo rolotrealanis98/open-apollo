@@ -90,20 +90,30 @@ struct ua_reg_io {
  * From DTrace IOKit capture (docs/iokit-mixer-mapping.md):
  *   - bus_id identifies the mixer bus (analog inputs 0-3, digital 0xC+,
  *     sends 0x8+, aux 0x10+)
- *   - sub_param: 0=main mix, 1=CUE1 send, 2=CUE2 send, 3=gainL, 4=gainR
+ *   - sub_param: the kext's bus param, 0=control room / main mix,
+ *     1=HP1 (CUE 1) send, 2=HP2 (CUE 2) send, 3=Aux 1 send, 4=Aux 2 send,
+ *     5=HP3 (CUE 3) send, 6=HP4 (CUE 4) send.  (3 and 4 are NOT gain L/R.)
  *   - value is IEEE 754 float packed as u32 (linear gain, NOT dB)
  *   - Input faders have -3dB offset: linear = 10^((dB-3)/20)
  *   - Aux faders have no offset: linear = 10^(dB/20)
- *   - Each fader change sends 3 writes (sub_param 0, 3, 4)
- *   - Pan sends single write (sub_param 0)
  *   - Mute sets fader to 0.0 (linear silence)
+ *
+ * Sides: the kext's SetMixerBusParam takes (param, side, value) entries, and
+ * the Mixer Engine sends two per bus and param: side 0 = weight into the
+ * left output, side 1 = weight into the right one (pan law x fader x send).
+ * One ioctl carries one value, so one call writes one entry: side 0 by
+ * default, side 1 with UA_BUS_PARAM_F_SIDE_R in flags.  A pan or stereo send
+ * is two calls (left, then right).  The driver never writes the other side
+ * on its own.
  */
 struct ua_mixer_bus_param {
 	__u32 bus_id;		/* Bus identifier (see bus ID map below) */
-	__u32 sub_param;	/* 0=main mix, 1=CUE1 send, 2=CUE2, 3=gainL, 4=gainR */
+	__u32 sub_param;	/* bus param 0-6, see above */
 	__u32 value;		/* IEEE 754 float as u32 (linear gain) */
-	__u32 flags;		/* Always 0x02 from captures */
+	__u32 flags;		/* 0x02 from captures; UA_BUS_PARAM_F_* */
 };
+/* flags: this entry is the right-output weight (side 1); else side 0 */
+#define UA_BUS_PARAM_F_SIDE_R	0x100
 /*
  * Complete Bus ID map (Apollo x4, verified Phase 3e 2026-02-19):
  *   0x0000-0x0003: Analog In 1-4 (mono, mic/line)
@@ -117,10 +127,10 @@ struct ua_mixer_bus_param {
  *   0x0014-0x0017: ADAT In 5-8
  *   0x0018-0x001f: Virtual In 1-8 (DAW playback, 4 stereo pairs)
  *
- * Sub-param: 0=main mix coeff, 1=CUE1 send, 2=CUE2 send,
- *            3=gainL (fader), 4=gainR (fader)
- * Input fader: triplet writes {sub=0, sub=3, sub=4}, unity=0.707
- * Stereo pair: sub=0 to both L+R, sub=3/4 only to L channel
+ * Sub-param: 0=CR/main mix coeff, 1=HP1 (CUE1), 2=HP2 (CUE2), 3=Aux 1,
+ *            4=Aux 2, 5=HP3 (CUE3), 6=HP4 (CUE4); each has a left and a
+ *            right (UA_BUS_PARAM_F_SIDE_R) entry.  A fader or pan move
+ *            writes sub 0 only; unity input fader = 0.707.
  */
 
 /*

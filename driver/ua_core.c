@@ -2219,19 +2219,23 @@ static long ua_ioctl_set_mixer_bus_param(struct ua_device *ua,
 	 * From kext CUAD2DeviceMixer::SetMixerBusParam disassembly:
 	 * bus coefficients are submitted as ring buffer commands (type
 	 * 0x1D, 4 dwords) to DSP 0, NOT via mixer setting registers.
+	 *
+	 * One call writes one (param, side) entry.  The kext's API takes
+	 * two per call, left and right; the struct has room for one value,
+	 * so the caller makes two calls and sets UA_BUS_PARAM_F_SIDE_R on
+	 * the second.  Without the flag (every caller so far sends flags
+	 * 0x02) the entry is side 0, exactly what was always written.
 	 */
 	{
+		u32 side = (bp.flags & UA_BUS_PARAM_F_SIDE_R) ? 1 : 0;
 		int bus_ret;
 
 		mutex_lock(&ua->lock);
-		bus_ret = ua_dsp_set_bus_param(ua, bp.bus_id,
-					       bp.sub_param, bp.value);
+		bus_ret = ua_dsp_set_bus_param(ua, bp.bus_id, bp.sub_param,
+					       side, bp.value);
 		mutex_unlock(&ua->lock);
 		return bus_ret;
 	}
-
-	/* Accept but do not write — bus coefficient DSP path unknown */
-	return 0;
 }
 
 static long ua_ioctl_get_mixer_readback(struct ua_device *ua,

@@ -703,11 +703,16 @@ static inline bool ua_public_output_mute(u32 pt)
  * SEL130 sub-param IDs (verified via DTrace)
  * Each bus write uses one of these sub-parameters.
  */
-#define UA_BUS_SUB_MAIN         0  /* pan-adjusted mix coefficient */
-#define UA_BUS_SUB_CUE1         1  /* CUE 1 send level */
-#define UA_BUS_SUB_CUE2         2  /* CUE 2 send level */
-#define UA_BUS_SUB_GAIN_L       3  /* left gain (fader) */
-#define UA_BUS_SUB_GAIN_R       4  /* right gain (fader) */
+#define UA_BUS_SUB_MAIN         0  /* control-room mix coefficient (fader x pan) */
+#define UA_BUS_SUB_CUE1         1  /* HP1 (CUE 1) send level */
+#define UA_BUS_SUB_CUE2         2  /* HP2 (CUE 2) send level */
+#define UA_BUS_SUB_AUX1         3  /* Aux 1 send level */
+#define UA_BUS_SUB_AUX2         4  /* Aux 2 send level */
+#define UA_BUS_SUB_CUE3         5  /* HP3 (CUE 3) send level */
+#define UA_BUS_SUB_CUE4         6  /* HP4 (CUE 4) send level */
+/* Old names: 3 and 4 were never a gain L/R pair (the kext's Aux 1 / Aux 2) */
+#define UA_BUS_SUB_GAIN_L       UA_BUS_SUB_AUX1
+#define UA_BUS_SUB_GAIN_R       UA_BUS_SUB_AUX2
 
 /*
  * Hardware Readback Field Macros
@@ -1475,7 +1480,7 @@ int ua_dsp_send_raw_dma(struct ua_device *ua, unsigned int dsp_idx,
 int ua_dsp_test_send_block(struct ua_device *ua);
 int ua_dsp_send_routing(struct ua_device *ua);
 int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
-			 u32 sub_param, u32 value_u32);
+			 u32 param, u32 side, u32 value_u32);
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
 int ua_dsp_send_rate_ack(struct ua_device *ua, u32 rate);
 void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx);

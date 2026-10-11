@@ -3404,7 +3404,9 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
  *
  *   word0: 0x001D0004   (cmd type 0x1D, 4 dwords)
  *   word1: bus_id        (0x00-0x1F)
- *   word2: sub_param     (0=main, 1=CUE1, 2=CUE2, 3=gainL, 4=gainR)
+ *   word2: (side << 24) | param    (kext SetMixerBusParam, parity/14 s5)
+ *          param: 0 CR, 1 HP1, 2 HP2, 3 Aux 1, 4 Aux 2, 5 HP3, 6 HP4
+ *          side:  0 = left output weight, 1 = right output weight
  *   word3: value         (IEEE 754 float as u32)
  *
  * This is a COMPLETELY DIFFERENT hardware path from SEL131/SEL132
@@ -3412,6 +3414,8 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
  * ---------------------------------------------------------------- */
 
 #define UA_DSP_CMD_BUS_PARAM	0x001D0004
+#define UA_DSP_CMD_INPUT_PARAM	0x001E0004
+#define UA_DSP_CMD_BUS_ENABLE	0x001C0003
 
 /**
  * ua_dsp_ring_reset - Sync software write_ptr to FPGA POSITION
@@ -3440,16 +3444,22 @@ void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx)
 }
 
 /**
- * ua_dsp_set_bus_param - Send a bus coefficient to DSP via ring buffer
+ * ua_dsp_set_bus_param - Send one bus coefficient entry to the DSP
  * @ua: device (caller must hold ua->lock)
- * @bus_id: bus identifier (0x00-0x1F)
- * @sub_param: sub-parameter (0=main, 1=CUE1, 2=CUE2, 3=gainL, 4=gainR)
+ * @bus_id: input bus (0x00-0x1F)
+ * @param: 0 CR, 1 HP1, 2 HP2, 3 Aux 1, 4 Aux 2, 5 HP3, 6 HP4
+ * @side: 0 = left, 1 = right output weight
  * @value_u32: coefficient as IEEE 754 float packed in u32
+ *
+ * One call is one entry of the kext's SetMixerBusParam, sent as
+ * {0x001D0004, bus, (side << 24) | param, value}.  The Mixer Engine sends
+ * two entries per bus and param (L and R), so a caller that wants pan or a
+ * stereo send calls this twice.
  *
  * Returns 0 on success, negative errno on failure.
  */
 int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
-			 u32 sub_param, u32 value_u32)
+			 u32 param, u32 side, u32 value_u32)
 {
 	struct ua_dsp_state *dsp0 = &ua->dsp[0];
 	u32 bank_base = ua_dsp_base(0);
@@ -3460,13 +3470,13 @@ int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 	if (!dsp0->rings_allocated)
 		return -ENODEV;
 
-	if (bus_id > 0x1f || sub_param > 6)
+	if (bus_id > 0x1f || param > 6 || side > 1)
 		return -EINVAL;
 
 	entry = (struct ua_ring_entry){
 		.word0 = cpu_to_le32(UA_DSP_CMD_BUS_PARAM),
 		.word1 = cpu_to_le32(bus_id),
-		.word2 = cpu_to_le32(sub_param),
+		.word2 = cpu_to_le32((side << 24) | param),
 		.word3 = cpu_to_le32(value_u32),
 	};
 
@@ -3478,8 +3488,8 @@ int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 	ret = ua_dsp_ring_put_entry(ua, &dsp0->cmd, &entry);
 	if (ret) {
 		dev_warn_ratelimited(&ua->pdev->dev,
-				     "bus_param ring full (bus=%u sub=%u pos=%u wr=%u)\n",
-				     bus_id, sub_param, dsp0->cmd.hw_pos,
+				     "bus_param ring full (bus=%u param=%u side=%u pos=%u wr=%u)\n",
+				     bus_id, param, side, dsp0->cmd.hw_pos,
 				     dsp0->cmd.write_ptr);
 		return ret;
 	}
