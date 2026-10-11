@@ -1153,6 +1153,10 @@ class HardwareBackend:
         self._cli_frozen = False     # Set True on first CLI timeout — stops all CLI
         self.last_errno = 0          # errno of the last failed set_mixer_param
         self._features: int | None = None   # GET_VERSION feature bits, cached
+        # True while the driver says the device is paused for system
+        # suspend (UA_PAUSE_DEVICE): every write is refused, see
+        # HardwareRouter.set_paused
+        self.paused = False
 
     def open(self, device_path: str | None = None) -> bool:
         """Open the device node. Auto-discovers /dev/ua_apollo* if no path given."""
@@ -1281,6 +1285,8 @@ class HardwareBackend:
 
     def reg_write(self, offset: int, value: int) -> bool:
         """Write a BAR0 register. Returns True on success."""
+        if self.paused:
+            return False
         if self.fd < 0:
             return False
         buf = struct.pack("II", offset, value & 0xFFFFFFFF)
@@ -1312,6 +1318,8 @@ class HardwareBackend:
             value: 32-bit setting value
             mask:  Changed-bits mask (default all bits = 0xFFFFFFFF)
         """
+        if self.paused:
+            return False
         if index < 0 or index >= MIXER_SETTING_COUNT:
             log.error("mixer_write_setting: index %d out of range (0-%d)",
                       index, MIXER_SETTING_COUNT - 1)
@@ -1526,6 +1534,8 @@ class HardwareBackend:
         Returns:
             True on success
         """
+        if self.paused:
+            return False
         # Build the 36-byte CLI command matching the kernel driver's
         # ua_preamp_set_param(): {param_id, value, 0, 0, 0, hw_id, 0, 0, 8}
         cli_payload = struct.pack('<9I',
@@ -1620,6 +1630,12 @@ class HardwareBackend:
             param_id:     Parameter ID (preamp or monitor param)
             value:        Integer parameter value
         """
+        if self.paused:
+            log.debug("MIXER_PARAM refused (device paused): ch_type=%d "
+                      "ch_idx=%d param=0x%02x", channel_type, channel_idx,
+                      param_id)
+            return False
+
         # Safe mode: allow preamp (1) and monitor (2) — kernel handles routing
         if self.safe_mode and channel_type not in (PREAMP_CHANNEL_TYPE, MONITOR_CHANNEL_TYPE):
             log.debug("MIXER_PARAM BLOCKED (safe_mode): ch_type=%d ch_idx=%d "
@@ -2021,6 +2037,8 @@ class HardwareBackend:
         Struct: {param_id: u32, reserved: u32, value: u64} = 16 bytes.
         Used for sample rate (param 0) and clock source (param 1).
         """
+        if self.paused:
+            return False
         if self.fd < 0:
             log.info("HW DRV: set_driver_param(param=%d, val=%d) (no device)",
                      param_id, value)
@@ -2211,6 +2229,8 @@ class HardwareRouter:
         # this from the detected model: the x4 does).
         self._settle: dict | None = None
         self.supports_outputs_attenuate = False
+        # Device paused for system suspend: no hardware writes (set_paused)
+        self.paused = False
         self._sync_driver_state()
 
     def _sync_driver_state(self):
@@ -2512,8 +2532,18 @@ class HardwareRouter:
                 return float(val)
         return -144.0  # default silence
 
+    def set_paused(self, paused: bool):
+        """Stop (True) or allow (False) every hardware write: the device is
+        paused for system suspend (UA_EVT_PAUSED, reason UA_PAUSE_DEVICE).
+        The state tree keeps taking changes; the resume push writes them."""
+        self.paused = bool(paused)
+        self.backend.paused = self.paused
+
     def on_set(self, path: str, value: Any):
         """Called by state_tree when a value changes. Route to hardware."""
+        if self.paused:
+            log.debug("SET %s = %r (device paused, tree only)", path, value)
+            return
         # Try each pattern in priority order
         m = _RE_PREAMP.match(path)
         if m:

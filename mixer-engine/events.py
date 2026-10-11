@@ -34,6 +34,16 @@ UA_EVT_CONNECTED = 0x1001        # probe, resume, reconnect
 UA_EVT_LAYOUT_CHANGED = 0x1002   # arg = (play_hw_channels << 16) | rec_hw_channels
 UA_EVT_EVENTS_LOST = 0x1003      # arg = events dropped
 UA_EVT_CLOCK_LOCK = 0x1004       # arg = 1 locked, 0 unlocked
+UA_EVT_PAUSED = 0x1005           # arg = the UA_PAUSE_* bit that was set
+UA_EVT_RESUMED = 0x1006          # arg = the UA_PAUSE_* bit that was cleared
+
+# Pause reasons (driver/ua_ioctl.h).  UA_PAUSE_DEVICE is system suspend and
+# the moment before a unit is removed; the others are the driver's own
+# audio housekeeping (rate change, phase, idle) and do not concern the mixer.
+UA_PAUSE_PHASE = 0x1
+UA_PAUSE_RATE = 0x2
+UA_PAUSE_DEVICE = 0x4
+UA_PAUSE_IDLE = 0x8
 
 EVENT_NAMES = {
     UA_EVT_RATE_INFO: "RATE_INFO",
@@ -47,6 +57,8 @@ EVENT_NAMES = {
     UA_EVT_LAYOUT_CHANGED: "LAYOUT_CHANGED",
     UA_EVT_EVENTS_LOST: "EVENTS_LOST",
     UA_EVT_CLOCK_LOCK: "CLOCK_LOCK",
+    UA_EVT_PAUSED: "PAUSED",
+    UA_EVT_RESUMED: "RESUMED",
 }
 
 # read() errors that mean "the device went away"

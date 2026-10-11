@@ -46,7 +46,8 @@ from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UA_EVT_RATE_CHANGED, UA_EVT_CLOCK_CHANGED,
                     UA_EVT_NOTIF_STATUS, UA_EVT_DEVICE_OFFLINE,
                     UA_EVT_CONNECTED, UA_EVT_LAYOUT_CHANGED,
-                    UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK)
+                    UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK,
+                    UA_EVT_PAUSED, UA_EVT_RESUMED, UA_PAUSE_DEVICE)
 from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, HardwareBackend,
                       HardwareRouter, fader_db_to_tapered,
@@ -373,6 +374,9 @@ class MixerDaemon:
         self._settle_timer = None
         self.io_layout: tuple[int, int] | None = None   # (play, rec) hw channels
         self.layout_changes = 0     # bumped by every LAYOUT_CHANGED event
+        # True between UA_EVT_PAUSED and UA_EVT_RESUMED for the device
+        # reason (system suspend): no hardware writes, the tree keeps going
+        self.hw_paused = False
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -452,6 +456,7 @@ class MixerDaemon:
         log.warning("Apollo device lost — daemon stays up, reopening with backoff")
         self._events_detach()
         self._cancel_settle()
+        self._set_hw_paused(False)   # the next connection starts clean
         self._hw_online = False
         self._ready_at = None
         # The watchdog owns the init push for the next connection
@@ -1189,6 +1194,12 @@ class MixerDaemon:
             self.layout_changes += 1
             log.info("I/O layout changed: %d play / %d rec channels",
                      *self.io_layout)
+        elif code == UA_EVT_PAUSED:
+            if arg & UA_PAUSE_DEVICE:
+                self._on_device_paused()
+        elif code == UA_EVT_RESUMED:
+            if arg & UA_PAUSE_DEVICE:
+                self._on_device_resumed()
         elif code == UA_EVT_EVENTS_LOST:
             log.warning("Driver event queue overflowed (%d dropped): "
                         "refreshing everything", arg)
@@ -1196,6 +1207,46 @@ class MixerDaemon:
         elif code in (UA_EVT_IODESC_IN, UA_EVT_IODESC_OUT,
                       UA_EVT_NOTIF_STATUS):
             pass    # raw firmware notifications: the decoded events follow
+
+    # ── Sleep / wake (04 H6) ─────────────────────────────────────────
+
+    def _set_hw_paused(self, paused: bool):
+        self.hw_paused = bool(paused)
+        if self.hw_router:
+            self.hw_router.set_paused(paused)
+
+    def _on_device_paused(self):
+        """SystemSleep: the driver is suspending the device.  Whatever the
+        daemon would still write (a settle mute to lift, an Identify blink)
+        is finished first, then every hardware write is refused until
+        RESUMED; the tree keeps taking client changes."""
+        if self.hw_paused:
+            return
+        log.info("Device paused for system suspend: hardware writes stopped")
+        self._cancel_settle()
+        self._set_hw_paused(True)
+
+    def _on_device_resumed(self):
+        """SystemWake: push the whole tree again, as after a connect: the
+        init sequence (preamp and monitor values from the hardware's own
+        readback, as in a warm start) and the A6 re-apply of what the
+        hardware cannot report back."""
+        was_paused = self.hw_paused
+        self._set_hw_paused(False)
+        if not self.hw_router or not self._hw_online:
+            return      # the watchdog owns the push for a new connection
+        if not self.hw_router.backend.connected:
+            return
+        log.info("Device resumed%s: re-pushing the tree",
+                 "" if was_paused else " (no pause was seen)")
+        self._push_defaults_to_hardware()
+        self._hw_init_done = True
+        self._readback_start_time = time.monotonic()
+        self._poll_driver_rate(force=True)
+        self._refresh_clock_source()
+        rb = self.hw_router.poll_hw_readback()
+        if rb:
+            self._sync_hw_readback(rb, {})   # empty last_rb → push all
 
     def _poll_dsp_load(self):
         """Poll DSP load and push to state tree at ~1 Hz.
@@ -1444,7 +1495,7 @@ class MixerDaemon:
         for type 0x01 (post-DSP) capture channels (Mic 3-4, Virtual,
         S/PDIF, etc.) which route through the DSP mixer.
         """
-        if not self.hw_router:
+        if not self.hw_router or self.hw_paused:
             return
 
         rb = self.hw_router.poll_hw_readback()
