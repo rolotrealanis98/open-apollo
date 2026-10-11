@@ -769,10 +769,10 @@ static u32 ua_dsp_connect_date(void)
  * eight reset strobes and leaves them in the cached value (issue #46).
  * Off: the long-standing x4 behaviour, byte for byte.
  */
-static bool dma_per_dsp;
+static bool dma_per_dsp = true;
 module_param(dma_per_dsp, bool, 0444);
 MODULE_PARM_DESC(dma_per_dsp,
-		 "Ring init sets one DMA_CTRL enable bit per DSP (macOS EnableDMA) and never leaves a reset strobe set, instead of OR-ing 0x1FFFE (default: off; changes the x4 cold and warm DMA_CTRL value)");
+		 "Ring init sets one DMA_CTRL enable bit per DSP (macOS EnableDMA) and never leaves a reset strobe set (default: on; 0 = the old OR of 0x1FFFE, which after a cold start can leave DMA_CTRL at 0x1ffff with every reset strobe asserted and the DSP command rings unserviced)");
 
 /* ----------------------------------------------------------------
  * Ring init / cleanup for all DSPs
