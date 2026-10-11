@@ -468,7 +468,8 @@ static void ua_dma_ring_sync_frames(struct device *dev,
 	}
 }
 
-static void ua_audio_free_dma(struct ua_device *ua)
+/* Idempotent; also the probe-failure path's (ua_probe_unwind_dsp()) */
+void ua_audio_free_dma(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct device *dev = &ua->pdev->dev;
@@ -3087,6 +3088,16 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
 	if (!audio->rec_buf || !audio->connected)
 		return -ENODEV;
 
+	/*
+	 * It reprograms and finally stops the transport and overwrites the
+	 * record ring: never under open streams.  ua->lock is dropped during
+	 * the wait below, so dma_test_active keeps pcm_prepare off until it
+	 * is done.
+	 */
+	if (audio->play_sub || audio->rec_sub || audio->transport_running)
+		return -EBUSY;
+	audio->dma_test_active = true;
+
 	if (dt->delay_ms < 50)
 		dt->delay_ms = 50;
 	if (dt->delay_ms > 2000)
@@ -3110,7 +3121,8 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
 	down_read(&audio->dma_sem);
 	if (!audio->rec_buf) {
 		up_read(&audio->dma_sem);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto out;
 	}
 	memset(audio->rec_buf, 0xDE, UA_DMA_BUF_SIZE);
 	ua_dma_ring_sync(dev, &audio->rec_ring, 0, UA_DMA_BUF_SIZE, true);
@@ -3120,10 +3132,10 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
 	/* Start transport via proper prepare+start sequence */
 	ret = ua_audio_prepare_transport(ua, 0);
 	if (ret)
-		return ret;
+		goto out;
 	ret = ua_audio_start_transport(ua);
 	if (ret)
-		return ret;
+		goto out;
 
 	/* Clock write if requested */
 	if (dt->flags & 1) {
@@ -3145,7 +3157,8 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
 	down_read(&audio->dma_sem);
 	if (atomic_read(&ua->shutdown) || !audio->rec_buf) {
 		up_read(&audio->dma_sem);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto out;
 	}
 	ua_dma_ring_sync(dev, &audio->rec_ring, 0, UA_DMA_BUF_SIZE, false);
 
@@ -3163,17 +3176,18 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
 	memcpy(dt->data, audio->rec_buf, sizeof(dt->data));
 	up_read(&audio->dma_sem);
 
-	/* Stop transport */
-	ua_write(ua, UA_REG_AX_CONTROL, 0);
-	audio->transport_running = false;
-
 	dev_info(&ua->pdev->dev,
 		 "dma_test: SP=%u canary_gone=%u audio=%u DMA_CTRL=0x%08x\n",
 		 dt->sample_pos, dt->nonzero,
 		 dt->non_zero_non_canary,
 		 ua_read(ua, UA_REG_DMA_CTRL));
-
-	return 0;
+	ret = 0;
+out:
+	/* Stop the transport it started, on every path */
+	ua_write(ua, UA_REG_AX_CONTROL, 0);
+	audio->transport_running = false;
+	audio->dma_test_active = false;
+	return ret;
 }
 
 /* ----------------------------------------------------------------
@@ -3966,7 +3980,7 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 }
 
 /* Body of ua_pcm_prepare(); caller holds ua->lock */
-static int __attribute__((optimize("O1")))
+static int UA_GCC_OPTIMIZE("O1")
 ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 {
 	struct ua_audio *audio = &ua->audio;
@@ -4242,6 +4256,13 @@ static int ua_pcm_prepare(struct snd_pcm_substream *sub)
 	}
 
 	mutex_lock(&ua->lock);
+
+	/* UA_IOCTL_DMA_TEST owns the transport (it drops the lock to wait) */
+	if (audio->dma_test_active) {
+		mutex_unlock(&ua->lock);
+		return -EBUSY;
+	}
+
 	timer_was_running = audio->period_timer_running;
 
 	ret = ua_pcm_prepare_locked(ua, sub);
@@ -4291,16 +4312,19 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 	u32 sp;
 	snd_pcm_uframes_t pos, period_size;
 
-	if (!audio->period_timer_running || !audio->transport_running)
+	if (!audio->period_timer_running)
 		return HRTIMER_NORESTART;
 
-	/* Device removed — stop timer immediately */
-	if (atomic_read(&ua->shutdown)) {
-		audio->period_timer_running = false;
-		return HRTIMER_NORESTART;
-	}
-
-	sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
+	/*
+	 * Device removed or failed (AER sets the shutdown flag and clears
+	 * transport_running), or the transport stopped under running
+	 * streams: their pointer would freeze with no wakeups, so push them
+	 * into XRUN as on a dead link below; pcm_prepare then fails or
+	 * restarts the transport.
+	 */
+	sp = 0xFFFFFFFF;
+	if (!atomic_read(&ua->shutdown) && audio->transport_running)
+		sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
 	if (sp == 0xFFFFFFFF) {
 		/*
 		 * Link down (Thunderbolt drop, power-off, AER): every
@@ -4310,8 +4334,9 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 		 * FPGA_REV == ~0 and fails cleanly instead of hanging.
 		 */
 		audio->period_timer_running = false;
-		dev_err_ratelimited(&ua->pdev->dev,
-				    "period timer: BAR0 reads all-ones (link down), stopping streams\n");
+		if (!atomic_read(&ua->shutdown) && audio->transport_running)
+			dev_err_ratelimited(&ua->pdev->dev,
+					    "period timer: BAR0 reads all-ones (link down), stopping streams\n");
 		spin_lock_irqsave(&audio->lock, flags);
 		if (audio->play_sub)
 			snd_pcm_stop_xrun(audio->play_sub);
@@ -4362,31 +4387,51 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 {
 	struct ua_device *ua = snd_pcm_substream_chip(sub);
 	struct ua_audio *audio = &ua->audio;
+	unsigned long flags;
+	unsigned int dir;
 
 	if (atomic_read(&ua->shutdown))
 		return -ENODEV;
 
+	dir = sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? UA_DIR_PLAY :
+							  UA_DIR_REC;
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
-		audio->last_play_period_pos = 0;
-		audio->last_rec_period_pos = 0;
+		spin_lock_irqsave(&audio->timer_lock, flags);
+		/* Only this direction's period tracking starts over */
+		if (dir == UA_DIR_PLAY)
+			audio->last_play_period_pos = 0;
+		else
+			audio->last_rec_period_pos = 0;
+		__set_bit(dir, &audio->running_subs);
 		audio->period_timer_running = true;
 		hrtimer_start(&audio->period_timer,
 			      ms_to_ktime(1), HRTIMER_MODE_REL_SOFT);
+		spin_unlock_irqrestore(&audio->timer_lock, flags);
 		return 0;
 
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		/*
+		 * The timer is shared: one substream stopping (a short aplay
+		 * ending while arecord runs) must not take the other's period
+		 * wakeups away, so it stops only when neither runs.
+		 *
 		 * Use try_to_cancel — NOT hrtimer_cancel.
 		 * trigger(STOP) can be called from snd_pcm_period_elapsed()
 		 * inside the hrtimer callback itself (xrun path).
 		 * hrtimer_cancel() would deadlock waiting for the callback
 		 * that is calling us.
 		 */
-		audio->period_timer_running = false;
-		hrtimer_try_to_cancel(&audio->period_timer);
+		spin_lock_irqsave(&audio->timer_lock, flags);
+		__clear_bit(dir, &audio->running_subs);
+		if (!audio->running_subs) {
+			audio->period_timer_running = false;
+			hrtimer_try_to_cancel(&audio->period_timer);
+		}
+		spin_unlock_irqrestore(&audio->timer_lock, flags);
 		return 0;
 
 	default:
@@ -6414,7 +6459,7 @@ int ua_audio_resume(struct ua_device *ua, enum ua_resume_how how)
 	return ret;
 }
 
-__attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
+int ua_audio_init(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 	struct snd_card *card;
@@ -6422,6 +6467,8 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 	int ret;
 
 	spin_lock_init(&audio->lock);
+	spin_lock_init(&audio->timer_lock);
+	audio->running_subs = 0;
 	init_rwsem(&audio->dma_sem);
 	mutex_init(&audio->io_lock);
 	INIT_DELAYED_WORK(&audio->dsp_service_work, ua_dsp_service_handler);
@@ -6612,10 +6659,15 @@ void ua_audio_fini(struct ua_device *ua)
 	ua_write(ua, UA_REG_TRANSPORT, 0);
 	msleep(100);
 
-	/* Free ALSA resources — disconnect first so any open fds see errors */
+	/*
+	 * Free the ALSA card: disconnect (open files get errors), then wait
+	 * until every PCM and control file is closed.  The PCM close and
+	 * the controls use this struct and the DMA rings, so neither may go
+	 * away before; snd_card_free_when_closed() returned at once and let
+	 * a later close run on freed memory.
+	 */
 	if (audio->card) {
-		snd_card_disconnect(audio->card);
-		snd_card_free_when_closed(audio->card);
+		snd_card_free(audio->card);
 		audio->card = NULL;
 	}
 

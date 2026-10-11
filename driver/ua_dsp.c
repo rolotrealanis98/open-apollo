@@ -32,7 +32,6 @@
 #include <linux/slab.h>
 #include <linux/timekeeping.h>
 
-#include "ua_dsp_programs.h"
 #include "ua_dsp_modules.h"
 
 #include "ua_apollo.h"
@@ -1296,8 +1295,10 @@ free_cmd:
  * First sends it inline as a baseline, then tries 6 DMA ref variations.
  * Logs results to dmesg for each format.
  */
+#ifndef __clang__	/* clang has no "GCC optimize" (see UA_GCC_OPTIMIZE) */
 #pragma GCC push_options
 #pragma GCC optimize("O1")
+#endif
 int ua_dsp_test_dma_ref(struct ua_device *ua)
 {
 	struct ua_dsp_state *dsp0 = &ua->dsp[0];
@@ -1601,7 +1602,9 @@ int ua_dsp_test_dma_ref(struct ua_device *ua)
 			      &dsp0->cmd, cmd_gen, &dsp0->resp, resp_gen);
 	return 0;
 }
+#ifndef __clang__
 #pragma GCC pop_options
+#endif
 
 /* ----------------------------------------------------------------
  * _sendBlock — send a data block to a DSP via ring buffer
@@ -1673,6 +1676,22 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 	ret = ua_dsp_ring_wait_space(ua, &ds->cmd, 1 + num_pages, 1000);
 	if (ret)
 		return ret;
+
+	/*
+	 * The DSP fills response descriptors in ring order, so one left
+	 * queued by an earlier command that never got its answer (a
+	 * timeout, or the unwind below) would take this command's response,
+	 * and every later sendBlock on this DSP would time out.  Resync the
+	 * response ring first; the abandoned descriptor's buffer stays
+	 * parked (orphans) until the ring is provably past it.
+	 */
+	if (ds->resp.live) {
+		ret = ua_dsp_ring_update_pos(ua, &ds->resp);
+		if (ret)
+			return ret;
+		if (ua_dsp_ring_pending(&ds->resp))
+			ua_dsp_ring_program(ua, &ds->resp, resp_base);
+	}
 
 	/* Allocate header DMA buffer (holds 1 command dword) */
 	hdr_buf = dma_alloc_coherent(&ua->pdev->dev, UA_PCIE_PAGE_SIZE,
@@ -2050,14 +2069,14 @@ int ua_dsp_send_raw_dma(struct ua_device *ua, unsigned int dsp_idx,
 	return 0;
 }
 
-/**
+/*
  * ua_dsp_test_send_block - Test sendBlock with connect + response ring
  * @ua: device (must hold ua->lock)
  *
  * Sends the connect command via both DMA ref and inline-with-addr formats,
  * checking the response ring for DSP replies.
  */
-int __attribute__((optimize("O1"))) ua_dsp_test_send_block(struct ua_device *ua)
+int UA_GCC_OPTIMIZE("O1") ua_dsp_test_send_block(struct ua_device *ua)
 {
 	struct ua_dsp_state *dsp0 = &ua->dsp[0];
 	u32 bank_base = ua_dsp_base(0);
@@ -2791,8 +2810,9 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 		block_size = le32_to_cpup((__le32 *)&data[entry_off + 4]);
 		block_offset = le32_to_cpup((__le32 *)&data[entry_off + 8]);
 
-		/* Validate block bounds */
-		if (block_offset + block_size > fw->size) {
+		/* Validate block bounds (no u32 wraparound) */
+		if (block_size > fw->size ||
+		    block_offset > fw->size - block_size) {
 			dev_err(&ua->pdev->dev,
 				"block %u overflows firmware (off=%u size=%u total=%zu)\n",
 				i, block_offset, block_size, fw->size);
@@ -2867,14 +2887,18 @@ int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx)
 		return ret;
 
 	data = fw->data;
+	header_size = 16;
+	num_blocks = fw->size >= 16 ? le32_to_cpup((__le32 *)&data[8]) : 0;
+
+	/* The same header checks as ua_dsp_load_mixer_blocks() */
 	if (fw->size < 16 ||
-	    le32_to_cpup((__le32 *)&data[0]) != UA_MIXER_FW_MAGIC) {
+	    le32_to_cpup((__le32 *)&data[0]) != UA_MIXER_FW_MAGIC ||
+	    le32_to_cpup((__le32 *)&data[4]) != UA_MIXER_FW_VERSION ||
+	    num_blocks == 0 || num_blocks > 64 ||
+	    fw->size < header_size + num_blocks * 12) {
 		release_firmware(fw);
 		return -EINVAL;
 	}
-
-	num_blocks = le32_to_cpup((__le32 *)&data[8]);
-	header_size = 16;
 
 	for (i = 0; i < num_blocks; i++) {
 		u32 sram_addr, block_size, block_offset;
@@ -2884,8 +2908,11 @@ int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx)
 		block_size = le32_to_cpup((__le32 *)&data[entry_off + 4]);
 		block_offset = le32_to_cpup((__le32 *)&data[entry_off + 8]);
 
-		if (block_offset + block_size > fw->size || (block_size & 3))
+		if (block_size > fw->size ||
+		    block_offset > fw->size - block_size || (block_size & 3)) {
+			ret = -EINVAL;
 			break;
+		}
 
 		ret = ua_dsp_send_block(ua, dsp_idx, 0x120000, 0x80040000,
 					&data[block_offset], block_size);
@@ -3121,9 +3148,9 @@ int ua_dsp_load_plugin_payloads(struct ua_device *ua)
 		payload_bytes = le32_to_cpup((__le32 *)&data[entry_off + 4]);
 		payload_off   = le32_to_cpup((__le32 *)&data[entry_off + 8]);
 
-		if (!payload_bytes ||
+		if (!payload_bytes || payload_bytes > fw->size ||
 		    payload_off < data_offset ||
-		    payload_off + payload_bytes > fw->size) {
+		    payload_off > fw->size - payload_bytes) {
 			dev_err(&ua->pdev->dev,
 				"plugin fw entry %u bad range "
 				"(off=%u bytes=%u total=%zu)\n",
@@ -3298,6 +3325,7 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 			const u32 *cmd = ua_plugin_chain_data[i + j];
 			u32 word2 = cmd[2];
 			u32 word3 = cmd[3];
+			u32 ref_dwords;
 
 			/*
 			 * Optionally skip BUS_COEFF commands (0x001D0004).
@@ -3322,6 +3350,15 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 					ua_plugin_lookup_dma(ua, i + j);
 
 				if (!buf) {
+					skipped++;
+					continue;
+				}
+				/* The FPGA reads the captured length: never past the buffer */
+				ref_dwords = cmd[0] & 0x7FFFFFFF;
+				if ((size_t)ref_dwords * 4 > buf->size) {
+					dev_warn_once(&ua->pdev->dev,
+						      "plugin chain: entry %d wants %u dwords, payload has %zu bytes; skipped\n",
+						      i + j, ref_dwords, buf->size);
 					skipped++;
 					continue;
 				}
@@ -3973,72 +4010,5 @@ int ua_dsp_send_routing(struct ua_device *ua)
 		 "IO descriptors written: input=%u words, output=%u words\n",
 		 UA_IO_DESC_WORDS, UA_IO_DESC_WORDS);
 
-	return 0;
-}
-
-/**
- * ua_dsp_load_programs - Send DSP audio routing programs to DSP 0
- *
- * Loads the mixer core, output routing, and capture routing programs
- * captured from macOS kext via DTrace (2026-03-18). These programs
- * tell the DSP how to route audio between preamp inputs, mix buses,
- * and DMA record/playback channels.
- *
- * Must be called after ACEFACE connect completes.
- * Uses ring buffer sendBlock with program command (0x0027012A),
- * NOT firmware load command (0x00120000).
- *
- * Command word from kext disassembly of SEL127 handler at 0x39158:
- *   MOVZ W1, #0x12A; MOVK W1, #0x27, LSL#16 → cmd = 0x0027012A
- *   W2 = 0x1 (param)
- */
-/* Program load command from kext command table at 0x8aade.
- * Different from firmware load (0x00120000) — this is for
- * DSP audio routing programs ("Bill" blocks). */
-#define UA_DSP_PROG_CMD   0x00360000
-#define UA_DSP_PROG_PARAM 0x80040000
-
-int ua_dsp_load_programs(struct ua_device *ua)
-{
-	unsigned int i;
-	int ret;
-
-	if (ua->device_type != UA_DEV_APOLLO_X4) {
-		dev_info(&ua->pdev->dev,
-			 "DSP programs: only x4 supported, skipping\n");
-		return 0;
-	}
-
-	/*
-	 * DSP 0 only.  macOS loads the same 5 "Bill" programs to all
-	 * 4 SHARC DSPs, but Linux currently only firmware-loads DSP 0
-	 * (ua_dsp_load_mixer_blocks / ua-apollo-mixer.bin). Submitting
-	 * program blocks to DSPs 1-3 whose bootloaders are not yet
-	 * firmware-loaded leaves ring state of unclear correctness —
-	 * ship-safe behavior is to stay on the FW-ready DSP 0 until
-	 * the DSP 1-3 FW load path exists.  Extend to all DSPs once
-	 * that lands.
-	 */
-	dev_info(&ua->pdev->dev,
-		 "loading %zu programs for DSP 0\n", UA_X4_DSP0_NUM_PROGRAMS);
-
-	for (i = 0; i < UA_X4_DSP0_NUM_PROGRAMS; i++) {
-		const struct ua_dsp_program *prog = &ua_x4_dsp0_programs[i];
-
-		ret = ua_dsp_send_block(ua, 0,
-					UA_DSP_PROG_CMD, UA_DSP_PROG_PARAM,
-					prog->data, prog->size);
-		if (ret) {
-			dev_err(&ua->pdev->dev,
-				"DSP program %s failed: %d\n",
-				prog->name, ret);
-			return ret;
-		}
-		dev_info(&ua->pdev->dev,
-			 "  DSP0: loaded %s (%u bytes)\n",
-			 prog->name, prog->size);
-	}
-
-	dev_info(&ua->pdev->dev, "DSP audio programs loaded (DSP 0)\n");
 	return 0;
 }

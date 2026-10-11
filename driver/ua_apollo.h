@@ -27,6 +27,18 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 
+/*
+ * Per-function optimisation levels that keep GCC 12/13 clear of internal
+ * compiler errors and bogus warnings on a few large functions.  Clang has
+ * no optimize attribute (it warns, and a -Werror kernel fails the build),
+ * so they apply to GCC only.
+ */
+#ifdef __clang__
+#define UA_GCC_OPTIMIZE(level)
+#else
+#define UA_GCC_OPTIMIZE(level)	__attribute__((optimize(level)))
+#endif
+
 /* PCI Device IDs */
 #define PCI_VENDOR_ID_UA        0x1A00
 #define PCI_DEVICE_ID_UA_UAD2   0x0001  /* UAD-2 PCIe cards */
@@ -970,6 +982,15 @@ struct ua_audio {
 	/* Period elapsed polling timer (replaces unreliable HW timer IRQ) */
 	struct hrtimer period_timer;
 	bool period_timer_running;
+	/*
+	 * Substreams between trigger START and STOP (bit = UA_DIR_*): the
+	 * shared timer stops only when neither runs.  timer_lock serialises
+	 * the triggers' timer start/stop; taken under the PCM stream lock,
+	 * nothing is taken inside it.
+	 */
+	unsigned long running_subs;
+	spinlock_t timer_lock;
+	bool dma_test_active;       /* UA_IOCTL_DMA_TEST owns the transport */
 	snd_pcm_uframes_t last_play_period_pos;
 	snd_pcm_uframes_t last_rec_period_pos;
 
@@ -1064,10 +1085,22 @@ struct ua_device {
 	u32 mixer_rb_data[UA_MIXER_RB_WORDS];  /* Cached readback (filled by service loop) */
 	u32 mixer_rb_status;                   /* Cached readback status */
 
-	/* Character device */
+	/*
+	 * Character device.  chardev owns this struct: its release frees it
+	 * after remove() and the last close of /dev/ua_apolloN, so open
+	 * files and the cdev never point at freed memory.
+	 */
 	struct cdev cdev;
-	struct device *dev;
-	int dev_id;
+	struct device chardev;
+	int dev_id;                 /* -1 until allocated */
+
+	/*
+	 * ioctls run with ioctl_sem held for reading; remove() takes it for
+	 * writing and sets removed, so it waits out an ioctl in flight and
+	 * none starts during or after the teardown.
+	 */
+	struct rw_semaphore ioctl_sem;
+	bool removed;
 
 	/* Synchronization */
 	struct mutex lock;          /* Device access lock */
@@ -1247,6 +1280,7 @@ int ua_audio_preinit_dma(struct ua_device *ua);
 int ua_audio_reprogram_dma(struct ua_device *ua);
 int ua_audio_init(struct ua_device *ua);
 void ua_audio_fini(struct ua_device *ua);
+void ua_audio_free_dma(struct ua_device *ua);
 void ua_audio_suspend(struct ua_device *ua);
 
 /* ua_audio_resume() modes */
@@ -1316,7 +1350,6 @@ int ua_dsp_send_raw_dma(struct ua_device *ua, unsigned int dsp_idx,
 			const void *data, size_t data_size);
 int ua_dsp_test_send_block(struct ua_device *ua);
 int ua_dsp_send_routing(struct ua_device *ua);
-int ua_dsp_load_programs(struct ua_device *ua);
 int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 			 u32 sub_param, u32 value_u32);
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);

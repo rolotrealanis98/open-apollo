@@ -141,7 +141,18 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	 *
 	 * Only ack the specific bits we're handling.
 	 */
-	status_lo = ua_read(ua, UA_REG_IRQ_STATUS) & ua->irq_mask_lo;
+	status_lo = ua_read(ua, UA_REG_IRQ_STATUS);
+
+	/*
+	 * All-ones: the device dropped off the bus (surprise unplug before
+	 * remove raised the shutdown flag).  Not ours, and acking it would
+	 * only feed a shared INTx line spurious work.
+	 */
+	if (status_lo == 0xFFFFFFFF) {
+		spin_unlock_irqrestore(&ua->irq_lock, flags);
+		return IRQ_NONE;
+	}
+	status_lo &= ua->irq_mask_lo;
 
 	if (ua->fw_v2)
 		status_hi = ua_read(ua, UA_REG_EXT_IRQ_STATUS) &
@@ -622,19 +633,6 @@ static long ua_ioctl_write_reg(struct ua_device *ua, unsigned long arg)
  * Registers at BAR0 + 0xC3F4..0xC4FF.
  * ---------------------------------------------------------------- */
 
-static int ua_cli_enable_locked(struct ua_device *ua)
-{
-	if (ua->cli_enabled)
-		return 0;
-
-	ua_write(ua, UA_REG_CLI_ENABLE, 1);
-	usleep_range(900, 1100);
-	ua->cli_enabled = true;
-
-	dev_dbg(&ua->pdev->dev, "CLI interface enabled\n");
-	return 0;
-}
-
 /**
  * ua_cli_send_locked - Send CLI command (kernel-internal helper)
  *
@@ -1036,10 +1034,6 @@ int ua_preamp_set_param(struct ua_device *ua, unsigned int ch,
 
 	mutex_lock(&ua->lock);
 
-	ret = ua_cli_enable_locked(ua);
-	if (ret)
-		goto out;
-
 	memset(cli_cmd, 0, sizeof(cli_cmd));
 	cli_cmd[0] = param_id;
 	cli_cmd[1] = value;
@@ -1048,12 +1042,11 @@ int ua_preamp_set_param(struct ua_device *ua, unsigned int ch,
 
 	ret = ua_cli_send_locked(ua, (u8 *)cli_cmd, 36, NULL, NULL);
 
-out:
 	mutex_unlock(&ua->lock);
 	return ret;
 }
 
-/**
+/*
  * ua_monitor_set_param - Set a monitor parameter via DSP mixer settings
  * @ua: device
  * @ch_idx: monitor channel index (from IOKit captures)
@@ -1071,7 +1064,7 @@ out:
  *
  * Must be called with ua->lock held.
  */
-__attribute__((optimize("Os"))) int
+UA_GCC_OPTIMIZE("Os") int
 ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		     u32 param_id, u32 value)
 {
@@ -1552,92 +1545,24 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
  * Mixer / CLI ioctl handlers
  * ---------------------------------------------------------------- */
 
-#pragma GCC push_options
-#pragma GCC optimize("O1")
-static noinline long ua_ioctl_cli_command(struct ua_device *ua,
-					  unsigned long arg)
+/*
+ * Raw ARM CLI commands freeze the ARM MCU on the Apollo x4 (front panel
+ * and relays dead until a power cycle), which is why ua_cli_send_locked()
+ * refuses everything.  The ioctl used to write the CLI registers itself
+ * and bypass that; it is refused the same way now.
+ */
+static long ua_ioctl_cli_command(struct ua_device *ua, unsigned long arg)
 {
-	struct ua_cli_command cmd;
-	u32 word;
-	unsigned int i, words;
-	int ret;
-
-	if (copy_from_user(&cmd, (void __user *)arg, sizeof(cmd)))
-		return -EFAULT;
-
-	if (cmd.cmd_len == 0 || cmd.cmd_len > UA_CLI_CMD_BUF_SIZE)
-		return -EINVAL;
-
-	mutex_lock(&ua->lock);
-
-	ret = ua_cli_enable_locked(ua);
-	if (ret)
-		goto out_unlock;
-
-	/* Write command buffer */
-	words = (cmd.cmd_len + 3) / 4;
-	for (i = 0; i < words; i++) {
-		word = 0;
-		memcpy(&word, &cmd.cmd_data[i * 4],
-		       min_t(u32, 4, cmd.cmd_len - i * 4));
-		ua_write(ua, UA_REG_CLI_CMD_BUF + i * 4, word);
-	}
-
-	/* Trigger command */
-	ua_write(ua, UA_REG_CLI_STATUS, cmd.cmd_len);
-
-	/* Poll for completion */
-	{
-		u32 status;
-		unsigned int polls;
-
-		ret = -ETIMEDOUT;
-		for (polls = 0; polls < UA_CLI_TIMEOUT_POLLS; polls++) {
-			status = ua_read(ua, UA_REG_CLI_STATUS);
-			if (status == 0 || (status & BIT(31))) {
-				ret = 0;
-				break;
-			}
-			usleep_range(900, 1100);
-		}
-	}
-
-	if (ret) {
-		dev_err(&ua->pdev->dev, "CLI ioctl timeout\n");
-		goto out_unlock;
-	}
-
-	/* Read response */
-	cmd.resp_len = ua_read(ua, UA_REG_CLI_RESP_LEN);
-	if (cmd.resp_len > UA_CLI_RESP_BUF_SIZE)
-		cmd.resp_len = UA_CLI_RESP_BUF_SIZE;
-
-	memset(cmd.resp_data, 0, sizeof(cmd.resp_data));
-	words = (cmd.resp_len + 3) / 4;
-	for (i = 0; i < words; i++) {
-		word = ua_read(ua, UA_REG_CLI_RESP_BUF + i * 4);
-		memcpy(&cmd.resp_data[i * 4], &word, sizeof(word));
-	}
-
-	mutex_unlock(&ua->lock);
-
-	if (copy_to_user((void __user *)arg, &cmd, sizeof(cmd)))
-		return -EFAULT;
-	return 0;
-
-out_unlock:
-	mutex_unlock(&ua->lock);
-	return ret;
+	return -ENOSYS;
 }
-#pragma GCC pop_options
 
 /* GCC 13.3 ICE in try_forward_edges on this large switch — reduce optimization */
-__attribute__((optimize("O1")))
-static noinline __attribute__((optimize("O0"))) long
+UA_GCC_OPTIMIZE("O1")
+static noinline UA_GCC_OPTIMIZE("O0") long
 ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 {
 	struct ua_mixer_param param;
-	int ret = 0;	/* the preamp (type 1) path never set it */
+	int ret = 0;
 	bool notify_alsa = false;
 	bool digital_mode_changed = false;
 	const char *ctl_name = NULL;
@@ -1703,8 +1628,8 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 				flag_set = !!param.value;
 
 			hw_val = flag_set ? hw_mask : 0;
-			ua_mixer_write_setting_locked(ua, setting_idx,
-						      hw_val, hw_mask);
+			ret = ua_mixer_write_setting_locked(ua, setting_idx,
+							    hw_val, hw_mask);
 		} else if (param.param_id == 0x06) {
 			/*
 			 * GainC: 6-bit field at setting[3] (ch0-3) or [14] (ch4-7).
@@ -1723,8 +1648,8 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 				(base_shift + 4) : base_shift;
 			mask = 0x3Fu << shift;
 			value = (param.value & 0x3F) << shift;
-			ua_mixer_write_setting_locked(ua, setting_idx,
-						      value, mask);
+			ret = ua_mixer_write_setting_locked(ua, setting_idx,
+							    value, mask);
 		} else if (param.param_id <= 0x17) {
 			/* GainA(0x0A), GainB(0x09), other: 8-bit byte packing */
 			unsigned int setting_idx;
@@ -1740,10 +1665,19 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 				shift = (param.channel_idx & 3) * 8;
 				value = (param.value & 0xFF) << shift;
 				mask = 0xFF << shift;
-				ua_mixer_write_setting_locked(ua, setting_idx,
-							      value, mask);
+				ret = ua_mixer_write_setting_locked(ua,
+								    setting_idx,
+								    value, mask);
 			}
 		}
+
+		/*
+		 * Not written (mixer not ready: quiesced, or a resume
+		 * re-init still running): report it, and keep the ALSA cache
+		 * on what the hardware has.
+		 */
+		if (ret)
+			break;
 
 		/* Update ALSA cache and prepare notification */
 		ch = param.channel_idx;
@@ -1980,12 +1914,9 @@ static long ua_ioctl_get_mixer_param(struct ua_device *ua, unsigned long arg)
 		return -EFAULT;
 
 	mutex_lock(&ua->lock);
-	ret = ua_cli_enable_locked(ua);
-	if (ret)
-		goto out_unlock;
 
 	switch (param.channel_type) {
-	case 1:  /* Preamp → CLI query */
+	case 1:  /* Preamp → CLI query (refused: see ua_cli_send_locked()) */
 		if (param.channel_idx >= ua->audio.num_preamps ||
 		    param.channel_idx >= UA_MAX_PREAMP_CH) {
 			ret = -EINVAL;
@@ -2361,7 +2292,7 @@ static long ua_ioctl_dsp_send_block(struct ua_device *ua, unsigned long arg)
  * Built at -O2: under this file's -Og, GCC 12 (Debian 12, 6.1 headers)
  * reports a bogus "copy source size is too small" for the heap buffer.
  */
-static noinline __attribute__((optimize("O2"))) long
+static noinline UA_GCC_OPTIMIZE("O2") long
 ua_ioctl_get_io_map(struct ua_device *ua, unsigned long arg)
 {
 	struct ua_io_map_info *info;
@@ -2383,14 +2314,38 @@ ua_ioctl_get_io_map(struct ua_device *ua, unsigned long arg)
  * Main ioctl dispatch
  * ---------------------------------------------------------------- */
 
-static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+/*
+ * Raw register, DMA, DSP-ring and firmware ioctls can point the device's
+ * DMA at any memory or wedge the DSP, so they need CAP_SYS_RAWIO.  The
+ * mixer daemon's ioctls (device info, readback, mixer params and
+ * settings, driver params, IO map) stay open to whoever may open the node.
+ */
+static bool ua_ioctl_needs_rawio(unsigned int cmd)
 {
-	struct ua_device *ua = filp->private_data;
+	switch (cmd) {
+	case UA_IOCTL_WRITE_REG:
+	case UA_IOCTL_RESET_DMA:
+	case UA_IOCTL_CLI_COMMAND:
+	case UA_IOCTL_LOAD_FIRMWARE:
+	case UA_IOCTL_DSP_CONNECT:
+	case UA_IOCTL_DSP_TEST_DMA:
+	case UA_IOCTL_DSP_TEST_SEND:
+	case UA_IOCTL_DSP_SEND_BLOCK:
+	case UA_IOCTL_SEND_ROUTING:
+	case UA_IOCTL_RING_SEND:
+	case UA_IOCTL_LOAD_FW_DSP:
+	case UA_IOCTL_DSP_SRAM_DATA:
+	case UA_IOCTL_DSP_SEND_RAW:
+	case UA_IOCTL_DMA_TEST:
+		return true;
+	default:
+		return false;
+	}
+}
 
-	/* Device removed — reject all ioctls */
-	if (atomic_read(&ua->shutdown))
-		return -ENODEV;
-
+static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
+			      unsigned long arg)
+{
 	switch (cmd) {
 	case UA_IOCTL_GET_DEVICE_INFO:
 		return ua_ioctl_get_device_info(ua, arg);
@@ -2607,6 +2562,24 @@ static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	default:
 		return -ENOTTY;
 	}
+}
+
+static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	struct ua_device *ua = filp->private_data;
+	long ret;
+
+	if (ua_ioctl_needs_rawio(cmd) && !capable(CAP_SYS_RAWIO))
+		return -EPERM;
+
+	/* Held across the ioctl so remove() can wait it out (ioctl_sem) */
+	down_read(&ua->ioctl_sem);
+	if (ua->removed || atomic_read(&ua->shutdown))
+		ret = -ENODEV;
+	else
+		ret = ua_ioctl_dispatch(ua, cmd, arg);
+	up_read(&ua->ioctl_sem);
+	return ret;
 }
 
 static const struct file_operations ua_fops = {
@@ -2838,7 +2811,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 
 			/*
 			 * No DSP program upload here any more.  The old
-			 * ua_dsp_load_programs() step (command 0x00360000 on
+			 * DSP program step (command 0x00360000 on
 			 * DSP 0) has no counterpart in the kext, never got a
 			 * response on the x4 (sendBlock timed out after 300
 			 * ms, "DSP program load failed: -110" on every cold
@@ -2995,19 +2968,61 @@ static bool ua_wants_intx(struct pci_dev *pdev)
 	}
 }
 
+/*
+ * The chardev's release: the last reference is gone (remove() has run and
+ * /dev/ua_apolloN is closed everywhere), so nothing can reach the struct.
+ */
+static void ua_chardev_release(struct device *dev)
+{
+	struct ua_device *ua = container_of(dev, struct ua_device, chardev);
+
+	pci_dev_put(ua->pdev);
+	kfree(ua);
+}
+
+/*
+ * Probe failed after ua_dsp_init_and_load(): stop the device, then free
+ * what that allocated (DSP rings and the buffers parked on them, plugin
+ * payloads, the audio DMA rings).  With bus mastering off nothing can
+ * DMA into them any more.
+ */
+static void ua_probe_unwind_dsp(struct ua_device *ua)
+{
+	mutex_lock(&ua->lock);
+	ua_hw_quiesce_locked(ua);
+	ua_write(ua, UA_REG_TRANSPORT, 0);
+	mutex_unlock(&ua->lock);
+	msleep(100);
+	pci_clear_master(ua->pdev);
+
+	ua_dsp_rings_fini(ua, true);
+	ua_dsp_free_plugin_payloads(ua);
+	ua_audio_free_dma(ua);
+}
+
 static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct ua_device *ua;
 	bool intx;
 	int ret, devno;
 
-	ua = devm_kzalloc(&pdev->dev, sizeof(*ua), GFP_KERNEL);
+	/*
+	 * Not devm: the struct has to outlive remove() while /dev/ua_apolloN
+	 * is still open; ua_chardev_release() frees it.
+	 */
+	ua = kzalloc(sizeof(*ua), GFP_KERNEL);
 	if (!ua)
 		return -ENOMEM;
 
-	ua->pdev = pdev;
+	ua->pdev = pci_dev_get(pdev);
+	ua->dev_id = -1;
+	device_initialize(&ua->chardev);
+	ua->chardev.class = ua_class;
+	ua->chardev.parent = &pdev->dev;
+	ua->chardev.release = ua_chardev_release;
 	mutex_init(&ua->lock);
 	spin_lock_init(&ua->irq_lock);
+	init_rwsem(&ua->ioctl_sem);
 	INIT_LIST_HEAD(&ua->dma_orphans);
 	INIT_WORK(&ua->resume_work, ua_resume_work);
 	pci_set_drvdata(pdev, ua);
@@ -3016,7 +3031,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = pcim_enable_device(pdev);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to enable PCI device: %d\n", ret);
-		return ret;
+		goto err_put;
 	}
 
 	/*
@@ -3039,7 +3054,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 	if (ret) {
 		dev_err(&pdev->dev, "failed to set DMA mask: %d\n", ret);
-		return ret;
+		goto err_put;
 	}
 
 	/* Map BAR0 — kext asserts minimum 0x2800 (10 KiB) */
@@ -3047,13 +3062,15 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ua->regs_size < UA_MIN_BAR_SIZE) {
 		dev_err(&pdev->dev, "BAR0 too small: %llu < %u\n",
 			(unsigned long long)ua->regs_size, UA_MIN_BAR_SIZE);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_put;
 	}
 
 	ua->regs = pcim_iomap(pdev, 0, 0);
 	if (!ua->regs) {
 		dev_err(&pdev->dev, "failed to map BAR0\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_put;
 	}
 
 	ua->regs_phys = pci_resource_start(pdev, 0);
@@ -3142,7 +3159,8 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	if (ua->num_irq_vectors < 0) {
 		dev_err(&pdev->dev, "no interrupt vectors available\n");
-		return ua->num_irq_vectors;
+		ret = ua->num_irq_vectors;
+		goto err_put;
 	}
 
 	/* An INTx line may be shared; the handler returns IRQ_NONE for
@@ -3156,54 +3174,54 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	ret = ua_dsp_init_and_load(ua, false, !ua_mixer_dsp_alive(ua));
 	if (ret)
-		goto err_free_irq;
-
-	/* Create character device /dev/ua_apolloN */
-	devno = ida_alloc_max(&ua_ida, UA_MAX_DEVICES - 1, GFP_KERNEL);
-	if (devno < 0) {
-		dev_err(&pdev->dev, "no free device numbers\n");
-		ret = devno;
-		goto err_free_irq;
-	}
-	ua->dev_id = devno;
-
-	cdev_init(&ua->cdev, &ua_fops);
-	ua->cdev.owner = THIS_MODULE;
-	ret = cdev_add(&ua->cdev, MKDEV(MAJOR(ua_devno), devno), 1);
-	if (ret) {
-		dev_err(&pdev->dev, "cdev_add failed: %d\n", ret);
-		goto err_ida;
-	}
-
-	ua->dev = device_create(ua_class, &pdev->dev,
-				MKDEV(MAJOR(ua_devno), devno),
-				ua, "ua_apollo%d", devno);
-	if (IS_ERR(ua->dev)) {
-		ret = PTR_ERR(ua->dev);
-		dev_err(&pdev->dev, "device_create failed: %d\n", ret);
-		goto err_cdev;
-	}
+		goto err_dsp;
 
 	/* Initialize audio subsystem (ALSA + DMA) */
 	ret = ua_audio_init(ua);
 	if (ret) {
 		dev_err(&pdev->dev, "audio init failed: %d\n", ret);
-		goto err_device;
+		goto err_dsp;
+	}
+
+	/*
+	 * Character device /dev/ua_apolloN, last: an ioctl may reach the
+	 * service loop, the period timer and the ALSA state, which
+	 * ua_audio_init() has set up by now.
+	 */
+	devno = ida_alloc_max(&ua_ida, UA_MAX_DEVICES - 1, GFP_KERNEL);
+	if (devno < 0) {
+		dev_err(&pdev->dev, "no free device numbers\n");
+		ret = devno;
+		goto err_audio;
+	}
+	ua->dev_id = devno;
+	ua->chardev.devt = MKDEV(MAJOR(ua_devno), devno);
+	ret = dev_set_name(&ua->chardev, "ua_apollo%d", devno);
+	if (ret)
+		goto err_ida;
+
+	cdev_init(&ua->cdev, &ua_fops);
+	ua->cdev.owner = THIS_MODULE;
+	ret = cdev_device_add(&ua->cdev, &ua->chardev);
+	if (ret) {
+		dev_err(&pdev->dev, "cdev_device_add failed: %d\n", ret);
+		goto err_ida;
 	}
 
 	dev_info(&pdev->dev, "registered as /dev/ua_apollo%d\n", devno);
 	return 0;
 
-err_device:
-	device_destroy(ua_class, MKDEV(MAJOR(ua_devno), devno));
-err_cdev:
-	cdev_del(&ua->cdev);
 err_ida:
 	ida_free(&ua_ida, devno);
-err_free_irq:
+err_audio:
+	ua_audio_fini(ua);
+err_dsp:
+	ua_probe_unwind_dsp(ua);
 	free_irq(pci_irq_vector(pdev, 0), ua);
 err_free_irq_vectors:
 	pci_free_irq_vectors(pdev);
+err_put:
+	put_device(&ua->chardev);
 	return ret;
 }
 
@@ -3213,6 +3231,14 @@ static void ua_remove(struct pci_dev *pdev)
 	bool dead = !pci_device_is_present(pdev);
 
 	dev_info(&pdev->dev, "ua_remove: surprise=%d\n", dead);
+
+	/*
+	 * 0. Wait out an ioctl in flight and refuse new ones: nothing below
+	 *    may race an ioctl into the rings, buffers or registers it frees.
+	 */
+	down_write(&ua->ioctl_sem);
+	ua->removed = true;
+	up_write(&ua->ioctl_sem);
 
 	/*
 	 * 1. Stop the software that touches BAR0 on its own: a pending
@@ -3282,9 +3308,10 @@ static void ua_remove(struct pci_dev *pdev)
 	ua_dsp_service_stop(ua);
 
 	/*
-	 * 6. Tear down audio subsystem — disconnects ALSA card,
-	 *    frees DMA buffers.  ua_write calls inside are noops
-	 *    (shutdown flag set), which is correct for surprise removal.
+	 * 6. Tear down audio subsystem — frees the ALSA card (waiting for
+	 *    open PCM and control files to close) and the DMA buffers.
+	 *    ua_write calls inside are noops (shutdown flag set), which is
+	 *    correct for surprise removal.
 	 */
 	ua_audio_fini(ua);
 
@@ -3299,10 +3326,13 @@ static void ua_remove(struct pci_dev *pdev)
 	/* 8. Release plugin-chain DMA payload buffers */
 	ua_dsp_free_plugin_payloads(ua);
 
-	/* 9. Cleanup chardev and IDA */
-	device_destroy(ua_class, MKDEV(MAJOR(ua_devno), ua->dev_id));
-	cdev_del(&ua->cdev);
+	/*
+	 * 9. Chardev and IDA.  An fd still open keeps the struct alive (its
+	 *    ioctls return -ENODEV); the last reference frees it.
+	 */
+	cdev_device_del(&ua->cdev, &ua->chardev);
 	ida_free(&ua_ida, ua->dev_id);
+	put_device(&ua->chardev);
 }
 
 /* ----------------------------------------------------------------
@@ -3319,7 +3349,12 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 	/* Block all new BAR0 access */
 	atomic_set(&ua->shutdown, 1);
 
-	/* Stop DSP service loop before touching hardware state */
+	/*
+	 * Stop the software that touches BAR0: a resume re-init, the DSP
+	 * service loop.  The period timer sees the flag and pushes the
+	 * open streams into XRUN.
+	 */
+	cancel_work_sync(&ua->resume_work);
 	ua_dsp_service_stop(ua);
 
 	/* Mark audio as disconnected — hardware state is gone */
@@ -3335,9 +3370,21 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 	return PCI_ERS_RESULT_NEED_RESET;
 }
 
+/*
+ * The same bring-up as system resume (ua_resume()): with bus mastering
+ * still off, stop the transport, mask the interrupts and pull the DSP
+ * rings back to their positions; then the warm path (SG table and rings
+ * reprogrammed, mixer DSP left running) when the DSP survived, or a cold
+ * re-init deferred to resume_work.  The connect runs from resume_work,
+ * queued by ua_io_resume().  The old code turned bus mastering on first,
+ * reset all DMA engines (which kills a live mixer DSP), never pointed
+ * the device back at the SG table or rings, and read the FPGA revision
+ * through the shutdown guard, so it never recovered.
+ */
 static pci_ers_result_t ua_slot_reset(struct pci_dev *pdev)
 {
 	struct ua_device *ua = pci_get_drvdata(pdev);
+	u32 fpga;
 	int ret;
 
 	dev_info(&pdev->dev, "slot reset\n");
@@ -3347,24 +3394,45 @@ static pci_ers_result_t ua_slot_reset(struct pci_dev *pdev)
 		dev_err(&pdev->dev, "re-enable after slot reset failed: %d\n", ret);
 		return PCI_ERS_RESULT_DISCONNECT;
 	}
+	pci_restore_state(pdev);
 
+	/* The shutdown guard is still up: read past it */
+	fpga = ioread32(ua->regs + UA_REG_FPGA_REV);
+	if (fpga == 0xFFFFFFFF || fpga != ua->fpga_rev) {
+		dev_err(&pdev->dev,
+			"device not back after slot reset (FPGA revision 0x%08x)\n",
+			fpga);
+		return PCI_ERS_RESULT_DISCONNECT;
+	}
+
+	mutex_lock(&ua->lock);
+	atomic_set(&ua->shutdown, 0);
+	ua->aceface_done = false;
+	ua->aceface_failed = false;
+	ua->audio.connected = false;
+	ua->audio.transport_running = false;
+
+	ua_hw_stop_xport_irqs(ua);
+	ua_dsp_rings_neutralize(ua);
 	pci_set_master(pdev);
 
-	/* Verify device is actually reachable after re-enable */
-	ua->fpga_rev = ua_read(ua, UA_REG_FPGA_REV);
-	if (ua->fpga_rev == 0xFFFFFFFF) {
-		dev_err(&pdev->dev,
-			"device still unreachable after slot reset\n");
-		return PCI_ERS_RESULT_DISCONNECT;
+	if (ua_mixer_dsp_alive(ua)) {
+		ret = ua_dsp_init_and_load(ua, true, false);
+	} else {
+		dev_info(&pdev->dev,
+			 "mixer DSP not running after the reset, cold re-init deferred\n");
+		ua->resume_need_init = true;
+		ret = 0;
 	}
-
-	ua_detect_capabilities(ua);
-
-	ret = ua_program_registers(ua);
 	if (ret) {
-		dev_err(&pdev->dev, "hardware re-init after slot reset failed\n");
+		atomic_set(&ua->shutdown, 1);
+		mutex_unlock(&ua->lock);
+		dev_err(&pdev->dev, "re-init after slot reset failed: %d\n",
+			ret);
 		return PCI_ERS_RESULT_DISCONNECT;
 	}
+	ua->resume_pending = true;	/* pcm_prepare waits for the connect */
+	mutex_unlock(&ua->lock);
 
 	return PCI_ERS_RESULT_RECOVERED;
 }
@@ -3373,24 +3441,10 @@ static void ua_io_resume(struct pci_dev *pdev)
 {
 	struct ua_device *ua = pci_get_drvdata(pdev);
 
-	dev_info(&pdev->dev, "I/O resumed\n");
+	dev_info(&pdev->dev, "I/O resumed, reconnecting\n");
 
-	/* Clear shutdown and failure flags — device is back */
-	atomic_set(&ua->shutdown, 0);
-	ua->aceface_failed = false;
-
-	/*
-	 * After PCIe AER slot reset, the DSP service was stopped.
-	 * Restart it if ACEFACE was previously done — the DSP
-	 * state (plugin chains, mixer settings) survives the
-	 * PCIe link reset since the Apollo stays powered.
-	 */
-	if (ua->aceface_done) {
-		ua->audio.connected = true;
-		ua_dsp_service_start(ua);
-		dev_info(&pdev->dev,
-			 "restarted DSP service after AER recovery\n");
-	}
+	/* The connect (and a deferred cold re-init), as after system resume */
+	queue_work(system_freezable_wq, &ua->resume_work);
 }
 
 static const struct pci_error_handlers ua_err_handlers = {

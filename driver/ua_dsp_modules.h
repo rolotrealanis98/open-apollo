@@ -64,17 +64,6 @@ static const u32 ua_mod_extended_wiring[] = {
 #define UA_MOD0_AUX_SRAM	0x000C6FF6
 #define UA_MOD0_AUX_DESC	0x0014000A  /* packed: count=20, start=10 */
 
-/* Biquad filter coefficients (7 words, shared across code modules) */
-static const u32 ua_mod_biquad[7] = {
-	0x3CB5F897,  /* 0.0222133 */
-	0xBF7FEFD4,  /* -0.999753 */
-	0x3F7FF7EA,  /* 0.999877 */
-	0x391565D3,  /* 0.000142477 */
-	0x3F800000,  /* 1.0 */
-	0xBC35FC6C,  /* -0.0111075 */
-	0xBBD21841,  /* -0.00641158 */
-};
-
 /*
  * Per-module SRAM addresses (allocated downward from base 0x9D2FE).
  * Module 0 has extra aux SRAM between sram_io and sram_hdr.
