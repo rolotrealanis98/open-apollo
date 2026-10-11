@@ -11,8 +11,8 @@ Checks, and fails (exit 1) on any error:
      `channel_counts` / `channels`; route channel IDs (unique, type byte
      <-> io kind, name <-> channel number); cue buses, talkback, TOSLink
      rules against the routes; the shape of the per-rate converter latency
-     tables ("latency") and of the monitor taper; the per-rate channel
-     counts ("rate_channels") against the routes.
+     tables ("latency"), the monitor taper, the engine feature flags and
+     the per-rate channel counts ("rate_channels") against the routes.
   2. driver/ua_models_gen.h against the JSON (the same test as
      `gen-driver-models.py --check`).
   3. The hand-written per-model tables against the JSON: the UA_DEV_*
@@ -395,6 +395,7 @@ def check_device(d, rep, type_io):
                       f'(highest virtual channel {max(virt)})')
     check_latency(d, rep)
     check_monitor_taper(d, rep)
+    check_engine_features(d, rep)
     check_rate_channels(d, rep)
     return lists
 
@@ -479,6 +480,62 @@ def check_monitor_taper(d, rep):
     if d.get('desktop') and steps != 54:
         rep.warn(rel, 'desktop model with a 48-step taper (every desktop '
                       'class seen uses 54)')
+
+
+ES9028_OUTPUTS = ('headphone', 'cue', 'monitor', 'monitor_r_surround', 'all')
+FUNC_SWITCH_MODES = ('none', 'alt 2', 'mono', 'dim', 'talkback', 'alt 1')
+
+
+def check_engine_features(d, rep):
+    """Engine feature flags from the MixerType* bodies (N30, N18)."""
+    rel = d['_rel']
+    keys = ('line_ref_level_inputs', 'line_pga_disable', 'es9028_outputs',
+            'func_switch', 'front_panel_switches', 'direct_outputs',
+            'volt876_adat_preamps', 'surround_max_mode')
+    for k in keys:
+        if k not in d:
+            rep.err(rel, f'missing field {k!r}')
+    if any(k not in d for k in keys):
+        return
+    analog = {e['synch_in'] for e in d.get('mixer_inputs') or []
+              if e['name'].startswith('ANALOG')}
+    ref = d['line_ref_level_inputs']
+    if not isinstance(ref, list) or not set(ref) <= analog:
+        rep.err(rel, f'line_ref_level_inputs {ref!r}: must be synch-ins of '
+                     f'ANALOG mixer inputs')
+    pga = d['line_pga_disable']
+    if not isinstance(pga, bool) or (pga and not d.get('preamps')):
+        rep.err(rel, 'line_pga_disable must be a boolean, false without '
+                     'preamps')
+    es = d['es9028_outputs']
+    if not isinstance(es, list) or not set(es) <= set(ES9028_OUTPUTS) or \
+            ('all' in es and len(es) > 1):
+        rep.err(rel, f'es9028_outputs {es!r}: use {ES9028_OUTPUTS}')
+    fs = d['func_switch']
+    if fs is not None:
+        modes = fs.get('modes') if isinstance(fs, dict) else None
+        if not isinstance(modes, list) or 'none' not in modes or \
+                not set(modes) <= set(FUNC_SWITCH_MODES) or \
+                not isinstance(fs.get('second'), bool):
+            rep.err(rel, f'func_switch {fs!r}: {{"modes": [...], '
+                         f'"second": bool}} with modes from '
+                         f'{FUNC_SWITCH_MODES}')
+    fp = d['front_panel_switches']
+    if not isinstance(fp, bool) or (fp and not d.get('desktop')):
+        rep.err(rel, 'front_panel_switches must be a boolean, true only on '
+                     'desktop models')
+    if d['direct_outputs'] not in (0, 8, 16):
+        rep.err(rel, f'direct_outputs {d["direct_outputs"]!r}: 0, 8 or 16')
+    volt = d['volt876_adat_preamps']
+    if volt not in (False, 'hidden'):
+        rep.err(rel, 'volt876_adat_preamps must be false or "hidden"')
+    rec = d['routes']['LoMid'].get('record', [])
+    if volt and not any(int(e['ch_id'], 16) >> 8 == gen.TYPE_ADAT
+                        for e in rec):
+        rep.err(rel, 'volt876_adat_preamps without ADAT inputs')
+    sm = d['surround_max_mode']
+    if sm is not None and (not isinstance(sm, int) or not 1 <= sm <= 10):
+        rep.err(rel, f'surround_max_mode {sm!r}: null or 1-10')
 
 
 RATE_CHANNEL_TYPES = {'adat': gen.TYPE_ADAT, 'spdif': gen.TYPE_SPDIF,

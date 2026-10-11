@@ -150,6 +150,14 @@
     "fpga_to_dsp": 3
   },
   "monitor_taper": {"steps": 54, "db": [-96, -95.5, -75, -60, -55, -52, -49, -46, -43, -40, -37, -35.5, -33, -30.5, -28, -26, -24, -22, -20, -18, -17, -16.5, -16, -15.5, -15, -14.5, -14, -13.5, -13, -12.5, -12, -11.5, -11, -10.5, -10, -9.5, -9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0]},
+  "line_ref_level_inputs": [],
+  "line_pga_disable": true,
+  "es9028_outputs": ["all"],
+  "func_switch": null,
+  "front_panel_switches": true,
+  "direct_outputs": 0,
+  "volt876_adat_preamps": "hidden",
+  "surround_max_mode": null,
   "rate_channels": {"rates": [44100, 48000, 88200, 96000, 176400, 192000], "record": {"adat": [8, 8, 4, 4, 2, 2], "spdif": [2, 2, 2, 2, 0, 0], "virtual": [4, 4, 4, 4, 0, 0]}, "playback": {"virtual": [4, 4, 4, 4, 0, 0]}},
   "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: S/PDIF hidden in ADAT mode, ADAT hidden in S/PDIF mode (both directions follow the input TOSLink mode)."
 }
