@@ -1302,6 +1302,95 @@ int ua_preamp_set_param(struct ua_device *ua, unsigned int ch,
 }
 
 /*
+ * Mixer "kind": CUAD2DeviceMixer::Initialize derives it from the family
+ * UAD2DeviceType, and the kext's parameter handlers gate on it (parity/14
+ * section 2).  The Apollo x4 is family 0x1a, kind 14 (32 buses, 7 bus params,
+ * preamp channels 0-3); the x4 Gen2 / Gen2 TB4 (family 0x26 / 0x28) are
+ * kind 22.
+ *
+ * TODO: ua->device_type is the serial-table type (0x1F for the x4), not the
+ * kext's family type; another change adds the public type.  Until then only
+ * the models whose fold is known are mapped, the rest are UA_MIXER_KIND_NONE
+ * and are not gated (the writes they get today stay as they are).
+ */
+#define UA_MIXER_KIND_NONE	(-1)
+
+static int ua_mixer_kind(const struct ua_device *ua)
+{
+	switch (ua->device_type) {
+	case UA_DEV_APOLLO_X4:
+		return 14;
+	case UA_DEV_APOLLO_X4_GEN2:
+	case UA_DEV_APOLLO_X4_GEN2_TB4:
+		return 22;
+	default:
+		return UA_MIXER_KIND_NONE;
+	}
+}
+
+/* Allowed-kind bit sets from the kext's gates (parity/14 section 2) */
+#define UA_KIND_SET_2A_2D	0x00112022u	/* 1,5,13,16,20 */
+#define UA_KIND_SET_33_35	0x0011202au	/* 1,3,5,13,16,20 */
+#define UA_KIND_SET_42		0x001f3c50u	/* 4,6,10-13,16-20 */
+#define UA_KIND_SET_49		0x001f3c00u	/* 10-13,16-20 */
+#define UA_KIND_SET_3E		0x0060c1f4u	/* 2,4-8,14,15,21,22 */
+#define UA_KIND_SET_41		0x0060c184u	/* 2,7,8,14,15,21,22 */
+#define UA_KIND_SET_69		0x005f7c00u	/* 10-14,16-20,22 */
+#define UA_KIND_SET_10_22	0x007ffc00u	/* 10-22 */
+#define UA_KIND_SET_IN_15	0x006e1c50u	/* 4,6,10-12,17-19, 21, 22 */
+
+static bool ua_kind_allows(int kind, u32 set)
+{
+	return kind == UA_MIXER_KIND_NONE || (set & BIT(kind));
+}
+
+/* Would the kext's SetOtherParam accept this param on this device? */
+static bool ua_other_param_allowed(const struct ua_device *ua, u32 param)
+{
+	int kind = ua_mixer_kind(ua);
+
+	switch (param) {
+	case 0x36:	/* S4 / S5 full words: the original Apollo (kind 3) only */
+	case 0x37:
+		return kind == 3;
+	case 0x2a ... 0x2d:
+		return ua_kind_allows(kind, UA_KIND_SET_2A_2D);
+	case 0x33 ... 0x35:
+		return ua_kind_allows(kind, UA_KIND_SET_33_35);
+	case 0x42:
+		return ua_kind_allows(kind, UA_KIND_SET_42);
+	case 0x49:
+		return ua_kind_allows(kind, UA_KIND_SET_49);
+	case 0x32:
+		return kind == UA_MIXER_KIND_NONE || (kind != 0 && kind != 3);
+	case 0x3e:
+		return ua_kind_allows(kind, UA_KIND_SET_3E);
+	case 0x41:
+		return ua_kind_allows(kind, UA_KIND_SET_41);
+	case 0x69:
+		return ua_kind_allows(kind, UA_KIND_SET_69);
+	case 0x67:
+	case 0x68:
+	case 0x87 ... 0x8a:
+		return ua_kind_allows(kind, UA_KIND_SET_10_22);
+	case 0x83 ... 0x86:	/* Dante-class kind 16 only */
+		return kind == 16;
+	default:
+		return true;
+	}
+}
+
+/*
+ * The kext's 2-bit "swap" fields: value bit 1 goes to the lower field bit
+ * and value bit 0 to the upper one (other params 0x03, 0x06, 0x08, 0x0a,
+ * 0x0f, 0x23, 0x25).  @lo is the lower field bit.
+ */
+static u32 ua_swap2(u32 value, unsigned int lo)
+{
+	return ((value & 2) ? BIT(lo) : 0) | ((value & 1) ? BIT(lo + 1) : 0);
+}
+
+/*
  * ua_monitor_set_param - Set a monitor parameter via DSP mixer settings
  * @ua: device
  * @ch_idx: monitor channel index (from IOKit captures)
@@ -1325,6 +1414,14 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 {
 	unsigned int setting_idx;
 	u32 hw_val, hw_mask;
+
+	/* SetOtherParam: param > 0x8a is -8; some params are kind-gated */
+	if (param_id > 0x8a || !ua_other_param_allowed(ua, param_id)) {
+		dev_dbg(&ua->pdev->dev,
+			"monitor param 0x%x: rejected for this device (kind %d)\n",
+			param_id, ua_mixer_kind(ua));
+		return -EINVAL;
+	}
 
 	switch (param_id) {
 
@@ -1410,9 +1507,10 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		hw_val  = (value & 3) << 24;
 		hw_mask = 0x03000000;
 		break;
-	case UA_MON_PARAM_CUE1_MONO:	/* 0x06 -> bits[21:20] */
+	case UA_MON_PARAM_CUE1_MONO:	/* 0x06 -> bits[21:20], swapped */
+		/* Value bit 0 = mono = field bit 21; bit 1 -> bit 20 */
 		setting_idx = 2;
-		hw_val  = (value & 3) << 20;
+		hw_val  = ua_swap2(value, 20);
 		hw_mask = 0x00300000;
 		break;
 	case UA_MON_PARAM_CUE2_MIX:	/* 0x07 -> bits[27:26] */
@@ -1420,9 +1518,9 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		hw_val  = (value & 3) << 26;
 		hw_mask = 0x0C000000;
 		break;
-	case UA_MON_PARAM_CUE2_MONO:	/* 0x08 -> bits[23:22] */
+	case UA_MON_PARAM_CUE2_MONO:	/* 0x08 -> bits[23:22], swapped */
 		setting_idx = 2;
-		hw_val  = (value & 3) << 22;
+		hw_val  = ua_swap2(value, 22);
 		hw_mask = 0x00C00000;
 		break;
 	case UA_MON_PARAM_UNKNOWN_15:	/* 0x15 -> bit28 */
@@ -1437,10 +1535,9 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		break;
 	case UA_MON_PARAM_MONO:		/* 0x36 -> setting[4] full word */
 		/*
-		 * Legacy kext property ID 0x36.  Only works for
-		 * dev_type==3 (original Apollo).  On x4, mono is
-		 * handled via param 0x03 value=1 (MixToMono).
-		 * Keep for backward compat -- routes to setting[4].
+		 * Kext property ID 0x36, mixer kind 3 (original Apollo) only;
+		 * ua_other_param_allowed() rejects it everywhere else.  On the
+		 * x4, mono is param 0x03 value=1 (MixToMono).
 		 */
 		setting_idx = 4;
 		hw_val  = value;
@@ -1449,14 +1546,15 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 
 	/* ---- Setting[6]: Mirror A / Identify / MirrorsToDigital ---- */
 
-	case UA_MON_PARAM_UNKNOWN_0A:	/* 0x0a -> bits[9:8] */
+	case UA_MON_PARAM_AUX1_MONO:	/* 0x0a -> bits[9:8], swapped */
 		setting_idx = 6;
-		hw_val  = (value & 3) << 8;
+		hw_val  = ua_swap2(value, 8);
 		hw_mask = 0x00000300;
 		break;
-	case UA_MON_PARAM_IDENTIFY:	/* 0x1d -> bits[15:11] */
+	case UA_MON_PARAM_IDENTIFY:	/* 0x1d -> bits[13:11], mask [15:11] */
+		/* IdentifyDevice: 3-bit value, bits 14-15 are cleared */
 		setting_idx = 6;
-		hw_val  = (value & 0x1F) << 11;
+		hw_val  = (value & 7) << 11;
 		hw_mask = 0x0000F800;
 		break;
 	case UA_MON_PARAM_DIGITAL_MIRROR: /* 0x1e -> bit10 */
@@ -1472,9 +1570,9 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 
 	/* ---- Setting[7]: Mirror B / TBConfig / misc ---- */
 
-	case UA_MON_PARAM_UNKNOWN_0F:	/* 0x0f -> bits[9:8] */
+	case UA_MON_PARAM_AUX2_MONO:	/* 0x0f -> bits[9:8], swapped */
 		setting_idx = 7;
-		hw_val  = (value & 3) << 8;
+		hw_val  = ua_swap2(value, 8);
 		hw_mask = 0x00000300;
 		break;
 	case UA_MON_PARAM_UNKNOWN_20:	/* 0x20 -> bit10 */
@@ -1520,9 +1618,9 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		hw_val  = (value & 3) << 28;
 		hw_mask = 0x30000000;
 		break;
-	case UA_MON_PARAM_CUE1_MIX_ALT:/* 0x23 -> bits[25:24] */
+	case UA_MON_PARAM_SYNCH18_MONO:/* 0x23 -> bits[25:24], swapped */
 		setting_idx = 8;
-		hw_val  = (value & 3) << 24;
+		hw_val  = ua_swap2(value, 24);
 		hw_mask = 0x03000000;
 		break;
 	case UA_MON_PARAM_UNKNOWN_24:	/* 0x24 -> bits[31:30] */
@@ -1530,9 +1628,9 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		hw_val  = (value & 3) << 30;
 		hw_mask = 0xC0000000;
 		break;
-	case UA_MON_PARAM_CUE2_MIX_ALT:/* 0x25 -> bits[27:26] */
+	case UA_MON_PARAM_SYNCH1A_MONO:/* 0x25 -> bits[27:26], swapped */
 		setting_idx = 8;
-		hw_val  = (value & 3) << 26;
+		hw_val  = ua_swap2(value, 26);
 		hw_mask = 0x0C000000;
 		break;
 
@@ -1604,7 +1702,7 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 
 	/* ---- Setting[13]: Talkback / misc ---- */
 
-	case UA_MON_PARAM_UNKNOWN_3A:	/* 0x3a -> bits[29:28] */
+	case UA_MON_PARAM_ALTMON_SELECT: /* 0x3a -> bits[29:28] */
 		setting_idx = 13;
 		hw_val  = (value & 3) << 28;
 		hw_mask = 0x30000000;
@@ -1632,7 +1730,7 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		hw_val  = value ? BIT(31) : 0;
 		hw_mask = BIT(31);
 		break;
-	case UA_MON_PARAM_UNKNOWN_66:	/* 0x66 -> bits[7:0] */
+	case UA_MON_PARAM_HP_LEVEL:	/* 0x66 -> bits[7:0] */
 		setting_idx = 14;
 		hw_val  = value & 0xFF;
 		hw_mask = 0x000000FF;
@@ -1640,22 +1738,22 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 
 	/* ---- Setting[15]: Mirror enables / clock-HP routing ---- */
 
-	case UA_MON_PARAM_UNKNOWN_38:	/* 0x38 -> bits[6:0] */
+	case UA_MON_PARAM_ALTMON1_TRIM:	/* 0x38 -> bits[6:0] */
 		setting_idx = 15;
 		hw_val  = value & 0x7F;
 		hw_mask = 0x0000007F;
 		break;
-	case UA_MON_PARAM_UNKNOWN_39:	/* 0x39 -> bits[22:16] */
+	case UA_MON_PARAM_ALTMON2_TRIM:	/* 0x39 -> bits[22:16] */
 		setting_idx = 15;
 		hw_val  = (value & 0x7F) << 16;
 		hw_mask = 0x007F0000;
 		break;
-	case UA_MON_PARAM_MIRROR_ENABLE_A: /* 0x3b -> bit8 */
+	case UA_MON_PARAM_ALTMON1_ENABLE: /* 0x3b -> bit8 */
 		setting_idx = 15;
 		hw_val  = value ? BIT(8) : 0;
 		hw_mask = BIT(8);
 		break;
-	case UA_MON_PARAM_MIRROR_ENABLE_B: /* 0x3c -> bit12 */
+	case UA_MON_PARAM_ALTMON2_ENABLE: /* 0x3c -> bit12 */
 		setting_idx = 15;
 		hw_val  = value ? BIT(12) : 0;
 		hw_mask = BIT(12);
@@ -1665,7 +1763,7 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		hw_val  = value ? BIT(9) : 0;
 		hw_mask = BIT(9);
 		break;
-	case UA_MON_PARAM_UNKNOWN_41:	/* 0x41 -> bit7 */
+	case UA_MON_PARAM_REMOTE_MON:	/* 0x41 -> bit7 */
 		setting_idx = 15;
 		hw_val  = value ? BIT(7) : 0;
 		hw_mask = BIT(7);
@@ -2084,12 +2182,13 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			notify_alsa = true;
 			break;
 		case UA_MON_PARAM_CUE1_MONO:
-			ua->audio.monitor.cue1_mono = !!param.value;
+			/* Bit 0 is mono; bit 1 is the kext's other field bit */
+			ua->audio.monitor.cue1_mono = !!(param.value & 1);
 			ctl_name = "CUE 1 Mono Switch";
 			notify_alsa = true;
 			break;
 		case UA_MON_PARAM_CUE2_MONO:
-			ua->audio.monitor.cue2_mono = !!param.value;
+			ua->audio.monitor.cue2_mono = !!(param.value & 1);
 			ctl_name = "CUE 2 Mono Switch";
 			notify_alsa = true;
 			break;

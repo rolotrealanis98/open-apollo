@@ -591,9 +591,9 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_MON_PARAM_MUTE       0x03  /* ch_idx=0, 2=muted/0=unmuted; 1=mono */
 #define UA_MON_PARAM_SOURCE     0x04  /* ch_idx=1, 0=MIX/1=CUE1/2=CUE2 */
 #define UA_MON_PARAM_CUE1_MIX   0x05  /* ch_idx=0, 0=on/2=off (inverted!) */
-#define UA_MON_PARAM_CUE1_MONO  0x06  /* ch_idx=0, 1=on/0=off */
+#define UA_MON_PARAM_CUE1_MONO  0x06  /* ch_idx=0, 1=mono (field bit 21), 2=bit 20; swapped */
 #define UA_MON_PARAM_CUE2_MIX   0x07  /* ch_idx=0, 0=on/2=off */
-#define UA_MON_PARAM_CUE2_MONO  0x08  /* ch_idx=0, 1=on/0=off */
+#define UA_MON_PARAM_CUE2_MONO  0x08  /* ch_idx=0, 1=mono (field bit 23), 2=bit 22; swapped */
 #define UA_MON_PARAM_UNKNOWN_15 0x15  /* setting[2] bit28, bool */
 #define UA_MON_PARAM_DIM        0x44  /* ch_idx=0, 1=on/0=off, bit31 */
 
@@ -605,13 +605,17 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_MON_MONO             1
 
 /* --- Setting[6]: Mirror A / Identify / MirrorsToDigital --- */
-#define UA_MON_PARAM_UNKNOWN_0A 0x0a  /* setting[6] bits[9:8], 2-bit */
-#define UA_MON_PARAM_IDENTIFY   0x1d  /* ch_idx=0, identify/locate */
+/* Aux bus 1 MixToMono; swapped 2-bit field (value bit 0 = mono = bit 9) */
+#define UA_MON_PARAM_AUX1_MONO  0x0a  /* setting[6] bits[9:8], 2-bit */
+#define UA_MON_PARAM_UNKNOWN_0A UA_MON_PARAM_AUX1_MONO
+#define UA_MON_PARAM_IDENTIFY   0x1d  /* ch_idx=0, identify/locate, 3-bit value */
 #define UA_MON_PARAM_DIGITAL_MIRROR 0x1e /* ch_idx=9, MirrorsToDigital */
 #define UA_MON_PARAM_CUE1_MIRROR 0x2e /* ch_idx=9, MirrorA value, 8-bit */
 
 /* --- Setting[7]: Mirror B / TBConfig / misc --- */
-#define UA_MON_PARAM_UNKNOWN_0F 0x0f  /* setting[7] bits[9:8], 2-bit */
+/* Aux bus 2 MixToMono; swapped like 0x0a */
+#define UA_MON_PARAM_AUX2_MONO  0x0f  /* setting[7] bits[9:8], 2-bit */
+#define UA_MON_PARAM_UNKNOWN_0F UA_MON_PARAM_AUX2_MONO
 #define UA_MON_PARAM_UNKNOWN_20 0x20  /* setting[7] bit10, bool (flush) */
 /* Param 0x20 is the output mute: CPcieDevice::SetOutputMute() (kext 12.0.0
  * x86 0x6140) calls CUAD2DeviceMixer::SetOtherParam(0x20, mute). */
@@ -625,19 +629,23 @@ static inline bool ua_public_output_mute(u32 pt)
 /* --- Setting[8]: Digital out mode / CUE alt --- */
 #define UA_MON_PARAM_DIGITAL_MODE 0x21 /* ch_idx=0, 0=S/PDIF/8=ADAT */
 #define UA_MON_PARAM_UNKNOWN_22 0x22  /* setting[8] bits[29:28], 2-bit */
-#define UA_MON_PARAM_CUE1_MIX_ALT 0x23 /* setting[8] bits[25:24], 2-bit */
+/* 0x23 / 0x25 are MixToMono of output synch 0x18 / 0x1a (swapped 2-bit
+ * fields), not mix sources; 0x22 / 0x24 are those outputs' mix source. */
+#define UA_MON_PARAM_SYNCH18_MONO 0x23 /* setting[8] bits[25:24], swapped */
 #define UA_MON_PARAM_UNKNOWN_24 0x24  /* setting[8] bits[31:30], 2-bit */
-#define UA_MON_PARAM_CUE2_MIX_ALT 0x25 /* setting[8] bits[27:26], 2-bit */
+#define UA_MON_PARAM_SYNCH1A_MONO 0x25 /* setting[8] bits[27:26], swapped */
+#define UA_MON_PARAM_CUE1_MIX_ALT UA_MON_PARAM_SYNCH18_MONO	/* old name */
+#define UA_MON_PARAM_CUE2_MIX_ALT UA_MON_PARAM_SYNCH1A_MONO	/* old name */
 
 /* --- Setting[11]: Mirror config / OutputRef --- */
-#define UA_MON_PARAM_MIRROR_CFG_A 0x2a /* setting[11] bit0, bool */
+#define UA_MON_PARAM_MIRROR_CFG_A 0x2a /* setting[11] bit0, bool; kind-gated: -EINVAL on the x4 */
 #define UA_MON_PARAM_MIRROR_CFG_B 0x2b /* setting[11] bit1, bool */
 #define UA_MON_PARAM_MIRROR_CFG_C 0x2c /* setting[11] bit2, bool */
 #define UA_MON_PARAM_MIRROR_CFG_D 0x2d /* setting[11] bit3, bool */
 #define UA_MON_PARAM_UNKNOWN_30 0x30  /* setting[11] bits[23:16], 8-bit */
 #define UA_MON_PARAM_UNKNOWN_31 0x31  /* setting[11] bits[31:24], 8-bit */
 #define UA_MON_PARAM_OUTPUT_REF 0x32  /* ch_idx=1, 0=+4dBu/1=-10dBV */
-#define UA_MON_PARAM_UNKNOWN_33 0x33  /* setting[11] bit5, bool */
+#define UA_MON_PARAM_UNKNOWN_33 0x33  /* setting[11] bit5, bool; 0x33-0x35 kind-gated: -EINVAL on the x4 */
 #define UA_MON_PARAM_UNKNOWN_34 0x34  /* setting[11] bit6, bool */
 #define UA_MON_PARAM_UNKNOWN_35 0x35  /* setting[11] bit7, bool */
 
@@ -646,22 +654,37 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_MON_PARAM_HP2_SOURCE 0x40  /* ch_idx=1, 0=CUE1/1=CUE2 */
 
 /* --- Setting[13]: Talkback / misc --- */
-#define UA_MON_PARAM_UNKNOWN_3A 0x3a  /* setting[13] bits[29:28], 2-bit */
-#define UA_MON_PARAM_UNKNOWN_42 0x42  /* setting[13] bits[15:13], 3-bit */
+#define UA_MON_PARAM_ALTMON_SELECT 0x3a /* setting[13] bits[29:28], kPropAltMonSelection */
+#define UA_MON_PARAM_UNKNOWN_3A UA_MON_PARAM_ALTMON_SELECT
+#define UA_MON_PARAM_UNKNOWN_42 0x42  /* setting[13] bits[15:13], FuncSwitchMode; -EINVAL on the x4 */
 #define UA_MON_PARAM_TALKBACK   0x46  /* ch_idx=0, val=1 ON / val=0 OFF */
 
 /* --- Setting[14]: Dim level / misc --- */
 #define UA_MON_PARAM_DIM_LEVEL  0x43  /* ch_idx=0, 1-7 stepped */
-#define UA_MON_PARAM_UNKNOWN_49 0x49  /* setting[14] bit31, bool */
-#define UA_MON_PARAM_UNKNOWN_66 0x66  /* setting[14] bits[7:0], 8-bit */
+#define UA_MON_PARAM_UNKNOWN_49 0x49  /* setting[14] bit31, Enable24dBMode; -EINVAL on the x4 */
+/* CRMonitorLevel of the HP-class outputs 0x02 does not cover (HP2, ...) */
+#define UA_MON_PARAM_HP_LEVEL   0x66  /* setting[14] bits[7:0], 8-bit */
+#define UA_MON_PARAM_UNKNOWN_66 UA_MON_PARAM_HP_LEVEL
 
-/* --- Setting[15]: Mirror enables / clock-HP routing --- */
-#define UA_MON_PARAM_UNKNOWN_38 0x38  /* setting[15] bits[6:0], 7-bit */
-#define UA_MON_PARAM_UNKNOWN_39 0x39  /* setting[15] bits[22:16], 7-bit */
-#define UA_MON_PARAM_MIRROR_ENABLE_A 0x3b /* ch_idx=9, CUE1 mirror enable */
-#define UA_MON_PARAM_MIRROR_ENABLE_B 0x3c /* ch_idx=9, CUE2 mirror enable */
-#define UA_MON_PARAM_UNKNOWN_3E 0x3e  /* setting[15] bit9, bool */
-#define UA_MON_PARAM_UNKNOWN_41 0x41  /* setting[15] bit7, bool */
+/*
+ * --- Setting[15]: Alt Monitor ---
+ * kPropAltMonTrim 0xf4 (clamp(trim*2 + 60.5, 0, 0x78)), AltMonEnabled 0xf6,
+ * AltMonSelection 0xf5 (S13).  Medium confidence (parity/14: names resolved
+ * from Mixer Engine call sites).  The ALSA "CUE n Mirror Switch" controls
+ * and the daemon's "MirrorEnable" write 0x3b / 0x3c: those are these
+ * AltMonEnabled bits, whatever the control is called.
+ */
+#define UA_MON_PARAM_ALTMON1_TRIM 0x38 /* setting[15] bits[6:0], 7-bit */
+#define UA_MON_PARAM_ALTMON2_TRIM 0x39 /* setting[15] bits[22:16], 7-bit */
+#define UA_MON_PARAM_ALTMON1_ENABLE 0x3b /* setting[15] bit 8 */
+#define UA_MON_PARAM_ALTMON2_ENABLE 0x3c /* setting[15] bit 12 */
+#define UA_MON_PARAM_UNKNOWN_38 UA_MON_PARAM_ALTMON1_TRIM
+#define UA_MON_PARAM_UNKNOWN_39 UA_MON_PARAM_ALTMON2_TRIM
+#define UA_MON_PARAM_MIRROR_ENABLE_A UA_MON_PARAM_ALTMON1_ENABLE /* old name */
+#define UA_MON_PARAM_MIRROR_ENABLE_B UA_MON_PARAM_ALTMON2_ENABLE /* old name */
+#define UA_MON_PARAM_UNKNOWN_3E 0x3e  /* setting[15] bit9, kPropCRPGABypass (inverted) */
+#define UA_MON_PARAM_REMOTE_MON 0x41  /* setting[15] bit7, kPropRemoteMonitorController */
+#define UA_MON_PARAM_UNKNOWN_41 UA_MON_PARAM_REMOTE_MON
 
 /* --- Setting[5]: Sound/config flags (type >= 0xa) --- */
 #define UA_MON_PARAM_UNKNOWN_67 0x67  /* setting[5] bit3, bool */
