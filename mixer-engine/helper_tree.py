@@ -277,16 +277,16 @@ class HelperTree:
         """
         stripped = path.strip("/")
 
-        # Handle /foo/bar/value → try property "bar" on node "foo"
-        if stripped.endswith("/value"):
-            result = self.set_value("/" + stripped[:-6], value)
-            if result != "not_found":
-                return result
-
-        parts = stripped.rsplit("/", 1)
-        if len(parts) == 2:
-            parent_path, prop_name = parts
-            parent = self._resolve(parent_path)
+        # /foo/bar/value → property "bar" on node "foo" first, then
+        # property "value" on node "foo/bar".  A root property (/initialized)
+        # has the same metadata, read_only included, as a nested one.
+        candidates = ([stripped[:-6], stripped] if stripped.endswith("/value")
+                      else [stripped])
+        for candidate in candidates:
+            parent_path, _, prop_name = candidate.rpartition("/")
+            if not prop_name:
+                continue
+            parent = self._resolve(parent_path) if parent_path else self.root
             if parent:
                 props = parent.get("properties", {})
                 if prop_name in props:
@@ -321,10 +321,15 @@ class HelperTree:
 
     def _notify(self, path: str, value: Any):
         """Notify subscribers of a value change."""
-        # Check exact path and ancestor paths
-        for sub_path, sub_ids in self._subs.items():
+        # Check exact path and ancestor paths.  Snapshots: a callback may
+        # (un)subscribe; one failing callback does not stop the others.
+        for sub_path, sub_ids in list(self._subs.items()):
             if path == sub_path or path.startswith(sub_path + "/"):
-                for sub_id in sub_ids:
+                for sub_id in list(sub_ids):
                     cb = self._callbacks.get(sub_id)
                     if cb:
-                        cb(path, value)
+                        try:
+                            cb(path, value)
+                        except Exception:
+                            log.exception("Helper subscriber %s failed for %s",
+                                          sub_id, path)

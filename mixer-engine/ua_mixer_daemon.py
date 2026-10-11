@@ -1647,11 +1647,12 @@ class MixerDaemon:
         the state tree on_set callback (which is wired to hardware write).
         This prevents a readback → state → hardware → readback loop.
         """
-        # Update helper tree (for 4720 console clients)
+        # Update helper tree (for 4720 console clients).  set_value()
+        # notifies when it stores the value; a path the helper tree lacks
+        # still reaches helper subscribers of that path once.
         if self.helper_tree:
-            self.helper_tree.set_value(path, value)
-            # Notify helper subscribers
-            self.helper_tree._notify(path, value)
+            if self.helper_tree.set_value(path, value) != "ok":
+                self.helper_tree._notify(path, value)
 
         # Update state tree value WITHOUT triggering on_set (hw write).
         # We bypass state.set() to avoid the on_set callback, but still
