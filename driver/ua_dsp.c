@@ -3577,6 +3577,35 @@ int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable)
 }
 
 /**
+ * ua_dsp_send_rate_ack - Tell every DSP the new sample rate
+ * @ua: device (caller must hold ua->lock)
+ * @rate: sample rate in Hz
+ *
+ * Kext RE: after a rate change the Mixer Engine's ack makes
+ * CUAD2DeviceMixer::AckSampleRateChange queue {0x001A0002, rate_Hz, 0} on
+ * every DSP of the device (the captured plugin chain only ever sends
+ * 44100, to DSP 0).
+ */
+int ua_dsp_send_rate_ack(struct ua_device *ua, u32 rate)
+{
+	unsigned int dsp;
+	int ret, err = 0;
+
+	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+		if (!ua->dsp[dsp].rings_allocated)
+			continue;
+		ret = ua_dsp_ring_send_raw(ua, dsp, 0x001A0002, rate, 0, 0);
+		if (ret) {
+			dev_warn(&ua->pdev->dev,
+				 "rate ack ring full (dsp=%u)\n", dsp);
+			err = ret;
+		}
+	}
+
+	return err;
+}
+
+/**
  * ua_dsp_flush_bus_params - Ensure all queued bus params are processed
  * @ua: device
  *

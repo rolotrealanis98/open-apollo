@@ -359,11 +359,13 @@ DRIVER_PARAM_SAMPLE_RATE = 0
 DRIVER_PARAM_CLOCK_SOURCE = 1
 DRIVER_PARAM_TRANSPORT_RUNNING = 2  # Read-only
 
+# /ClockSource name → driver clock source (clock_config low byte, the
+# kext's UAD2ClockSource; the device names its sources by the same numbers)
 CLOCK_SOURCE_MAP = {
-    "Internal": 0,
-    "S/PDIF": 1,
-    "ADAT": 2,
-    "WordClock": 3,
+    "Internal": 0x0C,
+    "S/PDIF": 0x00,
+    "ADAT": 0x05,
+    "Word Clock": 0x07,
 }
 VALID_SAMPLE_RATES = {44100, 48000, 88200, 96000, 176400, 192000}
 

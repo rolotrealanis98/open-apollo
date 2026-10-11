@@ -2102,6 +2102,8 @@ static long ua_ioctl_set_driver_param(struct ua_device *ua, unsigned long arg)
 	case 0: {  /* Sample rate */
 		int ret;
 
+		if (dp.value > 192000)
+			return -EINVAL;
 		if (ua->audio.transport_running)
 			dev_warn(&ua->pdev->dev,
 				 "changing sample rate while transport running!\n");
@@ -2111,16 +2113,15 @@ static long ua_ioctl_set_driver_param(struct ua_device *ua, unsigned long arg)
 		return ret;
 	}
 
-	case 1: {  /* Clock source */
-		unsigned int old = ua->audio.clock_source;
+	case 1: {  /* Clock source: UA_CLOCK_* (clock_config low byte) */
 		int ret;
 
-		ua->audio.clock_source = (unsigned int)dp.value;
-		ret = ua_audio_set_clock(ua, ua->audio.sample_rate);
+		if (dp.value > 0xff)
+			return -EINVAL;
+		/* Validates it and commits it under ua->lock once acked */
+		ret = ua_audio_set_clock_source(ua, (unsigned int)dp.value);
 		if (!ret)
 			ua_notify_clock_controls(ua);
-		else
-			ua->audio.clock_source = old;	/* not acknowledged */
 		return ret;
 	}
 

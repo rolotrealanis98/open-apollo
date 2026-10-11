@@ -24,6 +24,7 @@
 #include <linux/version.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
+#include <sound/pcm_params.h>
 #include <sound/control.h>
 #include <sound/info.h>
 #include <sound/tlv.h>
@@ -71,6 +72,24 @@ static bool pcie_tuning;
 module_param(pcie_tuning, bool, 0444);
 MODULE_PARM_DESC(pcie_tuning,
 		 "Legacy PCIe tweaks: disable ASPM on the Apollo endpoint (via the ASPM core) and raise the completion timeout to 65-210 ms on the Apollo and every upstream bridge (default: off)");
+
+/*
+ * Rate-change experiments (titan A/B, 2026-10): the kext changes the rate
+ * with the transport stopped and never writes the clock on a plain
+ * transport start (apollo-linux kext-rate-meters-hiz-2026-10-10.md).
+ */
+static int rate_change;
+module_param(rate_change, int, 0644);
+MODULE_PARM_DESC(rate_change,
+		 "Rate change: 0 = soft reconnect, clock written after the transport starts, 48 kHz session before a Hi-band start from a Hi-band clock (default); 1 = as the kext: clock change with the transport stopped, wait for the firmware rate, rate ack to every DSP, 1.5 s hold");
+static bool post_start_clock = true;
+module_param(post_start_clock, bool, 0644);
+MODULE_PARM_DESC(post_start_clock,
+		 "Write the clock after every transport start (default: on; the kext only writes it on a rate or source change)");
+static bool ax_control_ext = true;
+module_param(ax_control_ext, bool, 0644);
+MODULE_PARM_DESC(ax_control_ext,
+		 "Start the transport with AX_CONTROL 0x20F (default: on); off = 0xF, the kext's value for the internal clock");
 
 /* Forward declarations */
 static void ua_pcie_setup(struct ua_device *ua);
@@ -2295,6 +2314,14 @@ post_handshake:
 						 rate_info, clock_info);
 				}
 
+				/* Clock sources the device offers (kext:
+				 * bit 21 handler, mask at 0xC08E) */
+				audio->clock_src_mask =
+					ua_read(ua, UA_REG_NOTIF_CLOCK_SRCS) >> 16;
+				dev_info(&ua->pdev->dev,
+					 "  clock sources offered: 0x%04x\n",
+					 audio->clock_src_mask);
+
 				/* Bit 4: Read transport info */
 				{
 					u32 xport_info;
@@ -2975,9 +3002,11 @@ static int ua_audio_start_transport(struct ua_device *ua)
 		dev_info(&ua->pdev->dev, "  FW_VERSION: 0x%08x, device_type: 0x%x\n",
 			 fw_ver, ua->device_type);
 
-		/* Kext uses 0x20F for all devices including Apollo x4.
-		 * Bit 9 (0x200) = extended mode, may enable capture routing. */
-		ctrl = UA_AX_CTRL_START_EXT;
+		/* 0x20F has always been used here.  The kext's
+		 * StartTransport uses 0xF for the internal clock (0x0C)
+		 * and 0x20F only for source 0x0A (ax_control_ext=0 tries
+		 * 0xF). */
+		ctrl = ax_control_ext ? UA_AX_CTRL_START_EXT : UA_AX_CTRL_START;
 	}
 
 	/*
@@ -3279,53 +3308,96 @@ static int ua_audio_clock_change_locked(struct ua_device *ua,
 	return -ETIMEDOUT;
 }
 
+/* A clock source the device can run on (values: UA_CLOCK_*) */
+bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source)
+{
+	const struct ua_audio *audio = &ua->audio;
+
+	if (source != UA_CLOCK_INTERNAL && source != UA_CLOCK_SPDIF &&
+	    source != UA_CLOCK_ADAT && source != UA_CLOCK_WORDCLOCK)
+		return false;
+	/* No list read yet (not connected): let the device decide */
+	return !audio->clock_src_mask || (audio->clock_src_mask & BIT(source));
+}
+
+/*
+ * Playback and capture share one clock.  A rate other than the one a
+ * stream's hw_params fixed would leave that stream running at the wrong
+ * speed (and, with io_map, on a layout it wasn't opened with).
+ */
+static bool ua_rate_busy_locked(const struct ua_audio *audio,
+				unsigned int rate)
+{
+	unsigned int dir;
+
+	for (dir = 0; dir < ARRAY_SIZE(audio->stream_rate); dir++)
+		if (audio->stream_rate[dir] && audio->stream_rate[dir] != rate)
+			return true;
+	return false;
+}
+
 /*
  * Mirrors CPcieAudioExtension::SetSampleClock (x86 0x35cfc) where it
  * matters: retry the change once on timeout and report the error.
+ * rate 0 keeps the current rate, source < 0 the current source.
  *
  * Not connected yet (no ACEFACE handshake, so the notification block is
- * not configured and nothing could ack): store the rate (the caller has
- * stored the source) and return 0, as before; the connect/prepare path
- * applies them — prepare_transport() programs the rate-dependent
- * POS_OFFSET and the post-start clock write sends rate_index/source.
+ * not configured and nothing could ack): store rate and source and
+ * return 0; the connect/prepare path applies them — prepare_transport()
+ * programs the rate-dependent POS_OFFSET and the post-start clock write
+ * sends rate_index/source.
  *
- * Connected: commit only when the device acknowledged (any of
- * UA_CLOCK_ACK_BITS, the bits the old code accepted).  A change that got
- * no acknowledgement in two 2 s attempts returns -ETIMEDOUT and leaves
- * sample_rate/rate_index at the last acknowledged values; the old code
- * committed it regardless.
+ * Connected: commit rate and source only when the device acknowledged
+ * (any of UA_CLOCK_ACK_BITS, the bits the old code accepted).  A change
+ * that got no acknowledgement in two 2 s attempts returns -ETIMEDOUT and
+ * keeps the last acknowledged values.  A rate an open stream doesn't
+ * run at returns -EBUSY.
  *
  * Caller must NOT hold ua->lock.
  */
-int ua_audio_set_clock(struct ua_device *ua, unsigned int rate)
+static int ua_audio_set_clock_cfg(struct ua_device *ua, unsigned int rate,
+				  int source)
 {
 	struct ua_audio *audio = &ua->audio;
 	int rate_idx;
 	u32 clock_config;
 	int ret;
 
-	rate_idx = ua_rate_to_index(rate);
-	if (rate_idx < 0)
-		return rate_idx;
-
 	mutex_lock(&ua->lock);
 
+	if (!rate)
+		rate = audio->sample_rate;
+	if (source < 0)
+		source = audio->clock_source;
+	rate_idx = ua_rate_to_index(rate);
+	if (rate_idx < 0) {
+		ret = rate_idx;
+		goto out;
+	}
 	if (atomic_read(&ua->shutdown)) {
 		ret = -ENODEV;
+		goto out;
+	}
+	if (ua_rate_busy_locked(audio, rate)) {
+		dev_info(&ua->pdev->dev,
+			 "clock: %u Hz refused, a stream is open at %u Hz\n",
+			 rate, audio->sample_rate);
+		ret = -EBUSY;
 		goto out;
 	}
 	if (!ua->aceface_done) {
 		dev_info(&ua->pdev->dev,
 			 "clock: %u Hz (source 0x%x) stored, applied at connect\n",
-			 rate, audio->clock_source);
+			 rate, source);
 		audio->sample_rate = rate;
 		audio->rate_index = rate_idx;
+		audio->clock_source = source;
 		ret = 0;
 		goto out;
 	}
 
 	/* clockConfig = clockSource | (rateIndex << 8) */
-	clock_config = audio->clock_source | (rate_idx << 8);
+	clock_config = source | (rate_idx << 8);
 
 	dev_info(&ua->pdev->dev, "=== SET CLOCK ===\n");
 	dev_info(&ua->pdev->dev, "  rate=%u index=%d config=0x%08x\n",
@@ -3340,10 +3412,11 @@ int ua_audio_set_clock(struct ua_device *ua, unsigned int rate)
 	if (!ret) {
 		audio->sample_rate = rate;
 		audio->rate_index = rate_idx;
+		audio->clock_source = source;
 		/*
 		 * io_map=1: the rate band and the firmware's descriptors may
-		 * have changed with the rate, possibly under a running
-		 * transport (re-read, then commit or force a re-prepare).
+		 * have changed with the rate (re-read, then commit or force
+		 * a re-prepare).
 		 */
 		ua_io_map_rate_changed(ua);
 	} else {
@@ -3354,6 +3427,20 @@ int ua_audio_set_clock(struct ua_device *ua, unsigned int rate)
 out:
 	mutex_unlock(&ua->lock);
 	return ret;
+}
+
+int ua_audio_set_clock(struct ua_device *ua, unsigned int rate)
+{
+	if (ua_rate_to_index(rate) < 0)
+		return -EINVAL;
+	return ua_audio_set_clock_cfg(ua, rate, -1);
+}
+
+int ua_audio_set_clock_source(struct ua_device *ua, unsigned int source)
+{
+	if (!ua_clock_source_valid(ua, source))
+		return -EINVAL;
+	return ua_audio_set_clock_cfg(ua, 0, source);
 }
 
 /* ----------------------------------------------------------------
@@ -3377,6 +3464,24 @@ static const struct snd_pcm_hardware ua_pcm_hw = {
 	.periods_min = 2,
 	.periods_max = 64,
 };
+
+/* Offer only the rate the other direction's hw_params fixed (one clock) */
+static int ua_pcm_rate_rule(struct snd_pcm_hw_params *params,
+			    struct snd_pcm_hw_rule *rule)
+{
+	struct snd_pcm_substream *sub = rule->private;
+	struct ua_device *ua = snd_pcm_substream_chip(sub);
+	unsigned int other = sub->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+			     UA_DIR_REC : UA_DIR_PLAY;
+	unsigned int rate = READ_ONCE(ua->audio.stream_rate[other]);
+	struct snd_interval fixed = { .min = rate, .max = rate, .integer = 1 };
+
+	if (!rate)
+		return 0;
+	return snd_interval_refine(hw_param_interval(params,
+						     SNDRV_PCM_HW_PARAM_RATE),
+				   &fixed);
+}
 
 static int ua_pcm_open(struct snd_pcm_substream *sub)
 {
@@ -3421,6 +3526,16 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	 */
 	snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_BUFFER_SIZE,
 				     frames, frames);
+
+	/*
+	 * Playback and capture share one clock: once one direction has a
+	 * rate, the other is offered only that one, so the two can't
+	 * re-prepare each other's rate in a loop (PipeWire with the nodes
+	 * ungrouped did that ~5 times a second, and the DSP ended up
+	 * recording silence until a power cycle).
+	 */
+	snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_RATE,
+			    ua_pcm_rate_rule, sub, SNDRV_PCM_HW_PARAM_RATE, -1);
 
 	spin_lock_irqsave(&audio->lock, flags);
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK)
@@ -3480,14 +3595,37 @@ static int ua_pcm_close(struct snd_pcm_substream *sub)
 static int ua_pcm_hw_params(struct snd_pcm_substream *sub,
 			    struct snd_pcm_hw_params *hw)
 {
+	struct ua_device *ua = snd_pcm_substream_chip(sub);
+	struct ua_audio *audio = &ua->audio;
+	unsigned int dir = sub->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+			   UA_DIR_PLAY : UA_DIR_REC;
+	unsigned int other = dir == UA_DIR_PLAY ? UA_DIR_REC : UA_DIR_PLAY;
+	unsigned int rate = params_rate(hw);
+	int ret = 0;
+
 	/* DMA buffers are device-lifetime, pre-allocated.
 	 * Data transfer is handled by the copy callback which
-	 * scatters user channels into the full-width DMA buffer. */
-	return 0;
+	 * scatters user channels into the full-width DMA buffer.
+	 *
+	 * Record the rate (the other direction may have set one since
+	 * the rate rule ran). */
+	mutex_lock(&ua->lock);
+	if (audio->stream_rate[other] && audio->stream_rate[other] != rate)
+		ret = -EBUSY;
+	else
+		audio->stream_rate[dir] = rate;
+	mutex_unlock(&ua->lock);
+	return ret;
 }
 
 static int ua_pcm_hw_free(struct snd_pcm_substream *sub)
 {
+	struct ua_device *ua = snd_pcm_substream_chip(sub);
+
+	mutex_lock(&ua->lock);
+	ua->audio.stream_rate[sub->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+			      UA_DIR_PLAY : UA_DIR_REC] = 0;
+	mutex_unlock(&ua->lock);
 	return 0;
 }
 
@@ -3825,18 +3963,18 @@ static int ua_pcm_silence(struct snd_pcm_substream *sub, int channel,
  * routing activates correctly.
  * (Discovered 2026-03-18: ordering is critical)
  *
- * Source 0xC (internal clock) is required for DSP active processing; the
- * ALSA control init resets it, so it is forced here every time.  Caller
- * holds ua->lock.
+ * It sends the current source: internal (0x0C) unless one was chosen
+ * (source 0 is S/PDIF, which never acknowledges without a signal; the
+ * Clock Source control used to write it for "Internal").  Caller holds
+ * ua->lock.
  */
 static void ua_audio_post_start_clock(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
 
-	if (!ua->aceface_done)
+	if (!ua->aceface_done || !post_start_clock)
 		return;
 
-	audio->clock_source = 0xC;
 	ua_write(ua, UA_REG_NOTIF_CLOCK_CFG,
 		 (audio->rate_index << 8) | audio->clock_source);
 	ua_write(ua, UA_REG_AX_CONNECT, UA_AX_CLOCK_DOORBELL);
@@ -3979,6 +4117,120 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 		 waited, status, rate);
 }
 
+/*
+ * rate_change=1: change the rate the way the kext does
+ * (UAD2AudioEngine::performFormatChange → CDeviceManager::SetAudioSampleRate,
+ * the Mixer Engine's ack, _finishAckSrWaitCallback): the transport stays
+ * stopped for the whole change, the clock write waits for its ack, then
+ * for the firmware to report the new rate (25 ms polls, up to 4 s; a
+ * timeout is only logged, as in the kext), then every DSP gets the rate
+ * ack and the transport stays stopped another 1.5 s.  No disconnect and
+ * no reconnect.  The caller starts the transport.  Caller holds ua->lock.
+ */
+#define UA_RATE_POLL_MS		25
+#define UA_RATE_POLL_MAX_MS	4000
+#define UA_RATE_ACK_HOLD_MS	1500
+
+/*
+ * One DSP service step while ua->lock is held through a long wait (the
+ * service loop takes the lock): acknowledge notifications as the kext's
+ * handler does (it writes 0 to the status after acting; the firmware
+ * publishes the new rate only after that), drain the readback, flush the
+ * mixer batch.  Returns the notification bits, ~0 when offline.
+ */
+static u32 ua_audio_service_step(struct ua_device *ua)
+{
+	u32 notif = ua_read(ua, UA_REG_NOTIF_STATUS);
+
+	if (notif == 0xFFFFFFFF)
+		return notif;
+	if (notif)
+		ua_write(ua, UA_REG_NOTIF_STATUS, 0);
+	if (ua_read(ua, UA_REG_MIXER_RB_STATUS) == 1) {
+		unsigned int i;
+
+		for (i = 0; i < UA_MIXER_RB_WORDS; i++)
+			ua->mixer_rb_data[i] =
+				ua_read(ua, UA_REG_MIXER_RB_DATA + i * 4);
+		ua->mixer_rb_status = 1;
+		ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
+	}
+	ua_mixer_flush_settings(ua);
+	return notif;
+}
+
+static int ua_audio_rate_change_kext(struct ua_device *ua, unsigned int rate)
+{
+	struct ua_audio *audio = &ua->audio;
+	int idx = ua_rate_to_index(rate);
+	unsigned int waited;
+	u32 cfg;
+	int ret;
+
+	if (idx < 0)
+		return idx;
+
+	if (!audio->connected || !ua->aceface_done) {
+		/* No notification block yet: connect applies the rate */
+		audio->sample_rate = rate;
+		audio->rate_index = idx;
+		return 0;
+	}
+
+	dev_info(&ua->pdev->dev, "rate change %u -> %u Hz (transport stopped)\n",
+		 audio->sample_rate, rate);
+
+	if (audio->transport_running) {
+		/* Callback never takes ua->lock: safe to wait for it here */
+		audio->period_timer_running = false;
+		hrtimer_cancel(&audio->period_timer);
+		ua_audio_stop_transport(ua);
+	}
+
+	cfg = audio->clock_source | (idx << 8);
+	ret = ua_audio_clock_change_locked(ua, cfg);
+	if (ret == -ETIMEDOUT) {
+		dev_info(&ua->pdev->dev, "  retrying clock change once\n");
+		ret = ua_audio_clock_change_locked(ua, cfg);
+	}
+	if (ret) {
+		dev_err(&ua->pdev->dev,
+			"clock change to %u Hz (config 0x%08x) failed: %d\n",
+			rate, cfg, ret);
+		return ret;
+	}
+
+	for (waited = 0; waited < UA_RATE_POLL_MAX_MS;
+	     waited += UA_RATE_POLL_MS) {
+		if (ua_audio_service_step(ua) == 0xFFFFFFFF)
+			return -ENODEV;
+		if (((ua_read(ua, UA_REG_NOTIF_RATE_INFO) >> 8) & 0xff) == idx)
+			break;
+		msleep(UA_RATE_POLL_MS);
+	}
+	if (waited >= UA_RATE_POLL_MAX_MS)
+		dev_warn(&ua->pdev->dev,
+			 "  firmware rate still 0x%08x after %u ms (want index %d)\n",
+			 ua_read(ua, UA_REG_NOTIF_RATE_INFO), waited, idx);
+	else
+		dev_info(&ua->pdev->dev, "  firmware rate after %u ms\n",
+			 waited);
+
+	audio->sample_rate = rate;
+	audio->rate_index = idx;
+
+	ua_dsp_send_rate_ack(ua, rate);
+	for (waited = 0; waited < UA_RATE_ACK_HOLD_MS; waited += 10) {
+		if (ua_audio_service_step(ua) == 0xFFFFFFFF)
+			return -ENODEV;
+		msleep(10);
+	}
+
+	/* io_map=1: the descriptors for the new rate */
+	ua_io_map_rate_changed(ua);
+	return 0;
+}
+
 /* Body of ua_pcm_prepare(); caller holds ua->lock */
 static int UA_GCC_OPTIMIZE("O1")
 ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
@@ -4038,7 +4290,15 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 		 sub->runtime->period_size, sub->runtime->buffer_size,
 		 audio->connected, audio->transport_running, ua->aceface_done);
 
-	if (!audio->transport_running)
+	if (rate_change == 1 && sub->runtime->rate != audio->sample_rate &&
+	    audio->connected) {
+		ret = ua_audio_rate_change_kext(ua, sub->runtime->rate);
+		if (ret)
+			return ret;
+		rate_changed = true;
+	}
+
+	if (rate_change != 1 && !audio->transport_running)
 		ua_audio_hi_from_hi(ua, sub->runtime->rate);
 
 	if (sub->runtime->rate != audio->sample_rate) {
@@ -5620,6 +5880,11 @@ static const char * const ua_clock_source_names[] = {
 	"Internal", "S/PDIF", "ADAT", "Word Clock",
 };
 
+/* clock_config source value for each ua_clock_source_names entry */
+static const u8 ua_clock_source_values[] = {
+	UA_CLOCK_INTERNAL, UA_CLOCK_SPDIF, UA_CLOCK_ADAT, UA_CLOCK_WORDCLOCK,
+};
+
 static int ua_clock_source_info(struct snd_kcontrol *kctl,
 				struct snd_ctl_elem_info *info)
 {
@@ -5631,8 +5896,12 @@ static int ua_clock_source_get(struct snd_kcontrol *kctl,
 			       struct snd_ctl_elem_value *val)
 {
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
+	unsigned int i;
 
-	val->value.enumerated.item[0] = ua->audio.clock_source;
+	val->value.enumerated.item[0] = 0;
+	for (i = 0; i < ARRAY_SIZE(ua_clock_source_values); i++)
+		if (ua_clock_source_values[i] == ua->audio.clock_source)
+			val->value.enumerated.item[0] = i;
 	return 0;
 }
 
@@ -5640,24 +5909,21 @@ static int ua_clock_source_put(struct snd_kcontrol *kctl,
 			       struct snd_ctl_elem_value *val)
 {
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
-	unsigned int src = val->value.enumerated.item[0];
-	unsigned int old;
+	unsigned int idx = val->value.enumerated.item[0];
+	unsigned int src;
 	int ret;
 
-	if (src >= ARRAY_SIZE(ua_clock_source_names))
+	if (idx >= ARRAY_SIZE(ua_clock_source_values))
 		return -EINVAL;
 
-	if (src == ua->audio.clock_source)
+	src = ua_clock_source_values[idx];
+	if (src == READ_ONCE(ua->audio.clock_source))
 		return 0;
 
-	old = ua->audio.clock_source;
-	ua->audio.clock_source = src;
-	ret = ua_audio_set_clock(ua, ua->audio.sample_rate);
-	if (ret) {
-		/* Not acknowledged: keep the source the device runs on */
-		ua->audio.clock_source = old;
+	/* Commits the source under ua->lock once the device acknowledged */
+	ret = ua_audio_set_clock_source(ua, src);
+	if (ret)
 		return ret;
-	}
 
 	return 1;
 }

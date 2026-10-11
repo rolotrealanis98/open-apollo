@@ -322,6 +322,8 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_REG_NOTIF_RATE_INFO  (UA_REG_NOTIF_BASE + UA_NOTIF_BANK_OFFSET + 0x54)  /* 0xC07C */
 #define UA_REG_NOTIF_XPORT_INFO (UA_REG_NOTIF_BASE + UA_NOTIF_BANK_OFFSET + 0x58)  /* 0xC080 */
 #define UA_REG_NOTIF_CLOCK_INFO (UA_REG_NOTIF_BASE + UA_NOTIF_BANK_OFFSET + 0x5C)  /* 0xC084 */
+/* Clock sources the device offers: bits 16-31, bit n = source value n */
+#define UA_REG_NOTIF_CLOCK_SRCS (UA_REG_NOTIF_BASE + UA_NOTIF_BANK_OFFSET + 0x64)  /* 0xC08C */
 #define UA_REG_NOTIF_READBACK   (UA_REG_NOTIF_BASE + UA_NOTIF_BANK_OFFSET + 0x00)  /* 0xC028 */
 
 /* Config write area (NO bank shift — always at 0xC000) */
@@ -626,9 +628,9 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_MON_PARAM_DSP_SPANNING  0x16   /* ch_idx=0, DSP pairing mode */
 /* 0x0b, 0x0c, 0x0d, 0x10, 0x11, 0x12, 0x17, 0x18, 0x26-0x29 */
 
-/* Clock mode values (from SEL163 SetClockMode) */
-#define UA_CLOCK_MODE_INTERNAL   0x00
-#define UA_CLOCK_MODE_EXTERNAL   0x0C
+/* Clock mode values (from SEL163 SetClockMode): 0x0C is internal */
+#define UA_CLOCK_MODE_INTERNAL   0x0C
+#define UA_CLOCK_MODE_EXTERNAL   0x00
 
 /* Monitor mute values (NOT boolean — uses 2/0 encoding) */
 #define UA_MON_MUTE_ON          2
@@ -710,11 +712,16 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 /* Max buffer frame size (from kext PrepareTransport) */
 #define UA_MAX_BUF_FRAMES       8192
 
-/* Clock source values (for clock_config low byte) */
-#define UA_CLOCK_INTERNAL   0
-#define UA_CLOCK_SPDIF      1  /* Placeholder — verify on HW */
-#define UA_CLOCK_ADAT       2  /* Placeholder */
-#define UA_CLOCK_WORDCLOCK  3  /* Placeholder */
+/*
+ * Clock source values (clock_config low byte, kext UAD2ClockSource).  The
+ * device names them at 0xC090 by the same number and offers the ones set
+ * in UA_REG_NOTIF_CLOCK_SRCS (the x4: S/PDIF, ADAT, Peer2Peer 0x0A,
+ * Internal).
+ */
+#define UA_CLOCK_SPDIF      0x00
+#define UA_CLOCK_ADAT       0x05
+#define UA_CLOCK_WORDCLOCK  0x07
+#define UA_CLOCK_INTERNAL   0x0C
 
 /* Sample rate table indices (for UA_REG_AX_CONNECT clock doorbell) */
 #define UA_RATE_44100           1
@@ -1004,6 +1011,11 @@ struct ua_audio {
 	u32 churn_last_sample_pos;          /* SAMPLE_POS at last pcm_prepare */
 	unsigned int churn_count;           /* consecutive stalled prepares */
 	unsigned long churn_block_until;    /* refuse prepares until (jiffies) */
+
+	/* Playback and capture share one clock: the rate each direction's
+	 * hw_params set (0 = none), so the other can't pick another one */
+	unsigned int stream_rate[2];        /* [UA_DIR_PLAY], [UA_DIR_REC] */
+	u16 clock_src_mask;                 /* UA_REG_NOTIF_CLOCK_SRCS >> 16 */
 };
 
 /* One allocated DMA buffer carrying a plugin-chain DMA_REF payload.
@@ -1292,6 +1304,8 @@ enum ua_resume_how {
 int ua_audio_resume(struct ua_device *ua, enum ua_resume_how how);
 void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate);
+int ua_audio_set_clock_source(struct ua_device *ua, unsigned int source);
+bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source);
 int ua_audio_reconnect(struct ua_device *ua);
 void ua_notify_clock_controls(struct ua_device *ua);
 void ua_dsp_service_start(struct ua_device *ua);
@@ -1353,6 +1367,7 @@ int ua_dsp_send_routing(struct ua_device *ua);
 int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 			 u32 sub_param, u32 value_u32);
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
+int ua_dsp_send_rate_ack(struct ua_device *ua, u32 rate);
 void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
 			  u32 w0, u32 w1, u32 w2, u32 w3);
