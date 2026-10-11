@@ -147,13 +147,14 @@ MODULE_PARM_DESC(stall_qos_us,
  * Default: a 1 ms soft hrtimer polls SAMPLE_POS.  period_irq=1: the
  * period-timer interrupt wakes a threaded IRQ handler instead, so BAR0 is
  * read once per period in process context rather than 1000 times a second
- * from a timer.  Both are read when a stream starts (trigger), so a change
- * applies to streams started afterwards.
+ * from a timer.  period_irq is read when the transport starts (whether to
+ * program the timer) and when a stream starts (its owner), so a change
+ * applies once all streams are closed.
  */
 static bool period_irq;
 module_param(period_irq, bool, 0644);
 MODULE_PARM_DESC(period_irq,
-		 "Period wakeups from the hardware period-timer interrupt (threaded IRQ handler) instead of the 1 ms SAMPLE_POS poll (default: off; applies to streams started after a change)");
+		 "Period wakeups from the hardware period-timer interrupt (threaded IRQ handler) instead of the 1 ms SAMPLE_POS poll (default: off; off leaves the timer unprogrammed and its vector masked, as the macOS driver; a change applies once all streams are closed and the transport restarts)");
 static int period_irq_cfg_adj = -1;
 module_param(period_irq_cfg_adj, int, 0644);
 MODULE_PARM_DESC(period_irq_cfg_adj,
@@ -3183,35 +3184,43 @@ int ua_audio_reconnect(struct ua_device *ua)
  * ---------------------------------------------------------------- */
 
 /*
- * TIMER_CFG (0x2270) for a period of @period frames.  Caller holds
- * ua->lock with the transport stopped (ua_audio_prepare_transport()).
+ * The period timer of a transport about to start with a period of @period
+ * frames: TIMER_CFG (0x2270) and timer_frames.  Caller holds ua->lock with
+ * the transport stopped (ua_audio_prepare_transport()).
  *
- * period_irq=0 writes the period, as the driver always has (nothing takes
- * its period wakeups from this interrupt then).  period_irq=1 writes what
- * the kext writes for its periodic timer, the interval minus one
- * (CUAD2AudioMixer::StartTransport → SetPeriodicTimerIntervalInFrames(
- * block - 1, 0), 12.0.0 x86 0xf958; BUF_SIZE is frames - 1 too; see
- * period_irq_cfg_adj), with an interval of at least 1 ms: a shorter period
- * gets a multiple of itself and its stream stays on the hrtimer
- * (ua_period_irq_usable()), so the interrupt rate never exceeds the
- * hrtimer's 1 kHz.
+ * period_irq=0 programs no timer (timer_frames = 0, the vector stays
+ * masked).  That is the macOS state: PrepareTransport writes TIMER_CFG and
+ * enables vector 0x46 only for a non-zero interval, and the CoreAudio
+ * engine never sets one; it clocks off the end-of-buffer vector, as the
+ * Windows driver does.  The driver used to write the period here and arm
+ * the vector on every start although nothing took wakeups from it.
+ *
+ * period_irq=1 writes what the kext's one timer user writes, the interval
+ * minus one (CUAD2AudioMixer::StartTransport → vtable +0xf0 =
+ * SetPeriodicTimerIntervalInFrames(block - 1, 0), 12.0.0 x86 0xf958;
+ * BUF_SIZE is frames - 1 too; see period_irq_cfg_adj), with an interval of
+ * at least 1 ms: a shorter period gets a multiple of itself and its stream
+ * stays on the hrtimer (ua_period_irq_usable()), so the interrupt rate
+ * never exceeds the hrtimer's 1 kHz.
  */
 static void ua_audio_set_timer(struct ua_device *ua, unsigned int period)
 {
 	struct ua_audio *audio = &ua->audio;
+	unsigned int min = DIV_ROUND_UP(audio->sample_rate, 1000);
 	unsigned int frames = period;
-	u32 cfg = period;
+	int adj = READ_ONCE(period_irq_cfg_adj);
+	u32 cfg;
 
-	if (READ_ONCE(period_irq)) {
-		unsigned int min = DIV_ROUND_UP(audio->sample_rate, 1000);
-		int adj = READ_ONCE(period_irq_cfg_adj);
-
-		/* Only -1, 0, +1 (clamp() trips old kernels' minmax checks) */
-		adj = adj < 0 ? -1 : adj > 0 ? 1 : 0;
-		if (frames < min)
-			frames = roundup(min, period);
-		cfg = (u32)((int)frames + adj);
+	if (!READ_ONCE(period_irq)) {
+		audio->timer_frames = 0;
+		return;
 	}
+
+	/* Only -1, 0, +1 (clamp() trips old kernels' minmax checks) */
+	adj = adj < 0 ? -1 : adj > 0 ? 1 : 0;
+	if (frames < min)
+		frames = roundup(min, period);
+	cfg = (u32)((int)frames + adj);
 	ua_write(ua, UA_REG_AX_TIMER_CFG, cfg);
 	audio->timer_frames = frames;
 	audio->timer_cfg = cfg;
@@ -3221,7 +3230,8 @@ static void ua_audio_set_timer(struct ua_device *ua, unsigned int period)
  * Prepare the transport engine.
  * Mirrors CPcieAudioExtension::PrepareTransport().
  *
- * @timer_frames: periodic timer interval for TIMER_CFG, or 0 to leave it.
+ * @timer_frames: the ALSA period for the period timer (ua_audio_set_timer()
+ * decides whether there is one), or 0 to keep the current setting.
  * The kext writes TIMER_CFG only here, i.e. only while the transport is
  * stopped (PrepareTransport, 12.0.0 x86 0x34ee8); rewriting it under a
  * running transport on every pcm_prepare is a suspect in issue #42.
@@ -3292,12 +3302,21 @@ static int ua_audio_prepare_transport(struct ua_device *ua,
 	/* Step 3: Clear SAMPLE_POS (0x2244) = 0 */
 	ua_write(ua, UA_REG_AX_SAMPLE_POS, 0);
 
-	/* Step 3b: TIMER_CFG (0x2270) = periodic timer interval */
+	/*
+	 * Steps 3b/4: TIMER_CFG (0x2270) and EnableVector(0x46,
+	 * clearPending=1), as the kext: only with a timer interval, i.e.
+	 * period_irq=1 (ua_audio_set_timer()).  A restart (timer_frames 0)
+	 * keeps the session's choice.  Without a timer, mask a vector an
+	 * earlier period_irq=1 session left armed.
+	 */
 	if (timer_frames)
 		ua_audio_set_timer(ua, timer_frames);
-
-	/* Step 4: Enable timer vector — EnableVector(0x46, clearPending=1) */
-	ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC, true);
+	if (audio->timer_frames)
+		ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC, true);
+	else if (ua->fw_v2 &&
+		 (READ_ONCE(ua->irq_mask_hi) &
+		  BIT(ua_vector_to_hwbit(UA_IRQ_VEC_PERIODIC) - 32)))
+		ua_disable_vector(ua, UA_IRQ_VEC_PERIODIC);
 
 	/* Step 5: Clear SAMPLE_POS again (kext does this twice) */
 	ua_write(ua, UA_REG_AX_SAMPLE_POS, 0);
@@ -5108,8 +5127,8 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 			audio->play_sub, audio->rec_sub);
 
 		/*
-		 * TIMER_CFG from the ALSA period size, so interrupts fire
-		 * at the period boundary rather than the full buffer.  Only
+		 * The period timer (period_irq=1) from the ALSA period size,
+		 * so its interrupts fire at the period boundary.  Only
 		 * written here, while the transport is stopped: the first
 		 * substream to prepare sets the shared interval.
 		 */
@@ -5236,9 +5255,14 @@ static int ua_pcm_prepare(struct snd_pcm_substream *sub)
  *    from the period, the hard IRQ (ISR/ISR_HI read and ack, vector
  *    re-arm, nothing else on BAR0) wakes ua_audio_irq_thread(), which
  *    reads SAMPLE_POS once in process context and makes the same boundary
- *    test.  The kext takes its audio clock from interrupts too (end of
- *    buffer → UAD2AudioEngine::_bufferCallback → takeTimeStamp) and never
- *    polls BAR0 for it.
+ *    test.  The reference drivers take their audio clock from interrupts
+ *    too, never from a BAR0 poll, but from the end-of-buffer vector (kext:
+ *    UAD2AudioEngine::_bufferCallback → takeTimeStamp, once per 8192-frame
+ *    wrap; Windows: the same fast callback).  The kext's only timer user is
+ *    its client audio mixer (CUAD2AudioMixer: the block size, capped at
+ *    256/512/1024 frames for the 48/96/192 kHz bands).
+ *    With period_irq=0 the timer is not programmed and its vector stays
+ *    masked, the macOS state.
  *
  * The owner is chosen per substream at trigger(START) and kept until
  * STOP (irq_subs): the interrupt when period_irq=1, the firmware has the
@@ -5902,13 +5926,15 @@ bool ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 	irq_count++;
 
 	/*
-	 * Re-arm one-shot interrupt vectors.
-	 *
-	 * Both the periodic timer (BIT 30) and end-of-buffer (BIT 31) are
-	 * ONE-SHOT: after firing, the hardware clears their enable bit.
-	 * We must re-enable them or the DMA engine stalls after one cycle.
-	 * No pending clear: the ISR just acked them, and clearing again
-	 * could drop an event that arrived since.
+	 * Re-arm the vectors that fired.  The original driver found them
+	 * one-shot (enable bit cleared on fire).  The kext does not support
+	 * that for the end of buffer: 0x47 is a fast vector its filter never
+	 * masks, so this re-arm is a no-op write there.  Its one timer user
+	 * registers 0x46 non-fast, so the filter masks it and the owner
+	 * re-arms it after processing with EnableVector(0x46, 1)
+	 * (ResetPeriodicTimerInterrupt).  Here the ISR has just acked both;
+	 * no pending clear, which could drop an event that arrived since.
+	 * One posted IMR_HI write each, no BAR0 read.
 	 */
 	if (status_hi & BIT(30))
 		ua_enable_vector(ua, UA_IRQ_VEC_PERIODIC, false);
