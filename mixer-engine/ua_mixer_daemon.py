@@ -304,6 +304,9 @@ def read_device_info(backend) -> dict | None:
         serial = sysinfo.get("serial")
         if isinstance(serial, str) and serial.strip().strip("0 ") != "":
             info = dict(info, serial_str=serial.strip())
+        # the kext's public type: the model when device_type has no map
+        if isinstance(sysinfo.get("public_type"), int):
+            info = dict(info, public_type=sysinfo["public_type"])
     return info
 
 
@@ -585,7 +588,8 @@ class MixerDaemon:
         if info:
             fill_helper_identity(self.helper_tree, info)
             if self.loaded_map is not None:
-                new_map = find_device_map(info["device_type"])
+                new_map = find_device_map(info["device_type"],
+                                          info.get("public_type"))
                 if new_map and new_map != self.loaded_map:
                     log.warning("Device is a different model (type 0x%02x): "
                                 "device map %s -> %s, restarting",
@@ -1342,7 +1346,8 @@ class MixerDaemon:
         rel = info.get("fw_release")
         if isinstance(rel, int) and rel not in (0, 0xFFFFFFFF):
             dt = info.get("device_type")
-            cls = descriptor_mixer_class(find_descriptor(dt)[0]) \
+            cls = descriptor_mixer_class(find_descriptor(
+                dt, info.get("public_type"))[0]) \
                 if isinstance(dt, int) else None
             text = firmware_text(rel)
             problem = firmware_problem(info, cls)
@@ -2559,14 +2564,31 @@ def device_map_path(slug: str) -> Path:
     return SCRIPT_DIR / "device_maps" / f"device_map_{slug.replace('-', '_')}.json"
 
 
-def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
+def find_descriptor(device_type: int,
+                    public_type: int | None = None) -> tuple[str | None, str | None]:
     """Resolve a driver device_type to (slug, model) via devices/*.json.
 
     Each devices/*.json descriptor lists its driver "device_types" (hex strings)
     and its "model" (e.g. "Apollo x8p"). (None, None) if no descriptor matches.
+
+    When no descriptor lists device_type and the driver reported the kext's
+    public type (GET_SYSTEM_INFO), the descriptor whose "public_types" holds
+    it is used: UA's Mixer Engine picks the model from that type
+    (CUAD2Info::CardType).  That names a type-0 unit on a driver that does
+    not retype it, and the serial types 0x1E (2016, the Arrow), 0x2A (2032)
+    and 0x3E (2110, the Solo) the driver leaves unnamed.
     """
     if not DEVICES_DIR.is_dir():
         return None, None
+    found = _find_descriptor_by(device_type, ("device_types", "device_type"))
+    if found[0] is None and isinstance(public_type, int) and \
+            0 < public_type <= 0x29:
+        found = _find_descriptor_by(public_type, ("public_types",))
+    return found
+
+
+def _find_descriptor_by(value: int, keys: tuple) -> tuple[str | None, str | None]:
+    """The first devices/*.json listing `value` under one of `keys`."""
     for desc_path in sorted(DEVICES_DIR.glob("*.json")):
         try:
             desc = json.loads(desc_path.read_text())
@@ -2577,9 +2599,13 @@ def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
             log.warning("Ignoring device descriptor %s: not a JSON object", desc_path)
             continue
 
-        types = list(desc.get("device_types") or [])
-        if desc.get("device_type") is not None:
-            types.append(desc["device_type"])
+        types = []
+        for key in keys:
+            v = desc.get(key)
+            if isinstance(v, list):
+                types.extend(v)
+            elif v is not None:
+                types.append(v)
         match = False
         for dt in types:
             try:
@@ -2587,10 +2613,10 @@ def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
                 # rather than reading a bare "32" as hex (= 50).
                 dt_value = dt if isinstance(dt, int) else int(str(dt), 0)
             except ValueError:
-                log.warning("Ignoring device descriptor %s: bad device_type %r",
-                            desc_path, dt)
+                log.warning("Ignoring device descriptor %s: bad %s %r",
+                            desc_path, keys[0], dt)
                 continue
-            if dt_value == device_type:
+            if dt_value == value:
                 match = True
                 break
         if not match:
@@ -2634,12 +2660,14 @@ def descriptor_model(slug: str | None) -> ModelInfo | None:
         return None
 
 
-def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
-    """Resolve a driver device_type to (model, captured_map_path).
+def lookup_device(device_type: int, public_type: int | None = None
+                  ) -> tuple[str | None, Path | None]:
+    """Resolve a driver device_type (else the public type) to
+    (model, captured_map_path).
 
     The path is None if the model has no captured map (x4 and x8p do).
     """
-    slug, model = find_descriptor(device_type)
+    slug, model = find_descriptor(device_type, public_type)
     if slug is None:
         return None, None
     candidate = device_map_path(slug)
@@ -2667,16 +2695,19 @@ def generate_device_map(slug: str) -> Path | None:
         return None
 
 
-def device_model_name(device_type: int) -> str:
+def device_model_name(device_type: int, public_type: int | None = None) -> str:
     """Human-readable model name for a device_type (for logging)."""
-    model, _ = lookup_device(device_type)
+    model, _ = lookup_device(device_type, public_type)
     return model or f"device_type 0x{device_type:02x}"
 
 
-def find_device_map(device_type: int | None = None) -> Path | None:
+def find_device_map(device_type: int | None = None,
+                    public_type: int | None = None) -> Path | None:
     """Find the best available device map, preferring the attached device's own.
 
-    Order, when the connected hardware's device_type is known:
+    The model is the descriptor listing device_type, else the one listing
+    the driver's public type (find_descriptor).  Order, when the connected
+    hardware's model is known:
       1. the model's captured map (live UA Mixer Engine session: x4, x8p);
       2. a map generated from devices/<model>.json (tools/gen-device-map.py:
          x4 structure with the model's channel counts), cached under
@@ -2684,7 +2715,7 @@ def find_device_map(device_type: int | None = None) -> Path | None:
       3. the Apollo x4 map, with a warning that controls/routing may not match.
     """
     if device_type is not None:
-        slug, model = find_descriptor(device_type)
+        slug, model = find_descriptor(device_type, public_type)
         label = model or f"device_type 0x{device_type:02x}"
         if slug is not None:
             captured = device_map_path(slug)
@@ -2856,6 +2887,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     # Apollo model and load the device map that matches it.
     backend = None
     device_type = None
+    public_type = None
     info = None
     if not args.no_hardware:
         backend = HardwareBackend(args.device, safe_mode=args.safe_mode)
@@ -2863,9 +2895,11 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             info = read_device_info(backend)
             if info:
                 device_type = info["device_type"]
+                public_type = info.get("public_type")
                 log.info("Detected %s (device_type=0x%02x, subsystem=0x%04x, "
                          "%d DSPs, serial=%s)",
-                         device_model_name(device_type), device_type,
+                         device_model_name(device_type, public_type),
+                         device_type,
                          info["subsystem_id"], info["num_dsps"],
                          serial_text(info))
             else:
@@ -2887,7 +2921,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         args.ws_port = DEFAULT_WS_PORT + PORT_STRIDE * index
 
     # Find device map (prefer one matching the attached device; --device-map wins)
-    device_map = args.device_map or find_device_map(device_type)
+    device_map = args.device_map or find_device_map(device_type, public_type)
     if not device_map or not device_map.exists():
         log.error("Device map not found. Searched:")
         log.error("  %s", DEFAULT_DEVICE_MAP)
@@ -2930,15 +2964,15 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         hw_router = HardwareRouter(
             backend, state, stereo_sends=args.stereo_sends,
             input_buses=descriptor_input_buses(
-                find_descriptor(device_type)[0]
+                find_descriptor(device_type, public_type)[0]
                 if device_type is not None else None),
             model=descriptor_model(
-                find_descriptor(device_type)[0]
+                find_descriptor(device_type, public_type)[0]
                 if device_type is not None else None))
         # The settle mute uses OutputsAttenuate, which only some mixer
         # types support (OUTPUTS_ATTENUATE_CLASSES)
         hw_router.supports_outputs_attenuate = descriptor_mixer_class(
-            find_descriptor(device_type)[0]
+            find_descriptor(device_type, public_type)[0]
             if device_type is not None else None) \
             in OUTPUTS_ATTENUATE_CLASSES
         log.info("Hardware backend: %s", backend.device_path)
