@@ -3160,24 +3160,13 @@ class HardwareRouter:
                                             param_id, hw_value):
             log.error("HW PREAMP: failed to set input[%d].preamp.%s", ch, control)
 
-        # After any flag toggle, re-send current gain to prevent the
-        # batch flush from pushing stale cached gain values to the DSP.
-        if control in ("48V", "Pad", "LowCut", "Phase", "MicLine"):
-            last = self._gain_last.get(ch)
-            if last:
-                gain_db = last[0]
-            elif self.state_tree:
-                base = f"/devices/0/inputs/{ch}/preamps/0"
-                g = self.state_tree.get_value(f"{base}/Gain/value")
-                gain_db = int(round(float(g))) if g else 10
-            else:
-                gain_db = 10
-            val_a = max(0, min(54, gain_db - 10))
-            val_b = val_a
-            val_c = max(0, min(56, gain_db - 9))
-            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x0A, val_a)
-            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x09, val_b)
-            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, 0x06, val_c)
+        # A switch writes its own parameter only.  The gain used to be
+        # re-sent after every switch against a batch flush that re-wrote
+        # stale cached fields; the driver's one-shot mailbox writes a
+        # setting once with its mask, so nothing stale is flushed, and the
+        # re-send could put back a gain the front-panel knob had just
+        # changed (the router's cache follows the readback only every
+        # 20 ms, and not for 2 s after a client gain SET).
 
     # ── Input channel controls (SEL130 bus param path) ───────────
 

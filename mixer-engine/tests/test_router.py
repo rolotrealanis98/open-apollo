@@ -62,12 +62,22 @@ class TestPreampFlags:
         router.on_set(f"{PRE0}/{control}/value", value)
         assert backend.mixer_params[0] == (1, 0, param, hw)
 
-    def test_flag_resends_gain_afterwards(self, router, backend):
-        router.on_set(PRE0 + "/Gain/value", 30.0)
+    @pytest.mark.parametrize("ch", range(4))
+    @pytest.mark.parametrize("control", ["48V", "Pad", "LowCut", "Phase"])
+    @pytest.mark.parametrize("value", [False, True])
+    def test_flag_writes_only_its_parameter(self, router, backend, ch,
+                                            control, value):
+        """A switch no longer re-sends the gain (Codex dcb43ac): the
+        mailbox flushes nothing stale, Mic/Line (IOType) never re-sent it
+        and works, and the re-send could undo a front-panel gain change."""
+        from hardware import ARM_PARAM_IDS
+        router.on_set(f"/devices/0/inputs/{ch}/preamps/0/Gain/value", 30.0)
         backend.clear()
-        router.on_set(PRE0 + "/48V/value", True)
+        router.on_set(f"/devices/0/inputs/{ch}/preamps/0/{control}/value",
+                      value)
         assert backend.mixer_params == [
-            (1, 0, 0x03, 1), (1, 0, 0x0A, 20), (1, 0, 0x09, 20), (1, 0, 0x06, 21)]
+            (1, ch, ARM_PARAM_IDS[control], int(value))]
+        assert router._gain_last[ch][0] == 30
 
     @pytest.mark.parametrize("value, hw", [("Line", 1), ("Mic", 0), ("line", 1)])
     def test_iotype(self, router, backend, value, hw):
