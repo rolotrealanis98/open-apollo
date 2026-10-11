@@ -1600,6 +1600,18 @@ class MixerDaemon:
             log.info("Sent CUE 3/4 sends (sub=5/6, both sides) silent for "
                      "%d buses", len(all_buses))
 
+        # A6: what the hardware cannot report back (sends, aux, CUE, mirror,
+        # alt monitors, talkback configuration, solo) comes from the saved
+        # state, after the defaults so the saved value wins.  Preamp and
+        # monitor values stay the readback's.
+        if self.hw_router and self.hw_router.backend:
+            if self.state.get_value("/TalkbackOn/value"):
+                # init turned the talkback off; the tree must say so
+                self._push_to_clients("/TalkbackOn", False)
+            n = self.hw_router.reapply_saved_state(dict(self.state._dirty))
+            log.info("Re-applied %d saved controls (sends, aux, CUE, "
+                     "outputs, talkback configuration)", n)
+
         log.info("Pushed device map defaults to hardware "
                  "(preamps + monitor + bus coefficients)")
 

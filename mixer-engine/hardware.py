@@ -3435,6 +3435,141 @@ class HardwareRouter:
 
         log.debug("HW DRV: %s = %r (unhandled global)", control, value)
 
+    # ── State re-apply after a daemon restart (A6) ──────────────────
+
+    # Controls the hardware reports back (preamp gain and switches, link,
+    # monitor level/mute/dim/mono, headphone levels, talkback button) are
+    # never in this list: after a restart the Apollo's own values win.  What
+    # cannot be read back is pushed once from the persisted state, in the
+    # order the Mixer Engine's PushEntireMixerTreeToHardware uses:
+    # device-level settings, aux buses, input sends and solo, outputs.
+    _REAPPLY_DEVICE = (
+        "CueBusCount", "OutputsAttenuate", "InputJackSensingDisabled",
+        "DimAttenuation", "TOSLinkOutput", "AltMonSelection",
+        "RemoteMonitorController", "DSPSpanning",
+        "TalkbackInPhysicalCR", "TalkbackMaster", "Enable24dBMode")
+    _RE_REAPPLY = re.compile(
+        r'^/devices/0/(?P<kind>auxs|inputs|outputs)/(?P<n>\d+)/'
+        r'(?:(?P<sub>sends|preamps)/(?P<m>\d+)/)?(?P<ctl>\w+)/value$')
+    _REAPPLY_AUX = ("FaderLevel", "FaderLevelTapered", "Mute", "MixToMono")
+    _REAPPLY_SEND = ("Gain", "GainTapered", "Bypass", "Pan",
+                     "PostFaderOverride")
+
+    def reapply_saved_state(self, saved) -> int:
+        """Push the persisted state that is not read back from the hardware.
+
+        `saved` is the set of paths (or a mapping keyed by path) the user
+        changed (StateTree._dirty); values are read from the tree.  Returns
+        the number of controls written.  Input faders, pans and mutes are
+        pushed by the init path itself; this adds device-level settings,
+        aux buses, input and aux sends (both of the CUE 3/4 sub-params too),
+        solo, the CUE/headphone-source/line-out/alt-monitor outputs and the
+        talkback configuration.
+        """
+        if not self.state_tree:
+            return 0
+        paths = [p for p in saved if isinstance(p, str)
+                 and p.endswith("/value")]
+        have = set(paths)
+        count = 0
+
+        def push(path):
+            nonlocal count
+            value = self._tree_value(path)
+            if value is None:
+                return
+            self.on_set(path, value)
+            count += 1
+
+        # 1. device-level settings (the engine's mixer/root properties)
+        for name in self._REAPPLY_DEVICE:
+            for path in (f"/devices/0/{name}/value", f"/{name}/value"):
+                if path in have:
+                    push(path)
+
+        # Group the rest by object
+        aux_ctl: dict[int, set] = {}
+        aux_sends: dict[tuple, set] = {}
+        in_sends: dict[tuple, set] = {}
+        in_misc: list[tuple] = []
+        out_ctl: dict[int, set] = {}
+        solo = False
+        for path in paths:
+            m = self._RE_REAPPLY.match(path)
+            if not m:
+                continue
+            kind, n, sub, mm, ctl = (m.group("kind"), int(m.group("n")),
+                                     m.group("sub"), m.group("m"),
+                                     m.group("ctl"))
+            if kind == "auxs":
+                if sub == "sends" and ctl in self._REAPPLY_SEND:
+                    aux_sends.setdefault((n, int(mm)), set()).add(ctl)
+                elif sub is None and ctl in self._REAPPLY_AUX:
+                    aux_ctl.setdefault(n, set()).add(ctl)
+            elif kind == "inputs":
+                if sub == "sends" and ctl in self._REAPPLY_SEND:
+                    in_sends.setdefault((n, int(mm)), set()).add(ctl)
+                elif ctl == "Solo" and sub is None:
+                    solo = solo or self._truthy(self._tree_value(path))
+                elif ctl == "SRConvert" and sub is None:
+                    in_misc.append((n, ctl, path))
+                elif ctl == "HiZImpedance":
+                    in_misc.append((n, ctl, path))
+            elif kind == "outputs" and sub is None:
+                out_ctl.setdefault(n, set()).add(ctl)
+
+        # 2. aux buses: return fader, mute, mono, then their CUE sends
+        for n in sorted(aux_ctl):
+            base = f"/devices/0/auxs/{n}"
+            ctls = aux_ctl[n]
+            fader = next((c for c in ("FaderLevel", "FaderLevelTapered")
+                          if c in ctls), None)
+            if fader:
+                push(f"{base}/{fader}/value")
+            if "Mute" in ctls:
+                push(f"{base}/Mute/value")
+            if "MixToMono" in ctls:
+                push(f"{base}/MixToMono/value")
+        for (n, k) in sorted(aux_sends):
+            base = f"/devices/0/auxs/{n}/sends/{k}"
+            ctl = "Bypass" if self._truthy(
+                self._tree_value(f"{base}/Bypass/value")) else "Gain"
+            push(f"{base}/{ctl}/value")
+
+        # 3. input sends (sub 1-6, CUE 3/4 included), per-input settings
+        for (n, k) in sorted(in_sends):
+            base = f"/devices/0/inputs/{n}/sends/{k}"
+            ctl = "Bypass" if self._truthy(
+                self._tree_value(f"{base}/Bypass/value")) else "Gain"
+            push(f"{base}/{ctl}/value")
+        for n, ctl, path in sorted(in_misc):
+            push(path)
+        if solo:
+            self._handle_solo_recalc()
+            count += 1
+
+        # 4. outputs: not read back, so the saved value is the truth
+        roles = self._output_roles()
+        for n in sorted(out_ctl):
+            base = f"/devices/0/outputs/{n}"
+            ctls = out_ctl[n]
+            role = roles.get(n)
+            if role and role[0] == "cue":
+                wanted = ("MixToMono", "MixInSource", "OutputDestination")
+            elif role and role[0] == "hp":
+                wanted = ("MixInSource",)
+            elif role and role[0] == "monitor":
+                wanted = ("MixInSource", "Pad", "MirrorsToDigital",
+                          "CRPGABypass", "DigitalOutputMode")
+            elif n in self._line_outputs():
+                wanted = ("Pad", "AltMonTrim", "AltMonEnabled")
+            else:
+                continue
+            for ctl in wanted:
+                if ctl in ctls:
+                    push(f"{base}/{ctl}/value")
+        return count
+
     def flush_pending_gains(self):
         """Send any deferred gain values whose rate-limit window has passed."""
         now = time.monotonic()
