@@ -1827,7 +1827,7 @@ int ua_dsp_rings_init(struct ua_device *ua);	/* also re-arms on resume */
 void ua_dsp_rings_fini(struct ua_device *ua, bool dma_quiet);
 void ua_dsp_rings_quiesce(struct ua_device *ua);
 void ua_dsp_rings_neutralize(struct ua_device *ua);
-void ua_dsp_cache_firmware(struct ua_device *ua);
+void ua_dsp_cache_firmware(struct ua_device *ua, bool mixer, bool chain);
 void ua_dsp_rings_reprogram(struct ua_device *ua);
 int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 			 size_t fw_size);
@@ -1838,6 +1838,7 @@ int ua_dsp_wait_ready(struct ua_device *ua);
 int ua_dsp_load_plugin_payloads(struct ua_device *ua);
 void ua_dsp_free_plugin_payloads(struct ua_device *ua);
 int ua_dsp_activate_plugin_chain(struct ua_device *ua);
+bool ua_plugin_chain_enabled(void);
 void ua_dump_mixer_sram(struct ua_device *ua, const char *label);
 int ua_dsp_test_dma_ref(struct ua_device *ua);
 int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,

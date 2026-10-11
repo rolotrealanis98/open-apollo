@@ -157,6 +157,10 @@ rm -f "/lib/modules/$(uname -r)/extra/ua_apollo.ko.zst" 2>/dev/null
 depmod -a 2>/dev/null || true
 ok "Removed module auto-load config and extra module files"
 
+# Firmware blobs older installers put in /lib/firmware
+rm -f /lib/firmware/ua-apollo-plugin-chain.bin /lib/firmware/ua-apollo-mixer.bin 2>/dev/null
+ok "Removed Open Apollo firmware blobs"
+
 # dracut bakes modules-load.d entries into the initramfs — without a regen the
 # removed entry survives and keeps failing systemd-modules-load (issue #43)
 if [ "$HAD_MODULES_LOAD" = "1" ]; then

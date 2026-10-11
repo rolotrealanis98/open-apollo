@@ -41,10 +41,6 @@
 
 #include "ua_apollo.h"
 
-/* Advertise the blobs so initramfs tools and distro packaging include them. */
-MODULE_FIRMWARE(UA_MIXER_FW_NAME);
-MODULE_FIRMWARE(UA_PLUGIN_CHAIN_FW_NAME);
-
 /* Defined with the DSP vector code at the end of the file */
 static void ua_dsp_msg_work(struct work_struct *work);
 static void ua_dsp_irq_disarm(struct ua_device *ua);
@@ -1092,20 +1088,24 @@ void ua_dsp_rings_neutralize(struct ua_device *ua)
  * ua_dsp_cache_firmware - Keep the firmware files loadable across suspend
  * @ua: device
  *
- * A cold re-init after resume needs ua-apollo-mixer.bin (and the plugin
- * chain blob if it was not loaded yet).  firmware_request_cache() has the
- * firmware loader read them into its cache at suspend-prepare, while the
- * filesystem is still up, and serve request_firmware() from that cache
- * during resume.  The resume work also runs on the freezable workqueue,
- * after tasks are thawed.
+ * @mixer: the cold start loads ua-apollo-mixer.bin (mixer_fw_stage=1)
+ * @chain: the cold start sends the plugin chain (no_plugins=0)
+ *
+ * A cold re-init after resume needs the files the enabled stages load.
+ * firmware_request_cache() has the firmware loader read them into its
+ * cache at suspend-prepare, while the filesystem is still up, and serve
+ * request_firmware() from that cache during resume.  The resume work also
+ * runs on the freezable workqueue, after tasks are thawed.  With both
+ * stages off (the default) nothing is requested.
  */
-void ua_dsp_cache_firmware(struct ua_device *ua)
+void ua_dsp_cache_firmware(struct ua_device *ua, bool mixer, bool chain)
 {
 #if IS_ENABLED(CONFIG_FW_CACHE)
-	int ret;
+	int ret = 0;
 
-	ret = firmware_request_cache(&ua->pdev->dev, UA_MIXER_FW_NAME);
-	if (!ret)
+	if (mixer)
+		ret = firmware_request_cache(&ua->pdev->dev, UA_MIXER_FW_NAME);
+	if (!ret && chain)
 		ret = firmware_request_cache(&ua->pdev->dev,
 					     UA_PLUGIN_CHAIN_FW_NAME);
 	if (ret)

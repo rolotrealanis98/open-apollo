@@ -3797,7 +3797,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 			 * will not toggle, but the rest of the driver
 			 * still operates.
 			 */
-			int plugin_ret = ua_dsp_load_plugin_payloads(ua);
+			int plugin_ret = ua_plugin_chain_enabled() ?
+				ua_dsp_load_plugin_payloads(ua) : 0;
 
 			if (plugin_ret && plugin_ret != -ENOENT)
 				dev_warn(&pdev->dev,
@@ -3854,7 +3855,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 				 * defer activation to ua_audio_connect()
 				 * (after ACEFACE completes).
 				 */
-				if (fw_ret == 0 && !ua->plugins_activated) {
+				if (fw_ret == 0 && !ua->plugins_activated &&
+				    ua_plugin_chain_enabled()) {
 					int pc_ret =
 						ua_dsp_activate_plugin_chain(ua);
 					if (pc_ret)
@@ -4223,7 +4225,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_set_master(pdev);
 
 	/* A cold re-init after system resume needs the firmware files */
-	ua_dsp_cache_firmware(ua);
+	ua_dsp_cache_firmware(ua, mixer_fw_stage, ua_plugin_chain_enabled());
 
 	/*
 	 * Interrupt type, as UAD2Pcie2::_initializeInterrupts (kext 12.0.0

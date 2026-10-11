@@ -61,9 +61,15 @@ static bool skip_bus_coeff = true;
 module_param(skip_bus_coeff, bool, 0444);
 MODULE_PARM_DESC(skip_bus_coeff, "Skip BUS_COEFF (0x1D) in plugin chain (default: true)");
 
-static bool no_plugins;
+static bool no_plugins = true;
 module_param(no_plugins, bool, 0444);
-MODULE_PARM_DESC(no_plugins, "Skip plugin chain entirely (keep ACEFACE)");
+MODULE_PARM_DESC(no_plugins, "Skip the captured plugin-chain init (default: on). With the chain, titan's x4 faulted the IOMMU on its DMA references and DSP 0 stopped consuming its command ring; PAD/48V/Mic-Line work through the mixer settings without it. 0 sends the chain when ua-apollo-plugin-chain.bin is installed");
+
+/* Is the captured plugin-chain init enabled (no_plugins=0)? */
+bool ua_plugin_chain_enabled(void)
+{
+	return !no_plugins;
+}
 
 /*
  * The macOS driver never writes PCI config space (UAD2System.kext only

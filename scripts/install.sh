@@ -663,34 +663,27 @@ check_iommu() {
 # ================================================================
 # Step 4c: Install firmware blobs to /lib/firmware/
 # ================================================================
-# Ships DSP mixer blob (if present in repo root) and the plugin-chain
-# DMA payload blob (always shipped under configs/firmware/).  The
-# plugin-chain blob is REQUIRED for preamp PAD/48V/MicLine relays to
-# toggle — without it, ua_dsp_load_plugin_payloads returns -ENOENT
-# and ua_dsp_activate_plugin_chain skips every DMA_REF entry.
+# The driver loads neither blob by default: the cold-start firmware stage
+# is off (mixer_fw_stage=0, the x4's DSPs refuse it) and so is the captured
+# plugin-chain init (no_plugins=1, it faulted the IOMMU and stalled DSP 0's
+# command ring on the x4). PAD/48V/Mic-Line go through the mixer settings.
+# A plugin-chain blob left by an older install is removed; the mixer blob
+# is installed only when one sits in the repo root, for mixer_fw_stage=1.
 install_firmware() {
     header "Installing Firmware Blobs"
 
-    local pc_src="$PROJECT_DIR/configs/firmware/ua-apollo-plugin-chain.bin"
     local mx_src="$PROJECT_DIR/ua-apollo-mixer.bin"
     local dst="/lib/firmware"
     local any=0
 
     run_sudo mkdir -p "$dst"
 
-    if [ -f "$pc_src" ]; then
-        if run_sudo install -m 644 "$pc_src" "$dst/ua-apollo-plugin-chain.bin"; then
-            ok "plugin-chain firmware: $dst/ua-apollo-plugin-chain.bin"
-            any=1
+    if [ -f "$dst/ua-apollo-plugin-chain.bin" ]; then
+        if run_sudo rm -f "$dst/ua-apollo-plugin-chain.bin"; then
+            ok "removed old plugin-chain firmware (not used by default)"
         else
-            fail "failed to install plugin-chain firmware"
-            STEP_STATUS[firmware]="fail"
-            return 1
+            warn "could not remove $dst/ua-apollo-plugin-chain.bin"
         fi
-    else
-        warn "plugin-chain firmware missing: $pc_src"
-        warn "  regenerate with: python3 tools/build-plugin-chain-firmware.py"
-        warn "  preamp PAD/48V/MicLine relays will NOT work without it"
     fi
 
     if [ -f "$mx_src" ]; then
