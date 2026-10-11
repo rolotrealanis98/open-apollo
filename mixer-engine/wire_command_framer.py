@@ -32,7 +32,14 @@ _MAGICS = (b"JSON", b"UBJS")
 
 
 class WireError(ValueError):
-    """The stream cannot be framed any further."""
+    """The stream cannot be framed any further.
+
+    `messages` holds the complete commands parsed from the same read before
+    the error; the caller dispatches them, then drops the connection."""
+
+    def __init__(self, *args, messages=None):
+        super().__init__(*args)
+        self.messages = messages or []
 
 
 class WireCommandFramer:
@@ -75,9 +82,10 @@ class WireCommandFramer:
                 if raw:
                     messages.append(("text", raw.decode("utf-8",
                                                         errors="replace")))
-        except WireError:
+        except WireError as e:
             self.failed = True
             self.buf = b""
+            e.messages = messages
             raise
         return messages
 

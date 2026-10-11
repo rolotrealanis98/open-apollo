@@ -214,6 +214,13 @@ def test_oversize_frame_raises_for_the_handler(conn):
     with pytest.raises(WireError):
         daemon._feed_client_data(
             client, b"get /ping\0JSON" + struct.pack("<I", 0xFFFFFFFF))
-    # the text before the bad header was not dispatched: the whole read is
-    # framed before anything runs
-    assert writer.frames == []
+    # the valid command before the bad header is answered first
+    assert [json.loads(f.rstrip(b"\0")) for f in writer.frames] == [
+        {"path": "/ping", "data": True}]
+
+
+def test_wire_error_carries_the_commands_parsed_before_it():
+    f = WireCommandFramer()
+    with pytest.raises(WireError) as ei:
+        f.feed(b"get /ping\0JSON" + struct.pack("<I", MAX_PAYLOAD + 1))
+    assert ei.value.messages == [("text", "get /ping")]

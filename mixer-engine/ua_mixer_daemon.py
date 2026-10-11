@@ -1825,9 +1825,20 @@ class MixerDaemon:
         changes.  A framed command (UBJS or JSON) sets the client's reply
         format to its own, as a UBJS frame always did; an envelope that is
         not a command is logged and skipped, the connection stays up.
-        WireError (unframeable input) propagates: the caller drops the
+        WireError (unframeable input) propagates after the commands parsed
+        before it in the same read were dispatched: the caller drops the
         connection."""
-        for kind, msg in client.framer.feed(data):
+        try:
+            messages = client.framer.feed(data)
+            error = None
+        except WireError as e:
+            messages, error = e.messages, e
+        self._dispatch_wire_messages(client, messages)
+        if error is not None:
+            raise error
+
+    def _dispatch_wire_messages(self, client: MixerClient, messages):
+        for kind, msg in messages:
             if client.trace:
                 log.debug("RECV ← %s: %s", client.id,
                           msg[:200] if kind == "text" else repr(msg)[:200])
