@@ -161,6 +161,11 @@ def apply_runtime_properties(state: StateTree):
                       rprops.get("value"))
 
 
+# A preamp's Gain / GainTapered, exactly (not GainUnknown, not a send Gain)
+_RE_PREAMP_GAIN = re_mod.compile(
+    r"^(/devices/0/inputs/\d+/preamps/0)/(GainTapered|Gain)(?:/value)?$")
+
+
 # NOTE: Do NOT add "/BufferSize/values" or other "/Foo/values" paths here!
 # set_value("/Foo/values", x) resolves to the /Foo property and overwrites its
 # "value" field (not "values"), corrupting the actual control value.
@@ -2420,41 +2425,37 @@ class MixerDaemon:
             # gain LED blinking from readback pushing old values back)
             self._readback_suppress[path] = time.monotonic()
 
-        # For gain SETs: push BOTH Gain and GainTapered to the client.
-        # macOS Mixer Engine does this — every gain SET echoes both values
-        # as subscription pushes within ~14ms.
-        if "preamps/0/Gain" in path:
-            import re as _re
-            m = _re.search(r'/inputs/(\d+)/preamps/0/(GainTapered|Gain)', path)
-            if m:
-                ch, ctrl = int(m.group(1)), m.group(2)
-                from hardware import preamp_tapered_to_db, preamp_db_to_tapered
-                base = f"/devices/0/inputs/{ch}/preamps/0"
+        # Gain and GainTapered are one hardware control.  The macOS Mixer
+        # Engine echoes both on every gain SET, within ~14 ms; the SET's own
+        # path is already echoed by state.set().  The companion is kept in
+        # the tree (persisted, no second hardware write), pushed to the
+        # other subscribers, and sent to this client in its negotiated
+        # framing.  Exact preamp paths only, from the tree's (clamped) value.
+        m = _RE_PREAMP_GAIN.match(path)
+        if m:
+            from hardware import preamp_db_to_tapered, preamp_tapered_to_db
+            base, ctrl = m.groups()
+            actual = self.state.get_value(f"{base}/{ctrl}/value")
+            try:
+                actual = float(actual)
+            except (TypeError, ValueError):
+                actual = None
+            if actual is not None:
                 if ctrl == "GainTapered":
-                    db = int(round(preamp_tapered_to_db(float(cmd.value))))
-                    tapered = float(cmd.value)
-                elif ctrl == "Gain":
-                    db = int(round(float(cmd.value)))
-                    tapered = preamp_db_to_tapered(db)
+                    companion = f"{base}/Gain/value"
+                    value = preamp_tapered_to_db(actual)
                 else:
-                    db = None
-                if db is not None:
-                    # Only send the COMPANION value — the original path
-                    # is already pushed by state.set() subscriber echo.
-                    # macOS sends exactly 2 messages: Gain + GainTapered.
-                    from protocol import encode_response_bytes
-                    if ctrl == "GainTapered":
-                        # iPad sent GainTapered → push Gain (dB) only
-                        client.send(encode_response_bytes(
-                            f"{base}/Gain/value", float(db)))
-                    else:
-                        # iPad sent Gain → push GainTapered only
-                        client.send(encode_response_bytes(
-                            f"{base}/GainTapered/value", tapered))
+                    # the hardware takes whole dB (_handle_preamp)
+                    companion = f"{base}/GainTapered/value"
+                    value = preamp_db_to_tapered(int(round(actual)))
+                self.state.set(companion, value, source_client=client.id,
+                               hardware=False)
+                self._send_response(client, companion, value)
 
         # Monitor level SETs: keep the dB and tapered values in step (as
         # for gain), or a later readback push to the companion's stale
-        # value is dropped as unchanged.
+        # value is dropped as unchanged.  From the tree's (clamped) value
+        # when the map has the control.
         m = re_mod.match(r'^(/devices/0/outputs/\d+)/'
                          r'(CRMonitorLevelTapered|CRMonitorLevel)(?:/value)?$',
                          path)
@@ -2462,8 +2463,9 @@ class MixerDaemon:
             from hardware import (encode_monitor_level,
                                   monitor_hw_to_tapered, monitor_tapered_to_hw)
             base, ctrl = m.groups()
+            stored = self.state.get_value(f"{base}/{ctrl}/value")
             try:
-                v = float(cmd.value)
+                v = float(cmd.value if stored is None else stored)
             except (TypeError, ValueError):
                 v = None
             if v is not None and ctrl == "CRMonitorLevel":
