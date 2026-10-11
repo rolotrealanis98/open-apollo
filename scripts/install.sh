@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPORT_FILE="/tmp/open-apollo-install-report.json"
 TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
-VERSION="0.1.0"
+VERSION="0.2.0"
 SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 
 # --- Flags ---
@@ -140,7 +140,7 @@ regen_initramfs() {
 # --- Report state ---
 declare -A STEP_STATUS=()
 declare -A STEP_DETAIL=()
-DISTRO="" DISTRO_ID="" PKG_MGR="" KERNEL="" ARCH="" RAM_MB="" CPU_MODEL="" KERNEL_CC=""
+DISTRO="" DISTRO_ID="" DISTRO_LIKE="" PKG_MGR="" KERNEL="" ARCH="" RAM_MB="" CPU_MODEL="" KERNEL_CC=""
 SECURE_BOOT="" IOMMU="" PW_VER="" WP_VER="" PA_RUNNING=""
 EXISTING_CARDS="" SND_MODULES="" TB_CONTROLLER=""
 APOLLO_PCIE="" APOLLO_DEV_TYPE="" APOLLO_DEV_NAME=""
@@ -180,9 +180,11 @@ detect_distro() {
     if [ -f /etc/os-release ]; then
         DISTRO=$(. /etc/os-release && echo "${PRETTY_NAME:-$ID}")
         DISTRO_ID=$(. /etc/os-release && echo "${ID:-unknown}")
+        DISTRO_LIKE=$(. /etc/os-release && echo "${ID_LIKE:-}")
     else
         DISTRO="unknown"
         DISTRO_ID="unknown"
+        DISTRO_LIKE=""
     fi
 
     case "$DISTRO_ID" in
@@ -191,11 +193,22 @@ detect_distro() {
         arch|manjaro|endeavouros|cachyos) PKG_MGR="pacman" ;;
         opensuse*|sles) PKG_MGR="zypper" ;;
         nixos) PKG_MGR="nix" ;;
-        *)
-            PKG_MGR=""
-            warn "Unsupported distro: $DISTRO_ID — dependency install will be manual"
-            ;;
+        *) PKG_MGR="" ;;
     esac
+    # Derivatives (Omarchy: ID=omarchy, ID_LIKE=arch) use their parent's
+    # package manager and package names.
+    if [ -z "$PKG_MGR" ]; then
+        for like in $DISTRO_LIKE; do
+            case "$like" in
+                fedora|rhel|centos) PKG_MGR="dnf" ;;
+                debian|ubuntu) PKG_MGR="apt" ;;
+                arch) PKG_MGR="pacman" ;;
+                suse|opensuse*) PKG_MGR="zypper" ;;
+            esac
+            [ -n "$PKG_MGR" ] && break
+        done
+    fi
+    [ -z "$PKG_MGR" ] && warn "Unsupported distro: $DISTRO_ID — dependency install will be manual"
 
     # Detect if kernel was built with Clang (needed for module compilation)
     local kbuild="/lib/modules/$KERNEL/build"
