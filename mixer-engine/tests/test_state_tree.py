@@ -13,8 +13,20 @@ GAIN = "/devices/0/inputs/0/preamps/0/Gain"
 class TestLoading:
     def test_device_map_loaded(self, tree):
         assert tree.device_name == "Apollo x4"
-        assert tree.control_count == 11244
-        assert len(tree.all_paths()) > 11000
+        assert tree.control_count == 9924
+        assert len(tree.all_paths()) > 9000
+
+    @pytest.mark.parametrize("name", ["device_map_apollo_x4.json",
+                                      "device_map_apollo_x8p.json"])
+    def test_captured_maps_carry_no_plugin_license_state(self, name):
+        # The captures came from a real UA account; its per-plugin
+        # authorization and demo state must never be committed.
+        import pathlib
+        import re
+        f = pathlib.Path(__file__).parent.parent / "device_maps" / name
+        leaves = {c["path"].rstrip("/").rsplit("/", 1)[-1]
+                  for c in json.load(open(f))["controls"]}
+        assert not [n for n in leaves if re.search(r"auth|licen|demo", n, re.I)]
 
     def test_get_value_and_metadata(self, tree):
         assert tree.get_value(GAIN + "/value") == 10.0
