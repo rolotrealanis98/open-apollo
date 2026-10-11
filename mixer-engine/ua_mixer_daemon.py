@@ -60,7 +60,7 @@ from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
 from bonjour import BonjourAnnouncer, _default_name
 from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
                             latency_figures, load_descriptor)
-from commands import CommandEngine, parse_cmdparams
+from commands import CommandEngine, parse_cmdparams, refused_set
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
 try:
@@ -2253,6 +2253,9 @@ class MixerDaemon:
         path = cmd.path
         if path.lower() == "/sleep":
             path = "/Sleep"
+        if refused_set(path, cmd.value):
+            self._send_error(client, path, "set")
+            return
         old_value = self.commands.value_of(path)
 
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}

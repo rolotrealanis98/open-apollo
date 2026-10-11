@@ -65,6 +65,16 @@ log = logging.getLogger("ua-mixer-daemon")
 ERR_UNRESOLVED = "Unable to resolve the command for the post."
 ERR_FAILED = "Unable to execute command."
 
+_RE_DEVICE_NAME = re.compile(r"^/devices/\d+/DeviceName(?:/value)?$")
+
+
+def refused_set(path: str, value: Any) -> bool:
+    """A SET the engine refuses before it changes anything: an empty
+    device name (CMxMixer::SetProperty, kPropDeviceName 0x6d, returns an
+    error for "")."""
+    return bool(_RE_DEVICE_NAME.match(path)) and \
+        (value is None or str(value) == "")
+
 IDENTIFY_PATH = "/devices/0/Identify/value"
 IDENTIFY_SECONDS = 5.0
 IDENTIFY_MAX_SECONDS = 30.0

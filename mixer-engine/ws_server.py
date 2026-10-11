@@ -24,7 +24,7 @@ except ImportError:
     HAS_WEBSOCKETS = False
 
 from state_tree import StateTree
-from commands import ERR_UNRESOLVED
+from commands import ERR_UNRESOLVED, refused_set
 from ws_protocol import (
     WsCommand, parse_ws_command,
     encode_ws_response, encode_ws_error,
@@ -204,6 +204,9 @@ class WsServer:
         path = cmd.path
         if path.lower() == "/sleep":
             path = "/Sleep"
+        if refused_set(path, cmd.value):
+            return [encode_ws_error(path, "Unable to resolve path for set.",
+                                    cmd.message_id)]
         old = self.commands.value_of(path) if self.commands is not None \
             else None
         self.state.set(path, cmd.value, source_client=client.id)
