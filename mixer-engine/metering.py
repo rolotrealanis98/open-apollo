@@ -489,6 +489,12 @@ X4_READBACK_METERS = (
 )
 
 
+# Device types whose DSP writes the X4_READBACK_METERS layout: the x4 and
+# the x4 Gen 2 / Gen 2 TB4 (same Freud mixer family).  Other models need a
+# readback capture of their own.
+READBACK_METER_DEVICE_TYPES = frozenset({0x1F, 0x36, 0x3F})
+
+
 class ReadbackMeter(AlsaMeter):
     """Hardware meters: the levels the DSP writes into readback words 8-25.
 
@@ -533,12 +539,12 @@ class ReadbackMeter(AlsaMeter):
 def make_meter(alsa_device=None, device_type=None, device=None):
     """The meter that can work right now.
 
-    ReadbackMeter on the Apollo x4 (device type 0x1F), whose readback meter
-    layout is known; else PipeWireMeter when PipeWire holds the Apollo's
+    ReadbackMeter on the Apollo x4 (0x1F) and x4 Gen 2 (0x36, 0x3F: the same
+    FreudG2 mixer), whose readback meter layout is known; else PipeWireMeter when PipeWire holds the Apollo's
     streams (the usual desktop case), else AlsaMeter on the capture device
     directly.
     """
-    if device_type == 0x1F and not alsa_device:
+    if device_type in READBACK_METER_DEVICE_TYPES and not alsa_device:
         return ReadbackMeter()
     card = find_apollo_card(device)
     if card is not None and not alsa_device:
