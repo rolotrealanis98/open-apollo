@@ -125,15 +125,13 @@ EVENT_SAFETY_POLL = 10.0
 MUTE_ON_RATE_CHANGE_SECS = 1.0
 # Mixer Engine mixer types (devices/*.json "mixer_class") whose
 # SupportsOutputsAttenuate() returns 1, i.e. the models CMxRoot::
-# MuteUntilSettleDown attenuates on a rate change (arm64 disassembly):
-# A16, A16Black, Armstrong, Stretch, Conrad, Freud and ReneBase with its
-# Rene subclasses; the Gen 2 classes override only DAC/autogain/line-PGA
-# (parity/16) and inherit it.  Base (Apollo, ApolloBlack, Peyton, M64)
-# returns 0.  Lavern, Shirley, LavernG2, ApolloSolo and Cauldron derive
-# from Stretch/Conrad but are not checked for an override, so they are
-# left out.  Only the x4 (Freud) is hardware-tested.
+# MuteUntilSettleDown attenuates on a rate change.  From the vtable slot of
+# every MixerType in the arm64 Mixer Engine: all classes except the ones
+# that keep MixerTypeBase's 0 (Apollo, ApolloBlack, Peyton, M64).  Only the
+# x4 (Freud) is hardware-tested.
 OUTPUTS_ATTENUATE_CLASSES = frozenset({
-    "A16", "A16Black", "Armstrong", "Stretch", "Conrad", "Freud", "FreudG2",
+    "A16", "A16Black", "Armstrong", "Stretch", "Lavern", "Shirley",
+    "LavernG2", "Conrad", "ApolloSolo", "Cauldron", "Freud", "FreudG2",
     "Rene2", "Rene4", "Rene8", "Rene16", "ReneLax",
     "Rene2G2", "Rene4G2", "Rene8G2", "Rene16G2"})
 
