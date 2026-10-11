@@ -236,6 +236,34 @@ python3 ua_mixer_daemon.py -v
 
 The daemon exposes TCP:4710, TCP:4720, and WS:4721 for mixer control from any client application.
 
+### Network and firewall
+
+Console or ConsoleLink on another machine reaches the daemon over the network. Open these on the Linux host:
+
+| Port | Use |
+|------|-----|
+| TCP 4710 | Console / ConsoleLink |
+| TCP 4720 | Mixer protocol |
+| TCP 4721 | WebSocket (UA Connect) |
+| UDP 5353 | mDNS discovery (needs `avahi-daemon` running) |
+
+```bash
+sudo ufw allow from 192.168.1.0/24 to any port 4710,4720,4721 proto tcp
+sudo ufw allow from 192.168.1.0/24 to any port 5353 proto udp
+```
+
+Use your own subnet. Run the daemon with `--no-bonjour` if you do not want it announced on the network.
+
+### Debug logging
+
+Turn on the driver's `dev_dbg` messages at runtime, then read them with `dmesg -w`:
+
+```bash
+echo 'module ua_apollo +p' | sudo tee /sys/kernel/debug/dynamic_debug/control
+```
+
+Or enable them from load time with `dyndbg=+p` on the modprobe line (`sudo modprobe ua_apollo dyndbg=+p`, or `options ua_apollo dyndbg=+p` in `/etc/modprobe.d/`).
+
 ## Architecture
 
 ```
