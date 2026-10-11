@@ -107,6 +107,16 @@ fi
 if have modinfo; then
     printf '$ modinfo ua_apollo (version, srcversion, vermagic, depends)\n' >> "$OUT"
     modinfo ua_apollo 2>&1 | grep -E '^(version|srcversion|vermagic|depends|description):|not found' >> "$OUT"
+    note "signer: $(modinfo -F signer ua_apollo 2>/dev/null | head -1 | sed 's/^$/(none - unsigned)/')"
+fi
+if have mokutil; then
+    printf '$ mokutil --sb-state\n' >> "$OUT"
+    mokutil --sb-state >> "$OUT" 2>&1
+    if mokutil --sb-state 2>/dev/null | grep -qi 'enabled' \
+        && modinfo -n ua_apollo >/dev/null 2>&1 && [ -z "$(modinfo -F signer ua_apollo 2>/dev/null)" ]; then
+        note "NOTE: Secure Boot is on and the module is unsigned - the kernel will reject it."
+        note "      Run scripts/apollo-hostcheck.sh sb for the MOK enrollment steps."
+    fi
 fi
 
 # ----------------------------------------------------------------- PCI
@@ -162,11 +172,17 @@ if [ -d /sys/bus/thunderbolt/devices ]; then
     for d in /sys/bus/thunderbolt/devices/*; do
         [ -d "$d" ] || continue
         line="$(basename "$d")"
-        for f in vendor_name device_name authorized generation rx_speed rx_lanes tx_speed tx_lanes; do
+        for f in security vendor_name device_name authorized generation rx_speed rx_lanes tx_speed tx_lanes; do
             [ -r "$d/$f" ] && line="$line $f=$(cat "$d/$f" 2>/dev/null)"
         done
         note "$line"
+        [ "$(cat "$d/authorized" 2>/dev/null)" = "0" ] && UNAUTH_TB=1
     done
+    if [ "${UNAUTH_TB:-0}" = 1 ]; then
+        note "NOTE: a Thunderbolt device is NOT authorized (authorized=0); an Apollo behind it will not"
+        note "      appear on PCIe.  Run scripts/apollo-hostcheck.sh tb locally for the boltctl command"
+        note "      (it contains the device uuid, which this report leaves out)."
+    fi
 else
     note "no /sys/bus/thunderbolt (kernel without thunderbolt support, or none attached)"
 fi

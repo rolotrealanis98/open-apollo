@@ -87,6 +87,13 @@ ask() {   # ask "question" -> 0 yes, 1 no
 if [ -z "$CARD" ]; then
     CARD="$(awk '/^ *[0-9]+ \[/ && /ua_apollo/ {print $1; exit}' /proc/asound/cards 2>/dev/null)"
 fi
+if [ -z "$CARD" ] && [ -f "$HERE/../scripts/apollo-hostcheck.sh" ]; then
+    # No card: say whether a locked-down Thunderbolt port or Secure Boot is why.
+    # shellcheck source=scripts/apollo-hostcheck.sh
+    . "$HERE/../scripts/apollo-hostcheck.sh"
+    hostcheck_thunderbolt
+    hostcheck_secureboot
+fi
 [ -n "$CARD" ] || die "no ua_apollo ALSA card in /proc/asound/cards (is the driver loaded and the Apollo on?). Use --card N to override."
 HW="hw:$CARD,$DEVICE"
 IO_MAP="${APOLLO_IO_MAP:-/proc/asound/card$CARD/io_map}"   # env override: for testing

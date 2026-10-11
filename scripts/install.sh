@@ -70,6 +70,22 @@ warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()    { echo -e "${RED}[FAIL]${NC}  $*"; }
 header()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 
+# Thunderbolt-authorization and Secure Boot guidance (read-only; prints the
+# exact boltctl / mokutil commands, never runs them).
+hc_warn() { warn "$@"; }
+hc_info() { info "$@"; }
+hc_cmd()  { echo -e "          ${BOLD}$*${NC}"; }
+# shellcheck source=scripts/apollo-hostcheck.sh
+[ -f "$SCRIPT_DIR/apollo-hostcheck.sh" ] && . "$SCRIPT_DIR/apollo-hostcheck.sh"
+SB_GUIDANCE_SHOWN=0
+# Print the Secure Boot / MOK guidance once per run; $1 = failed load output.
+secureboot_guidance() {
+    declare -F hostcheck_secureboot >/dev/null || return 0
+    [ "$SB_GUIDANCE_SHOWN" = "1" ] && return 0
+    hostcheck_secureboot "${1:-}" || SB_GUIDANCE_SHOWN=1
+    return 0
+}
+
 # --- Prompt helper ---
 # Reads from /dev/tty so prompts work even when sudo password is piped via stdin
 prompt() {
@@ -210,6 +226,8 @@ detect_distro() {
         ok "Apollo detected: $APOLLO_PCIE"
     else
         warn "No Apollo hardware detected (lspci -d 1a00:)"
+        # An unauthorized Thunderbolt device keeps the Apollo off the PCI bus
+        declare -F hostcheck_thunderbolt >/dev/null && hostcheck_thunderbolt
     fi
 
     STEP_STATUS[distro]="ok"
@@ -811,10 +829,14 @@ run_init() {
     # Gate 1: Load the driver
     if ! lsmod | grep -q ua_apollo; then
         info "Loading driver..."
-        if run_sudo modprobe ua_apollo 2>/dev/null || run_sudo insmod "$PROJECT_DIR/driver/ua_apollo.ko" 2>/dev/null; then
+        local load_err
+        if load_err=$(run_sudo modprobe ua_apollo 2>&1 || run_sudo insmod "$PROJECT_DIR/driver/ua_apollo.ko" 2>&1); then
             ok "Driver loaded"
         else
             fail "Could not load driver — check dmesg for details"
+            [ -n "$load_err" ] && info "$load_err"
+            # Secure Boot rejecting the unsigned module: explain MOK enrollment
+            secureboot_guidance "$load_err"
             STEP_STATUS[init]="fail"
             STEP_DETAIL[init]="modprobe/insmod failed"
             return 1
@@ -1197,6 +1219,7 @@ main() {
     check_install_deps || true
     build_driver       || true
     setup_dkms         || true
+    secureboot_guidance
     check_iommu        || true
     install_firmware   || true
     deploy_configs     || true
