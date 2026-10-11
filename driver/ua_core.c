@@ -782,9 +782,10 @@ int ua_mixer_write_setting_locked(struct ua_device *ua,
  * Called from the DSP service loop at 10 Hz.  Matches the kext's
  * _flushCachedSettings which is called from GetReadback at ~33Hz.
  *
- * Windows BAR0 capture (2026-03-20) proves: val AND mask persist
- * across flushes. The DSP reads val/mask on every SEQ bump.
- * Do NOT clear mask after writing — gain requires persistent values.
+ * With mixer_mailbox (the default) each changed setting is written
+ * once and then cleared to zeros on the next flush, as the kext's
+ * _writeSetting does; mixer_mailbox=0 keeps the old persistent val/mask
+ * behaviour, which left the PAD/48V/Mic-Line relays dead.
  */
 void ua_mixer_flush_settings(struct ua_device *ua)
 {
