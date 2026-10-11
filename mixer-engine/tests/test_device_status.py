@@ -205,6 +205,12 @@ class TestFirmwareMajor:
             daemon._check_firmware(info(fw_version=fw))
         assert not caplog.records
 
+    def test_status_word_is_not_judged(self, daemon, caplog):
+        # titan's x4: BAR0 0x0000 reads 0x1c00 (DSP 0 status word)
+        with caplog.at_level(logging.WARNING, logger="ua-mixer-daemon"):
+            daemon._check_firmware(info(fw_version=0x1c00))
+        assert not caplog.records
+
     def test_other_major_warns_once(self, daemon, caplog):
         with caplog.at_level(logging.WARNING, logger="ua-mixer-daemon"):
             daemon._check_firmware(info(fw_version=7))

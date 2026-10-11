@@ -1267,7 +1267,15 @@ class MixerDaemon:
         if self._fw_warned or not info:
             return
         fw = info.get("fw_version")
-        if isinstance(fw, int) and fw not in ACCEPTED_FW_MAJORS:
+        # The driver's fw_version is BAR0 0x0000, which on the x4 reads
+        # 0x1c00: DSP 0's status word, not a firmware major.  Only a value
+        # that can be a major (1-255) is judged; the real source of the
+        # firmware version is still to be found (plan N13).
+        if not isinstance(fw, int) or not 0 < fw < 256:
+            log.debug("Firmware version word 0x%x is not a major number; "
+                      "not checked", fw if isinstance(fw, int) else 0)
+            return
+        if fw not in ACCEPTED_FW_MAJORS:
             self._fw_warned = True
             log.warning("Firmware version %d is not one the UA driver "
                         "accepts (%s): this combination is untested",
