@@ -2258,7 +2258,11 @@ int ua_dsp_send_sram_data(struct ua_device *ua, unsigned int dsp_idx,
 	/* Single doorbell for both entries */
 	ua_dsp_ring_doorbell(ua, &ds->cmd, cmd_base);
 
-	/* Wait for DSP to consume both entries */
+	/*
+	 * Wait for DSP to consume both entries.  Not consumed within the
+	 * kext's 6 s: -ETIMEDOUT, as its command-buffer send fails (-38);
+	 * this used to report success.
+	 */
 	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, UA_DSP_CMDBUF_WAIT_MS)) {
 		dev_warn(&ua->pdev->dev,
 			 "sram_data: DSP %u timeout (pos=%u wr=%u)\n",
@@ -2266,7 +2270,7 @@ int ua_dsp_send_sram_data(struct ua_device *ua, unsigned int dsp_idx,
 		/* The DMA ref may still be fetched: park its buffer */
 		ua_dsp_orphan_dma(ua, dma_buf, dma_addr, UA_PCIE_PAGE_SIZE,
 				  &ds->cmd, NULL);
-		return 0;
+		return -ETIMEDOUT;
 	}
 
 	dma_free_coherent(&ua->pdev->dev, UA_PCIE_PAGE_SIZE,
@@ -2340,7 +2344,10 @@ int ua_dsp_send_raw_dma(struct ua_device *ua, unsigned int dsp_idx,
 	}
 	ua_dsp_ring_doorbell(ua, &ds->cmd, cmd_base);
 
-	/* Wait for DSP to consume the entry before freeing DMA buffer */
+	/*
+	 * Wait for DSP to consume the entry before freeing DMA buffer;
+	 * -ETIMEDOUT when it does not (see ua_dsp_send_sram_data()).
+	 */
 	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, UA_DSP_CMDBUF_WAIT_MS)) {
 		dev_warn(&ua->pdev->dev,
 			 "raw_dma: DSP %u timeout (pos=%u wr=%u)\n",
@@ -2348,7 +2355,7 @@ int ua_dsp_send_raw_dma(struct ua_device *ua, unsigned int dsp_idx,
 		/* The DMA ref may still be fetched: park its buffer */
 		ua_dsp_orphan_dma(ua, dma_buf, dma_addr, UA_PCIE_PAGE_SIZE,
 				  &ds->cmd, NULL);
-		return 0;
+		return -ETIMEDOUT;
 	}
 
 	dma_free_coherent(&ua->pdev->dev, UA_PCIE_PAGE_SIZE,
@@ -3914,7 +3921,15 @@ int ua_dsp_replay_if_pending(struct ua_device *ua, const char *why)
  * @w2: third command word
  * @w3: fourth command word
  *
- * For testing ring buffer commands from userspace.
+ * For testing ring buffer commands from userspace (UA_IOCTL_RING_SEND),
+ * and the driver's own inline commands (bus enable, input params, rate
+ * ack, connect).
+ *
+ * Inline entries only: a DMA_REF (word 0 bit 31) carries a bus address
+ * the FPGA then reads.  The DMA_REFs the driver queues point at buffers
+ * it owns and keeps alive until the ring has passed them (send_block,
+ * sram_data, raw_dma, the plugin chain); one taken from user space
+ * would point the device at whatever that address is.
  */
 int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
 			  u32 w0, u32 w1, u32 w2, u32 w3)
@@ -3924,7 +3939,7 @@ int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
 	struct ua_ring_entry entry;
 	int ret;
 
-	if (dsp_idx >= ua->num_dsps)
+	if (dsp_idx >= ua->num_dsps || (w0 & UA_RING_DMA_REF))
 		return -EINVAL;
 
 	ds = &ua->dsp[dsp_idx];

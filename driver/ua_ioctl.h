@@ -399,8 +399,9 @@ struct ua_io_map_info {
 #define UA_IOCTL_GET_IO_MAP        _IOR(UA_IOCTL_MAGIC, 0x62, struct ua_io_map_info)
 
 /*
- * Raw ring buffer inline entry (4 words) to DSP 0 command ring.
- * For testing ring buffer commands from userspace.
+ * Raw ring buffer inline entry (4 words) to a DSP's command ring.
+ * For testing ring buffer commands from userspace.  Inline entries
+ * only: word0 with bit 31 set (a DMA reference) fails with -EINVAL.
  */
 struct ua_ring_cmd {
 	__u32 dsp_idx;	/* Target DSP (0-3) */
@@ -419,11 +420,13 @@ struct ua_ring_cmd {
 #define UA_IOCTL_LOAD_FW_DSP  _IOW(UA_IOCTL_MAGIC, 0x71, __u32)
 
 /* Send raw DMA data to DSP (no cmd/param header). Same struct as dsp_block
- * but cmd/param fields are ignored — data is sent as-is via DMA ref. */
+ * but cmd/param fields are ignored — data is sent as-is via DMA ref.
+ * -ETIMEDOUT when the ring has not consumed it within 6 s. */
 #define UA_IOCTL_DSP_SEND_RAW _IOW(UA_IOCTL_MAGIC, 0x72, struct ua_dsp_block)
 
 /* Send SRAM config + data as atomic pair (inline 0x00080004 + DMA ref).
- * Uses dsp_block struct: cmd=sram_addr, param ignored, data=payload. */
+ * Uses dsp_block struct: cmd=sram_addr, param ignored, data=payload.
+ * -ETIMEDOUT when the ring has not consumed the pair within 6 s. */
 #define UA_IOCTL_DSP_SRAM_DATA _IOW(UA_IOCTL_MAGIC, 0x73, struct ua_dsp_block)
 
 /*
