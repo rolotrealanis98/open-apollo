@@ -50,11 +50,13 @@ from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK,
                     UA_EVT_PAUSED, UA_EVT_RESUMED, UA_PAUSE_DEVICE)
 from model_info import ModelInfo, monitor_param_allowed
-from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
+from hardware import (CLOCK_CONTROL_PATHS, CLOCK_SOURCE_MAP,
+                      DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
                       HardwareBackend, HardwareRouter, clock_source_names,
                       device_clock_menu,
-                      fader_db_to_tapered, pcie_link_below_minimum,
+                      fader_db_to_tapered, normalize_global,
+                      pcie_link_below_minimum,
                       pcie_link_text, preamp_db_to_tapered)
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, find_apollo_card,
                       make_meter,
@@ -2399,9 +2401,11 @@ class MixerDaemon:
         if refused_set(path, cmd.value):
             self._send_error(client, path, "set")
             return
-        old_value = self.commands.value_of(path)
 
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
+        if self._handle_clock_set(client, path, cmd.value, resp_params):
+            return
+        old_value = self.commands.value_of(path)
 
         if client.helper and self.helper_tree:
             # Try helper tree first, fall back to state tree
@@ -2487,6 +2491,71 @@ class MixerDaemon:
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
             self._send_response(client, path, cmd.value, resp_params)
+
+    def _handle_clock_set(self, client: MixerClient, path: str, value,
+                          params: dict) -> bool:
+        """/SampleRate and /ClockSource: written to the driver first and
+        published only when it took the value (False for other paths).
+
+        An invalid value never reaches the driver.  When the driver refuses
+        (a source the device does not offer, no device, paused) or the
+        ioctl fails, the tree, the saved state and the subscribers keep the
+        previous value and the client gets the Mixer Engine's "Unable to
+        set value." with its parameters (func_id).  Keeping the old value
+        says nothing about what the hardware did.  Without hardware the
+        value is validated against the model's list and published.
+        """
+        canonical = path if path.endswith("/value") else path + "/value"
+        if canonical not in CLOCK_CONTROL_PATHS:
+            return False
+        helper_meta = None
+        if client.helper and self.helper_tree:
+            helper_meta = (self.helper_tree.root.get("properties") or {}).get(
+                canonical.split("/")[1])
+        if not self.state.path_exists(canonical) or (
+                isinstance(helper_meta, dict) and helper_meta.get("read_only")):
+            self._send_engine_error(client, path,
+                                    "Unable to resolve path for set.", params)
+            return True
+
+        if self.hw_router:
+            result = self.hw_router.set_global(canonical, value)
+        else:
+            names = set(CLOCK_SOURCE_MAP) | set(
+                (self.state.get_prop_dict("/ClockSource") or {}).get("values")
+                or [])
+            result = normalize_global(canonical, value, names)
+        if result is None or not result.accepted:
+            log.info("%s: SET %s = %r refused (%s)", client.id, path, value,
+                     result.reason if result else "no route")
+            self._send_engine_error(client, path, "Unable to set value.",
+                                    params)
+            return True
+
+        old_value = self.commands.value_of(canonical)
+        self.state.set(canonical, result.value, hardware=False)
+        if self.helper_tree:
+            self.helper_tree.set_value(canonical, result.value)
+        self._readback_suppress[canonical] = time.monotonic()
+        self.commands.on_set(canonical, result.value, old=old_value,
+                             client=client.id)
+        if "func_id" in params:
+            self._send_response(client, path, result.value, params)
+        return True
+
+    def _send_engine_error(self, client: MixerClient, path: str, error: str,
+                           params: dict | None = None):
+        """An error reply ({"path", "error"[, "parameters"]}) in the
+        client's framing, with the request's parameters echoed."""
+        resp: dict = {"path": path, "error": error}
+        params = self._coerce_params(params)
+        if params:
+            resp["parameters"] = params
+        if client.ubjson:
+            client.send(ubjson_encode_response(resp))
+        else:
+            client.send((json.dumps(resp, separators=(",", ":"))
+                         + "\0").encode("utf-8"))
 
     def _handle_subscribe(self, client: MixerClient, cmd: Command):
         """Handle SUBSCRIBE — register for notifications + send current values.

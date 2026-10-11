@@ -52,6 +52,7 @@ import re
 import struct
 import subprocess
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import model_features as mf
@@ -732,6 +733,53 @@ def pcie_link_text(speed: int | None, width: int | None) -> str:
 
 
 VALID_SAMPLE_RATES = {44100, 48000, 88200, 96000, 176400, 192000}
+
+# The clock controls whose SET is a transaction: written to the driver
+# first, published only when the driver took it
+CLOCK_CONTROL_PATHS = ("/SampleRate/value", "/ClockSource/value")
+
+
+@dataclass(frozen=True)
+class GlobalWriteResult:
+    """Outcome of a /SampleRate or /ClockSource write (the daemon's own,
+    not a UA status code).  `value` is the canonical value to publish."""
+    accepted: bool
+    value: Any = None
+    reason: str = ""
+
+
+def normalize_sample_rate(value: Any) -> int | None:
+    """A rate as an int, or None: an int, an integral finite float or a
+    short digit string, and one of VALID_SAMPLE_RATES.  48000.5, True and
+    "48000.5" are refused (int() used to truncate the float)."""
+    rate = None
+    if isinstance(value, int) and not isinstance(value, bool):
+        rate = value
+    elif isinstance(value, float) and math.isfinite(value) and \
+            value.is_integer():
+        rate = int(value)
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]{1,6}", value.strip()):
+        rate = int(value.strip())
+    return rate if rate in VALID_SAMPLE_RATES else None
+
+
+def normalize_global(path: str, value: Any,
+                     clock_names=None) -> GlobalWriteResult | None:
+    """Validate a clock control before any write or publication.  None for
+    a path that is not one (CLOCK_CONTROL_PATHS).  `clock_names` are the
+    names a /ClockSource SET may use (the device's menu plus
+    CLOCK_SOURCE_MAP; CLOCK_SOURCE_MAP when not given)."""
+    if path == "/SampleRate/value":
+        rate = normalize_sample_rate(value)
+        if rate is None:
+            return GlobalWriteResult(False, reason="unsupported sample rate")
+        return GlobalWriteResult(True, rate)
+    if path == "/ClockSource/value":
+        names = CLOCK_SOURCE_MAP if clock_names is None else clock_names
+        if isinstance(value, str) and value in names:
+            return GlobalWriteResult(True, value)
+        return GlobalWriteResult(False, reason="unknown clock source")
+    return None
 
 
 def pipewire_force_rate(rate: int, device: str | None = None) -> bool:
@@ -2485,13 +2533,17 @@ class HardwareRouter:
         return self.model_data.get(key, default) if self.model_data else default
 
     def _sync_driver_state(self):
-        """Read current rate/clock from driver and update state tree."""
+        """Read current rate/clock from driver and update state tree.
+
+        A readback: hardware=False, so it is never written back to the
+        driver (or handed to PipeWire) even when the tree's on_set is
+        already wired."""
         if not self.state_tree or not self.backend.connected:
             return
 
         rate = self.backend.get_driver_param(DRIVER_PARAM_SAMPLE_RATE)
         if rate:
-            self.state_tree.set("/SampleRate/value", rate)
+            self.state_tree.set("/SampleRate/value", rate, hardware=False)
             log.info("Synced SampleRate from driver: %d Hz", rate)
 
         clock = self.backend.get_driver_param(DRIVER_PARAM_CLOCK_SOURCE)
@@ -2500,7 +2552,8 @@ class HardwareRouter:
             for name, val in (list(menu.items()) +
                               list(CLOCK_SOURCE_MAP.items())):
                 if val == clock:
-                    self.state_tree.set("/ClockSource/value", name)
+                    self.state_tree.set("/ClockSource/value", name,
+                                        hardware=False)
                     log.info("Synced ClockSource from driver: %s", name)
                     break
 
@@ -4325,60 +4378,80 @@ class HardwareRouter:
 
     # ── Global/driver controls ────────────────────────────────────
 
-    def _handle_global(self, path: str, control: str, value: Any):
-        """Route global controls (sample rate, clock source).
+    def clock_source_names(self) -> set:
+        """The names a /ClockSource SET may use: the device's menu
+        (clock_sources) and CLOCK_SOURCE_MAP."""
+        menu = getattr(self, "clock_sources", None) or {}
+        return set(menu) | set(CLOCK_SOURCE_MAP)
 
-        These go through SetDriverParameter (sel 0xA6, 16-byte struct)
-        in the kext. The struct is: {paramID, reserved, value_lo, value_hi}
+    def set_global(self, path: str, value: Any) -> GlobalWriteResult | None:
+        """Validate and write a clock control (SetDriverParameter, sel 0xA6
+        in the kext: {paramID, reserved, value_lo, value_hi}).
+
+        Returns None for a path that is not a clock control, else whether
+        the driver took it.  The daemon publishes the value only when
+        accepted; a refused or failed ioctl leaves the tree as it was (the
+        hardware may still have changed: that is not a rollback claim).
+        A sample rate PipeWire takes over (clock.force-rate) counts as
+        accepted, as before.
 
         WARNING: Changing sample rate or clock source while streaming
         will disrupt audio. The macOS kext warns but proceeds.
         """
-        if control == "SampleRate":
-            try:
-                rate = int(value)
-            except (ValueError, TypeError):
-                log.warning("HW DRV: SampleRate invalid value: %r", value)
-                return
-
-            if rate not in VALID_SAMPLE_RATES:
-                log.warning("HW DRV: SampleRate %d not in valid set %s",
-                            rate, sorted(VALID_SAMPLE_RATES))
-                return
-
-            # While streams are open, the app that owns them re-prepares at
-            # its own rate and undoes a clock change made under it.  When
-            # that's PipeWire, ask it to run its graph at this rate instead,
-            # as Console changes the system rate on macOS.
-            if pipewire_force_rate(
-                    rate, device=getattr(self.backend, "device_path", None)):
-                log.info("HW DRV: SampleRate → %d Hz (PipeWire "
-                         "clock.force-rate)", rate)
-                return
-            transport = self.backend.get_driver_param(DRIVER_PARAM_TRANSPORT_RUNNING)
-            if transport and transport > 0:
-                log.warning("HW DRV: changing SampleRate while transport "
-                            "running — audio will be disrupted")
-
-            log.info("HW DRV: SampleRate → %d Hz", rate)
-            self.backend.set_driver_param(DRIVER_PARAM_SAMPLE_RATE, rate)
-            return
-
-        if control == "ClockSource":
-            source_str = str(value)
-            menu = getattr(self, "clock_sources", None) or {}
-            source_int = menu.get(source_str,
-                                  CLOCK_SOURCE_MAP.get(source_str))
-            if source_int is None:
+        if path not in CLOCK_CONTROL_PATHS:
+            return None
+        result = normalize_global(path, value, self.clock_source_names())
+        if not result.accepted:
+            if path == "/ClockSource/value":
                 log.warning("HW DRV: ClockSource unknown value: %r "
                             "(valid: %s)", value,
-                            list(menu or CLOCK_SOURCE_MAP))
-                return
+                            sorted(self.clock_source_names()))
+            else:
+                log.warning("HW DRV: SampleRate invalid value: %r (valid: %s)",
+                            value, sorted(VALID_SAMPLE_RATES))
+            return result
+        try:
+            if path == "/SampleRate/value":
+                rate = result.value
+                # While streams are open, the app that owns them re-prepares
+                # at its own rate and undoes a clock change made under it.
+                # When that's PipeWire, ask it to run its graph at this rate
+                # instead, as Console changes the system rate on macOS.
+                if pipewire_force_rate(
+                        rate, device=getattr(self.backend, "device_path", None)):
+                    log.info("HW DRV: SampleRate → %d Hz (PipeWire "
+                             "clock.force-rate)", rate)
+                    return result
+                transport = self.backend.get_driver_param(
+                    DRIVER_PARAM_TRANSPORT_RUNNING)
+                if transport and transport > 0:
+                    log.warning("HW DRV: changing SampleRate while transport "
+                                "running — audio will be disrupted")
+                log.info("HW DRV: SampleRate → %d Hz", rate)
+                ok = self.backend.set_driver_param(DRIVER_PARAM_SAMPLE_RATE,
+                                                   rate)
+            else:
+                menu = getattr(self, "clock_sources", None) or {}
+                source = menu.get(result.value,
+                                  CLOCK_SOURCE_MAP.get(result.value))
+                log.info("HW DRV: ClockSource → %s (value=%d)",
+                         result.value, source)
+                ok = self.backend.set_driver_param(DRIVER_PARAM_CLOCK_SOURCE,
+                                                   source)
+        except Exception:
+            log.exception("HW DRV: %s write failed", path)
+            ok = False
+        if not ok:
+            return GlobalWriteResult(False, reason="not acknowledged by the "
+                                     "driver; hardware outcome unknown")
+        return result
 
-            log.info("HW DRV: ClockSource → %s (value=%d)",
-                     source_str, source_int)
-            self.backend.set_driver_param(DRIVER_PARAM_CLOCK_SOURCE,
-                                          source_int)
+    def _handle_global(self, path: str, control: str, value: Any):
+        """Route global controls (sample rate, clock source) that arrive
+        through the tree's on_set: the WS server, a session or snapshot
+        load.  The TCP SET handlers call set_global() before publishing."""
+        if control in ("SampleRate", "ClockSource"):
+            self.set_global(path, value)
             return
 
         if control == "PostFaderMetering":

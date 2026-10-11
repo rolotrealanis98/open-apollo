@@ -25,6 +25,7 @@ except ImportError:
 
 from state_tree import StateTree
 from commands import ERR_UNRESOLVED, refused_set
+from hardware import CLOCK_CONTROL_PATHS, CLOCK_SOURCE_MAP, normalize_global
 from ws_protocol import (
     WsCommand, parse_ws_command,
     encode_ws_response, encode_ws_error,
@@ -209,9 +210,25 @@ class WsServer:
                                     cmd.message_id)]
         old = self.commands.value_of(path) if self.commands is not None \
             else None
-        self.state.set(path, cmd.value, source_client=client.id)
+        value, hardware = cmd.value, True
+        canonical = path if path.endswith("/value") else path + "/value"
+        if canonical in CLOCK_CONTROL_PATHS and self.state.path_exists(canonical):
+            # As on TCP: written to the driver first, published only when
+            # it took the value (MixerDaemon._handle_clock_set)
+            if self.hw_router is not None:
+                result = self.hw_router.set_global(canonical, value)
+            else:
+                names = set(CLOCK_SOURCE_MAP) | set(
+                    (self.state.get_prop_dict("/ClockSource") or {}).get(
+                        "values") or [])
+                result = normalize_global(canonical, value, names)
+            if not result.accepted:
+                return [encode_ws_error(path, "Unable to set value.",
+                                        cmd.message_id)]
+            path, value, hardware = canonical, result.value, False
+        self.state.set(path, value, source_client=client.id, hardware=hardware)
         if self.commands is not None:
-            self.commands.on_set(path, cmd.value, old=old, client=client.id)
+            self.commands.on_set(path, value, old=old, client=client.id)
         return []
 
     def _handle_subscribe(self, client: WsClient, cmd: WsCommand) -> list[str]:
