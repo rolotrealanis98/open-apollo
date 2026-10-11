@@ -533,21 +533,73 @@ const char *ua_device_name(u32 device_type)
 }
 
 /*
- * Verify DSP banks are accessible by reading their base registers.
- * Mirrors CPcieDevice::_checkDSPs().
+ * dsp_status_check: what to do with the DSP status fault bits.
+ *   0 = do not read the windows; 1 = read and log (default);
+ *   2 = also fail probe after the connect, as the kext does.
+ * The kext fails start on a fault (-21): _checkDSPs is the tail of
+ * Connect(), and _allocateDSPs applies the same test to DSP 0 in
+ * MapHardware.  The healthy values of the two bit groups (low 7 and bit
+ * 23) are not known for the x4 yet, so the fatal mode is opt-in until
+ * titan has logged them (parity/11 row E4).
  */
-static int ua_check_dsps(struct ua_device *ua)
+static unsigned int dsp_status_check = 1;
+module_param(dsp_status_check, uint, 0444);
+MODULE_PARM_DESC(dsp_status_check,
+		 "DSP status word check (kext _checkDSPs, fault mask 0x80007F): 0 = off, 1 = log (default), 2 = fail probe on a fault as the macOS driver does");
+
+#define UA_DSP_FAULT_MASK	0x0080007FU
+#define UA_DSP_SLAVE_MASK	0x1C00U
+
+/* DSP n's register window: n * 0x800, +0x2000 above DSP 3 (CPcieDSP::ProgramRegisters) */
+static u32 ua_dsp_window(unsigned int idx)
 {
-	unsigned int i;
+	return idx * 0x800 + (idx > 3 ? 0x2000 : 0);
+}
+
+/*
+ * Mirrors CPcieDevice::_checkDSPs() (kext x86 0x61bc): word 0 of every
+ * DSP's register window; a word & 0x80007F is a fault (-21 there, -EIO
+ * here).  The old code read the ring register block instead, which is
+ * unrelated.  Only the @final call (after the connect, where the kext
+ * runs it) can fail, and only with dsp_status_check=2.
+ */
+static int ua_check_dsps(struct ua_device *ua, bool final)
+{
+	unsigned int i, faults = 0;
+
+	if (!dsp_status_check || !ua->num_dsps)
+		return 0;
 
 	for (i = 0; i < ua->num_dsps; i++) {
-		u32 base = ua_dsp_base(i);
-		u32 val = ua_read(ua, base);
+		u32 off = ua_dsp_window(i);
+		u32 val;
 
-		dev_dbg(&ua->pdev->dev, "DSP %u: bank base 0x%04x, reg[0] = 0x%08x\n",
-			i, base, val);
+		if ((resource_size_t)off + 4 > ua->regs_size) {
+			dev_dbg(&ua->pdev->dev,
+				"DSP %u: window 0x%04x is outside BAR0\n",
+				i, off);
+			continue;
+		}
+
+		val = ua_read(ua, off);
+		if (val & UA_DSP_FAULT_MASK)
+			faults++;
+		dev_info(&ua->pdev->dev,
+			 "DSP %u status (%s): window 0x%04x word0 = 0x%08x%s\n",
+			 i, final ? "after connect" : "early", off, val,
+			 (val & UA_DSP_FAULT_MASK) ? " (fault bits set)" : "");
+		if (ua->num_dsps == 1 && (val & UA_DSP_SLAVE_MASK))
+			dev_warn(&ua->pdev->dev,
+				 "single-DSP device reports slave bits 0x%x\n",
+				 val & UA_DSP_SLAVE_MASK);
 	}
 
+	if (final && faults && dsp_status_check >= 2) {
+		dev_err(&ua->pdev->dev,
+			"%u DSP(s) report a fault (mask 0x%x): failing as the macOS driver does\n",
+			faults, UA_DSP_FAULT_MASK);
+		return -EIO;
+	}
 	return 0;
 }
 
@@ -576,7 +628,7 @@ static int ua_program_registers(struct ua_device *ua)
 	ua_reset_dma(ua);
 
 	/* Verify DSP accessibility */
-	ua_check_dsps(ua);
+	ua_check_dsps(ua, false);
 
 	return 0;
 }
@@ -2793,7 +2845,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 			dev_err(&pdev->dev, "FPGA revision mismatch\n");
 			return -EIO;
 		}
-		ua_check_dsps(ua);
+		ua_check_dsps(ua, false);
 		/* ACEFACE does NOT persist across OS reboots.
 		 * Leave aceface_done = false so ua_audio_connect()
 		 * does the full ACEFACE handshake even on warm boot. */
@@ -3210,6 +3262,29 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		 ua->device_type, ua->public_type,
 		 ua->public_type == UA_PUBTYPE_NONE ? " (unresolved)" : "");
 
+	if (ua->fw_v2) {
+		/*
+		 * CPcieDevice::MapHardware creates the audio extension only
+		 * for ext_caps bit 31 set and family != 6 (row B6).  No such
+		 * product is supported, and v1 parts keep their old path, so
+		 * this is only reported.
+		 */
+		if (!(ua->ext_caps & BIT(31)) ||
+		    ((ua->ext_caps >> 20) & 0x3f) == 6)
+			dev_warn(&pdev->dev,
+				 "ext_caps 0x%08x: the macOS driver creates no audio extension for this device\n",
+				 ua->ext_caps);
+
+		/*
+		 * DSP 0 window +0x1A4 (boot word, d14) and +0x1AC (the
+		 * device-info word the kext publishes for ring-connect
+		 * types, row G2), as the previous owner left them.
+		 */
+		dev_info(&pdev->dev,
+			 "DSP0 window: +0x1A4 = 0x%08x, +0x1AC = 0x%08x\n",
+			 ua_read(ua, 0x1A4), ua_read(ua, 0x1AC));
+	}
+
 	/*
 	 * Previous-session ring state, for warm-boot debugging.  Registers
 	 * only: the old WARM SNAPSHOT also memremap()ed and read whatever
@@ -3302,6 +3377,11 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_err(&pdev->dev, "audio init failed: %d\n", ret);
 		goto err_dsp;
 	}
+
+	/* The kext's _checkDSPs is the tail of Connect(): fatal there */
+	ret = ua_check_dsps(ua, true);
+	if (ret)
+		goto err_audio;
 
 	/*
 	 * Character device /dev/ua_apolloN, last: an ioctl may reach the
