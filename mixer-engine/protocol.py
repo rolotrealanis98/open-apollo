@@ -106,11 +106,10 @@ def _parse_path_with_params(path_raw: str) -> tuple[str, bool, list[str], dict]:
     if "?" in path_raw:
         path, query_str = path_raw.split("?", 1)
         params = parse_qs(query_str, keep_blank_values=True)
-        # Handle both ?recursive (blank value) and ?recursive=1
-        rec_val = params.get("recursive", [None])
-        recursive = rec_val[0] is not None and rec_val[0] != "0" if rec_val != [None] else False
-        if "recursive" in query_str.split("&") or "recursive=" in query_str:
-            recursive = True
+        # ?recursive (blank value) and ?recursive=1 are recursive,
+        # ?recursive=0 is not
+        rec_val = params.get("recursive", [None])[0]
+        recursive = rec_val is not None and rec_val != "0"
         pf = params.get("propfilter", [""])[0]
         if pf:
             propfilter = [p.strip() for p in pf.split(",") if p.strip()]

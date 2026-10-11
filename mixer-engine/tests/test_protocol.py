@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from protocol import (MessageFramer, encode_error_bytes, encode_response_bytes,
                       parse_command, parse_value)
@@ -52,10 +51,6 @@ class TestParseCommand:
     def test_get_bare_recursive_flag(self):
         assert parse_command("get /x?recursive").recursive
 
-    @pytest.mark.xfail(strict=True, reason=(
-        "bug: protocol._parse_path_with_params sets recursive=True for "
-        "'recursive=0' because its `\"recursive=\" in query_str` substring "
-        "check overrides the earlier '!= \"0\"' test"))
     def test_get_recursive_zero_is_false(self):
         assert not parse_command("get /x?recursive=0").recursive
 
