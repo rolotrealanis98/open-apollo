@@ -42,6 +42,7 @@
 /* Defined with the DSP vector code at the end of the file */
 static void ua_dsp_msg_work(struct work_struct *work);
 static void ua_dsp_irq_disarm(struct ua_device *ua);
+static bool ua_dsp_prop_ring_connect(const struct ua_device *ua);
 
 /* Internal ring entry layout */
 struct ua_ring_entry {
@@ -1008,6 +1009,8 @@ void ua_dsp_rings_quiesce(struct ua_device *ua)
 {
 	unsigned int i;
 
+	/* kext_connect: the disconnect is the date word alone (R83) */
+	(void)ua_dsp_disconnect_notify(ua);
 	/* dsp_msg_irq: stop counting and reading before the rings are emptied */
 	ua_dsp_irq_disarm(ua);
 
@@ -2816,6 +2819,10 @@ int ua_dsp_connect_all(struct ua_device *ua)
 	u32 date;
 	int ret;
 
+	/* _connectToDsps: nothing to do without DSPs (kext_connect only) */
+	if (ua_kext_connect && !ua->num_dsps)
+		return 0;
+
 	if (!ua->fw_loaded)
 		dev_info(&ua->pdev->dev,
 			 "DSP connect: firmware not loaded (testing)\n");
@@ -2826,6 +2833,14 @@ int ua_dsp_connect_all(struct ua_device *ua)
 		u32 bank_base = ua_dsp_base(i);
 
 		if (!ds->rings_allocated)
+			continue;
+
+		/*
+		 * kext_connect: only a DSP that reports property 0xC gets
+		 * the connect command (_connectToDsps step 2); the date
+		 * word below is sent regardless (step 3).
+		 */
+		if (ua_kext_connect && !ua_dsp_prop_ring_connect(ua))
 			continue;
 
 		/* Resync the cmd ring to POSITION for a fresh command */
@@ -4640,4 +4655,86 @@ static void ua_dsp_msg_work(struct work_struct *work)
 	}
 	ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
 	spin_unlock_irq(&ua->irq_lock);
+}
+
+/* ----------------------------------------------------------------
+ * kext_connect: StartTransport notification and date-only disconnect
+ * (parity/13 6.2, R83, R84, H04, H05)
+ * ---------------------------------------------------------------- */
+
+/*
+ * GetProperty(0xC) of the kext's DSP: this device uses ring connect.  For
+ * the types in the connect mask it is 1; the kext asks GetDeviceInfo for
+ * every other type, which Linux cannot derive, so an unresolved public type
+ * keeps the old behaviour (connect) and a resolved one outside the mask
+ * is treated as 0.
+ */
+static bool ua_dsp_prop_ring_connect(const struct ua_device *ua)
+{
+	if (ua->public_type == UA_PUBTYPE_NONE)
+		return true;
+	return ua_public_ring_connect(ua->public_type);
+}
+
+/**
+ * ua_dsp_start_transport_notify - CPcieDevice::StartTransport's ring part
+ * @ua: device (ua->lock held)
+ *
+ * With kext_connect, after the DSPs are connected: {0x00230002, 0} to every
+ * DSP that has property 0xC, then the date word {0x00100002, date} to DSP 0
+ * (_connectToDsps(1, 0), kext 0x5bf4).  Nothing is waited for.  No effect
+ * without kext_connect or before ua_dsp_connect_all() has run.  The second
+ * argument's bit 0 that gates it in the kext ("first start of the bus",
+ * parity/13 open question 2) is not modelled: call this once per transport
+ * start, after the AX_CONTROL start write (not wired up yet; ua_audio.c).
+ */
+int ua_dsp_start_transport_notify(struct ua_device *ua)
+{
+	unsigned int dsp;
+	int ret, err = 0;
+
+	if (!ua_kext_connect || !ua->dsps_connected ||
+	    !ua_dsp_prop_ring_connect(ua))
+		return 0;
+
+	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+		if (!ua->dsp[dsp].rings_allocated)
+			continue;
+		ret = ua_dsp_ring_send_raw(ua, dsp, UA_DSP_CMD_CONNECT, 0, 0,
+					   0);
+		if (ret)
+			err = err ? err : ret;
+	}
+	if (ua->dsp[0].rings_allocated) {
+		ret = ua_dsp_ring_send_raw(ua, 0, UA_DSP_CMD_FINALIZE,
+					   ua_dsp_connect_date(), 0, 0);
+		if (ret)
+			err = err ? err : ret;
+	}
+	dev_dbg(&ua->pdev->dev, "kext_connect: StartTransport notified (%d)\n",
+		err);
+	return err;
+}
+
+/**
+ * ua_dsp_disconnect_notify - _connectToDsps(0, flag): the date word only
+ * @ua: device (ua->lock held)
+ *
+ * With kext_connect, once DSPs are connected: a disconnect sends nothing but
+ * {0x00100002, date} to DSP 0.  Called from ua_dsp_rings_quiesce(), i.e. at
+ * shutdown, suspend and remove, before the rings are emptied.
+ */
+int ua_dsp_disconnect_notify(struct ua_device *ua)
+{
+	int ret;
+
+	if (!ua_kext_connect || !ua->dsps_connected ||
+	    !ua->dsp[0].rings_allocated)
+		return 0;
+
+	ret = ua_dsp_ring_send_raw(ua, 0, UA_DSP_CMD_FINALIZE,
+				   ua_dsp_connect_date(), 0, 0);
+	dev_dbg(&ua->pdev->dev, "kext_connect: date-only disconnect (%d)\n",
+		ret);
+	return ret;
 }
