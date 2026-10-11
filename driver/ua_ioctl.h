@@ -436,6 +436,168 @@ struct ua_dma_test {
 #define UA_IOCTL_DMA_TEST _IOWR(UA_IOCTL_MAGIC, 0x80, struct ua_dma_test)
 
 /*
+ * ABI version (UA_IOCTL_GET_VERSION).
+ *
+ * The ioctl numbers, struct layouts and event codes in this file are one
+ * ABI with a major and a minor number:
+ *   - minor is bumped for every addition that old user space can ignore:
+ *     a new ioctl, a new event code, a new feature bit, a reserved field
+ *     that starts to carry a value (zero stays the old meaning);
+ *   - major is bumped for anything that breaks a caller written against
+ *     the same major: a changed struct size or field meaning, a renumbered
+ *     or removed ioctl, a changed event code or argument.
+ * A caller that needs a feature checks the feature bit (or abi_minor), not
+ * the driver version string.  A driver that predates GET_VERSION returns
+ * -ENOTTY; treat that as "ABI 1.0 without any of the feature bits".
+ *
+ * The struct is fixed size: never change sizeof(struct ua_version).
+ */
+#define UA_ABI_MAJOR		1
+#define UA_ABI_MINOR		0
+
+#define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
+#define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
+#define UA_FEAT_BUS_PARAM_SIDE	(1u << 2)  /* UA_BUS_PARAM_F_SIDE_R */
+#define UA_FEAT_MIXER_PARAM_T0	(1u << 3)  /* GET_MIXER_PARAM type 0 (bus mask) */
+#define UA_FEAT_KIND_GATES	(1u << 4)  /* params gated by mixer kind (-EINVAL) */
+#define UA_FEAT_MIXER_STATE	(1u << 5)  /* /proc/asound/cardN/mixer_state */
+#define UA_FEAT_SYSTEM_INFO	(1u << 6)  /* UA_IOCTL_GET_SYSTEM_INFO */
+#define UA_FEAT_BUS_PARAM_BATCH	(1u << 7)  /* UA_IOCTL_SET_MIXER_BUS_PARAMS */
+#define UA_FEAT_PAUSE_INFO	(1u << 8)  /* UA_IOCTL_GET_PAUSE_INFO */
+#define UA_FEAT_PAUSE_EVENTS	(1u << 9)  /* UA_EVT_PAUSED / UA_EVT_RESUMED */
+#define UA_FEAT_UNIT_GROUP	(1u << 10) /* unit index/role in SYSTEM_INFO */
+
+struct ua_version {
+	__u32 abi_major;
+	__u32 abi_minor;
+	__u32 driver_version;	/* 0x00MMmmpp: 0.2.0 = 0x000200 */
+	__u32 features;		/* UA_FEAT_* */
+	char driver_name[16];	/* NUL-terminated version string, e.g. "0.2.0" */
+	__u32 reserved[4];
+};
+
+#define UA_IOCTL_GET_VERSION	_IOR(UA_IOCTL_MAGIC, 0x04, struct ua_version)
+
+/*
+ * Device and system info (UA_IOCTL_GET_SYSTEM_INFO), the Linux side of the
+ * kext's GetDeviceInfo (111/157) and GetSystemInfo (109) as far as the
+ * driver knows the values.  A separate ioctl rather than an extension of
+ * GET_DEVICE_INFO: _IOR encodes sizeof(struct ua_device_info) in the
+ * number, so that struct cannot grow, and its 7 reserved words cannot hold
+ * a serial string plus the clock and group state.  GET_DEVICE_INFO is left
+ * as it was.
+ *
+ * Unit group (multi-unit groundwork): every probed Apollo is in group 0;
+ * the first registered unit is the master and the next one takes over when
+ * it is removed.  unit_index is the position in registration order; a lone
+ * unit is index 0, count 1, master.  A unit that is being removed reports
+ * unit_count 0 and unit_index 0xFFFFFFFF.
+ */
+#define UA_UNIT_ROLE_NONE	0
+#define UA_UNIT_ROLE_MASTER	1
+#define UA_UNIT_ROLE_FOLLOWER	2
+
+struct ua_system_info {
+	__u32 fpga_rev;
+	__u32 device_type;	/* serial-table type */
+	__u32 public_type;	/* kext UAD2DeviceType; 0xFFFFFFFF = unresolved */
+	__u32 subsystem_id;
+	__u32 pci_device;	/* PCI device ID */
+	__u32 num_dsps;
+	__u32 fw_version;
+	__u32 fw_v2;		/* 1 = extended (v2) firmware */
+	__u32 ext_caps;
+	__u32 hw_uid_lo;	/* BAR0 0x30/0x34: the kext's HWID */
+	__u32 hw_uid_hi;
+	__u32 mixer_kind;	/* kext mixer kind; 0xFFFFFFFF = none/ungated */
+	char serial[16];	/* the real serial: 16 ASCII chars from BAR0
+				 * 0x20-0x2F, NUL-padded after the first NUL
+				 * (not terminated when all 16 are used).  Not
+				 * ua_device_info.serial, which is BAR0 0x2238
+				 * and reads 0 on the x4 */
+	__u32 sample_rate;	/* Hz */
+	__u32 rate_index;	/* 1 = 44.1k .. 6 = 192k, 0 = unset */
+	__u32 clock_source;	/* UA_CLOCK_* */
+	__u32 clock_lock_valid;	/* 1 = clock_locked comes from a live readback */
+	__u32 clock_locked;
+	__u32 connected;	/* 1 = DSP firmware connected */
+	__u32 transport_running;
+	__u32 play_channels;
+	__u32 rec_channels;
+	__u32 unit_group;	/* group id (0) */
+	__u32 unit_index;
+	__u32 unit_count;	/* units in the group */
+	__u32 unit_role;	/* UA_UNIT_ROLE_* */
+	__u32 reserved[8];
+};
+
+#define UA_IOCTL_GET_SYSTEM_INFO	_IOR(UA_IOCTL_MAGIC, 0x05, struct ua_system_info)
+
+/*
+ * Pause reasons and the LockSampleRateAndClock level
+ * (UA_IOCTL_GET_PAUSE_INFO), after the kext's CanAudioStream (15 section
+ * 5.1) and the 0x264/0x265 notifications.  The bits are the kext's:
+ *   UA_PAUSE_PHASE   0x1  PLL phase correction (multi-unit; never set yet)
+ *   UA_PAUSE_RATE    0x2  a sample-rate or clock change is in progress
+ *   UA_PAUSE_DEVICE  0x4  the unit is suspended, resuming or being removed
+ *   UA_PAUSE_IDLE    0x8  audio is not running (derived: no transport)
+ * Streaming is possible when bits 0 and 1 are clear; 0x4 and 0x8 are
+ * reported but do not block, as in the kext.  UA_EVT_PAUSED / UA_EVT_RESUMED
+ * carry the bit that was set / cleared (never UA_PAUSE_IDLE).
+ *
+ * lock_level is the kext's LockSampleRateAndClock level (0 none, 1-2 rate,
+ * 3 rate and clock).  Nothing sets it on Linux yet, so it reads 0.
+ */
+#define UA_PAUSE_PHASE		0x1
+#define UA_PAUSE_RATE		0x2
+#define UA_PAUSE_DEVICE		0x4
+#define UA_PAUSE_IDLE		0x8
+
+struct ua_pause_info {
+	__u32 reasons;		/* UA_PAUSE_* */
+	__u32 can_stream;	/* 1 when UA_PAUSE_PHASE and _RATE are clear */
+	__u32 lock_level;	/* 0..3 */
+	__u32 reserved[5];
+};
+
+#define UA_IOCTL_GET_PAUSE_INFO		_IOR(UA_IOCTL_MAGIC, 0x06, struct ua_pause_info)
+
+/*
+ * Batched bus params (kext selector 130 carries a batch of
+ * bus/param/side/value entries and a hardware id).  One ioctl, up to
+ * UA_BUS_PARAM_BATCH_MAX entries, applied in order under one device lock
+ * (no other ioctl or mixer flush interleaves).  Every entry is validated
+ * first: a bad one fails the call with -EINVAL and nothing is applied.  A
+ * ring error in the middle stops the batch; the entries before it stay
+ * applied and `applied` says how many.  `applied` is written back on
+ * success and on a ring error.
+ *
+ * hwid_lo/hwid_hi: the target unit's hardware id (ua_system_info.hw_uid_*);
+ * 0/0 means "this node".  A non-zero id that is not this unit's fails with
+ * -ENXIO.  flags must be 0.
+ */
+#define UA_BUS_PARAM_BATCH_MAX	64
+
+struct ua_mixer_bus_entry {
+	__u32 bus_id;		/* 0x00-0x1f */
+	__u32 param;		/* 0-6, as ua_mixer_bus_param.sub_param */
+	__u32 side;		/* 0 = left output weight, 1 = right */
+	__u32 value;		/* IEEE 754 float as u32 */
+};
+
+struct ua_mixer_bus_params {
+	__u32 count;		/* 1..UA_BUS_PARAM_BATCH_MAX */
+	__u32 flags;		/* must be 0 */
+	__u32 hwid_lo;
+	__u32 hwid_hi;
+	__u64 entries;		/* user pointer to count x ua_mixer_bus_entry */
+	__u32 applied;		/* OUT: entries written to the DSP */
+	__u32 reserved;
+};
+
+#define UA_IOCTL_SET_MIXER_BUS_PARAMS	_IOWR(UA_IOCTL_MAGIC, 0x3c, struct ua_mixer_bus_params)
+
+/*
  * Event channel: read() on /dev/ua_apolloN returns struct ua_event records.
  *
  * Mirrors the kext's async notifications ({code, arg} through
@@ -473,8 +635,11 @@ struct ua_dma_test {
  *   UA_EVT_NOTIF_STATUS  0x6e  raw notification status (BAR0 0xC030) as the
  *                              driver read and cleared it; arg = the status.
  *                              Posted before the decoded events above.
- * The kext's 0x69 (additional latency) and 0x6f (clock master) are not
- * produced: no equivalent state here.
+ *   UA_EVT_CLOCK_MASTER  0x6f  this unit became the group's master (the
+ *                              previous master was removed); arg = 0.  Posted
+ *                              to the new master's files only.
+ * The kext's 0x69 (additional latency) is not produced: no equivalent
+ * state here.
  *
  * Linux-only codes:
  *   UA_EVT_DEVICE_OFFLINE 0x1000  the device was removed; arg = 1 when it
@@ -485,6 +650,20 @@ struct ua_dma_test {
  *   UA_EVT_LAYOUT_CHANGED 0x1002  an io_map layout was committed; arg =
  *                                 (play_hw_channels << 16) | rec_hw_channels
  *   UA_EVT_EVENTS_LOST    0x1003  see above
+ *   (0x1004 belongs to the clock lock event)
+ *   UA_EVT_PAUSED         0x1005  audio on this unit must stop (the kext's
+ *                                 0x264); arg = the UA_PAUSE_* bit that was
+ *                                 set: UA_PAUSE_RATE around a rate/clock
+ *                                 change, UA_PAUSE_DEVICE on system suspend
+ *                                 and before a unit is removed
+ *   UA_EVT_RESUMED        0x1006  that reason is gone (the kext's 0x265);
+ *                                 arg = the bit that was cleared.  Streaming
+ *                                 may restart when GET_PAUSE_INFO.can_stream
+ *                                 is 1.  A removed unit gets no RESUMED
+ *                                 (DEVICE_OFFLINE follows its PAUSED)
+ *
+ * PAUSED / RESUMED are posted when a reason bit changes, so they come in
+ * pairs per reason.
  */
 struct ua_event {
 	__u32 code;
@@ -498,10 +677,14 @@ struct ua_event {
 #define UA_EVT_RATE_CHANGED	0x67
 #define UA_EVT_CLOCK_CHANGED	0x68
 #define UA_EVT_NOTIF_STATUS	0x6e
+#define UA_EVT_CLOCK_MASTER	0x6f
 
 #define UA_EVT_DEVICE_OFFLINE	0x1000
 #define UA_EVT_CONNECTED	0x1001
 #define UA_EVT_LAYOUT_CHANGED	0x1002
 #define UA_EVT_EVENTS_LOST	0x1003
+/* 0x1004: UA_EVT_CLOCK_LOCK (clock agent) */
+#define UA_EVT_PAUSED		0x1005
+#define UA_EVT_RESUMED		0x1006
 
 #endif /* UA_IOCTL_H */

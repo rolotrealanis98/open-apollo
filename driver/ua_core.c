@@ -112,6 +112,27 @@ module_param(mixer_mailbox, bool, 0644);
 MODULE_PARM_DESC(mixer_mailbox,
 		 "Write mixer settings as the macOS driver does: each change once with its mask, then zeros once (default: on); 0 = re-send every touched field on every flush (old behaviour, PAD/48V/Mic-Line do not work)");
 
+/*
+ * UAD-2 Satellite Thunderbolt (device 0x0002, subsystems 0x0A/0x0B): the
+ * macOS kext forces legacy INTx for them, the Windows INF ships
+ * MSISupported=1 (parity/18 B12, W4).  Windows is the newer driver and
+ * the INF is an explicit decision, so MSI is the default; the Apollo x4
+ * (and every other model) is not affected either way.
+ */
+static bool satellite_msi = true;
+module_param(satellite_msi, bool, 0444);
+MODULE_PARM_DESC(satellite_msi,
+		 "Use MSI instead of legacy INTx for the UAD-2 Satellite Thunderbolt (PCI subsystem 0x0A/0x0B), as the Windows driver does; 0 = INTx as the macOS driver (default: 1; no effect on Apollos)");
+
+/*
+ * Unit group (K1, parity/15): every probed unit is in one group for now.
+ * The master is the first registered unit; when it is removed the next in
+ * registration order takes over (the kext's _removeAudioDevice promotes
+ * extension [0]).  Nothing acts on the role yet, it is reported only.
+ */
+static LIST_HEAD(ua_units);
+static DEFINE_MUTEX(ua_units_lock);
+
 /* ----------------------------------------------------------------
  * PCI device table
  * ---------------------------------------------------------------- */
@@ -746,6 +767,191 @@ static void ua_hw_stop_xport_irqs(struct ua_device *ua)
 /* ----------------------------------------------------------------
  * Character device file operations
  * ---------------------------------------------------------------- */
+
+static int ua_mixer_kind(const struct ua_device *ua);
+
+/* ----------------------------------------------------------------
+ * Unit group (K1)
+ * ---------------------------------------------------------------- */
+
+static void ua_unit_register(struct ua_device *ua)
+{
+	struct ua_device *master;
+	unsigned int idx = 0;
+	struct ua_device *u;
+
+	mutex_lock(&ua_units_lock);
+	list_add_tail(&ua->unit_node, &ua_units);
+	master = list_first_entry(&ua_units, struct ua_device, unit_node);
+	list_for_each_entry(u, &ua_units, unit_node)
+		if (u == ua)
+			break;
+		else
+			idx++;
+	dev_info(&ua->pdev->dev, "unit group 0: unit %u, %s\n", idx,
+		 master == ua ? "master" : "follower");
+	mutex_unlock(&ua_units_lock);
+}
+
+/* Leave the group; the next unit in registration order becomes master */
+static void ua_unit_unregister(struct ua_device *ua)
+{
+	mutex_lock(&ua_units_lock);
+	if (!list_empty(&ua->unit_node)) {
+		bool was_master = list_first_entry(&ua_units, struct ua_device,
+						   unit_node) == ua;
+
+		list_del_init(&ua->unit_node);
+		dev_info(&ua->pdev->dev, "left unit group 0%s\n",
+			 was_master ? " (was master)" : "");
+		if (was_master && !list_empty(&ua_units)) {
+			struct ua_device *m = list_first_entry(&ua_units,
+							       struct ua_device,
+							       unit_node);
+
+			dev_info(&m->pdev->dev,
+				 "unit group 0: now master\n");
+			ua_event_post(m, UA_EVT_CLOCK_MASTER, 0);
+		}
+	}
+	mutex_unlock(&ua_units_lock);
+}
+
+static void ua_unit_info(struct ua_device *ua, u32 *index, u32 *count,
+			 u32 *role)
+{
+	struct ua_device *u;
+	u32 i = 0, n = 0;
+
+	*index = 0xFFFFFFFFu;
+	*count = 0;
+	*role = UA_UNIT_ROLE_NONE;
+
+	mutex_lock(&ua_units_lock);
+	if (!list_empty(&ua->unit_node)) {
+		list_for_each_entry(u, &ua_units, unit_node) {
+			if (u == ua)
+				*index = i;
+			i++;
+			n++;
+		}
+		*count = n;
+		*role = *index == 0 ? UA_UNIT_ROLE_MASTER :
+				      UA_UNIT_ROLE_FOLLOWER;
+	}
+	mutex_unlock(&ua_units_lock);
+}
+
+/* ----------------------------------------------------------------
+ * Pause reasons (K6/F12)
+ * ---------------------------------------------------------------- */
+
+void ua_pause_set(struct ua_device *ua, u32 reason)
+{
+	u32 old = atomic_fetch_or(reason, &ua->pause_mask);
+
+	if (!(old & reason))
+		ua_event_post(ua, UA_EVT_PAUSED, reason);
+}
+
+void ua_pause_clear(struct ua_device *ua, u32 reason)
+{
+	u32 old = atomic_fetch_andnot(reason, &ua->pause_mask);
+
+	if (old & reason)
+		ua_event_post(ua, UA_EVT_RESUMED, old & reason);
+}
+
+static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_version v = {
+		.abi_major = UA_ABI_MAJOR,
+		.abi_minor = UA_ABI_MINOR,
+		.driver_version = 0x000200,	/* DRIVER_VERSION 0.2.0 */
+		.features = UA_FEAT_EVENTS | UA_FEAT_PUBLIC_TYPE |
+			    UA_FEAT_BUS_PARAM_SIDE | UA_FEAT_MIXER_PARAM_T0 |
+			    UA_FEAT_KIND_GATES | UA_FEAT_MIXER_STATE |
+			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
+			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
+			    UA_FEAT_UNIT_GROUP,
+	};
+
+	strscpy(v.driver_name, DRIVER_VERSION, sizeof(v.driver_name));
+	if (copy_to_user((void __user *)arg, &v, sizeof(v)))
+		return -EFAULT;
+	return 0;
+}
+
+static long ua_ioctl_get_system_info(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_system_info si = {};
+	struct ua_audio *audio = &ua->audio;
+	u32 words[UA_REG_SERIAL_LEN / 4];
+	char *ser = si.serial;
+	unsigned int i;
+	int kind;
+
+	si.fpga_rev = ua->fpga_rev;
+	si.device_type = ua->device_type;
+	si.public_type = ua->public_type;
+	si.subsystem_id = ua->subsystem_id;
+	si.pci_device = ua->pdev->device;
+	si.num_dsps = ua->num_dsps;
+	si.fw_version = ua_read(ua, UA_REG_FW_VERSION);
+	si.fw_v2 = ua->fw_v2 ? 1 : 0;
+	si.ext_caps = ua_read(ua, UA_REG_EXT_CAPS);
+	si.hw_uid_lo = ua_read(ua, UA_REG_HW_UID_LO);
+	si.hw_uid_hi = ua_read(ua, UA_REG_HW_UID_HI);
+	kind = ua_mixer_kind(ua);
+	si.mixer_kind = kind < 0 ? 0xFFFFFFFFu : kind;
+
+	/* Same bytes as ua_serial_lookup(): 16 ASCII chars at BAR0 0x20 */
+	for (i = 0; i < ARRAY_SIZE(words); i++)
+		words[i] = ua_read(ua, UA_REG_SERIAL_BASE + i * 4);
+	memcpy(ser, words, sizeof(si.serial));
+	for (i = 0; i < sizeof(si.serial); i++)
+		if (!ser[i]) {
+			memset(ser + i, 0, sizeof(si.serial) - i);
+			break;
+		}
+
+	mutex_lock(&ua->lock);
+	si.sample_rate = audio->sample_rate;
+	si.rate_index = audio->rate_index;
+	si.clock_source = audio->clock_source;
+	/* Readback word 6: bit 31 = locked, valid when bit 30 is set */
+	if (ua->mixer_rb_seen && (ua->mixer_rb_data[6] & BIT(30))) {
+		si.clock_lock_valid = 1;
+		si.clock_locked = !!(ua->mixer_rb_data[6] & BIT(31));
+	}
+	si.connected = audio->connected ? 1 : 0;
+	si.transport_running = audio->transport_running ? 1 : 0;
+	si.play_channels = audio->play_channels;
+	si.rec_channels = audio->rec_channels;
+	mutex_unlock(&ua->lock);
+
+	si.unit_group = 0;
+	ua_unit_info(ua, &si.unit_index, &si.unit_count, &si.unit_role);
+
+	if (copy_to_user((void __user *)arg, &si, sizeof(si)))
+		return -EFAULT;
+	return 0;
+}
+
+static long ua_ioctl_get_pause_info(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_pause_info pi = {};
+
+	pi.reasons = atomic_read(&ua->pause_mask);
+	if (!READ_ONCE(ua->audio.transport_running))
+		pi.reasons |= UA_PAUSE_IDLE;
+	pi.can_stream = !(pi.reasons & (UA_PAUSE_PHASE | UA_PAUSE_RATE));
+	pi.lock_level = READ_ONCE(ua->lock_level);
+
+	if (copy_to_user((void __user *)arg, &pi, sizeof(pi)))
+		return -EFAULT;
+	return 0;
+}
 
 static long ua_ioctl_get_device_info(struct ua_device *ua, unsigned long arg)
 {
@@ -2568,6 +2774,59 @@ static long ua_ioctl_set_mixer_bus_param(struct ua_device *ua,
 	}
 }
 
+/*
+ * Batched SetMixerBusParam (kext selector 130).  The ring helper takes
+ * one entry and rings the doorbell itself (ring helpers are static in
+ * ua_dsp.c), so the batch is N calls of the single-entry path under one
+ * ua->lock hold: validated up front, applied in order, nothing else
+ * interleaves.
+ */
+static long ua_ioctl_set_mixer_bus_params(struct ua_device *ua,
+					  unsigned long arg)
+{
+	struct ua_mixer_bus_params bp;
+	struct ua_mixer_bus_entry *ent;
+	unsigned int i;
+	long ret = 0;
+
+	if (copy_from_user(&bp, (void __user *)arg, sizeof(bp)))
+		return -EFAULT;
+	if (bp.flags || !bp.count || bp.count > UA_BUS_PARAM_BATCH_MAX)
+		return -EINVAL;
+	if ((bp.hwid_lo || bp.hwid_hi) &&
+	    (bp.hwid_lo != ua_read(ua, UA_REG_HW_UID_LO) ||
+	     bp.hwid_hi != ua_read(ua, UA_REG_HW_UID_HI)))
+		return -ENXIO;
+
+	ent = memdup_user(u64_to_user_ptr(bp.entries),
+			  bp.count * sizeof(*ent));
+	if (IS_ERR(ent))
+		return PTR_ERR(ent);
+
+	for (i = 0; i < bp.count; i++)
+		if (ent[i].bus_id > 0x1f || ent[i].param > 6 ||
+		    ent[i].side > 1) {
+			kfree(ent);
+			return -EINVAL;
+		}
+
+	bp.applied = 0;
+	mutex_lock(&ua->lock);
+	for (i = 0; i < bp.count; i++) {
+		ret = ua_dsp_set_bus_param(ua, ent[i].bus_id, ent[i].param,
+					   ent[i].side, ent[i].value);
+		if (ret)
+			break;
+		bp.applied++;
+	}
+	mutex_unlock(&ua->lock);
+	kfree(ent);
+
+	if (copy_to_user((void __user *)arg, &bp, sizeof(bp)))
+		return -EFAULT;
+	return ret;
+}
+
 static long ua_ioctl_get_mixer_readback(struct ua_device *ua,
 					unsigned long arg)
 {
@@ -2985,6 +3244,18 @@ static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
 	switch (cmd) {
 	case UA_IOCTL_GET_DEVICE_INFO:
 		return ua_ioctl_get_device_info(ua, arg);
+
+	case UA_IOCTL_GET_VERSION:
+		return ua_ioctl_get_version(ua, arg);
+
+	case UA_IOCTL_GET_SYSTEM_INFO:
+		return ua_ioctl_get_system_info(ua, arg);
+
+	case UA_IOCTL_GET_PAUSE_INFO:
+		return ua_ioctl_get_pause_info(ua, arg);
+
+	case UA_IOCTL_SET_MIXER_BUS_PARAMS:
+		return ua_ioctl_set_mixer_bus_params(ua, arg);
 
 	case UA_IOCTL_GET_DSP_INFO:
 		return ua_ioctl_get_dsp_info(ua, arg);
@@ -3546,7 +3817,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
  * UAD2Pcie2::_initializeInterrupts (kext 12.0.0 x86 0xbe40) reads config
  * 0x02 (device ID) and 0x2E (subsystem ID): device 0x0001 always gets the
  * legacy interrupt; device 0x0002 gets it when the subsystem is 0x05, 0x0A
- * or 0x0B (bit mask 0xc20).  Every other device uses MSI.
+ * or 0x0B (bit mask 0xc20).  Every other device uses MSI.  The Windows INF
+ * ships MSI for 0x0A/0x0B, so those two follow satellite_msi (default MSI).
  */
 static bool ua_wants_intx(struct pci_dev *pdev)
 {
@@ -3554,9 +3826,11 @@ static bool ua_wants_intx(struct pci_dev *pdev)
 		return true;
 
 	switch (pdev->subsystem_device) {
-	case 0x05:
 	case 0x0A:
 	case 0x0B:
+		/* UAD-2 Satellite TB: INTx on macOS, MSI on Windows */
+		return !satellite_msi;
+	case 0x05:
 		return true;
 	default:
 		return false;
@@ -3621,6 +3895,8 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ua_event_init(ua);
 	INIT_LIST_HEAD(&ua->dma_orphans);
 	INIT_WORK(&ua->resume_work, ua_resume_work);
+	INIT_LIST_HEAD(&ua->unit_node);
+	atomic_set(&ua->pause_mask, 0);
 	pci_set_drvdata(pdev, ua);
 
 	/* Enable device */
@@ -3758,6 +4034,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	 * Interrupt type, as UAD2Pcie2::_initializeInterrupts (kext 12.0.0
 	 * x86 0xbe40): legacy INTx for device 0x0001 (UAD-2 PCIe) and for
 	 * subsystems 0x05, 0x0A and 0x0B; MSI for every other device.
+	 * 0x0A/0x0B use MSI unless satellite_msi=0 (Windows INF).
 	 */
 	intx = ua_wants_intx(pdev);
 	if (intx) {
@@ -3830,9 +4107,13 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	cdev_init(&ua->cdev, &ua_fops);
 	ua->cdev.owner = THIS_MODULE;
+
+	/* In the group before the node exists, so no ioctl sees a stranger */
+	ua_unit_register(ua);
 	ret = cdev_device_add(&ua->cdev, &ua->chardev);
 	if (ret) {
 		dev_err(&pdev->dev, "cdev_device_add failed: %d\n", ret);
+		ua_unit_unregister(ua);
 		goto err_ida;
 	}
 
@@ -3859,6 +4140,11 @@ static void ua_remove(struct pci_dev *pdev)
 	bool dead = !pci_device_is_present(pdev);
 
 	dev_info(&pdev->dev, "ua_remove: surprise=%d\n", dead);
+
+	/* Clients stop audio, then the unit leaves the group (master
+	 * re-election) before anything is torn down */
+	ua_pause_set(ua, UA_PAUSE_DEVICE);
+	ua_unit_unregister(ua);
 
 	/*
 	 * 0. Wait out an ioctl in flight and refuse new ones: nothing below
@@ -4164,6 +4450,7 @@ static int __maybe_unused ua_suspend(struct device *dev)
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct ua_device *ua = pci_get_drvdata(pdev);
 
+	ua_pause_set(ua, UA_PAUSE_DEVICE);
 	ua_quiesce_device(ua, "suspend", true);
 
 	/* The PCI core saves config space and picks the low-power state */
@@ -4210,6 +4497,7 @@ static void ua_resume_work(struct work_struct *work)
 	mutex_lock(&ua->lock);
 	ua->resume_pending = false;
 	mutex_unlock(&ua->lock);
+	ua_pause_clear(ua, UA_PAUSE_DEVICE);
 
 	dev_info(&ua->pdev->dev, "resume re-init done (%d)\n", ret);
 }
@@ -4288,6 +4576,7 @@ static int __maybe_unused ua_resume(struct device *dev)
 		mutex_lock(&ua->lock);
 		ua->resume_pending = false;
 		mutex_unlock(&ua->lock);
+		ua_pause_clear(ua, UA_PAUSE_DEVICE);
 		dev_info(dev, "resumed (warm)\n");
 		return 0;
 	}

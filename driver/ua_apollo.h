@@ -1298,7 +1298,22 @@ struct ua_device {
 
 	/* Surprise removal (Thunderbolt hot-unplug) */
 	atomic_t shutdown;          /* Set on remove/disconnect — blocks BAR0 access */
+
+	/*
+	 * Unit group (ua_core.c): membership in the module-global list of
+	 * probed units, under ua_units_lock.  Empty node = not in the group
+	 * (not yet registered, or being removed).
+	 */
+	struct list_head unit_node;
+
+	/* Pause reasons (UA_PAUSE_*): see ua_pause_set()/ua_pause_clear() */
+	atomic_t pause_mask;
+	u32 lock_level;             /* LockSampleRateAndClock level; 0 */
 };
+
+/* Pause reasons: posts UA_EVT_PAUSED / UA_EVT_RESUMED on a change (ua_core.c) */
+void ua_pause_set(struct ua_device *ua, u32 reason);
+void ua_pause_clear(struct ua_device *ua, u32 reason);
 
 /* Per-open-file state: filp->private_data (ua_event.c) */
 #define UA_EVENT_QUEUE_LEN	64

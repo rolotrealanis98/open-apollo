@@ -3410,6 +3410,7 @@ static int ua_audio_set_clock_cfg(struct ua_device *ua, unsigned int rate,
 	dev_info(&ua->pdev->dev, "clock: %u Hz, index %d, config 0x%08x\n",
 		 rate, rate_idx, clock_config);
 
+	ua_pause_set(ua, UA_PAUSE_RATE);
 	ret = ua_audio_clock_change_locked(ua, clock_config);
 	if (ret == -ETIMEDOUT) {
 		dev_info(&ua->pdev->dev, "  retrying clock change once\n");
@@ -3439,6 +3440,7 @@ static int ua_audio_set_clock_cfg(struct ua_device *ua, unsigned int rate,
 			rate, clock_config, ret);
 	}
 out:
+	ua_pause_clear(ua, UA_PAUSE_RATE);
 	mutex_unlock(&ua->lock);
 	return ret;
 }
@@ -4310,6 +4312,7 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 
 	if (rate_change == 1 && sub->runtime->rate != audio->sample_rate &&
 	    audio->connected) {
+		ua_pause_set(ua, UA_PAUSE_RATE);
 		ret = ua_audio_rate_change_kext(ua, sub->runtime->rate);
 		if (ret)
 			return ret;
@@ -4342,6 +4345,7 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 
 		if (new_idx < 0)
 			return new_idx;
+		ua_pause_set(ua, UA_PAUSE_RATE);
 
 		if (audio->connected) {
 			dev_info(&ua->pdev->dev,
@@ -4545,6 +4549,7 @@ static int ua_pcm_prepare(struct snd_pcm_substream *sub)
 	timer_was_running = audio->period_timer_running;
 
 	ret = ua_pcm_prepare_locked(ua, sub);
+	ua_pause_clear(ua, UA_PAUSE_RATE);
 
 	if (audio->connected && !audio->dsp_service_running &&
 	    !atomic_read(&ua->shutdown))
