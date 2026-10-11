@@ -559,7 +559,23 @@ HIZ_IMPEDANCES_OHM = (2_200_000, 1_000_000, 453_000, 232_000,
                       100_000, 70_000, 47_000, 21_000)
 HIZ_IMPEDANCE_PARAM = 0x11
 LINK_PARAM = 0x02            # kPropStereo: pair leader (even channel) only
+# More input params of CMxInput::UpdateHardwareState (parity/04 s0.1, 14 s3)
+LINE_REF_PARAM = 0x01        # kPropPad on a line input = its reference level
+KNOB_STEPS_PARAM = 0x10      # kPropPreampInputKnobSteps
+SELECTED_PARAM_PARAM = 0x12  # kPropPreampSelectedParam
+DIRECT_OUT_PARAM = 0x13      # route word (DSP ring command in the driver)
+HIZ_OVERRIDE_PARAM = 0x14    # kPropHiZ, sent only with jack sensing off
+PGA_DISABLE_PARAM = 0x15     # kPropPGADisabledInLineMode
+# Other params (SetOtherParam) the engine sends from root/mixer/output props
+CLIP_HOLD_PARAM = 0x13       # /ClipHold index (setting[1] [30:28])
+PEAK_HOLD_PARAM = 0x14       # /PeakHold index (setting[1] [15:13])
+FUNC_SWITCH_PARAM = 0x42     # kPropFuncSwitchMode (setting[13] [15:13])
+FUNC_SWITCH2_PARAM = 0x83    # kPropFuncSwitch2Mode (x16D)
+SURROUND_MODE_PARAM = 0x4a   # kPropSurroundMonitorMode (setting[32] [7:0])
+SURROUND_FOLD_PARAM = 0x63   # kPropSurroundStereoFoldDown (setting[7] bit 14)
+TB_MIC_SELECT_PARAM = 0x65   # kPropTalkbackMicSelect (setting[31] [25:24])
 ADC_DELAY_COMP_PARAM = 0x6a  # CMxMixer::UpdateADCDelayComp (setting[35])
+STEREO_SUB_PARAM = 0x87      # kPropStereoSubOutputEnabled (setting[5] bit 9)
 
 
 def hiz_impedance_code(value) -> int | None:
@@ -2238,7 +2254,8 @@ class HardwareBackend:
 _RE_INPUT = re.compile(
     r'^/devices/0/inputs/(\d+)/(Mute|Solo|Pan|Pan2|FaderLevel|FaderLevelTapered|'
     r'IOType|RecordPreEffects|Isolate|SoloSafe|Stereo|Active|SRConvert|'
-    r'HiZImpedance)/value$')
+    r'HiZImpedance|PGADisabledInLineMode|OutputDestination|'
+    r'OutputMonitorMixEnable|Pad)/value$')
 
 # RemoteSolo: a remote surface holds the solo engaged (device-wide flag)
 _RE_REMOTE_SOLO = re.compile(r'^/RemoteSolo/value$')
@@ -2246,7 +2263,9 @@ _RE_REMOTE_SOLO = re.compile(r'^/RemoteSolo/value$')
 # Preamp controls: /devices/0/inputs/<ch>/preamps/0/<control>/value
 _RE_PREAMP = re.compile(
     r'^/devices/0/inputs/(\d+)/preamps/0/'
-    r'(Gain|GainTapered|48V|Pad|HiZ|HiZImpedance|LowCut|Phase|Mute)/value$')
+    r'(Gain|GainTapered|48V|Pad|HiZ|HiZImpedance|LowCut|Phase|Mute|'
+    r'PreampInputKnobSteps|PreampSelectedParam|'
+    r'PreampGainCustomDisplayText)/value$')
 
 # Bus send controls: /devices/0/inputs/<ch>/sends/<send>/<control>/value
 _RE_SEND = re.compile(
@@ -2257,7 +2276,8 @@ _RE_OUTPUT = re.compile(
     r'^/devices/0/outputs/(\d+)/(Mute|DimOn|Pad|MixToMono|MirrorsToDigital|'
     r'CRMonitorLevel|CRMonitorLevelTapered|SurroundMute|SurroundSolo|'
     r'AltMonEnabled|AltMonTrim|CRPGABypass|MixInSource|DimLevel|'
-    r'DigitalOutputMode|OutputDestination|Identify)/value$')
+    r'DigitalOutputMode|OutputDestination|Identify|SurroundStereoFoldDown|'
+    r'StereoSubOutputEnabled|SurroundOutputEnabled|SurroundTrimLevel)/value$')
 
 # Aux bus controls: /devices/0/auxs/<bus>/<control>/value
 _RE_AUX = re.compile(
@@ -2273,10 +2293,11 @@ _RE_AUX_SEND = re.compile(
 # lives under /devices/0/.
 _RE_DEVICE_GLOBAL = re.compile(
     r'^(?:/devices/0)?/(TalkbackOn|TalkbackInPhysicalCR|TalkbackMaster|'
-    r'Enable24dBMode)/value$|'
+    r'Enable24dBMode|ClipHold|PeakHold|TalkbackMicSelect)/value$|'
     r'^/devices/0/(DimAttenuation|TOSLinkOutput|DSPSpanning|Identify|'
     r'AltMonSelection|RemoteMonitorController|InputJackSensingDisabled|'
-    r'OutputsAttenuate|CueBusCount)/value$')
+    r'OutputsAttenuate|CueBusCount|FuncSwitchMode|FuncSwitch2Mode|'
+    r'SurroundMonitorMode)/value$')
 
 # Global driver controls
 _RE_GLOBAL = re.compile(
@@ -2341,15 +2362,22 @@ class HardwareRouter:
         # devices/<model>.json of the attached model ({} = not known; the
         # handlers then fall back to what the device map has)
         self.model_data: dict = {}
+        # Direct-output signals in use: input tree index -> signal index
+        # (CMxMixer::AllocateDirectOutputSignal)
+        self._direct_out_signals: dict[int, int] = {}
         self._sync_driver_state()
 
     def set_model_data(self, desc: dict | None):
         """Use the attached model's devices/*.json facts: its monitor
-        taper (48 or 54 steps).  None or {} keeps the x4 behaviour."""
+        taper (48 or 54 steps) and the engine feature flags the handlers
+        gate on.  None or {} keeps the x4 behaviour."""
         self.model_data = dict(desc or {})
         steps = set_monitor_taper(mf.monitor_taper_table(self.model_data))
         log.info("Model data: %s (monitor taper %d steps)",
                  self.model_data.get("model", "unknown model"), steps)
+
+    def _model_flag(self, key, default=None):
+        return self.model_data.get(key, default) if self.model_data else default
 
     def _sync_driver_state(self):
         """Read current rate/clock from driver and update state tree."""
@@ -2865,6 +2893,12 @@ class HardwareRouter:
 
         solo_flag = any_solo and self._has_feature(UA_FEAT_BUS_SOLO_FLAG)
         for i, bus, soloed, fader_db, muted in channels:
+            if self._pair_follower(i):
+                # A linked pair's right half: its main-mix bus is written
+                # with the leader (Pan2), only its own sends here
+                self._write_post_fader_sends(
+                    i, bus, fader_db, muted or (any_solo and not soloed))
+                continue
             if bus == self.talkback_bus():
                 # Talkback has its own encoding (sub 0 only, unity 3.976)
                 db = -144.0 if (muted or (any_solo and not soloed)) \
@@ -2879,9 +2913,11 @@ class HardwareRouter:
                     bus, encode_input_fader(fader_db),
                     encode_mix_coeff(fader_db, pan),
                     encode_mix_coeff_r(fader_db, pan), solo_mute=True)
+                self._write_partner_bus(i, fader_db, False, solo_mute=True)
                 self._write_post_fader_sends(i, bus, fader_db, True)
             elif muted or (any_solo and not soloed):
                 self.backend.set_bus_fader(bus, 0.0, 0.0, 0.0)
+                self._write_partner_bus(i, fader_db, True)
                 self._write_post_fader_sends(i, bus, fader_db, True)
             else:
                 # sub 0 is fader x pan; it must carry the pan too, or the
@@ -2891,6 +2927,7 @@ class HardwareRouter:
                 mix_r = encode_mix_coeff_r(fader_db, pan)
                 self.backend.set_bus_fader(bus, encode_input_fader(fader_db),
                                            mix, mix_r)
+                self._write_partner_bus(i, fader_db, False)
                 self._write_post_fader_sends(i, bus, fader_db, False)
 
         log.info("Solo recalc: any_solo=%s, %d channels updated",
@@ -2953,6 +2990,44 @@ class HardwareRouter:
 
         if control == "HiZImpedance":
             self._write_hiz_impedance(path, ch, value)
+            return
+
+        if control == "HiZ":
+            self._write_hiz_override(path, ch, value)
+            return
+
+        if control == "PreampInputKnobSteps":
+            # kPropPreampInputKnobSteps (0xbc) -> input param 0x10, 4 bits
+            # (CMxInput::UpdateHardwareState 0x100063a64: value & 0xf;
+            # kext lane setting[23] nibble 4*ch)
+            try:
+                hw_value = int(value) & 0xF
+            except (TypeError, ValueError):
+                return
+            log.info("HW PREAMP: input[%d].PreampInputKnobSteps = %r → %d "
+                     "(param=0x10)", ch, value, hw_value)
+            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch,
+                                         KNOB_STEPS_PARAM, hw_value)
+            return
+
+        if control == "PreampSelectedParam":
+            # kPropPreampSelectedParam (0xbe) -> input param 0x12 (the engine
+            # sends the stored int; the kext keeps 2 bits, setting[23]
+            # [17+2ch:16+2ch])
+            try:
+                hw_value = int(value) & 0x3
+            except (TypeError, ValueError):
+                return
+            log.info("HW PREAMP: input[%d].PreampSelectedParam = %r → %d "
+                     "(param=0x12)", ch, value, hw_value)
+            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch,
+                                         SELECTED_PARAM_PARAM, hw_value)
+            return
+
+        if control == "PreampGainCustomDisplayText":
+            # A display string for clients; the engine sends nothing for it
+            log.debug("SET %s = %r (display text, software-only)", path,
+                      value)
             return
 
         param_id = ARM_PARAM_IDS.get(control)
@@ -3037,6 +3112,13 @@ class HardwareRouter:
                 self._write_talkback(bus, linear)
                 return
 
+            muted = self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Mute/value"))
+            if self._pair_follower(ch):
+                # The pair's leader carries this bus (its Pan2 position)
+                log.debug("SET %s = %r (right half of a linked pair: the "
+                          "leader drives bus 0x%04x)", path, value, bus)
+                self._write_post_fader_sends(ch, bus, db, muted)
+                return
             linear = encode_input_fader(db)
             # Read current pan to compute combined sub=0 coefficient
             pan = self._get_input_pan(ch)
@@ -3046,16 +3128,23 @@ class HardwareRouter:
                      "mix=%.6f/%.6f (L/R) pan=%.2f (bus=0x%04x)",
                      ch, db, linear, mix, mix_r, pan, bus)
             self.backend.set_bus_fader(bus, linear, mix, mix_r)
-            self._write_post_fader_sends(
-                ch, bus, db,
-                self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Mute/value")))
+            self._write_partner_bus(ch, db, False)
+            self._write_post_fader_sends(ch, bus, db, muted)
             return
 
         if control == "Mute":
             if value and value != "0" and value != "false":
+                if self._pair_follower(ch):
+                    log.debug("SET %s = %r (right half of a linked pair: "
+                              "the leader's mute silences bus 0x%04x)",
+                              path, value, bus)
+                    self._write_post_fader_sends(
+                        ch, bus, self._get_input_fader_db(ch), True)
+                    return
                 log.info("HW BUS: input[%d].Mute ON (fader→0.0, bus=0x%04x)",
                          ch, bus)
                 self.backend.set_bus_fader(bus, 0.0, 0.0, 0.0)
+                self._write_partner_bus(ch, 0.0, True)
                 self._write_post_fader_sends(
                     ch, bus, self._get_input_fader_db(ch), True)
             else:
@@ -3065,14 +3154,30 @@ class HardwareRouter:
             return
 
         if control in ("Pan", "Pan2"):
-            pan_f = float(value)
+            try:
+                pan_f = float(value)
+            except (TypeError, ValueError):
+                return
+            partner = self._pair_partner(ch)
+            if control == "Pan2":
+                # kPropCRPanPosition2: only a linked pair's leader uses it,
+                # for its second bus (synch-in + 1); a mono input has none
+                if partner is None:
+                    log.debug("SET %s = %r (Pan2 only moves a linked "
+                              "pair's second bus)", path, value)
+                    return
+                bus = self._input_bus(partner)
+            elif self._pair_follower(ch):
+                log.debug("SET %s = %r (right half of a linked pair: the "
+                          "leader's Pan2 places bus 0x%04x)", path, value, bus)
+                return
             # Read current fader level to compute combined sub=0 coefficient
             fader_db = self._get_input_fader_db(ch)
             mix = encode_mix_coeff(fader_db, pan_f)
             mix_r = encode_mix_coeff_r(fader_db, pan_f)
-            log.info("HW BUS: input[%d].Pan = %.3f → mix=%.6f/%.6f (L/R) "
+            log.info("HW BUS: input[%d].%s = %.3f → mix=%.6f/%.6f (L/R) "
                      "fader=%.1fdB (bus=0x%04x)",
-                     ch, pan_f, mix, mix_r, fader_db, bus)
+                     ch, control, pan_f, mix, mix_r, fader_db, bus)
             self.backend.set_bus_pan(bus, mix, mix_r)
             return
 
@@ -3112,6 +3217,21 @@ class HardwareRouter:
 
         if control == "Stereo":
             self._write_link(path, ch, value)
+            # Linking hands the second bus to the leader (and unlinking
+            # gives it back): rewrite every bus's coefficients
+            self._handle_solo_recalc()
+            return
+
+        if control == "PGADisabledInLineMode":
+            self._write_pga_disable(path, ch, value)
+            return
+
+        if control in ("OutputDestination", "OutputMonitorMixEnable"):
+            self._write_direct_out(path, ch)
+            return
+
+        if control == "Pad":
+            self._write_line_ref_level(path, ch, value)
             return
 
         if control in ("SoloSafe", "Isolate"):
@@ -3159,6 +3279,192 @@ class HardwareRouter:
                  "pair %d/%d)", ch, value, hw_value, ch + 1, ch + 2)
         self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, LINK_PARAM,
                                      hw_value)
+
+    # ── HiZ client override (N27) ───────────────────────────────────
+
+    def _jack_sensing_disabled(self) -> bool:
+        return self._truthy(self._tree_value(
+            "/devices/0/InputJackSensingDisabled/value"))
+
+    def _hiz_inputs(self) -> list:
+        """Preamp inputs with a HiZ control in the device map (the x4: 0, 1;
+        the Twin/Solo/Arrow: 0)."""
+        return [ch for ch in sorted(self.preamp_inputs())
+                if self._tree_value(
+                    f"/devices/0/inputs/{ch}/preamps/0/HiZ/value") is not None]
+
+    def _write_hiz_override(self, path: str, ch: int, value: Any) -> bool:
+        """kPropHiZ -> input param 0x14 (setting[0] bit 24+ch), sent by
+        CMxInput::UpdateHardwareState (0x1000638ac) only when the mixer's
+        InputJackSensingDisabled is set and the input supports HiZ: with
+        jack sensing on, the jack decides and the readback reports it."""
+        if ch not in self._hiz_inputs():
+            log.debug("SET %s = %r (input %d has no HiZ)", path, value, ch)
+            return False
+        if not self._jack_sensing_disabled():
+            log.debug("SET %s = %r (jack sensing on: the HiZ jack decides)",
+                      path, value)
+            return False
+        hw_value = 1 if self._truthy(value) else 0
+        log.info("HW PREAMP: input[%d].HiZ = %r → %d (param=0x14, jack "
+                 "sensing off)", ch, value, hw_value)
+        self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch,
+                                     HIZ_OVERRIDE_PARAM, hw_value)
+        return True
+
+    def _push_hiz_overrides(self):
+        """Jack sensing was just disabled: the host now owns the HiZ
+        switch, so send each HiZ input's current HiZ value."""
+        for ch in self._hiz_inputs():
+            self._write_hiz_override(
+                f"/devices/0/inputs/{ch}/preamps/0/HiZ/value", ch,
+                self._tree_value(f"/devices/0/inputs/{ch}/preamps/0/HiZ/value"))
+
+    # ── Line inputs: reference level and PGA disable (N30) ──────────
+
+    def _write_line_ref_level(self, path: str, ch: int, value: Any):
+        """kPropPad on a Line input = its reference level (+4 dBu / -10
+        dBV): CMxInput::SupportsReferenceLevel (IOType Line and the class's
+        InputSupportsLineReferenceLevel, the model's line_ref_level_inputs
+        synch-ins) gates input param 0x01 on the input's synch-in (both
+        halves of a stereo input)."""
+        bus = self._input_bus(ch)
+        refs = self._model_flag("line_ref_level_inputs") or []
+        if bus is None or bus not in refs:
+            log.debug("SET %s = %r (no line reference level on input %d)",
+                      path, value, ch)
+            return
+        hw_value = 1 if self._truthy(value) else 0
+        targets = [bus]
+        if self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Stereo/value")) \
+                and bus % 2 == 0 and bus + 1 in refs:
+            targets.append(bus + 1)
+        for b in targets:
+            log.info("HW LINE IN: synch-in %d reference level = %r → %d "
+                     "(param=0x01)", b, value, hw_value)
+            self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, b,
+                                         LINE_REF_PARAM, hw_value)
+
+    def _write_pga_disable(self, path: str, ch: int, value: Any):
+        """kPropPGADisabledInLineMode -> input param 0x15 (the input's fixed
+        line mode, CMxInput::GetFixedLineMode; 0x100063058).  The engine
+        sends it for preamp inputs of the classes with SupportsLinePGADisable
+        (Apollo 8/8p, x6/x8/x8p and their Gen 2, x4 Gen 2, Twin X Gen 2);
+        the driver refuses it on other kinds (the x4)."""
+        if ch not in self.preamp_inputs() or \
+                self._model_flag("line_pga_disable") is False:
+            log.debug("SET %s = %r (no line PGA disable on input %d)", path,
+                      value, ch)
+            return
+        hw_value = 1 if self._truthy(value) else 0
+        log.info("HW PREAMP: input[%d].PGADisabledInLineMode = %r → %d "
+                 "(param=0x15)", ch, value, hw_value)
+        self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch,
+                                     PGA_DISABLE_PARAM, hw_value)
+
+    # ── Direct outputs / flex routing (N30, N18) ────────────────────
+
+    def _max_direct_outputs(self) -> int:
+        """GetMaxDirectOutputs of the model (8 on the Apollo/8/8p/16, 16 on
+        HEXA, 0 elsewhere).  Without model data: 16 when the map has a
+        per-input OutputDestination (only flex-routing maps carry it)."""
+        n = self._model_flag("direct_outputs")
+        if isinstance(n, int):
+            return n
+        return 16 if self._tree_value(
+            f"{IN_BASE}/0/OutputDestination/value") is not None else 0
+
+    def _write_direct_out(self, path: str, ch: int):
+        """Input OutputDestination / OutputMonitorMixEnable -> input param
+        0x13, the DSP route word (CMxInput::UpdateHardwareState 0x100062928):
+        a destination other than Monitor takes a direct-output signal
+        (AllocateDirectOutputSignal: lowest free of GetMaxDirectOutputs),
+        Monitor frees it; bit 16 keeps the input in the monitor mix."""
+        bus = self._input_bus(ch)
+        if bus is None:
+            log.debug("SET %s (input %d has no synch-in)", path, ch)
+            return
+        if self._max_direct_outputs() <= 0:
+            # CMxMixer::SupportsOutputDestination is false on this class
+            log.debug("SET %s (model has no direct outputs)", path)
+            return
+        base = f"{IN_BASE}/{ch}"
+        dest = mf.output_destination_synch(
+            self._tree_value(f"{base}/OutputDestination/value") or "Monitor")
+        if dest is None:
+            log.warning("HW INPUT: input[%d] OutputDestination %r unknown",
+                        ch, self._tree_value(f"{base}/OutputDestination/value"))
+            return
+        mix = self._tree_value(f"{base}/OutputMonitorMixEnable/value")
+        monitor_mix = True if mix is None else self._truthy(mix)
+        signal = self._direct_out_signals.get(ch)
+        if dest < 0:
+            self._direct_out_signals.pop(ch, None)
+            signal = mf.DIRECT_OUT_NONE
+        elif signal is None:
+            used = set(self._direct_out_signals.values())
+            free = [s for s in range(self._max_direct_outputs())
+                    if s not in used]
+            if not free:
+                log.warning("HW INPUT: input[%d] direct output to synch-out "
+                            "%d: no free direct-output signal (max %d)", ch,
+                            dest, self._max_direct_outputs())
+                return
+            signal = free[0]
+            self._direct_out_signals[ch] = signal
+        leader = self._truthy(self._tree_value(f"{base}/Stereo/value")) and \
+            bus % 2 == 0
+        route = mf.direct_out_route(signal, dest, monitor_mix, leader)
+        log.info("HW INPUT: input[%d] direct out → synch-out %d signal %d "
+                 "monitor mix %s → route 0x%05x (param=0x13, synch-in %d)",
+                 ch, dest, signal, monitor_mix, route, bus)
+        self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, bus,
+                                     DIRECT_OUT_PARAM, route)
+
+    # ── Stereo-linked inputs: one pan pair, two buses (N27) ─────────
+
+    def _linked(self, ch: int) -> bool:
+        return self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Stereo/value"))
+
+    def _pair_partner(self, ch: int) -> int | None:
+        """Tree index of the right half when `ch` leads a linked stereo pair
+        (Stereo set and an even synch-in); None otherwise.  As
+        CMxInput::UpdateHardwareState, the leader drives both buses: its
+        own with the Pan pair, synch-in + 1 with the Pan2 pair."""
+        bus = self._input_bus(ch)
+        if bus is None or bus % 2 or not self._linked(ch):
+            return None
+        for cand in (ch + 1, ch - 1):
+            if self._input_bus(cand) == bus + 1:
+                return cand
+        return None
+
+    def _pair_follower(self, ch: int) -> bool:
+        """True for the right half (odd synch-in) of a linked pair: the
+        engine sends no main-mix coefficients for it."""
+        bus = self._input_bus(ch)
+        if bus is None or bus % 2 == 0 or not self._linked(ch):
+            return False
+        return any(self._input_bus(c) == bus - 1 and self._linked(c)
+                   for c in (ch - 1, ch + 1))
+
+    def _write_partner_bus(self, ch: int, fader_db: float, silent: bool,
+                           solo_mute: bool = False):
+        """Main-mix coefficients of a linked pair's second bus from the
+        leader `ch`: the leader's level with its Pan2 position."""
+        partner = self._pair_partner(ch)
+        if partner is None:
+            return
+        pbus = self._input_bus(partner)
+        pan2 = self._float(self._tree_value(f"{IN_BASE}/{ch}/Pan2/value"),
+                           0.0)
+        if silent:
+            self.backend.set_bus_fader(pbus, 0.0, 0.0, 0.0)
+            return
+        kw = {"solo_mute": True} if solo_mute else {}
+        self.backend.set_bus_fader(pbus, encode_input_fader(fader_db),
+                                   encode_mix_coeff(fader_db, pan2),
+                                   encode_mix_coeff_r(fader_db, pan2), **kw)
 
     # ── Bus send controls (SEL130 bus param path) ──────────────────
 
@@ -3259,6 +3565,11 @@ class HardwareRouter:
         # CUE 3/4 (4-cue models): mono 0x23 / 0x25, mix 0x22 / 0x24, mirror
         # source 0x30 / 0x31 (parity/14 s4: the kext's outputs of synch
         # 0x18 / 0x1a; which tree output carries them is M confidence).
+        if control.startswith("Surround") or control == \
+                "StereoSubOutputEnabled":
+            self._handle_surround_output(path, ch, control, value)
+            return
+
         role = self._output_role(ch)
         if role and role[0] == "cue":
             cue_idx = role[1]
@@ -3533,6 +3844,34 @@ class HardwareRouter:
         # Other outputs (individual analog/digital)
         log.debug("SET %s = %r (individual output, software-only)", path, value)
 
+    def _handle_surround_output(self, path: str, ch: int, control: str,
+                                value: Any):
+        """Per-output surround properties (CMxOutput::UpdateHardwareState).
+
+        SurroundStereoFoldDown -> other param 0x63 (the engine sends its
+        global fold-down flag for an output that supports fold-down);
+        StereoSubOutputEnabled -> other param 0x87.  SurroundTrimLevel /
+        Solo / Mute go to params 0x4b+i / 0x53+i / 0x5b+i (0x6b/0x73/0x7b+i
+        for channels 8-15, 0x88-0x8a for the sub) where i is the output's
+        surround channel index (MixerType::GetSurroundChannelIndex, per
+        surround mode); that index and the trim encoding are not decoded,
+        so those stay in the tree.  SurroundOutputEnabled has no hardware
+        write in the engine."""
+        if control in ("SurroundStereoFoldDown", "StereoSubOutputEnabled"):
+            if control == "SurroundStereoFoldDown" and self.model_data and \
+                    self.model_data.get("surround_max_mode") is None:
+                log.debug("SET %s = %r (model has no surround)", path, value)
+                return
+            param = SURROUND_FOLD_PARAM if control == \
+                "SurroundStereoFoldDown" else STEREO_SUB_PARAM
+            hw_value = 1 if self._truthy(value) else 0
+            log.info("HW OUT: output[%d].%s = %r → %d (param=0x%02x)", ch,
+                     control, value, hw_value, param)
+            self._set_other(param, hw_value, what=control)
+            return
+        log.debug("SET %s = %r (surround channel index not decoded: "
+                  "software-only)", path, value)
+
     # ── Aux bus controls (SEL130 bus param path) ─────────────────
 
     def _handle_aux(self, path: str, bus: int, control: str, value: Any):
@@ -3724,6 +4063,52 @@ class HardwareRouter:
             log.info("HW MONITOR: %s = %r → %d (param=0x%02x)",
                      control, value, hw_value, param)
             self._set_other(param, hw_value, what=control)
+            if control == "InputJackSensingDisabled" and hw_value:
+                # the host owns the HiZ switches from now on
+                self._push_hiz_overrides()
+            return
+
+        if control in ("ClipHold", "PeakHold"):
+            # Root /ClipHold, /PeakHold: the value's index goes to every
+            # mixer as other param 0x13 / 0x14 (CMxRoot::UpdateHardwareState)
+            names = mf.HOLD_NAMES if control == "ClipHold" \
+                else mf.HOLD_NAMES[:-1]
+            idx = self._enum_index(value, names)
+            if idx is None:
+                log.warning("HW MONITOR: %s %r is not one of %s", control,
+                            value, list(names))
+                return
+            param = CLIP_HOLD_PARAM if control == "ClipHold" \
+                else PEAK_HOLD_PARAM
+            log.info("HW MONITOR: %s = %r → %d (param=0x%02x, %d ms)",
+                     control, value, idx, param, mf.HOLD_MS[idx])
+            self._set_other(param, idx, what=control)
+            return
+
+        if control == "TalkbackMicSelect":
+            # Root kPropTalkbackMicSelect -> other param 0x65 on the mixers
+            # whose type supports talkback (CMxRoot::UpdateHardwareState
+            # 0x100095834); the kext keeps 2 bits
+            if self.model_data and not self.model_data.get("talkback"):
+                log.debug("SET %s = %r (model has no talkback)", path, value)
+                return
+            try:
+                hw_value = int(value) & 0x3
+            except (TypeError, ValueError):
+                log.warning("HW MONITOR: TalkbackMicSelect %r invalid", value)
+                return
+            log.info("HW MONITOR: TalkbackMicSelect = %r → %d (param=0x65)",
+                     value, hw_value)
+            self._set_other(TB_MIC_SELECT_PARAM, hw_value,
+                            what="TalkbackMicSelect")
+            return
+
+        if control in ("FuncSwitchMode", "FuncSwitch2Mode"):
+            self._write_func_switch(path, control, value)
+            return
+
+        if control == "SurroundMonitorMode":
+            self._write_surround_mode(path, value)
             return
 
         if control == "TalkbackMaster":
@@ -3766,6 +4151,81 @@ class HardwareRouter:
                              "(CUE %d)", count, bus, idx + 1)
                     self.backend.set_mixer_param(0, bus, 0x01, 1)
             return
+
+    @staticmethod
+    def _enum_index(value, names) -> int | None:
+        """Index of a string value in `names` (case-insensitive), or an int
+        index in range; None otherwise."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)) and float(value) == int(value):
+            return int(value) if 0 <= int(value) < len(names) else None
+        s = str(value).strip().upper()
+        for i, n in enumerate(names):
+            if s == n.upper():
+                return i
+        return None
+
+    def _write_func_switch(self, path: str, control: str, value: Any):
+        """kPropFuncSwitchMode / FuncSwitch2Mode -> other param 0x42 / 0x83
+        with the DescartesFuncSwitchMode value (none 0, alt 2 1, mono 2, dim
+        3, talkback 4, alt 1 5; CMxMixer::UpdateHardwareState 0x100071df8).
+        Only the modes the class supports (Apollo 8/8p: none..dim; HEXA up to
+        talkback; x16D all six and the second switch)."""
+        if isinstance(value, str):
+            v = mf.FUNC_SWITCH_VALUES.get(value.strip().lower())
+            name = value.strip().lower()
+        else:
+            try:
+                v = int(value)
+            except (TypeError, ValueError):
+                v = None
+            name = next((n for n, x in mf.FUNC_SWITCH_VALUES.items()
+                         if x == v), None)
+        if v is None or name is None:
+            log.warning("HW MONITOR: %s %r is not a function switch mode",
+                        control, value)
+            return
+        fs = self._model_flag("func_switch", None)
+        if self.model_data and not fs:
+            log.debug("SET %s = %r (model has no function switch)", path,
+                      value)
+            return
+        if fs:
+            if control == "FuncSwitch2Mode" and not fs.get("second"):
+                log.debug("SET %s = %r (no second function switch)", path,
+                          value)
+                return
+            if name not in (fs.get("modes") or []):
+                log.warning("HW MONITOR: %s %r not offered by this model "
+                            "(%s)", control, value, fs.get("modes"))
+                return
+        param = FUNC_SWITCH_PARAM if control == "FuncSwitchMode" \
+            else FUNC_SWITCH2_PARAM
+        log.info("HW MONITOR: %s = %r → %d (param=0x%02x)", control, value,
+                 v, param)
+        self._set_other(param, v, what=control)
+
+    def _write_surround_mode(self, path: str, value: Any):
+        """kPropSurroundMonitorMode -> other param 0x4a = the mode index
+        (CMxMixer::UpdateHardwareState 0x100071c60), for the modes the class
+        supports (x6 up to 5.1, x8/x8p up to 7.1, x16/x16D the Atmos modes
+        8-10).  The engine also needs its hidden EnableSurround setting;
+        the daemon follows the model data only."""
+        idx = self._enum_index(value, mf.SURROUND_MODES)
+        top = self._model_flag("surround_max_mode", None)
+        if idx is None and isinstance(value, int) and top and 0 <= value <= top:
+            idx = value
+        if idx is None:
+            log.warning("HW MONITOR: SurroundMonitorMode %r unknown", value)
+            return
+        if self.model_data and (top is None or idx > top):
+            log.debug("SET %s = %r (surround mode not offered by this model)",
+                      path, value)
+            return
+        log.info("HW MONITOR: SurroundMonitorMode = %r → %d (param=0x4a)",
+                 value, idx)
+        self._set_other(SURROUND_MODE_PARAM, idx, what="SurroundMonitorMode")
 
     # ── Global/driver controls ────────────────────────────────────
 
@@ -3841,7 +4301,12 @@ class HardwareRouter:
         "CueBusCount", "OutputsAttenuate", "InputJackSensingDisabled",
         "DimAttenuation", "TOSLinkOutput", "AltMonSelection",
         "RemoteMonitorController", "DSPSpanning",
-        "TalkbackInPhysicalCR", "TalkbackMaster", "Enable24dBMode")
+        "TalkbackInPhysicalCR", "TalkbackMaster", "Enable24dBMode",
+        "ClipHold", "PeakHold", "TalkbackMicSelect", "FuncSwitchMode",
+        "FuncSwitch2Mode", "SurroundMonitorMode")
+    # Per-input settings the hardware does not report back
+    _REAPPLY_INPUT = ("SRConvert", "HiZImpedance", "PGADisabledInLineMode",
+                      "OutputDestination", "Pad")
     _RE_REAPPLY = re.compile(
         r'^/devices/0/(?P<kind>auxs|inputs|outputs)/(?P<n>\d+)/'
         r'(?:(?P<sub>sends|preamps)/(?P<m>\d+)/)?(?P<ctl>\w+)/value$')
@@ -3905,9 +4370,15 @@ class HardwareRouter:
                     in_sends.setdefault((n, int(mm)), set()).add(ctl)
                 elif ctl == "Solo" and sub is None:
                     solo = solo or self._truthy(self._tree_value(path))
-                elif ctl == "SRConvert" and sub is None:
+                elif ctl in self._REAPPLY_INPUT and sub is None:
+                    in_misc.append((n, ctl, path))
+                elif ctl == "OutputMonitorMixEnable" and sub is None:
+                    # written with OutputDestination (one route word)
                     in_misc.append((n, ctl, path))
                 elif ctl == "HiZImpedance":
+                    in_misc.append((n, ctl, path))
+                elif sub == "preamps" and ctl in ("PreampInputKnobSteps",
+                                                  "PreampSelectedParam"):
                     in_misc.append((n, ctl, path))
             elif kind == "outputs" and sub is None:
                 out_ctl.setdefault(n, set()).add(ctl)
@@ -3956,9 +4427,10 @@ class HardwareRouter:
                 wanted = ("MixInSource", "Pad", "MirrorsToDigital",
                           "CRPGABypass", "DigitalOutputMode")
             elif n in self._line_outputs():
-                wanted = ("Pad", "AltMonTrim", "AltMonEnabled")
+                wanted = ("Pad", "AltMonTrim", "AltMonEnabled",
+                          "SurroundStereoFoldDown", "StereoSubOutputEnabled")
             else:
-                continue
+                wanted = ("SurroundStereoFoldDown", "StereoSubOutputEnabled")
             for ctl in wanted:
                 if ctl in ctls:
                     push(f"{base}/{ctl}/value")

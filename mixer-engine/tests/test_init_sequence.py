@@ -2,7 +2,11 @@
 
 The Apollo x4 must send exactly the writes, in the order, that the DTrace
 replay did before the sequence was derived from the model: the fixture
-tests/fixtures/x4_init_sequence.json was captured from that code.
+tests/fixtures/x4_init_sequence.json was captured from that code.  One
+deliberate change since: the linked S/PDIF pair is one pan pair on two
+buses, as the Mixer Engine writes it, so S/PDIF R's main-mix bus (9) is
+written with S/PDIF L's (hard right, Pan2 +1) instead of centred in its
+own turn; those bus-9 entries were re-captured, the rest is unchanged.
 """
 
 import json

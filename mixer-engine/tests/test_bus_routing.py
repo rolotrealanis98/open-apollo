@@ -96,6 +96,10 @@ class TestInputBusTable:
         (12, 0x08), (13, 0x09),                         # S/PDIF
         (14, 0x18), (21, 0x1F)])                        # virtual
     def test_fader_addresses_the_right_bus(self, router, backend, ch, bus):
+        # S/PDIF L/R are a linked pair in the x4 map (the leader drives both
+        # buses, tests/test_stereo_pair.py); unlinked, each has its own bus
+        for i in (12, 13):
+            router.state_tree.set(f"{IN}/{i}/Stereo/value", False)
         router.on_set(f"{IN}/{ch}/FaderLevel/value", -6.0)
         assert {b for b, _ in subs(backend)} == {bus}
         assert subs(backend)[0] == (bus, 0)

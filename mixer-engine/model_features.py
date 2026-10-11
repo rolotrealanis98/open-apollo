@@ -7,7 +7,10 @@ docs/re-notes/me-model-rows-2026-10-11.md has the derivation):
   and what the engine derives from them: the ADC delay-comp setting (other
   param 0x6a), the per-output DAC delay-comp frames (SEL189) and the
   "additional latency" it reports to CoreAudio (SEL164);
-* monitor_taper: the control-room level taper (48 or 54 steps).
+* monitor_taper: the control-room level taper (48 or 54 steps);
+* the engine feature flags: line reference level inputs, line PGA disable,
+  ES9028 outputs, the function switch, front-panel switches, direct outputs,
+  surround modes.
 
 Pure functions: nothing here touches the hardware or the state tree.
 """
@@ -40,6 +43,24 @@ def dsp_block(rate: int) -> int:
 LINES34_HP_CLASSES = frozenset({"Armstrong", "Stretch", "Lavern", "LavernG2",
                                 "Shirley"})
 
+
+# kPropFuncSwitchMode values (DescartesFuncSwitchMode, CMxMixer::
+# GetFuncSwitchModeTypeInfo 0x10006a9b4): the value goes to other param
+# 0x42 (switch 1) or 0x83 (switch 2, x16D only)
+FUNC_SWITCH_VALUES = {"none": 0, "alt 2": 1, "mono": 2, "dim": 3,
+                      "talkback": 4, "alt 1": 5}
+
+# kPropSurroundMonitorMode index (CMxMixer::GetSurroundModeTypeInfo; the
+# order of the captured x8p list).  8-10 are the Atmos modes of the x16 /
+# x16D; their names are not in the captured trees.
+SURROUND_MODES = ("STEREO", "2.1", "LCR", "LCRS", "QUAD", "5.1", "6.1",
+                  "7.1")
+
+# /ClipHold and /PeakHold: the value index goes to other params 0x13 / 0x14
+# (CMxRoot::UpdateHardwareState 0x100095640 / 0x100095548); the durations
+# are CMxRoot::Clip/PeakHoldDurationMs (table 0x1005d4780, -1 = infinite)
+HOLD_NAMES = ("NONE", "1 SEC", "3 SEC", "5 SEC", "10 SEC", "INFINITE")
+HOLD_MS = (0, 1000, 3000, 5000, 10000, -1)
 
 DEVICES_DIR = Path(__file__).resolve().parent.parent / "devices"
 
@@ -192,3 +213,44 @@ def monitor_taper_table(desc: dict) -> list | None:
     if not isinstance(db, list) or len(db) != int(t.get("steps", 0)) + 1:
         return None
     return [float(v) for v in db]
+
+
+# ── Direct outputs (IP 0x13 route word, CMxInput::UpdateHardwareState) ─
+
+DIRECT_OUT_NONE = 0xFF       # no direct-output signal / destination
+ROUTE_DEFAULT = 0x1FFFF      # ClearOutputDestinationOnHardware
+
+
+def direct_out_route(signal: int, dest_synch: int, monitor_mix: bool,
+                     stereo_leader: bool = False) -> int:
+    """Input param 0x13 value (0x100063840): [7:0] direct-output signal
+    index (0xff = none), [15:8] destination synch-out (0xff = none), bit 16
+    the input still feeds the monitor mix, bit 17 set for the leader (even
+    synch-in) of a stereo pair."""
+    v = (signal & 0xFF) | ((dest_synch & 0xFF) << 8)
+    if monitor_mix:
+        v |= 0x10000
+    if stereo_leader:
+        v |= 0x20000
+    return v
+
+
+def output_destination_synch(name) -> int | None:
+    """Synch-out id of an input OutputDestination value (the candidate list
+    at 0x1005d41a0: Monitor = -1 (no direct out), Line 1-8 = 8-15, ADAT 1-8
+    = 16-23, S/PDIF L/R = 6/7).  None for an unknown value."""
+    if not isinstance(name, str):
+        return None
+    n = name.strip().upper()
+    if n in ("MONITOR", "NONE", ""):
+        return -1
+    for prefix, base in (("LINE ", 8), ("ADAT ", 16)):
+        if n.startswith(prefix) and n[len(prefix):].isdigit():
+            k = int(n[len(prefix):])
+            if 1 <= k <= 8:
+                return base + k - 1
+    if n in ("S/PDIF L", "SPDIF L"):
+        return 6
+    if n in ("S/PDIF R", "SPDIF R"):
+        return 7
+    return None
