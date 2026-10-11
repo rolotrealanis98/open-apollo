@@ -718,6 +718,32 @@ ok "udev rules + systemd units installed — Apollo will auto-init on power-on/r
 info "Firmware must be in $FW_DIR/ for auto-load to work"
 
 # ================================================================
+# Step 6c: Mixer daemon (UA Console control over USB)
+# ================================================================
+# The daemon's USB backend (mixer-engine/hardware_usb.py) takes over when no
+# /dev/ua_apollo* exists and a USB Apollo is on the bus.  The access rule
+# lets the desktop user open the vendor interface and starts the user unit
+# when the Apollo appears; the daemon waits for the DSP init stamp.
+header "Mixer Daemon (USB)"
+run_sudo cp "$PROJECT_DIR/configs/udev/70-ua-apollo-usb-access.rules" "$UDEV_DIR/"
+run_sudo udevadm control --reload-rules 2>/dev/null || true
+MIXER_DIR="$PROJECT_DIR/mixer-engine"
+run_sudo mkdir -p /etc/systemd/user
+sed "s|@MIXER_DIR@|$MIXER_DIR|g" "$PROJECT_DIR/configs/systemd/ua-mixer-daemon.service" \
+    | run_sudo tee /etc/systemd/user/ua-mixer-daemon.service >/dev/null
+run_sudo install -d -o "$REAL_USER" -g "$(id -gn "$REAL_USER")" "$MIXER_DIR/state"
+if [ "$REAL_USER" != "root" ] && \
+        sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$REAL_USER")" \
+        systemctl --user daemon-reload 2>/dev/null && \
+        sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$REAL_USER")" \
+        systemctl --user enable --now ua-mixer-daemon.service 2>/dev/null; then
+    ok "Mixer daemon enabled for $REAL_USER (TCP:4710, WS:4720; USB backend)"
+else
+    warn "Could not enable the mixer daemon for $REAL_USER"
+    info "  After logging in: systemctl --user enable --now ua-mixer-daemon.service"
+fi
+
+# ================================================================
 # Step 7: PipeWire config
 # ================================================================
 header "PipeWire Configuration"

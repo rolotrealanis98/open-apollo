@@ -88,6 +88,7 @@ fi
 # ================================================================
 header "Removing udev rules"
 
+rm -f /etc/udev/rules.d/70-ua-apollo-usb-access.rules
 if [ -f /etc/udev/rules.d/99-apollo-usb.rules ]; then
     rm -f /etc/udev/rules.d/99-apollo-usb.rules
     udevadm control --reload-rules 2>/dev/null || true

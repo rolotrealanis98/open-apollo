@@ -1,0 +1,16 @@
+# Access to the USB Apollo's vendor interface for the mixer daemon: the
+# logged-in desktop user (uaccess; applied by 73-seat-late.rules, so this file
+# has to sort before it) and the audio group, like the ALSA devices.  Only the
+# post-firmware audio PIDs are listed; the FX3 loader stubs stay root-only.
+#   Apollo Solo USB 0x000d, Twin USB 0x0002, Twin X USB 0x000f
+# The daemon only sends the vendor control requests its USB backend needs
+# (mixer settings, readback); it never claims interface 0 and never writes
+# EEPROM or flash (mixer-engine/hardware_usb.py, tools/uausb/device.py).
+# Deploy to: /etc/udev/rules.d/70-ua-apollo-usb-access.rules
+ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000d|0002|000f", \
+  MODE="0660", GROUP="audio", TAG+="uaccess"
+
+# Start the mixer daemon for the logged-in user when the unit appears; it
+# waits for the DSP init (/run/ua-usb-dsp-init.done) before talking to it.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000d|0002|000f", \
+  TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="ua-mixer-daemon.service"
