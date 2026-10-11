@@ -23,7 +23,6 @@ and "Gain/value" as its current value. We replicate this.
 import json
 import logging
 import threading
-import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable

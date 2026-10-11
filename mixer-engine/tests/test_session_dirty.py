@@ -3,7 +3,6 @@ test_session_dirty.py and test_session_checkpoint.py; clear points from the
 Mixer Engine binary, see session_dirty.py)."""
 
 import json
-import time
 
 import pytest
 
