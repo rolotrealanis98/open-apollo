@@ -271,3 +271,26 @@ class TestMonitorLevelCompanion:
         want = (monitor_tapered_to_hw(0.5) - 192) / 2.0
         assert tree.get_value(
             "/devices/0/outputs/18/CRMonitorLevel/value") == want
+
+
+class TestCueSendInit:
+    """Init writes the CUE 3/4 send entries (sub 5/6): both sides."""
+
+    def pairs(self, backend):
+        left = {(b, s) for b, s, _ in backend.bus_params if s in (5, 6)}
+        right = {(b, s) for b, s, _ in backend.bus_params_r if s in (5, 6)}
+        return left, right
+
+    def test_cue34_sends_start_silent_on_both_sides(self, daemon, backend):
+        backend.readback = None
+        daemon._push_defaults_to_hardware()
+        for bus in (0x00, 0x03, 0x08, 0x0A, 0x10, 0x12, 0x1B):
+            for sub in (5, 6):
+                assert (bus, sub, 0.0) in backend.bus_params
+                assert (bus, sub, 0.0) in backend.bus_params_r
+
+    def test_every_left_entry_has_its_right_twin(self, daemon, backend):
+        backend.readback = None
+        daemon._push_defaults_to_hardware()
+        left, right = self.pairs(backend)
+        assert left == right and len(left) == 21 * 2

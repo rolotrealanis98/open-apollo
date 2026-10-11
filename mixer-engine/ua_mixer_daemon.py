@@ -1578,11 +1578,14 @@ class MixerDaemon:
             mon(MON, 0, 0x6a, 5)       # Channel config count (final)
             log.info("Monitor init: full 57-param sequence sent")
 
-            # Bus mute L/R (sub=5/6) for all 21 buses.
+            # CUE 3 / CUE 4 sends (sub=5/6) for all 21 buses, start silent.
             # macOS sends 7 sub-params per bus; we were missing sub 5/6.
-            # All buses init to 0.0 (muted) except talkback which gets
-            # passthrough. The daemon's fader init handles talkback later.
-            from hardware import SUB_PARAM_MUTE_L, SUB_PARAM_MUTE_R
+            # (The daemon used to call them "bus mute L/R"; the engine's
+            # numbering makes them the HP3 / HP4 sends, parity/14 B12.)
+            # Like every bus param, each has a left (side 0) and a right
+            # (side 1) entry and the engine writes both; the state re-apply
+            # below sets the saved CUE 3/4 send levels of a 4-cue model.
+            from hardware import SUB_PARAM_CUE3, SUB_PARAM_CUE4
             all_buses = [0x00, 0x01, 0x02, 0x03,       # Analog In 1-4
                          0x08, 0x09,                     # S/PDIF L/R
                          0x0a,                           # Talkback
@@ -1591,9 +1594,11 @@ class MixerDaemon:
                          0x14, 0x15, 0x16, 0x17,         # ADAT 5-8
                          0x18, 0x19, 0x1a, 0x1b]         # Virtual 1-4
             for bus in all_buses:
-                be.set_mixer_bus_param(bus, SUB_PARAM_MUTE_L, 0.0)
-                be.set_mixer_bus_param(bus, SUB_PARAM_MUTE_R, 0.0)
-            log.info("Sent bus mute L/R (sub=5/6) for %d buses", len(all_buses))
+                for sub in (SUB_PARAM_CUE3, SUB_PARAM_CUE4):
+                    be.set_mixer_bus_param(bus, sub, 0.0)
+                    be.set_mixer_bus_param(bus, sub, 0.0, side=1)
+            log.info("Sent CUE 3/4 sends (sub=5/6, both sides) silent for "
+                     "%d buses", len(all_buses))
 
         log.info("Pushed device map defaults to hardware "
                  "(preamps + monitor + bus coefficients)")
