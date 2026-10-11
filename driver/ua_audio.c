@@ -6148,6 +6148,15 @@ void ua_mixer_sync_readback(struct ua_device *ua)
 	unsigned int ch, n, i;
 	char name[44];
 
+	/*
+	 * Words 38/39 guard the snapshot: the Mixer Engine (CMxMixer::
+	 * TimerCallback) skips one where either reads 0xFFFFFFFF, so the
+	 * ALSA cache does not follow it either (parity/14 section 7).
+	 */
+	BUILD_BUG_ON(UA_MIXER_RB_WORDS < 40);
+	if (rb[38] == 0xFFFFFFFF || rb[39] == 0xFFFFFFFF)
+		return;
+
 	for (i = 0; i < UA_MIXER_RB_WORDS; i++)
 		chg[i] = audio->rb_synced_valid ? rb[i] ^ old[i] : ~0u;
 	memcpy(old, rb, sizeof(audio->rb_synced));
