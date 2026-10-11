@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Driver: `Line N HiZ Impedance` ALSA controls (2.2M to 21k) on the HiZ inputs; error counters (forced XRUN stops, PCIe errors, AX_CONTROL faults, DSP error vectors, block-send errors) in `/proc/asound/cardN/dsp_state` with a rate-limited `UA_EVT_DEVICE_ERROR` event; ABI 1.2: PCIe link speed/width, clock-source mask and firmware rate mask in `UA_IOCTL_GET_SYSTEM_INFO`; `SET_MIXER_PARAM` channel type 3 sends the rate acknowledgement from user space; `MODULE_FIRMWARE` declarations for the two firmware blobs.
+- Mixer daemon: SoloSafe and Isolate exempt a channel from another channel's solo (the x4's talkback input is Isolate); the `/ClockSource` list follows the sources the device offers; `/AudioStreaming` follows the transport; Undo/Redo and I/O-map preset commands; `/openapollo/pcie_link`. Generated maps carry the digital mirror and output pads only on models that have them.
+- `setup-apollo-io.sh --output-delay NAME=FRAMES` delays an output by up to 255 frames with a PipeWire filter chain (output delay compensation; the driver maps the DMA ring directly, so it cannot delay in the kernel). `tools/usb-reg-probe.py` uses the Windows vendor-request map and only reads unless told otherwise; the USB init warns when the Apollo is not on a SuperSpeed link. README: network/firewall ports and dynamic debug.
 - Mixer daemon: `post` object commands get the Mixer Engine's replies ("Unable to resolve the command for the post." / "Unable to execute command.") instead of silence, and the host-side ones work: Identify, ClearClips, ClearSolos, CopyChannel/PasteChannel/CopyToSends, snapshots, channel presets and sessions. Sessions, snapshots and presets are the daemon's own JSON files, not UA's XML.
 - Mixer daemon: stops writing to the hardware while the driver reports the device paused for system suspend, and pushes the mixer state again on resume (the preamp and monitor values still come from the hardware).
 - Mixer daemon: reports the unit's real serial number (from `UA_IOCTL_GET_SYSTEM_INFO`), checks the driver's feature bits before using the newer bus-param flags (an older driver would have written a pan's right weight into the left entry), and has `--stereo-sends` (right-hand send entries; off until a listening test). `tools/oa-daemon-client.py` sets, gets and watches daemon paths.
@@ -42,6 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/proc/asound/cardN/io_map` and `UA_IOCTL_GET_IO_MAP`: channel names, slots and the firmware IO descriptors.
 
 ### Changed
+- Command-buffer sends to the DSP wait up to 6 s for the ring, as the macOS driver does (ordinary commands keep their short timeout). PCM streams report 24 significant bits in their 32-bit samples. The upper interrupt bank is used on the devices the macOS driver uses it on (ext_caps bit 31, family not 6), which is every known Apollo.
 - The transport starts only once FRAME_CTR has reached FRAME_CFG (`frame_ctr_gate=2`, the macOS driver's 3 reads 1 ms apart), instead of on its first non-zero value: at 176.4/192 kHz that was 4 of 0x20. On the x4 the default rate-change path stays 28/28, and the macOS driver's own rate-change sequence (`rate_change=1`) records 11 of 14 runs instead of 5. `frame_ctr_gate=0` restores the old start.
 - With `period_irq=0` (the default) the driver no longer programs the period timer or enables its interrupt (vector 0x46), and no longer calls `snd_pcm_period_elapsed()` from the hard interrupt: the 1 ms hrtimer alone drives period wakeups, under the stream lock. The device now raises only end-of-buffer and notification interrupts (about 6 a second at 48 kHz).
 - README: the driver builds clean on kernels 5.15 to 7.3; hardware testing is on 7.2 and Ubuntu 24.04's 6.8.
@@ -60,6 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documentation moved to the [GitHub wiki](https://github.com/rolotrealanis98/open-apollo/wiki). The `docs/` directory and the open-apollo-docs site are retired; old `open-apollo-docs.pages.dev` links redirect to the wiki.
 
 ### Fixed
+- The notification status (0xC030) is cleared only after every bit of the pass has been acted on, as the macOS driver does.
+- `period_irq=1` at 48 kHz: the timer vector is re-armed from the IRQ thread after the period is served (it used to re-arm in the hard IRQ and let a second interrupt for the same boundary through), and TIMER_CFG is written on every transport prepare, restarts included.
 - The driver's ALSA sync skips a hardware readback the Mixer Engine would skip (word 38 or 39 reading 0xFFFFFFFF).
 - Mixer daemon: a readback snapshot whose check word (38 or 39) is all ones is dropped, as the Mixer Engine drops it, instead of being decoded; at start the daemon waits for the next snapshot instead of falling back to the defaults.
 - Mixer bus params write both the left and the right coefficient entry (the side is in the DSP command, as the macOS driver sends it); the daemon writes both for fader, pan, mute and solo. Pan and stereo coefficients used to change only the left half.
