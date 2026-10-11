@@ -3695,6 +3695,24 @@ class HardwareRouter:
 
     # ── Output/Monitor controls (SEL131 mixer param path) ────────
 
+    def _monitor_mute_mono(self, ch: int, mute: bool | None = None,
+                           mono: bool | None = None) -> int:
+        """Monitor param 0x03 value: bit 1 mute, bit 0 mono.  The switch
+        not being set keeps its state from the tree (output `ch`)."""
+        def tree(control):
+            if self.state_tree is None:
+                return False
+            try:
+                return self._truthy(self.state_tree.get_value(
+                    f"/devices/0/outputs/{ch}/{control}/value"))
+            except Exception:   # a map without the control
+                return False
+        if mute is None:
+            mute = tree("Mute")
+        if mono is None:
+            mono = tree("MixToMono")
+        return (2 if mute else 0) | (1 if mono else 0)
+
     def _handle_output(self, path: str, ch: int, control: str, value: Any):
         """Route output/monitor controls via SetMixerParam (SEL131).
 
@@ -3801,8 +3819,11 @@ class HardwareRouter:
                 return
 
             if control == "Mute":
-                # Monitor mute: 2=muted, 0=unmuted (NOT 1!)
-                hw_value = 2 if value and value != "0" and value != "false" else 0
+                # Param 0x03 carries both monitor switches: bit 1 mute,
+                # bit 0 mono (MixToMono), and the driver writes both bits
+                # every time, so the other switch's state goes along
+                hw_value = self._monitor_mute_mono(
+                    ch, mute=self._truthy(value))
                 log.info("HW MONITOR: Mute = %r → %d", value, hw_value)
                 self.backend.set_mixer_param(
                     MONITOR_CHANNEL_TYPE, 0,
@@ -3823,9 +3844,11 @@ class HardwareRouter:
 
             if control == "MixToMono":
                 # VERIFIED: MixToMono uses param 0x03 (same as
-                # MonitorMute) with value=1/0. MonitorMute uses value=2/0.
-                # So param 0x03 has 3-state encoding: 0=off, 1=mono, 2=muted.
-                hw_value = 1 if value and value != "0" and value != "false" else 0
+                # MonitorMute): bit 0 mono, bit 1 mute (the Mixer Engine
+                # sends 0, 1 and 2; the readback has both bits, so 3 is
+                # both).  The mute state goes along (see Mute above).
+                hw_value = self._monitor_mute_mono(
+                    ch, mono=self._truthy(value))
                 log.info("HW MONITOR: MixToMono = %r → %d (param=0x03)",
                          value, hw_value)
                 self.backend.set_mixer_param(

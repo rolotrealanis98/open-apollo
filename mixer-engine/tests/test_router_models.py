@@ -270,3 +270,29 @@ def test_x8p_init_defaults_go_to_its_monitor_output_and_all_inputs():
     # at index 26 writes bus 0x0A, analog 8 writes bus 0x07)
     buses = {b for b, _, _ in be.bus_params}
     assert 0x07 in buses and 0x0A in buses
+
+
+def _tree_set(r, path, value):
+    """Put a value in the tree without routing it (as after an earlier SET)."""
+    r.state_tree.set_value(path, value)
+
+
+@pytest.mark.parametrize("path,mon", [(X4, 18), (X8P, 22)])
+def test_monitor_mute_and_mono_go_together(path, mon):
+    # Param 0x03 is bit 1 mute, bit 0 mono, and the driver writes both bits
+    # every time: setting one switch must carry the other's state
+    r, be = router_for(path)
+    _tree_set(r, f"{OUT}/{mon}/MixToMono/value", True)
+    r.on_set(f"{OUT}/{mon}/Mute/value", True)
+    assert be.mixer_params == [(MONITOR_CHANNEL_TYPE, 0,
+                                MONITOR_PARAM["MonitorMute"], 3)]
+    be.clear()
+    _tree_set(r, f"{OUT}/{mon}/Mute/value", True)
+    r.on_set(f"{OUT}/{mon}/MixToMono/value", False)
+    assert be.mixer_params == [(MONITOR_CHANNEL_TYPE, 0,
+                                MONITOR_PARAM["MixToMono"], 2)]
+    be.clear()
+    _tree_set(r, f"{OUT}/{mon}/MixToMono/value", False)
+    r.on_set(f"{OUT}/{mon}/Mute/value", False)
+    assert be.mixer_params == [(MONITOR_CHANNEL_TYPE, 0,
+                                MONITOR_PARAM["MonitorMute"], 0)]
