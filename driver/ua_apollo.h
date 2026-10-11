@@ -155,6 +155,33 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 }
 
 /*
+ * Public device type: the kext's UAD2DeviceType as CPcieDevice::
+ * GetCapabilities (x86 0x464c) computes it -- ext_caps family refined by
+ * the serial type -- and stores in CPcieDevice+0xc48.  Every kext mask
+ * test (ring connect in Connect/StartTransport, HardResetDSPs,
+ * SetOutputMute) runs on this number, not on the serial-table type that
+ * ua_device.device_type holds (x4: public 0x1A, serial type 0x1F).
+ * ua_compute_public_type() in ua_core.c; parity/11 section 2.3.
+ */
+#define UA_PUBTYPE_NONE		0xFFFFFFFFu	/* GetCapabilities: -1 */
+#define UA_PUBTYPE_X4		0x1A
+#define UA_PUBLIC_RING_CONNECT_MASK	0x3ff17fcf9b0ULL	/* types <= 0x29 */
+#define UA_PUBLIC_OUTPUT_MUTE_MASK	0x8010080000ULL		/* 0x13, 0x1C, 0x27 */
+#define UA_PUBLIC_OUTPUT_MUTE_MAX	0x27
+
+static inline bool ua_public_ring_connect(u32 pt)
+{
+	return pt <= UA_RING_CONNECT_V12_MAX_TYPE &&
+	       (UA_PUBLIC_RING_CONNECT_MASK >> pt) & 1;
+}
+
+static inline bool ua_public_output_mute(u32 pt)
+{
+	return pt <= UA_PUBLIC_OUTPUT_MUTE_MAX &&
+	       (UA_PUBLIC_OUTPUT_MUTE_MASK >> pt) & 1;
+}
+
+/*
  * Serial prefix register: hardware registers at BAR0 + 0x20..0x2C
  * contain a 16-byte serial string. ASCII digits 5-8 (serial + 4, NOT the
  * leading four) are the model prefix matched by _deviceTypeFromSerialNumber()
@@ -1083,7 +1110,10 @@ struct ua_device {
 
 	/* Device identity */
 	u32 fpga_rev;               /* Cached FPGA revision from 0x2218 */
-	u32 device_type;            /* UAD2DeviceType enum */
+	u32 device_type;            /* Serial-table type (naming, models) */
+	u32 public_type;            /* Kext UAD2DeviceType (GetCapabilities);
+				     * UA_PUBTYPE_NONE when unresolved */
+	u32 ext_caps;               /* ext_caps (0x2234) at probe, v2 only */
 	u32 subsystem_id;           /* PCI subsystem ID = model selector */
 	u32 num_dsps;               /* Number of SHARC DSPs */
 	bool fw_v2;                 /* Extended (v2) firmware */
@@ -1463,5 +1493,13 @@ int ua_aceface_handshake(struct ua_device *ua);
 int ua_boot_transport_start(struct ua_device *ua);
 void ua_boot_transport_stop(struct ua_device *ua);
 void ua_reset_dma(struct ua_device *ua);
+
+/* Per-engine DMA_CTRL ownership (CPcieIntrManager::EnableDMA/ResetDMAEngine) */
+void ua_dma_enable_engine(struct ua_device *ua, unsigned int idx);
+void ua_dma_reset_engine(struct ua_device *ua, unsigned int idx);
+
+/* kext_connect: ring connect after ACEFACE (ua_core.c) */
+extern bool ua_kext_connect;
+void ua_kext_ring_connect(struct ua_device *ua);
 
 #endif /* UA_APOLLO_H */

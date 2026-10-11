@@ -26,7 +26,8 @@ struct ua_device_info {
 	__u32 fw_v2;		/* 1 if extended (v2) firmware */
 	__u32 serial;
 	__u32 ext_caps;
-	__u32 reserved[8];
+	__u32 public_type;	/* kext UAD2DeviceType (x4 = 0x1A); 0xFFFFFFFF = unresolved */
+	__u32 reserved[7];
 };
 
 /*

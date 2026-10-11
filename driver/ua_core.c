@@ -187,6 +187,7 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 
 /* Forward declarations */
 static void ua_read_serial_type(struct ua_device *ua);
+static u32 ua_compute_public_type(struct ua_device *ua);
 static void ua_resume_work(struct work_struct *work);
 
 /* ----------------------------------------------------------------
@@ -245,10 +246,23 @@ void ua_reset_dma(struct ua_device *ua)
  *   - v1 DSP count: table on FPGA rev bits[31:28], see below
  *   - Some v2 devices need serial prefix (0x20-0x2C) to get exact type
  */
-static void ua_detect_capabilities(struct ua_device *ua)
+static int ua_detect_capabilities(struct ua_device *ua)
 {
 	u32 fpga = ua->fpga_rev;
 	u32 ext_caps;
+
+	/*
+	 * Offline detector: GetCapabilities (kext x86 0x464c) treats an
+	 * FPGA_REV or ext_caps read of 0xFFFFFFFF as "device gone" and
+	 * MapHardware fails (-0x5c) before anything is touched.  0xFFFFFFFF
+	 * has bit 31 set, so without this the code below would take the v2
+	 * path with garbage capabilities.
+	 */
+	if (fpga == 0xFFFFFFFF) {
+		dev_err(&ua->pdev->dev,
+			"FPGA_REV reads 0xFFFFFFFF: device offline\n");
+		return -ENODEV;
+	}
 
 	if ((s32)fpga >= 0) {
 		/* v1 firmware: type from FPGA rev bits[31:28] - 1 */
@@ -283,7 +297,25 @@ static void ua_detect_capabilities(struct ua_device *ua)
 		/* v2 firmware */
 		ua->fw_v2 = true;
 		ext_caps = ua_read(ua, UA_REG_EXT_CAPS);
+		if (ext_caps == 0xFFFFFFFF) {
+			dev_err(&ua->pdev->dev,
+				"ext_caps reads 0xFFFFFFFF: device offline\n");
+			return -ENODEV;
+		}
+		ua->ext_caps = ext_caps;
 		ua->num_dsps = (ext_caps >> 8) & 0xFF;
+
+		/*
+		 * _allocateDSPs (kext x86 0x7678) refuses a DSP count of 9 or
+		 * more (no Apollo has that many; the field is garbage).  The
+		 * driver used to clamp it to UA_MAX_DSPS and carry on.
+		 */
+		if (ua->num_dsps > UA_MAX_DSPS) {
+			dev_err(&ua->pdev->dev,
+				"ext_caps 0x%08x reports %u DSPs (max %u): not an Apollo\n",
+				ext_caps, ua->num_dsps, UA_MAX_DSPS);
+			return -ENODEV;
+		}
 
 		/*
 		 * Device type detection for v2 firmware:
@@ -320,8 +352,8 @@ static void ua_detect_capabilities(struct ua_device *ua)
 		}
 	}
 
-	if (ua->num_dsps > UA_MAX_DSPS)
-		ua->num_dsps = UA_MAX_DSPS;
+	ua->public_type = ua_compute_public_type(ua);
+	return 0;
 }
 
 /*
@@ -368,7 +400,7 @@ static const struct ua_serial_entry ua_serial_table[] = {
  * the 4-byte ASCII model prefix at offset +4 (digits 5-8) against the table —
  * not the leading four digits.
  */
-static void ua_read_serial_type(struct ua_device *ua)
+static u32 ua_serial_lookup(struct ua_device *ua, bool verbose)
 {
 	char serial[UA_REG_SERIAL_LEN + 1];
 	u32 regs[4];
@@ -380,18 +412,97 @@ static void ua_read_serial_type(struct ua_device *ua)
 	memcpy(serial, regs, UA_REG_SERIAL_LEN);
 	serial[UA_REG_SERIAL_LEN] = '\0';
 
-	dev_info(&ua->pdev->dev, "serial: %.16s\n", serial);
+	if (verbose)
+		dev_info(&ua->pdev->dev, "serial: %.16s\n", serial);
 
 	/* Match the 4-char model prefix at digits 5-8 against the lookup table */
-	for (i = 0; i < ARRAY_SIZE(ua_serial_table); i++) {
-		if (!strncmp(serial + 4, ua_serial_table[i].prefix, 4)) {
-			ua->device_type = ua_serial_table[i].device_type;
-			return;
-		}
-	}
+	for (i = 0; i < ARRAY_SIZE(ua_serial_table); i++)
+		if (!strncmp(serial + 4, ua_serial_table[i].prefix, 4))
+			return ua_serial_table[i].device_type;
 
-	dev_warn(&ua->pdev->dev, "unknown serial prefix, type unresolved\n");
-	ua->device_type = 0;
+	return 0;
+}
+
+static void ua_read_serial_type(struct ua_device *ua)
+{
+	ua->device_type = ua_serial_lookup(ua, true);
+	if (!ua->device_type)
+		dev_warn(&ua->pdev->dev,
+			 "unknown serial prefix, type unresolved\n");
+}
+
+/*
+ * ua_compute_public_type - the kext's UAD2DeviceType (CPcieDevice::
+ * GetCapabilities, x86 0x464c; parity/11 rows B5 and section 2.3).
+ *
+ * v1 firmware: 0.  v2: the ext_caps family ((ext_caps >> 20) & 0x3f)
+ * indexes a table at 0x4d5c; the entries for the x-series families are
+ * then refined by the serial-table type (_deviceTypeFromSerialNumber).
+ * The kext's FPGA-version fallback (_deviceTypeFromFPGAVersion) is not
+ * ported: where it would be consulted the type stays at the family value
+ * (HEXA, 0x19) or UA_PUBTYPE_NONE (QUAD, as the kext's -1 when that check
+ * fails too).  The serial is read independently of device_type, which the
+ * Solo and 8p subsystem pins override.
+ */
+static u32 ua_compute_public_type(struct ua_device *ua)
+{
+	static const u8 family_map[] = {
+		0x05, 0x04, 0x00, 0x07, 0x08, 0x0B, 0x04, 0x0C, 0x0D, 0x0F,
+		0x0E, 0x00, 0x00, 0x12, 0x13, 0x1A, 0x16, 0x18, 0x19, 0x20,
+	};
+	u32 fam, base, st;
+
+	if (!ua->fw_v2)
+		return 0;
+
+	fam = (ua->ext_caps >> 20) & 0x3f;
+	if (fam == 0x3f)
+		return UA_PUBTYPE_NONE;
+	if (fam == 0 || fam > ARRAY_SIZE(family_map))
+		return 0;
+
+	base = family_map[fam - 1];
+	if (base != 0x13 && base != 0x16 && base != 0x19 && base != 0x1A)
+		return base;
+
+	st = ua_serial_lookup(ua, false);
+
+	switch (base) {
+	case 0x13:
+		if (st == UA_DEV_SERIAL_2016)
+			return 0x13;
+		if (st == UA_DEV_SERIAL_2110)
+			return 0x27;
+		return 0x1C;		/* serial 2032 or any other */
+	case 0x1A:
+		if (st == UA_DEV_APOLLO_X4)
+			return 0x1A;
+		if (st == UA_DEV_APOLLO_X4_GEN2)
+			return 0x26;
+		if (st == UA_DEV_APOLLO_X4_GEN2_TB4)
+			return 0x28;
+		return UA_PUBTYPE_NONE;
+	case 0x16:
+		if (st >= UA_DEV_APOLLO_X6 && st <= UA_DEV_APOLLO_X16)
+			return 0x14 + (st - UA_DEV_APOLLO_X6);
+		if (st == UA_DEV_APOLLO_X16D)
+			return 0x20;
+		if (st >= UA_DEV_APOLLO_X6_GEN2 &&
+		    st <= UA_DEV_APOLLO_X16_GEN2)
+			return 0x21 + (st - UA_DEV_APOLLO_X6_GEN2);
+		return 0x16;
+	default:			/* 0x19 */
+		if (st == UA_DEV_APOLLO_SOLO || st == UA_DEV_ARROW ||
+		    st == 0x26 || st == 0x2E || st == 0x2F)
+			return 0x19;
+		if (st == UA_DEV_APOLLO_TWIN_X_GEN2 ||
+		    st == UA_DEV_APOLLO_TWIN_X_GEN2_B || st == 0x3D)
+			return 0x25;
+		if (st == UA_DEV_APOLLO_TWIN_X_GEN2_TB4 ||
+		    st == UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B)
+			return 0x29;
+		return 0x19;
+	}
 }
 
 /*
@@ -533,6 +644,7 @@ static long ua_ioctl_get_device_info(struct ua_device *ua, unsigned long arg)
 	info.fw_v2 = ua->fw_v2 ? 1 : 0;
 	info.serial = ua_read(ua, UA_REG_SERIAL);
 	info.ext_caps = ua_read(ua, UA_REG_EXT_CAPS);
+	info.public_type = ua->public_type;
 
 	if (copy_to_user((void __user *)arg, &info, sizeof(info)))
 		return -EFAULT;
@@ -898,8 +1010,24 @@ static int ua_mixer_read_setting_locked(struct ua_device *ua,
  * 0x8010080000, i.e. 0x13, 0x1C and 0x27 (Apollo Solo TB).  A no-op on
  * every other model, the x4 included.
  */
-#define UA_OUTPUT_MUTE_TYPES	0x8010080000ULL
-#define UA_OUTPUT_MUTE_MAX_TYPE	0x27
+#define UA_OUTPUT_MUTE_TYPES	UA_PUBLIC_OUTPUT_MUTE_MASK
+#define UA_OUTPUT_MUTE_MAX_TYPE	UA_PUBLIC_OUTPUT_MUTE_MAX
+
+/*
+ * The test runs on the kext's PUBLIC type (CPcieDevice+0xc48, from
+ * GetCapabilities), not the serial-table type: x4 = 0x1A (no mute),
+ * serial 2032 -> 0x1C, 2016 -> 0x13, 2110 -> 0x27.  Only when the public
+ * type could not be computed does the serial-table type decide, as the
+ * driver did before the public type existed.
+ */
+static bool ua_has_output_mute(const struct ua_device *ua)
+{
+	if (ua->public_type != UA_PUBTYPE_NONE)
+		return ua_public_output_mute(ua->public_type);
+
+	return ua->device_type <= UA_OUTPUT_MUTE_MAX_TYPE &&
+	       (UA_OUTPUT_MUTE_TYPES & BIT_ULL(ua->device_type));
+}
 
 /**
  * ua_set_output_mute_locked - SetOutputMute(mute) as the kext does it
@@ -917,8 +1045,7 @@ void ua_set_output_mute_locked(struct ua_device *ua, bool mute,
 	unsigned int polls;
 	u32 seq_rd;
 
-	if (ua->device_type > UA_OUTPUT_MUTE_MAX_TYPE ||
-	    !(UA_OUTPUT_MUTE_TYPES & BIT_ULL(ua->device_type)))
+	if (!ua_has_output_mute(ua))
 		return;
 	if (!ua->mixer_ready)
 		return;
@@ -3069,7 +3196,9 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ua->subsystem_id = pdev->subsystem_device;
 
 	/* Detect firmware version, device type, and DSP count from hardware regs */
-	ua_detect_capabilities(ua);
+	ret = ua_detect_capabilities(ua);
+	if (ret)
+		goto err_put;
 
 	/* tools/contribute/device-probe.sh parses this line; keep its shape */
 	dev_info(&pdev->dev,
@@ -3077,7 +3206,9 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		 ua_device_name(ua->device_type),
 		 ua->fpga_rev, ua->subsystem_id, ua->num_dsps,
 		 ua->fw_v2 ? "v2" : "v1");
-	dev_info(&pdev->dev, "device type 0x%02x\n", ua->device_type);
+	dev_info(&pdev->dev, "device type 0x%02x, public type 0x%02x%s\n",
+		 ua->device_type, ua->public_type,
+		 ua->public_type == UA_PUBTYPE_NONE ? " (unresolved)" : "");
 
 	/*
 	 * Previous-session ring state, for warm-boot debugging.  Registers

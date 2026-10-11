@@ -1639,6 +1639,7 @@ static void ua_io_map_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "model\t\t%s (device type 0x%02x)\n",
 		    audio->model ? audio->model->name : "no model data",
 		    info->device_type);
+	snd_iprintf(buf, "public_type\t0x%02x\n", ua->public_type);
 	snd_iprintf(buf, "rate\t\t%u Hz\n", info->sample_rate);
 
 	for (dir = 0; dir < UA_DIRS; dir++) {
