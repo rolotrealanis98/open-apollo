@@ -2590,6 +2590,9 @@ class HardwareRouter:
         # Decode talkback status from data[6]
         d6 = data[6]
         result["talkback_active"] = bool(d6 & (1 << 8))
+        # Clock lock: bit 31, valid when bit 30 is set (kext)
+        if d6 & (1 << 30):
+            result["clock_locked"] = bool(d6 & (1 << 31))
 
         # Decode preamp flags from data[0] — 6-bit stride per channel
         d0 = data[0]

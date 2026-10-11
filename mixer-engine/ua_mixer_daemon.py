@@ -545,6 +545,11 @@ class MixerDaemon:
         if talkback != last_rb.get("talkback_active"):
             self._push_to_clients("/TalkbackOn", talkback)
 
+        # Clock lock (only when the hardware says the bit is valid)
+        locked = rb.get("clock_locked")
+        if locked is not None and locked != last_rb.get("clock_locked"):
+            self._push_to_clients("/ClockLocked", locked)
+
         # Preamp gain readback — 4 individual channels.
         # rb_data[3]: ch0=[7:0], ch1=[15:8], ch2=[23:16], ch3=[31:24]
         for ch in range(4):
