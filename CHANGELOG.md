@@ -23,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Reboot, power-off and suspend now stop the Apollo first (`.shutdown` and suspend/resume): mute, transport off, DMA quiesced, disconnect signal. Unloading the module no longer leaves the audio extension connected, so `rmmod` + `insmod` reconnects and keeps the mixer DSP running.
 - The DSP command ring is circular: mixer commands no longer stop for good after about 1,000 changes.
 - ASPM L0s is turned off on the Apollo's PCIe link; with it on, the link logged a steady stream of correctable errors while streaming.
-- Recording works after every sample-rate change on the x4: a 192 kHz stream started while the clock was already at 176.4 or 192 kHz used to record nothing.
+- Recording works after every sample-rate change on the x4: a 192 kHz stream started while the clock was already at 176.4 or 192 kHz used to record nothing, and a 176.4 kHz one did about 1 time in 6.
 
 ## [1.0.0] - 2026-03-22
 
