@@ -41,6 +41,10 @@
 
 #include "ua_apollo.h"
 
+/* Advertise the blobs so initramfs tools and distro packaging include them. */
+MODULE_FIRMWARE(UA_MIXER_FW_NAME);
+MODULE_FIRMWARE(UA_PLUGIN_CHAIN_FW_NAME);
+
 /* Defined with the DSP vector code at the end of the file */
 static void ua_dsp_msg_work(struct work_struct *work);
 static void ua_dsp_irq_disarm(struct ua_device *ua);
