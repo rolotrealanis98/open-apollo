@@ -421,4 +421,73 @@ struct ua_dma_test {
 
 #define UA_IOCTL_DMA_TEST _IOWR(UA_IOCTL_MAGIC, 0x80, struct ua_dma_test)
 
+/*
+ * Event channel: read() on /dev/ua_apolloN returns struct ua_event records.
+ *
+ * Mirrors the kext's async notifications ({code, arg} through
+ * CNotificationQueue, armed by selector 165).  poll()/select()/epoll and
+ * O_NONBLOCK work; SIGIO via fcntl(F_SETFL, O_ASYNC) too.
+ *
+ * Each open file has its own queue of 64 events.  read() needs a buffer of
+ * at least sizeof(struct ua_event) bytes and returns as many whole events
+ * as fit; it blocks until one is queued (-EAGAIN with O_NONBLOCK).  Files
+ * that never read lose nothing but their own oldest events.  A reader that
+ * falls behind finds a UA_EVT_EVENTS_LOST event (arg = events dropped since
+ * the last one delivered) in front of the next events it gets.
+ *
+ * Events are queued from the time the file is opened.  After the device is
+ * removed (unbind, surprise removal) UA_EVT_DEVICE_OFFLINE is the last event;
+ * once the queue is drained read() fails with -ENODEV and poll() reports
+ * EPOLLHUP.
+ *
+ * time_ns is CLOCK_MONOTONIC.
+ *
+ * Codes 0x64-0x6f are the kext's values; arg means what it does there:
+ *   UA_EVT_RATE_INFO     0x64  firmware rate/lock info changed (notification
+ *                              bit 4); arg = raw notification status
+ *   UA_EVT_IODESC_IN     0x65  the firmware republished the input IO
+ *                              descriptor (bit 1); arg = raw status
+ *   UA_EVT_IODESC_OUT    0x66  ... the output one (bit 0); arg = raw status
+ *   UA_EVT_RATE_CHANGED  0x67  the clock now runs at a new rate; arg = rate
+ *                              index (UA_RATE_44100..UA_RATE_192000: 1 =
+ *                              44.1k, 2 = 48k, 3 = 88.2k, 4 = 96k, 5 =
+ *                              176.4k, 6 = 192k).  From a committed rate
+ *                              change (ALSA hw_params/prepare, ioctl, mixer
+ *                              control) and from notification bits 22 / 4.
+ *   UA_EVT_CLOCK_CHANGED 0x68  clock source change committed; arg = source
+ *                              (UA_CLOCK_*)
+ *   UA_EVT_NOTIF_STATUS  0x6e  raw notification status (BAR0 0xC030) as the
+ *                              driver read and cleared it; arg = the status.
+ *                              Posted before the decoded events above.
+ * The kext's 0x69 (additional latency) and 0x6f (clock master) are not
+ * produced: no equivalent state here.
+ *
+ * Linux-only codes:
+ *   UA_EVT_DEVICE_OFFLINE 0x1000  the device was removed; arg = 1 when it
+ *                                 was already gone from the bus (surprise
+ *                                 removal), 0 for an orderly unbind
+ *   UA_EVT_CONNECTED      0x1001  the audio extension connected (probe,
+ *                                 resume, reconnect); arg = 0
+ *   UA_EVT_LAYOUT_CHANGED 0x1002  an io_map layout was committed; arg =
+ *                                 (play_hw_channels << 16) | rec_hw_channels
+ *   UA_EVT_EVENTS_LOST    0x1003  see above
+ */
+struct ua_event {
+	__u32 code;
+	__u32 arg;
+	__u64 time_ns;
+};
+
+#define UA_EVT_RATE_INFO	0x64
+#define UA_EVT_IODESC_IN	0x65
+#define UA_EVT_IODESC_OUT	0x66
+#define UA_EVT_RATE_CHANGED	0x67
+#define UA_EVT_CLOCK_CHANGED	0x68
+#define UA_EVT_NOTIF_STATUS	0x6e
+
+#define UA_EVT_DEVICE_OFFLINE	0x1000
+#define UA_EVT_CONNECTED	0x1001
+#define UA_EVT_LAYOUT_CHANGED	0x1002
+#define UA_EVT_EVENTS_LOST	0x1003
+
 #endif /* UA_IOCTL_H */

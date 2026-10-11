@@ -505,19 +505,6 @@ static void ua_hw_stop_xport_irqs(struct ua_device *ua)
  * Character device file operations
  * ---------------------------------------------------------------- */
 
-static int ua_open(struct inode *inode, struct file *filp)
-{
-	struct ua_device *ua = container_of(inode->i_cdev, struct ua_device, cdev);
-
-	filp->private_data = ua;
-	return 0;
-}
-
-static int ua_release(struct inode *inode, struct file *filp)
-{
-	return 0;
-}
-
 static long ua_ioctl_get_device_info(struct ua_device *ua, unsigned long arg)
 {
 	struct ua_device_info info = {};
@@ -2576,7 +2563,8 @@ static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
 
 static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	struct ua_device *ua = filp->private_data;
+	struct ua_file *uf = filp->private_data;
+	struct ua_device *ua = uf->ua;
 	long ret;
 
 	if (ua_ioctl_needs_rawio(cmd) && !capable(CAP_SYS_RAWIO))
@@ -2594,8 +2582,11 @@ static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 static const struct file_operations ua_fops = {
 	.owner		= THIS_MODULE,
-	.open		= ua_open,
-	.release	= ua_release,
+	.open		= ua_event_open,
+	.release	= ua_event_release,
+	.read		= ua_event_read,
+	.poll		= ua_event_poll,
+	.fasync		= ua_event_fasync,
 	.unlocked_ioctl	= ua_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= compat_ptr_ioctl,
@@ -3010,6 +3001,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	mutex_init(&ua->lock);
 	spin_lock_init(&ua->irq_lock);
 	init_rwsem(&ua->ioctl_sem);
+	ua_event_init(ua);
 	INIT_LIST_HEAD(&ua->dma_orphans);
 	INIT_WORK(&ua->resume_work, ua_resume_work);
 	pci_set_drvdata(pdev, ua);
@@ -3226,6 +3218,7 @@ static void ua_remove(struct pci_dev *pdev)
 	down_write(&ua->ioctl_sem);
 	ua->removed = true;
 	up_write(&ua->ioctl_sem);
+	ua_event_offline(ua, dead);
 
 	/*
 	 * 1. Stop the software that touches BAR0 on its own: a pending

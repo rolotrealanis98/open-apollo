@@ -1203,6 +1203,8 @@ static void ua_io_map_commit(struct ua_device *ua,
 	memcpy(audio->io_map_mode, l->mode, sizeof(audio->io_map_mode));
 	audio->io_layout_stale = false;
 
+	ua_event_post(ua, UA_EVT_LAYOUT_CHANGED,
+		      (l->play_hw << 16) | (l->rec_hw & 0xffff));
 	ua_io_map_log(ua, why, l);
 }
 
@@ -1741,6 +1743,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 		/* Bits 0/1: the firmware republished an IO descriptor */
 		if (notif & (UA_NOTIF_BIT_OUT_IO | UA_NOTIF_BIT_IN_IO))
 			ua_io_desc_notify(ua);
+		ua_event_post_notif(ua, notif);
 	}
 
 	rb_status = ua_read(ua, UA_REG_MIXER_RB_STATUS);
@@ -2281,6 +2284,7 @@ post_handshake:
 				}
 
 				audio->connected = true;
+				ua_event_post(ua, UA_EVT_CONNECTED, 0);
 
 				/*
 				 * Activate plugin chain AFTER ACEFACE connect
@@ -3337,9 +3341,16 @@ static int ua_audio_set_clock_cfg(struct ua_device *ua, unsigned int rate,
 	}
 
 	if (!ret) {
+		bool rate_new = audio->rate_index != (unsigned int)rate_idx;
+		bool src_new = audio->clock_source != source;
+
 		audio->sample_rate = rate;
 		audio->rate_index = rate_idx;
 		audio->clock_source = source;
+		if (rate_new)
+			ua_event_post(ua, UA_EVT_RATE_CHANGED, rate_idx);
+		if (src_new)
+			ua_event_post(ua, UA_EVT_CLOCK_CHANGED, source);
 		/*
 		 * io_map=1: the rate band and the firmware's descriptors may
 		 * have changed with the rate (re-read, then commit or force
@@ -4021,6 +4032,7 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 			return;
 		if (notif) {
 			ua_write(ua, UA_REG_NOTIF_STATUS, 0);
+			ua_event_post_notif(ua, notif);
 			status |= notif;
 		}
 		if (ua_read(ua, UA_REG_MIXER_RB_STATUS) == 1) {
@@ -4071,8 +4083,10 @@ static u32 ua_audio_service_step(struct ua_device *ua)
 
 	if (notif == 0xFFFFFFFF)
 		return notif;
-	if (notif)
+	if (notif) {
 		ua_write(ua, UA_REG_NOTIF_STATUS, 0);
+		ua_event_post_notif(ua, notif);
+	}
 	if (ua_read(ua, UA_REG_MIXER_RB_STATUS) == 1) {
 		unsigned int i;
 
@@ -4145,6 +4159,7 @@ static int ua_audio_rate_change_kext(struct ua_device *ua, unsigned int rate)
 
 	audio->sample_rate = rate;
 	audio->rate_index = idx;
+	ua_event_post(ua, UA_EVT_RATE_CHANGED, idx);
 
 	ua_dsp_send_rate_ack(ua, rate);
 	for (waited = 0; waited < UA_RATE_ACK_HOLD_MS; waited += 10) {

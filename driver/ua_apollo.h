@@ -22,8 +22,12 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/kfifo.h>
+#include <linux/wait.h>
+#include <linux/fs.h>
 /* <linux/hrtimer_types.h> only exists from ~6.9; hrtimer.h pulls it in */
 #include <linux/hrtimer.h>
+#include "ua_ioctl.h"
 #include <sound/core.h>
 #include <sound/pcm.h>
 
@@ -1154,6 +1158,16 @@ struct ua_device {
 	struct rw_semaphore ioctl_sem;
 	bool removed;
 
+	/*
+	 * Event channel (ua_event.c): the open files, each with its own
+	 * queue.  event_lock is taken with interrupts off; nothing is
+	 * taken inside it.
+	 */
+	spinlock_t event_lock;
+	struct list_head event_files;	/* struct ua_file, event_lock */
+	wait_queue_head_t event_wq;
+	bool event_offline;		/* event_lock; DEVICE_OFFLINE posted */
+
 	/* Synchronization */
 	struct mutex lock;          /* Device access lock */
 	spinlock_t irq_lock;        /* Interrupt handler lock */
@@ -1161,6 +1175,27 @@ struct ua_device {
 	/* Surprise removal (Thunderbolt hot-unplug) */
 	atomic_t shutdown;          /* Set on remove/disconnect — blocks BAR0 access */
 };
+
+/* Per-open-file state: filp->private_data (ua_event.c) */
+#define UA_EVENT_QUEUE_LEN	64
+struct ua_file {
+	struct ua_device *ua;		/* kept alive by the cdev while open */
+	struct list_head node;		/* ua->event_files */
+	DECLARE_KFIFO(events, struct ua_event, UA_EVENT_QUEUE_LEN);
+	u32 lost;			/* dropped since the last LOST event */
+	struct fasync_struct *fasync;
+};
+
+void ua_event_init(struct ua_device *ua);
+void ua_event_post(struct ua_device *ua, u32 code, u32 arg);
+void ua_event_post_notif(struct ua_device *ua, u32 notif);
+void ua_event_offline(struct ua_device *ua, bool surprise);
+int ua_event_open(struct inode *inode, struct file *filp);
+int ua_event_release(struct inode *inode, struct file *filp);
+ssize_t ua_event_read(struct file *filp, char __user *buf, size_t len,
+		      loff_t *ppos);
+__poll_t ua_event_poll(struct file *filp, struct poll_table_struct *wait);
+int ua_event_fasync(int fd, struct file *filp, int on);
 
 /* Register access helpers — guarded against surprise removal */
 static inline u32 ua_read(struct ua_device *ua, u32 offset)
