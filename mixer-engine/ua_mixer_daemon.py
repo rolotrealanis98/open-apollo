@@ -1057,18 +1057,7 @@ class MixerDaemon:
         mon_out = router.monitor_output_index()
         if mon_out is not None:
             mon_base = f"/devices/0/outputs/{mon_out}"
-            # Monitor level — push both the dB value and the tapered one
-            # (as for gain below), so CRMonitorLevel doesn't go stale.
-            tapered = rb.get("monitor_level_tapered", 0.0)
-            level_path = f"{mon_base}/CRMonitorLevel"
-            path = f"{mon_base}/CRMonitorLevelTapered"
-            if abs(tapered - last_rb.get("monitor_level_tapered", -1)) > 0.002:
-                if not any(self._readback_suppressed(p) for p in
-                           (level_path, path, level_path + "/value",
-                            path + "/value")):
-                    self._push_to_clients(level_path,
-                                          rb.get("monitor_level_db", -96.0))
-                    self._push_to_clients(path, tapered)
+            self._sync_level_readback(mon_base, "monitor", rb, last_rb)
 
             for ctrl, key in (("Mute", "monitor_mute"), ("DimOn", "monitor_dim"),
                               ("MixToMono", "monitor_mono")):
@@ -1076,16 +1065,12 @@ class MixerDaemon:
                 if val != last_rb.get(key):
                     self._push_to_clients(f"{mon_base}/{ctrl}", val)
 
-        # HP1/HP2 level (tapered 0.0-1.0) — x4 outputs 19 and 20
-        for n, key in ((0, "hp1_level_tapered"), (1, "hp2_level_tapered")):
+        # HP1/HP2 level — x4 outputs 19 and 20
+        for n, key in ((0, "hp1"), (1, "hp2")):
             hp_out = router.output_index("hp", n)
-            if hp_out is None:
-                continue
-            hp_path = f"/devices/0/outputs/{hp_out}/CRMonitorLevelTapered"
-            hp_tap = rb.get(key, 0.0)
-            if abs(hp_tap - last_rb.get(key, -1)) > 0.002:
-                if not self._readback_suppressed(hp_path):
-                    self._push_to_clients(hp_path, hp_tap)
+            if hp_out is not None:
+                self._sync_level_readback(f"/devices/0/outputs/{hp_out}",
+                                          key, rb, last_rb)
 
         # Talkback active (TalkbackOn is at the tree root in the device maps)
         talkback = rb.get("talkback_active", False)
@@ -1162,6 +1147,26 @@ class MixerDaemon:
                 self._push_if_present(f"{in_base}/Stereo", link, force=True)
 
         self._sync_front_panel(rb, last_rb, preamps)
+
+    def _sync_level_readback(self, base: str, key: str, rb: dict,
+                             last_rb: dict):
+        """A monitor or headphone level from the readback: CRMonitorLevel
+        (dB, what Console's number shows) and CRMonitorLevelTapered (the
+        knob), both, whenever the raw level moves.
+
+        The trigger is the raw byte: below -55.5 dB one 0.5 dB step moves
+        the tapered value by 0.00044, so a tapered threshold (the old
+        0.002) missed a slow knob turn there entirely.  Skipped for 2 s
+        after a client SET of either one."""
+        raw = rb.get(f"{key}_level_raw")
+        if raw is None or raw == last_rb.get(f"{key}_level_raw"):
+            return
+        level, tapered = f"{base}/CRMonitorLevel", f"{base}/CRMonitorLevelTapered"
+        if any(self._readback_suppressed(p) for p in
+               (level, tapered, level + "/value", tapered + "/value")):
+            return
+        self._push_to_clients(level, (raw - 192) / 2.0)
+        self._push_to_clients(tapered, rb[f"{key}_level_tapered"])
 
     def _sync_front_panel(self, rb: dict, last_rb: dict, preamps: list):
         """SelectedOnFront of the monitor, CUE 1 and the preamp inputs.
