@@ -3816,11 +3816,13 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 
 			if (ua_uses_audio_extension(ua->device_type)) {
 				/*
-				 * On cold boot, ACEFACE fails before the
-				 * firmware stage (observed on the x4; the
-				 * cause is unproven).  Now that the stage
-				 * has run, retry with transport still
-				 * running.
+				 * If the early ACEFACE handshake did not
+				 * complete, retry it once with the transport
+				 * still running.  (An old x4 note had it fail
+				 * before the firmware stage on every cold
+				 * boot; on titan 2026-10-11 it connected
+				 * first time on three cold starts, with and
+				 * without the stage.)
 				 */
 				if (!ua->aceface_done) {
 					dev_info(&pdev->dev,
