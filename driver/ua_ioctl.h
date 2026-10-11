@@ -469,7 +469,7 @@ struct ua_dma_test {
  * The struct is fixed size: never change sizeof(struct ua_version).
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		2
+#define UA_ABI_MINOR		3
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -484,6 +484,7 @@ struct ua_dma_test {
 #define UA_FEAT_UNIT_GROUP	(1u << 10) /* unit index/role in SYSTEM_INFO */
 #define UA_FEAT_BUS_SOLO_FLAG	(1u << 11) /* UA_BUS_PARAM_F_SOLO_MUTE */
 #define UA_FEAT_SYSINFO_EXT	(1u << 12) /* pcie_link_*, clock_src_mask, fw_rate_mask in SYSTEM_INFO */
+#define UA_FEAT_PLUGIN_CAPS	(1u << 13) /* UA_IOCTL_GET_PLUGIN_CAPS (ABI 1.3) */
 
 struct ua_version {
 	__u32 abi_major;
@@ -593,6 +594,49 @@ struct ua_pause_info {
 };
 
 #define UA_IOCTL_GET_PAUSE_INFO		_IOR(UA_IOCTL_MAGIC, 0x06, struct ua_pause_info)
+
+/*
+ * Plugin capabilities (UA_IOCTL_GET_PLUGIN_CAPS, read-only, ABI 1.3,
+ * UA_FEAT_PLUGIN_CAPS).
+ *
+ * The driver supports no DSP plugin operation: nothing loads, places,
+ * parameterises or removes a plugin on the DSPs, so `operations` is 0.
+ * A client that presents plugins (a Console/plugin bridge) must treat
+ * every one as unavailable on the hardware.  An operation the driver
+ * gains later gets a UA_PLUGIN_OP_* bit; until then no bit is defined.
+ *
+ * `state` reports what the driver last did, not a verified DSP state:
+ *   UA_PLUGIN_STATE_FW_LOADED       a DSP firmware load completed: the
+ *                                   cold-start stage (ua-apollo-mixer.bin)
+ *                                   or UA_IOCTL_LOAD_FIRMWARE; cleared by
+ *                                   a cold re-init and on teardown
+ *   UA_PLUGIN_STATE_DSPS_CONNECTED  the DSP ring connect ran
+ *                                   (ring-connect models, kext_connect)
+ *   UA_PLUGIN_STATE_INIT_CHAIN      the captured DSP-0 init sequence
+ *                                   (ua-apollo-plugin-chain.bin) was sent:
+ *                                   fixed module setup, not a plugin load
+ *   UA_PLUGIN_STATE_AUDIO_CONNECTED the audio extension is connected
+ * dsp_rings: bit n set = DSP n has its command and response rings.
+ * dma_orphans: DMA buffers a timed-out ring command may still reference;
+ * the driver frees each once the ring is provably past it.
+ * Reserved words are 0.
+ */
+#define UA_PLUGIN_STATE_FW_LOADED	(1u << 0)
+#define UA_PLUGIN_STATE_DSPS_CONNECTED	(1u << 1)
+#define UA_PLUGIN_STATE_INIT_CHAIN	(1u << 2)
+#define UA_PLUGIN_STATE_AUDIO_CONNECTED	(1u << 3)
+
+struct ua_plugin_caps {
+	__u32 struct_size;	/* sizeof(struct ua_plugin_caps) */
+	__u32 state;		/* UA_PLUGIN_STATE_* */
+	__u64 operations;	/* UA_PLUGIN_OP_*: none exist, always 0 */
+	__u32 num_dsps;
+	__u32 dsp_rings;	/* bit n: DSP n's rings are allocated */
+	__u32 dma_orphans;	/* parked DMA buffers, see above */
+	__u32 reserved[9];
+};
+
+#define UA_IOCTL_GET_PLUGIN_CAPS	_IOR(UA_IOCTL_MAGIC, 0x07, struct ua_plugin_caps)
 
 /*
  * Batched bus params (kext selector 130 carries a batch of

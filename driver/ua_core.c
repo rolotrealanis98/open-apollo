@@ -895,7 +895,8 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_KIND_GATES | UA_FEAT_MIXER_STATE |
 			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
-			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT,
+			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT |
+			    UA_FEAT_PLUGIN_CAPS,
 	};
 
 	/*
@@ -988,6 +989,38 @@ static long ua_ioctl_get_pause_info(struct ua_device *ua, unsigned long arg)
 	pi.lock_level = READ_ONCE(ua->lock_level);
 
 	if (copy_to_user((void __user *)arg, &pi, sizeof(pi)))
+		return -EFAULT;
+	return 0;
+}
+
+/*
+ * UA_IOCTL_GET_PLUGIN_CAPS: no plugin operation exists (operations = 0);
+ * the state bits are what the driver last did.  No register access.
+ */
+static long ua_ioctl_get_plugin_caps(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_plugin_caps caps = { .struct_size = sizeof(caps) };
+	unsigned int i;
+
+	BUILD_BUG_ON(sizeof(struct ua_plugin_caps) != 64);
+
+	mutex_lock(&ua->lock);
+	if (ua->fw_loaded)
+		caps.state |= UA_PLUGIN_STATE_FW_LOADED;
+	if (ua->dsps_connected)
+		caps.state |= UA_PLUGIN_STATE_DSPS_CONNECTED;
+	if (ua->plugins_activated)
+		caps.state |= UA_PLUGIN_STATE_INIT_CHAIN;
+	if (ua->audio.connected)
+		caps.state |= UA_PLUGIN_STATE_AUDIO_CONNECTED;
+	caps.num_dsps = ua->num_dsps;
+	for (i = 0; i < ua->num_dsps && i < UA_MAX_DSPS; i++)
+		if (ua->dsp[i].rings_allocated)
+			caps.dsp_rings |= BIT(i);
+	caps.dma_orphans = ua->dma_orphan_count;
+	mutex_unlock(&ua->lock);
+
+	if (copy_to_user((void __user *)arg, &caps, sizeof(caps)))
 		return -EFAULT;
 	return 0;
 }
@@ -3306,6 +3339,9 @@ static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
 
 	case UA_IOCTL_GET_PAUSE_INFO:
 		return ua_ioctl_get_pause_info(ua, arg);
+
+	case UA_IOCTL_GET_PLUGIN_CAPS:
+		return ua_ioctl_get_plugin_caps(ua, arg);
 
 	case UA_IOCTL_SET_MIXER_BUS_PARAMS:
 		return ua_ioctl_set_mixer_bus_params(ua, arg);
