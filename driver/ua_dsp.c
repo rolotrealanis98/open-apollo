@@ -3017,10 +3017,10 @@ int ua_dsp_connect_all(struct ua_device *ua)
 #define UA_DSP_READY_MAGIC	0xa8caed0fu
 #define UA_DSP_READY_POLL_MS	300
 
-static int dsp_ready_wait;
+static int dsp_ready_wait = 1;
 module_param(dsp_ready_wait, int, 0444);
 MODULE_PARM_DESC(dsp_ready_wait,
-		 "EXPERIMENTAL (kext-vs-driver audit D14), 0 = off (default). On a cold start, before the DSP rings are set up, poll each DSP's ready word as the macOS driver does, and retry a failed DSP connect once. 1 = only on devices whose ext_caps bits[7:4] == 1 (the macOS driver's rule); 2 = every v2 device regardless of capability. One log line reports the outcome.");
+		 "Before the DSP rings are set up on a cold start, poll each DSP's ready word as the macOS driver does, and retry a failed DSP connect once (kext-vs-driver audit D14). 1 = only on devices whose ext_caps bits[7:4] == 1, the macOS driver's rule (default); 2 = every v2 device; 0 = off. One log line reports the outcome.");
 
 /* DSP n's register window: n * 0x800, plus 0x2000 for DSPs 4-7 */
 static inline u32 ua_dsp_window(unsigned int dsp_idx)
