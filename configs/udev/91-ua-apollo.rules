@@ -1,6 +1,10 @@
 # Auto-configure PipeWire pro-audio profile when Apollo appears
 # Deploy to: /etc/udev/rules.d/91-ua-apollo.rules
-ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x1a00", ATTR{device}=="0x0002", \
+#
+# Match every PCI id the driver binds (ua_pci_ids in driver/ua_core.c):
+# 0x0001 UAD-2 PCIe, 0x0002 Apollo Thunderbolt.  tests/test-udev-pci-ids.sh
+# fails when this list and the driver table drift apart.
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x1a00", ATTR{device}=="0x0001|0x0002", \
   RUN+="/usr/local/bin/open-apollo-profile-setup"
 
 # Device node permissions: 70-ua-apollo-access.rules (uaccess has to be set

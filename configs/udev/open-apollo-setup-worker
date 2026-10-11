@@ -5,41 +5,90 @@
 
 LOG_TAG="open-apollo-setup"
 
+# Best graphical login session of a real (non-root) local user, from
+# loginctl: "<uid> <name>" on stdout, nothing when there is none yet.
+# Score: active +4, x11/wayland/mir +2, seat0 +1; remote and non-"user"
+# class sessions (greeter, manager) never qualify.
+pick_session_user() {
+    local sid best="" best_score=-1 score uid name active class type remote seat line
+    while read -r sid _; do
+        [ -n "$sid" ] || continue
+        uid="" name="" active="" class="" type="" remote="" seat=""
+        while IFS='=' read -r key val; do
+            case "$key" in
+                User) uid="$val" ;;
+                Name) name="$val" ;;
+                Active) active="$val" ;;
+                Class) class="$val" ;;
+                Type) type="$val" ;;
+                Remote) remote="$val" ;;
+                Seat) seat="$val" ;;
+            esac
+        done < <(loginctl show-session "$sid" -p User -p Name -p Active -p Class -p Type -p Remote -p Seat 2>/dev/null)
+        [ "$class" = "user" ] && [ "$remote" != "yes" ] || continue
+        [ -n "$uid" ] && [ "$uid" -gt 0 ] 2>/dev/null && [ -n "$name" ] || continue
+        [ -d "${RUN_USER_BASE:-/run/user}/$uid" ] || continue
+        score=0
+        [ "$active" = "yes" ] && score=$((score + 4))
+        case "$type" in x11|wayland|mir) score=$((score + 2)) ;; esac
+        [ "$seat" = "seat0" ] && score=$((score + 1))
+        if [ "$score" -gt "$best_score" ]; then
+            best_score=$score
+            best="$uid $name"
+        fi
+    done < <(loginctl list-sessions --no-legend 2>/dev/null)
+    line="$best"
+    [ -n "$line" ] && echo "$line"
+}
+
 # Find the logged-in user running PipeWire (up to 30s)
-for i in $(seq 1 15); do
-    PW_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
-    PW_UID=$(id -u "$PW_USER" 2>/dev/null)
+PW_UID="" PW_USER=""
+for _ in $(seq 1 15); do
+    read -r PW_UID PW_USER < <(pick_session_user)
     [ -n "$PW_USER" ] && [ -n "$PW_UID" ] && break
     sleep 2
 done
-[ -z "$PW_USER" ] && { logger -t "$LOG_TAG" "No PipeWire user found"; exit 0; }
+[ -z "$PW_USER" ] && { logger -t "$LOG_TAG" "No desktop session found via loginctl"; exit 0; }
 
-PW_HOME=$(eval echo "~$PW_USER")
+PW_HOME=$(getent passwd "$PW_USER" | cut -d: -f6)
+[ -n "$PW_HOME" ] || PW_HOME="/home/$PW_USER"
 pw_run() { sudo -u "$PW_USER" HOME="$PW_HOME" XDG_RUNTIME_DIR="/run/user/$PW_UID" "$@"; }
 
+# Wait for the driver to register its ALSA card (up to 60s).  The udev rule
+# also matches the UAD-2 PCIe id, which has no audio card: nothing to set up.
+for _ in $(seq 1 30); do
+    grep -q 'ua_apollo' /proc/asound/cards 2>/dev/null && break
+    sleep 2
+done
+if ! grep -q 'ua_apollo' /proc/asound/cards 2>/dev/null; then
+    logger -t "$LOG_TAG" "No ua_apollo ALSA card appeared; nothing to configure"
+    exit 0
+fi
+
 # Wait for PipeWire to see the Apollo ALSA card (up to 60s)
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
     pw_run wpctl status 2>/dev/null | grep -q 'Apollo.*\[alsa\]' && break
     sleep 2
 done
 
-logger -t "$LOG_TAG" "Running apollo-setup-io for user $PW_USER"
+logger -t "$LOG_TAG" "Running apollo-setup-io for user $PW_USER (uid $PW_UID)"
 
-# Run apollo-setup-io — generates config and restarts PipeWire.
-# It will die from the PipeWire restart — that is expected.
-pw_run /usr/local/bin/apollo-setup-io > /tmp/apollo-setup-io.log 2>&1 || true
+# Run apollo-setup-io — generates config and restarts PipeWire.  It will die
+# from the PipeWire restart — that is expected.  Its output goes to the
+# journal (journalctl -t open-apollo-setup-io), not to a file in /tmp.
+pw_run /usr/local/bin/apollo-setup-io 2>&1 | logger -t "$LOG_TAG-io" || true
 
 # Post-restart fixup: re-set pro-audio profile
 logger -t "$LOG_TAG" "Post-restart: re-setting pro-audio profile"
 
 # Wait for PipeWire to come back (up to 20s)
-for i in $(seq 1 10); do
+for _ in $(seq 1 10); do
     pw_run pw-cli info 0 &>/dev/null && break
     sleep 2
 done
 
 # Re-set pro-audio profile (WirePlumber does not reliably auto-set it)
-for i in $(seq 1 10); do
+for _ in $(seq 1 10); do
     DEV_ID=$(pw_run wpctl status 2>/dev/null | \
         grep 'Apollo.*\[alsa\]' | grep -oP '[0-9]+' | head -1)
     [ -n "$DEV_ID" ] && break
@@ -51,7 +100,7 @@ if [ -n "$DEV_ID" ]; then
     logger -t "$LOG_TAG" "Set pro-audio profile on device $DEV_ID"
 
     # Wait for ALSA nodes to appear (up to 20s)
-    for i in $(seq 1 10); do
+    for _ in $(seq 1 10); do
         pw_run pw-cli ls Node 2>/dev/null | grep -q 'alsa_input.*pro-input' && break
         sleep 2
     done
