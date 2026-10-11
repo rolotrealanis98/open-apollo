@@ -36,7 +36,7 @@ import sys
 import time
 from pathlib import Path
 
-from protocol import (MessageFramer, Command, parse_command, encode_response_bytes,
+from protocol import (Command, parse_command, encode_response_bytes,
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
 from helper_tree import HelperTree
@@ -63,7 +63,9 @@ from bonjour import BonjourAnnouncer, _default_name
 from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
                             latency_figures, load_descriptor)
 from commands import CommandEngine, parse_cmdparams, refused_set
-from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
+from ubjson_codec import encode_response as ubjson_encode_response
+from json_frame_codec import JsonFrameError, encode_frame as json_encode_frame
+from wire_command_framer import WireCommandFramer, WireError
 
 try:
     from ws_server import WsServer, HAS_WEBSOCKETS
@@ -403,35 +405,56 @@ class MixerClient:
         self.id = f"client-{MixerClient._next_id}"
         self.reader = reader
         self.writer = writer
-        self.framer = MessageFramer()
+        # Text commands, UBJS and JSON frames in any order
+        # (wire_command_framer)
+        self.framer = WireCommandFramer()
         self.peer = writer.get_extra_info("peername")
         self.server_port = (writer.get_extra_info("sockname") or (None, None))[1]
         self.closed = False
         self.trace = trace
         self.helper = ubjson  # True for 4720 (helper) clients
-        self.ubjson = False   # Switched to True after command_format 2
+        # Reply format: UBJS frames after command_format 2 (or a UBJS-framed
+        # command), JSON frames after command_format 1 (or a JSON-framed
+        # command), else NUL-terminated JSON text
+        self.ubjson = False
+        self.json_framed = False
         self._send_count = 0
 
     def send(self, data: bytes):
-        """Queue data for sending to this client."""
+        """Queue data for sending to this client.  `data` is a UBJS frame
+        or NUL-terminated JSON text; the latter goes out as a JSON frame
+        while the client is in command_format 1."""
         if not self.closed:
             try:
+                text = None
+                if not self.ubjson:
+                    text = data.decode("utf-8", errors="replace").rstrip("\x00")
+                    if self.json_framed:
+                        try:
+                            data = json_encode_frame(json.loads(text))
+                        except (ValueError, JsonFrameError) as e:
+                            log.warning("%s: reply not sent as a JSON frame "
+                                        "(%s): %s", self.id, e, text[:200])
+                            return
                 self.writer.write(data)
                 self._send_count += 1
                 if self.trace:
                     if self.ubjson:
                         log.debug("SEND → %s: [UBJSON %d bytes]", self.id, len(data))
                     else:
-                        text = data.decode("utf-8", errors="replace").rstrip("\x00")
-                        log.debug("SEND → %s: %s", self.id, text[:200])
+                        log.debug("SEND → %s: %s%s", self.id,
+                                  "[JSON frame] " if self.json_framed else "",
+                                  text[:200])
             except (ConnectionError, RuntimeError):
                 self.closed = True
 
     def __repr__(self):
-        if self.helper:
-            proto = "UBJSON" if self.ubjson else "helper-text"
+        if self.ubjson:
+            proto = "UBJSON"
+        elif self.json_framed:
+            proto = "JSON-framed"
         else:
-            proto = "text"
+            proto = "helper-text" if self.helper else "text"
         return f"<MixerClient {self.id} :{self.server_port} {proto} {self.peer}>"
 
 
@@ -1732,60 +1755,7 @@ class MixerDaemon:
                 if not data:
                     break
 
-                # Auto-detect UBJSON or switch framer when UBJSON data arrives.
-                # After command_format 2, client.ubjson=True but framer may
-                # still be text MessageFramer — switch when we see UBJS magic.
-                #
-                # CRITICAL: UBJS magic may appear MID-BUFFER when the client
-                # sends trailing text commands and UBJSON frames in the same
-                # TCP segment.  We must scan the combined buffer (framer
-                # leftover + new data), process text before UBJS, then switch.
-                if not isinstance(client.framer, UbjsonFramer):
-                    should_scan = client.ubjson or (
-                        len(data) >= 4 and data[:4] == b"UBJS")
-                    if should_scan:
-                        combined = client.framer.buf + data
-                        ubjs_idx = combined.find(b"UBJS")
-                        if ubjs_idx >= 0:
-                            # Drain text commands before the UBJS boundary
-                            text_part = combined[:ubjs_idx]
-                            ubjs_part = combined[ubjs_idx:]
-                            client.framer.buf = b""
-                            if text_part:
-                                for msg in client.framer.feed(text_part):
-                                    if client.trace:
-                                        log.debug("RECV ← %s: %s",
-                                                  client.id, msg[:200])
-                                    self._dispatch(client, msg)
-                            # Switch to UBJSON framer
-                            client.framer = UbjsonFramer()
-                            if not client.ubjson:
-                                client.ubjson = True
-                                log.info("%s: Auto-detected UBJSON protocol",
-                                         client.id)
-                            else:
-                                log.debug("%s: Framer switched to UBJSON "
-                                          "(mid-buffer at offset %d)",
-                                          client.id, ubjs_idx)
-                            data = ubjs_part
-
-                messages = client.framer.feed(data)
-                for msg in messages:
-                    if isinstance(msg, dict):
-                        # UBJSON command dict from UbjsonFramer
-                        if client.trace:
-                            log.debug("RECV ← %s: %r", client.id, msg)
-                        cmd = self._parse_ubjson_command(msg)
-                        if cmd:
-                            self._dispatch_cmd(client, cmd)
-                        else:
-                            log.warning("Unparseable UBJSON from %s: %r",
-                                        client.id, msg)
-                    else:
-                        # Text message from MessageFramer
-                        if client.trace:
-                            log.debug("RECV ← %s: %s", client.id, msg[:200])
-                        self._dispatch(client, msg)
+                self._feed_client_data(client, data)
 
                 # Flush writes
                 try:
@@ -1794,6 +1764,9 @@ class MixerDaemon:
                     break
         except (ConnectionError, asyncio.CancelledError):
             pass
+        except WireError as e:
+            log.warning("%s: dropping the connection, unframeable input: %s",
+                        client.id, e)
         finally:
             log.info("Disconnected: %s", client)
             client.closed = True
@@ -1805,6 +1778,34 @@ class MixerDaemon:
                 await writer.wait_closed()
             except Exception:
                 pass
+
+    def _feed_client_data(self, client: MixerClient, data: bytes):
+        """Dispatch the complete commands in `data`, in order, across format
+        changes.  A framed command (UBJS or JSON) sets the client's reply
+        format to its own, as a UBJS frame always did; an envelope that is
+        not a command is logged and skipped, the connection stays up.
+        WireError (unframeable input) propagates: the caller drops the
+        connection."""
+        for kind, msg in client.framer.feed(data):
+            if client.trace:
+                log.debug("RECV ← %s: %s", client.id,
+                          msg[:200] if kind == "text" else repr(msg)[:200])
+            if kind == "text":
+                self._dispatch(client, msg)
+                continue
+            cmd = self._parse_ubjson_command(msg)
+            if cmd is None:
+                log.warning("Unparseable %s command from %s: %r",
+                            "UBJSON" if kind == "ubjson" else "JSON",
+                            client.id, msg)
+                continue
+            if kind == "ubjson" and not client.ubjson:
+                log.info("%s: Auto-detected UBJSON protocol", client.id)
+            elif kind == "json" and not client.json_framed:
+                log.info("%s: Auto-detected JSON-framed protocol", client.id)
+            client.ubjson = kind == "ubjson"
+            client.json_framed = kind == "json"
+            self._dispatch_cmd(client, cmd)
 
     # ── Response helpers ────────────────────────────────────────────
 
@@ -2199,8 +2200,8 @@ class MixerDaemon:
     # ── Command parsing ─────────────────────────────────────────────
 
     @staticmethod
-    def _parse_ubjson_command(msg: dict) -> Command | None:
-        """Convert a UBJSON command dict to a Command object.
+    def _parse_ubjson_command(msg) -> Command | None:
+        """Convert a framed (UBJSON or JSON) command dict to a Command.
 
         UAD Console sends two formats:
             cmd/url:   {"cmd": "get", "url": "/ping"}
@@ -2208,10 +2209,19 @@ class MixerDaemon:
             path/data: {"path": "network_id", "data": "<uuid>"}  (identification)
 
         Note: value field may be "value" or "data" depending on client.
+        None for anything else, a wrong-typed cmd/url/path/parameters
+        included (those used to raise out of the connection handler).
         """
+        if not isinstance(msg, dict):
+            return None
+        raw_verb, url = msg.get("cmd", ""), msg.get("url", "")
+        if not isinstance(raw_verb, str) or not isinstance(url, str):
+            return None
+        if msg.get("parameters") is not None and \
+                not isinstance(msg["parameters"], dict):
+            return None
         # Try cmd/url format first (standard commands)
-        verb = msg.get("cmd", "").lower()
-        url = msg.get("url", "")
+        verb = raw_verb.lower()
         if verb and url:
             path, recursive, propfilter, raw_params = _parse_path_with_params(url)
             value = msg.get("value")
@@ -2234,7 +2244,7 @@ class MixerDaemon:
 
         # Try path/data format (JSON identification messages)
         path = msg.get("path", "")
-        if path:
+        if isinstance(path, str) and path:
             data = msg.get("data")
             return Command(verb="json", path=path, value=data, json_data=msg)
 
@@ -2583,35 +2593,18 @@ class MixerDaemon:
         resp_params = dict(cmd.raw_params) if cmd.raw_params else None
 
         if cmd.path == "command_format" or cmd.path == "/command_format":
-            if client.ubjson:
-                # Already in UBJSON mode (auto-detected from UBJS magic).
-                # Respond with data={} matching real Mixer Helper format.
-                self._send_response(client, "command_format", {}, resp_params)
-                log.info("%s: command_format acknowledged (already UBJSON)",
-                         client.id)
-            elif client.helper:
-                # Helper port text client switching to UBJSON responses.
-                # IMPORTANT: Do NOT switch the framer here! The client
-                # continues sending text commands (set /sleep, post
-                # /request_challenge, subscribe, etc.) after command_format.
-                # The framer auto-switches to UbjsonFramer when the client
-                # starts sending UBJS-framed data (detected in _handle_client).
-                client.ubjson = True
-                self._send_response(client, "command_format", {}, resp_params)
-                log.info("%s: Switched to UBJSON responses (command_format 2, "
-                         "framer stays text until UBJS detected)",
-                         client.id)
-            else:
-                # Text client sending command_format 2 → switch response
-                # format to UBJSON. Keep the text framer for incoming data
-                # because the client may send a few more text commands
-                # before switching to UBJSON. The auto-detection code
-                # (UBJS magic check in _handle_client) will switch the
-                # framer when actual UBJSON data arrives.
-                client.ubjson = True
-                self._send_response(client, "command_format", {}, resp_params)
-                log.info("%s: Switched to UBJSON responses (command_format 2)",
-                         client.id)
+            # Replies switch now (data={} as the real Mixer Helper sends);
+            # the input framer keeps taking the trailing text commands the
+            # client sends before its first frame (set /sleep, post
+            # /request_challenge ...).  1 = JSON frames, 2 (and anything
+            # else, as before) = UBJS frames: the two modes of UA's client
+            # serializer (json_frame_codec).
+            mode_one = type(cmd.value) in (int, str) and cmd.value in (1, "1")
+            client.ubjson = not mode_one
+            client.json_framed = mode_one
+            self._send_response(client, "command_format", {}, resp_params)
+            log.info("%s: command_format %s acknowledged", client.id,
+                     "1 (JSON frames)" if mode_one else "2 (UBJSON)")
             return
 
         if cmd.path == "/request_challenge":
