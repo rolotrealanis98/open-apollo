@@ -226,8 +226,8 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_REG_AX_P2P_ENABLE    0x22C4
 
 /* Audio Clock */
-#define UA_REG_CLOCK_SRC0       0x2280  /* Clock source register 0 */
-#define UA_REG_CLOCK_SRC1       0x2284  /* Clock source register 1 */
+#define UA_REG_P2P_SLOT0        0x2280  /* Peer-to-peer slot address 0 (multi-unit; not a clock source) */
+#define UA_REG_P2P_SLOT1        0x2284  /* Peer-to-peer slot address 1 */
 
 /*
  * DSP Mixer Registers (BAR0 + 0x3800 window)
