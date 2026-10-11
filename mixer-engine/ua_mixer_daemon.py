@@ -65,6 +65,8 @@ from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
                             latency_figures, load_descriptor)
 from commands import CommandEngine, parse_cmdparams, refused_set
 from session_dirty import SessionDirty
+from plugin_lifecycle import PluginLifecycle, is_plugin_slot_path
+from plugin_remote import PluginRemote
 from ubjson_codec import encode_response as ubjson_encode_response
 from json_frame_codec import JsonFrameError, encode_frame as json_encode_frame
 from wire_command_framer import WireCommandFramer, WireError
@@ -476,8 +478,14 @@ class MixerDaemon:
                  metering=None,
                  network_id: str | None = None,
                  loaded_map: Path | None = None,
-                 preserve_hardware: bool = False):
+                 preserve_hardware: bool = False,
+                 plugin_backend=None, plugin_transactions=None, plugin_remote_backend=None):
         self.state = state
+        self.plugin_lifecycle = PluginLifecycle(state, plugin_backend, helper_tree=helper_tree,
+                                               transactions=plugin_transactions)
+        self._plugin_publication_active = False
+        self.plugin_remote = PluginRemote(state, backend=plugin_remote_backend,
+                                          lease_provider=plugin_transactions)
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
         self.hw_router = hw_router
         self.host = host
@@ -2350,6 +2358,17 @@ class MixerDaemon:
         # Build response params from query params (echo message_id etc.)
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
 
+        remote_result = self.plugin_remote.handle(cmd.path, resp_params)
+        if remote_result is not None:
+            if remote_result.error:
+                self._send_local_plugin_error(client, cmd.path, remote_result.error,
+                                              resp_params)
+            else:
+                self._send_response(client, cmd.path, remote_result.data,
+                                    remote_result.parameters)
+            return
+
+
         # Ping — keepalive health check, return immediately
         if cmd.path in ("/ping", "ping"):
             self._send_response(client, "/ping", True, resp_params or None)
@@ -2389,6 +2408,18 @@ class MixerDaemon:
 
         self._send_response(client, cmd.path, data,
                             resp_params if resp_params else None)
+
+    def _send_local_plugin_error(self, client: MixerClient, path: str,
+                                 error: str, params: dict):
+        """Local diagnostics shared by control SET and remote readback GET."""
+        response = {"path": path, "error": error}
+        if params:
+            response["parameters"] = self._coerce_params(params)
+        if client.ubjson:
+            client.send(ubjson_encode_response(response))
+        else:
+            client.send((json.dumps(response, separators=(",", ":")) + "\0").encode("utf-8"))
+
 
     def _handle_get_helper(self, client: MixerClient, cmd: Command,
                            resp_params: dict):
@@ -2457,6 +2488,24 @@ class MixerDaemon:
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
         if self._handle_clock_set(client, path, cmd.value, resp_params):
             return
+        if self._plugin_publication_active and is_plugin_slot_path(path):
+            self._send_local_plugin_error(client, path,
+                                          "openapollo.plugin_transaction_reentrant",
+                                          resp_params)
+            return
+
+        plugin_result = self.plugin_lifecycle.handle(path, cmd.value)
+        if plugin_result is not None:
+            if plugin_result.committed:
+                self._publish_plugin_commit(plugin_result.events)
+            if plugin_result.error:
+                # Local Open Apollo error namespace; not a claimed native UA code.
+                self._send_local_plugin_error(client, path, plugin_result.error,
+                                              resp_params)
+            elif "func_id" in resp_params:
+                self._send_response(client, path, cmd.value, resp_params)
+            return
+
         old_value = self.commands.value_of(path)
 
         if client.helper and self.helper_tree:
@@ -2549,6 +2598,53 @@ class MixerDaemon:
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
             self._send_response(client, path, cmd.value, resp_params)
+
+    def _publish_plugin_commit(self, events):
+        """Publish an adapter-confirmed transaction, including retirement errors.
+
+        Handles and status are runtime metadata. Persist only edit intent; a
+        restart still defers plugin restoration until a genuine backend loads it.
+        """
+        if self._plugin_publication_active:
+            raise RuntimeError("Plugin publication is already in progress")
+        self._plugin_publication_active = True
+        try:
+            self._publish_plugin_commit_inner(events)
+        finally:
+            self._plugin_publication_active = False
+
+
+    def _publish_plugin_commit_inner(self, events):
+        """Committed state is final; notification failures never roll it back."""
+        if not events:
+            return  # An unchanged confirmed control has no edit to persist.
+        from plugin_lifecycle import plugin_slot_from_path
+        slots = {plugin_slot_from_path(path) for path, _ in events}
+        if None in slots or len(slots) != 1:
+            raise ValueError('Committed plugin events must belong to one effect slot')
+        slot = slots.pop()
+        intent = {slot + '/' + field + '/value': self.state.get_value(slot + '/' + field)
+                  for field in ('EffectName', 'Power')}
+        node, _ = self.state._resolve_path(slot + '/parameters')
+        if node:
+            for ident, parameter in node.get('children', {}).items():
+                for field in ('NormalizedValue', 'StepValue'):
+                    if field in parameter.get('properties', {}):
+                        intent[f'{slot}/parameters/{ident}/{field}/value'] = parameter['properties'][field]['value']
+        with self.state._persistence_lock:
+            for store in (self.state._dirty, self.state._deferred_saved):
+                for key in list(store):
+                    canonical = '/' + '/'.join(part for part in key.split('/') if part)
+                    if canonical.startswith(slot + '/'):
+                        del store[key]
+            self.state._dirty.update(intent)
+            self.state._schedule_save()
+        self.session_dirty.mark()
+        for path, value in events:
+            self.state._notify_subscribers(path, value, exclude=None)
+            if self.helper_tree:
+                self.helper_tree._notify(path, value)
+
 
     def _handle_clock_set(self, client: MixerClient, path: str, value,
                           params: dict) -> bool:
@@ -3276,7 +3372,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     if isinstance(serial, str):
         seed_state_file(state_file, state_file_for(device_map, index))
     state_file.parent.mkdir(exist_ok=True)
-    state.enable_persistence(state_file)
+    state.enable_persistence(state_file, restore_filter=lambda path: not is_plugin_slot_path(path))
     store_stem = state_file.name.removesuffix(".state.json")
     network_id = load_network_id(state_file.with_name(
         state_file.name.removesuffix(".state.json") + ".network.json"))

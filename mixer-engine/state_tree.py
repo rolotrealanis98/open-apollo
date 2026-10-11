@@ -58,6 +58,8 @@ class StateTree:
         # path → the value it had before its first change (the device map's
         # default, or the value the saved state replaced): what NewSession
         # goes back to
+        self._restore_filter: Callable[[str], bool] | None = None
+        self._deferred_saved: dict[str, Any] = {}
         self._base: dict[str, Any] = {}
         self._save_path: Path | None = None
         self._save_timer: threading.Timer | None = None
@@ -116,12 +118,15 @@ class StateTree:
             return resolved
         return None
 
-    def enable_persistence(self, save_path: str | Path):
+    def enable_persistence(self, save_path: str | Path,
+                           restore_filter: Callable[[str], bool] | None = None):
         """Enable persistent state: save modified values to disk, load on startup.
 
         Only stores values that differ from the device map defaults.
         The save file is a small JSON dict: {path: value, ...}
         """
+        self._restore_filter = restore_filter
+        self._deferred_saved = {}
         self._save_path = Path(save_path)
         if self._save_path.exists():
             self._load_saved_state()
@@ -133,6 +138,9 @@ class StateTree:
                 saved = json.load(f)
             count = 0
             for path, value in saved.items():
+                if self._restore_filter is not None and not self._restore_filter(path):
+                    self._deferred_saved[path] = value
+                    continue
                 resolved, prop_name = self._resolve_path(path)
                 if resolved is not None and prop_name is not None:
                     self._base.setdefault(path, resolved.get("value"))
@@ -158,12 +166,13 @@ class StateTree:
         """Write modified values to disk (atomically: .tmp, then rename).
         A failed write leaves the previous file as it was."""
         with self._persistence_lock:
-            if self._save_path is None or not self._dirty:
+            if self._save_path is None or not (self._dirty or self._deferred_saved):
                 return
             # A copy: the event loop keeps changing _dirty while the Timer
             # thread encodes (json.dump iterates in Python, so a live dict
             # can change size under it)
-            snapshot = dict(self._dirty)
+            snapshot = dict(self._deferred_saved)
+            snapshot.update(self._dirty)
             try:
                 self._save_path.parent.mkdir(parents=True, exist_ok=True)
                 tmp = self._save_path.with_suffix(".tmp")
