@@ -3135,6 +3135,12 @@ int ua_dsp_connect_retry(struct ua_device *ua)
 
 #include "ua_plugin_chain.h"
 
+/* Dwords a DMA_REF entry makes the FPGA fetch (its word 0 below bit 31) */
+static u32 ua_ring_ref_dwords(u32 word0)
+{
+	return word0 & ~(u32)UA_RING_DMA_REF;
+}
+
 /**
  * ua_dsp_load_plugin_payloads - Load plugin-chain DMA payloads from firmware
  * @ua: device
@@ -3151,10 +3157,14 @@ int ua_dsp_connect_retry(struct ua_device *ua)
  * the Linux dma_addr of the matching buffer before handing the entry
  * to the ring.
  *
- * -ENOENT is a soft failure: plugin-chain activation will still run
- * but DMA_REF entries will be skipped, so DSP programs that depend on
- * plugin-loaded code (including the ARM flag-forwarder driving
- * PAD/48V/MicLine relays) will not initialize.
+ * The whole table is checked before anything is allocated: every entry
+ * names a DMA_REF row of ua_plugin_chain_data[] (each at most once),
+ * lies inside the file after the table, and holds at least the dwords
+ * that row makes the FPGA fetch.  tools/build-plugin-chain-firmware.py
+ * writes exactly one such entry per DMA_REF row.
+ *
+ * -ENOENT (blob not installed) is a soft failure: activation is then
+ * skipped (-ENODATA) and retried at the next connect.
  */
 int ua_dsp_load_plugin_payloads(struct ua_device *ua)
 {
@@ -3162,6 +3172,7 @@ int ua_dsp_load_plugin_payloads(struct ua_device *ua)
 	const u8 *data;
 	u32 magic, version, entry_count, data_offset;
 	unsigned int table_size, i;
+	DECLARE_BITMAP(seen, UA_PLUGIN_CHAIN_COUNT);
 	int ret;
 
 	if (ua->plugin_bufs)
@@ -3218,12 +3229,57 @@ int ua_dsp_load_plugin_payloads(struct ua_device *ua)
 	}
 
 	table_size = entry_count * 12;
-	if (fw->size < 16 + table_size || data_offset < 16 + table_size) {
+	if (fw->size < 16 + table_size || data_offset < 16 + table_size ||
+	    data_offset > fw->size) {
 		dev_err(&ua->pdev->dev,
 			"plugin chain fw truncated (size=%zu, need >= %u)\n",
 			fw->size, 16 + table_size);
 		ret = -EINVAL;
 		goto out;
+	}
+
+	/* Every entry, before the first allocation */
+	bitmap_zero(seen, UA_PLUGIN_CHAIN_COUNT);
+	for (i = 0; i < entry_count; i++) {
+		unsigned int entry_off = 16 + i * 12;
+		u32 ring_idx = le32_to_cpup((__le32 *)&data[entry_off]);
+		u32 payload_bytes = le32_to_cpup((__le32 *)&data[entry_off + 4]);
+		u32 payload_off = le32_to_cpup((__le32 *)&data[entry_off + 8]);
+		u32 row0 = ring_idx < UA_PLUGIN_CHAIN_COUNT ?
+			   ua_plugin_chain_data[ring_idx][0] : 0;
+
+		if (!payload_bytes || payload_bytes > fw->size ||
+		    payload_off < data_offset ||
+		    payload_off > fw->size - payload_bytes) {
+			dev_err(&ua->pdev->dev,
+				"plugin fw entry %u bad range "
+				"(off=%u bytes=%u total=%zu)\n",
+				i, payload_off, payload_bytes, fw->size);
+			ret = -EINVAL;
+			goto out;
+		}
+		if (!(row0 & UA_RING_DMA_REF)) {
+			dev_err(&ua->pdev->dev,
+				"plugin fw entry %u: ring index %u is not a DMA_REF entry of the chain\n",
+				i, ring_idx);
+			ret = -EINVAL;
+			goto out;
+		}
+		if (__test_and_set_bit(ring_idx, seen)) {
+			dev_err(&ua->pdev->dev,
+				"plugin fw entry %u: ring index %u given twice\n",
+				i, ring_idx);
+			ret = -EINVAL;
+			goto out;
+		}
+		if ((size_t)ua_ring_ref_dwords(row0) * 4 > payload_bytes) {
+			dev_err(&ua->pdev->dev,
+				"plugin fw entry %u: %u bytes, ring index %u fetches %u dwords\n",
+				i, payload_bytes, ring_idx,
+				ua_ring_ref_dwords(row0));
+			ret = -EINVAL;
+			goto out;
+		}
 	}
 
 	ua->plugin_bufs = kcalloc(entry_count,
@@ -3243,17 +3299,7 @@ int ua_dsp_load_plugin_payloads(struct ua_device *ua)
 		payload_bytes = le32_to_cpup((__le32 *)&data[entry_off + 4]);
 		payload_off   = le32_to_cpup((__le32 *)&data[entry_off + 8]);
 
-		if (!payload_bytes || payload_bytes > fw->size ||
-		    payload_off < data_offset ||
-		    payload_off > fw->size - payload_bytes) {
-			dev_err(&ua->pdev->dev,
-				"plugin fw entry %u bad range "
-				"(off=%u bytes=%u total=%zu)\n",
-				i, payload_off, payload_bytes, fw->size);
-			ret = -EINVAL;
-			goto out_free;
-		}
-
+		/* Range and ring index checked above */
 		buf->ring_idx = ring_idx;
 		buf->size = payload_bytes;
 		buf->cpu = dma_alloc_coherent(&ua->pdev->dev, payload_bytes,
@@ -3342,8 +3388,10 @@ ua_plugin_lookup_dma(struct ua_device *ua, unsigned int ring_idx)
  * DMA_REF entries (cmd[0] & 0x80000000) carry Windows host physical
  * addresses in cmd[2]/cmd[3] that are invalid on Linux.  Each one is
  * substituted with the Linux dma_addr of a coherent buffer whose
- * contents came from ua_dsp_load_plugin_payloads().  If no payload
- * was loaded (firmware blob missing), the DMA_REF entry is skipped.
+ * contents came from ua_dsp_load_plugin_payloads().  Without the blob
+ * nothing is sent (-ENODATA); a blob that lacks the payload of any
+ * DMA_REF entry, or has one shorter than the entry fetches, sends
+ * nothing either (-EINVAL): the chain goes out whole or not at all.
  *
  * Data extracted from tools/captures/win-dsp0-ring-complete-20260319.json
  */
@@ -3391,6 +3439,32 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 		return -ENODATA;
 	}
 
+	/*
+	 * A payload for every DMA_REF entry, big enough for the dwords it
+	 * fetches, before the first entry goes out.  The old code skipped
+	 * such entries one by one and still sent the rest of the chain: a
+	 * half-configured DSP with no error.  The loader already refused
+	 * entries that do not match a row; this catches rows left without
+	 * one.
+	 */
+	for (i = 0; i < UA_PLUGIN_CHAIN_COUNT; i++) {
+		const u32 *cmd = ua_plugin_chain_data[i];
+		struct ua_plugin_dma_buf *buf;
+
+		if (!(cmd[0] & UA_RING_DMA_REF))
+			continue;
+		buf = ua_plugin_lookup_dma(ua, i);
+		if (!buf ||
+		    (size_t)ua_ring_ref_dwords(cmd[0]) * 4 > buf->size) {
+			/* Once: every connect (each rate change) retries */
+			dev_warn_once(&ua->pdev->dev,
+				      "plugin chain: no %u-dword payload for entry %d in %s, not activated\n",
+				      ua_ring_ref_dwords(cmd[0]), i,
+				      UA_PLUGIN_CHAIN_FW_NAME);
+			return -EINVAL;
+		}
+	}
+
 	dev_dbg(&ua->pdev->dev,
 		"plugin chain: sending %d commands to DSP 0 "
 		"(skip_bus_coeff=%d)\n",
@@ -3424,7 +3498,6 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 			const u32 *cmd = ua_plugin_chain_data[i + j];
 			u32 word2 = cmd[2];
 			u32 word3 = cmd[3];
-			u32 ref_dwords;
 
 			/*
 			 * Optionally skip BUS_COEFF commands (0x001D0004).
@@ -3440,27 +3513,13 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 			/*
 			 * DMA_REF entries: substitute Windows host physical
 			 * addresses (cmd[2]/cmd[3]) with the Linux dma_addr
-			 * of the matching payload buffer.  Skip the entry if
-			 * no payload is available — the FPGA would otherwise
-			 * DMA garbage from an invalid address.
+			 * of the matching payload buffer (present and big
+			 * enough: checked above, before the first entry).
 			 */
-			if (cmd[0] & 0x80000000) {
+			if (cmd[0] & UA_RING_DMA_REF) {
 				struct ua_plugin_dma_buf *buf =
 					ua_plugin_lookup_dma(ua, i + j);
 
-				if (!buf) {
-					skipped++;
-					continue;
-				}
-				/* The FPGA reads the captured length: never past the buffer */
-				ref_dwords = cmd[0] & 0x7FFFFFFF;
-				if ((size_t)ref_dwords * 4 > buf->size) {
-					dev_warn_once(&ua->pdev->dev,
-						      "plugin chain: entry %d wants %u dwords, payload has %zu bytes; skipped\n",
-						      i + j, ref_dwords, buf->size);
-					skipped++;
-					continue;
-				}
 				word2 = lower_32_bits(buf->dma);
 				word3 = upper_32_bits(buf->dma);
 			}
