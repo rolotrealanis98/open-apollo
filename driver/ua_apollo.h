@@ -938,6 +938,9 @@ struct ua_preamp_state {
 	bool phase;     /* Phase invert */
 	bool lowcut;    /* Low-cut filter */
 	bool mic_line;  /* false=Mic, true=Line */
+	u8 hiz_imp;     /* HiZ impedance code 0-7 (inputs 1/2), host cache only:
+			 * the readback has no field for it; 0 = 2.2M until a
+			 * user changes it (nothing is written before that) */
 };
 
 /* Monitor section state cache (write-through) */

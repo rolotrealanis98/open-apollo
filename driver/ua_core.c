@@ -2522,6 +2522,11 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			ua->audio.preamp[ch].gain = (int)param.value;
 			ctl_name = "Line %u Capture Volume";
 			break;
+		case UA_PREAMP_PARAM_HIZ_IMP:
+			if (param.value < 8)
+				ua->audio.preamp[ch].hiz_imp = param.value;
+			ctl_name = "Line %u HiZ Impedance";
+			break;
 		}
 		if (ctl_name)
 			notify_alsa = true;

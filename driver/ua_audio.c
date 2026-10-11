@@ -6517,6 +6517,57 @@ static int ua_input_select_put(struct snd_kcontrol *kctl,
 	return 1;
 }
 
+/*
+ * --- HiZ impedance (ENUM, inputs 1/2 of models with HiZ) ---
+ *
+ * Input param 0x11 (kPropHiZImpedance): the code is the index into the
+ * kext's table {2.2M, 1M, 453k, 232k, 100k, 70k, 47k, 21k} (parity/14 s3,
+ * ConvertHiZImpedanceToHWCode), S13 nibble 0 / 1.  No readback field, so
+ * the value is host-cached (default 0 = 2.2M) and nothing is written until
+ * a user changes it; ua_mixer_sync_readback() has nothing to sync.
+ */
+static const char * const ua_hiz_imp_names[] = {
+	"2.2M", "1M", "453k", "232k", "100k", "70k", "47k", "21k",
+};
+
+static int ua_hiz_imp_info(struct snd_kcontrol *kctl,
+			   struct snd_ctl_elem_info *info)
+{
+	return snd_ctl_enum_info(info, 1, ARRAY_SIZE(ua_hiz_imp_names),
+				 ua_hiz_imp_names);
+}
+
+static int ua_hiz_imp_get(struct snd_kcontrol *kctl,
+			  struct snd_ctl_elem_value *val)
+{
+	struct ua_device *ua = snd_kcontrol_chip(kctl);
+	unsigned int ch = UA_CTL_CH(kctl->private_value);
+
+	val->value.enumerated.item[0] = ua->audio.preamp[ch].hiz_imp;
+	return 0;
+}
+
+static int ua_hiz_imp_put(struct snd_kcontrol *kctl,
+			  struct snd_ctl_elem_value *val)
+{
+	struct ua_device *ua = snd_kcontrol_chip(kctl);
+	unsigned int ch = UA_CTL_CH(kctl->private_value);
+	unsigned int idx = val->value.enumerated.item[0];
+	int ret;
+
+	if (idx >= ARRAY_SIZE(ua_hiz_imp_names))
+		return -EINVAL;
+	if (idx == ua->audio.preamp[ch].hiz_imp)
+		return 0;
+
+	ret = ua_ctl_preamp_write(ua, ch, UA_PREAMP_PARAM_HIZ_IMP, idx);
+	if (ret)
+		return ret;
+
+	ua->audio.preamp[ch].hiz_imp = idx;
+	return 1;
+}
+
 /* --- Monitor Mono Switch (BOOLEAN, known routing: setting[2] bit 17) --- */
 
 static int ua_monitor_mono_get(struct snd_kcontrol *kctl,
@@ -7791,6 +7842,25 @@ static int ua_mixer_init(struct ua_device *ua)
 			if (ret)
 				return ret;
 			total++;
+
+			/* HiZ impedance (inputs 1/2, host-cached) */
+			ctl = (struct snd_kcontrol_new){};
+			ctl.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+			snprintf(name, sizeof(name),
+				 "Line %u HiZ Impedance", ch + 1);
+			ctl.name = name;
+			ctl.info = ua_hiz_imp_info;
+			ctl.get = ua_hiz_imp_get;
+			ctl.put = ua_hiz_imp_put;
+			ctl.private_value = UA_CTL_PACK(ch,
+							UA_PREAMP_PARAM_HIZ_IMP);
+			kctl = snd_ctl_new1(&ctl, ua);
+			if (!kctl)
+				return -ENOMEM;
+			ret = ua_ctl_register(ua, kctl);
+			if (ret)
+				return ret;
+			total++;
 		}
 	}
 
@@ -8747,6 +8817,7 @@ int ua_audio_init(struct ua_device *ua)
 			audio->preamp[i].phase = false;
 			audio->preamp[i].lowcut = false;
 			audio->preamp[i].mic_line = false; /* default Mic */
+			audio->preamp[i].hiz_imp = 0;	   /* 2.2M, unwritten */
 		}
 		audio->monitor.level = 192;  /* 0 dB: 192 + 0×2 */
 		audio->monitor.mute = UA_MON_MUTE_OFF;
