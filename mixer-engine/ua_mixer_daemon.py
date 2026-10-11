@@ -39,7 +39,15 @@ from protocol import (MessageFramer, Command, parse_command, encode_response_byt
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
 from helper_tree import HelperTree
-from hardware import (DRIVER_PARAM_SAMPLE_RATE, HardwareBackend,
+from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
+                    UNSUPPORTED as EVENTS_UNSUPPORTED, EVENT_NAMES,
+                    UA_EVT_RATE_INFO, UA_EVT_IODESC_IN, UA_EVT_IODESC_OUT,
+                    UA_EVT_RATE_CHANGED, UA_EVT_CLOCK_CHANGED,
+                    UA_EVT_NOTIF_STATUS, UA_EVT_DEVICE_OFFLINE,
+                    UA_EVT_CONNECTED, UA_EVT_LAYOUT_CHANGED,
+                    UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK)
+from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
+                      DRIVER_PARAM_SAMPLE_RATE, HardwareBackend,
                       HardwareRouter, fader_db_to_tapered,
                       preamp_db_to_tapered)
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
@@ -106,6 +114,10 @@ DEVICE_REOPEN_MIN = 0.5
 DEVICE_REOPEN_MAX = 5.0
 DEVICE_SETTLE = 3.0
 EXIT_RESTART = 75   # EX_TEMPFAIL: systemd's Restart=on-failure starts us again
+
+# With the driver's event channel open, the 1 Hz driver-rate poll becomes a
+# safety net: events carry the changes, this only catches a missed one.
+EVENT_SAFETY_POLL = 10.0
 
 
 def load_network_id(path: Path | None) -> str:
@@ -292,6 +304,12 @@ class MixerDaemon:
         self._reopen_delay = DEVICE_REOPEN_MIN
         self._next_reopen = 0.0
         self._ready_at: float | None = None
+        # Driver event channel (L1); polling stays the fallback
+        self._events = DriverEvents(self._on_driver_event)
+        self._events_loop = None
+        self._last_rate_poll = 0.0
+        self.io_layout: tuple[int, int] | None = None   # (play, rec) hw channels
+        self.layout_changes = 0     # bumped by every LAYOUT_CHANGED event
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -301,6 +319,8 @@ class MixerDaemon:
         self.server = await asyncio.start_server(
             self._handle_text_client, self.host, self.port,
             reuse_address=True)
+
+        self._events_attach()
 
         addrs = [s.getsockname() for s in self.server.sockets]
         log.info("TCP:%d (Mixer Engine, text) listening on %s", self.port, addrs)
@@ -367,6 +387,7 @@ class MixerDaemon:
 
     def _device_lost(self, now: float):
         log.warning("Apollo device lost — daemon stays up, reopening with backoff")
+        self._events_detach()
         self._hw_online = False
         self._ready_at = None
         # The watchdog owns the init push for the next connection
@@ -397,10 +418,11 @@ class MixerDaemon:
         self._hw_init_done = True
         self._readback_start_time = time.monotonic()
         # Resync what the hardware reports now (rate, preamps, monitor)
-        self._poll_driver_rate()
+        self._poll_driver_rate(force=True)
         rb = self.hw_router.poll_hw_readback()
         if rb:
             self._sync_hw_readback(rb, {})   # empty last_rb → push all
+        self._events_attach()
         self._hw_online = True
         self._set_device_online(True)
         return True
@@ -930,15 +952,24 @@ class MixerDaemon:
                 self._push_if_present(
                     f"/devices/0/inputs/{inp}/SelectedOnFront", ch == sel, force)
 
-    def _poll_driver_rate(self):
+    def _poll_driver_rate(self, force: bool = False):
         """Report the driver's sample rate when it changes under the daemon.
 
         An app re-preparing its streams, an ALSA control or a SET that
         didn't take changes the rate without a client SET; without this
         /SampleRate keeps showing the last value a client set.
+
+        The pump calls this at 1 Hz.  While the driver's event channel is
+        open the events carry the changes and only every EVENT_SAFETY_POLL
+        seconds does a call do the read; `force` skips that wait.
         """
         if not self.hw_router or not self.hw_router.backend.connected:
             return
+        now = time.monotonic()
+        if (not force and self._events.active
+                and now - self._last_rate_poll < EVENT_SAFETY_POLL):
+            return
+        self._last_rate_poll = now
         if self._readback_suppressed("/SampleRate/value"):
             return
         rate = self.hw_router.backend.get_driver_param(
@@ -946,6 +977,124 @@ class MixerDaemon:
         if rate and self.state.get_value("/SampleRate/value") != rate:
             log.info("Driver sample rate is now %d Hz", rate)
             self._push_to_clients("/SampleRate", rate)
+
+    # ── Driver event channel (L1) ───────────────────────────────────
+
+    def _events_attach(self):
+        """Open the device's event channel and hand it to the event loop.
+
+        Quietly does nothing without a connected device or on a driver
+        without the channel: the 1 Hz polling then runs as before.  Called
+        at start-up and again each time the watchdog brings the device back.
+        """
+        if self._events.active or not self.hw_router:
+            return
+        be = self.hw_router.backend
+        path = getattr(be, "device_path", None)
+        if not be.connected or not isinstance(path, str):
+            return
+        if not self._events.open(path):
+            log.info("Driver has no event channel: polling the driver "
+                     "(rate every second)")
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None     # no loop yet (tests): drain by hand
+        if loop is not None:
+            try:
+                loop.add_reader(self._events.fd, self._on_events_readable)
+                self._events_loop = loop
+            except (NotImplementedError, OSError, ValueError) as e:
+                log.warning("Event channel not usable with this loop (%s): "
+                            "polling", e)
+                self._events.close()
+                return
+        log.info("Driver event channel open: rate poll slowed to %.0f s",
+                 EVENT_SAFETY_POLL)
+
+    def _events_detach(self):
+        if self._events_loop is not None and self._events.fd >= 0:
+            try:
+                self._events_loop.remove_reader(self._events.fd)
+            except (OSError, ValueError):
+                pass
+        self._events_loop = None
+        self._events.close()
+
+    def _on_events_readable(self):
+        """Event loop callback: the event fd has data (or hung up)."""
+        status = self._events.drain()
+        if status == EVENTS_OFFLINE:
+            # ENODEV / hang-up: the last event normally arrived first,
+            # this covers a queue that was lost
+            self._events_detach()
+            self._on_device_offline("event channel closed")
+        elif status == EVENTS_UNSUPPORTED:
+            log.info("Event channel stopped answering: polling the driver")
+            self._events_detach()
+
+    def _on_device_offline(self, why: str):
+        """The driver says the device is gone: same state as a failed
+        watchdog probe, the watchdog then reopens it."""
+        if not self.hw_router or not self._hw_online:
+            return
+        log.warning("Device offline (%s)", why)
+        be = self.hw_router.backend
+        if be.connected:
+            be.mark_lost(why)
+        self._device_lost(time.monotonic())
+
+    def _refresh_clock_source(self, source: int | None = None):
+        """Push the driver's clock source (name) to /ClockSource."""
+        if not self.hw_router or not self.hw_router.backend.connected:
+            return
+        if source is None:
+            source = self.hw_router.backend.get_driver_param(
+                DRIVER_PARAM_CLOCK_SOURCE)
+        for name, val in CLOCK_SOURCE_MAP.items():
+            if val == source:
+                if not self._readback_suppressed("/ClockSource/value"):
+                    self._push_to_clients("/ClockSource", name)
+                return
+
+    def _refresh_all_from_driver(self):
+        """A full refresh, after events were dropped: rate, clock source
+        and lock state, from the same accessors the polling path uses."""
+        self._poll_driver_rate(force=True)
+        self._refresh_clock_source()
+        rb = self.hw_router.poll_hw_readback() if self.hw_router else None
+        if rb and rb.get("clock_locked") is not None:
+            self._push_to_clients("/ClockLocked", bool(rb["clock_locked"]))
+
+    def _on_driver_event(self, code: int, arg: int, time_ns: int = 0):
+        """One struct ua_event from the driver (see events.py)."""
+        name = EVENT_NAMES.get(code, f"0x{code:x}")
+        log.debug("driver event %s arg=0x%x", name, arg)
+        if code in (UA_EVT_RATE_CHANGED, UA_EVT_CONNECTED, UA_EVT_RATE_INFO):
+            self._poll_driver_rate(force=True)
+        elif code == UA_EVT_CLOCK_CHANGED:
+            self._refresh_clock_source(arg)
+        elif code == UA_EVT_CLOCK_LOCK:
+            self._push_to_clients("/ClockLocked", bool(arg))
+        elif code == UA_EVT_DEVICE_OFFLINE:
+            self._on_device_offline(
+                "surprise removal" if arg else "driver unbind")
+        elif code == UA_EVT_LAYOUT_CHANGED:
+            # The daemon does not model the I/O layout itself; keep the
+            # numbers for whoever does (the metering reads io_map on its
+            # own) and count the change
+            self.io_layout = (arg >> 16, arg & 0xFFFF)
+            self.layout_changes += 1
+            log.info("I/O layout changed: %d play / %d rec channels",
+                     *self.io_layout)
+        elif code == UA_EVT_EVENTS_LOST:
+            log.warning("Driver event queue overflowed (%d dropped): "
+                        "refreshing everything", arg)
+            self._refresh_all_from_driver()
+        elif code in (UA_EVT_IODESC_IN, UA_EVT_IODESC_OUT,
+                      UA_EVT_NOTIF_STATUS):
+            pass    # raw firmware notifications: the decoded events follow
 
     def _poll_dsp_load(self):
         """Poll DSP load and push to state tree at ~1 Hz.
