@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - Reboot, power-off and suspend now stop the Apollo first (`.shutdown` and suspend/resume): mute, transport off, DMA quiesced, disconnect signal. Unloading the module no longer leaves the audio extension connected, so `rmmod` + `insmod` reconnects and keeps the mixer DSP running.
+- Preamp PAD, 48V and Mic/Line work from Linux. Mixer settings are now written as the macOS driver writes them, each change once and then cleared (`mixer_mailbox`, default on), instead of re-sending every touched field on every update; with the old method the DSP ignored PAD, 48V and Mic/Line. The front-panel buttons and the monitor knob also keep their changes instead of being overwritten by the next settings update. `mixer_mailbox=0` restores the old behaviour.
 - The DSP command ring is circular: mixer commands no longer stop for good after about 1,000 changes.
 - ASPM L0s is turned off on the Apollo's PCIe link; with it on, the link logged a steady stream of correctable errors while streaming.
 - Recording works after every sample-rate change on the x4: a 192 kHz stream started while the clock was already at 176.4 or 192 kHz used to record nothing, and a 176.4 kHz one did about 1 time in 6.

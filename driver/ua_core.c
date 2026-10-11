@@ -84,6 +84,24 @@ module_param(v12_connect, bool, 0444);
 MODULE_PARM_DESC(v12_connect,
 		 "EXPERIMENTAL, needs Solo/Arrow/x8p testers: use the v12 ring-connect device set (adds Solo TB, Arrow, type 0x29) and do the ACEFACE handshake before the ring connect (default: off)");
 
+/*
+ * Mixer settings are an edge-triggered mailbox, as CPcieDeviceMixer::
+ * _writeSetting (kext 0x4b454) treats them: a changed setting is written
+ * with its mask once, its mask is cleared, and on the next flush the
+ * setting is written as zeros once.  Re-sending every field ever touched
+ * on every flush (the old Linux behaviour, mixer_mailbox=0) left PAD, 48V
+ * and Mic/Line dead: the DSP never reported them and the relays never
+ * moved, while LowCut and Phase worked.  With the mailbox all five follow
+ * the host, the front-panel buttons and the monitor knob keep working
+ * between host writes instead of being overwritten on the next flush,
+ * and gain, monitor level/mute/mono/dim and talkback behave as before
+ * (x4 on titan, 2026-10-10).
+ */
+static bool mixer_mailbox = true;
+module_param(mixer_mailbox, bool, 0644);
+MODULE_PARM_DESC(mixer_mailbox,
+		 "Write mixer settings as the macOS driver does: each change once with its mask, then zeros once (default: on); 0 = re-send every touched field on every flush (old behaviour, PAD/48V/Mic-Line do not work)");
+
 /* ----------------------------------------------------------------
  * PCI device table
  * ---------------------------------------------------------------- */
@@ -691,13 +709,15 @@ read_response:
  *   1. Maintain cached val/mask arrays for all 38 settings
  *   2. On setting change: merge into cache, mark dirty
  *   3. On service tick: if dirty AND SEQ_RD == cached SEQ_WR,
- *      write ALL 38 settings to SRAM, then bump SEQ_WR once
+ *      write the settings with a pending change (mask != 0) and the
+ *      zero pass of those written last time, then bump SEQ_WR once
  *   4. DSP reads all 38 atomically per SEQ_WR advance
  *
  * The mask merge is critical — setting[2] has monitor volume ([7:0]),
  * mute ([16]), mono ([17]), and dim ([31]) sharing one register.
- * Each caller provides a partial mask; the cache accumulates all
- * active fields.
+ * Each caller provides a partial mask; the cache accumulates the
+ * fields changed since the last flush (mixer_mailbox, the default,
+ * then clears the mask: see ua_mixer_flush_settings()).
  * ---------------------------------------------------------------- */
 
 /**
@@ -769,6 +789,7 @@ int ua_mixer_write_setting_locked(struct ua_device *ua,
 void ua_mixer_flush_settings(struct ua_device *ua)
 {
 	u32 seq_rd, word_a, word_b, reg;
+	u64 zero_next = 0;
 	int i;
 
 	if (!ua->mixer_ready || !ua->mixer_dirty)
@@ -780,13 +801,15 @@ void ua_mixer_flush_settings(struct ua_device *ua)
 		return;  /* DSP still processing previous batch */
 
 	/*
-	 * Write ALL 38 settings to SRAM registers.
+	 * Write the changed settings to SRAM, then one SEQ_WR bump.
 	 * Word A = (mask[15:0] << 16) | val[15:0]
 	 * Word B = (mask[31:16] << 16) | val[31:16]
 	 *
-	 * Windows BAR0 capture (2026-03-20) proves: val AND mask persist
-	 * across flushes. The DSP reads val/mask on every SEQ bump.
-	 * Do NOT clear mask after writing — gain requires persistent values.
+	 * With mixer_mailbox (default) a setting's mask is cleared once it
+	 * has been written and the setting goes out as zeros on the next
+	 * flush, as the kext does.  The 2026-03 note that gain needs
+	 * persistent masks did not hold up: gain reads back identically
+	 * either way (titan, 2026-10-10).
 	 *
 	 * Word order tested (2026-03-21): swapping words for settings 0-31
 	 * does NOT fix monitor. Single-setting[2] write with SEQ bump also
@@ -801,6 +824,14 @@ void ua_mixer_flush_settings(struct ua_device *ua)
 		 * clear those defaults, breaking DSP module configuration
 		 * (e.g., monitor processing depends on preset defaults).
 		 */
+		if (mixer_mailbox && !ua->mixer_mask[i] &&
+		    (ua->mixer_zero_pending & BIT_ULL(i))) {
+			/* mixer_mailbox: the one zero pass after a write */
+			reg = ua_mixer_setting_reg(i);
+			ua_write(ua, reg, 0);
+			ua_write(ua, reg + 4, 0);
+			continue;
+		}
 		if (!ua->mixer_mask[i])
 			continue;
 		reg = ua_mixer_setting_reg(i);
@@ -810,12 +841,17 @@ void ua_mixer_flush_settings(struct ua_device *ua)
 			 ((ua->mixer_val[i] >> 16) & 0xFFFF);
 		ua_write(ua, reg, word_a);
 		ua_write(ua, reg + 4, word_b);
+		if (mixer_mailbox) {
+			ua->mixer_mask[i] = 0;
+			zero_next |= BIT_ULL(i);
+		}
 	}
 
 	/* Single SEQ_WR bump for entire batch */
 	ua->mixer_seq_wr++;
 	ua_write(ua, UA_REG_MIXER_SEQ_WR, ua->mixer_seq_wr);
-	ua->mixer_dirty = false;
+	ua->mixer_zero_pending = zero_next;
+	ua->mixer_dirty = zero_next != 0;
 
 	dev_dbg(&ua->pdev->dev,
 		"mixer_flush: SEQ_WR=%u (SEQ_RD was %u)\n",

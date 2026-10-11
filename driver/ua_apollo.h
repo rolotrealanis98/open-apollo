@@ -1056,6 +1056,7 @@ struct ua_device {
 	/* Mixer batch write state (matches kext CPcieDeviceMixer protocol) */
 	u32 mixer_val[UA_MIXER_BATCH_COUNT];   /* Cached setting values */
 	u32 mixer_mask[UA_MIXER_BATCH_COUNT];  /* Cached setting masks */
+	u64 mixer_zero_pending;                /* mixer_mailbox: settings to zero next */
 	u32 mixer_seq_wr;                      /* Our cached SEQ_WR */
 	bool mixer_dirty;                      /* Any setting changed since last flush */
 	bool mixer_ready;                      /* Batch protocol initialized */
