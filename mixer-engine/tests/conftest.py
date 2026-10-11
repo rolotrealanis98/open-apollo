@@ -44,6 +44,10 @@ class FakeBackend:
         self.other = []              # (method name, args)
         self.features = 0            # UA_FEAT_* bits has_feature() reports
         self.bus_flags = []          # (bus_id, sub_param, side, solo_mute)
+        self.system_info = None      # what get_system_info() returns
+
+    def get_system_info(self):
+        return self.system_info
 
     def has_feature(self, bit):
         return bool(self.features & bit)

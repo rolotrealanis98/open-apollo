@@ -191,6 +191,9 @@ UA_FEAT_PAUSE_INFO = 1 << 8
 UA_FEAT_PAUSE_EVENTS = 1 << 9
 UA_FEAT_UNIT_GROUP = 1 << 10
 UA_FEAT_BUS_SOLO_FLAG = 1 << 11
+# ABI 1.2: the first four reserved words of struct ua_system_info carry
+# pcie_link_speed, pcie_link_width, clock_src_mask and fw_rate_mask
+UA_FEAT_SYSINFO_EXT = 1 << 12
 
 # struct ua_system_info (ABI 1.x, 148 bytes): the first 12 u32, the 16-byte
 # serial, 13 more u32 and reserved[8].  Field names in order.
@@ -203,6 +206,17 @@ _SYSTEM_INFO_TAIL = ("sample_rate", "rate_index", "clock_source",
                      "clock_lock_valid", "clock_locked", "connected",
                      "transport_running", "play_channels", "rec_channels",
                      "unit_group", "unit_index", "unit_count", "unit_role")
+
+# ABI 1.2 (UA_FEAT_SYSINFO_EXT): four more u32 right after unit_role, then
+# reserved[4]; the size stays 148.
+#   pcie_link_speed  PCI_EXP_LNKSTA current link speed code (1 = 2.5 GT/s
+#                    Gen1, 2 = 5 GT/s Gen2, 3 = 8 GT/s Gen3, ...), 0 unknown
+#   pcie_link_width  negotiated lanes (1, 2, 4), 0 unknown
+#   clock_src_mask   0xC08C[31:16]: bit n set = clock source value n offered
+#   fw_rate_mask     0xC08C[7:0]: bit n set = rate index n offered
+_SYSTEM_INFO_EXT = ("pcie_link_speed", "pcie_link_width", "clock_src_mask",
+                    "fw_rate_mask")
+_SYSTEM_INFO_EXT_OFF = 64 + 4 * len(_SYSTEM_INFO_TAIL)
 
 _FW_LOAD_SIZE = 16
 UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
@@ -607,6 +621,48 @@ CLOCK_SOURCE_MAP = {
     # reaches the driver.  The driver also rejects values the device does
     # not advertise (ua_clock_source_valid).
 }
+
+
+def clock_source_names(mask: int | None,
+                       model_names: list[str] | None) -> list[str] | None:
+    """The /ClockSource value list from the device's source mask.
+
+    Bit n of `mask` (0xC08C[31:16]) set means clock source value n is on
+    the device's menu; the names are CLOCK_SOURCE_MAP's.  The result keeps
+    the model's order and only names the model also offers (devices/*.json
+    clock_sources).  Internal is always kept: a unit can always run on its
+    own clock, whatever bit 12 says.  None (no mask, an empty mask, or no
+    name left but Internal) means "use the static list".
+    """
+    if not mask or not model_names:
+        return None
+    names = [n for n in model_names
+             if n == "Internal"
+             or (n in CLOCK_SOURCE_MAP and CLOCK_SOURCE_MAP[n] < 16
+                 and mask & (1 << CLOCK_SOURCE_MAP[n]))]
+    return names if len(names) > 1 else None
+
+
+# Per-lane payload of a PCIe link, MB/s, by LNKSTA speed code
+_PCIE_LANE_MBPS = {1: 250, 2: 500, 3: 985, 4: 1969, 5: 3938}
+
+
+def pcie_link_below_minimum(speed: int | None, width: int | None) -> bool:
+    """True when the link is known and slower than x1 Gen2 (500 MB/s).
+    An unknown link (0 or None) is not reported."""
+    if not speed or not width:
+        return False
+    lane = _PCIE_LANE_MBPS.get(speed, 985 if speed > 3 else 0)
+    return lane * width < _PCIE_LANE_MBPS[2]
+
+
+def pcie_link_text(speed: int | None, width: int | None) -> str:
+    """'x1 Gen2', or '' while unknown."""
+    if not speed or not width:
+        return ""
+    return f"x{width} Gen{speed}"
+
+
 VALID_SAMPLE_RATES = {44100, 48000, 88200, 96000, 176400, 192000}
 
 
@@ -2026,6 +2082,9 @@ class HardwareBackend:
         tail = struct.unpack_from('<13I', raw, 64)
         info = dict(zip(_SYSTEM_INFO_HEAD, head))
         info.update(zip(_SYSTEM_INFO_TAIL, tail))
+        if self.has_feature(UA_FEAT_SYSINFO_EXT):
+            info.update(zip(_SYSTEM_INFO_EXT, struct.unpack_from(
+                '<4I', raw, _SYSTEM_INFO_EXT_OFF)))
         # NUL-padded after the first NUL, unterminated when all 16 are used
         info["serial"] = raw[48:64].split(b'\0', 1)[0].decode(
             'ascii', 'replace').strip()

@@ -49,9 +49,10 @@ from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK,
                     UA_EVT_PAUSED, UA_EVT_RESUMED, UA_PAUSE_DEVICE)
 from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
-                      DRIVER_PARAM_SAMPLE_RATE, HardwareBackend,
-                      HardwareRouter, fader_db_to_tapered,
-                      preamp_db_to_tapered)
+                      DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
+                      HardwareBackend, HardwareRouter, clock_source_names,
+                      fader_db_to_tapered, pcie_link_below_minimum,
+                      pcie_link_text, preamp_db_to_tapered)
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
                       meter_channel)
 from bonjour import BonjourAnnouncer, _default_name
@@ -103,7 +104,32 @@ RUNTIME_PROPERTIES = {
     "/DanteDevicesStatus": {"type": "string", "value": ""},
     "/DanteErrorStatus": {"type": "string", "value": ""},
     "/CorrectionLicenseState": {"type": "int", "value": 0},
+    # open-apollo's own, read-only: the PCIe/Thunderbolt link the driver
+    # negotiated (UA_FEAT_SYSINFO_EXT).  Empty/0 until the device reports it.
+    "/openapollo/pcie_link": {"type": "string", "value": "",
+                              "readonly": True},
+    "/openapollo/pcie_link_speed": {"type": "int", "value": 0,
+                                    "readonly": True},
+    "/openapollo/pcie_link_width": {"type": "int", "value": 0,
+                                    "readonly": True},
 }
+
+
+def apply_runtime_properties(state: StateTree):
+    """Add RUNTIME_PROPERTIES to a freshly loaded tree; those the device
+    map already has are forced to the runtime value (DeviceOnline defaults
+    to False in the map but must be True)."""
+    for rpath, rprops in RUNTIME_PROPERTIES.items():
+        if not state.path_exists(rpath):
+            state.add_runtime_property(rpath, rprops)
+            log.debug("Added runtime property: %s = %r", rpath,
+                      rprops.get("value"))
+        else:
+            state.set_value(rpath, rprops["value"])
+            log.debug("Set runtime value: %s = %r", rpath,
+                      rprops.get("value"))
+
+
 # NOTE: Do NOT add "/BufferSize/values" or other "/Foo/values" paths here!
 # set_value("/Foo/values", x) resolves to the /Foo property and overwrites its
 # "value" field (not "values"), corrupting the actual control value.
@@ -117,6 +143,11 @@ DEVICE_REOPEN_MIN = 0.5
 DEVICE_REOPEN_MAX = 5.0
 DEVICE_SETTLE = 3.0
 EXIT_RESTART = 75   # EX_TEMPFAIL: systemd's Restart=on-failure starts us again
+
+# Firmware majors the kext accepts (FWMajorVersion, parity 16 F43): 9 for the
+# Apollo/8/8p/A16/Twin/Conrad family, 11 for Freud, Rene and Lavern.  The
+# per-device minimums are not known and are not checked.
+ACCEPTED_FW_MAJORS = (9, 11)
 
 # With the driver's event channel open, the 1 Hz driver-rate poll becomes a
 # safety net: events carry the changes, this only catches a missed one.
@@ -380,6 +411,12 @@ class MixerDaemon:
         self.hw_paused = False
         # `post` object commands (commands.py)
         self.commands = CommandEngine(self)
+        # The model's /ClockSource list (the static fallback) and the
+        # warnings already given
+        values = (self.state.get_prop_dict("/ClockSource") or {}).get("values")
+        self._model_clock_sources = list(values) if values else None
+        self._fw_warned = False
+        self._link_warned = False
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -391,6 +428,8 @@ class MixerDaemon:
             reuse_address=True)
 
         self._events_attach()
+        if self._hw_online:
+            self._on_device_connected()
 
         addrs = [s.getsockname() for s in self.server.sockets]
         log.info("TCP:%d (Mixer Engine, text) listening on %s", self.port, addrs)
@@ -497,6 +536,7 @@ class MixerDaemon:
         self._events_attach()
         self._hw_online = True
         self._set_device_online(True)
+        self._on_device_connected()
         return True
 
     def _device_watchdog_step(self, now: float) -> bool:
@@ -629,6 +669,7 @@ class MixerDaemon:
                 dsp_tick = 0
                 self._poll_dsp_load()
                 self._poll_driver_rate()
+                self._poll_transport()
 
             if not meter_cache:
                 continue
@@ -1149,10 +1190,113 @@ class MixerDaemon:
         if self.hw_router:
             self.hw_router.cancel_settle_mute()
 
+    # ── Device status from GET_SYSTEM_INFO / the transport ──────────
+
+    def _system_info(self) -> dict | None:
+        be = self.hw_router.backend if self.hw_router else None
+        if be is None or not be.connected:
+            return None
+        get = getattr(be, "get_system_info", None)
+        info = get() if callable(get) else None
+        return info if isinstance(info, dict) else None
+
+    def _on_device_connected(self):
+        """A device session starts (start-up, hot-plug return): one
+        GET_SYSTEM_INFO feeds the clock-source list, the PCIe link report and
+        the firmware check."""
+        info = self._system_info()
+        self._publish_clock_sources(info)
+        self._publish_pcie_link(info)
+        self._check_firmware(info)
+        self._poll_transport()
+
+    def _publish_clock_sources(self, info: dict | None = None,
+                               notify: bool = True) -> bool:
+        """Set the /ClockSource value list from the device's source mask.
+
+        With UA_FEAT_SYSINFO_EXT the driver reports 0xC08C[31:16]; the list
+        is the model's sources (devices/*.json) that the device offers
+        (hardware.clock_source_names).  Without the mask, or without a
+        device, it is the static model list.  When the list changes,
+        /ClockSourceListChanged is pulsed so clients ask for it again.
+        Returns True when the list changed.
+        """
+        model = self._model_clock_sources
+        if not model or not self.state.path_exists("/ClockSource/value"):
+            return False
+        if info is None:
+            info = self._system_info()
+        names = clock_source_names(
+            info.get("clock_src_mask") if info else None, model) or model
+        prop = self.state.get_prop_dict("/ClockSource")
+        if prop is None or prop.get("values") == names:
+            return False
+        log.info("Clock sources are now %s (device mask 0x%04x)", names,
+                 (info or {}).get("clock_src_mask") or 0)
+        self.state.update_property("/ClockSource", {"values": names})
+        if notify:
+            for flag in (True, False):
+                self._push_to_clients("/ClockSourceListChanged", flag)
+            # a pulse, not a setting: keep it out of the saved state
+            self.state._dirty.pop("/ClockSourceListChanged/value", None)
+        return True
+
+    def _publish_pcie_link(self, info: dict | None):
+        """Report the PCIe link (UA_FEAT_SYSINFO_EXT) at
+        /openapollo/pcie_link{,_speed,_width}; warn once when it is slower
+        than x1 Gen2."""
+        if not info or "pcie_link_speed" not in info:
+            return
+        speed, width = info["pcie_link_speed"], info["pcie_link_width"]
+        for path, val in (("/openapollo/pcie_link", pcie_link_text(speed, width)),
+                          ("/openapollo/pcie_link_speed", speed),
+                          ("/openapollo/pcie_link_width", width)):
+            if self.state.path_exists(path + "/value"):
+                self._push_to_clients(path, val)
+                self.state._dirty.pop(path + "/value", None)
+        if pcie_link_below_minimum(speed, width) and not self._link_warned:
+            self._link_warned = True
+            log.warning("PCIe link is %s, below x1 Gen2: audio and meters "
+                        "can drop out (check the Thunderbolt cable, port "
+                        "and any dock)", pcie_link_text(speed, width))
+
+    def _check_firmware(self, info: dict | None):
+        """Log one warning when the firmware major is not one the kext
+        accepts (9 or 11).  Informational only: firmware_compatibility
+        stays 0 and nothing is refused."""
+        if self._fw_warned or not info:
+            return
+        fw = info.get("fw_version")
+        if isinstance(fw, int) and fw not in ACCEPTED_FW_MAJORS:
+            self._fw_warned = True
+            log.warning("Firmware version %d is not one the UA driver "
+                        "accepts (%s): this combination is untested",
+                        fw, " or ".join(map(str, ACCEPTED_FW_MAJORS)))
+
+    def _poll_transport(self):
+        """/AudioStreaming follows the driver's transport (running or
+        not).  One small GET_DRIVER_PARAM at the 1 Hz pump rate; the driver
+        has no event for it.  Without a device the value stays at its
+        default (True)."""
+        if (not self.hw_router or not self._hw_online
+                or not self.hw_router.backend.connected):
+            return
+        running = self.hw_router.backend.get_driver_param(
+            DRIVER_PARAM_TRANSPORT_RUNNING)
+        if running is None:
+            return
+        running = bool(running)
+        if self.state.get_value("/AudioStreaming/value") != running:
+            log.info("Audio streaming -> %s", running)
+            self._push_to_clients("/AudioStreaming", running)
+            # device status, not a setting: not saved
+            self.state._dirty.pop("/AudioStreaming/value", None)
+
     def _refresh_clock_source(self, source: int | None = None):
         """Push the driver's clock source (name) to /ClockSource."""
         if not self.hw_router or not self.hw_router.backend.connected:
             return
+        self._publish_clock_sources()
         if source is None:
             source = self.hw_router.backend.get_driver_param(
                 DRIVER_PARAM_CLOCK_SOURCE)
@@ -2612,15 +2756,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
 
     # Add runtime-only properties that the real mixer engine provides
     # but aren't in the captured device map (initialization state, etc.)
-    for rpath, rprops in RUNTIME_PROPERTIES.items():
-        if not state.path_exists(rpath):
-            state.add_runtime_property(rpath, rprops)
-            log.debug("Added runtime property: %s = %r", rpath, rprops.get("value"))
-        else:
-            # Force-set existing properties to runtime values
-            # (e.g. DeviceOnline defaults to False in device map but must be True)
-            state.set_value(rpath, rprops["value"])
-            log.debug("Set runtime value: %s = %r", rpath, rprops.get("value"))
+    apply_runtime_properties(state)
 
     # Enable persistent state (saves modified values across restarts)
     state_file = state_file_for(device_map, index, serial)

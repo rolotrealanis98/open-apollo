@@ -113,7 +113,8 @@ _VOLATILE = re.compile(
     r"^/(initialized|initialized_percent|initialized_status|AudioStreaming|"
     r"ClockLocked|SampleRate|ClockSource|TotalDSPLoad|TotalPGMLoad|"
     r"TotalMEMLoad|DeviceConnectionMode|Session|ModifiedSessions|Snapshot|"
-    r"PrimedSnapshot|Sleep|Dirty)/value$|"
+    r"PrimedSnapshot|Sleep|Dirty|ClockSourceListChanged)/value$|"
+    r"^/openapollo/|"
     r"^/devices/0/DeviceOnline/value$|/meters/|/effects/")
 _RE_PREAMP = re.compile(r"^/devices/0/inputs/\d+/preamps/")
 _RE_INPUT_STRIP = re.compile(
