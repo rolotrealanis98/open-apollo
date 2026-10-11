@@ -1214,6 +1214,22 @@ struct ua_audio {
 	bool dsp_service_running;
 	unsigned int dsp_service_count;
 
+	/*
+	 * notif_irq (parity/12 B07): the notification vector kicks the
+	 * service work from the hard IRQ.  notif_kick is the IRQ-to-work
+	 * flag (set by the IRQ, consumed by the pass); the counters are in
+	 * /proc/asound/cardN/dsp_state.  notif_irqs/_kicks/_storms/_win_*
+	 * have the hard IRQ as their only writer, the pass counters the work.
+	 */
+	atomic_t notif_kick;
+	unsigned int notif_irqs;	/* notification vector interrupts seen */
+	unsigned int notif_irq_kicks;	/* ... that queued the service work */
+	unsigned int notif_irq_passes;	/* service passes started by the IRQ */
+	unsigned int notif_poll_passes;	/* service passes on the 10 ms timer */
+	unsigned int notif_irq_storms;	/* vector masked by the storm guard */
+	unsigned long notif_win_start;	/* storm guard window (jiffies) */
+	unsigned int notif_win_count;
+
 	/* Period elapsed polling timer (default; period_irq=1 uses the HW timer IRQ) */
 	struct hrtimer period_timer;
 	bool period_timer_running;
@@ -1483,6 +1499,7 @@ struct ua_device {
 	spinlock_t irq_lock;        /* Interrupt handler lock */
 
 	/* Surprise removal (Thunderbolt hot-unplug) */
+	atomic64_t irq_first_ns;    /* ktime_get_ns() of the first interrupt after request_irq, 0 = none (probe self-test) */
 	atomic_t shutdown;          /* Set on remove/disconnect — blocks BAR0 access */
 
 	/*
@@ -1722,6 +1739,8 @@ enum ua_resume_how {
 int ua_audio_resume(struct ua_device *ua, enum ua_resume_how how);
 bool ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
 void ua_audio_irq_thread(struct ua_device *ua);
+void ua_audio_notif_irq(struct ua_device *ua, u32 status_hi);
+bool ua_notif_irq_enabled(void);
 void ua_audio_period_wd_cancel(struct ua_device *ua);
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate);
 int ua_audio_set_clock_source(struct ua_device *ua, unsigned int source);

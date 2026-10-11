@@ -211,11 +211,18 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	}
 	ua_irq_count++;
 
+	/* First interrupt since request_irq: the probe self-test watches it */
+	if (!atomic64_read(&ua->irq_first_ns))
+		atomic64_cmpxchg(&ua->irq_first_ns, 0, ktime_get_ns());
+
 	/* Dispatch audio-related interrupts */
 	wake = ua_audio_irq(ua, status_lo, status_hi);
 
 	/* DSP message FIFO / error vectors (dsp_msg_irq, default off) */
 	ua_dsp_irq(ua, status_lo, status_hi);
+
+	/* Notification vector: run the DSP service pass now (notif_irq) */
+	ua_audio_notif_irq(ua, status_hi);
 
 	return wake ? IRQ_WAKE_THREAD : IRQ_HANDLED;
 }
@@ -3927,9 +3934,54 @@ static void ua_probe_unwind_dsp(struct ua_device *ua)
 	ua_audio_free_dma(ua);
 }
 
+/*
+ * Interrupt self-test (N22, parity/02 testInterrupt), log only.
+ *
+ * The kext's testInterrupt is not an IRQ test (parity/13 R49: it refreshes
+ * plugin authorisation), and the hardware has no software-trigger vector:
+ * ISR is write-1-to-clear only, and no register is known that raises a
+ * vector on demand.  Triggering the notification vector would need a DSP
+ * action that is not harmless (a clock write or a transport change), so
+ * this test is passive: it writes NOTHING to the device.  It reports
+ * whether any interrupt of ours (an enabled, unmasked vector, as seen by
+ * ua_irq_handler) arrived since request_irq, waiting up to 50 ms for one.
+ * After a normal probe the connect and DSP load have already raised some,
+ * so the wait is usually zero; a quiet device logs "no interrupt", which
+ * on an idle unit is information, not a fault.  The result never fails the
+ * probe.
+ */
+static bool irq_selftest = true;
+module_param(irq_selftest, bool, 0444);
+MODULE_PARM_DESC(irq_selftest,
+		 "Log at the end of probe whether an interrupt reached the handler since request_irq, waiting up to 50 ms for one (passive: no device register is written; default: on)");
+
+static void ua_irq_selftest(struct ua_device *ua, u64 req_ns)
+{
+	u64 first;
+	int i;
+
+	if (!irq_selftest)
+		return;
+	for (i = 0; i < 50; i++) {
+		first = atomic64_read(&ua->irq_first_ns);
+		if (first)
+			break;
+		usleep_range(1000, 1500);
+	}
+	first = atomic64_read(&ua->irq_first_ns);
+	if (first)
+		dev_info(&ua->pdev->dev,
+			 "interrupt self-test: ok (%llu us after request_irq, %u interrupt(s) so far)\n",
+			 div_u64(first - req_ns, 1000), ua_irq_count);
+	else
+		dev_info(&ua->pdev->dev,
+			 "interrupt self-test: no interrupt in 50 ms (passive test, nothing was triggered)\n");
+}
+
 static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct ua_device *ua;
+	u64 irq_req_ns;
 	bool intx;
 	int ret, devno;
 
@@ -4131,6 +4183,8 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_free_irq_vectors;
 	}
 
+	irq_req_ns = ktime_get_ns();
+
 	ret = ua_dsp_init_and_load(ua, false, !ua_mixer_dsp_alive(ua));
 	if (ret)
 		goto err_dsp;
@@ -4177,6 +4231,7 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	dev_info(&pdev->dev, "registered as /dev/ua_apollo%d\n", devno);
+	ua_irq_selftest(ua, irq_req_ns);
 	return 0;
 
 err_ida:

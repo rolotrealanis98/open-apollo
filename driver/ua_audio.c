@@ -125,6 +125,10 @@ static bool rate_ack_real;
 module_param(rate_ack_real, bool, 0644);
 MODULE_PARM_DESC(rate_ack_real,
 		 "Send {0x001A0002, rate} to every DSP at connect (the firmware's rate) and after every clock change, as the macOS Mixer Engine does (default: off; the plugin chain's WAKE entry always says 44100)");
+static bool notif_irq;
+module_param(notif_irq, bool, 0644);
+MODULE_PARM_DESC(notif_irq,
+		 "Run the DSP service pass (notification status 0xC030, clock lock, readback) from the notification interrupt (vector 0x28) at once, as the kext's _notifyIntrCallback does, instead of waiting for the next 10 ms poll; the poll stays as the fallback (default: off). Counters in /proc/asound/cardN/dsp_state");
 static bool clock_ack_bit5;
 module_param(clock_ack_bit5, bool, 0644);
 MODULE_PARM_DESC(clock_ack_bit5,
@@ -2298,12 +2302,25 @@ static void ua_dsp_service_handler(struct work_struct *work)
 	u32 rb_status, seq_wr, seq_rd, notif;
 	u32 data[UA_MIXER_RB_WORDS];
 	unsigned int i;
+	bool irq_pass = atomic_xchg(&audio->notif_kick, 0);
 
 	/* Device removed — stop servicing */
 	if (atomic_read(&ua->shutdown)) {
 		audio->dsp_service_running = false;
 		return;
 	}
+
+	/*
+	 * A pass the interrupt queued as the loop was being stopped: do
+	 * nothing, and do not start the 10 ms chain again.
+	 */
+	if (irq_pass && !audio->dsp_service_running)
+		return;
+
+	if (irq_pass)
+		audio->notif_irq_passes++;
+	else
+		audio->notif_poll_passes++;
 
 	mutex_lock(&ua->lock);
 
@@ -2400,12 +2417,67 @@ static void ua_dsp_service_handler(struct work_struct *work)
 				rb_status, seq_wr, seq_rd);
 	}
 
-	audio->dsp_service_count++;
+	/*
+	 * Only timer passes advance the count: it times the mixer flush
+	 * defer above (5 x 10 ms), which interrupt-driven passes must not
+	 * shorten.
+	 */
+	if (!irq_pass)
+		audio->dsp_service_count++;
 
 	/* Re-schedule if still running */
 	if (audio->dsp_service_running)
 		schedule_delayed_work(&audio->dsp_service_work,
 				      msecs_to_jiffies(UA_DSP_SERVICE_INTERVAL_MS));
+}
+
+bool ua_notif_irq_enabled(void)
+{
+	return notif_irq;
+}
+
+/*
+ * notif_irq (parity/12 B07, N21): the notification vector (0x28, ISR_HI
+ * bit 0) runs the service pass at once.  Hard-IRQ side: the main handler
+ * has already read and acked the ISR; this adds no BAR0 access, only the
+ * flag and mod_delayed_work(0).  The pass is the existing one, so the
+ * 0xC030 ack stays its last step (ua_audio_notif_ack).  No re-arm: the
+ * vector is not in the kext's one-shot auto-mask (0x18C63, parity/03 I10,
+ * DSP command/response only), the ISR ack is all it needs.  The 10 ms
+ * poll keeps running as the fallback.
+ *
+ * Storm guard: more than 2000 of these in one second masks the vector (the
+ * next connect re-enables it) and leaves the poll to serve the register.
+ */
+void ua_audio_notif_irq(struct ua_device *ua, u32 status_hi)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned long now = jiffies;
+
+	if (!notif_irq ||
+	    !(status_hi & BIT(ua_vector_to_hwbit(UA_IRQ_VEC_NOTIFICATION) - 32)))
+		return;
+	audio->notif_irqs++;
+	if (atomic_read(&ua->shutdown))
+		return;
+
+	if (time_after(now, audio->notif_win_start + HZ)) {
+		audio->notif_win_start = now;
+		audio->notif_win_count = 0;
+	}
+	if (++audio->notif_win_count > 2000) {
+		audio->notif_irq_storms++;
+		ua_disable_vector(ua, UA_IRQ_VEC_NOTIFICATION);
+		dev_warn_ratelimited(&ua->pdev->dev,
+				     "notif_irq: >2000 notification interrupts in 1 s, vector masked (10 ms poll continues)\n");
+		return;
+	}
+
+	if (!READ_ONCE(audio->dsp_service_running))
+		return;
+	atomic_set(&audio->notif_kick, 1);
+	audio->notif_irq_kicks++;
+	mod_delayed_work(system_wq, &audio->dsp_service_work, 0);
 }
 
 void ua_dsp_service_start(struct ua_device *ua)

@@ -4934,6 +4934,14 @@ static void ua_dsp_state_proc_read(struct snd_info_entry *entry,
 				    x->msg_last[dsp][4]);
 	}
 
+	snd_iprintf(buf, "\nnotification service (notif_irq=%d):\n",
+		    ua_notif_irq_enabled());
+	snd_iprintf(buf, "  notification interrupts %u, kicked the work %u, storm masks %u\n",
+		    ua->audio.notif_irqs, ua->audio.notif_irq_kicks,
+		    ua->audio.notif_irq_storms);
+	snd_iprintf(buf, "  service passes: %u interrupt-driven, %u polled (10 ms)\n",
+		    ua->audio.notif_irq_passes, ua->audio.notif_poll_passes);
+
 	mutex_unlock(&ua->lock);
 }
 
