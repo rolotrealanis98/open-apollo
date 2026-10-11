@@ -40,7 +40,7 @@ from state_tree import StateTree
 from helper_tree import HelperTree
 from hardware import (HardwareBackend, HardwareRouter, fader_db_to_tapered,
                       preamp_db_to_tapered)
-from metering import AlsaMeter, NullMeter, SILENCE_DB
+from metering import NullMeter, SILENCE_DB, make_meter, meter_channel
 from bonjour import BonjourAnnouncer
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
@@ -170,6 +170,8 @@ class MixerDaemon:
         self.server: asyncio.Server | None = None
         self.helper_server: asyncio.Server | None = None
         self._metering = metering or NullMeter()
+        self._meter_map: dict = {}   # (kind, ch, meter) → record ch
+        self._meter_map_ids: tuple | None = None
         self._last_meter: dict[str, float | bool] = {}  # delta detection
 
         # Generate unique IDs matching real mixer engine format (hex UUIDs)
@@ -247,7 +249,7 @@ class MixerDaemon:
 
     # Regex for parsing meter subscription paths — compiled once
     _METER_PATH_RE = re_mod.compile(
-        r'/devices/0/(inputs|outputs)/(\d+)/'
+        r'/devices/0/(inputs|outputs|auxs)/(\d+)/'
         r'(?:sends/\d+/)?'
         r'meters/(\d+)/'
         r'(MeterLevel|MeterPeakLevel|MeterClip|Clip)/value$'
@@ -264,8 +266,9 @@ class MixerDaemon:
         is turned on the Apollo, the new value is pushed to all
         subscribed clients so the UI tracks the hardware.
 
-        Meter values come from AlsaMeter (software metering from ALSA
-        PCM capture), not from hardware readback registers.
+        Meter values come from the software meter (metering.make_meter:
+        the Apollo's record channels through PipeWire, or ALSA capture),
+        not from hardware readback registers.
 
         DSP load is polled at ~1 Hz (every 50 ticks) and pushed to
         /TotalDSPLoad, /TotalPGMLoad, /TotalMEMLoad.
@@ -437,16 +440,28 @@ class MixerDaemon:
         }
 
     def _read_meter(self, entry: dict):
-        """Read a single meter value from the AlsaMeter.
+        """Read a single meter value from the software meter.
 
-        Maps device-map input/output indices to ALSA capture channels.
+        Maps the device-map channel (by its Name) to the ALSA record
+        channel that carries it; channels the Apollo doesn't record read
+        as silence.
         """
-        if entry['kind'] == 'inputs':
-            level, peak, clip = self._metering.get_input_meter(
-                entry['channel'])
+        ids = tuple(self._metering.channel_ids)
+        key = (entry['kind'], entry['channel'], entry['meter_idx'])
+        if ids != self._meter_map_ids:
+            self._meter_map = {}
+            self._meter_map_ids = ids
+        if key not in self._meter_map:
+            base = f"/devices/0/{entry['kind']}/{entry['channel']}"
+            self._meter_map[key] = meter_channel(
+                entry['kind'], entry['channel'], entry['meter_idx'],
+                self.state.get_value(f"{base}/Name/value"),
+                bool(self.state.get_value(f"{base}/Stereo/value")), ids)
+        cap = self._meter_map[key]
+        if cap is None:
+            level, peak, clip = SILENCE_DB, SILENCE_DB, False
         else:
-            level, peak, clip = self._metering.get_output_meter(
-                entry['channel'])
+            level, peak, clip = self._metering.get_channel_meter(cap)
 
         if entry['prop'] == 'level':
             return level
@@ -1721,9 +1736,10 @@ Examples:
     elif args.no_hardware:
         log.info("Software-only mode (--no-hardware)")
 
-    # Initialize software metering (ALSA PCM capture)
+    # Initialize software metering (through PipeWire when it holds the
+    # Apollo, else ALSA capture)
     if not args.no_hardware:
-        metering = AlsaMeter(device=args.alsa_device, capture_channels=22)
+        metering = make_meter(args.alsa_device)
         metering.start()
     else:
         metering = NullMeter()
@@ -1758,8 +1774,8 @@ Examples:
     log.info("  Device map: %s", device_map)
     log.info("  Controls: %d", state.control_count)
     log.info("  Hardware: %s", "connected" if hw_router else "software-only")
-    log.info("  Metering: %s", "ALSA capture" if metering.available else
-             ("starting..." if not args.no_hardware else "disabled"))
+    log.info("  Metering: %s", type(metering).__name__ if not args.no_hardware
+             else "disabled")
     log.info("  TCP:4710 (Mixer Engine): tcp://%s:%d", args.host, args.port)
     log.info("  TCP:4720 (Mixer Helper): %s",
              f"tcp://{args.host}:{helper_port}" if helper_port else "disabled")
