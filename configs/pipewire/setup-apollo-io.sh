@@ -18,6 +18,8 @@
 #   --virtual        also create Virtual In/Out loopbacks (off by default:
 #                    Virtual channels need the DSP strip engine, not there yet)
 #   --no-virtual     do not create them (the default)
+#   --extra          also create the monitoring channels: CUE (headphone)
+#                    outputs, AUX / MON / Talkback captures (off by default)
 #   --output-delay NAME=FRAMES
 #                    delay the output sink NAME (a node.name such as
 #                    apollo_line_out_12 or apollo_monitor) by FRAMES frames
@@ -43,6 +45,7 @@ MAX_WAIT=10  # seconds to wait for PipeWire
 DRY_RUN=0
 VERBOSE=0
 WITH_VIRTUAL=0
+WITH_EXTRA=0
 IO_MAP_FILE=""
 CARD=""
 RATE=48000
@@ -102,6 +105,7 @@ while [ $# -gt 0 ]; do
         --card)    [ $# -ge 2 ] || die "--card needs a number"; CARD="$2"; shift ;;
         --virtual) WITH_VIRTUAL=1 ;;
         --no-virtual) WITH_VIRTUAL=0 ;;
+        --extra)   WITH_EXTRA=1 ;;
         --output-delay) [ $# -ge 2 ] || die "--output-delay needs NAME=FRAMES"; add_delay "$2"; shift ;;
         --output-delay-file) [ $# -ge 2 ] || die "--output-delay-file needs a file"; load_delay_file "$2"; shift ;;
         --rate)    [ $# -ge 2 ] || die "--rate needs a number"; RATE="$2"; shift ;;
@@ -117,16 +121,19 @@ done
 # /proc/asound/cardN/io_map has a "record:" and a "playback:" section with
 # one line per ALSA channel:   ch  <n>  slot  <s>  0x<id>  <name>
 # ALSA channel n is PipeWire position AUXn.  The ID is (type << 8) | number:
-#   0x00/0x01/0x03 analog in or line out, 0x02 AUX bus, 0x04 ADAT,
-#   0x05 S/PDIF, 0x07 Virtual, 0x09 MON, 0x0a CUE, 0x0b Talkback.
+#   0x00/0x01/0x03 analog in (mic/line/HiZ, mic/line, line) or line out,
+#   0x02 AUX bus, 0x04 ADAT, 0x05 S/PDIF, 0x06 AES/EBU, 0x07 Virtual,
+#   0x08 MADI, 0x09 MON, 0x0a CUE, 0x0b Talkback, 0x0d Dante.
 # A channel whose slot is 65535 has no DMA slot at the current rate (the
 # firmware has fewer slots at 176.4/192 kHz) and records or plays silence;
 # its position stays put, so it is kept and only flagged.
 #
 # The order and names depend on the driver layout (io_map=0 legacy labels,
 # or the firmware descriptor, the default on the x4) and are read, not
-# assumed.  Without a readable map (older driver) the descriptor layout of
-# the Apollo x4 in S/PDIF mode (22 rec / 24 play) is used.
+# assumed.  Without a readable map (older driver, or a legacy layout with no
+# channel IDs) the descriptor layout of the Apollo x4 in S/PDIF mode (22 rec /
+# 24 play) is used, but only when the card is an Apollo x4; any other model
+# stops with an error (use --io-map FILE to give it a map).
 
 # Apollo x4, S/PDIF mode: the lines the driver prints for it
 default_io_map() {
@@ -206,6 +213,7 @@ REC_N=0; PLAY_N=0
 REC_ID=(); REC_SLOT=(); REC_NAME=()
 PLAY_ID=(); PLAY_SLOT=(); PLAY_NAME=()
 MAP_SOURCE=""
+APOLLO_CARD=""
 
 parse_io_map() {   # stdin: io_map text
     local dir ch slot hex name
@@ -247,12 +255,33 @@ count_ids() {
     echo "$n"
 }
 
+# Model name of the card: the "model" line of the io_map text, else the card's
+# name in /proc/asound/cards ("N [id]: ua_apollo - <name>")
+model_of() {   # file card
+    local m=""
+    if [ -n "$1" ] && [ -r "$1" ]; then
+        m=$(awk '/^model[ \t]/ { sub(/^model[ \t]+/, ""); sub(/ \(device type.*$/, ""); print; exit }' "$1")
+    fi
+    if [ -z "$m" ] && [ -n "$2" ]; then
+        m=$(awk -v n="$2" '$1 == n && /\]:/ { sub(/^.*\]: *[^ ]+ - /, ""); print; exit }' \
+            /proc/asound/cards 2>/dev/null || true)
+    fi
+    echo "$m"
+}
+
+use_builtin_x4() {   # why
+    log "$1, using the built-in Apollo x4 layout"
+    parse_io_map < <(default_io_map)
+    MAP_SOURCE="built-in Apollo x4 layout"
+}
+
 load_io_map() {
-    local file="$IO_MAP_FILE" card="$CARD"
+    local file="$IO_MAP_FILE" card="$CARD" model=""
     if [ -z "$file" ]; then
         [ -n "$card" ] || card=$(find_apollo_card)
         [ -n "$card" ] && file="/proc/asound/card$card/io_map"
     fi
+    APOLLO_CARD="$card"
 
     if [ -n "$file" ] && [ -r "$file" ]; then
         parse_io_map < "$file"
@@ -260,14 +289,23 @@ load_io_map() {
             MAP_SOURCE="$file"
             return
         fi
-        log "Warning: no channel IDs in $file, using the built-in x4 layout"
+        model=$(model_of "$file" "$card")
+        if [ "$model" = "Apollo x4" ]; then
+            use_builtin_x4 "Warning: no channel IDs in $file"
+            return
+        fi
+        die "no channel IDs in $file and the card is '${model:-unknown}', not an Apollo x4, so the built-in x4 layout would route to the wrong channels. Use a driver that prints channel IDs (io_map=-1), or pass the layout with --io-map FILE."
     elif [ -n "$IO_MAP_FILE" ]; then
         die "cannot read io_map file: $IO_MAP_FILE"
-    else
-        log "No io_map from the driver (older driver?), using the built-in x4 layout"
     fi
-    parse_io_map < <(default_io_map)
-    MAP_SOURCE="built-in Apollo x4 layout"
+
+    [ -n "$card" ] || die "no ALSA card driven by ua_apollo found (is the driver loaded?). Use --card N or --io-map FILE."
+    model=$(model_of "" "$card")
+    if [ "$model" = "Apollo x4" ]; then
+        use_builtin_x4 "No io_map from the driver (older driver?)"
+        return
+    fi
+    die "no io_map from the driver for card $card ('${model:-unknown}'), and the built-in layout is only for an Apollo x4. Update the driver, or pass the layout with --io-map FILE."
 }
 
 # ── Step 2: Turn the channel map into a loopback list ──
@@ -323,20 +361,65 @@ add_pair() {   # kind dir name desc idL idR
     add_item "$1" "$2" "$3" "$4" "$l" "$r"
 }
 
+# Highest channel number (low ID byte) of a type in a direction; 0 when none
+max_num() {   # dir type
+    local dir=$1 t=$2 i max id m=0
+    if [ "$dir" = rec ]; then max=$REC_N; else max=$PLAY_N; fi
+    for ((i = 0; i < max; i++)); do
+        if [ "$dir" = rec ]; then id=${REC_ID[i]:-0}; else id=${PLAY_ID[i]:-0}; fi
+        if [ $((id >> 8)) -eq "$t" ] && [ $((id & 255)) -gt "$m" ]; then m=$((id & 255)); fi
+    done
+    echo "$m"
+}
+
+# Stereo pairs 1+2, 3+4, ... of one channel type (ID = type << 8 | number);
+# a missing member skips that pair, an odd last channel gets no item
+add_typed_pairs() {   # kind dir type node_prefix desc_prefix
+    local kind=$1 dir=$2 t=$3 np=$4 dp=$5 n m
+    m=$(max_num "$dir" "$t")
+    for ((n = 1; n < m; n += 2)); do
+        add_pair "$kind" "$dir" "${np}_$n$((n + 1))" "$dp $n+$((n + 1))" \
+            $((t * 256 + n)) $((t * 256 + n + 1))
+    done
+}
+
+# The pair (n, n+1) of a bus type numbered by pair: AUX1 L/R, CUE2 L/R ...
+add_bus_pairs() {   # kind dir type node_fmt desc_fmt  (%d = pair number)
+    local kind=$1 dir=$2 t=$3 nf=$4 df=$5 n m
+    m=$(max_num "$dir" "$t")
+    for ((n = 1; n < m; n += 2)); do
+        # shellcheck disable=SC2059
+        add_pair "$kind" "$dir" "$(printf "$nf" $(((n + 1) / 2)))" \
+            "$(printf "$df" $(((n + 1) / 2)))" $((t * 256 + n)) $((t * 256 + n + 1))
+    done
+}
+
+# Types: 0x00 MIC/LINE/HIZ, 0x01 MIC/LINE, 0x03 LINE, 0x04 ADAT, 0x05 S/PDIF,
+# 0x06 AES/EBU, 0x07 VIRTUAL, 0x08 MADI, 0x09 MON, 0x0a CUE, 0x0d DANTE
 build_items() {
-    local i t n p id
+    local i t n p id idx
     local analog=()
 
-    # Analog inputs (types 0x00 / 0x01 / 0x03), in channel order
+    # Analog inputs (types 0x00 / 0x01 / 0x03), in channel order.  Mic/line
+    # inputs (types 0, 1) are "Mic n", line-only inputs (type 3) "Line In n".
     for ((i = 0; i < REC_N; i++)); do
         id=${REC_ID[i]:-0}
         t=$((id >> 8))
         case "$t" in 0|1|3) [ "$id" -ne 0 ] && analog+=("$i") ;; esac
     done
     for ((n = 0; n < ${#analog[@]}; n++)); do
-        add_item src rec "apollo_mic_$((n + 1))" "Apollo Mic $((n + 1))" "${analog[n]}"
-        if [ "$n" -eq 1 ]; then   # Mic 1+2 stereo right after Mic 2
-            add_item src rec apollo_mic_stereo "Apollo Mic 1+2" "${analog[0]}" "${analog[1]}"
+        idx=${analog[n]}
+        if [ $((REC_ID[idx] >> 8)) -eq 3 ]; then
+            add_item src rec "apollo_line_in_$((n + 1))" "Apollo Line In $((n + 1))" "$idx"
+        else
+            add_item src rec "apollo_mic_$((n + 1))" "Apollo Mic $((n + 1))" "$idx"
+        fi
+        if [ "$n" -eq 1 ]; then   # inputs 1+2 as a stereo pair right after input 2
+            if [ $((REC_ID[analog[0]] >> 8)) -ne 3 ] && [ $((REC_ID[analog[1]] >> 8)) -ne 3 ]; then
+                add_item src rec apollo_mic_stereo "Apollo Mic 1+2" "${analog[0]}" "${analog[1]}"
+            else
+                add_item src rec apollo_line_12 "Apollo Line In 1+2" "${analog[0]}" "${analog[1]}"
+            fi
         fi
     done
     for ((p = 1; p * 2 + 1 < ${#analog[@]}; p++)); do   # Line In 3+4, 5+6, ...
@@ -345,26 +428,33 @@ build_items() {
             "${analog[p * 2]}" "${analog[p * 2 + 1]}"
     done
 
+    add_typed_pairs src rec 4 apollo_adat_in "Apollo ADAT In"
     add_pair src rec apollo_spdif_in "Apollo S/PDIF In" $((0x0501)) $((0x0502))
+    add_pair src rec apollo_aes_in "Apollo AES/EBU In" $((0x0601)) $((0x0602))
+    add_typed_pairs src rec 8 apollo_madi_in "Apollo MADI In"
+    add_typed_pairs src rec 13 apollo_dante_in "Apollo Dante In"
     if [ "$WITH_VIRTUAL" -eq 1 ]; then
-        for n in 1 3 5 7; do
-            add_pair src rec "apollo_virtual_in_$n$((n + 1))" \
-                "Apollo Virtual In $n+$((n + 1))" $((0x0700 + n)) $((0x0700 + n + 1))
-        done
+        add_typed_pairs src rec 7 apollo_virtual_in "Apollo Virtual In"
+    fi
+    if [ "$WITH_EXTRA" -eq 1 ]; then
+        add_bus_pairs src rec 2 "apollo_aux%d_in" "Apollo AUX %d In"
+        add_pair src rec apollo_monitor_in "Apollo Monitor In" $((0x0901)) $((0x0902))
+        add_pair src rec apollo_talkback "Apollo Talkback" $((0x0b01)) $((0x0b02))
     fi
 
-    # Playback: MON L/R, Line outs (type 0x03) in pairs, S/PDIF, Virtual
+    # Playback: MON L/R, Line outs (type 0x03) in pairs, digital, Virtual
     add_pair snk play apollo_monitor "Apollo Monitor L/R" $((0x0901)) $((0x0902))
-    for n in 1 3 5 7; do
-        add_pair snk play "apollo_line_out_$n$((n + 1))" \
-            "Apollo Line Out $n+$((n + 1))" $((0x0300 + n)) $((0x0300 + n + 1))
-    done
+    add_typed_pairs snk play 3 apollo_line_out "Apollo Line Out"
+    add_typed_pairs snk play 4 apollo_adat_out "Apollo ADAT Out"
     add_pair snk play apollo_spdif_out "Apollo S/PDIF Out" $((0x0501)) $((0x0502))
+    add_pair snk play apollo_aes_out "Apollo AES/EBU Out" $((0x0601)) $((0x0602))
+    add_typed_pairs snk play 8 apollo_madi_out "Apollo MADI Out"
+    add_typed_pairs snk play 13 apollo_dante_out "Apollo Dante Out"
     if [ "$WITH_VIRTUAL" -eq 1 ]; then
-        for n in 1 3 5 7; do
-            add_pair snk play "apollo_virtual_out_$n$((n + 1))" \
-                "Apollo Virtual Out $n+$((n + 1))" $((0x0700 + n)) $((0x0700 + n + 1))
-        done
+        add_typed_pairs snk play 7 apollo_virtual_out "Apollo Virtual Out"
+    fi
+    if [ "$WITH_EXTRA" -eq 1 ]; then
+        add_bus_pairs snk play 10 "apollo_cue%d" "Apollo CUE %d"
     fi
     [ ${#ITEMS[@]} -gt 0 ] || die "no usable channels in the io_map"
 }
@@ -542,22 +632,55 @@ log "PipeWire is up"
 
 # ── Step 5: Find Apollo ALSA device and set pro-audio profile ──
 
-# Find the device ID by matching "Apollo" in wpctl device list
-DEVICE_ID=$(wpctl status 2>/dev/null | grep 'Apollo x4' | grep '\[alsa\]' | grep -oP '[0-9]+' | head -1 || true)
-
-# Fallback: search pw-dump for driver name
-if [ -z "$DEVICE_ID" ]; then
-    DEVICE_ID=$(pw-dump 2>/dev/null | python3 -c "
+# The Apollo is the card driven by ua_apollo whatever its name ("Apollo x4",
+# "Apollo x8p", "Unknown UA Device"): match PipeWire's alsa.driver_name, and
+# alsa.card when the card number is known.
+PW_QUERY_PY='
 import json, sys
-for obj in json.load(sys.stdin):
-    props = obj.get('info', {}).get('props', {})
-    if props.get('alsa.driver_name') == 'ua_apollo' and obj.get('type') == 'PipeWire:Interface:Device':
-        print(obj['id']); break
-" 2>/dev/null || true)
-fi
+want, mode = sys.argv[1], sys.argv[2]
+try:
+    objs = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+inp = out = dev = ""
+for obj in objs:
+    props = obj.get("info", {}).get("props", {})
+    if props.get("alsa.driver_name") != "ua_apollo":
+        continue
+    if want and str(props.get("alsa.card", want)) != want:
+        continue
+    if obj.get("type") == "PipeWire:Interface:Device" and not dev:
+        dev = str(obj["id"])
+    name = props.get("node.name", "")
+    if "input" in name and not inp:
+        inp = name
+    if "output" in name and not out:
+        out = name
+print({"device": dev, "node-in": inp, "node-out": out}[mode])
+'
+pw_query() { pw-dump 2>/dev/null | python3 -c "$PW_QUERY_PY" "$APOLLO_CARD" "$1" 2>/dev/null || true; }
+
+# wpctl device id of the Apollo; wpctl status text only as a fallback
+find_device_id() {
+    local id name
+    id=$(pw_query device)
+    if [ -z "$id" ]; then
+        name=$(model_of "" "$APOLLO_CARD")
+        id=$(wpctl status 2>/dev/null | grep '\[alsa\]' | grep -F "${name:-Apollo}" \
+            | grep -oP '[0-9]+' | head -1 || true)
+    fi
+    echo "$id"
+}
+
+DEVICE_ID=""
+for _ in 1 2 3 4 5; do
+    DEVICE_ID=$(find_device_id)
+    [ -n "$DEVICE_ID" ] && break
+    sleep 1
+done
 
 if [ -z "$DEVICE_ID" ]; then
-    die "Apollo device not found in PipeWire. Is the driver loaded?"
+    die "Apollo device (alsa.driver_name ua_apollo) not found in PipeWire. Is the driver loaded?"
 fi
 
 log "Found Apollo device ID: $DEVICE_ID"
@@ -576,19 +699,8 @@ sleep 1
 # ── Step 6: Discover ALSA node names ──
 
 # Find Apollo pro-audio node names via pw-dump (reliable, handles any PCI address)
-eval "$(pw-dump 2>/dev/null | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-inp = out = ''
-for obj in data:
-    props = obj.get('info', {}).get('props', {})
-    if props.get('alsa.driver_name') != 'ua_apollo': continue
-    name = props.get('node.name', '')
-    if 'input' in name and not inp: inp = name
-    if 'output' in name and not out: out = name
-print(f'INPUT_NODE=\"{inp}\"')
-print(f'OUTPUT_NODE=\"{out}\"')
-" 2>/dev/null || echo 'INPUT_NODE="" ; OUTPUT_NODE=""')"
+INPUT_NODE=$(pw_query node-in)
+OUTPUT_NODE=$(pw_query node-out)
 
 [ -z "$INPUT_NODE" ] && die "Apollo pro-audio input node not found. Is pro-audio profile active?"
 [ -z "$OUTPUT_NODE" ] && die "Apollo pro-audio output node not found. Is pro-audio profile active?"
@@ -620,7 +732,12 @@ if systemctl --user is-active pipewire.service &>/dev/null; then
 
     # Re-set pro-audio profile after restart (lost during restart)
     sleep 1
-    NEW_DEVID=$(wpctl status 2>/dev/null | grep 'Apollo x4' | grep '\[alsa\]' | grep -oP '[0-9]+' | head -1 || true)
+    NEW_DEVID=""
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        NEW_DEVID=$(find_device_id)
+        [ -n "$NEW_DEVID" ] && break
+        sleep 1
+    done
     if [ -n "$NEW_DEVID" ]; then
         wpctl set-profile "$NEW_DEVID" 1 2>/dev/null || true
         log "Re-set pro-audio profile (device $NEW_DEVID)"

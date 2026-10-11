@@ -65,9 +65,27 @@ if ! grep -q 'ua_apollo' /proc/asound/cards 2>/dev/null; then
     exit 0
 fi
 
+# Device id of the ua_apollo ALSA device in the PipeWire graph, matched by
+# alsa.driver_name (the card name varies by model: "Apollo x4", "Apollo x8p",
+# "Unknown UA Device" ...); empty until WirePlumber has created it.
+apollo_device_id() {
+    pw_run pw-dump 2>/dev/null | python3 -c '
+import json, sys
+try:
+    objs = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for o in objs:
+    props = o.get("info", {}).get("props", {})
+    if o.get("type") == "PipeWire:Interface:Device" and props.get("alsa.driver_name") == "ua_apollo":
+        print(o["id"])
+        break
+' 2>/dev/null
+}
+
 # Wait for PipeWire to see the Apollo ALSA card (up to 60s)
 for _ in $(seq 1 30); do
-    pw_run wpctl status 2>/dev/null | grep -q 'Apollo.*\[alsa\]' && break
+    [ -n "$(apollo_device_id)" ] && break
     sleep 2
 done
 
@@ -89,8 +107,7 @@ done
 
 # Re-set pro-audio profile (WirePlumber does not reliably auto-set it)
 for _ in $(seq 1 10); do
-    DEV_ID=$(pw_run wpctl status 2>/dev/null | \
-        grep 'Apollo.*\[alsa\]' | grep -oP '[0-9]+' | head -1)
+    DEV_ID=$(apollo_device_id)
     [ -n "$DEV_ID" ] && break
     sleep 2
 done

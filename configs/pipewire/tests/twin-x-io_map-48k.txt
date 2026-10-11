@@ -1,0 +1,36 @@
+# synthesized from devices/apollo-twin-x.json (tools/gen-io-map-fixture.py), not a hardware capture
+io_map		1 (descriptor layout, auto)
+model		Apollo Twin X (device type 0x00)
+rate		48000 Hz
+
+record: 16 ALSA channels, DMA frame 17 slots, S/PDIF mode
+  ch  0  slot  0  0x0001  MIC/LINE/HIZ 1
+  ch  1  slot  1  0x0002  MIC/LINE/HIZ 2
+  ch  2  slot  2  0x0901  MON L
+  ch  3  slot  3  0x0902  MON R
+  ch  4  slot  4  0x0701  VIRTUAL 1
+  ch  5  slot  5  0x0702  VIRTUAL 2
+  ch  6  slot  6  0x0703  VIRTUAL 3
+  ch  7  slot  7  0x0704  VIRTUAL 4
+  ch  8  slot  8  0x0501  S/PDIF L
+  ch  9  slot  9  0x0502  S/PDIF R
+  ch 10  slot 10  0x0201  AUX1 L
+  ch 11  slot 11  0x0202  AUX1 R
+  ch 12  slot 12  0x0203  AUX2 L
+  ch 13  slot 13  0x0204  AUX2 R
+  ch 14  slot 14  0x0b01  TALKBACK 1
+  ch 15  slot 15  0x0b02  TALKBACK 2
+record descriptor: 16 slots, word5 0x0
+
+playback: 10 ALSA channels, DMA frame 11 slots, S/PDIF mode
+  ch  0  slot  0  0x0901  MON L
+  ch  1  slot  1  0x0902  MON R
+  ch  2  slot  2  0x0a03  CUE2 L
+  ch  3  slot  3  0x0a04  CUE2 R
+  ch  4  slot  4  0x0701  VIRTUAL 1
+  ch  5  slot  5  0x0702  VIRTUAL 2
+  ch  6  slot  6  0x0703  VIRTUAL 3
+  ch  7  slot  7  0x0704  VIRTUAL 4
+  ch  8  slot  8  0x0a01  CUE1 L
+  ch  9  slot  9  0x0a02  CUE1 R
+playback descriptor: 10 slots, word5 0x0

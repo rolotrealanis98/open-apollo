@@ -536,15 +536,40 @@ elif command -v wpctl > /dev/null 2>&1; then
     sleep 2
 
     # Find the Apollo device ID in PipeWire
-    APOLLO_DEV_ID=$(pw_run wpctl status 2>/dev/null | \
-        grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+    # (by driver name: the card is not always called "Apollo ..." - an
+    # unidentified model is "Unknown UA Device")
+    APOLLO_DEV_ID=$(pw_run pw-dump 2>/dev/null | python3 -c '
+import json, sys
+try:
+    objs = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for o in objs:
+    props = o.get("info", {}).get("props", {})
+    if o.get("type") == "PipeWire:Interface:Device" and props.get("alsa.driver_name") == "ua_apollo":
+        print(o["id"])
+        break
+' 2>/dev/null)
+    if [ -z "$APOLLO_DEV_ID" ]; then
+        APOLLO_DEV_ID=$(pw_run wpctl status 2>/dev/null | \
+            grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+    fi
 
     if [ -n "$APOLLO_DEV_ID" ]; then
         pw_run wpctl set-profile "$APOLLO_DEV_ID" 1 2>/dev/null
         sleep 1
         # Verify sink was created
         if pw_run wpctl status 2>/dev/null | grep -qi "Apollo.*Pro\|apollo.*sink"; then
-            ok "PipeWire pro-audio profile active (24 out + 22 in channels)"
+            # channel counts of this model, from the driver's io_map
+            APOLLO_CARD=$(awk '/^ *[0-9]+ \[.*\]: *ua_apollo( |$)/ { print $1; exit }' /proc/asound/cards 2>/dev/null)
+            IOMAP_FILE="/proc/asound/card${APOLLO_CARD:-x}/io_map"
+            N_OUT=$(awk '$1 == "playback:" && $3 == "ALSA" { print $2; exit }' "$IOMAP_FILE" 2>/dev/null)
+            N_IN=$(awk '$1 == "record:" && $3 == "ALSA" { print $2; exit }' "$IOMAP_FILE" 2>/dev/null)
+            if [ -n "$N_OUT" ] && [ -n "$N_IN" ]; then
+                ok "PipeWire pro-audio profile active ($N_OUT out + $N_IN in channels)"
+            else
+                ok "PipeWire pro-audio profile active"
+            fi
             # Set as default
             SINK_ID=$(pw_run wpctl status 2>/dev/null | \
                 grep -i 'apollo.*pro\|apollo.*sink' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
