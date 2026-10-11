@@ -6,7 +6,7 @@
   "mixer_class": "Cauldron",
   "mixer_type_id": 15,
   "preamps": 2,
-  "hiz": 2,
+  "hiz": 1,
   "talkback": false,
   "digital_io": "spdif",
   "desktop": true,

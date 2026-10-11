@@ -6,7 +6,7 @@
   "mixer_class": "Stretch",
   "mixer_type_id": 7,
   "preamps": 2,
-  "hiz": 2,
+  "hiz": 1,
   "talkback": true,
   "digital_io": "spdif",
   "desktop": true,

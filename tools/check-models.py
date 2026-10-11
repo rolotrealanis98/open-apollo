@@ -53,6 +53,20 @@ DIRS = ('record', 'playback')
 # difference there is a warning, on these two it is an error.
 LEGACY_VERIFIED = {0x1F, 0x22}
 
+# Mixer classes whose engine exposes the HiZ control on the first input
+# only (parity map 16 sec. 3.1): their route tables tag both analog inputs
+# MicLineHiZ, so the route-derived count over-counts.
+HIZ_FIRST_INPUT_ONLY = frozenset((
+    'Armstrong', 'Stretch', 'Lavern', 'LavernG2', 'Shirley',
+    'Conrad', 'ApolloSolo', 'Cauldron'))
+
+
+def expected_hiz(d, route_hiz):
+    """HiZ inputs the engine exposes, given the MicLineHiZ route count."""
+    if d.get('mixer_class') in HIZ_FIRST_INPUT_ONLY:
+        return min(route_hiz, 1)
+    return route_hiz
+
 
 def load_generator():
     path = os.path.join(ROOT, 'tools', 'gen-driver-models.py')
@@ -265,8 +279,9 @@ def check_device(d, rep, type_io):
         rep.err(rel, f'hiz {hiz} > preamps {pre}')
     if pre > 8:
         rep.err(rel, f'preamps {pre} > UA_MAX_PREAMP_CH')
-    if hiz != hiz_routes:
-        rep.err(rel, f'hiz {hiz} but {hiz_routes} MicLineHiZ record routes')
+    if hiz != expected_hiz(d, hiz_routes):
+        rep.err(rel, f'hiz {hiz} but {hiz_routes} MicLineHiZ record routes'
+                     f' (engine exposes {expected_hiz(d, hiz_routes)})')
     if pre != mic_routes:
         rep.err(rel, f'preamps {pre} but {mic_routes} MicLine/MicLineHiZ '
                      f'record routes')
@@ -324,6 +339,11 @@ def check_device(d, rep, type_io):
     if (d.get('digital_io') == 'aes') != aes:
         rep.err(rel, f'digital_io={d.get("digital_io")!r} but AES record '
                      f'routes: {aes}')
+    madi = any(e.get('name', '').startswith('MADI')
+               for e in d['routes']['LoMid'].get('record', []))
+    if (d.get('digital_io') == 'madi') != madi:
+        rep.err(rel, f'digital_io={d.get("digital_io")!r} but MADI record '
+                     f'routes: {madi}')
     vmax = rules.get('virtual_max')
     virt = [c & 0xff for c in rec if c >> 8 == gen.TYPE_VIRTUAL]
     if vmax and virt and max(virt) <= vmax:
@@ -591,7 +611,8 @@ def check_reference(devs, ref, rep):
         want = {'preamps': c['PreampCount'][0],
                 'talkback': bool(c['SupportsTalkback'][0]),
                 'desktop': bool(c['IsDesktop'][0]),
-                'digital_io': 'aes' if c['SPDIFIsAESEBU'][0] else 'spdif'}
+                'digital_io': ('madi' if d['mixer_class'] == 'M64' else
+                               'aes' if c['SPDIFIsAESEBU'][0] else 'spdif')}
         for k, v in want.items():
             if d.get(k) != v:
                 rep.err(rel, f'{k} = {d.get(k)!r}, {where}/caps.json says '
@@ -606,7 +627,7 @@ def check_reference(devs, ref, rep):
         if row[1] != d['mixer_class'] or row[2] != d['mixer_type_id']:
             rep.err(rel, f'mixer class/type {d["mixer_class"]}/'
                          f'{d["mixer_type_id"]}, {where} says {row[1]}/{row[2]}')
-        if (row[5], row[6]) != (d['preamps'], d['hiz']):
+        if (row[5], expected_hiz(d, row[6])) != (d['preamps'], d['hiz']):
             rep.err(rel, f'preamps/hiz {d["preamps"]}/{d["hiz"]}, {where} '
                          f'says {row[5]}/{row[6]}')
         lists = route_lists(d, Report())

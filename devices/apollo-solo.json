@@ -9,7 +9,7 @@
   "mixer_class": "ApolloSolo",
   "mixer_type_id": 16,
   "preamps": 2,
-  "hiz": 2,
+  "hiz": 1,
   "talkback": false,
   "digital_io": "spdif",
   "desktop": true,

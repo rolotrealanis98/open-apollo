@@ -8,7 +8,7 @@
   "mixer_class": "Conrad",
   "mixer_type_id": 8,
   "preamps": 2,
-  "hiz": 2,
+  "hiz": 1,
   "talkback": false,
   "digital_io": "spdif",
   "desktop": true,
