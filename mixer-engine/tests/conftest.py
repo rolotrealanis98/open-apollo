@@ -106,7 +106,8 @@ def make_readback(*, words=None, mon_raw=None, mute=False, mono=False,
     ch 0-3 go to word 0, 4-7 to word 5.
     gains_c: four GainC values (dB - 9), 6 bits at shifts 0/6/16/22.
     clock_lock: None (bit 30 clear) or the lock state (bit 30 set).
-    focus: None (word 0 bit 27 clear), 'monitor' or 'headphone'.
+    focus: None (word 0 bit 27 clear), 'monitor', 'headphone' or
+    'headphone2' (also word 5 bit 30).
     sel_input: front-panel preamp, word 3 [30:28].
     """
     w = list(words) if words else [0] * 40
@@ -115,7 +116,9 @@ def make_readback(*, words=None, mon_raw=None, mute=False, mono=False,
         for n in fl:
             w[0 if ch < 4 else 5] |= 1 << ((ch & 3) * 6 + names.index(n))
     if focus is not None:
-        w[0] |= 1 << 27 | int(focus == "headphone") << 26
+        w[0] |= 1 << 27 | int(focus.startswith("headphone")) << 26
+        if focus == "headphone2":
+            w[5] |= 1 << 30
     if hiz[0]:
         w[0] |= 1 << 24
     if hiz[1]:

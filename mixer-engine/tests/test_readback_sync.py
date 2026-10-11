@@ -76,6 +76,17 @@ class TestFrontPanel:
         sync(daemon, backend, focus="headphone")
         assert selected(tree) == ({14}, set())
 
+    def test_focus_on_headphone_2_is_cue_2(self, daemon, backend, tree):
+        # x4, titan 2026-10-11: word 5 bit 30 while the HP2 knob is selected
+        cue2 = daemon.hw_router.output_index("cue", 1)
+        assert cue2 is not None
+        rb = sync(daemon, backend, focus="headphone")
+        sync(daemon, backend, last=rb, focus="headphone2")
+        assert selected(tree) == ({cue2}, set())
+        rb2 = daemon.hw_router.poll_hw_readback()
+        sync(daemon, backend, last=rb2, focus="headphone")
+        assert selected(tree) == ({14}, set())
+
     def test_no_focus_selects_the_input(self, daemon, backend, tree):
         sync(daemon, backend, sel_input=2)
         assert selected(tree) == (set(), {2})

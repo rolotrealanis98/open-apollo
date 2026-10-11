@@ -1223,11 +1223,18 @@ class MixerDaemon:
         router = self.hw_router
         force = last is None
         select_inputs = False
-        if force or words[0] != last[0]:
+        if force or words[0] != last[0] or (
+                rb.get("hp_focus_hp2") != last_rb.get("hp_focus_hp2")):
             focus = rb["hp_focus_valid"]
             on_hp = focus and rb["hp_focus_headphone"]
-            for out, val in ((router.monitor_output_index(), focus and not on_hp),
-                             (router.output_index("cue", 0), on_hp)):
+            hp2_out = router.output_index("cue", 1)
+            on_hp2 = on_hp and bool(rb.get("hp_focus_hp2")) and \
+                hp2_out is not None
+            outs = [(router.monitor_output_index(), focus and not on_hp),
+                    (router.output_index("cue", 0), on_hp and not on_hp2)]
+            if hp2_out is not None:
+                outs.append((hp2_out, on_hp2))
+            for out, val in outs:
                 if out is not None:
                     self._push_if_present(
                         f"/devices/0/outputs/{out}/SelectedOnFront", val, force)

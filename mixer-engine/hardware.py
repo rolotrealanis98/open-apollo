@@ -4860,7 +4860,8 @@ class HardwareRouter:
                      panel
             data[5], data[7]: the same as words 0 and 3 for preamps 5-8
                      (models with more than four); on the x4 data[7] [7:0]
-                     is the HP2 level instead (verified)
+                     is the HP2 level and data[5] bit 30 says the front
+                     panel is on HP2 (verified)
             data[6]: bit 8 talkback, bit 31 clock locked when bit 30 is set
                      (verified); [29:28] alt-monitor selection
             data[8]-[25]: level meters the DSP writes (metering.py
@@ -4945,6 +4946,11 @@ class HardwareRouter:
         # the monitor) or on the preamp in word 3 [30:28]
         result["hp_focus_valid"] = bool(d0 & (1 << 27))
         result["hp_focus_headphone"] = bool(d0 & (1 << 26))
+        # Headphone 2 rather than 1: word 5 bit 30 on models with four
+        # preamps or fewer, where word 5 holds no preamp flags (x4, titan
+        # 2026-10-11: set while the HP2 knob was the front-panel focus)
+        result["hp_focus_hp2"] = (len(self.preamp_inputs()) <= 4
+                                  and bool(data[5] & (1 << 30)))
         result["front_panel_input"] = (data[3] >> 28) & 7
 
         # Temperature byte (kPropTemperature; the Mixer Engine passes the
