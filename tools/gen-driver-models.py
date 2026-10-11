@@ -149,8 +149,10 @@ def load_models():
             flags.append('UA_MODEL_F_HP1')
         if 'HP 2' in outputs:
             flags.append('UA_MODEL_F_HP2')
+        adc, adc_boards = adc_latency(d.get('latency'), rel)
         models.append({
             'slug': slug, 'path': rel, 'name': d['model'], 'types': dtypes,
+            'adc': adc, 'adc_boards': adc_boards,
             'type_names': names, 'preamps': preamps, 'hiz': hiz,
             'flags': flags, 'routes': routes, 'legacy_mode': legacy_mode,
             'toslink': toslink, 'default_in': default_in,
@@ -160,6 +162,39 @@ def load_models():
     if not models:
         raise GenError('no models with device_types found in devices/')
     return models
+
+
+LATENCY_RATES = [44100, 48000, 88200, 96000, 176400, 192000]
+
+
+def adc_latency(lat, rel):
+    """Input (ADC) delay in milli-frames per rate (UA_RATE_44100..192000),
+    and {board id: row} where the Mixer Engine's GetInputDelay varies by
+    analog board (devices/*.json "latency").  ([], {}) without data."""
+    if not lat:
+        return [], {}
+    if lat.get('rates') != LATENCY_RATES:
+        raise GenError(f'{rel}: latency.rates must be {LATENCY_RATES}')
+    inp = lat.get('input') or {}
+
+    def row(vals, what):
+        if not isinstance(vals, list) or len(vals) != len(LATENCY_RATES):
+            raise GenError(f'{rel}: latency.input.{what} needs 6 values')
+        out = [int(round(float(v) * 1000)) for v in vals]
+        if any(v < 0 or v > 0xFFFF for v in out):
+            raise GenError(f'{rel}: latency.input.{what} out of range')
+        return out
+
+    default = row(inp.get('default'), 'default') if 'default' in inp else []
+    boards = {}
+    for k, vals in (inp.get('boards') or {}).items():
+        # A key is one board id or a comma list ("1,2,3,4,5,6,7")
+        for part in str(k).split(','):
+            bid = int(part)
+            if not 0 <= bid < 8:
+                raise GenError(f'{rel}: latency board id {k} out of range')
+            boards[bid] = row(vals, f'boards.{k}')
+    return default, boards
 
 
 def cident(s):
@@ -229,6 +264,18 @@ def generate(models):
         w(f'\t.toslink = UA_TOSLINK_{TOSLINK_RULES[m["toslink"]]},')
         w(f'\t.default_in_mode = UA_DIG_{m["default_in"].upper()},')
         w(f'\t.adat_mid_rate_max = {m["adat_mid"]},')
+        if m['adc']:
+            w('\t.adc_mframes = { 0, ' +
+              ', '.join(str(v) for v in m['adc']) + ' },')
+        if m['adc_boards']:
+            mask = 0
+            w('\t.adc_board_mframes = {')
+            for b, vals in sorted(m['adc_boards'].items()):
+                mask |= 1 << b
+                w(f'\t\t[{b}] = {{ 0, ' + ', '.join(str(v) for v in vals)
+                  + ' },')
+            w('\t},')
+            w(f'\t.adc_boards = 0x{mask:02x},')
         w('\t.routes = {')
         for band in BANDS:
             w(f'\t\t[UA_RATE_BAND_{band.upper()}] = {{')

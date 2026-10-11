@@ -1054,6 +1054,7 @@ struct ua_monitor_state {
 #define UA_MODEL_F_DESKTOP      BIT(2)
 #define UA_MODEL_F_HP1          BIT(3)  /* mixer output "HP 1" */
 #define UA_MODEL_F_HP2          BIT(4)  /* mixer output "HP 2" */
+#define UA_MODEL_BOARDS         8       /* analog board ids, readback w33 [28:26] */
 
 struct ua_route_list {
 	const u16 *ids;         /* UA channel IDs, ALSA channel order */
@@ -1069,6 +1070,14 @@ struct ua_model_desc {
 	unsigned int toslink;           /* UA_TOSLINK_* route-list rule */
 	unsigned int default_in_mode;   /* UA_DIG_*: default TOSLink input */
 	unsigned int adat_mid_rate_max; /* 0, or last ADAT shown at 88.2/96k */
+	/*
+	 * Input (ADC) delay in milli-frames per rate index (UA_RATE_*, index 0
+	 * unused): the Mixer Engine's GetInputDelay(rate, analog board id).
+	 * A board with its own row has bit n set in adc_boards.
+	 */
+	u16 adc_mframes[UA_RATE_192000 + 1];
+	u16 adc_board_mframes[UA_MODEL_BOARDS][UA_RATE_192000 + 1];
+	u8 adc_boards;
 	struct ua_route_list routes[UA_RATE_BANDS][UA_DIG_MODES][UA_DIRS];
 };
 

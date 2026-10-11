@@ -1937,21 +1937,26 @@ static u32 ua_frame_cfg_for_rate(unsigned int rate_index)
 }
 
 /*
- * Converter latency in milli-frames per rate index (parity/12 L05, the
- * Mixer Engine's MixerTypeFreud::GetInputDelay for the analog input path).
- * Apollo x4 only; every other model reports 0 until its tables are read.
- * Index 0 is unused.  There is no output entry: the DAC figure depends on a
- * flag and an IO type the x4 values for which are not pinned down yet, so
- * playback reports the safety offset alone.
+ * Input (ADC) converter latency in milli-frames at @rate_index: the Mixer
+ * Engine's MixerType*::GetInputDelay(rate, analog board id), generated per
+ * model from devices/<model>.json (me-model-rows-2026-10-11.md).  The board id is
+ * readback word 33 [28:26] (titan's x4: 0, 5 frames below 100 kHz and 6
+ * above; board 2 has its own fractional table).  0 without model data.
+ * There is no output entry: playback reports the safety offset alone.
  */
-static const u16 ua_x4_adc_mframes[UA_RATE_192000 + 1] = {
-	[UA_RATE_44100]  = 4807,
-	[UA_RATE_48000]  = 4796,
-	[UA_RATE_88200]  = 4681,
-	[UA_RATE_96000]  = 4658,
-	[UA_RATE_176400] = 4428,
-	[UA_RATE_192000] = 4383,
-};
+static u32 ua_adc_mframes(const struct ua_device *ua, unsigned int rate_index)
+{
+	const struct ua_model_desc *m = ua->audio.model;
+	unsigned int board = 0;
+
+	if (!m)
+		return 0;
+	if (ua->mixer_rb_seen)
+		board = UA_RB_BOARD_ID(ua->mixer_rb_data[33]);
+	if (m->adc_boards & BIT(board))
+		return m->adc_board_mframes[board][rate_index];
+	return m->adc_mframes[rate_index];
+}
 
 /*
  * The delay the driver knows about, in frames at @rate_index, for
@@ -1965,12 +1970,12 @@ static unsigned int ua_known_delay(const struct ua_device *ua,
 {
 	u32 sfty = 0, conv = 0;
 
-	if (rate_index >= UA_RATE_44100 && rate_index <= UA_RATE_192000 &&
-	    ua_uses_audio_extension(ua->device_type)) {
+	/* FRAME_CFG is written for every model, so its offset is reported too */
+	if (rate_index >= UA_RATE_44100 && rate_index <= UA_RATE_192000) {
 		if (dir == UA_DIR_PLAY)
 			sfty = ua_frame_cfg_for_rate(rate_index);
-		else if (ua->device_type == UA_DEV_APOLLO_X4)
-			conv = ua_x4_adc_mframes[rate_index];
+		else
+			conv = ua_adc_mframes(ua, rate_index);
 	}
 	if (safety)
 		*safety = sfty;
