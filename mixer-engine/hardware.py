@@ -451,6 +451,14 @@ CLOCK_SOURCE_MAP = {
     "S/PDIF": 0x00,
     "ADAT": 0x05,
     "Word Clock": 0x07,
+    "Dante": 0x09,
+    # "AES/EBU" and "MADI" are left out on purpose: the device maps of the
+    # A16, x16 and Rack offer them, but no UAD2ClockSource value for either
+    # is known (kext-rate-meters-hiz-2026-10-10.md Q4 lists only the five
+    # above), and writing a guess would select the wrong sync source.
+    # A client selecting them gets the "unknown value" warning and nothing
+    # reaches the driver.  The driver also rejects values the device does
+    # not advertise (ua_clock_source_valid).
 }
 VALID_SAMPLE_RATES = {44100, 48000, 88200, 96000, 176400, 192000}
 

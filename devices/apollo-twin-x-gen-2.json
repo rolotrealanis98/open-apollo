@@ -14,6 +14,7 @@
   "desktop": true,
   "cue_buses": {"default": 2, "max": 2},
   "talkback_synch_in": 10,
+  "clock_sources": ["Internal", "S/PDIF"],
   "route_rules": {"toslink": "input-mode", "virtual_max": 4, "adat_mid_rate_max": 4, "default_input": "spdif"},
   "legacy_digital_mode": "spdif",
   "channel_counts": {

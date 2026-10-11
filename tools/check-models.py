@@ -60,6 +60,10 @@ HIZ_FIRST_INPUT_ONLY = frozenset((
     'Armstrong', 'Stretch', 'Lavern', 'LavernG2', 'Shirley',
     'Conrad', 'ApolloSolo', 'Cauldron'))
 
+# Names a "clock_sources" list may use (the device map's /ClockSource names).
+CLOCK_SOURCE_NAMES = ('Internal', 'Word Clock', 'ADAT', 'S/PDIF', 'AES/EBU',
+                      'Dante', 'MADI')
+
 
 def expected_hiz(d, route_hiz):
     """HiZ inputs the engine exposes, given the MicLineHiZ route count."""
@@ -344,6 +348,18 @@ def check_device(d, rep, type_io):
     if (d.get('digital_io') == 'madi') != madi:
         rep.err(rel, f'digital_io={d.get("digital_io")!r} but MADI record '
                      f'routes: {madi}')
+    cs = d.get('clock_sources')
+    if cs is not None:
+        bad = [n for n in cs if n not in CLOCK_SOURCE_NAMES]
+        if bad or not cs or cs[0] != 'Internal' or len(set(cs)) != len(cs):
+            rep.err(rel, f'clock_sources {cs!r}: must start with Internal, '
+                         f'be unique and use {CLOCK_SOURCE_NAMES}')
+        digital = {'aes': 'AES/EBU', 'madi': 'MADI'}.get(d.get('digital_io'))
+        if digital and digital not in cs:
+            rep.err(rel, f'clock_sources lacks {digital} (digital_io '
+                         f'{d.get("digital_io")!r})')
+        if has_adat and 'ADAT' not in cs and rules.get('default_input') == 'adat':
+            rep.err(rel, 'default_input adat but no ADAT clock source')
     vmax = rules.get('virtual_max')
     virt = [c & 0xff for c in rec if c >> 8 == gen.TYPE_VIRTUAL]
     if vmax and virt and max(virt) <= vmax:

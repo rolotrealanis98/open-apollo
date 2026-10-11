@@ -129,7 +129,8 @@ class TestTalkback:
 
 class TestClockSource:
     @pytest.mark.parametrize("name, hw", [
-        ("Internal", 0x0C), ("S/PDIF", 0x00), ("ADAT", 0x05), ("Word Clock", 0x07)])
+        ("Internal", 0x0C), ("S/PDIF", 0x00), ("ADAT", 0x05), ("Word Clock", 0x07),
+        ("Dante", 0x09)])
     def test_names(self, router, backend, name, hw):
         router.on_set("/ClockSource/value", name)
         assert backend.driver_params == [(DRIVER_PARAM_CLOCK_SOURCE, hw)]
@@ -137,7 +138,14 @@ class TestClockSource:
 
     def test_map_matches_expected_values(self):
         assert CLOCK_SOURCE_MAP == {
-            "Internal": 0x0C, "S/PDIF": 0x00, "ADAT": 0x05, "Word Clock": 0x07}
+            "Internal": 0x0C, "S/PDIF": 0x00, "ADAT": 0x05, "Word Clock": 0x07,
+            "Dante": 0x09}
+
+    @pytest.mark.parametrize("name", ["AES/EBU", "MADI"])
+    def test_sources_without_a_known_driver_value_are_not_written(
+            self, router, backend, name):
+        router.on_set("/ClockSource/value", name)
+        assert backend.driver_params == []
 
     def test_unknown_name_ignored(self, router, backend):
         router.on_set("/ClockSource/value", "Bogus")

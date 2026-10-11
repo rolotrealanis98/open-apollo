@@ -15,6 +15,7 @@
   "desktop": false,
   "cue_buses": {"default": 2, "max": 4},
   "talkback_synch_in": 10,
+  "clock_sources": ["Internal", "Word Clock", "ADAT"],
   "route_rules": {"toslink": "per-direction", "virtual_max": null, "adat_mid_rate_max": null, "default_input": "adat"},
   "legacy_digital_mode": "spdif",
   "channel_counts": {
