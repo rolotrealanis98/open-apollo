@@ -6162,6 +6162,36 @@ void ua_mixer_sync_readback(struct ua_device *ua)
 }
 
 /*
+ * /proc/asound/cardN/mixer_state: the readback fields that have no control
+ * (read-only state).  parity/14-mixer-params.md section 7.
+ */
+static void ua_mixer_state_proc_read(struct snd_info_entry *entry,
+				     struct snd_info_buffer *buf)
+{
+	struct ua_device *ua = entry->private_data;
+	u32 rb[UA_MIXER_RB_WORDS];
+	bool seen;
+
+	mutex_lock(&ua->lock);
+	memcpy(rb, ua->mixer_rb_data, sizeof(rb));
+	seen = ua->mixer_rb_seen;
+	mutex_unlock(&ua->lock);
+
+	if (!seen) {
+		snd_iprintf(buf, "no mixer readback yet\n");
+		return;
+	}
+	snd_iprintf(buf, "headphone_focus\t%s\n",
+		    !UA_RB_HP_FOCUS_VALID(rb[0]) ? "unset" :
+		    UA_RB_HP_FOCUS_HP(rb[0]) ? "headphone" : "monitor");
+	snd_iprintf(buf, "selected_input\t%u\n", UA_RB_SEL_INPUT(rb[3]));
+	snd_iprintf(buf, "altmon_select\t%u\n", UA_RB_ALTMON_SEL(rb[6]));
+	snd_iprintf(buf, "low_noise\t%u\n", UA_RB_LOW_NOISE(rb[2]));
+	snd_iprintf(buf, "temperature_raw\t%u\n", UA_RB_TEMPERATURE(rb[17]));
+	snd_iprintf(buf, "analog_board_id\t%u\n", UA_RB_BOARD_ID(rb[33]));
+}
+
+/*
  * ua_mixer_init - Register ALSA mixer (kcontrol) elements
  *
  * Dynamically creates controls based on detected model:
@@ -7088,6 +7118,15 @@ int ua_audio_init(struct ua_device *ua)
 	ret = snd_card_ro_proc_new(card, "io_map", ua, ua_io_map_proc_read);
 	if (ret) {
 		dev_warn(&ua->pdev->dev, "io_map proc entry failed: %d\n", ret);
+		ret = 0;
+	}
+
+	/* /proc/asound/cardN/mixer_state: readback fields without a control */
+	ret = snd_card_ro_proc_new(card, "mixer_state", ua,
+				   ua_mixer_state_proc_read);
+	if (ret) {
+		dev_warn(&ua->pdev->dev, "mixer_state proc entry failed: %d\n",
+			 ret);
 		ret = 0;
 	}
 

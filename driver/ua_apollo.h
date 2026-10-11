@@ -802,8 +802,23 @@ static inline bool ua_public_output_mute(u32 pt)
 	(((data3) >> (((ch) & 3) * 6 + (((ch) & 2) ? 4 : 0))) & 0x3F)
 #define UA_RB_PREAMP_GAIN_DB(data3, ch)  (UA_RB_PREAMP_GAINC(data3, ch) + 9)
 
-/* rb_data[6]: bit 8 talkback; bit 31 clock locked, valid when bit 30 set */
+/* rb_data[0] 27/26: front-panel headphone focus (valid / on the headphone) */
+#define UA_RB_HP_FOCUS_VALID(data0)      (((data0) >> 27) & 1)
+#define UA_RB_HP_FOCUS_HP(data0)         (((data0) >> 26) & 1)
+/* rb_data[2] bit 30: LowNoisePreamps */
+#define UA_RB_LOW_NOISE(data2)           (((data2) >> 30) & 1)
+/* rb_data[3] [30:28]: input selected on the front panel */
+#define UA_RB_SEL_INPUT(data3)           (((data3) >> 28) & 7)
+
+/* rb_data[6]: bit 8 talkback; [29:28] alt-monitor selection; bit 31 clock
+ * locked, valid when bit 30 set */
 #define UA_RB_TALKBACK(data6)            (((data6) >> 8) & 1)
+#define UA_RB_ALTMON_SEL(data6)          (((data6) >> 28) & 3)
+
+/* rb_data[17] [15:8]: temperature byte (kPropTemperature, raw) */
+#define UA_RB_TEMPERATURE(data17)        (((data17) >> 8) & 0xFF)
+/* rb_data[33] [28:26]: analog board id */
+#define UA_RB_BOARD_ID(data33)           (((data33) >> 26) & 7)
 
 /* rb_data[7]: bits 7:0 headphone 2 volume (same raw scale as the monitor) */
 #define UA_RB_HP2_VOLUME(data7)          ((data7) & 0xFF)
