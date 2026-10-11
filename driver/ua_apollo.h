@@ -1585,6 +1585,14 @@ struct ua_device {
 	atomic_t pause_mask;
 	u32 lock_level;             /* LockSampleRateAndClock level; 0 */
 
+	/*
+	 * The kext's driver parameters 1-5 (UA_DRIVER_PARAM_KEXT(n), stored
+	 * only, under ->lock); bit n of kext_param_set = id n was written,
+	 * else Get returns the kext's initial value.
+	 */
+	u64 kext_param[6];
+	u32 kext_param_set;
+
 	/* DSP ring extras (ua_dsp.c); keep last */
 	struct ua_dsp_ext dspx;
 };

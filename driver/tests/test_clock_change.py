@@ -172,6 +172,9 @@ static int ua_audio_set_clock(struct ua_device *ua, unsigned int r)
 static int ua_audio_set_clock_source(struct ua_device *ua, unsigned int s)
 { (void)ua; sources++; last = s; return result; }
 static void ua_notify_clock_controls(struct ua_device *ua) { (void)ua; notifies++; }
+/* the kext ids 0x101-0x105 (test_kext_driver_params.py) */
+static int ua_kext_param_set(struct ua_device *ua, u32 id, uint64_t v)
+{ (void)ua; (void)v; return id >= 0x101 && id <= 0x105 ? 0 : -EINVAL; }
 '''
 
 PARAM_MAIN = r'''
@@ -192,6 +195,7 @@ int main(void)
 	assert(set(1, (1ULL << 32) | 0x0C) == -EINVAL);
 	assert(set(1, 0x100) == -EINVAL);
 	assert(set(2, 1) == -EINVAL);
+	assert(set(0x101, 1) == 0);	/* a kext id, not a rate or a source */
 	assert(!rates && !sources && !notifies);
 
 	assert(set(0, 96000) == 0 && rates == 1 && last == 96000 && notifies == 1);

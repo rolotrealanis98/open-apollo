@@ -959,7 +959,8 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
 			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT |
-			    UA_FEAT_PLUGIN_CAPS | UA_FEAT_FW_RELEASE,
+			    UA_FEAT_PLUGIN_CAPS | UA_FEAT_FW_RELEASE |
+			    UA_FEAT_KEXT_DRIVER_PARAMS,
 	};
 
 	/*
@@ -3117,6 +3118,53 @@ static long ua_ioctl_read_mixer_setting(struct ua_device *ua,
 	return 0;
 }
 
+/*
+ * The kext's driver parameters 1-5 (UA_DRIVER_PARAM_KEXT(n), ua_ioctl.h):
+ * CDeviceManager::SetDriverParameter (kext x86 0x1dd38) stores them and
+ * GetDriverParameter (0x1de68) returns them; nothing here acts on them.
+ * Initial values as CDeviceManager::Initialize leaves them: 5 reads 1,
+ * the others 0.
+ */
+static int ua_kext_param_set(struct ua_device *ua, u32 id, u64 value)
+{
+	unsigned int n = id - UA_DRIVER_PARAM_KEXT_BASE;
+
+	if (id < UA_DRIVER_PARAM_KEXT(1) || id > UA_DRIVER_PARAM_KEXT(5))
+		return -EINVAL;
+	if (n == 2)
+		value &= 0xfffffffeu;	/* bit 0: clear 3, not kept (0x18db6) */
+	else if (n == 3)
+		value = 0;		/* Set clears the counter (0x1ddbc) */
+	else if (n != 4)
+		value = (u32)value;
+	mutex_lock(&ua->lock);
+	ua->kext_param[n] = value;
+	ua->kext_param_set |= BIT(n);
+	if (n == 2) {			/* bit 0 cleared the counter */
+		ua->kext_param[3] = 0;
+		ua->kext_param_set |= BIT(3);
+	}
+	mutex_unlock(&ua->lock);
+	return 0;
+}
+
+static int ua_kext_param_get(struct ua_device *ua, u32 id, u64 *value)
+{
+	unsigned int n = id - UA_DRIVER_PARAM_KEXT_BASE;
+	u64 v;
+
+	if (id < UA_DRIVER_PARAM_KEXT(1) || id > UA_DRIVER_PARAM_KEXT(5))
+		return -EINVAL;
+	mutex_lock(&ua->lock);
+	v = (ua->kext_param_set & BIT(n)) ? ua->kext_param[n] :
+	    (n == 5 ? 1 : 0);
+	mutex_unlock(&ua->lock);
+	if (n == 1 || n == 5)		/* movslq in GetDriverParameter */
+		v = (u64)(s64)(s32)(u32)v;
+	*value = v;
+	return 0;
+}
+
 static long ua_ioctl_set_driver_param(struct ua_device *ua, unsigned long arg)
 {
 	struct ua_driver_param dp;
@@ -3152,7 +3200,7 @@ static long ua_ioctl_set_driver_param(struct ua_device *ua, unsigned long arg)
 	}
 
 	default:
-		return -EINVAL;
+		return ua_kext_param_set(ua, dp.param_id, dp.value);
 	}
 }
 
@@ -3173,8 +3221,13 @@ static long ua_ioctl_get_driver_param(struct ua_device *ua, unsigned long arg)
 	case 2:  /* Transport running */
 		dp.value = ua->audio.transport_running ? 1 : 0;
 		break;
-	default:
-		return -EINVAL;
+	default: {
+		int ret = ua_kext_param_get(ua, dp.param_id, &dp.value);
+
+		if (ret)
+			return ret;
+		break;
+	}
 	}
 
 	if (copy_to_user((void __user *)arg, &dp, sizeof(dp)))
