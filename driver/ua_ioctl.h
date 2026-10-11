@@ -283,21 +283,30 @@ struct ua_fw_load {
 };
 
 /*
- * DSP block send — used for replaying captured firmware blocks.
- * Sends a single command+data block to a DSP via ring buffer.
- *
- * From DTrace SEL127 captures:
- *   cmd = SRAM address (e.g., 0x0e8cc000)
- *   param = always 0x00000001
- *   payload = binary firmware data
- *
- * The driver allocates a DMA buffer [cmd, param, data...] and submits
- * a DMA reference entry to the DSP's command ring.
+ * DSP block send (UA_IOCTL_DSP_SEND_BLOCK) — the kext's _sendBlock, used
+ * for replaying captured firmware blocks.  One command + data block to a
+ * DSP through its rings (ua_dsp_send_block()):
+ *   - a 4-dword response descriptor on the response ring first;
+ *   - a header DMA ref on the command ring: {(dwords + 1) | cmd} below
+ *     0x3FFFC bytes of data, {cmd | BIT(30), dwords + 2} from there on;
+ *   - the data as 1 KiB DMA refs (2 or 4 KiB with sendblock_chunk), one
+ *     doorbell for the batch;
+ *   - a wait of up to 5 s for the response.
+ * cmd is the command code (0x120000 for the firmware transaction; the
+ * captures' SRAM addresses are host buffer addresses, not commands).
+ * param is never sent: with bit 31 set its high half is the expected high
+ * half of response word 0 (0x80040000 for firmware).  The response's
+ * status word decodes into the kext's result codes; with block_strict=1 a
+ * bad one fails the call with -EIO, otherwise it is only logged.  No
+ * response: -ETIMEDOUT.  data_size: a multiple of 4, at most 4 MiB, and
+ * the header plus the data refs must fit one command ring (1023 entries:
+ * about 1 MiB at the default 1 KiB chunk), else -E2BIG.
+ * (UA_IOCTL_DSP_SRAM_DATA and UA_IOCTL_DSP_SEND_RAW reuse the struct.)
  */
 struct ua_dsp_block {
 	__u32 dsp_index;	/* Target DSP (0..num_dsps-1) */
-	__u32 cmd;		/* Command code / SRAM address */
-	__u32 param;		/* Command parameter */
+	__u32 cmd;		/* Command code (SRAM address for SRAM_DATA) */
+	__u32 param;		/* Expected response (see above); not sent */
 	__u32 data_size;	/* Payload size in bytes (must be 4-byte aligned) */
 	__u64 data;		/* Userspace pointer to payload data */
 };
