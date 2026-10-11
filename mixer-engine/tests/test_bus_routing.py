@@ -357,10 +357,25 @@ class TestCueOutputs:
             (2, 0, mono, 1), (2, 0, mix, 0), (2, 0, mix, 2)]
 
     def test_cue2_is_output_15_not_16(self, router, backend):
+        # outputs 16/17 are CUE 3/4: they never land on CUE 1/2's params
         router.on_set(f"{OUT}/16/MixToMono/value", True)
         router.on_set(f"{OUT}/17/MixToMono/value", True)
-        router.on_set(f"{OUT}/16/OutputDestination/value", "S/PDIF")
-        assert backend.mixer_params == []     # CUE 3/4: no verified param
+        params = {c[2] for c in backend.mixer_params}
+        assert params == {0x23, 0x25}
+        assert not params & {0x06, 0x08}
+
+    @pytest.mark.parametrize("ch, mono, mix, mirror", [
+        (16, 0x23, 0x22, 0x30), (17, 0x25, 0x24, 0x31)])
+    def test_cue3_cue4_params(self, router, backend, ch, mono, mix, mirror):
+        router.on_set(f"{OUT}/{ch}/MixToMono/value", True)
+        router.on_set(f"{OUT}/{ch}/MixInSource/value", "cue")
+        router.on_set(f"{OUT}/{ch}/MixInSource/value", "mon")
+        assert backend.mixer_params == [
+            (2, 0, mono, 1), (2, 0, mix, 0), (2, 0, mix, 2)]
+        backend.clear()
+        # no mirror enable bit is known for CUE 3/4: source only
+        router.on_set(f"{OUT}/{ch}/OutputDestination/value", "None")
+        assert backend.mixer_params == [(2, 10, mirror, 0xFFFFFFFF)]
 
     @pytest.mark.parametrize("ch, src, en", [(14, 0x2E, 0x3B),
                                              (15, 0x2F, 0x3C)])

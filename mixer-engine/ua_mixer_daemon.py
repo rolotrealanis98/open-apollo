@@ -1495,8 +1495,10 @@ class MixerDaemon:
                                    0xBF800000 if flag(ch, "phase")
                                    else 0x3F800000)
                 be.set_mixer_param(PREAMP, ch, 0x07, 0)          # Unknown
-                if ch <= 1:  # HiZ-capable channels only
-                    be.set_mixer_param(PREAMP, ch, 0x11, 1)      # HiZ flag
+                # (input param 0x11 is the HiZ impedance code, not a
+                # flag: the macOS capture's value 1 only selected 1 Mohm.
+                # A saved HiZImpedance is written after init; with none,
+                # the hardware keeps what it has.)
                 be.set_mixer_param(PREAMP, ch, 0x01, flag(ch, "pad"))
                 be.set_mixer_param(PREAMP, ch, 0x03, flag(ch, "48v"))
                 if ch in (0, 2):  # Link on first of each pair

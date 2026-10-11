@@ -476,7 +476,87 @@ MONITOR_PARAM = {
     "Identify":        0x1d,   # ch_idx=0: flash front panel LEDs (1=on, 0=off)
     # TalkbackConfig
     "TBConfig":        0x47,   # ch_idx=0: talkback configuration
+    # Other params the Mixer Engine sends from properties (parity/14 s4/s8)
+    "OutputsAttenuate": 0x20,  # kPropOutputsAttenuate, setting[7] bit 10
+    "CRPGABypass":     0x3e,   # kPropCRPGABypass, setting[15] bit 9 (value inverted)
+    "RemoteMonitor":   0x41,   # kPropRemoteMonitorController, setting[15] bit 7
+    "JackSensingDisabled": 0x45,  # kPropInputJackSensingDisabled, setting[7] bit 11
+    "TalkbackMaster":  0x48,   # kPropTalkbackMaster, setting[7] bit 13
+    "Enable24dB":      0x49,   # kPropEnable24dBMode; the x4 (kind 14) refuses it
+    "OutPadA":         0x19,   # kPropPad of a line-out pair: setting[0] bit 28 ..
+    "OutPadB":         0x1a,
+    "OutPadC":         0x1b,
+    "OutPadD":         0x1c,   # .. bit 31
+    # CUE 3 / CUE 4 outputs (synch 0x18 / 0x1a; parity/14 s4, M for the
+    # output they belong to)
+    "CUE3Mix":         0x22,
+    "CUE3Mono":        0x23,
+    "CUE4Mix":         0x24,
+    "CUE4Mono":        0x25,
+    "MirrorC":         0x30,   # CUE3 mirror source
+    "MirrorD":         0x31,   # CUE4 mirror source
 }
+# Per CUE output (0-based): mono / mix / mirror-source params, and the
+# mirror enable (AltMon enable bits 0x3b/0x3c; none known for CUE 3/4)
+CUE_MONO_PARAMS = (0x06, 0x08, 0x23, 0x25)
+CUE_MIX_PARAMS = (0x05, 0x07, 0x22, 0x24)
+CUE_MIRROR_PARAMS = (0x2E, 0x2F, 0x30, 0x31)
+CUE_MIRROR_ENABLE_PARAMS = (0x3B, 0x3C, None, None)
+
+# Alt monitors: output pair n of the line outputs -> alt monitor n+1
+ALTMON_TRIM_PARAMS = (0x38, 0x39)
+ALTMON_ENABLE_PARAMS = (0x3B, 0x3C)
+OUT_PAD_PARAMS = (0x19, 0x1A, 0x1B, 0x1C)
+# DSP bus-enable ids of CUE 1..4 (SetBusEnable; CueBusCount decides)
+CUE_BUS_ENABLE_BUSES = (1, 2, 5, 6)
+AUX_MONO_PARAMS = {0: 0x0A, 1: 0x0F}     # CMxAuxBus MixToMono, aux 1 / 2
+
+
+def encode_altmon_trim(trim_db: float) -> int:
+    """kPropAltMonTrim -> param 0x38/0x39: clamp(int(trim*2 + 60.5), 0, 0x78)
+    (60 = 0 dB, 0.5 dB steps, -30..+30 dB)."""
+    return max(0, min(0x78, int(float(trim_db) * 2 + 60.5)))
+
+
+# Input param 0x11 (kPropHiZImpedance, inputs 1 and 2 only): the code is the
+# index into this table (ConvertHiZImpedanceToHWCode, parity/14 s3)
+HIZ_IMPEDANCES_OHM = (2_200_000, 1_000_000, 453_000, 232_000,
+                      100_000, 70_000, 47_000, 21_000)
+HIZ_IMPEDANCE_PARAM = 0x11
+LINK_PARAM = 0x02            # kPropStereo: pair leader (even channel) only
+
+
+def hiz_impedance_code(value) -> int | None:
+    """HiZ impedance property value -> hardware code 0-7, None if unknown.
+
+    Accepts the code itself (int 0-7), the resistance in ohms (a number
+    >= 1000 or a string such as "1M", "453k", "2.2 MOhm", "100 kΩ"), or a
+    label in HIZ_IMPEDANCES_OHM order.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if float(value) == int(value) and 0 <= int(value) < len(HIZ_IMPEDANCES_OHM):
+            return int(value)
+        ohms = float(value)
+    else:
+        m = re.match(r'^\s*([0-9]*\.?[0-9]+)\s*([kKmM]?)\s*(?:ohms?|\u03a9|\u2126)?\s*$',
+                     str(value).replace("\u00a0", " "), re.I)
+        if not m:
+            return None
+        ohms = float(m.group(1))
+        unit = m.group(2).lower()
+        if unit == "k":
+            ohms *= 1_000
+        elif unit == "m":
+            ohms *= 1_000_000
+        elif ohms == int(ohms) and 0 <= int(ohms) < len(HIZ_IMPEDANCES_OHM) \
+                and "." not in str(value):
+            return int(ohms)       # a bare "3" is the code, as the int is
+    for code, nominal in enumerate(HIZ_IMPEDANCES_OHM):
+        if abs(ohms - nominal) <= nominal * 0.02:
+            return code
+    return None
 MONITOR_CHANNEL_TYPE = 2
 PREAMP_CHANNEL_TYPE = 1
 
@@ -1052,6 +1132,7 @@ class HardwareBackend:
         self._last_mixer_write = 0.0  # Throttle: time of last DSP setting write
         self._last_cli_write = 0.0   # Throttle: time of last ARM CLI command
         self._cli_frozen = False     # Set True on first CLI timeout — stops all CLI
+        self.last_errno = 0          # errno of the last failed set_mixer_param
 
     def open(self, device_path: str | None = None) -> bool:
         """Open the device node. Auto-discovers /dev/ua_apollo* if no path given."""
@@ -1539,6 +1620,7 @@ class HardwareBackend:
 
         buf = struct.pack('<IIII', channel_type, channel_idx,
                           param_id, value & 0xFFFFFFFF)
+        self.last_errno = 0
         try:
             fcntl.ioctl(self.fd, UA_IOCTL_SET_MIXER_PARAM, buf)
             self._last_mixer_write = time.monotonic()
@@ -1547,6 +1629,7 @@ class HardwareBackend:
             return True
         except OSError as e:
             self._last_mixer_write = time.monotonic()
+            self.last_errno = e.errno
             log.error("set_mixer_param(type=%d, idx=%d, param=0x%02x, "
                       "val=%d): %s", channel_type, channel_idx,
                       param_id, value, e)
@@ -1939,11 +2022,12 @@ class HardwareBackend:
 # Input channel controls: /devices/0/inputs/<ch>/<control>/value
 _RE_INPUT = re.compile(
     r'^/devices/0/inputs/(\d+)/(Mute|Solo|Pan|Pan2|FaderLevel|FaderLevelTapered|'
-    r'IOType|RecordPreEffects|Isolate|Stereo|Active|SRConvert)/value$')
+    r'IOType|RecordPreEffects|Isolate|Stereo|Active|SRConvert|HiZImpedance)/value$')
 
 # Preamp controls: /devices/0/inputs/<ch>/preamps/0/<control>/value
 _RE_PREAMP = re.compile(
-    r'^/devices/0/inputs/(\d+)/preamps/0/(Gain|GainTapered|48V|Pad|HiZ|LowCut|Phase|Mute)/value$')
+    r'^/devices/0/inputs/(\d+)/preamps/0/'
+    r'(Gain|GainTapered|48V|Pad|HiZ|HiZImpedance|LowCut|Phase|Mute)/value$')
 
 # Bus send controls: /devices/0/inputs/<ch>/sends/<send>/<control>/value
 _RE_SEND = re.compile(
@@ -1953,7 +2037,7 @@ _RE_SEND = re.compile(
 _RE_OUTPUT = re.compile(
     r'^/devices/0/outputs/(\d+)/(Mute|DimOn|Pad|MixToMono|MirrorsToDigital|'
     r'CRMonitorLevel|CRMonitorLevelTapered|SurroundMute|SurroundSolo|'
-    r'AltMonEnabled|AltMonTrim|MixInSource|DimLevel|'
+    r'AltMonEnabled|AltMonTrim|CRPGABypass|MixInSource|DimLevel|'
     r'DigitalOutputMode|OutputDestination|Identify)/value$')
 
 # Aux bus controls: /devices/0/auxs/<bus>/<control>/value
@@ -1965,12 +2049,15 @@ _RE_AUX = re.compile(
 _RE_AUX_SEND = re.compile(
     r'^/devices/0/auxs/(\d+)/sends/(\d+)/(Gain|GainTapered|Pan|Bypass)/value$')
 
-# Global device controls (directly under /devices/0/).  The device maps put
-# TalkbackOn at the tree root (/TalkbackOn); /devices/0/TalkbackOn is also
-# accepted.
+# Global device controls.  The device maps put TalkbackOn and a few more at
+# the tree root (/TalkbackOn); /devices/0/<same> is also accepted.  The rest
+# lives under /devices/0/.
 _RE_DEVICE_GLOBAL = re.compile(
-    r'^(?:/devices/0)?/(TalkbackOn)/value$|'
-    r'^/devices/0/(DimAttenuation|TOSLinkOutput|DSPSpanning|Identify)/value$')
+    r'^(?:/devices/0)?/(TalkbackOn|TalkbackInPhysicalCR|TalkbackMaster|'
+    r'Enable24dBMode)/value$|'
+    r'^/devices/0/(DimAttenuation|TOSLinkOutput|DSPSpanning|Identify|'
+    r'AltMonSelection|RemoteMonitorController|InputJackSensingDisabled|'
+    r'OutputsAttenuate|CueBusCount)/value$')
 
 # Global driver controls
 _RE_GLOBAL = re.compile(
@@ -2007,6 +2094,10 @@ class HardwareRouter:
         self._gain_last: dict[int, tuple[int, float]] = {}  # ch → (db, time)
         self._gain_pending: dict[int, int] = {}  # ch → deferred db value
         self._input_bus_table: tuple | None = None
+        # SetOtherParam ids the driver refused with EINVAL (kind gates, e.g.
+        # 24 dB mode on the x4): not retried
+        self._refused_other: set[int] = set()
+        self._line_outputs_cache: list | None = None
         self._sync_driver_state()
 
     def _sync_driver_state(self):
@@ -2326,6 +2417,56 @@ class HardwareRouter:
         # Unmatched path — software only, no hardware write needed
         log.debug("SET %s = %r (software-only)", path, value)
 
+    # ── SetOtherParam helpers ────────────────────────────────────────
+
+    def _set_other(self, param: int, value: int, ch_idx: int = 0,
+                   what: str = "") -> bool:
+        """SetMixerParam type 2 (SetOtherParam; the kext ignores ch_idx).
+
+        A param the driver refuses with EINVAL (a kind gate: the Mixer
+        Engine does not send it to this model either) is remembered and
+        skipped from then on, so a client that sets the property does not
+        flood the log.
+        """
+        if param in self._refused_other:
+            log.debug("HW %s: param 0x%02x refused by this device, skipped",
+                      what or "OTHER", param)
+            return False
+        ok = self.backend.set_mixer_param(MONITOR_CHANNEL_TYPE, ch_idx,
+                                          param, value)
+        if not ok and getattr(self.backend, "last_errno", 0) == errno.EINVAL:
+            self._refused_other.add(param)
+            log.info("HW %s: param 0x%02x is refused by this device (kind "
+                     "gate), not sending it again", what or "OTHER", param)
+        return ok
+
+    def _line_outputs(self) -> list:
+        """Tree indexes of the outputs of IOType Line, in map order (the
+        x4's analog outputs 1-4).  Alt monitors and the output pads are
+        per pair of these."""
+        cache = self._line_outputs_cache
+        if cache is not None:
+            return cache
+        out = []
+        i = 0
+        while True:
+            base = f"/devices/0/outputs/{i}"
+            io_type = self._tree_value(f"{base}/IOType/value")
+            if io_type is None and self._tree_value(
+                    f"{base}/Name/value") is None:
+                break
+            if str(io_type or "").strip().lower() == "line":
+                out.append(i)
+            i += 1
+        if i:
+            self._line_outputs_cache = out
+        return out
+
+    def _line_pair(self, ch: int) -> int | None:
+        """Pair number (0-based) of line output `ch`, None if it is not one."""
+        lines = self._line_outputs()
+        return lines.index(ch) // 2 if ch in lines else None
+
     # ── Solo recalculation ─────────────────────────────────────────
 
     @staticmethod
@@ -2434,6 +2575,10 @@ class HardwareRouter:
                                                0x06, val_c)
             if not ok:
                 log.error("HW PREAMP GAIN: failed for input[%d]", ch)
+            return
+
+        if control == "HiZImpedance":
+            self._write_hiz_impedance(path, ch, value)
             return
 
         param_id = ARM_PARAM_IDS.get(control)
@@ -2588,8 +2733,54 @@ class HardwareRouter:
                 MONITOR_PARAM["SRConvert"], hw_value)
             return
 
-        # Software-only controls (RecordPreEffects, Isolate, Stereo, Active)
+        if control == "HiZImpedance":
+            if ch in self.preamp_inputs():
+                self._write_hiz_impedance(path, ch, value)
+            return
+
+        if control == "Stereo":
+            self._write_link(path, ch, value)
+            return
+
+        # Software-only controls (RecordPreEffects, Isolate, Active)
         log.debug("SET %s = %r (software-only)", path, value)
+
+    def _write_hiz_impedance(self, path: str, ch: int, value: Any):
+        """kPropHiZImpedance -> input param 0x11 = index into
+        HIZ_IMPEDANCES_OHM.  Only the HiZ inputs (preamp channels 0 and 1);
+        any other channel is refused by the kext.  The old "HiZ flag"
+        write (param 0x11 = 1) selected 1 Mohm by accident."""
+        if ch not in (0, 1) or ch not in self.preamp_inputs():
+            log.debug("SET %s = %r (input %d has no HiZ impedance)",
+                      path, value, ch)
+            return
+        code = hiz_impedance_code(value)
+        if code is None:
+            log.warning("HW PREAMP: input[%d] HiZImpedance %r is not one of "
+                        "%s ohm", ch, value, list(HIZ_IMPEDANCES_OHM))
+            return
+        log.info("HW PREAMP: input[%d].HiZImpedance = %r → code %d "
+                 "(%d ohm, param=0x11)", ch, value, code,
+                 HIZ_IMPEDANCES_OHM[code])
+        self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch,
+                                     HIZ_IMPEDANCE_PARAM, code)
+
+    def _write_link(self, path: str, ch: int, value: Any):
+        """kPropStereo -> input param 0x02, pair leader (even channel)
+        only: the kext writes both link bits of the pair for the leader and
+        nothing for the odd channel, so the daemon does not send it."""
+        if ch not in self.preamp_inputs():
+            log.debug("SET %s = %r (no preamp for input %d)", path, value, ch)
+            return
+        if ch % 2:
+            log.debug("SET %s = %r (odd channel: the pair leader carries "
+                      "the link)", path, value)
+            return
+        hw_value = 1 if self._truthy(value) else 0
+        log.info("HW PREAMP: input[%d].Stereo = %r → Link %d (param=0x02, "
+                 "pair %d/%d)", ch, value, hw_value, ch + 1, ch + 2)
+        self.backend.set_mixer_param(PREAMP_CHANNEL_TYPE, ch, LINK_PARAM,
+                                     hw_value)
 
     # ── Bus send controls (SEL130 bus param path) ──────────────────
 
@@ -2678,17 +2869,19 @@ class HardwareRouter:
         # From IOKit mapping: all ch_type=2, ch_idx=0
         #   CUE1 MONO=param 0x06 (1/0), CUE1 MIX=param 0x05 (0=on, 2=off)
         #   CUE2 MONO=param 0x08 (1/0), CUE2 MIX=param 0x07 (0=on, 2=off)
-        # CUE 3/4 params are not verified: no hardware write for them.
+        # CUE 3/4 (4-cue models): mono 0x23 / 0x25, mix 0x22 / 0x24, mirror
+        # source 0x30 / 0x31 (parity/14 s4: the kext's outputs of synch
+        # 0x18 / 0x1a; which tree output carries them is M confidence).
         role = self._output_role(ch)
         if role and role[0] == "cue":
             cue_idx = role[1]
-            if cue_idx > 1:
-                log.debug("SET %s = %r (CUE %d: no verified hardware "
-                          "param)", path, value, cue_idx + 1)
+            if cue_idx > 3:
+                log.debug("SET %s = %r (CUE %d: no such cue bus)",
+                          path, value, cue_idx + 1)
                 return
 
             if control == "MixToMono":
-                param = 0x06 if cue_idx == 0 else 0x08
+                param = CUE_MONO_PARAMS[cue_idx]
                 hw_value = 1 if value and value != "0" and value != "false" else 0
                 log.info("HW CUE%d: MixToMono = %r → %d (param=0x%02x, ch_idx=0)",
                          cue_idx + 1, value, hw_value, param)
@@ -2699,7 +2892,7 @@ class HardwareRouter:
             if control == "MixInSource":
                 # CUE MIX: "cue"=CUE_MIX_ON (0, mix on), "mon"=CUE_MIX_OFF (2, mix off)
                 # INVERTED encoding: hw 0 = mix enabled, hw 2 = mix disabled
-                param = MONITOR_PARAM["CUE1Mix"] if cue_idx == 0 else MONITOR_PARAM["CUE2Mix"]
+                param = CUE_MIX_PARAMS[cue_idx]
                 val_str = str(value).lower()
                 hw_value = CUE_MIX_ON if val_str in ("cue", "on", "1") else CUE_MIX_OFF
                 log.info("HW CUE%d: MixInSource = %r → %d (param=0x%02x, ch_idx=0, "
@@ -2711,38 +2904,35 @@ class HardwareRouter:
 
             if control == "OutputDestination":
                 # CUE mirror source: string → hardware int
-                # CUE1 (outputs 14/15) → MirrorA (0x2e), CUE2 (16/17) → MirrorB (0x2f)
-                param_name = "MirrorA" if cue_idx == 0 else "MirrorB"
-                enable_name = "MirrorEnableA" if cue_idx == 0 else "MirrorEnableB"
+                # CUE1 → MirrorA (0x2e) + enable 0x3b, CUE2 → MirrorB (0x2f)
+                # + enable 0x3c; CUE3/4 → 0x30 / 0x31 (no enable bit known)
+                param = CUE_MIRROR_PARAMS[cue_idx]
+                enable = CUE_MIRROR_ENABLE_PARAMS[cue_idx]
                 source_str = str(value)
                 hw_value = MIRROR_SOURCE_MAP.get(source_str, 0xFFFFFFFF)
 
                 if hw_value == 0xFFFFFFFF:
                     # "None" → disable mirror
                     log.info("HW CUE%d: OutputDestination = %r → mirror disabled "
-                             "(param=%s=0x%02x, enable=%s=0x%02x, ch_idx=10)",
-                             cue_idx + 1, value, param_name,
-                             MONITOR_PARAM[param_name],
-                             enable_name, MONITOR_PARAM[enable_name])
+                             "(param=0x%02x, enable=%s, ch_idx=10)",
+                             cue_idx + 1, value, param,
+                             f"0x{enable:02x}" if enable else "-")
+                    if enable is not None:
+                        self.backend.set_mixer_param(
+                            MONITOR_CHANNEL_TYPE, 10, enable, 0)
                     self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 10,
-                        MONITOR_PARAM[enable_name], 0)
-                    self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 10,
-                        MONITOR_PARAM[param_name], hw_value & 0xFFFFFFFF)
+                        MONITOR_CHANNEL_TYPE, 10, param, hw_value & 0xFFFFFFFF)
                 else:
                     # Set source, then enable mirror
                     log.info("HW CUE%d: OutputDestination = %r → %d "
-                             "(param=%s=0x%02x, enable=%s=0x%02x, ch_idx=10)",
-                             cue_idx + 1, value, hw_value, param_name,
-                             MONITOR_PARAM[param_name],
-                             enable_name, MONITOR_PARAM[enable_name])
+                             "(param=0x%02x, enable=%s, ch_idx=10)",
+                             cue_idx + 1, value, hw_value, param,
+                             f"0x{enable:02x}" if enable else "-")
                     self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 10,
-                        MONITOR_PARAM[param_name], hw_value)
-                    self.backend.set_mixer_param(
-                        MONITOR_CHANNEL_TYPE, 10,
-                        MONITOR_PARAM[enable_name], 1)
+                        MONITOR_CHANNEL_TYPE, 10, param, hw_value)
+                    if enable is not None:
+                        self.backend.set_mixer_param(
+                            MONITOR_CHANNEL_TYPE, 10, enable, 1)
                 return
 
             log.debug("SET %s = %r (CUE output, unhandled control)", path, value)
@@ -2853,6 +3043,16 @@ class HardwareRouter:
                     MONITOR_PARAM["Identify"], hw_value)
                 return
 
+            if control == "CRPGABypass":
+                # kPropCRPGABypass (0xfc) -> param 0x3e, the engine sends the
+                # inverted value (init: 1 = bypass property off)
+                hw_value = 0 if self._truthy(value) else 1
+                log.info("HW MONITOR: CRPGABypass = %r → %d (param=0x3e, "
+                         "inverted)", value, hw_value)
+                self._set_other(MONITOR_PARAM["CRPGABypass"], hw_value,
+                                what="CRPGABypass")
+                return
+
         # Headphone outputs (x4: outputs 19/20 = HP 1/2, IOType Headphone).
         # The level has its own monitor param: 0x02 for the first headphone
         # output (setting[2] bits 15:8, readback word 2) and 0x66 for the
@@ -2914,6 +3114,35 @@ class HardwareRouter:
             log.info("HW HP: %s = %r (param not yet mapped)", control, value)
             return
 
+        # Line outputs (x4 outputs 0-3): pad per pair, alt monitor per pair
+        pair = self._line_pair(ch)
+        if pair is not None:
+            if control == "Pad" and pair < len(OUT_PAD_PARAMS):
+                # kPropPad on a line output -> OutPadA..D (0x19..0x1c), one
+                # bit per pair of outputs: the last of the two to be set wins
+                param = OUT_PAD_PARAMS[pair]
+                hw_value = 1 if self._truthy(value) else 0
+                log.info("HW OUT: output[%d].Pad = %r → %d (param=0x%02x, "
+                         "pair %d)", ch, value, hw_value, param, pair + 1)
+                self._set_other(param, hw_value, what="OutPad")
+                return
+            if control == "AltMonTrim" and pair < len(ALTMON_TRIM_PARAMS):
+                raw = encode_altmon_trim(self._float(value, 0.0))
+                param = ALTMON_TRIM_PARAMS[pair]
+                log.info("HW OUT: output[%d].AltMonTrim = %r dB → %d "
+                         "(param=0x%02x, alt monitor %d)", ch, value, raw,
+                         param, pair + 1)
+                self._set_other(param, raw, what="AltMonTrim")
+                return
+            if control == "AltMonEnabled" and pair < len(ALTMON_ENABLE_PARAMS):
+                param = ALTMON_ENABLE_PARAMS[pair]
+                hw_value = 1 if self._truthy(value) else 0
+                log.info("HW OUT: output[%d].AltMonEnabled = %r → %d "
+                         "(param=0x%02x, alt monitor %d)", ch, value,
+                         hw_value, param, pair + 1)
+                self._set_other(param, hw_value, what="AltMonEnabled")
+                return
+
         # Other outputs (individual analog/digital)
         log.debug("SET %s = %r (individual output, software-only)", path, value)
 
@@ -2957,6 +3186,21 @@ class HardwareRouter:
                 log.info("HW BUS: aux[%d].Mute OFF → restore %.1f dB = %.6f "
                          "(bus=0x%04x)", bus, saved_db, linear, bus_id)
                 self.backend.set_mixer_bus_param(bus_id, SUB_PARAM_MIX, linear)
+            return
+
+        if control == "MixToMono":
+            # CMxAuxBus MixToMono: aux 1 -> param 0x0a, aux 2 -> 0x0f
+            # (the driver swaps the two value bits)
+            param = AUX_MONO_PARAMS.get(bus)
+            if param is None:
+                log.debug("SET %s = %r (aux %d has no mono param)",
+                          path, value, bus + 1)
+                return
+            hw_value = 1 if self._truthy(value) else 0
+            log.info("HW AUX: aux[%d].MixToMono = %r → %d (param=0x%02x)",
+                     bus, value, hw_value, param)
+            self.backend.set_mixer_param(MONITOR_CHANNEL_TYPE, 0, param,
+                                         hw_value)
             return
 
         log.debug("SET %s = %r (aux control, software-only)", path, value)
@@ -3069,6 +3313,64 @@ class HardwareRouter:
             self.backend.set_mixer_param(
                 MONITOR_CHANNEL_TYPE, 0,
                 MONITOR_PARAM["Identify"], hw_value)
+            return
+
+        # Mixer-level properties that map to one SetOtherParam each
+        # (parity/14 s4 and s8); a bool is v != 0
+        bool_params = {
+            "TalkbackInPhysicalCR": MONITOR_PARAM["TBConfig"],
+            "OutputsAttenuate": MONITOR_PARAM["OutputsAttenuate"],
+            "InputJackSensingDisabled": MONITOR_PARAM["JackSensingDisabled"],
+            "RemoteMonitorController": MONITOR_PARAM["RemoteMonitor"],
+            "Enable24dBMode": MONITOR_PARAM["Enable24dB"],
+        }
+        if control in bool_params:
+            param = bool_params[control]
+            hw_value = 1 if self._truthy(value) else 0
+            log.info("HW MONITOR: %s = %r → %d (param=0x%02x)",
+                     control, value, hw_value, param)
+            self._set_other(param, hw_value, what=control)
+            return
+
+        if control == "TalkbackMaster":
+            # kPropTalkbackMaster is the order of the unit that owns the
+            # talkback; the hardware bit says "this unit is it"
+            order = self._tree_value("/devices/0/MultiUnitOrder/value")
+            try:
+                is_master = int(value) == int(order or 0)
+            except (TypeError, ValueError):
+                is_master = False
+            log.info("HW MONITOR: TalkbackMaster = %r (this unit %r) → %d "
+                     "(param=0x48)", value, order or 0, int(is_master))
+            self._set_other(MONITOR_PARAM["TalkbackMaster"], int(is_master),
+                            what="TalkbackMaster")
+            return
+
+        if control == "AltMonSelection":
+            # kPropAltMonSelection: 2 bits (setting[13] [29:28])
+            try:
+                hw_value = int(value) & 3
+            except (TypeError, ValueError):
+                log.warning("HW MONITOR: AltMonSelection %r invalid", value)
+                return
+            log.info("HW MONITOR: AltMonSelection = %r → %d (param=0x3a)",
+                     value, hw_value)
+            self._set_other(MONITOR_PARAM["AltMonSelection"], hw_value,
+                            what="AltMonSelection")
+            return
+
+        if control == "CueBusCount":
+            # The engine enables the DSP buses {1, 2, 5, 6} for CUE 1-4 as
+            # index < CueBusCount: a 4-cue model turns 5 and 6 (CUE 3/4) on
+            try:
+                count = int(value)
+            except (TypeError, ValueError):
+                return
+            for idx, bus in enumerate(CUE_BUS_ENABLE_BUSES):
+                if idx >= 2 and count > idx:
+                    log.info("HW MONITOR: CueBusCount = %d → enable bus %d "
+                             "(CUE %d)", count, bus, idx + 1)
+                    self.backend.set_mixer_param(0, bus, 0x01, 1)
             return
 
     # ── Global/driver controls ────────────────────────────────────
