@@ -462,7 +462,7 @@ struct ua_dma_test {
  * The struct is fixed size: never change sizeof(struct ua_version).
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		1
+#define UA_ABI_MINOR		2
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -476,6 +476,7 @@ struct ua_dma_test {
 #define UA_FEAT_PAUSE_EVENTS	(1u << 9)  /* UA_EVT_PAUSED / UA_EVT_RESUMED */
 #define UA_FEAT_UNIT_GROUP	(1u << 10) /* unit index/role in SYSTEM_INFO */
 #define UA_FEAT_BUS_SOLO_FLAG	(1u << 11) /* UA_BUS_PARAM_F_SOLO_MUTE */
+#define UA_FEAT_SYSINFO_EXT	(1u << 12) /* pcie_link_*, clock_src_mask, fw_rate_mask in SYSTEM_INFO */
 
 struct ua_version {
 	__u32 abi_major;
@@ -538,7 +539,21 @@ struct ua_system_info {
 	__u32 unit_index;
 	__u32 unit_count;	/* units in the group */
 	__u32 unit_role;	/* UA_UNIT_ROLE_* */
-	__u32 reserved[8];
+	/*
+	 * UA_FEAT_SYSINFO_EXT (ABI 1.2); an older driver returns 0 here.
+	 * pcie_link_speed: the PCI_EXP_LNKSTA current-link-speed field (1 =
+	 * 2.5 GT/s, 2 = 5 GT/s, 3 = 8 GT/s, 4 = 16 GT/s), 0 = unknown.
+	 * pcie_link_width: the negotiated lanes (1, 2, 4 ...), 0 = unknown.
+	 * clock_src_mask: 0xC08C[31:16] as read at connect (bit n = clock
+	 * source n is offered), 0 = not read.
+	 * fw_rate_mask: 0xC08C[7:0], bit n = rate index n offered (1 = 44.1k
+	 * .. 6 = 192k), 0 = not read.
+	 */
+	__u32 pcie_link_speed;
+	__u32 pcie_link_width;
+	__u32 clock_src_mask;
+	__u32 fw_rate_mask;
+	__u32 reserved[4];
 };
 
 #define UA_IOCTL_GET_SYSTEM_INFO	_IOR(UA_IOCTL_MAGIC, 0x05, struct ua_system_info)

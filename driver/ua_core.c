@@ -888,7 +888,7 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_KIND_GATES | UA_FEAT_MIXER_STATE |
 			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
-			    UA_FEAT_UNIT_GROUP,
+			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT,
 	};
 
 	/*
@@ -912,6 +912,7 @@ static long ua_ioctl_get_system_info(struct ua_device *ua, unsigned long arg)
 	u32 words[UA_REG_SERIAL_LEN / 4];
 	char *ser = si.serial;
 	unsigned int i;
+	u16 lnksta;
 	int kind;
 
 	si.fpga_rev = ua->fpga_rev;
@@ -951,7 +952,15 @@ static long ua_ioctl_get_system_info(struct ua_device *ua, unsigned long arg)
 	si.transport_running = audio->transport_running ? 1 : 0;
 	si.play_channels = audio->play_channels;
 	si.rec_channels = audio->rec_channels;
+	si.clock_src_mask = audio->clock_src_mask;
+	si.fw_rate_mask = audio->fw_rate_mask;
 	mutex_unlock(&ua->lock);
+
+	if (!pcie_capability_read_word(ua->pdev, PCI_EXP_LNKSTA, &lnksta)) {
+		si.pcie_link_speed = lnksta & PCI_EXP_LNKSTA_CLS;
+		si.pcie_link_width = (lnksta & PCI_EXP_LNKSTA_NLW) >>
+				     PCI_EXP_LNKSTA_NLW_SHIFT;
+	}
 
 	si.unit_group = 0;
 	ua_unit_info(ua, &si.unit_index, &si.unit_count, &si.unit_role);
