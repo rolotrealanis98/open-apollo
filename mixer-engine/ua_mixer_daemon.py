@@ -476,7 +476,8 @@ class MixerDaemon:
                  helper_tree: HelperTree | None = None,
                  metering=None,
                  network_id: str | None = None,
-                 loaded_map: Path | None = None):
+                 loaded_map: Path | None = None,
+                 preserve_hardware: bool = False):
         self.state = state
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
         self.hw_router = hw_router
@@ -561,6 +562,20 @@ class MixerDaemon:
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
+        # --preserve-hardware: attach to a running Apollo without writing
+        # to it.  This device session publishes what the readback shows
+        # and sends no init sequence (and no ADC delay comp); a later
+        # connection (hot-plug, resume) re-inits as always, since the
+        # device lost its state then.
+        self._preserve_session = False
+        if preserve_hardware and self._hw_online:
+            self._preserve_session = True
+            self._hw_init_done = True
+            rb = hw_router.poll_hw_readback()
+            if rb:
+                self._sync_hw_readback(rb, {})
+            log.info("Preserving the hardware's current settings: no init "
+                     "sequence for this connection")
 
     async def start(self):
         """Start TCP servers on both ports (runs forever)."""
@@ -667,6 +682,7 @@ class MixerDaemon:
                                 new_map.name)
                     return False
         log.info("Device ready: re-running the init sequence")
+        self._preserve_session = False
         self._push_defaults_to_hardware()
         self._hw_init_done = True
         self._readback_start_time = time.monotonic()
@@ -1382,7 +1398,8 @@ class MixerDaemon:
         sent = (fig["adc_comp"], self._readback_start_time) if fig else None
         router = self.hw_router
         if (fig and router and self._hw_init_done and self._hw_online
-                and not self.hw_paused and sent != self._adc_comp_sent):
+                and not self.hw_paused and not self._preserve_session
+                and sent != self._adc_comp_sent):
             from hardware import ADC_DELAY_COMP_PARAM
             if router._set_other(ADC_DELAY_COMP_PARAM, fig["adc_comp"],
                                  what="ADC delay comp"):
@@ -1643,6 +1660,7 @@ class MixerDaemon:
             return
         log.info("Device resumed%s: re-pushing the tree",
                  "" if was_paused else " (no pause was seen)")
+        self._preserve_session = False
         self._push_defaults_to_hardware()
         self._hw_init_done = True
         self._readback_start_time = time.monotonic()
@@ -3098,8 +3116,21 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                         help="Device node, e.g. /dev/ua_apollo1 (default: the first "
                              "/dev/ua_apollo*). One daemon serves one Apollo: "
                              "run one instance per device")
-    parser.add_argument("--no-hardware", action="store_true",
-                        help="Software-only mode (no hardware writes)")
+    hardware_mode = parser.add_mutually_exclusive_group()
+    hardware_mode.add_argument("--no-hardware", action="store_true",
+                               help="Software-only mode (no hardware writes)")
+    hardware_mode.add_argument("--require-hardware", action="store_true",
+                               help="Exit (status 1) when the device node "
+                                    "cannot be opened at start, instead of "
+                                    "waiting for it")
+    parser.add_argument("--preserve-hardware", action="store_true",
+                        help="Attach to a running Apollo without the init "
+                             "sequence: publish what the hardware reports "
+                             "and write nothing until a client changes "
+                             "something (a reconnect re-inits as usual)")
+    parser.add_argument("--no-metering", action="store_true",
+                        help="Do not open a meter source (PipeWire/ALSA "
+                             "capture or readback); meters read silence")
     parser.add_argument("--safe-mode", action="store_true",
                         help="Enable safe mode (block unmapped DSP writes)")
     parser.add_argument("--ws-port", type=int, default=None,
@@ -3174,6 +3205,11 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             else:
                 log.warning("Driver did not report device info "
                             "(pre-GET_DEVICE_INFO?) — using default device map")
+        elif args.require_hardware:
+            log.error("Hardware required but the device node could not be "
+                      "opened (%s): check that the driver is loaded and the "
+                      "node's permissions", args.device or "/dev/ua_apollo*")
+            sys.exit(1)
         else:
             # Keep the backend: the daemon follows the device and picks it
             # up when it appears (udev starts us on add; replug/reload)
@@ -3258,7 +3294,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
 
     # Initialize software metering (through PipeWire when it holds the
     # Apollo, else ALSA capture)
-    if not args.no_hardware:
+    if not args.no_hardware and not args.no_metering:
         metering = make_meter(args.alsa_device, device_type,
                               backend.device_path
                               if backend and backend.connected else None,
@@ -3275,7 +3311,8 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                          helper_port=helper_port, trace=args.trace,
                          helper_tree=helper_tree, metering=metering,
                          network_id=network_id,
-                         loaded_map=None if args.device_map else device_map)
+                         loaded_map=None if args.device_map else device_map,
+                         preserve_hardware=args.preserve_hardware)
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}
@@ -3311,7 +3348,8 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     log.info("  Hardware: %s",
              ("connected" if backend.connected else "waiting for device")
              if hw_router else "software-only")
-    log.info("  Metering: %s", type(metering).__name__ if not args.no_hardware
+    log.info("  Metering: %s", type(metering).__name__
+             if not args.no_hardware and not args.no_metering
              else "disabled")
     log.info("  TCP (Mixer Engine): tcp://%s:%d", args.host, args.port)
     log.info("  TCP (Mixer Helper): %s",
