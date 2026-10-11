@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Recording works after every sample-rate change on the x4: a 192 kHz stream started while the clock was already at 176.4 or 192 kHz used to record nothing, and a 176.4 kHz one did about 1 time in 6.
 - Mixer daemon: talkback works from a client. The device maps keep `TalkbackOn` at the tree root (`/TalkbackOn`), and the daemon only routed `/devices/0/TalkbackOn` to the hardware; the talkback button's state is now also reported on `/TalkbackOn`.
 - Mixer daemon: a front-panel monitor-knob change now updates `CRMonitorLevel` (dB) as well as `CRMonitorLevelTapered`, so clients reading the dB value no longer see a stale level.
+- Mixer daemon: starting it no longer resets the Apollo. Preamp gain and switches, link, and the monitor level, mute, mono and dim are taken from the hardware, so front-panel changes made while no daemon ran are kept; safe defaults (monitor at minimum) are only used when there is no hardware readback. Input faders and mutes a client set are restored from the saved state instead of every input being muted, and the init sequence is sent once instead of twice when a client connects during startup.
 - Mixer daemon: after the front-panel gain knob moves, setting a preamp's gain back to the value a client last set now reaches the hardware; the daemon used to drop it as a duplicate.
 
 ## [1.0.0] - 2026-03-22

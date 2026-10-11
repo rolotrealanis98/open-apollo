@@ -38,7 +38,8 @@ from protocol import (MessageFramer, Command, parse_command, encode_response_byt
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
 from helper_tree import HelperTree
-from hardware import HardwareBackend, HardwareRouter, preamp_db_to_tapered
+from hardware import (HardwareBackend, HardwareRouter, fader_db_to_tapered,
+                      preamp_db_to_tapered)
 from metering import AlsaMeter, NullMeter, SILENCE_DB
 from bonjour import BonjourAnnouncer
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
@@ -777,13 +778,13 @@ class MixerDaemon:
         """
         log.info("Firing initialization sequence: initialized → true")
 
-        # Push state tree defaults to hardware BEFORE readback sync
-        # takes over.  On cold boot, all mixer settings are zeroed; this
-        # ensures hardware matches the desired state (device map defaults
-        # or restored saved state).
-        self._push_defaults_to_hardware()
-        if self.hw_router and self.hw_router.backend.connected:
-            self._hw_init_done = True
+        # Push the init sequence to hardware BEFORE readback sync takes
+        # over, once per hardware connection: this runs both from the
+        # startup timer and after a client's handshake.
+        if not self._hw_init_done:
+            self._push_defaults_to_hardware()
+            if self.hw_router and self.hw_router.backend.connected:
+                self._hw_init_done = True
 
         # Force value change even if saved state restored True —
         # reset to False first so the False→True transition fires
@@ -797,11 +798,18 @@ class MixerDaemon:
         self.state.set_value("/initialized", True)
 
     def _push_defaults_to_hardware(self):
-        """Push device map defaults to hardware on init.
+        """Push the init sequence (macOS order) to hardware.
 
-        After cold boot, all mixer settings are zeroed.  This pushes
-        the ORIGINAL device map default values (not current state tree,
-        which may have been overwritten by client SETs) to hardware.
+        Preamp and monitor values come from the hardware readback when it
+        is valid, so a daemon start keeps what the Apollo is doing,
+        front-panel changes included (the readback level is the level the
+        Apollo is already playing at).  Without a valid readback, safe
+        defaults are used: monitor volume at minimum to protect speakers,
+        preamps at 10 dB with every switch off.
+
+        Input faders and mutes can't be read back: the ones a client set
+        (the saved state) are restored, and every other input starts
+        muted at 0 dB, which the state tree is told so clients show it.
 
         Includes bus coefficients for all 24 input channels — required
         for type 0x01 (post-DSP) capture channels (Mic 3-4, Virtual,
@@ -810,23 +818,53 @@ class MixerDaemon:
         if not self.hw_router:
             return
 
-        # Safe defaults — monitor volume at MINIMUM to protect speakers.
-        # User must raise volume intentionally after boot.
-        defaults = {
-            "/devices/0/inputs/0/preamps/0/Gain/value": 10.0,
-            "/devices/0/inputs/1/preamps/0/Gain/value": 10.0,
-            "/devices/0/inputs/2/preamps/0/Gain/value": 10.0,
-            "/devices/0/inputs/3/preamps/0/Gain/value": 10.0,
-            "/devices/0/outputs/18/MixInSource/value": "mon",
-            "/devices/0/outputs/18/CRMonitorLevel/value": -96.0,
-        }
+        rb = self.hw_router.poll_hw_readback() or {}
+        if rb:
+            log.info("Init keeps the hardware's preamp and monitor settings "
+                     "(monitor %.1f dB)", rb["monitor_level_db"])
+        else:
+            log.info("No hardware readback: init uses safe defaults "
+                     "(monitor at minimum)")
+        mon_raw = rb.get("monitor_level_raw", 0)
+        mon_mute = rb.get("monitor_mute", False)
+        mon_mono = rb.get("monitor_mono", False)
+        # Talkback also sets the dim bit, and init turns talkback off
+        mon_dim = rb.get("monitor_dim", False) and not rb.get(
+            "talkback_active", False)
+        gain_db = [rb.get(f"preamp_{ch}_gain", 10) for ch in range(4)]
 
-        # Push all 24 input fader defaults via state tree path.
-        # This uses the proven FaderLevel→bus coefficient pipeline.
-        # Mute all inputs by default — no input monitoring until user unmutes.
+        def flag(ch, key):
+            return 1 if rb.get(f"preamp_{ch}_{key}", False) else 0
+
+        defaults = {
+            f"/devices/0/inputs/{ch}/preamps/0/Gain/value": float(gain_db[ch])
+            for ch in range(4)
+        }
+        defaults["/devices/0/outputs/18/MixInSource/value"] = "mon"
+        defaults["/devices/0/outputs/18/CRMonitorLevel/value"] = \
+            (mon_raw - 192) / 2.0
+
+        # Push all 24 input faders via the state tree path (the proven
+        # FaderLevel→bus coefficient pipeline).
+        saved = self.state._dirty
         for i in range(24):
-            defaults[f"/devices/0/inputs/{i}/FaderLevel/value"] = 0.0
-            defaults[f"/devices/0/inputs/{i}/Mute/value"] = True
+            base = f"/devices/0/inputs/{i}"
+            fader = f"{base}/FaderLevel/value"
+            tapered = f"{base}/FaderLevelTapered/value"
+            mute = f"{base}/Mute/value"
+            if fader in saved:
+                defaults[fader] = saved[fader]
+            elif tapered in saved:
+                defaults[tapered] = saved[tapered]
+            else:
+                defaults[fader] = 0.0
+                self._push_to_clients(fader, 0.0)
+                self._push_to_clients(tapered, fader_db_to_tapered(0.0))
+            if mute in saved:
+                defaults[mute] = saved[mute]
+            else:
+                defaults[mute] = True
+                self._push_to_clients(mute, True)
 
         for path, value in defaults.items():
             self.hw_router.on_set(path, value)
@@ -878,7 +916,7 @@ class MixerDaemon:
                 be.set_mixer_param(2, ch_idx, 0x47, 1)   # TB_CONFIG
                 be.set_mixer_param(2, ch_idx, 0x48, 0)   # param 0x48
                 be.set_mixer_param(2, ch_idx, 0x46, 0)   # TALKBACK OFF
-                be.set_mixer_param(2, ch_idx, 0x44, 0)   # DIM OFF
+                be.set_mixer_param(2, ch_idx, 0x44, int(mon_dim))  # DIM
             log.info("Sent talkback/dim init sequence (TB_CONFIG + OFF)")
 
             # Full per-channel preamp init matching macOS DTrace capture
@@ -907,19 +945,22 @@ class MixerDaemon:
                 be.set_mixer_param(PREAMP, ch, 0x16, 0xA0)       # Level = -16 dB (leading)
 
             for ch in range(4):
-                be.set_mixer_param(PREAMP, ch, 0x04, 0)          # LowCut=off
-                be.set_mixer_param(PREAMP, ch, 0x00, 0)          # Mic/Line=Mic
+                be.set_mixer_param(PREAMP, ch, 0x04, flag(ch, "lowcut"))
+                be.set_mixer_param(PREAMP, ch, 0x00, flag(ch, "micline"))
                 be.set_mixer_param(PREAMP, ch, 0x08, 0)          # Unknown
                 be.set_mixer_param(PREAMP, ch, 0x08, 0)          # Unknown (2x)
-                be.set_mixer_param(PREAMP, ch, 0x06, 1)          # GainC=1 (10dB)
-                be.set_mixer_param(PREAMP, ch, 0x05, 0x3F800000) # Phase=+1.0f
+                be.set_mixer_param(PREAMP, ch, 0x06,             # GainC = dB-9
+                                   max(0, min(56, gain_db[ch] - 9)))
+                be.set_mixer_param(PREAMP, ch, 0x05,             # Phase -1.0f=inv
+                                   0xBF800000 if flag(ch, "phase")
+                                   else 0x3F800000)
                 be.set_mixer_param(PREAMP, ch, 0x07, 0)          # Unknown
                 if ch <= 1:  # HiZ-capable channels only
                     be.set_mixer_param(PREAMP, ch, 0x11, 1)      # HiZ flag
-                be.set_mixer_param(PREAMP, ch, 0x01, 0)          # PAD=off
-                be.set_mixer_param(PREAMP, ch, 0x03, 0)          # 48V=off
+                be.set_mixer_param(PREAMP, ch, 0x01, flag(ch, "pad"))
+                be.set_mixer_param(PREAMP, ch, 0x03, flag(ch, "48v"))
                 if ch in (0, 2):  # Link on first of each pair
-                    be.set_mixer_param(PREAMP, ch, 0x02, 0)      # Link=off
+                    be.set_mixer_param(PREAMP, ch, 0x02, flag(ch, "link"))
                 be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route pass 2
                 be.set_mixer_param(PREAMP, ch, 0x13, 0x0001FFFF) # Route pass 3
 
@@ -975,11 +1016,11 @@ class MixerDaemon:
             mon(MON, 0, 0x25, 0)       # CUE2Mix alt = off
             mon(MON, 10, 0x31, 0xffffffff)  # Unknown mirror
             mon(MON, 1, 0x04, 0)       # MonitorSrc = MIX bus
-            mon(MON, 1, 0x01, 0)       # Volume = 0 (minimum, SAFE)
-            mon(MON, 0, 0x03, 0)       # Mute = off
+            mon(MON, 1, 0x01, mon_raw) # Volume (0 = minimum without readback)
+            mon(MON, 0, 0x03, 2 if mon_mute else int(mon_mono))  # 2 mute, 1 mono
             mon(MON, 10, 0x1e, 0)      # MirrorsToDigital = off
             mon(MON, 1, 0x32, 0)       # OutputRef = +4dBu
-            mon(MON, 1, 0x44, 0)       # Dim = off
+            mon(MON, 1, 0x44, int(mon_dim))  # Dim
             mon(MON, 1, 0x3e, 1)       # Unknown (setting[15] bit9)
             mon(MON, 1, 0x4b, 0)       # HP1 config (setting[33] byte0)
             mon(MON, 1, 0x64, 0)       # HP config (setting[32] byte1)
