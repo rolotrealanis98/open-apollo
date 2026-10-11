@@ -4295,6 +4295,7 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	struct snd_pcm_runtime *runtime = sub->runtime;
 	unsigned long flags;
 	unsigned int ch, frames;
+	int err;
 
 	if (atomic_read(&ua->shutdown))
 		return -ENODEV;
@@ -4331,6 +4332,16 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	 */
 	snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_BUFFER_SIZE,
 				     frames, frames);
+
+	/*
+	 * The converters are 24 bit: the samples are S32_LE with the data in
+	 * the top 24 bits.  Tell the applications (the kext publishes 24 bit
+	 * significant too), so a plugin or a resampler does not dither the
+	 * low byte.
+	 */
+	err = snd_pcm_hw_constraint_msbits(runtime, 0, 32, 24);
+	if (err < 0)
+		return err;
 
 	/*
 	 * Playback and capture share one clock: once one direction has a
