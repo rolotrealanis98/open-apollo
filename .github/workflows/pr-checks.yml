@@ -64,6 +64,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Installer unit tests
         run: bash tests/test-install-module-binding.sh
+      - name: Host check unit tests (Thunderbolt, Secure Boot, setup worker)
+        run: bash tests/test-host-checks.sh
 
   console-web:
     runs-on: ubuntu-latest
