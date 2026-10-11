@@ -1929,7 +1929,7 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 
 	case UA_MON_PARAM_DIGITAL_MODE:	/* 0x21 -> bits[7:0] */
 		setting_idx = 8;
-		hw_val  = value & 0xFF;
+		hw_val  = ua_device_mode_word(ua, value);
 		hw_mask = 0x000000FF;
 		break;
 	case UA_MON_PARAM_UNKNOWN_22:	/* 0x22 -> bits[29:28] */

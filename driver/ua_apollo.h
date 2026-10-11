@@ -1715,6 +1715,16 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 			 u32 param_id, u32 value);
 
+/*
+ * The device-mode word (other param 0x21, mixer setting[8] bits 7:0), as the
+ * kext's PushDeviceMode builds it (parity/04 D1-D3, feature-mechanisms §5):
+ * [2:0] multi-unit role, 0x08 TOSLink out = ADAT, 0x10 TOSLink in = ADAT,
+ * 0x20/0x28/0x30 converter mode, [7:6] multi-unit order.
+ */
+#define UA_DEVMODE_OUT_ADAT	0x08
+#define UA_DEVMODE_IN_ADAT	0x10
+u32 ua_device_mode_word(struct ua_device *ua, u32 value);	/* ua->lock */
+
 /* DSP ring buffer and firmware (ua_dsp.c) */
 int ua_dsp_rings_init(struct ua_device *ua);	/* also re-arms on resume */
 void ua_dsp_rings_fini(struct ua_device *ua, bool dma_quiet);

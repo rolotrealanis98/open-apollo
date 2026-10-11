@@ -1140,6 +1140,39 @@ static unsigned int ua_route_mode(const struct ua_audio *audio,
 	}
 }
 
+static bool toslink_in_bit;
+module_param(toslink_in_bit, bool, 0644);
+MODULE_PARM_DESC(toslink_in_bit,
+		 "Carry the TOSLink input type in the device-mode word (param 0x21 bit 0x10 = ADAT in, as the kext's PushDeviceMode does) on models with a Digital Input Mode control, and write the word when that control changes (default: off, bit 0x10 is always sent clear; needs an optical source to verify)");
+
+/**
+ * ua_device_mode_word - the byte written for the device-mode param 0x21
+ * @ua: device (ua->lock held)
+ * @value: the caller's word: output type 0x08, multi-unit and converter bits
+ *
+ * Read-modify-write over the fields this driver owns: bits 7:0 of @value
+ * pass through (the caller owns the output type, the multi-unit role/order
+ * bits [2:0]/[7:6], which stay zero for a lone unit, and the converter
+ * mode).  With toslink_in_bit on and a model that has a TOSLink input type
+ * (Digital Input Mode), bit 0x10 is replaced by dig_in_mode (ADAT = set);
+ * otherwise the word is @value & 0xff, exactly what every 0x21 write sent
+ * before.
+ */
+u32 ua_device_mode_word(struct ua_device *ua, u32 value)
+{
+	struct ua_audio *audio = &ua->audio;
+	u32 word = value & 0xff;
+
+	if (!toslink_in_bit || !audio->model ||
+	    audio->model->toslink == UA_TOSLINK_NONE)
+		return word;
+
+	word &= ~UA_DEVMODE_IN_ADAT;
+	if (audio->dig_in_mode == UA_DIG_ADAT)
+		word |= UA_DEVMODE_IN_ADAT;
+	return word;
+}
+
 /*
  * MixerTypeFreud/Stretch/Armstrong::IsChannelShownForIORoute hide ADAT
  * channels from 5 up while 50001 <= rate <= 150000 (88.2/96 kHz S/MUX).
@@ -6741,6 +6774,22 @@ static int ua_digital_in_mode_put(struct snd_kcontrol *kctl,
 		return 0;
 	}
 	ua->audio.dig_in_mode = mode;
+	/*
+	 * toslink_in_bit: the kext pushes the whole device-mode word when the
+	 * TOSLink input type changes (PushDeviceMode), so do the same, with
+	 * the output type and the other fields as last sent.  A failed write
+	 * leaves the host-side selection in force; the next 0x21 write
+	 * carries the bit again.
+	 */
+	if (toslink_in_bit) {
+		int ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_DIGITAL_MODE,
+					       ua->audio.monitor.digital_mode);
+
+		if (ret)
+			dev_warn(&ua->pdev->dev,
+				 "Digital Input Mode: device-mode write failed: %d\n",
+				 ret);
+	}
 	ua_io_map_digital_mode_changed(ua);
 	mutex_unlock(&ua->lock);
 
