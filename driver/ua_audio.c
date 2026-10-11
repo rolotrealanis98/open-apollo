@@ -2545,6 +2545,7 @@ static void ua_audio_disconnect(struct ua_device *ua)
 
 /**
  * ua_audio_reconnect - Reset connection state and re-do ACEFACE handshake.
+ * @ua: device
  *
  * Called from ioctl after userspace firmware load.  The driver's initial
  * probe-time connect attempt fails on cold boot (DSP not ready), so

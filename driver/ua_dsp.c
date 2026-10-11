@@ -1092,6 +1092,12 @@ int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 
 /**
  * ua_dsp_load_firmware_to - Load firmware to a specific DSP
+ * @ua: device
+ * @dsp_idx: target DSP index
+ * @fw_data: firmware image
+ * @fw_size: size of @fw_data in bytes
+ *
+ * Return: 0 on success, negative errno on failure.
  */
 int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 			     const void *fw_data, size_t fw_size)
@@ -3027,6 +3033,9 @@ void ua_dsp_free_plugin_payloads(struct ua_device *ua)
 
 /**
  * ua_plugin_lookup_dma - Find allocated DMA buffer for a ring index
+ * @ua: device
+ * @ring_idx: ring entry index the buffer was allocated for
+ *
  * Returns NULL if no buffer was allocated for that entry.
  */
 static struct ua_plugin_dma_buf *
@@ -3320,7 +3329,10 @@ int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
  * ua_dsp_ring_send_raw - Send an arbitrary 4-word inline entry to any DSP
  * @ua: device (caller must hold ua->lock)
  * @dsp_idx: target DSP (0-3)
- * @w0..w3: the four command words
+ * @w0: first command word
+ * @w1: second command word
+ * @w2: third command word
+ * @w3: fourth command word
  *
  * For testing ring buffer commands from userspace.
  */

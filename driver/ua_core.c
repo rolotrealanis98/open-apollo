@@ -635,8 +635,18 @@ static long ua_ioctl_write_reg(struct ua_device *ua, unsigned long arg)
 
 /**
  * ua_cli_send_locked - Send CLI command (kernel-internal helper)
+ * @ua: device (caller must hold ua->lock)
+ * @cmd_data: command bytes to write to the CLI buffer
+ * @cmd_len: length of @cmd_data in bytes (1..UA_CLI_CMD_BUF_SIZE)
+ * @resp_data: buffer for the response bytes, or NULL to ignore the response
+ * @resp_len: out: response length in bytes (capped at UA_CLI_RESP_BUF_SIZE),
+ *            or NULL to ignore the response
  *
  * Must be called with ua->lock held.
+ *
+ * Return: 0 on success, -EINVAL for a bad @cmd_len, -ETIMEDOUT if the ARM
+ * does not answer.  Currently every call returns -ENOSYS: CLI access is
+ * blocked unconditionally because it freezes the ARM MCU.
  */
 static int ua_cli_send_locked(struct ua_device *ua, const u8 *cmd_data,
 			      u32 cmd_len, u8 *resp_data, u32 *resp_len)
