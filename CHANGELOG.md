@@ -65,6 +65,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documentation moved to the [GitHub wiki](https://github.com/rolotrealanis98/open-apollo/wiki). The `docs/` directory and the open-apollo-docs site are retired; old `open-apollo-docs.pages.dev` links redirect to the wiki.
 
 ### Fixed
+- PipeWire duplex starts no longer begin with a burst of playback xruns: a stream now starts at the shared transport's live position (`pcm_live_start`, default on; prepare sets the ALSA hardware pointer to SAMPLE_POS, as the RME Hammerfall drivers do), instead of at 0 on a transport already running. On the x4 a duplex start went from 7 playback xruns to 1.
 - The notification status (0xC030) is cleared only after every bit of the pass has been acted on, as the macOS driver does.
 - `period_irq=1` at 48 kHz: the timer vector is re-armed from the IRQ thread after the period is served (it used to re-arm in the hard IRQ and let a second interrupt for the same boundary through), and TIMER_CFG is written on every transport prepare, restarts included.
 - The driver's ALSA sync skips a hardware readback the Mixer Engine would skip (word 38 or 39 reading 0xFFFFFFFF).
