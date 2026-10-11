@@ -1,13 +1,40 @@
 #!/usr/bin/env python3
-"""Probe Apollo Solo USB registers via vendor control transfers.
+"""Probe Apollo USB registers via vendor control transfers (read-only by default).
 
-The ioctl request numbers map to USB vendor bRequest codes:
-  0x10 = read register, 0x11 = write register, etc.
+Vendor request map, derived from the Windows UAD2Usb.sys (parity/05-windows.md
+section 3.3). Every request is bmRequestType 0x41 (OUT) / 0xC1 (IN), recipient
+= interface, wIndex = 0, and wValue carries the argument:
 
-Usage: sudo python3 usb-reg-probe.py
+  0x03 OUT  register write; wValue = FPGA word address, payload = 1 or N dwords
+  0x04 IN   register read;  wValue = FPGA word address, length 4 or 4n
+  0x10 IN   readback block: the 40-dword (160-byte) mixer readback, wValue = 0
+  0x00 IN   4-byte run-state word        0x0E/0x0F IN  4-byte version/ID words
+  0x06 IN   36-byte device/firmware info block
+
+Mixer block in FPGA word space:
+  0x0600  mixer settings block (block write via 0x03)
+  0x0602  SEQ_WR  (write here to bump the sequence and latch the settings)
+  0x0603  SEQ_RD  (DSP acknowledges here)
+  0x0604  readback status
+
+The old PCIe-style offsets (0x3800 MIXER_BASE, 0xC3F4 CLI_ENABLE, ...) are BAR0
+addresses and do not exist in this FPGA address space; the earlier version of
+this tool also treated 0x10 as "read register", which was wrong.
+
+Default mode only reads. Writing needs --write ADDR=VALUE together with
+--allow-write; a write to the mixer block can change monitor, preamp or routing
+state on a live unit, so only use it on purpose.
+
+Usage:
+  sudo python3 usb-reg-probe.py                     # read-only survey
+  sudo python3 usb-reg-probe.py --read 0x0603       # one register
+  sudo python3 usb-reg-probe.py --readback          # 40-dword block (0x10)
+  sudo python3 usb-reg-probe.py --write 0x0602=1 --allow-write
 """
+import argparse
 import struct
 import sys
+
 import usb.core
 import usb.util
 
@@ -17,6 +44,31 @@ LIVE_PIDS = {
     0x0002: "Twin USB",
     0x000F: "Twin X USB",
 }
+
+REQ_OUT = 0x41
+REQ_IN = 0xC1
+
+REQ_STATUS = 0x00
+REQ_WRITE_REG = 0x03
+REQ_READ_REG = 0x04
+REQ_FW_INFO = 0x06
+REQ_READBACK = 0x10
+
+# FPGA word addresses (Windows-derived, see docstring)
+REGS = {
+    0x0600: "MIXER_BLOCK",
+    0x0602: "SEQ_WR",
+    0x0603: "SEQ_RD",
+    0x0604: "READBACK_STATUS",
+}
+
+# Read-only no-argument requests: (request, length, name)
+INFO_REQUESTS = [
+    (REQ_STATUS, 4, "run-state word"),
+    (0x0E, 4, "version/ID word A"),
+    (0x0F, 4, "version/ID word B"),
+    (REQ_FW_INFO, 36, "device/firmware info"),
+]
 
 
 def find_device():
@@ -28,96 +80,98 @@ def find_device():
     return None, None
 
 
-# Key register offsets from Thunderbolt driver
-REGS = {
-    0x0000: "BAR0 base",
-    0x0004: "BAR0+4",
-    0x0008: "BAR0+8",
-    0x3800: "MIXER_BASE",
-    0x3804: "MIXER+4",
-    0x3808: "MIXER_SEQ_WR",
-    0x380C: "MIXER_SEQ_RD",
-    0xC3F4: "CLI_ENABLE",
-    0xC3F8: "CLI_STATUS",
-}
+def read_reg(dev, addr, length=4):
+    data = dev.ctrl_transfer(REQ_IN, REQ_READ_REG, addr, 0, length, timeout=500)
+    return data.tobytes()
 
-def probe():
+
+def write_reg(dev, addr, value):
+    dev.ctrl_transfer(REQ_OUT, REQ_WRITE_REG, addr, 0,
+                      struct.pack("<I", value), timeout=500)
+
+
+def dump_words(raw):
+    n = len(raw) // 4
+    return " ".join(f"{w:08x}" for w in struct.unpack_from(f"<{n}I", raw))
+
+
+def readback(dev):
+    print("\n=== Readback block (request 0x10, 40 dwords) ===")
+    try:
+        data = dev.ctrl_transfer(REQ_IN, REQ_READBACK, 0, 0, 160, timeout=500)
+    except usb.core.USBError as e:
+        print(f"  error: {e}")
+        return
+    raw = data.tobytes()
+    for i in range(0, len(raw) // 4, 4):
+        print(f"  word {i:2d}: {dump_words(raw[i * 4:i * 4 + 16])}")
+
+
+def survey(dev):
+    print("=== Mixer registers (request 0x04, wValue = FPGA word address) ===")
+    for addr, name in sorted(REGS.items()):
+        try:
+            print(f"  [{addr:#06x}] {name:16s}: {dump_words(read_reg(dev, addr))}")
+        except usb.core.USBError as e:
+            print(f"  [{addr:#06x}] {name:16s}: {e}")
+
+    print("\n=== Info requests (read-only) ===")
+    for req, length, name in INFO_REQUESTS:
+        try:
+            data = dev.ctrl_transfer(REQ_IN, req, 0, 0, length, timeout=500)
+            print(f"  req={req:#04x} ({name:20s}): {dump_words(data.tobytes())}")
+        except usb.core.USBError as e:
+            print(f"  req={req:#04x} ({name:20s}): {e}")
+
+    readback(dev)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--read", metavar="ADDR", action="append", default=[],
+                    help="read one FPGA word address (request 0x04); repeatable")
+    ap.add_argument("--readback", action="store_true",
+                    help="only fetch the 40-dword readback block (request 0x10)")
+    ap.add_argument("--write", metavar="ADDR=VALUE", action="append", default=[],
+                    help="write a dword (request 0x03); needs --allow-write")
+    ap.add_argument("--allow-write", action="store_true",
+                    help="permit --write (changes live device state)")
+    args = ap.parse_args()
+
+    if args.write and not args.allow_write:
+        ap.error("--write changes device state; add --allow-write to confirm")
+
     dev, model = find_device()
     if not dev:
-        print("No live Apollo USB device found "
-              "(expected one of: %s)" %
+        print("No live Apollo USB device found (expected one of: %s)" %
               ", ".join(LIVE_PIDS.values()))
         sys.exit(1)
-    print(f"Found: {model} — {dev.product}\n")
+    print(f"Found: {model} - {dev.product}\n")
 
     if dev.is_kernel_driver_active(0):
         dev.detach_kernel_driver(0)
     usb.util.claim_interface(dev, 0)
-
-    # Test 1: Read register via ctrl request 0x10
-    # Try passing offset in wValue, wIndex, and in data
-    print("=== Vendor ctrl request 0x10 (read reg) ===")
-    print("\n-- wValue=offset, wIndex=0, read 64 bytes --")
-    for offset, name in sorted(REGS.items()):
-        try:
-            data = dev.ctrl_transfer(0xC0, 0x10, offset & 0xFFFF, offset >> 16, 64, timeout=500)
-            hex_str = data.tobytes().hex()
-            # Parse first few words as LE uint32
-            words = struct.unpack_from("<8I", data.tobytes())
-            word_str = " ".join(f"{w:08x}" for w in words)
-            print(f"  [{offset:#06x}] {name:16s}: {word_str}")
-        except usb.core.USBError as e:
-            print(f"  [{offset:#06x}] {name:16s}: {e}")
-
-    # Test 2: Try with offset as data payload (8-byte struct like ioctl)
-    print("\n-- Send offset as payload (like ioctl struct) --")
-    for offset, name in [(0x380C, "MIXER_SEQ_RD"), (0xC3F4, "CLI_ENABLE")]:
-        payload = struct.pack("<II", offset, 0)
-        try:
-            data = dev.ctrl_transfer(0xC0, 0x10, 0, 0, 64, timeout=500)
-            words = struct.unpack_from("<4I", data.tobytes())
-            print(f"  base read: {' '.join(f'{w:08x}' for w in words)}")
-        except usb.core.USBError as e:
-            print(f"  {name}: {e}")
-        # Try sending payload as OUT then reading
-        try:
-            dev.ctrl_transfer(0x40, 0x10, offset & 0xFFFF, offset >> 16, b"", timeout=500)
-            data = dev.ctrl_transfer(0xC0, 0x10, offset & 0xFFFF, offset >> 16, 64, timeout=500)
-            words = struct.unpack_from("<4I", data.tobytes())
-            print(f"  [{offset:#06x}] OUT+IN: {' '.join(f'{w:08x}' for w in words)}")
-        except usb.core.USBError as e:
-            print(f"  [{offset:#06x}] OUT+IN: {e}")
-
-    # Test 3: Try other ioctl-mapped requests
-    print("\n=== Other vendor requests ===")
-    for req, name in [(0x11, "WRITE_REG"), (0x30, "SET_BUS_PARAM"),
-                       (0x31, "SET_MIXER_PARAM"), (0x34, "SET_DRIVER_PARAM"),
-                       (0x35, "GET_DRIVER_PARAM"), (0x36, "WRITE_SETTING"),
-                       (0x37, "READ_SETTING"), (0x40, "CLI_CMD")]:
-        try:
-            data = dev.ctrl_transfer(0xC0, req, 0, 0, 64, timeout=300)
-            words = struct.unpack_from("<4I", data.tobytes())
-            print(f"  req={req:#04x} ({name:16s}): {' '.join(f'{w:08x}' for w in words)}")
-        except usb.core.USBTimeoutError:
-            print(f"  req={req:#04x} ({name:16s}): timeout")
-        except usb.core.USBError as e:
-            if "pipe" in str(e).lower():
-                print(f"  req={req:#04x} ({name:16s}): STALL (not supported)")
-            else:
-                print(f"  req={req:#04x} ({name:16s}): {e}")
-
-    # Test 4: Read a range of registers from 0x3800
-    print("\n=== Register scan 0x3800-0x3840 ===")
-    for offset in range(0x3800, 0x3844, 4):
-        try:
-            data = dev.ctrl_transfer(0xC0, 0x10, offset & 0xFFFF, offset >> 16, 8, timeout=300)
-            val = struct.unpack_from("<II", data.tobytes())
-            print(f"  [{offset:#06x}]: {val[0]:08x} {val[1]:08x}")
-        except usb.core.USBError:
-            print(f"  [{offset:#06x}]: error")
-
-    usb.util.release_interface(dev, 0)
+    try:
+        if args.write:
+            print("WARNING: writing FPGA registers on a live device. A bad write"
+                  " to the mixer block can mute or mis-route the unit.\n",
+                  file=sys.stderr)
+            for spec in args.write:
+                addr_s, _, val_s = spec.partition("=")
+                addr, val = int(addr_s, 0), int(val_s, 0)
+                write_reg(dev, addr, val)
+                print(f"  wrote [{addr:#06x}] = {val:#010x}")
+        for a in args.read:
+            addr = int(a, 0)
+            print(f"  [{addr:#06x}]: {dump_words(read_reg(dev, addr))}")
+        if args.readback:
+            readback(dev)
+        if not (args.read or args.readback or args.write):
+            survey(dev)
+    finally:
+        usb.util.release_interface(dev, 0)
     print("\nDone.")
 
+
 if __name__ == "__main__":
-    probe()
+    main()
