@@ -871,6 +871,7 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_CLOCK_SPDIF      0x00
 #define UA_CLOCK_ADAT       0x05
 #define UA_CLOCK_WORDCLOCK  0x07
+#define UA_CLOCK_DANTE      0x09    /* x16D; not offered by the x4 */
 #define UA_CLOCK_INTERNAL   0x0C
 #define UA_CLOCK_PEER       0x0A    /* peer/slave: hidden from the Clock Source menu */
 

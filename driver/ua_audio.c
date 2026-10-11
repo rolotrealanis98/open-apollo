@@ -2187,6 +2187,8 @@ static const char *ua_clock_fallback_name(unsigned int src, char *buf,
 		return "ADAT";
 	case UA_CLOCK_WORDCLOCK:
 		return "Word Clock";
+	case UA_CLOCK_DANTE:
+		return "Dante";
 	case UA_CLOCK_INTERNAL:
 		return "Internal";
 	default:
@@ -4336,7 +4338,15 @@ static int ua_audio_clock_change_locked(struct ua_device *ua,
 	return -ETIMEDOUT;
 }
 
-/* A clock source the device can run on (values: UA_CLOCK_*) */
+/*
+ * A clock source the device can run on (values: UA_CLOCK_*): one of the
+ * known UAD2ClockSource values, and offered by the device once its
+ * source mask (0xC08C[31:16]) has been read.  Dante (9) is in the set:
+ * the x16D offers it and the mixer daemon sends it (CLOCK_SOURCE_MAP).
+ * After a connect the mask keeps it off every unit that does not offer
+ * it; before the first one any known value is stored and the device
+ * decides at the connect, as for Word Clock on the x4.
+ */
 bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source)
 {
 	const struct ua_audio *audio = &ua->audio;
@@ -4352,7 +4362,8 @@ bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source)
 		return found;
 	}
 	if (source != UA_CLOCK_INTERNAL && source != UA_CLOCK_SPDIF &&
-	    source != UA_CLOCK_ADAT && source != UA_CLOCK_WORDCLOCK)
+	    source != UA_CLOCK_ADAT && source != UA_CLOCK_WORDCLOCK &&
+	    source != UA_CLOCK_DANTE)
 		return false;
 	/* No list read yet (not connected): let the device decide */
 	return !audio->clock_src_mask || (audio->clock_src_mask & BIT(source));
