@@ -474,11 +474,17 @@ class MixerDaemon:
         Readback pushes are suppressed for 300ms after a client SET
         to prevent echo/trailing on UI controls.
         """
-        # Monitor level (tapered 0.0-1.0)
+        # Monitor level — push both the dB value and the tapered one (as
+        # for gain below), so CRMonitorLevel doesn't go stale.
         tapered = rb.get("monitor_level_tapered", 0.0)
+        level_path = "/devices/0/outputs/18/CRMonitorLevel"
         path = "/devices/0/outputs/18/CRMonitorLevelTapered"
         if abs(tapered - last_rb.get("monitor_level_tapered", -1)) > 0.002:
-            if not self._readback_suppressed(path):
+            if not any(self._readback_suppressed(p) for p in
+                       (level_path, path, level_path + "/value",
+                        path + "/value")):
+                self._push_to_clients(level_path,
+                                      rb.get("monitor_level_db", -96.0))
                 self._push_to_clients(path, tapered)
 
         # Monitor mute
@@ -513,11 +519,10 @@ class MixerDaemon:
             self._push_to_clients(
                 "/devices/0/outputs/18/MixToMono", mono)
 
-        # Talkback active
+        # Talkback active (TalkbackOn is at the tree root in the device maps)
         talkback = rb.get("talkback_active", False)
         if talkback != last_rb.get("talkback_active"):
-            self._push_to_clients(
-                "/devices/0/outputs/18/TalkbackOn", talkback)
+            self._push_to_clients("/TalkbackOn", talkback)
 
         # Preamp gain readback — 4 individual channels.
         # rb_data[3]: ch0=[7:0], ch1=[15:8], ch2=[23:16], ch3=[31:24]
@@ -536,6 +541,12 @@ class MixerDaemon:
                 if not dragging:
                     self._push_to_clients(gain_path, float(gain_dB))
                     self._push_to_clients(tapered_path, preamp_db_to_tapered(gain_dB))
+                    # The gain moved outside the daemon (front-panel knob):
+                    # update the router's duplicate filter, or a client
+                    # SET back to its previous value would be dropped.
+                    if self.hw_router:
+                        self.hw_router._gain_last[ch] = (gain_dB,
+                                                         time.monotonic())
 
         # Preamp controls (4 channels) — flags + IOType
         for ch in range(4):

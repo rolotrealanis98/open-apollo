@@ -1654,9 +1654,12 @@ _RE_AUX = re.compile(
 _RE_AUX_SEND = re.compile(
     r'^/devices/0/auxs/(\d+)/sends/(\d+)/(Gain|GainTapered|Pan|Bypass)/value$')
 
-# Global device controls (directly under /devices/0/)
+# Global device controls (directly under /devices/0/).  The device maps put
+# TalkbackOn at the tree root (/TalkbackOn); /devices/0/TalkbackOn is also
+# accepted.
 _RE_DEVICE_GLOBAL = re.compile(
-    r'^/devices/0/(TalkbackOn|DimAttenuation|TOSLinkOutput|DSPSpanning|Identify)/value$')
+    r'^(?:/devices/0)?/(TalkbackOn)/value$|'
+    r'^/devices/0/(DimAttenuation|TOSLinkOutput|DSPSpanning|Identify)/value$')
 
 # Global driver controls
 _RE_GLOBAL = re.compile(
@@ -1760,7 +1763,7 @@ class HardwareRouter:
 
         m = _RE_DEVICE_GLOBAL.match(path)
         if m:
-            control = m.group(1)
+            control = m.group(1) or m.group(2)
             self._handle_device_global(path, control, value)
             return
 
