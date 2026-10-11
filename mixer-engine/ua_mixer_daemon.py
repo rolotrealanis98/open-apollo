@@ -2160,7 +2160,8 @@ class MixerDaemon:
             mon(MON, 10, 0x31, 0xffffffff)  # Unknown mirror
             mon(MON, 1, 0x04, 0)       # MonitorSrc = MIX bus
             mon(MON, 1, 0x01, mon_raw) # Volume (0 = minimum without readback)
-            mon(MON, 0, 0x03, 2 if mon_mute else int(mon_mono))  # 2 mute, 1 mono
+            # bit 1 mute | bit 0 mono (hardware._monitor_mute_mono)
+            mon(MON, 0, 0x03, (2 if mon_mute else 0) | (1 if mon_mono else 0))
             mon(MON, 10, 0x1e, 0)      # MirrorsToDigital = off
             mon(MON, 1, 0x32, 0)       # OutputRef = +4dBu
             mon(MON, 1, 0x44, int(mon_dim))  # Dim

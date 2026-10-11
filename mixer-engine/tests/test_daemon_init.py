@@ -82,6 +82,15 @@ class TestInitWithReadback:
         assert last[(1, 0x04)] == 1 and last[(0, 0x04)] == 0   # LowCut
         assert last[(0, 0x02)] == 0 and last[(2, 0x02)] == 1   # Link
 
+    @pytest.mark.parametrize("mute, mono, want", [
+        (False, False, 0), (False, True, 1), (True, False, 2), (True, True, 3)])
+    def test_monitor_mute_mono_word_composes_both_bits(
+            self, daemon, backend, mute, mono, want):
+        backend.readback = (1, make_readback(mon_raw=150, mute=mute, mono=mono))
+        daemon._push_defaults_to_hardware()
+        calls = [c for c in backend.mixer_params if c[:3] == (2, 0, 0x03)]
+        assert calls and {c[3] for c in calls} == {want}
+
     def test_dim_kept_but_talkback_forced_off(self, daemon, backend):
         self.setup_readback(backend)
         daemon._push_defaults_to_hardware()
