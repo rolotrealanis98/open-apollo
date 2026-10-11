@@ -1055,7 +1055,10 @@ static const struct ua_model_type ua_gen_model_types[] = {
 	{ 0x8E, NULL, &ua_gen_model_apollo_8p },
 	{ 0x8F, NULL, &ua_gen_model_apollo_twin },
 	{ 0x92, NULL, &ua_gen_model_apollo_twin_mkii },
+	{ 0x93, NULL, &ua_gen_model_arrow },
 	{ 0x99, NULL, &ua_gen_model_apollo_twin_x },
+	{ 0x9C, NULL, &ua_gen_model_apollo_solo },
+	{ 0xA7, NULL, &ua_gen_model_apollo_solo },
 };
 
 #undef UA_GEN_ROUTE

@@ -128,6 +128,21 @@ int main(void)
 	       UA_DEV_APOLLO_TWIN_X);
 	assert(resolve(19, UA_DEV_ARROW, old, UA_DEV_ARROW) ==
 	       UA_DEV_APOLLO_TWIN_X);
+	/* Conrad family: 2016 = Arrow, 2032/2110 = Solo; a pinned Solo stays
+	 * unless the public type says Arrow */
+	assert(resolve(15, UA_DEV_SERIAL_2016, old, UA_DEV_SERIAL_2016) ==
+	       UA_DEV_ARROW_PUBLIC);
+	assert(resolve(15, UA_DEV_SERIAL_2032, old, UA_DEV_SERIAL_2032) ==
+	       UA_DEV_APOLLO_SOLO_PUBLIC);
+	assert(resolve(15, UA_DEV_SERIAL_2110, old, UA_DEV_SERIAL_2110) ==
+	       UA_DEV_APOLLO_SOLO_PUBLIC_B);
+	assert(resolve(15, UA_DEV_SERIAL_2016, old, UA_DEV_APOLLO_SOLO) ==
+	       UA_DEV_ARROW_PUBLIC);
+	assert(resolve(15, UA_DEV_SERIAL_2110, old, UA_DEV_APOLLO_SOLO) ==
+	       UA_DEV_APOLLO_SOLO);
+	/* the same serial types on the HEXA family are not retyped */
+	assert(resolve(17, UA_DEV_SERIAL_2016, old, UA_DEV_SERIAL_2016) ==
+	       UA_DEV_SERIAL_2016);
 	/* no public type: unchanged */
 	assert(resolve(16, 0, old, 0) == 0);		/* QUAD, -1 */
 	assert(resolve(20, 0, old, 0) == 0);

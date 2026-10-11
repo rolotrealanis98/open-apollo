@@ -638,18 +638,35 @@ static u32 ua_compute_public_type(struct ua_device *ua)
  * (x86 0x4b03) and the Mixer Engine's card types for 0x19 are the Lavern
  * (Twin X) class.  Their legacy DMA row (3/2) is the 3/2 fallback, so only
  * the name and the preamp counts change.
+ *
+ * On the Conrad family (ext_caps family 15) the public type names the
+ * product too: 0x13 (serial 2016) is the Arrow (card type 31), 0x1C
+ * (serial 2032 or other) and 0x27 (serial 2110) the Solo (cards 32/54).
+ * The serial-table types 0x1E/0x2A/0x3E there, which the driver never
+ * named, and the 0x000F subsystem pin on an Arrow (public 0x13) take
+ * UA_DEV_PUBLIC(public type); a pinned Solo keeps 0x27.  Their legacy DMA
+ * rows (0x1E 24/22, 0x2A 34/34, frozen from wrong names) become the 3/2
+ * fallback the Solo row has; the descriptor layout (io_map default) is
+ * not affected.
  */
 static void ua_resolve_public_model(struct ua_device *ua)
 {
-	u32 pt = ua->public_type;
+	u32 pt = ua->public_type, dt = ua->device_type;
+	const char *why = NULL;
 
 	if (pt == 0 || pt == UA_PUBTYPE_NONE || pt >= UA_PUBLIC_DEVTYPE_BASE)
 		return;
-	if (pt == 0x19 && (ua->device_type == UA_DEV_APOLLO_SOLO ||
-			   ua->device_type == UA_DEV_ARROW)) {
+	if (pt == 0x19 && (dt == UA_DEV_APOLLO_SOLO || dt == UA_DEV_ARROW))
+		why = "the Twin X family (public type 0x19): Twin X";
+	else if ((pt == 0x13 || pt == 0x1C || pt == 0x27) &&
+		 (dt == UA_DEV_SERIAL_2016 || dt == UA_DEV_SERIAL_2032 ||
+		  dt == UA_DEV_SERIAL_2110 ||
+		  (pt == 0x13 && dt == UA_DEV_APOLLO_SOLO)))
+		why = "the Conrad family: Arrow (0x13) or Solo (0x1C/0x27)";
+	if (why) {
 		dev_info(&ua->pdev->dev,
-			 "device type 0x%02x on the Twin X family (public type 0x19): Twin X\n",
-			 ua->device_type);
+			 "device type 0x%02x on %s, public type 0x%02x\n",
+			 dt, why, pt);
 		ua->device_type = UA_DEV_PUBLIC(pt);
 		return;
 	}

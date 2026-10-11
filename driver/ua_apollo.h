@@ -122,7 +122,10 @@
 #define UA_DEV_APOLLO_8P_PUBLIC     0x8E  /* public 0xE, family 11 (no subsystem pin) */
 #define UA_DEV_APOLLO_TWIN_B        0x8F  /* public 0xF, family 10 (Twin card types 22/23) */
 #define UA_DEV_APOLLO_TWIN_MKII     0x92  /* public 0x12, family 14 */
+#define UA_DEV_ARROW_PUBLIC         0x93  /* public 0x13: family 15, serial type 0x1E */
+#define UA_DEV_APOLLO_SOLO_PUBLIC   0x9C  /* public 0x1C: family 15, serial type 0x2A or other */
 #define UA_DEV_APOLLO_TWIN_X        0x99  /* public 0x19, family 19, serial not Gen 2 */
+#define UA_DEV_APOLLO_SOLO_PUBLIC_B 0xA7  /* public 0x27: family 15, serial type 0x3E */
 
 /*
  * AudioExtension vs legacy ring-buffer connect mechanism.
