@@ -58,7 +58,18 @@ pw_run() {
     fi
 }
 
-# Step 1: Stop mixer daemon
+# Step 1: Stop and remove the mixer daemon (systemd user unit)
+if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
+    pw_run systemctl --user disable --now ua-mixer-daemon.service 2>/dev/null || true
+fi
+rm -f /etc/systemd/user/ua-mixer-daemon.service
+[ -n "$USER_HOME" ] && rm -f "$USER_HOME/.config/systemd/user/ua-mixer-daemon.service" \
+    "$USER_HOME/.config/systemd/user/default.target.wants/ua-mixer-daemon.service"
+if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
+    pw_run systemctl --user daemon-reload 2>/dev/null || true
+fi
+ok "Removed mixer daemon user unit"
+# Also stop a daemon started by hand (older installers)
 if pgrep -f "ua_mixer_daemon" > /dev/null 2>&1; then
     pkill -f "ua_mixer_daemon" 2>/dev/null || true
     sleep 1
@@ -161,60 +172,26 @@ if [ "$HAD_MODULES_LOAD" = "1" ]; then
 fi
 
 # Step 11: Unload kernel module
-# Must happen BEFORE PipeWire restart — PipeWire holds ALSA references.
-# We stop PipeWire first to release the refcount, then unload.
+# Stop PipeWire first so nothing holds the ALSA device. Driver v2 unloads
+# cleanly (disconnects the audio extension), so the Apollo can stay powered.
 echo ""
-if lsmod | grep -q ua_apollo; then
-    info "The kernel module is still loaded."
-    info "To safely unload it, the Apollo must be powered off."
-    echo ""
-    echo -e "  ${BOLD}1.${NC} Power OFF your Apollo (unplug power or flip the switch)"
-    echo -e "  ${BOLD}2.${NC} Wait 5 seconds for Thunderbolt to disconnect"
-    echo ""
-
-    # Read from /dev/tty so prompts work even when sudo password was piped
-    if [ -e /dev/tty ]; then
-        read -rp "Press Enter after Apollo is off (or 's' to skip)... " unload_answer < /dev/tty
-    else
-        info "Waiting 15s for Apollo power off..."
-        sleep 15
-        unload_answer=""
+if lsmod | grep -q '^ua_apollo'; then
+    if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
+        info "Stopping PipeWire to release audio device..."
+        pw_run systemctl --user stop pipewire.service wireplumber.service \
+            pipewire-pulse.service pipewire.socket pipewire-pulse.socket 2>/dev/null || true
+        sleep 2
     fi
 
-    if [[ ! "$unload_answer" =~ ^[Ss] ]]; then
-        # Stop PipeWire to release ALSA references
-        if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
-            info "Stopping PipeWire to release audio device..."
-            pw_run systemctl --user stop pipewire.service wireplumber.service \
-                pipewire-pulse.service pipewire.socket pipewire-pulse.socket 2>/dev/null || true
-            sleep 2
-        fi
-
-        # Wait for PCIe device to disappear
-        unload_wait=0
-        while lspci -d 1a00: 2>/dev/null | grep -q . && [ $unload_wait -lt 30 ]; do
-            sleep 2
-            unload_wait=$((unload_wait + 2))
-        done
-
-        if ! lspci -d 1a00: 2>/dev/null | grep -q .; then
-            if rmmod ua_apollo 2>/dev/null; then
-                ok "Kernel module unloaded"
-            else
-                warn "Could not unload module — reboot to fully remove"
-            fi
-        else
-            warn "Apollo still on PCIe bus — cannot safely unload"
-            info "Power off Apollo and reboot to fully remove"
-        fi
-
-        # Restart PipeWire (now without Apollo)
-        if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
-            pw_run systemctl --user start pipewire.socket pipewire-pulse.socket 2>/dev/null || true
-            ok "Restarted PipeWire"
-        fi
+    if rmmod ua_apollo 2>/dev/null; then
+        ok "Kernel module unloaded"
     else
-        info "Skipped — reboot to fully remove the driver"
+        warn "Could not unload module (still in use) — reboot to fully remove"
+    fi
+
+    if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
+        pw_run systemctl --user start pipewire.socket pipewire-pulse.socket 2>/dev/null || true
+        ok "Restarted PipeWire"
     fi
 else
     ok "Kernel module not loaded"

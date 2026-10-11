@@ -43,8 +43,9 @@ Steps performed:
   2. Check and install missing dependencies
   3. Build kernel module
   4. (Optional) Set up DKMS for auto-rebuild on kernel updates
-  5. Deploy PipeWire/WirePlumber/UCM2 configs
-  6. Run apollo-init.sh if Apollo hardware detected
+  5. Deploy udev, PipeWire/WirePlumber/UCM2 configs
+  6. Load/verify the driver if Apollo hardware detected
+     and enable the mixer daemon (systemd user unit)
   7. Generate install report
   8. Opt-in anonymous telemetry
 EOF
@@ -90,6 +91,20 @@ run_sudo() {
     else
         sudo "$@"
     fi
+}
+
+# --- Desktop user helpers ---
+# The user who ran sudo owns the audio session and the mixer daemon.
+desktop_user() { echo "${SUDO_USER:-$(logname 2>/dev/null || echo "")}"; }
+
+# Run a command as the desktop user with a working systemd --user bus.
+as_desktop_user() {
+    local u uid
+    u=$(desktop_user)
+    uid=$(id -u "$u" 2>/dev/null || echo "")
+    [ -n "$u" ] && [ -n "$uid" ] || return 1
+    sudo -u "$u" XDG_RUNTIME_DIR="/run/user/$uid" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 }
 
 # --- Initramfs regen (dracut bakes /etc/modules-load.d into the initrd) ---
@@ -324,6 +339,16 @@ check_install_deps() {
     else
         ok "pavucontrol"
     fi
+    # websockets: the mixer daemon's WS:4720 server (Console/Connect clients)
+    if ! python3 -c "import websockets" 2>/dev/null; then
+        missing+=("python websockets")
+        case "$PKG_MGR" in
+            dnf|apt|zypper) missing_pkgs+=("python3-websockets") ;;
+            pacman)         missing_pkgs+=("python-websockets") ;;
+        esac
+    else
+        ok "python websockets"
+    fi
     # AppIndicator3 for tray indicator
     if ! python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
         missing+=("appindicator")
@@ -460,38 +485,43 @@ setup_dkms() {
         return 0
     fi
 
-    local dkms_src="/usr/src/ua_apollo-$VERSION"
-
-    # Remove existing DKMS registration if present
-    if dkms status ua_apollo/$VERSION 2>/dev/null | grep -q .; then
-        info "Removing existing DKMS registration..."
-        run_sudo dkms remove ua_apollo/$VERSION --all 2>/dev/null || true
+    # The version comes from driver/dkms.conf so the registration, the
+    # /usr/src tree and the config can never disagree.
+    local dkms_ver
+    dkms_ver=$(sed -n 's/^PACKAGE_VERSION="\(.*\)"/\1/p' "$PROJECT_DIR/driver/dkms.conf" 2>/dev/null)
+    if [ -z "$dkms_ver" ]; then
+        fail "driver/dkms.conf missing or has no PACKAGE_VERSION"
+        STEP_STATUS[dkms]="fail"
+        return 1
     fi
+    local dkms_src="/usr/src/ua_apollo-$dkms_ver"
+
+    # Remove every existing registration (any version) so an older build
+    # cannot shadow this one
+    local old_ver
+    while read -r old_ver; do
+        [ -n "$old_ver" ] || continue
+        info "Removing existing DKMS registration ua_apollo/$old_ver..."
+        run_sudo dkms remove "ua_apollo/$old_ver" --all 2>/dev/null || true
+    done < <(dkms status ua_apollo 2>/dev/null | sed -n 's|^ua_apollo[/,] *\([^,: ]*\).*|\1|p' | sort -u)
 
     # Remove any manually installed .ko to avoid "Differences" warning
     run_sudo rm -f "/lib/modules/$(uname -r)/extra/ua_apollo.ko" 2>/dev/null || true
 
-    # Copy source
+    # Copy source: exactly what driver/Makefile builds (ua_core, ua_audio, ua_dsp)
+    # plus the headers and dkms.conf
     info "Copying driver source to $dkms_src"
-    run_sudo rm -rf "$dkms_src"
+    run_sudo rm -rf /usr/src/ua_apollo-*
     run_sudo mkdir -p "$dkms_src"
-    run_sudo cp "$PROJECT_DIR"/driver/*.c "$PROJECT_DIR"/driver/*.h "$dkms_src/" 2>/dev/null || true
-    run_sudo cp "$PROJECT_DIR"/driver/Makefile "$dkms_src/"
-
-    # Create dkms.conf — auto-detect clang-built kernels at DKMS build time
-    run_sudo tee "$dkms_src/dkms.conf" >/dev/null <<'DKMSEOF'
-PACKAGE_NAME="ua_apollo"
-PACKAGE_VERSION="__VERSION__"
-BUILT_MODULE_NAME[0]="ua_apollo"
-DEST_MODULE_LOCATION[0]="/updates"
-AUTOINSTALL="yes"
-MAKE[0]="cc_arg=; [ -f /lib/modules/${kernelver}/build/include/config/CC_IS_CLANG ] && cc_arg=CC=clang; make -C /lib/modules/${kernelver}/build M=${dkms_tree}/ua_apollo/${PACKAGE_VERSION}/build $cc_arg modules"
-CLEAN="cc_arg=; [ -f /lib/modules/${kernelver}/build/include/config/CC_IS_CLANG ] && cc_arg=CC=clang; make -C /lib/modules/${kernelver}/build M=${dkms_tree}/ua_apollo/${PACKAGE_VERSION}/build $cc_arg clean"
-DKMSEOF
-    run_sudo sed -i "s/__VERSION__/$VERSION/" "$dkms_src/dkms.conf"
+    if ! run_sudo cp "$PROJECT_DIR"/driver/*.c "$PROJECT_DIR"/driver/*.h \
+            "$PROJECT_DIR"/driver/Makefile "$PROJECT_DIR"/driver/dkms.conf "$dkms_src/"; then
+        fail "Could not copy driver source to $dkms_src"
+        STEP_STATUS[dkms]="fail"
+        return 1
+    fi
 
     # DKMS add/build/install
-    if run_sudo dkms add ua_apollo/$VERSION 2>&1; then
+    if run_sudo dkms add "ua_apollo/$dkms_ver" 2>&1; then
         ok "DKMS: added"
     else
         fail "DKMS add failed"
@@ -499,7 +529,7 @@ DKMSEOF
         return 1
     fi
 
-    if run_sudo dkms build ua_apollo/$VERSION 2>&1; then
+    if run_sudo dkms build "ua_apollo/$dkms_ver" 2>&1; then
         ok "DKMS: built"
     else
         fail "DKMS build failed"
@@ -507,7 +537,7 @@ DKMSEOF
         return 1
     fi
 
-    if run_sudo dkms install ua_apollo/$VERSION 2>&1; then
+    if run_sudo dkms install "ua_apollo/$dkms_ver" --force 2>&1; then
         ok "DKMS: installed"
     else
         fail "DKMS install failed"
@@ -646,10 +676,77 @@ deploy_configs() {
     if run_sudo bash "$PROJECT_DIR/configs/deploy.sh" 2>&1; then
         ok "PipeWire/WirePlumber/UCM2 configs deployed"
         STEP_STATUS[configs]="ok"
+        # New WirePlumber rules only apply to a fresh WirePlumber
+        if as_desktop_user systemctl --user restart wireplumber.service 2>/dev/null; then
+            ok "WirePlumber restarted (new rules active)"
+        else
+            warn "Could not restart WirePlumber — run: systemctl --user restart wireplumber"
+        fi
     else
         fail "Config deployment failed"
         STEP_STATUS[configs]="fail"
         return 1
+    fi
+}
+
+# Driver v2 defaults (io_map=-1 auto, mixer_mailbox=1) are right for every
+# supported model; an old override in /etc/modprobe.d can silently pin the
+# legacy layout.  The installer never writes modprobe options, so only warn.
+check_modprobe_options() {
+    local f hits=""
+    for f in /etc/modprobe.d/*.conf; do
+        [ -f "$f" ] || continue
+        if grep -Eq '^[[:space:]]*options[[:space:]]+ua_apollo[[:space:]].*(io_map|mixer_mailbox)=' "$f"; then
+            hits+=" $f"
+        fi
+    done
+    if [ -n "$hits" ]; then
+        warn "Old ua_apollo io_map/mixer_mailbox options found in:$hits"
+        info "Driver v2 defaults (io_map=-1 auto, mixer_mailbox=1) are recommended — remove those options unless you set them on purpose"
+    fi
+}
+
+# ================================================================
+# Daemon: systemd user unit (survives reboot, restarts on failure)
+# ================================================================
+setup_mixer_daemon() {
+    header "Mixer Daemon"
+
+    local u daemon_script="$PROJECT_DIR/mixer-engine/ua_mixer_daemon.py"
+    u=$(desktop_user)
+    if [ -z "$u" ] || [ "$u" = "root" ]; then
+        warn "No desktop user (run via sudo from your login) — enable it yourself:"
+        info "  systemctl --user enable --now ua-mixer-daemon.service"
+        STEP_STATUS[daemon]="skipped"
+        return 0
+    fi
+    if [ ! -f "$daemon_script" ] || [ ! -f /etc/systemd/user/ua-mixer-daemon.service ]; then
+        warn "Mixer daemon script or user unit missing — skipping"
+        STEP_STATUS[daemon]="skipped"
+        return 0
+    fi
+
+    # The daemon persists state under mixer-engine/state; it runs as the
+    # desktop user, so that directory must belong to them.
+    run_sudo install -d -o "$u" -g "$(id -gn "$u")" "$PROJECT_DIR/mixer-engine/state"
+
+    # Replace any hand-started daemon from older installers
+    pkill -f "ua_mixer_daemon" 2>/dev/null || true
+
+    as_desktop_user systemctl --user daemon-reload 2>/dev/null || true
+    if as_desktop_user systemctl --user enable --now ua-mixer-daemon.service 2>&1; then
+        sleep 2
+        if as_desktop_user systemctl --user is-active --quiet ua-mixer-daemon.service; then
+            ok "Mixer daemon running as $u (TCP:4710, WS:4720), enabled at login"
+            STEP_STATUS[daemon]="ok"
+        else
+            warn "Mixer daemon not active — journalctl --user -u ua-mixer-daemon"
+            STEP_STATUS[daemon]="fail"
+        fi
+    else
+        warn "Could not enable ua-mixer-daemon.service for $u (no user systemd session?)"
+        info "  After logging in: systemctl --user enable --now ua-mixer-daemon.service"
+        STEP_STATUS[daemon]="fail"
     fi
 }
 
@@ -723,7 +820,23 @@ run_init() {
             return 1
         fi
     else
-        ok "Driver already loaded"
+        # A module from an older install keeps running until reloaded. v2
+        # unloads cleanly, so swap it for the freshly installed one.
+        local loaded_sv new_sv
+        loaded_sv=$(cat /sys/module/ua_apollo/srcversion 2>/dev/null || echo "")
+        new_sv=$(modinfo -F srcversion ua_apollo 2>/dev/null || echo "")
+        if [ -n "$new_sv" ] && [ "$loaded_sv" != "$new_sv" ]; then
+            info "Loaded driver is out of date — reloading..."
+            pkill -f "ua_mixer_daemon" 2>/dev/null || true
+            if run_sudo rmmod ua_apollo 2>/dev/null && run_sudo modprobe ua_apollo 2>/dev/null; then
+                ok "Driver reloaded"
+            else
+                warn "Could not reload the driver — reboot to use the new build"
+                NEEDS_REBOOT=1
+            fi
+        else
+            ok "Driver already loaded"
+        fi
     fi
 
     # Gate 2: Verify the loaded module claimed the Apollo.  The kernel
@@ -1087,6 +1200,7 @@ main() {
     check_iommu        || true
     install_firmware   || true
     deploy_configs     || true
+    check_modprobe_options
 
     # Check if build succeeded before proceeding
     if [ "${STEP_STATUS[build]:-}" = "fail" ]; then
@@ -1166,34 +1280,9 @@ main() {
 
     run_init           || true
 
-    # ── Start mixer daemon ──
-    if [ "${STEP_STATUS[init]:-}" = "ok" ]; then
-        header "Mixer Daemon"
-
-        pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-        daemon_script="$PROJECT_DIR/mixer-engine/ua_mixer_daemon.py"
-        daemon_log="/tmp/ua-mixer-daemon.log"
-
-        if [ -n "$pw_user" ] && [ -f "$daemon_script" ]; then
-            # Kill any existing daemon
-            pkill -f "ua_mixer_daemon" 2>/dev/null || true
-            sleep 1
-
-            info "Starting mixer daemon..."
-            sudo -u "$pw_user" python3 "$daemon_script" --no-bonjour \
-                > "$daemon_log" 2>&1 &
-            disown
-
-            # Wait for daemon to start
-            sleep 3
-            if pgrep -f "ua_mixer_daemon" > /dev/null 2>&1; then
-                ok "Mixer daemon running (TCP:4710, WS:4720)"
-                STEP_STATUS[daemon]="ok"
-            else
-                warn "Mixer daemon failed to start — check $daemon_log"
-                STEP_STATUS[daemon]="fail"
-            fi
-        fi
+    # ── Mixer daemon (systemd user unit) ──
+    if [ "${STEP_STATUS[init]:-}" = "ok" ] || [ "${STEP_STATUS[init]:-}" = "skipped" ]; then
+        setup_mixer_daemon || true
     fi
 
     # ── Audio test ──

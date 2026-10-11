@@ -1,0 +1,20 @@
+# Open Apollo mixer daemon (TCP:4710 / WS:4720), run as the desktop user.
+# The user needs no root: 70-ua-apollo-access.rules gives the logged-in user
+# (uaccess) and the audio group access to /dev/ua_apollo0.
+# Deployed by configs/deploy.sh to /etc/systemd/user/ua-mixer-daemon.service
+# (@MIXER_DIR@ is replaced with the mixer-engine path) and enabled with
+# `systemctl --user enable --now ua-mixer-daemon.service`.
+[Unit]
+Description=Open Apollo mixer daemon
+After=pipewire.service wireplumber.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+WorkingDirectory=@MIXER_DIR@
+ExecStart=/usr/bin/python3 @MIXER_DIR@/ua_mixer_daemon.py --no-bonjour
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

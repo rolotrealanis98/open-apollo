@@ -84,9 +84,19 @@ else
     echo "  Warning: $SETUP_SCRIPT not found, skipping"
 fi
 
-# Step 5: Deploy udev rule and hotplug helper scripts
-echo "Installing udev rule and hotplug scripts..."
+# Step 5: Deploy udev rules and hotplug helper scripts
+echo "Installing udev rules and hotplug scripts..."
 UDEV_DIR="$SCRIPT_DIR/udev"
+
+# Device-node access (0660 root:audio + uaccess for the logged-in user).
+# Must sort before 73-seat-late.rules, hence the 70 prefix.
+if [ -f "$UDEV_DIR/70-ua-apollo-access.rules" ]; then
+    cp "$UDEV_DIR/70-ua-apollo-access.rules" /etc/udev/rules.d/
+    echo "  -> /etc/udev/rules.d/70-ua-apollo-access.rules"
+else
+    echo "  Warning: 70-ua-apollo-access.rules not found, skipping"
+fi
+
 if [ -f "$UDEV_DIR/91-ua-apollo.rules" ]; then
     cp "$UDEV_DIR/91-ua-apollo.rules" /etc/udev/rules.d/
     echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
@@ -99,13 +109,7 @@ if [ -f "$UDEV_DIR/91-ua-apollo.rules" ]; then
     chmod +x /usr/local/bin/open-apollo-setup-worker
     echo "  -> /usr/local/bin/open-apollo-setup-worker"
 else
-    echo "  Warning: udev rules not found, skipping"
-fi
-
-# /dev/ua_apolloN access for the desktop user (uaccess) and the audio group
-if [ -f "$UDEV_DIR/70-ua-apollo-access.rules" ]; then
-    cp "$UDEV_DIR/70-ua-apollo-access.rules" /etc/udev/rules.d/
-    echo "  -> /etc/udev/rules.d/70-ua-apollo-access.rules"
+    echo "  Warning: 91-ua-apollo.rules not found, skipping"
 fi
 
 # Thunderbolt hot-plug: keep the TB ports out of D3cold, or powering on an
@@ -117,14 +121,29 @@ if [ -f "$UDEV_DIR/60-thunderbolt-no-rtd3.rules" ]; then
 fi
 
 udevadm control --reload-rules 2>/dev/null || true
+# Re-apply permissions/ACLs to an already-present /dev/ua_apollo0
+udevadm trigger --action=change --name-match='/dev/ua_apollo*' 2>/dev/null || true
 echo "  udev rules reloaded"
+
+# Step 6: Mixer daemon as a systemd *user* unit (enabled per user by install.sh)
+echo "Installing mixer daemon user unit..."
+MIXER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/mixer-engine"
+UNIT_SRC="$SCRIPT_DIR/systemd/ua-mixer-daemon.service"
+if [ -f "$UNIT_SRC" ] && [ -f "$MIXER_DIR/ua_mixer_daemon.py" ]; then
+    mkdir -p /etc/systemd/user
+    sed "s|@MIXER_DIR@|$MIXER_DIR|g" "$UNIT_SRC" > /etc/systemd/user/ua-mixer-daemon.service
+    echo "  -> /etc/systemd/user/ua-mixer-daemon.service (runs $MIXER_DIR)"
+else
+    echo "  Warning: mixer daemon unit or script not found, skipping"
+fi
 
 echo ""
 echo "=== Deployment complete ==="
 echo ""
 echo "Next steps:"
-echo "  1. Restart PipeWire:  systemctl --user restart pipewire wireplumber"
-echo "  2. Set up I/O map:    apollo-setup-io"
-echo "  3. Verify:            wpctl status"
-echo "  4. Test playback:     pw-play /usr/share/sounds/freedesktop/stereo/complete.oga"
-echo "  5. Test capture:      pw-record --rate 48000 --channels 2 --format s32 /tmp/test.wav"
+echo "  1. Restart audio:     systemctl --user restart pipewire wireplumber"
+echo "  2. Mixer daemon:      systemctl --user enable --now ua-mixer-daemon.service"
+echo "  3. Set up I/O map:    apollo-setup-io"
+echo "  4. Verify:            wpctl status"
+echo "  5. Test playback:     pw-play /usr/share/sounds/freedesktop/stereo/complete.oga"
+echo "  6. Test capture:      pw-record --rate 48000 --channels 2 --format s32 /tmp/test.wav"
