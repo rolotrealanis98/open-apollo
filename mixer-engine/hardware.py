@@ -226,15 +226,18 @@ ARM_PARAM_IDS = PREAMP_PARAM_IDS
 # with stride 0x0800. These IDs are passed in the SetInputParam struct
 # at word[5] to identify which preamp channel to control.
 
-APOLLO_X4_HW_IDS = {
-    0: 0x0000,  # Analog Input 1 (Mic/Line, HiZ available)
-    1: 0x0800,  # Analog Input 2 (Mic/Line, HiZ available)
-    2: 0x1000,  # Analog Input 3 (Line only)
-    3: 0x1800,  # Analog Input 4 (Line only)
-}
-# Inputs 4+ are S/PDIF, ADAT, Virtual — no preamps, no hwID needed.
+MAX_PREAMP_CHANNELS = 8  # the driver's UA_MAX_PREAMP_CH; models have 0-8
 HW_ID_STRIDE = 0x0800
-MAX_PREAMP_CHANNELS = 4  # Apollo x4; other models vary
+# hwID of preamp input N.  Inputs 1-4 are verified on the x4; 5-8 (Apollo 8p,
+# x8p) continue the stride, which is assumed (not captured).
+APOLLO_PREAMP_HW_IDS = {
+    n: n * HW_ID_STRIDE for n in range(MAX_PREAMP_CHANNELS)
+}
+APOLLO_X4_HW_IDS = {n: APOLLO_PREAMP_HW_IDS[n] for n in range(4)}
+# Inputs past the preamps are S/PDIF, ADAT, Virtual — no hwID needed.
+# How many of a model's inputs are preamps comes from its device map
+# (HardwareRouter.preamp_inputs), capped at MAX_PREAMP_CHANNELS.
+_X4_PREAMP_COUNT = 4   # used only when the router has no state tree
 
 # ── Bus ID Mapping (from IOKit SEL130 capture + hw probe, Apollo x4) ──
 # Bus IDs identify mixer bus channels for SetMixerBusParam (SEL130).
@@ -258,15 +261,19 @@ TALKBACK_BUS_START = 0x0A
 TALKBACK_UNITY = 3.976353
 
 # Hardware bus IDs of the ADAT inputs: 1-4 sit at 0x0C-0x0F, 5-8 after the
-# AUX return slots at 0x14-0x17.
+# AUX return slots at 0x14-0x17.  The same slots carry the second block of
+# 8 channels of the 16-channel models (Apollo 16 / x16 analog 9-16, x16D
+# Dante 9-16, Rack MADI 9-16): devices/*.json synch_in agrees for all 25.
 _ADAT_BUS_IDS = (0x0C, 0x0D, 0x0E, 0x0F, 0x14, 0x15, 0x16, 0x17)
-_ANALOG_BUS_COUNT = 4        # analog inputs 1-4 at bus 0x00-0x03
-_SPDIF_BUS_IDS = (0x08, 0x09)
+_ANALOG_BUS_COUNT = 8        # analog inputs 1-8 at bus 0x00-0x07
+_SPDIF_BUS_IDS = (0x08, 0x09)   # S/PDIF L/R, or AES/EBU 1/2
 _VIRTUAL_BUS_BASE = 0x18     # Virtual 1-8 at 0x18-0x1F
 _VIRTUAL_BUS_COUNT = 8
 
-_INPUT_NAME_RE = re.compile(r'^(ANALOG|ADAT|VIRTUAL)\s+(\d+)$')
+_INPUT_NAME_RE = re.compile(
+    r'^(ANALOG|ADAT|VIRTUAL|DANTE|MADI)\s+(\d+)$')
 _SPDIF_NAME_RE = re.compile(r'^S/?PDIF\s*([LR])$')
+_AES_NAME_RE = re.compile(r'^AES(?:/EBU)?\s*([12])$')
 
 
 def bus_id_for_input_name(name) -> int | None:
@@ -276,8 +283,11 @@ def bus_id_for_input_name(name) -> int | None:
     map (x4: ANALOG 1-4, ADAT 1-8, S/PDIF L/R, VIRTUAL 1-8, TALKBACK), while
     the hardware bus IDs have gaps (CUE, talkback and AUX slots in between).
     Deriving the ID from the name keeps the table right for any map that
-    names its inputs this way.  Returns None for a name with no bus (a
-    placeholder like "N/A 1", or a channel this table has no bus for).
+    names its inputs this way: analog 1-8 at 0x00-0x07 (x4: 1-4), a second
+    block of eight (ANALOG / DANTE / MADI 9-16) in the ADAT slots, AES/EBU
+    1/2 where the other models have S/PDIF L/R.  Returns None for a name
+    with no bus (a placeholder like "N/A 1", or a channel this table has no
+    bus for).
     """
     if not isinstance(name, str):
         return None
@@ -287,12 +297,19 @@ def bus_id_for_input_name(name) -> int | None:
     m = _SPDIF_NAME_RE.match(n)
     if m:
         return _SPDIF_BUS_IDS[0 if m.group(1) == "L" else 1]
+    m = _AES_NAME_RE.match(n)
+    if m:
+        return _SPDIF_BUS_IDS[int(m.group(1)) - 1]
     m = _INPUT_NAME_RE.match(n)
     if not m:
         return None
     kind, num = m.group(1), int(m.group(2))
-    if kind == "ANALOG" and 1 <= num <= _ANALOG_BUS_COUNT:
-        return num - 1
+    if kind in ("ANALOG", "DANTE", "MADI"):
+        if 1 <= num <= _ANALOG_BUS_COUNT:
+            return num - 1
+        if _ANALOG_BUS_COUNT < num <= _ANALOG_BUS_COUNT + len(_ADAT_BUS_IDS):
+            return _ADAT_BUS_IDS[num - _ANALOG_BUS_COUNT - 1]
+        return None
     if kind == "ADAT" and 1 <= num <= len(_ADAT_BUS_IDS):
         return _ADAT_BUS_IDS[num - 1]
     if kind == "VIRTUAL" and 1 <= num <= _VIRTUAL_BUS_COUNT:
@@ -1882,9 +1899,18 @@ class HardwareRouter:
     - Driver params: Direct register writes
     """
 
-    def __init__(self, backend: HardwareBackend, state_tree=None):
+    def __init__(self, backend: HardwareBackend, state_tree=None,
+                 input_buses: dict | None = None):
+        """`input_buses` maps an input name of the device map to its bus ID
+        (the model's devices/<model>.json mixer_inputs synch_in); it wins
+        over the name rule of bus_id_for_input_name().  Only needed where a
+        model deviates from the rule (the Twin MkII's talkback input)."""
         self.backend = backend
         self.state_tree = state_tree
+        self._input_bus_overrides = {
+            str(k).strip().upper(): v for k, v in (input_buses or {}).items()}
+        self._output_roles_cache: dict | None = None
+        self._preamp_inputs_cache: frozenset | None = None
         # Rate-limit gain writes to prevent DSP overload.
         self._gain_last: dict[int, tuple[int, float]] = {}  # ch → (db, time)
         self._gain_pending: dict[int, int] = {}  # ch → deferred db value
@@ -1931,8 +1957,10 @@ class HardwareRouter:
                 if name is None:
                     break
                 names.append(name)
-            table = build_input_bus_table(names) if names \
-                else _INPUT_IDX_TO_BUS
+            table = tuple(
+                self._input_bus_overrides.get(
+                    str(n).strip().upper(), bus_id_for_input_name(n))
+                for n in names) if names else _INPUT_IDX_TO_BUS
             if names:
                 self._input_bus_table = table
         return table
@@ -1942,32 +1970,116 @@ class HardwareRouter:
         table = self._input_buses()
         return table[ch] if 0 <= ch < len(table) else None
 
-    def _output_role(self, ch: int) -> tuple[str, int] | None:
-        """('cue' | 'hp' | 'monitor', n) for tree output `ch`, from IOType.
+    # Output roles by IOType, then by name, then by who carries the monitor
+    # level.  n counts outputs of a kind in map order: x4 outputs 14-17 are
+    # ('cue', 0..3), 18 is ('monitor', 0), 19-20 are ('hp', 0..1); the x8p's
+    # are 18-21, 22 and 23-24, a generated map's wherever its rows land.
+    _OUTPUT_KINDS = {"cue": "cue", "headphone": "hp", "monitor": "monitor"}
+    _OUTPUT_NAME_KINDS = (
+        (re.compile(r"^CUE\s*\d+$", re.I), "cue"),
+        (re.compile(r"^(HP|HEADPHONES?)\s*\d*$", re.I), "hp"),
+        (re.compile(r"^MONITOR$", re.I), "monitor"),
+    )
+    # The x4 layout, used only when the router has no state tree at all.
+    _X4_OUTPUT_ROLES = {14: ("cue", 0), 15: ("cue", 1), 16: ("cue", 2),
+                        17: ("cue", 3), 18: ("monitor", 0),
+                        19: ("hp", 0), 20: ("hp", 1)}
 
-        n counts outputs of that type in map order: x4 outputs 14-17 are
-        ('cue', 0..3), 19-20 are ('hp', 0..1), 18 is ('monitor', 0).
-        Falls back to the x4 layout when the tree has no IOType values.
+    def _output_roles(self) -> dict:
+        """Tree output index -> (kind, n) for every cue, headphone and
+        monitor output of the loaded device map.
+
+        kind comes from the output's IOType ("Cue", "Headphone",
+        "Monitor"), else from its Name; n counts outputs of that kind in map
+        order.  A "Monitor" output counts only if it carries
+        CRMonitorLevel (the "Monitor R for Surround" output has a different
+        IOType and none); an output without IOType that carries
+        CRMonitorLevel and is not named as something else is the monitor.
         """
-        kinds = {"cue": "cue", "headphone": "hp", "monitor": "monitor"}
-        io_type = self._tree_value(f"/devices/0/outputs/{ch}/IOType/value")
-        if io_type is None:
-            if 14 <= ch <= 17:
-                return ("cue", ch - 14)
-            if ch == 18:
-                return ("monitor", 0)
-            if ch in (19, 20):
-                return ("hp", ch - 19)
-            return None
-        kind = kinds.get(str(io_type).strip().lower())
-        if kind is None:
-            return None
+        cache = self._output_roles_cache
+        if cache is not None:
+            return cache
+        roles: dict = {}
+        counts: dict = {}
+        found = False
+        i = 0
+        while True:
+            base = f"/devices/0/outputs/{i}"
+            io_type = self._tree_value(f"{base}/IOType/value")
+            name = self._tree_value(f"{base}/Name/value")
+            if io_type is None and name is None:
+                break
+            found = True
+            kind = self._OUTPUT_KINDS.get(str(io_type or "").strip().lower())
+            if kind is None and io_type is None:
+                for rx, k in self._OUTPUT_NAME_KINDS:
+                    if rx.match(str(name or "").strip()):
+                        kind = k
+                        break
+            has_level = self._tree_value(
+                f"{base}/CRMonitorLevel/value") is not None
+            if kind is None and io_type is None and has_level:
+                kind = "monitor"
+            if kind == "monitor" and not has_level:
+                kind = None
+            if kind is not None:
+                roles[i] = (kind, counts.get(kind, 0))
+                counts[kind] = counts.get(kind, 0) + 1
+            i += 1
+        if not found:
+            if self.state_tree is None:
+                return dict(self._X4_OUTPUT_ROLES)
+            if self._tree_value("/devices/0/inputs/0/Name/value") is None:
+                return roles    # no map loaded yet: not cached
+            # a map without outputs (the Realtime Rack): no roles
+        self._output_roles_cache = roles
+        return roles
+
+    def _output_role(self, ch: int) -> tuple[str, int] | None:
+        """('cue' | 'hp' | 'monitor', n) for tree output `ch`, or None."""
+        return self._output_roles().get(ch)
+
+    def output_index(self, kind: str, n: int = 0) -> int | None:
+        """Tree output index of the n-th 'monitor' / 'hp' / 'cue' output."""
+        for ch, role in self._output_roles().items():
+            if role == (kind, n):
+                return ch
+        return None
+
+    def monitor_output_index(self) -> int | None:
+        """Tree output index of the monitor (x4 18, x8p 22)."""
+        return self.output_index("monitor", 0)
+
+    def preamp_inputs(self) -> frozenset:
+        """Tree input indexes that have a preamp, capped at the driver's
+        MAX_PREAMP_CHANNELS: those with an inputs/N/preamps/0/Gain control
+        (x4 0-3, x8p 0-7, Solo 0-1, Apollo 16: none)."""
+        cache = self._preamp_inputs_cache
+        if cache is not None:
+            return cache
+        if self.state_tree is None:
+            return frozenset(range(_X4_PREAMP_COUNT))
+        found = set()
+        i = 0
+        while self._tree_value(f"/devices/0/inputs/{i}/Name/value") \
+                is not None:
+            if self._tree_value(
+                    f"/devices/0/inputs/{i}/preamps/0/Gain/value") is not None \
+                    and i < MAX_PREAMP_CHANNELS:
+                found.add(i)
+            i += 1
+        if i == 0:
+            return frozenset(range(_X4_PREAMP_COUNT))   # no inputs loaded yet
+        self._preamp_inputs_cache = frozenset(found)
+        return self._preamp_inputs_cache
+
+    def input_count(self) -> int:
+        """Number of mixer inputs in the loaded device map (x4: 24)."""
         n = 0
-        for i in range(ch):
-            t = self._tree_value(f"/devices/0/outputs/{i}/IOType/value")
-            if t is not None and kinds.get(str(t).strip().lower()) == kind:
-                n += 1
-        return (kind, n)
+        while self._tree_value(f"/devices/0/inputs/{n}/Name/value") \
+                is not None:
+            n += 1
+        return n or len(_INPUT_IDX_TO_BUS)
 
     def _send_sub(self, base: str, send_idx: int, by_idx: dict) -> int | None:
         """SEL130 sub-param of a send: from its map ID, else its index."""
@@ -2190,7 +2302,7 @@ class HardwareRouter:
             Mute=0x00  Phase=0x01  48V=0x04  Pad=0x08
             HiZ=0x09   LowCut=0x0A  Gain=0x17
         """
-        if ch >= MAX_PREAMP_CHANNELS:
+        if ch not in self.preamp_inputs():
             log.debug("SET %s = %r (no preamp for input %d)", path, value, ch)
             return
 
@@ -2359,7 +2471,7 @@ class HardwareRouter:
         if control == "IOType":
             # Mic/Line switching: DTrace-verified, maps to
             # SEL131 ch_type=1 param=0x00, value 1=Line 0=Mic
-            if ch >= MAX_PREAMP_CHANNELS:
+            if ch not in self.preamp_inputs():
                 log.debug("SET %s = %r (no preamp for input %d)", path, value, ch)
                 return
             hw_value = 1 if str(value).lower() in ("line", "1", "true") else 0

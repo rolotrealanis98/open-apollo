@@ -1159,14 +1159,16 @@ class MixerDaemon:
             f"/devices/0/inputs/{ch}/preamps/0/Gain/value": float(gain_db[ch])
             for ch in range(4)
         }
-        defaults["/devices/0/outputs/18/MixInSource/value"] = "mon"
-        defaults["/devices/0/outputs/18/CRMonitorLevel/value"] = \
-            (mon_raw - 192) / 2.0
+        mon_out = self.hw_router.monitor_output_index()
+        if mon_out is not None:   # x4 18, x8p 22
+            defaults[f"/devices/0/outputs/{mon_out}/MixInSource/value"] = "mon"
+            defaults[f"/devices/0/outputs/{mon_out}/CRMonitorLevel/value"] = \
+                (mon_raw - 192) / 2.0
 
-        # Push all 24 input faders via the state tree path (the proven
-        # FaderLevel→bus coefficient pipeline).
+        # Push every input fader (x4: 24) via the state tree path (the
+        # proven FaderLevel→bus coefficient pipeline).
         saved = self.state._dirty
-        for i in range(24):
+        for i in range(self.hw_router.input_count()):
             base = f"/devices/0/inputs/{i}"
             fader = f"{base}/FaderLevel/value"
             tapered = f"{base}/FaderLevelTapered/value"
@@ -1906,6 +1908,25 @@ def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
     return None, None
 
 
+def descriptor_input_buses(slug: str | None) -> dict:
+    """Input name -> bus ID (devices/<slug>.json mixer_inputs synch_in).
+
+    Handed to the HardwareRouter, whose name rule covers every model but the
+    Twin MkII's talkback input (synch-in 2).  {} when there is no usable
+    descriptor.
+    """
+    if not slug:
+        return {}
+    try:
+        desc = json.loads((DEVICES_DIR / f"{slug}.json").read_text())
+        return {e["name"]: int(e["synch_in"])
+                for e in desc.get("mixer_inputs") or []
+                if e.get("name") != "UNAVAILABLE"
+                and e.get("synch_in") is not None}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
 def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
     """Resolve a driver device_type to (model, captured_map_path).
 
@@ -2151,7 +2172,11 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     # Wire up the hardware router (backend was opened above for device detection)
     hw_router = None
     if backend is not None:
-        hw_router = HardwareRouter(backend, state)
+        hw_router = HardwareRouter(
+            backend, state,
+            input_buses=descriptor_input_buses(
+                find_descriptor(device_type)[0]
+                if device_type is not None else None))
         log.info("Hardware backend: %s", backend.device_path)
         log.info("Safe mode: %s (monitor+preamp+analog bus enabled, "
                  "digital/send/aux bus writes %s)",

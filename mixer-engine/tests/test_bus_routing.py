@@ -73,12 +73,18 @@ class TestInputBusTable:
     @pytest.mark.parametrize("name, bus", [
         ("ANALOG 4", 0x03), ("analog 1", 0x00), ("ADAT 5", 0x14),
         ("ADAT 8", 0x17), ("S/PDIF L", 0x08), ("S/PDIF R", 0x09),
-        ("SPDIF R", 0x09), ("VIRTUAL 8", 0x1F), ("TALKBACK", 0x0A)])
+        ("SPDIF R", 0x09), ("VIRTUAL 8", 0x1F), ("TALKBACK", 0x0A),
+        # models with more analog inputs (x8p 5-8), AES/EBU, 16-channel blocks
+        ("ANALOG 5", 0x04), ("ANALOG 8", 0x07), ("ANALOG 9", 0x0C),
+        ("ANALOG 16", 0x17), ("AES/EBU 1", 0x08), ("AES/EBU 2", 0x09),
+        ("DANTE 8", 0x07), ("DANTE 16", 0x17), ("MADI 1", 0x00),
+        ("MADI 9", 0x0C)])
     def test_names(self, name, bus):
         assert bus_id_for_input_name(name) == bus
 
     @pytest.mark.parametrize("name", [
-        "N/A 1", "ANALOG 5", "ADAT 9", "VIRTUAL 0", "MADI 1", None, ""])
+        "N/A 1", "ANALOG 17", "ADAT 9", "VIRTUAL 0", "MADI 17", "UNAVAILABLE",
+        None, ""])
     def test_names_without_a_bus(self, name):
         assert bus_id_for_input_name(name) is None
 
