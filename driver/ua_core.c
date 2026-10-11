@@ -2705,8 +2705,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 
 	seq_wr = ua_read(ua, UA_REG_MIXER_SEQ_WR);
 	seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
-	dev_info(&pdev->dev,
-		 "post-init: SEQ_WR=%u SEQ_RD=%u\n", seq_wr, seq_rd);
+	dev_dbg(&pdev->dev,
+		"post-init: SEQ_WR=%u SEQ_RD=%u\n", seq_wr, seq_rd);
 
 	/*
 	 * Always allocate DSP ring buffers — needed for firmware
@@ -2777,11 +2777,6 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 			 */
 			ua_dsp_rings_reprogram(ua);
 		}
-
-		/* DMA locality test removed from init path — it consumed
-		 * ring entries and the size sweep permanently stalled the
-		 * ring before FW loading could happen.
-		 */
 
 		fw_ret = ua_dsp_load_mixer_blocks(ua);
 
@@ -2893,9 +2888,9 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 
 				seq_wr = ua_read(ua, UA_REG_MIXER_SEQ_WR);
 				seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
-				dev_info(&pdev->dev,
-					 "post-connect: SEQ_WR=%u SEQ_RD=%u\n",
-					 seq_wr, seq_rd);
+				dev_dbg(&pdev->dev,
+					"post-connect: SEQ_WR=%u SEQ_RD=%u\n",
+					seq_wr, seq_rd);
 			} else {
 				dev_warn(&pdev->dev,
 					 "DSP connect failed: %d\n", fw_ret);
@@ -2913,33 +2908,11 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 	if (ua_uses_audio_extension(ua->device_type))
 		ua_boot_transport_stop(ua);
 
-	/*
-	 * Second clock write after transport stop (macOS Phase G).
-	 * The early clock write (pre-transport) matches Phase A.
-	 * clock_source already set to 0xC above.
-	 */
-	/*
-	 * EXPERIMENT: Skip clock write — playback works without it.
-	 * Clock write (source=0xC) transitions DSP to active processing
-	 * mode but BREAKS playback (no audio output). Without it, DSP
-	 * stays in default passthrough mode where playback works.
-	 * Capture needs this write but it breaks playback.
-	 * (2026-03-18: confirmed playback broken with clock write)
-	 */
-#if 0
-	if (ua_uses_audio_extension(ua->device_type) && ua->aceface_done) {
-		ret = ua_audio_set_clock(ua, 48000);
-		dev_info(&pdev->dev,
-			 "post-boot clock config: %s (ret=%d)\n",
-			 ret == 0 ? "OK" : "FAILED", ret);
-	}
-#endif
-
 	seq_wr = ua_read(ua, UA_REG_MIXER_SEQ_WR);
 	seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
-	dev_info(&pdev->dev,
-		 "post-ring-init: SEQ_WR=%u SEQ_RD=%u\n",
-		 seq_wr, seq_rd);
+	dev_dbg(&pdev->dev,
+		"post-ring-init: SEQ_WR=%u SEQ_RD=%u\n",
+		seq_wr, seq_rd);
 
 	return 0;
 }

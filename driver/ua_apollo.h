@@ -1341,8 +1341,6 @@ void ua_dsp_rings_quiesce(struct ua_device *ua);
 void ua_dsp_rings_neutralize(struct ua_device *ua);
 void ua_dsp_cache_firmware(struct ua_device *ua);
 void ua_dsp_rings_reprogram(struct ua_device *ua);
-void ua_dsp_ring_diagnostic(struct ua_device *ua);
-void ua_dsp_test_dma_locality(struct ua_device *ua);
 int ua_dsp_load_firmware(struct ua_device *ua, const void *fw_data,
 			 size_t fw_size);
 int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,

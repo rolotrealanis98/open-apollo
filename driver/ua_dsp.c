@@ -782,14 +782,14 @@ int ua_dsp_rings_init(struct ua_device *ua)
 		}
 
 		/* Program hardware registers */
-		dev_info(&ua->pdev->dev,
-			 "DSP %u: programming rings at BAR0+0x%04x "
-			 "(cmd @+0x%02x, resp @+0x%02x)\n",
-			 i, bank_base,
-			 UA_RING_CMD_OFFSET, UA_RING_RESP_OFFSET);
-		dev_info(&ua->pdev->dev,
-			 "DSP %u: cmd page0 DMA=%pad, resp page0 DMA=%pad\n",
-			 i, &ds->cmd.page_addrs[0], &ds->resp.page_addrs[0]);
+		dev_dbg(&ua->pdev->dev,
+			"DSP %u: programming rings at BAR0+0x%04x "
+			"(cmd @+0x%02x, resp @+0x%02x)\n",
+			i, bank_base,
+			UA_RING_CMD_OFFSET, UA_RING_RESP_OFFSET);
+		dev_dbg(&ua->pdev->dev,
+			"DSP %u: cmd page0 DMA=%pad, resp page0 DMA=%pad\n",
+			i, &ds->cmd.page_addrs[0], &ds->resp.page_addrs[0]);
 
 		/* Fresh, or quiesced and neutralized: nothing to drain */
 		__ua_dsp_ring_program(ua, &ds->cmd,
@@ -807,11 +807,11 @@ int ua_dsp_rings_init(struct ua_device *ua)
 			u32 resp_pos = ua_read(ua, bank_base +
 					       UA_RING_RESP_OFFSET +
 					       UA_RING_POSITION);
-			dev_info(&ua->pdev->dev,
-				 "DSP %u: rings ready (cmd=%u resp=%u entries) "
-				 "pos: cmd=%u resp=%u\n",
-				 i, ds->cmd.capacity, ds->resp.capacity,
-				 cmd_pos, resp_pos);
+			dev_dbg(&ua->pdev->dev,
+				"DSP %u: rings ready (cmd=%u resp=%u entries) "
+				"pos: cmd=%u resp=%u\n",
+				i, ds->cmd.capacity, ds->resp.capacity,
+				cmd_pos, resp_pos);
 		}
 	}
 
@@ -823,15 +823,15 @@ int ua_dsp_rings_init(struct ua_device *ua)
 	if (ua->fw_v2) {
 		u32 dma = ua_read(ua, UA_REG_DMA_CTRL);
 
-		dev_info(&ua->pdev->dev,
-			 "DMA_CTRL before engine enable: 0x%08x\n", dma);
+		dev_dbg(&ua->pdev->dev,
+			"DMA_CTRL before engine enable: 0x%08x\n", dma);
 		/* macOS uses 0x1FFFE (16 engines); we had 0x1FE (9).
 		 * More engines may be needed for type 0x01 capture channels. */
 		ua_write(ua, UA_REG_DMA_CTRL, dma | 0x1FFFE);
 		ua->dma_ctrl_cache = ua_read(ua, UA_REG_DMA_CTRL);
-		dev_info(&ua->pdev->dev,
-			 "DMA_CTRL after engine enable: 0x%08x\n",
-			 ua->dma_ctrl_cache);
+		dev_dbg(&ua->pdev->dev,
+			"DMA_CTRL after engine enable: 0x%08x\n",
+			ua->dma_ctrl_cache);
 
 		/*
 		 * CRITICAL: Pulse DMA reset with engines already enabled.
@@ -845,9 +845,9 @@ int ua_dsp_rings_init(struct ua_device *ua)
 		ua_write(ua, UA_REG_DMA_CTRL, ua->dma_ctrl_cache);
 		(void)ua_read(ua, UA_REG_DMA_CTRL);  /* flush */
 
-		dev_info(&ua->pdev->dev,
-			 "DMA_CTRL after ring enable pulse: 0x%08x\n",
-			 ua_read(ua, UA_REG_DMA_CTRL));
+		dev_dbg(&ua->pdev->dev,
+			"DMA_CTRL after ring enable pulse: 0x%08x\n",
+			ua_read(ua, UA_REG_DMA_CTRL));
 
 		/*
 		 * The kext reads POSITION after ResetDMAEngines (Program-
@@ -880,14 +880,14 @@ int ua_dsp_rings_init(struct ua_device *ua)
 		u32 r2238 = ua_read(ua, 0x2238);
 		u32 r223c = ua_read(ua, 0x223C);
 
-		dev_info(&ua->pdev->dev,
-			 "DMA area: 2210=%08x 2214=%08x "
-			 "221C=%08x 2220=%08x 2224=%08x\n",
-			 r2210, r2214, r221c, r2220, r2224);
-		dev_info(&ua->pdev->dev,
-			 "DMA area: 2228=%08x 222C=%08x "
-			 "2230=%08x 2234=%08x 2238=%08x 223C=%08x\n",
-			 r2228, r222c, r2230, r2234, r2238, r223c);
+		dev_dbg(&ua->pdev->dev,
+			"DMA area: 2210=%08x 2214=%08x "
+			"221C=%08x 2220=%08x 2224=%08x\n",
+			r2210, r2214, r221c, r2220, r2224);
+		dev_dbg(&ua->pdev->dev,
+			"DMA area: 2228=%08x 222C=%08x "
+			"2230=%08x 2234=%08x 2238=%08x 223C=%08x\n",
+			r2228, r222c, r2230, r2234, r2238, r223c);
 	}
 
 	dev_info(&ua->pdev->dev, "DSP ring buffers initialized\n");
@@ -1055,8 +1055,8 @@ void ua_dsp_rings_reprogram(struct ua_device *ua)
 				      bank_base + UA_RING_RESP_OFFSET, false);
 	}
 
-	dev_info(&ua->pdev->dev,
-		 "DSP rings reprogrammed after transport start\n");
+	dev_dbg(&ua->pdev->dev,
+		"DSP rings reprogrammed after transport start\n");
 }
 
 /* ----------------------------------------------------------------
@@ -1130,9 +1130,9 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 	cmd_buf_size = (3 + fw_dwords) * 4;
 	total_dwords = 3 + fw_dwords;
 
-	dev_info(&ua->pdev->dev,
-		 "firmware load: allocating %zu byte contiguous DMA buffer\n",
-		 cmd_buf_size);
+	dev_dbg(&ua->pdev->dev,
+		"firmware load: allocating %zu byte contiguous DMA buffer\n",
+		cmd_buf_size);
 
 	cmd_buf = dma_alloc_coherent(&ua->pdev->dev, cmd_buf_size,
 				     &cmd_addr, GFP_KERNEL);
@@ -1197,22 +1197,22 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 		goto free_cmd;
 	}
 
-	dev_info(&ua->pdev->dev,
-		 "fw cmd entry: [%08x %08x %08x %08x] cmd_addr=%pad\n",
-		 le32_to_cpu(entry.word0), le32_to_cpu(entry.word1),
-		 le32_to_cpu(entry.word2), le32_to_cpu(entry.word3),
-		 &cmd_addr);
-	dev_info(&ua->pdev->dev,
-		 "fw cmd buf: [%08x %08x %08x %08x ...] total=%u dwords\n",
-		 le32_to_cpu(cmd_words[0]), le32_to_cpu(cmd_words[1]),
-		 le32_to_cpu(cmd_words[2]), le32_to_cpu(cmd_words[3]),
-		 total_dwords);
+	dev_dbg(&ua->pdev->dev,
+		"fw cmd entry: [%08x %08x %08x %08x] cmd_addr=%pad\n",
+		le32_to_cpu(entry.word0), le32_to_cpu(entry.word1),
+		le32_to_cpu(entry.word2), le32_to_cpu(entry.word3),
+		&cmd_addr);
+	dev_dbg(&ua->pdev->dev,
+		"fw cmd buf: [%08x %08x %08x %08x ...] total=%u dwords\n",
+		le32_to_cpu(cmd_words[0]), le32_to_cpu(cmd_words[1]),
+		le32_to_cpu(cmd_words[2]), le32_to_cpu(cmd_words[3]),
+		total_dwords);
 
 	ua_dsp_ring_doorbell(ua, &dsp0->cmd,
 			     bank_base + UA_RING_CMD_OFFSET);
 
-	dev_info(&ua->pdev->dev,
-		 "firmware load: %zu bytes, polling...\n", fw_size);
+	dev_dbg(&ua->pdev->dev,
+		"firmware load: %zu bytes, polling...\n", fw_size);
 
 	/* Poll response buffer (DMA coherent — no lock needed) */
 	ret = -ETIMEDOUT;
@@ -1235,9 +1235,9 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 			u32 resp_pos = ua_read(ua, bank_base +
 					       UA_RING_RESP_OFFSET +
 					       UA_RING_POSITION);
-			dev_info(&ua->pdev->dev,
-				 "fw poll %us: cmd_pos=%u resp_pos=%u resp[0]=0x%08x\n",
-				 polls / 100, cmd_pos, resp_pos, resp_word0);
+			dev_dbg(&ua->pdev->dev,
+				"fw poll %us: cmd_pos=%u resp_pos=%u resp[0]=0x%08x\n",
+				polls / 100, cmd_pos, resp_pos, resp_word0);
 		}
 		msleep(UA_FW_POLL_MS);
 	}
@@ -1832,14 +1832,14 @@ int ua_dsp_send_block(struct ua_device *ua, unsigned int dsp_idx,
 			break;
 	}
 
-	dev_info(&ua->pdev->dev,
-		 "sendBlock DSP%u: cmd=0x%08x param=0x%08x size=%zu "
-		 "resp=[0x%08x 0x%08x 0x%08x 0x%08x] pos=%u/%u\n",
-		 dsp_idx, cmd, param, data_size,
-		 le32_to_cpu(resp_words[0]), le32_to_cpu(resp_words[1]),
-		 le32_to_cpu(resp_words[2]), le32_to_cpu(resp_words[3]),
-		 ua_read(ua, cmd_base + UA_RING_POSITION),
-		 ds->cmd.write_ptr);
+	dev_dbg(&ua->pdev->dev,
+		"sendBlock DSP%u: cmd=0x%08x param=0x%08x size=%zu "
+		"resp=[0x%08x 0x%08x 0x%08x 0x%08x] pos=%u/%u\n",
+		dsp_idx, cmd, param, data_size,
+		le32_to_cpu(resp_words[0]), le32_to_cpu(resp_words[1]),
+		le32_to_cpu(resp_words[2]), le32_to_cpu(resp_words[3]),
+		ua_read(ua, cmd_base + UA_RING_POSITION),
+		ds->cmd.write_ptr);
 
 	if (resp_words[0] == 0) {
 		dev_warn(&ua->pdev->dev,
@@ -2375,326 +2375,6 @@ int UA_GCC_OPTIMIZE("O1") ua_dsp_test_send_block(struct ua_device *ua)
 }
 
 /* ----------------------------------------------------------------
- * Ring buffer engine diagnostic
- * ---------------------------------------------------------------- */
-
-/**
- * ua_dsp_ring_diagnostic - Test if FPGA ring buffer engine processes entries
- * @ua: device
- *
- * Runs after ACEFACE + DMA pulse, before firmware loading.
- * Submits inline entries (no DMA ref) to determine if the ring buffer
- * engine is active.  This helps distinguish "engine not started" from
- * "DMA ref format issue".
- */
-void ua_dsp_ring_diagnostic(struct ua_device *ua)
-{
-	struct ua_dsp_state *dsp0 = &ua->dsp[0];
-	u32 cb = ua_dsp_base(0) + UA_RING_CMD_OFFSET;
-	u32 rb = ua_dsp_base(0) + UA_RING_RESP_OFFSET;
-	struct ua_ring_entry ent;
-	u32 pos_before, pos_after, pos_resp;
-	u32 reg2c, reg30, reg34, reg38, reg3c;
-
-	if (!dsp0->rings_allocated)
-		return;
-
-	/* Read unknown ring registers beyond POSITION for clues */
-	reg2c = ua_read(ua, cb + 0x2C);
-	reg30 = ua_read(ua, cb + 0x30);
-	reg34 = ua_read(ua, cb + 0x34);
-	reg38 = ua_read(ua, cb + 0x38);
-	reg3c = ua_read(ua, cb + 0x3C);
-	dev_info(&ua->pdev->dev,
-		 "ring diag: cmd extra regs "
-		 "+2C=%08x +30=%08x +34=%08x +38=%08x +3C=%08x\n",
-		 reg2c, reg30, reg34, reg38, reg3c);
-
-	pos_before = ua_read(ua, cb + UA_RING_POSITION);
-
-	/* Test 1: Single inline connect entry (no DMA ref) */
-	ua_dsp_ring_program(ua, &dsp0->cmd, cb);
-	ent = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_DSP_CMD_CONNECT),
-		.word1 = cpu_to_le32(1),
-		.word2 = 0,
-		.word3 = 0,
-	};
-	ua_dsp_ring_put_entry(ua, &dsp0->cmd, &ent);
-	ua_dsp_ring_doorbell(ua, &dsp0->cmd, cb);
-	msleep(200);
-
-	pos_after = ua_read(ua, cb + UA_RING_POSITION);
-	dev_info(&ua->pdev->dev,
-		 "ring diag test1 (inline connect): "
-		 "pos %u → %u (WPTR=1 DBELL=1)\n",
-		 pos_before, pos_after);
-
-	/* Check if POSITION register is writable (try reset to 0) */
-	ua_write(ua, cb + UA_RING_POSITION, 0);
-	dev_info(&ua->pdev->dev,
-		 "ring diag: wrote 0 to POSITION, readback=%u\n",
-		 ua_read(ua, cb + UA_RING_POSITION));
-
-	/* Test 2: Both cmd+resp doorbelled simultaneously */
-	ua_dsp_ring_program(ua, &dsp0->cmd, cb);
-	ua_dsp_ring_program(ua, &dsp0->resp, rb);
-
-	ent = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_DSP_CMD_CONNECT),
-		.word1 = cpu_to_le32(1),
-		.word2 = 0,
-		.word3 = 0,
-	};
-	ua_dsp_ring_put_entry(ua, &dsp0->cmd, &ent);
-
-	ent = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_RING_DMA_REF | 4),
-		.word1 = 0,
-		.word2 = cpu_to_le32(lower_32_bits(dsp0->resp.page_addrs[0])),
-		.word3 = cpu_to_le32(upper_32_bits(dsp0->resp.page_addrs[0])),
-	};
-	ua_dsp_ring_put_entry(ua, &dsp0->resp, &ent);
-
-	ua_dsp_ring_doorbell(ua, &dsp0->cmd, cb);
-	ua_dsp_ring_doorbell(ua, &dsp0->resp, rb);
-	msleep(200);
-
-	pos_after = ua_read(ua, cb + UA_RING_POSITION);
-	pos_resp = ua_read(ua, rb + UA_RING_POSITION);
-	dev_info(&ua->pdev->dev,
-		 "ring diag test2 (both doorbell): "
-		 "cmd_pos=%u resp_pos=%u\n",
-		 pos_after, pos_resp);
-
-	/* Verify ring page content is what we wrote */
-	if (dsp0->cmd.pages[0]) {
-		u32 *p = dsp0->cmd.pages[0];
-
-		dev_info(&ua->pdev->dev,
-			 "ring diag: cmd page[0] slot0="
-			 "%08x %08x %08x %08x\n",
-			 le32_to_cpu(p[0]), le32_to_cpu(p[1]),
-			 le32_to_cpu(p[2]), le32_to_cpu(p[3]));
-	}
-
-	/* Test 3: Try writing DOORBELL value=0 then value=1 (some FPGAs
-	 * use edge-triggered doorbells, not level-triggered)
-	 */
-	ua_dsp_ring_program(ua, &dsp0->cmd, cb);
-	ent = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_DSP_CMD_CONNECT),
-		.word1 = cpu_to_le32(1),
-		.word2 = 0,
-		.word3 = 0,
-	};
-	ua_dsp_ring_put_entry(ua, &dsp0->cmd, &ent);
-
-	/* Write WRITE_PTR first, then do doorbell with explicit 0→1 */
-	ua_write(ua, cb + UA_RING_WRITE_PTR, 1);
-	ua_write(ua, cb + UA_RING_DOORBELL, 0);  /* reset doorbell */
-	wmb();
-	ua_write(ua, cb + UA_RING_DOORBELL, 1);  /* trigger */
-	msleep(200);
-
-	pos_after = ua_read(ua, cb + UA_RING_POSITION);
-	dev_info(&ua->pdev->dev,
-		 "ring diag test3 (edge doorbell): cmd_pos=%u\n",
-		 pos_after);
-
-	/* Clean up: reset rings for FW loading */
-	ua_dsp_ring_program(ua, &dsp0->cmd, cb);
-	ua_dsp_ring_program(ua, &dsp0->resp, rb);
-}
-
-/**
- * ua_dsp_test_dma_locality - Determine if FPGA can DMA-read host memory
- * @ua: device
- *
- * THE critical diagnostic: uses CUMULATIVE ring entries (no ring_program
- * between tests) to avoid stale POSITION.  Each test adds one entry,
- * doorbells, and checks if POSITION advances to the expected value.
- *
- * Tests DMA ref with:
- *   A: Small payload (8 bytes) → ring page 1 (registered address)
- *   B: Small payload (8 bytes) → external DMA buffer
- *   C: Large payload (~12KB) → external DMA buffer (FW-sized)
- *   D: Inline baseline (sanity check)
- */
-void ua_dsp_test_dma_locality(struct ua_device *ua)
-{
-	struct ua_dsp_state *dsp0 = &ua->dsp[0];
-	u32 cb = ua_dsp_base(0) + UA_RING_CMD_OFFSET;
-	struct ua_ring_entry ent;
-	u32 *page1_words;
-	void *ext_buf = NULL;
-	dma_addr_t ext_dma = 0;
-	void *big_buf = NULL;
-	dma_addr_t big_dma = 0;
-	u32 pos_before, pos_after;
-	size_t big_size = ALIGN(12040 + 8, UA_PCIE_PAGE_SIZE);
-
-	if (!dsp0->rings_allocated || dsp0->cmd.num_pages < 2)
-		return;
-
-	/* Allocate external buffers upfront */
-	ext_buf = dma_alloc_coherent(&ua->pdev->dev, UA_PCIE_PAGE_SIZE,
-				     &ext_dma, GFP_KERNEL);
-	big_buf = dma_alloc_coherent(&ua->pdev->dev, big_size,
-				     &big_dma, GFP_KERNEL);
-
-	dev_info(&ua->pdev->dev, "=== DMA locality test (cumulative) ===\n");
-	dev_info(&ua->pdev->dev,
-		 "  cmd page0=%pad  page1=%pad  ext=%pad  big=%pad\n",
-		 &dsp0->cmd.page_addrs[0], &dsp0->cmd.page_addrs[1],
-		 &ext_dma, &big_dma);
-
-	/* Program ring ONCE — all tests use cumulative write_ptr */
-	ua_dsp_ring_program(ua, &dsp0->cmd, cb);
-
-	pos_before = ua_read(ua, cb + UA_RING_POSITION);
-	dev_info(&ua->pdev->dev,
-		 "  initial POSITION=%u WRITE_PTR=%u\n",
-		 pos_before, dsp0->cmd.write_ptr);
-
-	/*
-	 * Test A: DMA ref → ring page 1 (small, 2 dwords, registered addr)
-	 */
-	page1_words = dsp0->cmd.pages[1];
-	page1_words[0] = cpu_to_le32(UA_DSP_CMD_CONNECT);
-	page1_words[1] = cpu_to_le32(1);
-
-	ent = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_RING_DMA_REF | 2),
-		.word1 = 0,
-		.word2 = cpu_to_le32(lower_32_bits(dsp0->cmd.page_addrs[1])),
-		.word3 = cpu_to_le32(upper_32_bits(dsp0->cmd.page_addrs[1])),
-	};
-	ua_dsp_ring_put_entry(ua, &dsp0->cmd, &ent);
-	ua_dsp_ring_doorbell(ua, &dsp0->cmd, cb);
-	msleep(200);
-	pos_after = ua_read(ua, cb + UA_RING_POSITION);
-	dev_info(&ua->pdev->dev,
-		 "  Test A (DMA ref→page1, 8B): pos %u→%u %s\n",
-		 pos_before, pos_after,
-		 pos_after > pos_before ? "WORKS" : "FAIL");
-	pos_before = pos_after;
-
-	/*
-	 * Test B: DMA ref → external buffer (small, 2 dwords)
-	 */
-	if (ext_buf) {
-		memset(ext_buf, 0, UA_PCIE_PAGE_SIZE);
-		((u32 *)ext_buf)[0] = cpu_to_le32(UA_DSP_CMD_CONNECT);
-		((u32 *)ext_buf)[1] = cpu_to_le32(1);
-
-		ent = (struct ua_ring_entry){
-			.word0 = cpu_to_le32(UA_RING_DMA_REF | 2),
-			.word1 = 0,
-			.word2 = cpu_to_le32(lower_32_bits(ext_dma)),
-			.word3 = cpu_to_le32(upper_32_bits(ext_dma)),
-		};
-		ua_dsp_ring_put_entry(ua, &dsp0->cmd, &ent);
-		ua_dsp_ring_doorbell(ua, &dsp0->cmd, cb);
-		msleep(200);
-		pos_after = ua_read(ua, cb + UA_RING_POSITION);
-		dev_info(&ua->pdev->dev,
-			 "  Test B (DMA ref→ext, 8B): pos %u→%u %s\n",
-			 pos_before, pos_after,
-			 pos_after > pos_before ? "WORKS" : "FAIL");
-		pos_before = pos_after;
-	}
-
-	/*
-	 * Tests C-H: DMA ref size sweep.
-	 * Find the maximum DMA ref size the FPGA will process.
-	 * Uses the same external buffer, varying the size field.
-	 * Sizes: 4, 16, 64, 256, 1024 (=4KB), 3012 (~12KB) dwords.
-	 * All contain a connect command at the start.
-	 */
-	if (big_buf) {
-		static const u32 test_sizes[] = {
-			4, 256, 384, 512, 640, 768, 1024
-		};
-		static const char * const test_labels[] = {
-			"16B", "1KB", "1.5KB", "2KB", "2.5KB", "3KB", "4KB"
-		};
-		u32 *bw = big_buf;
-		int t;
-
-		memset(big_buf, 0, big_size);
-		bw[0] = cpu_to_le32(UA_DSP_CMD_CONNECT);
-		bw[1] = cpu_to_le32(1);
-
-		for (t = 0; t < 7; t++) {
-			ent = (struct ua_ring_entry){
-				.word0 = cpu_to_le32(UA_RING_DMA_REF |
-						     test_sizes[t]),
-				.word1 = 0,
-				.word2 = cpu_to_le32(lower_32_bits(big_dma)),
-				.word3 = cpu_to_le32(upper_32_bits(big_dma)),
-			};
-			ua_dsp_ring_put_entry(ua, &dsp0->cmd, &ent);
-			ua_dsp_ring_doorbell(ua, &dsp0->cmd, cb);
-			msleep(300);
-			pos_after = ua_read(ua, cb + UA_RING_POSITION);
-			dev_info(&ua->pdev->dev,
-				 "  Test %c (DMA ref %s, %u dw): "
-				 "pos %u→%u %s\n",
-				 'C' + t, test_labels[t], test_sizes[t],
-				 pos_before, pos_after,
-				 pos_after > pos_before ? "WORKS" : "FAIL");
-
-			if (pos_after <= pos_before) {
-				/* Ring stalled — try to recover with
-				 * ring_program for remaining tests */
-				dev_info(&ua->pdev->dev,
-					 "  STALL at %u dwords (%s) — "
-					 "max working size was %s\n",
-					 test_sizes[t], test_labels[t],
-					 t > 0 ? test_labels[t - 1] : "< 4dw");
-				break;
-			}
-			pos_before = pos_after;
-		}
-	}
-
-	/*
-	 * Test I: Inline after sweep (check if ring recovered or stalled)
-	 */
-	ent = (struct ua_ring_entry){
-		.word0 = cpu_to_le32(UA_DSP_CMD_CONNECT),
-		.word1 = cpu_to_le32(1),
-		.word2 = 0,
-		.word3 = 0,
-	};
-	ua_dsp_ring_put_entry(ua, &dsp0->cmd, &ent);
-	ua_dsp_ring_doorbell(ua, &dsp0->cmd, cb);
-	msleep(200);
-	pos_after = ua_read(ua, cb + UA_RING_POSITION);
-	dev_info(&ua->pdev->dev,
-		 "  Test I (inline post-sweep): pos %u→%u %s\n",
-		 pos_before, pos_after,
-		 pos_after > pos_before ? "WORKS" : "STALLED");
-
-	dev_info(&ua->pdev->dev,
-		 "  final: POSITION=%u WRITE_PTR=%u\n",
-		 pos_after, dsp0->cmd.write_ptr);
-	dev_info(&ua->pdev->dev, "=== DMA locality test done ===\n");
-
-	/* A stalled DMA ref may still read them: park, freed once consumed */
-	ua_dsp_orphan_dma(ua, ext_buf, ext_dma, UA_PCIE_PAGE_SIZE,
-			  &dsp0->cmd, NULL);
-	ua_dsp_orphan_dma(ua, big_buf, big_dma, big_size, &dsp0->cmd, NULL);
-
-	/*
-	 * CRITICAL: Sync write_ptr for FW loading.
-	 * Don't ring_program (would desync POSITION vs WRITE_PTR).
-	 * FW loading will continue accumulating from current write_ptr.
-	 */
-}
-
-/* ----------------------------------------------------------------
  * Mixer firmware blob loading (request_firmware API)
  * ---------------------------------------------------------------- */
 
@@ -2783,9 +2463,9 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 		goto out;
 	}
 
-	dev_info(&ua->pdev->dev,
-		 "loading mixer firmware: %u blocks, %zu bytes\n",
-		 num_blocks, fw->size);
+	dev_dbg(&ua->pdev->dev,
+		"loading mixer firmware: %u blocks, %zu bytes\n",
+		num_blocks, fw->size);
 
 	/*
 	 * 3-phase FW load (from Windows UAD2Pcie.sys Ghidra):
@@ -2901,10 +2581,9 @@ int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx)
 	}
 
 	for (i = 0; i < num_blocks; i++) {
-		u32 sram_addr, block_size, block_offset;
+		u32 block_size, block_offset;
 		unsigned int entry_off = header_size + i * 12;
 
-		sram_addr = le32_to_cpup((__le32 *)&data[entry_off]);
 		block_size = le32_to_cpup((__le32 *)&data[entry_off + 4]);
 		block_offset = le32_to_cpup((__le32 *)&data[entry_off + 8]);
 
@@ -2924,9 +2603,9 @@ int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx)
 		}
 	}
 
-	dev_info(&ua->pdev->dev,
-		 "DSP %u: %u/%u firmware blocks loaded\n",
-		 dsp_idx, i, num_blocks);
+	dev_dbg(&ua->pdev->dev,
+		"DSP %u: %u/%u firmware blocks loaded\n",
+		dsp_idx, i, num_blocks);
 
 	release_firmware(fw);
 	return (i == num_blocks) ? 0 : ret;
@@ -2986,11 +2665,11 @@ int ua_dsp_connect_all(struct ua_device *ua)
 				     bank_base + UA_RING_CMD_OFFSET);
 
 		usleep_range(5000, 10000);
-		dev_info(&ua->pdev->dev,
-			 "DSP %u connect: pos=%u (expect %u)\n", i,
-			 ua_read(ua, bank_base + UA_RING_CMD_OFFSET +
+		dev_dbg(&ua->pdev->dev,
+			"DSP %u connect: pos=%u (expect %u)\n", i,
+			ua_read(ua, bank_base + UA_RING_CMD_OFFSET +
 				 UA_RING_POSITION),
-			 ds->cmd.write_ptr);
+			ds->cmd.write_ptr);
 	}
 
 	/* Brief delay between phases */
@@ -3025,12 +2704,12 @@ int ua_dsp_connect_all(struct ua_device *ua)
 	}
 
 	usleep_range(5000, 10000);
-	dev_info(&ua->pdev->dev,
-		 "DSP 0 finalize (date 0x%08x): pos=%u (expect %u)\n",
-		 date,
-		 ua_read(ua, ua_dsp_base(0) + UA_RING_CMD_OFFSET +
+	dev_dbg(&ua->pdev->dev,
+		"DSP 0 finalize (date 0x%08x): pos=%u (expect %u)\n",
+		date,
+		ua_read(ua, ua_dsp_base(0) + UA_RING_CMD_OFFSET +
 			 UA_RING_POSITION),
-		 ua->dsp[0].cmd.write_ptr);
+		ua->dsp[0].cmd.write_ptr);
 
 	ua->dsps_connected = true;
 	dev_info(&ua->pdev->dev, "all %u DSPs connected\n", ua->num_dsps);
@@ -3075,14 +2754,16 @@ int ua_dsp_load_plugin_payloads(struct ua_device *ua)
 	if (ua->plugin_bufs)
 		return 0;   /* Already loaded */
 
-	ret = request_firmware(&fw, UA_PLUGIN_CHAIN_FW_NAME, &ua->pdev->dev);
+	/* Optional blob, retried on every connect: stay quiet when absent. */
+	ret = firmware_request_nowarn(&fw, UA_PLUGIN_CHAIN_FW_NAME,
+				      &ua->pdev->dev);
 	if (ret) {
 		if (ret == -ENOENT)
-			dev_warn(&ua->pdev->dev,
-				 "plugin chain firmware '%s' not found; "
-				 "DMA_REF entries will be skipped (preamp "
-				 "PAD/48V/MicLine relays will not work)\n",
-				 UA_PLUGIN_CHAIN_FW_NAME);
+			dev_warn_once(&ua->pdev->dev,
+				      "plugin chain firmware '%s' not found; "
+				      "DMA_REF entries will be skipped (preamp "
+				      "PAD/48V/MicLine relays will not work)\n",
+				      UA_PLUGIN_CHAIN_FW_NAME);
 		else
 			dev_err(&ua->pdev->dev,
 				"plugin chain firmware load failed: %d\n", ret);
@@ -3285,17 +2966,17 @@ int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 	 * /lib/firmware/.
 	 */
 	if (!ua->plugin_bufs) {
-		dev_warn(&ua->pdev->dev,
-			 "plugin chain: payloads not loaded, activation skipped "
-			 "(install %s to enable preamp relays)\n",
-			 UA_PLUGIN_CHAIN_FW_NAME);
+		dev_warn_once(&ua->pdev->dev,
+			      "plugin chain: payloads not loaded, activation skipped "
+			      "(install %s to enable preamp relays)\n",
+			      UA_PLUGIN_CHAIN_FW_NAME);
 		return -ENODATA;
 	}
 
-	dev_info(&ua->pdev->dev,
-		 "plugin chain: sending %d commands to DSP 0 "
-		 "(skip_bus_coeff=%d)\n",
-		 UA_PLUGIN_CHAIN_COUNT, ua->skip_bus_coeff);
+	dev_dbg(&ua->pdev->dev,
+		"plugin chain: sending %d commands to DSP 0 "
+		"(skip_bus_coeff=%d)\n",
+		UA_PLUGIN_CHAIN_COUNT, ua->skip_bus_coeff);
 
 	/*
 	 * Send commands in batches of 64, one doorbell per batch, pacing
@@ -3620,9 +3301,9 @@ void ua_dsp_flush_bus_params(struct ua_device *ua)
 
 	if (ua_dsp_ring_wait_idle(ua, ring, 10))
 		return;
-	dev_info(&ua->pdev->dev,
-		 "bus_param flush timeout: pos=%u wr=%u (not consumed)\n",
-		 ring->hw_pos, ring->write_ptr);
+	dev_warn_ratelimited(&ua->pdev->dev,
+			     "bus_param flush timeout: pos=%u wr=%u (not consumed)\n",
+			     ring->hw_pos, ring->write_ptr);
 }
 
 /* ----------------------------------------------------------------
@@ -3941,9 +3622,9 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 	/* Ring the doorbell once for the entire batch */
 	ua_dsp_ring_doorbell(ua, &ds->cmd, cmd_base);
 
-	dev_info(&ua->pdev->dev,
-		 "module_cfg: queued %u entries for %u modules\n",
-		 ds->cmd.write_ptr, UA_MODULE_COUNT);
+	dev_dbg(&ua->pdev->dev,
+		"module_cfg: queued %u entries for %u modules\n",
+		ds->cmd.write_ptr, UA_MODULE_COUNT);
 
 	/* Wait for DSP to process all entries */
 	if (!ua_dsp_ring_wait_idle(ua, &ds->cmd, 500)) {
@@ -3955,9 +3636,9 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 				  &ds->cmd, NULL);
 		return 0;
 	}
-	dev_info(&ua->pdev->dev,
-		 "module_cfg: DSP consumed all entries (pos=%u)\n",
-		 ds->cmd.hw_pos);
+	dev_dbg(&ua->pdev->dev,
+		"module_cfg: DSP consumed all entries (pos=%u)\n",
+		ds->cmd.hw_pos);
 
 out_free:
 	dma_free_coherent(&ua->pdev->dev, UA_PCIE_PAGE_SIZE,
@@ -4005,8 +3686,8 @@ int ua_dsp_send_routing(struct ua_device *ua)
 	unsigned int i;
 
 	if (ua_io_map_enabled(ua)) {
-		dev_info(&ua->pdev->dev,
-			 "descriptor layout: not writing captured IO descriptors (the firmware owns them)\n");
+		dev_dbg(&ua->pdev->dev,
+			"descriptor layout: not writing captured IO descriptors (the firmware owns them)\n");
 		return 0;
 	}
 
@@ -4035,9 +3716,9 @@ int ua_dsp_send_routing(struct ua_device *ua)
 		ua_write(ua, UA_REG_OUT_NAMES_BASE + i * 4,
 			 cfg->io_desc_output[i]);
 
-	dev_info(&ua->pdev->dev,
-		 "IO descriptors written: input=%u words, output=%u words\n",
-		 UA_IO_DESC_WORDS, UA_IO_DESC_WORDS);
+	dev_dbg(&ua->pdev->dev,
+		"IO descriptors written: input=%u words, output=%u words\n",
+		UA_IO_DESC_WORDS, UA_IO_DESC_WORDS);
 
 	return 0;
 }
