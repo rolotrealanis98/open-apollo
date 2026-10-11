@@ -167,6 +167,24 @@ _DEVICE_INFO_SIZE = 64
 _DEVICE_LOST_ERRNOS = (errno.ENODEV, errno.EIO, errno.ENXIO, errno.EBADF)
 UA_IOCTL_GET_DEVICE_INFO = _IOR(UA_IOCTL_MAGIC, 0x01, _DEVICE_INFO_SIZE)
 
+# struct ua_version { u32 abi_major, abi_minor, driver_version, features;
+#                     char driver_name[16]; u32 reserved[4]; } = 48 bytes.
+# ABI rule (driver/ua_ioctl.h): minor bumps for additions, major for breaks.
+_VERSION_SIZE = 48
+UA_IOCTL_GET_VERSION = _IOR(UA_IOCTL_MAGIC, 0x04, _VERSION_SIZE)
+UA_ABI_MAJOR = 1
+UA_FEAT_EVENTS = 1 << 0
+UA_FEAT_PUBLIC_TYPE = 1 << 1
+UA_FEAT_BUS_PARAM_SIDE = 1 << 2
+UA_FEAT_MIXER_PARAM_T0 = 1 << 3
+UA_FEAT_KIND_GATES = 1 << 4
+UA_FEAT_MIXER_STATE = 1 << 5
+UA_FEAT_SYSTEM_INFO = 1 << 6
+UA_FEAT_BUS_PARAM_BATCH = 1 << 7
+UA_FEAT_PAUSE_INFO = 1 << 8
+UA_FEAT_PAUSE_EVENTS = 1 << 9
+UA_FEAT_UNIT_GROUP = 1 << 10
+
 _FW_LOAD_SIZE = 16
 UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
 UA_IOCTL_DSP_CONNECT = _IO(UA_IOCTL_MAGIC, 0x51)
@@ -1788,6 +1806,31 @@ class HardwareBackend:
     def probe_register(self, offset: int) -> int | None:
         """Read a single register (for empirical probing)."""
         return self.reg_read(offset)
+
+    def get_version(self) -> dict | None:
+        """Driver ABI version via UA_IOCTL_GET_VERSION.
+
+        Returns {abi_major, abi_minor, driver_version, features,
+        driver_name}, or None when the driver predates the ioctl (ENOTTY),
+        there is no device, or the call fails.  Informational only.
+        """
+        if self.fd < 0:
+            return None
+        try:
+            raw = fcntl.ioctl(self.fd, UA_IOCTL_GET_VERSION,
+                              bytes(_VERSION_SIZE))
+        except OSError as e:
+            if e.errno != errno.ENOTTY:
+                log.debug("get_version: %s", e)
+            return None
+        major, minor, drv, feats, name = struct.unpack_from('<IIII16s', raw)
+        return {
+            "abi_major": major,
+            "abi_minor": minor,
+            "driver_version": drv,
+            "features": feats,
+            "driver_name": name.split(b'\0', 1)[0].decode('ascii', 'replace'),
+        }
 
     # ── Driver parameter access ──────────────────────────────────────
 
