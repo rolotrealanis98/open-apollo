@@ -718,6 +718,23 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_MON_PARAM_UNKNOWN_67 0x67  /* setting[5] bit3, bool */
 #define UA_MON_PARAM_UNKNOWN_68 0x68  /* setting[5] bit4, bool */
 #define UA_MON_PARAM_UNKNOWN_87 0x87  /* setting[5] bit9, bool */
+#define UA_MON_PARAM_HP2_CORRECTION 0x69 /* setting[5] bit5; kinds 10-14,16-20,22 */
+#define UA_MON_PARAM_SURR_LFE_TRIM 0x88 /* setting[5] bits[31:24]; kinds 10-22 */
+#define UA_MON_PARAM_SURR_FLAG_89 0x89  /* 0x89/0x8a: setting[5] bits 10/11; kinds 10-22 */
+
+/*
+ * --- Surround / HP-correction trim and flag families (parity/14 s4) ---
+ * First id of each run handled by the ua_other_fields[] table in ua_core.c.
+ */
+#define UA_MON_PARAM_SURR_TRIM_2  0x4d  /* 0x4d-0x4e: setting[33] bytes 2,3 */
+#define UA_MON_PARAM_SURR_TRIM_4  0x4f  /* 0x4f-0x52: setting[34] bytes 0-3 */
+#define UA_MON_PARAM_SURR_FLAG_55 0x55  /* 0x55-0x5a: setting[32] bits 26-31 */
+#define UA_MON_PARAM_SURR_FLAG_5D 0x5d  /* 0x5d-0x62: setting[32] bits 18-23 */
+#define UA_MON_PARAM_ROOT_65      0x65  /* setting[31] bits[25:24] (low confidence) */
+#define UA_MON_PARAM_SURR_TRIM_6B 0x6b  /* 0x6b-0x6e: setting[36] bytes 0-3 */
+#define UA_MON_PARAM_SURR_TRIM_6F 0x6f  /* 0x6f-0x72: setting[37] bytes 0-3 */
+#define UA_MON_PARAM_CHAN_FLAG_73 0x73  /* 0x73-0x7a: setting[35] bits 16-23 */
+#define UA_MON_PARAM_CHAN_FLAG_7B 0x7b  /* 0x7b-0x82: setting[35] bits 8-15 */
 
 /* --- Setting[35] (0x23): Channel config count --- */
 #define UA_MON_PARAM_CHAN_CFG   0x6a  /* setting[35] bits[4:0], 5-bit */

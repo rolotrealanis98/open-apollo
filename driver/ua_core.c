@@ -1418,6 +1418,77 @@ static u32 ua_swap2(u32 value, unsigned int lo)
 }
 
 /*
+ * SetOtherParam families that are plain "value into one field" writes with
+ * no bit swap: surround/HP-correction/Dante/trim ids (parity/14 section 4,
+ * reverse index in section 6).  One row covers a run of ids; id N of the
+ * run lands at bit (shift + (N - first) * stride) of @setting, @width bits
+ * wide (width 1 = bool, value != 0).  Kind gates live in
+ * ua_other_param_allowed() (0x69: kinds 10-14,16-20,22; 0x88-0x8a: 10-22);
+ * the kext accepts the other ids on every kind.
+ *
+ *   ids          setting  field                          kext meaning
+ *   0x4d-0x4e    S33      bytes 2,3  (shift 16,24)       surround trim ch 2/3
+ *   0x4f-0x52    S34      bytes 0-3  (shift 0,8,16,24)   surround trim
+ *   0x55-0x5a    S32      bits 26-31                     surround flags
+ *   0x5d-0x62    S32      bits 18-23                     surround flags
+ *   0x65         S31      [25:24], 2 bits                root property (L)
+ *   0x69         S5       bit 5                          HP2 correction enable
+ *   0x6b-0x6e    S36      bytes 0-3                      surround trim
+ *   0x6f-0x72    S37      bytes 0-3                      surround trim
+ *   0x73-0x7a    S35      bits 16-23                     per-channel flags
+ *   0x7b-0x82    S35      bits 8-15                      per-channel flags
+ *   0x88         S5       [31:24], 8 bits                surround LFE/sub trim
+ *   0x89-0x8a    S5       bits 10,11                     surround channel flags
+ *
+ * The Mixer Engine sends these to its multi-channel surround models; none
+ * is known to be sent to a first-generation x4.  Ids 0x4a-0x4c, 0x53/0x54,
+ * 0x5b/0x5c, 0x63, 0x64, 0x66-0x68, 0x6a and 0x87 stay explicit cases.
+ */
+struct ua_other_field {
+	u8 first, last;		/* id run, inclusive */
+	u8 setting;
+	u8 shift;		/* shift of the first id */
+	u8 stride;		/* shift step per id */
+	u8 width;		/* bits */
+};
+
+static const struct ua_other_field ua_other_fields[] = {
+	{ UA_MON_PARAM_SURR_TRIM_2,	0x4e, 33, 16, 8, 8 },
+	{ UA_MON_PARAM_SURR_TRIM_4,	0x52, 34,  0, 8, 8 },
+	{ UA_MON_PARAM_SURR_FLAG_55,	0x5a, 32, 26, 1, 1 },
+	{ UA_MON_PARAM_SURR_FLAG_5D,	0x62, 32, 18, 1, 1 },
+	{ UA_MON_PARAM_ROOT_65,		0x65, 31, 24, 0, 2 },
+	{ UA_MON_PARAM_HP2_CORRECTION,	0x69,  5,  5, 0, 1 },
+	{ UA_MON_PARAM_SURR_TRIM_6B,	0x6e, 36,  0, 8, 8 },
+	{ UA_MON_PARAM_SURR_TRIM_6F,	0x72, 37,  0, 8, 8 },
+	{ UA_MON_PARAM_CHAN_FLAG_73,	0x7a, 35, 16, 1, 1 },
+	{ UA_MON_PARAM_CHAN_FLAG_7B,	0x82, 35,  8, 1, 1 },
+	{ UA_MON_PARAM_SURR_LFE_TRIM,	0x88,  5, 24, 0, 8 },
+	{ UA_MON_PARAM_SURR_FLAG_89,	0x8a,  5, 10, 1, 1 },
+};
+
+static bool ua_other_field_lookup(u32 param, u32 value, unsigned int *setting,
+				  u32 *hw_val, u32 *hw_mask)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(ua_other_fields); i++) {
+		const struct ua_other_field *f = &ua_other_fields[i];
+		u32 vmask, shift;
+
+		if (param < f->first || param > f->last)
+			continue;
+		shift = f->shift + (param - f->first) * f->stride;
+		vmask = GENMASK(f->width - 1, 0);
+		*setting = f->setting;
+		*hw_mask = vmask << shift;
+		*hw_val = (f->width == 1 ? !!value : (value & vmask)) << shift;
+		return true;
+	}
+	return false;
+}
+
+/*
  * ua_monitor_set_param - Set a monitor parameter via DSP mixer settings
  * @ua: device
  * @ch_idx: monitor channel index (from IOKit captures)
@@ -1902,6 +1973,9 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		return -EINVAL;
 
 	default:
+		if (ua_other_field_lookup(param_id, value, &setting_idx,
+					  &hw_val, &hw_mask))
+			break;
 		dev_dbg(&ua->pdev->dev,
 			"monitor_set_param: unknown param 0x%x (ch=%u val=0x%x)\n",
 			param_id, ch_idx, value);
