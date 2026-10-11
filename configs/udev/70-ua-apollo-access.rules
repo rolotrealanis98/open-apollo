@@ -1,0 +1,7 @@
+# Access to the Apollo control node /dev/ua_apolloN: the logged-in desktop
+# user (uaccess; applied by 73-seat-late.rules, so this file has to sort
+# before it) and the audio group, like the ALSA devices.  The driver keeps
+# its raw register/DMA/DSP ioctls for CAP_SYS_RAWIO, so this opens only the
+# mixer ioctls the daemon uses.
+# Deploy to: /etc/udev/rules.d/70-ua-apollo-access.rules
+KERNEL=="ua_apollo[0-9]*", MODE="0660", GROUP="audio", TAG+="uaccess"

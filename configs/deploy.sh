@@ -102,6 +102,12 @@ else
     echo "  Warning: udev rules not found, skipping"
 fi
 
+# /dev/ua_apolloN access for the desktop user (uaccess) and the audio group
+if [ -f "$UDEV_DIR/70-ua-apollo-access.rules" ]; then
+    cp "$UDEV_DIR/70-ua-apollo-access.rules" /etc/udev/rules.d/
+    echo "  -> /etc/udev/rules.d/70-ua-apollo-access.rules"
+fi
+
 # Thunderbolt hot-plug: keep the TB ports out of D3cold, or powering on an
 # Apollo generates no PCIe hotplug event at all (see the rule's comments).
 # Independent of the hotplug helper rule above -- it must install on its own.

@@ -105,6 +105,7 @@ ok "Removed UCM2 profile"
 
 # Step 7: Remove udev rules and scripts
 rm -f /etc/udev/rules.d/91-ua-apollo.rules 2>/dev/null
+rm -f /etc/udev/rules.d/70-ua-apollo-access.rules 2>/dev/null
 rm -f /etc/udev/rules.d/60-thunderbolt-no-rtd3.rules 2>/dev/null
 rm -f /usr/local/bin/open-apollo-profile-setup 2>/dev/null
 rm -f /usr/local/bin/open-apollo-setup-worker 2>/dev/null
