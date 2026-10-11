@@ -477,8 +477,15 @@ class TestEventLoop:
 
 
 # ── Mute-until-settle (A11 / 04 H5) ─────────────────────────────────
+# The Mixer Engine's MuteUntilSettleDown sets OutputsAttenuate (other param
+# 0x20) on mixer types that support it (the x4), never the monitor mute.
 
+ATTEN = (2, 0, 0x20)
 MUTE = (2, 0, 0x03)
+
+
+def atten_writes(backend):
+    return [c[3] for c in backend.mixer_params if c[:3] == ATTEN]
 
 
 def mute_writes(backend):
@@ -487,11 +494,12 @@ def mute_writes(backend):
 
 class TestMuteUntilSettle:
     def run_event(self, ebackend, node, tree, *evs, secs=0.05, after=0.12,
-                  setup=None, readback=None):
+                  supported=True, setup=None):
         d = MixerDaemon(tree, HardwareRouter(ebackend, tree))
+        d.hw_router.supports_outputs_attenuate = supported
         d.mute_on_rate_change = secs
         ebackend.driver_values[RATE] = 48000
-        ebackend.readback = readback
+        ebackend.readback = (1, make_readback(mon_raw=150))
 
         async def run():
             d._events_attach()
@@ -504,57 +512,52 @@ class TestMuteUntilSettle:
         asyncio.run(run())
         return d
 
-    def test_rate_change_mutes_then_unmutes(self, ebackend, node, tree):
-        ebackend.readback = None
-        self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 4),
-                       readback=(1, make_readback(mon_raw=150)))
-        assert mute_writes(ebackend) == [2, 0]
+    def test_rate_change_attenuates_then_restores(self, ebackend, node,
+                                                  tree):
+        self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 4))
+        assert atten_writes(ebackend) == [1, 0]
 
-    def test_mono_is_kept(self, ebackend, node, tree):
-        self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 4),
-                       readback=(1, make_readback(mon_raw=150, mono=True)))
-        assert mute_writes(ebackend) == [3, 1]
-
-    def test_same_rate_does_not_mute(self, ebackend, node, tree):
-        self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 2),
-                       readback=(1, make_readback(mon_raw=150)))
+    def test_monitor_mute_is_never_touched(self, ebackend, node, tree):
+        self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 4))
         assert mute_writes(ebackend) == []
 
-    def test_already_muted_is_left_alone(self, ebackend, node, tree):
+    def test_unsupported_model_does_nothing(self, ebackend, node, tree):
         self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 4),
-                       readback=(1, make_readback(mon_raw=150, mute=True)))
-        assert mute_writes(ebackend) == []
+                       supported=False)
+        assert atten_writes(ebackend) == []
+
+    def test_same_rate_does_not_attenuate(self, ebackend, node, tree):
+        self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 2))
+        assert atten_writes(ebackend) == []
 
     def test_disabled_with_zero_seconds(self, ebackend, node, tree):
         self.run_event(ebackend, node, tree, (UA_EVT_RATE_CHANGED, 4),
-                       secs=0,
-                       readback=(1, make_readback(mon_raw=150)))
-        assert mute_writes(ebackend) == []
+                       secs=0)
+        assert atten_writes(ebackend) == []
 
-    def test_first_event_after_a_rate_unknown_start_does_not_mute(
+    def test_first_event_after_a_rate_unknown_start_does_not_attenuate(
             self, ebackend, node, tree):
         d = MixerDaemon(tree, HardwareRouter(ebackend, tree))
+        d.hw_router.supports_outputs_attenuate = True
         d.mute_on_rate_change = 0.05
-        ebackend.readback = (1, make_readback(mon_raw=150))
-        # no driver rate known: nothing to compare the first event with
         d._on_driver_event(UA_EVT_RATE_CHANGED, 4)
-        assert mute_writes(ebackend) == []
+        assert atten_writes(ebackend) == []
 
-    def test_no_event_loop_no_mute(self, edaemon, ebackend):
+    def test_no_event_loop_no_attenuation(self, edaemon, ebackend):
+        edaemon.hw_router.supports_outputs_attenuate = True
         edaemon._last_rate_index = 2
-        ebackend.readback = (1, make_readback(mon_raw=150))
         edaemon._on_driver_event(UA_EVT_RATE_CHANGED, 4)    # not in a loop
-        assert mute_writes(ebackend) == []
+        assert atten_writes(ebackend) == []
 
-    def test_connect_and_clock_events_do_not_mute(self, ebackend, node, tree):
+    def test_connect_and_clock_events_do_not_attenuate(self, ebackend, node,
+                                                       tree):
         self.run_event(ebackend, node, tree, (UA_EVT_CONNECTED, 0),
-                       (UA_EVT_CLOCK_CHANGED, 12), (UA_EVT_RATE_INFO, 1),
-                       readback=(1, make_readback(mon_raw=150)))
-        assert mute_writes(ebackend) == []
+                       (UA_EVT_CLOCK_CHANGED, 12), (UA_EVT_RATE_INFO, 1))
+        assert atten_writes(ebackend) == []
 
     def test_device_lost_cancels_without_writing(self, ebackend, node, tree):
-        ebackend.readback = (1, make_readback(mon_raw=150))
         d = MixerDaemon(tree, HardwareRouter(ebackend, tree))
+        d.hw_router.supports_outputs_attenuate = True
         d.mute_on_rate_change = 5.0
         ebackend.driver_values[RATE] = 48000
 
@@ -567,69 +570,46 @@ class TestMuteUntilSettle:
             assert d.hw_router._settle is None and d._settle_timer is None
 
         asyncio.run(run())
-        assert mute_writes(ebackend) == [2]       # never "unmuted" on a lost fd
+        assert atten_writes(ebackend) == [1]     # never restored on a lost fd
 
 
 class TestSettleRouter:
-    def test_begin_end(self, router, backend):
-        assert router.begin_settle_mute(False, False)
-        assert router.end_settle_mute()
-        assert [c[3] for c in backend.mixer_params] == [2, 0]
+    @pytest.fixture
+    def srouter(self, router):
+        router.supports_outputs_attenuate = True
+        return router
 
-    def test_second_begin_keeps_the_hold(self, router, backend):
-        router.begin_settle_mute(False, True)
-        assert router.begin_settle_mute(False, True)
-        assert [c[3] for c in backend.mixer_params] == [3]
+    def test_begin_end(self, srouter, backend):
+        assert srouter.begin_settle_mute()
+        assert srouter.end_settle_mute()
+        assert atten_writes(backend) == [1, 0]
 
-    def test_muted_already_writes_nothing(self, router, backend):
-        assert not router.begin_settle_mute(True, False)
+    def test_second_begin_keeps_the_hold(self, srouter, backend):
+        srouter.begin_settle_mute()
+        assert srouter.begin_settle_mute()
+        assert atten_writes(backend) == [1]
+
+    def test_unsupported_writes_nothing(self, router, backend):
+        assert not router.begin_settle_mute()
         assert backend.mixer_params == []
         assert not router.end_settle_mute()
 
-    def test_mute_set_during_the_hold_is_applied_at_the_end(self, router,
-                                                           backend):
-        mon = router.monitor_output_index()
-        router.begin_settle_mute(False, False)
-        backend.clear()
-        router.on_set(f"{OUT_}/{mon}/Mute/value", True)
-        assert backend.mixer_params == []          # held, not written
-        router.end_settle_mute()
-        assert [c[3] for c in backend.mixer_params] == [2]   # stays muted
-
-    def test_unmute_during_the_hold_waits(self, router, backend):
-        mon = router.monitor_output_index()
-        router.begin_settle_mute(False, False)
-        backend.clear()
-        router.on_set(f"{OUT_}/{mon}/Mute/value", False)
-        assert backend.mixer_params == []
-        router.end_settle_mute()
-        assert [c[3] for c in backend.mixer_params] == [0]
-
-    def test_mono_change_during_the_hold_keeps_the_mute(self, router,
+    def test_user_attenuate_set_during_the_hold_is_kept(self, srouter,
                                                         backend):
-        mon = router.monitor_output_index()
-        router.begin_settle_mute(False, False)
+        srouter.begin_settle_mute()
         backend.clear()
-        router.on_set(f"{OUT_}/{mon}/MixToMono/value", True)
-        assert [c[3] for c in backend.mixer_params] == [3]    # mute | mono
-        router.end_settle_mute()
-        assert [c[3] for c in backend.mixer_params][-1] == 1
+        srouter.on_set("/devices/0/OutputsAttenuate/value", True)
+        assert atten_writes(backend) == []          # held, not written
+        srouter.end_settle_mute()
+        assert atten_writes(backend) == [1]         # stays attenuated
 
-    def test_cancel_writes_nothing(self, router, backend):
-        router.begin_settle_mute(False, False)
+    def test_monitor_mute_during_the_hold_is_written(self, srouter, backend):
+        mon = srouter.monitor_output_index()
+        srouter.begin_settle_mute()
         backend.clear()
-        router.cancel_settle_mute()
+        srouter.on_set(f"/devices/0/outputs/{mon}/Mute/value", True)
+        assert mute_writes(backend) == [2]          # not held any more
+
+    def test_end_without_begin(self, srouter, backend):
+        assert not srouter.end_settle_mute()
         assert backend.mixer_params == []
-        assert not router.end_settle_mute()
-
-    def test_normal_mute_after_the_hold_is_written_directly(self, router,
-                                                           backend):
-        mon = router.monitor_output_index()
-        router.begin_settle_mute(False, False)
-        router.end_settle_mute()
-        backend.clear()
-        router.on_set(f"{OUT_}/{mon}/Mute/value", True)
-        assert [c[3] for c in backend.mixer_params] == [2]
-
-
-OUT_ = "/devices/0/outputs"

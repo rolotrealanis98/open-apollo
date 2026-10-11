@@ -2098,9 +2098,12 @@ class HardwareRouter:
         # 24 dB mode on the x4): not retried
         self._refused_other: set[int] = set()
         self._line_outputs_cache: list | None = None
-        # Mute-until-settle: set while the monitor is held muted after a
-        # rate change (see begin_settle_mute)
+        # Mute-until-settle: set while the outputs are attenuated after a
+        # rate change (see begin_settle_mute).  Only models whose Mixer
+        # Engine type supports OutputsAttenuate get it (the daemon sets
+        # this from the detected model: the x4 does).
         self._settle: dict | None = None
+        self.supports_outputs_attenuate = False
         self._sync_driver_state()
 
     def _sync_driver_state(self):
@@ -2959,13 +2962,6 @@ class HardwareRouter:
             if control == "Mute":
                 # Monitor mute: 2=muted, 0=unmuted (NOT 1!)
                 hw_value = 2 if value and value != "0" and value != "false" else 0
-                if self._settle is not None:
-                    # held muted until the clock has settled: remember what
-                    # the user wants for when it ends
-                    self._settle["user_mute"] = bool(hw_value)
-                    log.info("HW MONITOR: Mute = %r held until the rate "
-                             "change has settled", value)
-                    return
                 log.info("HW MONITOR: Mute = %r → %d", value, hw_value)
                 self.backend.set_mixer_param(
                     MONITOR_CHANNEL_TYPE, 0,
@@ -2989,11 +2985,6 @@ class HardwareRouter:
                 # MonitorMute) with value=1/0. MonitorMute uses value=2/0.
                 # So param 0x03 has 3-state encoding: 0=off, 1=mono, 2=muted.
                 hw_value = 1 if value and value != "0" and value != "false" else 0
-                if self._settle is not None:
-                    # param 0x03 carries mute and mono together: keep the
-                    # settle mute while changing mono
-                    self._settle["mono"] = bool(hw_value)
-                    hw_value |= 2
                 log.info("HW MONITOR: MixToMono = %r → %d (param=0x03)",
                          value, hw_value)
                 self.backend.set_mixer_param(
@@ -3342,6 +3333,13 @@ class HardwareRouter:
         if control in bool_params:
             param = bool_params[control]
             hw_value = 1 if self._truthy(value) else 0
+            if control == "OutputsAttenuate" and self._settle is not None:
+                # attenuated until the new rate has settled: the user's
+                # value is applied when the hold ends
+                self._settle["user"] = hw_value
+                log.info("HW MONITOR: OutputsAttenuate = %r held until the "
+                         "rate change has settled", value)
+                return
             log.info("HW MONITOR: %s = %r → %d (param=0x%02x)",
                      control, value, hw_value, param)
             self._set_other(param, hw_value, what=control)
@@ -3587,38 +3585,40 @@ class HardwareRouter:
 
     # ── Mute-until-settle (04 H5) ───────────────────────────────────
 
-    def begin_settle_mute(self, already_muted: bool, mono: bool) -> bool:
-        """Mute the control-room output while a rate change settles.
+    def begin_settle_mute(self) -> bool:
+        """Attenuate the outputs while a rate change settles.
 
-        The Mixer Engine calls MuteUntilSettleDown(secs) from SetSampleRate:
-        an output mute through the mixer settings, lifted by its timer.  Here
-        the monitor mute bit of param 0x03 is set (with the mono bit kept);
-        end_settle_mute() lifts it.  Returns False, writing nothing, when the
-        monitor is muted already (the user's mute stays) or has no output.
-        A second call while held just keeps the hold.
+        The Mixer Engine's CMxRoot::MuteUntilSettleDown sets
+        kPropOutputsAttenuate (other param 0x20) to 1 on each mixer and its
+        timer (CheckMuteUntilSettleDown) lifts it; UpdateHardwareState sends
+        it only for mixer types that support OutputsAttenuate (the x4's
+        MixerTypeFreud does, the base type does not).  The monitor mute bit
+        is never touched, so clients see no Mute toggle.  Returns False,
+        writing nothing, when the model has no OutputsAttenuate.  A second
+        call while held just keeps the hold.
         """
         if self._settle is not None:
             return True
-        if already_muted or self.monitor_output_index() is None:
+        if not self.supports_outputs_attenuate:
             return False
-        self._settle = {"mono": bool(mono), "user_mute": False}
-        log.info("HW MONITOR: muted while the new rate settles")
-        self.backend.set_mixer_param(MONITOR_CHANNEL_TYPE, 0,
-                                     MONITOR_PARAM["MonitorMute"],
-                                     2 | int(bool(mono)))
+        user = 1 if self._truthy(self._tree_value(
+            "/devices/0/OutputsAttenuate/value")) else 0
+        self._settle = {"user": user}
+        log.info("HW MONITOR: outputs attenuated while the new rate settles")
+        self._set_other(MONITOR_PARAM["OutputsAttenuate"], 1,
+                        what="OutputsAttenuate (settle)")
         return True
 
     def end_settle_mute(self) -> bool:
-        """Lift the settle mute: back to what the user set meanwhile (a
-        mute set during the hold stays muted).  False if none was active."""
+        """Lift the settle attenuation: back to the user's OutputsAttenuate
+        (0 unless a client set it).  False if none was active."""
         st = self._settle
         if st is None:
             return False
         self._settle = None
-        hw_value = (2 if st["user_mute"] else 0) | int(st["mono"])
-        log.info("HW MONITOR: settle mute over → %d", hw_value)
-        self.backend.set_mixer_param(MONITOR_CHANNEL_TYPE, 0,
-                                     MONITOR_PARAM["MonitorMute"], hw_value)
+        log.info("HW MONITOR: settle attenuation over → %d", st["user"])
+        self._set_other(MONITOR_PARAM["OutputsAttenuate"], st["user"],
+                        what="OutputsAttenuate (settle)")
         return True
 
     def cancel_settle_mute(self):

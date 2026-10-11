@@ -123,6 +123,10 @@ EVENT_SAFETY_POLL = 10.0
 # seconds after a rate change (MuteUntilSettleDown); its default is not
 # known, 1 s is a placeholder.  0 turns the mute off.
 MUTE_ON_RATE_CHANGE_SECS = 1.0
+# Driver device types whose Mixer Engine mixer type supports
+# OutputsAttenuate (CMxRoot::MuteUntilSettleDown's mute): the Apollo x4
+# (MixerTypeFreud, SupportsOutputsAttenuate() = 1).
+OUTPUTS_ATTENUATE_TYPES = frozenset({0x1F})
 # The driver's rate index (UA_RATE_*) of a sample rate
 RATE_INDEX = {44100: 1, 48000: 2, 88200: 3, 96000: 4, 176400: 5, 192000: 6}
 
@@ -1059,10 +1063,10 @@ class MixerDaemon:
         self._device_lost(time.monotonic())
 
     def _mute_until_settle(self):
-        """MuteUntilSettleDown: hold the monitor muted for a moment after
-        the clock changed rate, so the converters' re-lock does not reach
-        the speakers.  Needs the event loop to schedule the unmute; without
-        one nothing is muted."""
+        """MuteUntilSettleDown: attenuate the outputs (OutputsAttenuate) for
+        a moment after the clock changed rate, so the converters' re-lock
+        does not reach the speakers.  Needs the event loop to schedule the
+        end; without one nothing is attenuated."""
         secs = self.mute_on_rate_change
         if secs <= 0 or not self.hw_router or not self._hw_online:
             return
@@ -1070,23 +1074,11 @@ class MixerDaemon:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        mon = self.hw_router.monitor_output_index()
-        if mon is None:
-            return
-        rb = self.hw_router.poll_hw_readback() or {}
-        base = f"/devices/0/outputs/{mon}"
-        muted = rb.get("monitor_mute",
-                       self._truthy_tree(f"{base}/Mute/value"))
-        mono = rb.get("monitor_mono",
-                      self._truthy_tree(f"{base}/MixToMono/value"))
-        if not self.hw_router.begin_settle_mute(muted, mono):
+        if not self.hw_router.begin_settle_mute():
             return
         if self._settle_timer is not None:
             self._settle_timer.cancel()
         self._settle_timer = loop.call_later(secs, self._end_settle)
-
-    def _truthy_tree(self, path: str) -> bool:
-        return bool(self.state.get_value(path))
 
     def _end_settle(self):
         self._settle_timer = None
@@ -2480,6 +2472,10 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             input_buses=descriptor_input_buses(
                 find_descriptor(device_type)[0]
                 if device_type is not None else None))
+        # MixerTypeFreud (the x4) supports OutputsAttenuate, which the
+        # settle mute uses; other mixer types are unconfirmed
+        hw_router.supports_outputs_attenuate = (
+            device_type in OUTPUTS_ATTENUATE_TYPES)
         log.info("Hardware backend: %s", backend.device_path)
         log.info("Safe mode: %s (monitor+preamp+analog bus enabled, "
                  "digital/send/aux bus writes %s)",
