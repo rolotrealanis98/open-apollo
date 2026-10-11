@@ -532,6 +532,16 @@ struct ua_dma_test {
  * -ENOTTY; treat that as "ABI 1.0 without any of the feature bits".
  *
  * The struct is fixed size: never change sizeof(struct ua_version).
+ *
+ * Numbers kept free (2026-10-11, apollo-linux codex-driver-overlay-review):
+ *   - ioctls 0x09-0x0e and events 0x1008/0x1009 are never assigned: an
+ *     out-of-tree plugin prototype used them, so a caller built against it
+ *     must get -ENOTTY here, not a different operation;
+ *   - ioctls 0x90-0x9f are reserved for plugin hosting, events for it start
+ *     at 0x1010;
+ *   - feature bit 31 is reserved as a continuation bit: when the last free
+ *     bit is needed, reserved[0] becomes a second feature word and bit 31
+ *     says it is valid (an older driver leaves reserved[] zero).
  */
 #define UA_ABI_MAJOR		1
 #define UA_ABI_MINOR		7
