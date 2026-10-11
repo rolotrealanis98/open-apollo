@@ -434,8 +434,16 @@ MONITOR_PARAM = {
     # CUE mirror / output routing — all ch_idx=9 unless noted
     "MirrorA":         0x2e,   # ch_idx=9: CUE1 mirror source (see MIRROR_SOURCE_MAP)
     "MirrorB":         0x2f,   # ch_idx=9: CUE2 mirror source (see MIRROR_SOURCE_MAP)
-    "MirrorEnableA":   0x3b,   # ch_idx=9: CUE1 mirror enable (1/0)
-    "MirrorEnableB":   0x3c,   # ch_idx=9: CUE2 mirror enable (1/0)
+    # 0x3b / 0x3c are the kext's AltMonEnabled (kPropAltMonEnabled 0xf6,
+    # setting[15] bits 8 / 12; parity/14 s4, medium confidence), not a
+    # "mirror enable".  MirrorEnableA/B stay as the names this daemon uses.
+    "MirrorEnableA":   0x3b,   # ch_idx=9: = AltMon1Enabled (1/0)
+    "MirrorEnableB":   0x3c,   # ch_idx=9: = AltMon2Enabled (1/0)
+    "AltMon1Enabled":  0x3b,   # kPropAltMonEnabled, alt monitor 1
+    "AltMon2Enabled":  0x3c,   # kPropAltMonEnabled, alt monitor 2
+    "AltMon1Trim":     0x38,   # kPropAltMonTrim: clamp(int(trim*2 + 60.5), 0, 0x78)
+    "AltMon2Trim":     0x39,
+    "AltMonSelection": 0x3a,   # kPropAltMonSelection, 2 bits (setting[13])
     # CUE mono/mix — all ch_idx=0
     "CUE1Mono":        0x06,   # ch_idx=0: CUE1 mono (1/0)
     "CUE2Mono":        0x08,   # ch_idx=0: CUE2 mono (1/0)

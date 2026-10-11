@@ -410,6 +410,13 @@ class TestHeadphoneLevel:
         assert MONITOR_PARAM["HP1Level"] == 0x02
         assert MONITOR_PARAM["HP2Level"] == 0x66
 
+    def test_alt_monitor_names(self):
+        # 0x3b / 0x3c are AltMonEnabled; the daemon's old names alias them
+        assert MONITOR_PARAM["AltMon1Enabled"] == MONITOR_PARAM["MirrorEnableA"]
+        assert MONITOR_PARAM["AltMon2Enabled"] == MONITOR_PARAM["MirrorEnableB"]
+        assert (MONITOR_PARAM["AltMon1Trim"], MONITOR_PARAM["AltMon2Trim"],
+                MONITOR_PARAM["AltMonSelection"]) == (0x38, 0x39, 0x3A)
+
 
 class TestBusParamSides:
     """SEL130 entries come in left/right pairs (parity/14 section 5)."""
