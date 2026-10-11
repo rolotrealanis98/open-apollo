@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Scan all USB vendor control requests on Apollo Solo USB.
+"""Scan the USB vendor IN requests of an Apollo USB (read-only).
 
-Tests request codes 0x00-0xFF in both directions to find supported commands.
+Tests device-to-host request codes 0x00-0xFF to find supported commands.
+It used to send every host-to-device code as well; that is gone: a blind
+OUT request can be a firmware, EEPROM or flash write, and the OUT requests
+the UA driver uses are known (uausb/device.py: 0x03 register write, 0x05
+rate index, 0x07 clock source, 0x09, 0x0C/0x0D).
 
 Usage: sudo python3 usb-ctrl-scan.py
 """
-import struct
 import sys
 import usb.core
 import usb.util
@@ -52,16 +55,7 @@ def scan():
         except usb.core.USBError:
             pass  # STALL = not supported, skip silently
 
-    # Scan host-to-device vendor requests (writes) with empty payload
-    print("\n=== Host-to-Device vendor requests (0x40) with empty data ===")
-    for req in range(0x00, 0x100):
-        try:
-            dev.ctrl_transfer(0x40, req, 0, 0, b"", timeout=200)
-            print(f"  req={req:#04x}: ACCEPTED")
-        except usb.core.USBTimeoutError:
-            print(f"  req={req:#04x}: TIMEOUT")
-        except usb.core.USBError:
-            pass
+    # No host-to-device scan: see the module docstring.
 
     # Check if any bulk data appeared after the scans
     print("\n=== Check bulk/interrupt after scan ===")

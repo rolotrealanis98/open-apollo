@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Scan vendor request 0x0A register space and try writes.
+"""Scan vendor request 0x0A (read-only).
 
-Request 0x0A returns JKMK-prefixed data indexed by wValue.
-Scan the space to find non-zero registers.
+Request 0x0A returns JKMK-prefixed data indexed by wValue: magic
+0x4B4D4B4A, the wValue echoed as two words, then nine data words (the
+same "JK" magic family as request 0x06, 0x2A2B4B4A, and 0x08, 0x3B3C4B4A).
+The Windows UA driver never sends 0x0A.  The write probes this tool used to
+make (0x0A, 0x01, 0x05, 0x06, 0x08, 0x09 host-to-device) are gone: 0x05 is
+the sample-rate index and 0x09 an unknown command, and a blind write can be
+a firmware, EEPROM or flash write.
 
 Usage: sudo python3 usb-0a-scan.py
 """
@@ -73,56 +78,10 @@ def scan():
         except usb.core.USBError:
             print(f"  [hi={hi:2d}]: error")
 
-    # Try WRITING via 0x0A (host-to-device)
-    print("\n=== Write via 0x0A (0x40) — try to set parameters ===")
-    # Try writing various payloads with request 0x0A
-    test_writes = [
-        ("empty", 0, b""),
-        ("4B zero", 0, struct.pack("<I", 0)),
-        ("8B offset+val", 0, struct.pack("<II", 0x380C, 1)),
-        ("JKMK+data", 0, b"JKMK" + struct.pack("<II", 0, 0)),
-        ("wVal=1 empty", 1, b""),
-        ("wVal=5 empty", 5, b""),
-    ]
-    for name, wval, payload in test_writes:
-        try:
-            dev.ctrl_transfer(0x40, 0x0A, wval, 0, payload, timeout=300)
-            print(f"  {name}: ACCEPTED")
-            # Read back
-            try:
-                resp = dev.ctrl_transfer(0xC0, 0x0A, wval, 0, 48, timeout=200)
-                raw = bytes(resp)
-                payload_data = raw[12:]
-                if any(b != 0 for b in payload_data):
-                    print(f"    readback: {payload_data.hex()}")
-            except:
-                pass
-        except usb.core.USBTimeoutError:
-            print(f"  {name}: timeout")
-        except usb.core.USBError as e:
-            print(f"  {name}: {e}")
+    # No write probes: see the module docstring.
 
-    # Try other write requests that were accepted
-    print("\n=== Try write req 0x01 with register data ===")
-    for name, req, wval, payload in [
-        ("req1 val=0", 0x01, 0, b""),
-        ("req1 val=1", 0x01, 1, b""),
-        ("req5 val=0", 0x05, 0, b""),
-        ("req6 val=0", 0x06, 0, b""),
-        ("req8 val=0", 0x08, 0, b""),
-        ("req9 val=0", 0x09, 0, b""),
-        ("req9 val=1", 0x09, 1, b""),
-    ]:
-        try:
-            dev.ctrl_transfer(0x40, req, wval, 0, payload, timeout=300)
-            print(f"  {name}: ACCEPTED")
-        except usb.core.USBTimeoutError:
-            print(f"  {name}: timeout")
-        except usb.core.USBError:
-            print(f"  {name}: stall")
-
-    # Check if anything appeared on endpoints after writes
-    print("\n=== Post-write endpoint check ===")
+    # Check if anything appeared on the endpoints after the reads
+    print("\n=== Endpoint check ===")
     for ep, name in [(0x81, "BULK IN"), (0x86, "INTR IN")]:
         for i in range(3):
             try:
