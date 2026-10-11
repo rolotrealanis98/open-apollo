@@ -36,7 +36,8 @@ class FakeBackend:
         self.connected = connected
         self.device_path = None
         self.mixer_params = []       # (channel_type, channel_idx, param_id, value)
-        self.bus_params = []         # (bus_id, sub_param, value)
+        self.bus_params = []         # (bus_id, sub_param, value): left entries
+        self.bus_params_r = []       # (bus_id, sub_param, value): right entries
         self.driver_params = []      # (param_id, value)
         self.driver_values = {}      # param_id -> value returned by get_driver_param
         self.readback = None         # what get_hw_readback() returns
@@ -46,8 +47,9 @@ class FakeBackend:
         self.mixer_params.append((channel_type, channel_idx, param_id, value))
         return True
 
-    def set_mixer_bus_param(self, bus_id, sub_param, value):
-        self.bus_params.append((bus_id, sub_param, value))
+    def set_mixer_bus_param(self, bus_id, sub_param, value, side=0):
+        (self.bus_params_r if side else self.bus_params).append(
+            (bus_id, sub_param, value))
         return True
 
     def set_driver_param(self, param_id, value):
@@ -72,6 +74,7 @@ class FakeBackend:
     def clear(self):
         self.mixer_params.clear()
         self.bus_params.clear()
+        self.bus_params_r.clear()
         self.driver_params.clear()
         self.other.clear()
 

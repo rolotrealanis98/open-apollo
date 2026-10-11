@@ -108,6 +108,11 @@ UA_IOCTL_SET_MIXER_PARAM = _IOW(UA_IOCTL_MAGIC, 0x31, _MIXER_PARAM_SIZE)
 # value_u32 is IEEE 754 float packed as uint32 (linear gain).
 _MIXER_BUS_PARAM_SIZE = 16
 UA_IOCTL_SET_MIXER_BUS_PARAM = _IOW(UA_IOCTL_MAGIC, 0x30, _MIXER_BUS_PARAM_SIZE)
+# flags of the bus-param ioctl (0x02 from the captures): this entry is the
+# right-output weight (side 1).  One call is one (param, side) entry; the
+# kext's API takes both sides, so a pan or stereo send is two calls.
+UA_BUS_PARAM_FLAGS = 0x02
+UA_BUS_PARAM_F_SIDE_R = 0x100
 
 # struct ua_mixer_setting { index, value, mask, reserved } = 16 bytes
 # Atomic mixer setting read/write via sequence handshake in kernel.
@@ -706,6 +711,20 @@ def encode_mix_coeff(fader_db: float, pan: float) -> float:
     if fader_db <= -144.0:
         return 0.0
     return 10.0 ** (fader_db / 20.0) * math.cos((pan + 1.0) * math.pi / 4.0)
+
+
+def encode_mix_coeff_r(fader_db: float, pan: float) -> float:
+    """Right-output weight of the sub=0 mix coefficient (side 1 entry).
+
+    The Mixer Engine sends each bus param as a left and a right entry:
+        left  = 10^(fader_dB/20) × cos((pan + 1) × π/4)   (encode_mix_coeff)
+        right = 10^(fader_dB/20) × sin((pan + 1) × π/4)
+    At center pan both are 0.707 × the fader; at hard left the right
+    weight is 0.
+    """
+    if fader_db <= -144.0:
+        return 0.0
+    return 10.0 ** (fader_db / 20.0) * math.sin((pan + 1.0) * math.pi / 4.0)
 
 
 def encode_aux_fader(db: float) -> float:
@@ -1510,7 +1529,7 @@ class HardwareBackend:
     # ── SetMixerBusParam (SEL130 equivalent) ──────────────────────────
 
     def set_mixer_bus_param(self, bus_id: int, sub_param: int,
-                            value_float: float) -> bool:
+                            value_float: float, side: int = 0) -> bool:
         """Set a mixer bus parameter — equivalent to macOS IOKit SEL130.
 
         Sends fader level, pan, and send gain values. Values are IEEE 754
@@ -1519,12 +1538,17 @@ class HardwareBackend:
         A fader or pan change writes sub_param 0 only; sub_param 1-6 are
         the CUE 1/2, AUX 1/2 and CUE 3/4 send levels (see SUB_PARAM_*).
 
-        Struct: {bus_id, sub_param, value_u32, flags=0x02} = 16 bytes.
+        Each (bus, sub_param) has a left (side 0) and a right (side 1)
+        entry; the Mixer Engine writes both.  One call writes one entry.
+
+        Struct: {bus_id, sub_param, value_u32, flags} = 16 bytes; flags is
+        0x02, plus UA_BUS_PARAM_F_SIDE_R for the right entry.
 
         Args:
             bus_id:      Bus identifier (see INPUT_BUS_IDS, aux_bus_id())
             sub_param:   0=main mix, 1/2=CUE 1/2, 3/4=AUX 1/2, 5/6=CUE 3/4
             value_float: Linear gain as float (0.0 = silence, 1.0 = unity)
+            side:        0 = left output weight, 1 = right output weight
         """
         value_u32 = float_to_uint32(value_float)
 
@@ -1541,20 +1565,23 @@ class HardwareBackend:
                      value_float, value_u32)
             return False
 
-        buf = struct.pack('<IIII', bus_id, sub_param, value_u32, 0x02)
+        flags = UA_BUS_PARAM_FLAGS | (UA_BUS_PARAM_F_SIDE_R if side else 0)
+        buf = struct.pack('<IIII', bus_id, sub_param, value_u32, flags)
         try:
             fcntl.ioctl(self.fd, UA_IOCTL_SET_MIXER_BUS_PARAM, buf)
-            log.debug("BUS_PARAM: bus=0x%04x sub=%d value=%.6f (0x%08x)",
-                      bus_id, sub_param, value_float, value_u32)
+            log.debug("BUS_PARAM: bus=0x%04x sub=%d side=%d value=%.6f "
+                      "(0x%08x)", bus_id, sub_param, side, value_float,
+                      value_u32)
             return True
         except OSError as e:
-            log.error("set_mixer_bus_param(bus=0x%04x, sub=%d, val=%.6f): %s",
-                      bus_id, sub_param, value_float, e)
+            log.error("set_mixer_bus_param(bus=0x%04x, sub=%d, side=%d, "
+                      "val=%.6f): %s", bus_id, sub_param, side, value_float, e)
             return False
 
     def set_bus_fader(self, bus_id: int, linear_gain: float,
-                     mix_coeff: float = 0.0) -> bool:
-        """Send a fader change: one write, sub 0 (fader x pan mix coefficient).
+                     mix_coeff: float = 0.0,
+                     mix_coeff_r: float | None = None) -> bool:
+        """Send a fader change: sub 0 (fader x pan mix coefficient), L and R.
 
         The Mixer Engine moves a fader through sub 0 only.  Sub 3 and 4 are
         the AUX 1 / AUX 2 send levels (parity/04-engine-surface.md §0.1),
@@ -1564,20 +1591,32 @@ class HardwareBackend:
         mix_coeff = fader_linear × √2 × cos((pan + 1) × π/4)
         At center pan, mix_coeff == linear_gain (the √2 and cos(π/4) cancel).
         `linear_gain` is accepted for call compatibility and not written.
+
+        mix_coeff_r, when given, is the right-output weight, written as the
+        side-1 entry of sub 0 (fader_linear × √2 × sin((pan + 1) × π/4));
+        without it only the left entry is written, as before.
         """
         write_fn = self.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
             else self.set_mixer_bus_param
-        return write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
+        ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
+        if mix_coeff_r is not None:
+            ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff_r, side=1) and ok
+        return ok
 
-    def set_bus_pan(self, bus_id: int, mix_coeff: float) -> bool:
-        """Send a pan change (single write to sub=0).
+    def set_bus_pan(self, bus_id: int, mix_coeff: float,
+                    mix_coeff_r: float | None = None) -> bool:
+        """Send a pan change (sub=0, left entry and, if given, right entry).
 
         From DTrace capture: pan writes only sub=0.
         mix_coeff = fader_linear × √2 × cos((pan + 1) × π/4)
+        mix_coeff_r = fader_linear × √2 × sin((pan + 1) × π/4)
         """
         write_fn = self.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
             else self.set_mixer_bus_param
-        return write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
+        ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
+        if mix_coeff_r is not None:
+            ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff_r, side=1) and ok
+        return ok
 
     # ── Diagnostic / Probing ──────────────────────────────────────────
 
@@ -1787,7 +1826,7 @@ class HardwareBackend:
     # ── Direct mixer setting writes for bus params ────────────────────
 
     def set_bus_param_direct(self, bus_id: int, sub_param: int,
-                             value_float: float) -> bool:
+                             value_float: float, side: int = 0) -> bool:
         """Write a bus param directly to the correct mixer setting.
 
         Looks up (bus_id, sub_param) in BUS_SETTING_MAP. If found,
@@ -1796,12 +1835,14 @@ class HardwareBackend:
         to set_mixer_bus_param() if the mapping is unknown.
         """
         key = (bus_id, sub_param)
-        setting_idx = BUS_SETTING_MAP.get(key)
+        setting_idx = BUS_SETTING_MAP.get(key) if not side else None
 
         if setting_idx is None:
-            log.debug("BUS_PARAM_DIRECT: no mapping for bus=0x%04x sub=%d, "
-                      "falling back to ioctl", bus_id, sub_param)
-            return self.set_mixer_bus_param(bus_id, sub_param, value_float)
+            log.debug("BUS_PARAM_DIRECT: no mapping for bus=0x%04x sub=%d "
+                      "side=%d, falling back to ioctl", bus_id, sub_param,
+                      side)
+            return self.set_mixer_bus_param(bus_id, sub_param, value_float,
+                                            side)
 
         value_u32 = float_to_uint32(value_float)
 
@@ -2274,14 +2315,16 @@ class HardwareRouter:
                     else fader_db
                 self.backend.set_bus_pan(bus, self._talkback_coeff(db))
             elif muted or (any_solo and not soloed):
-                self.backend.set_bus_fader(bus, 0.0, 0.0)
+                self.backend.set_bus_fader(bus, 0.0, 0.0, 0.0)
                 self._write_post_fader_sends(i, bus, fader_db, True)
             else:
                 # sub 0 is fader x pan; it must carry the pan too, or the
                 # recalculation would drop a panned channel to centre.
-                mix = encode_mix_coeff(fader_db, self._get_input_pan(i))
+                pan = self._get_input_pan(i)
+                mix = encode_mix_coeff(fader_db, pan)
+                mix_r = encode_mix_coeff_r(fader_db, pan)
                 self.backend.set_bus_fader(bus, encode_input_fader(fader_db),
-                                           mix)
+                                           mix, mix_r)
                 self._write_post_fader_sends(i, bus, fader_db, False)
 
         log.info("Solo recalc: any_solo=%s, %d channels updated",
@@ -2430,10 +2473,11 @@ class HardwareRouter:
             # Read current pan to compute combined sub=0 coefficient
             pan = self._get_input_pan(ch)
             mix = encode_mix_coeff(db, pan)
+            mix_r = encode_mix_coeff_r(db, pan)
             log.info("HW BUS: input[%d].Fader = %.1f dB → linear=%.6f "
-                     "mix=%.6f pan=%.2f (bus=0x%04x)",
-                     ch, db, linear, mix, pan, bus)
-            self.backend.set_bus_fader(bus, linear, mix)
+                     "mix=%.6f/%.6f (L/R) pan=%.2f (bus=0x%04x)",
+                     ch, db, linear, mix, mix_r, pan, bus)
+            self.backend.set_bus_fader(bus, linear, mix, mix_r)
             self._write_post_fader_sends(
                 ch, bus, db,
                 self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Mute/value")))
@@ -2443,7 +2487,7 @@ class HardwareRouter:
             if value and value != "0" and value != "false":
                 log.info("HW BUS: input[%d].Mute ON (fader→0.0, bus=0x%04x)",
                          ch, bus)
-                self.backend.set_bus_fader(bus, 0.0, 0.0)
+                self.backend.set_bus_fader(bus, 0.0, 0.0, 0.0)
                 self._write_post_fader_sends(
                     ch, bus, self._get_input_fader_db(ch), True)
             else:
@@ -2457,9 +2501,11 @@ class HardwareRouter:
             # Read current fader level to compute combined sub=0 coefficient
             fader_db = self._get_input_fader_db(ch)
             mix = encode_mix_coeff(fader_db, pan_f)
-            log.info("HW BUS: input[%d].Pan = %.3f → mix=%.6f fader=%.1fdB "
-                     "(bus=0x%04x)", ch, pan_f, mix, fader_db, bus)
-            self.backend.set_bus_pan(bus, mix)
+            mix_r = encode_mix_coeff_r(fader_db, pan_f)
+            log.info("HW BUS: input[%d].Pan = %.3f → mix=%.6f/%.6f (L/R) "
+                     "fader=%.1fdB (bus=0x%04x)",
+                     ch, pan_f, mix, mix_r, fader_db, bus)
+            self.backend.set_bus_pan(bus, mix, mix_r)
             return
 
         if control == "Solo":

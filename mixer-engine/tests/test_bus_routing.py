@@ -409,3 +409,61 @@ class TestHeadphoneLevel:
     def test_param_ids(self):
         assert MONITOR_PARAM["HP1Level"] == 0x02
         assert MONITOR_PARAM["HP2Level"] == 0x66
+
+
+class TestBusParamSides:
+    """SEL130 entries come in left/right pairs (parity/14 section 5)."""
+
+    def test_pan_writes_left_and_right_of_sub0(self, router, backend):
+        router.on_set(f"{IN}/0/Pan/value", -1.0)       # hard left
+        assert backend.bus_params == [(0x00, 0, pytest.approx(1.0))]
+        assert backend.bus_params_r == [(0x00, 0, pytest.approx(0.0, abs=1e-9))]
+
+    def test_center_pan_is_equal_power(self, router, backend):
+        router.on_set(f"{IN}/0/Pan/value", 0.0)
+        [(_, _, left)] = backend.bus_params
+        [(_, _, right)] = backend.bus_params_r
+        assert left == pytest.approx(right)
+        assert left == pytest.approx(0.7071067, rel=1e-5)
+
+    def test_fader_writes_both_sides(self, router, backend):
+        router.on_set(f"{IN}/0/FaderLevel/value", 0.0)
+        assert (0x00, 0) in subs(backend)
+        assert [(b, s) for b, s, _ in backend.bus_params_r] == [(0x00, 0)]
+
+    def test_mute_zeroes_both_sides(self, router, backend):
+        router.on_set(f"{IN}/0/Mute/value", True)
+        assert (0x00, 0, 0.0) in backend.bus_params
+        assert backend.bus_params_r == [(0x00, 0, 0.0)]
+
+    def test_sends_stay_left_only(self, router, backend):
+        router.on_set(f"{IN}/0/sends/0/Gain/value", 0.0)
+        assert backend.bus_params_r == []
+
+    def test_mix_coeff_r_helper(self):
+        from hardware import encode_mix_coeff, encode_mix_coeff_r
+        for pan in (-1.0, -0.3, 0.0, 0.6, 1.0):
+            left = encode_mix_coeff(-6.0, pan)
+            right = encode_mix_coeff_r(-6.0, pan)
+            assert left * left + right * right == pytest.approx(10 ** (-6.0 / 10))
+        assert encode_mix_coeff_r(-144.0, 0.0) == 0.0
+        assert encode_mix_coeff_r(0.0, 1.0) == pytest.approx(1.0)
+
+    def test_ioctl_flags_carry_the_side(self, monkeypatch):
+        import struct
+
+        import hardware
+        from hardware import (HardwareBackend, UA_BUS_PARAM_F_SIDE_R,
+                              UA_BUS_PARAM_FLAGS)
+        sent = []
+        be = HardwareBackend.__new__(HardwareBackend)
+        be.fd = 3
+        be.safe_mode = False
+        monkeypatch.setattr(hardware.fcntl, "ioctl",
+                            lambda fd, req, buf: sent.append(buf))
+        be.set_mixer_bus_param(0x02, 3, 0.5)
+        be.set_mixer_bus_param(0x02, 3, 0.5, side=1)
+        flags = [struct.unpack("<IIII", b)[3] for b in sent]
+        assert flags == [UA_BUS_PARAM_FLAGS,
+                         UA_BUS_PARAM_FLAGS | UA_BUS_PARAM_F_SIDE_R]
+        assert UA_BUS_PARAM_FLAGS == 0x02   # what captures and old callers send
