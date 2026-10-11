@@ -105,8 +105,13 @@ RUNTIME_PROPERTIES = {
     "/dante/available_collections": {"type": "string", "value": ""},
     "/dante/available_presets": {"type": "string", "value": ""},
     "/dante/devices/device_list": {"type": "string", "value": ""},
-    "/DanteDevicesStatus": {"type": "string", "value": ""},
-    "/DanteErrorStatus": {"type": "string", "value": ""},
+    # Root ints in the Mixer Engine (kPropDanteDevicesStatus 0x166,
+    # kPropDanteErrorStatus 0x170, set by CMxMixer::updateDanteInfo):
+    # DevicesStatus 0 = no Dante device online (1 online, -1 another
+    # device Dante-locked, -2 AES67 active); ErrorStatus is a bit mask,
+    # 0 = no error.  A model without Dante (all but the x16D) stays at 0.
+    "/DanteDevicesStatus": {"type": "int", "value": 0},
+    "/DanteErrorStatus": {"type": "int", "value": 0},
     "/CorrectionLicenseState": {"type": "int", "value": 0},
     # open-apollo's own, read-only: the PCIe/Thunderbolt link the driver
     # negotiated (UA_FEAT_SYSINFO_EXT).  Empty/0 until the device reports it.
