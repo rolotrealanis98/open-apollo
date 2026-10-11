@@ -296,3 +296,32 @@ def test_monitor_mute_and_mono_go_together(path, mon):
     r.on_set(f"{OUT}/{mon}/Mute/value", False)
     assert be.mixer_params == [(MONITOR_CHANNEL_TYPE, 0,
                                 MONITOR_PARAM["MonitorMute"], 0)]
+
+
+def test_device_mode_word_carries_every_field():
+    # CMxMixer::PushDeviceMode: one word (other param 0x21) for TOSLink out
+    # (0x08), TOSLink in (0x10), ConverterMode (0x20/0x28/0x30) and the
+    # multi-unit order [7:6]; setting one keeps the others
+    r, be = router_for(X4)
+    _tree_set(r, "/devices/0/TOSLink/value", "ADAT")
+    r.on_set("/devices/0/TOSLinkOutput/value", "ADAT")
+    assert be.mixer_params == [(MONITOR_CHANNEL_TYPE, 0,
+                                MONITOR_PARAM["DigitalOutputMode"], 0x18)]
+    be.clear()
+    _tree_set(r, "/devices/0/TOSLinkOutput/value", "ADAT")
+    r.on_set("/devices/0/TOSLink/value", "S/PDIF")
+    assert be.mixer_params[-1][3] == 0x08
+    be.clear()
+    _tree_set(r, "/devices/0/TOSLink/value", "S/PDIF")
+    r.on_set("/devices/0/MultiUnitOrder/value", 2)
+    assert be.mixer_params[-1][3] == 0x08 | (2 << 6)
+    assert r._device_mode_word(out_adat=False, in_adat=False,
+                               converter=3, order=0) == 0x30
+
+
+def test_single_unit_defaults_keep_the_old_values():
+    # A single x4 with S/PDIF in and out: 0, and 8 for ADAT out, as before
+    r, be = router_for(X4)
+    r.on_set("/devices/0/TOSLinkOutput/value", "S/PDIF")
+    r.on_set("/devices/0/TOSLinkOutput/value", "ADAT")
+    assert [p[3] for p in be.mixer_params] == [0, 8]

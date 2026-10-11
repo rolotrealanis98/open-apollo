@@ -2442,7 +2442,8 @@ _RE_AUX_SEND = re.compile(
 _RE_DEVICE_GLOBAL = re.compile(
     r'^(?:/devices/0)?/(TalkbackOn|TalkbackInPhysicalCR|TalkbackMaster|'
     r'Enable24dBMode|ClipHold|PeakHold|TalkbackMicSelect)/value$|'
-    r'^/devices/0/(DimAttenuation|TOSLinkOutput|DSPSpanning|Identify|'
+    r'^/devices/0/(DimAttenuation|TOSLinkOutput|TOSLink|ConverterMode|'
+    r'MultiUnitOrder|DSPSpanning|Identify|'
     r'AltMonSelection|RemoteMonitorController|InputJackSensingDisabled|'
     r'OutputsAttenuate|CueBusCount|FuncSwitchMode|FuncSwitch2Mode|'
     r'SurroundMonitorMode)/value$')
@@ -3695,6 +3696,43 @@ class HardwareRouter:
 
     # ── Output/Monitor controls (SEL131 mixer param path) ────────
 
+    def _device_mode_word(self, out_adat: bool | None = None,
+                          in_adat: bool | None = None, converter=None,
+                          order=None) -> int:
+        """Other param 0x21 as CMxMixer::PushDeviceMode composes it
+        (feature-mechanisms.md section 5): [2:0] multi-unit role (0 for a
+        single unit; `multi_unit_role` once units are chained), 0x08
+        TOSLink out = ADAT, 0x10 TOSLink in = ADAT, 0x20/0x28/0x30
+        ConverterMode 1/2/3, [7:6] multi-unit order.  A field not given
+        comes from the tree.  The driver writes the word's low byte."""
+        def tree(path):
+            return self._tree_value(f"/devices/0/{path}/value")
+        if out_adat is None:
+            out_adat = TOSLINK_OUTPUT_MAP.get(str(tree("TOSLinkOutput")),
+                                              0) == 8
+        if in_adat is None:
+            in_adat = TOSLINK_OUTPUT_MAP.get(str(tree("TOSLink")), 0) == 8
+        if converter is None:
+            converter = tree("ConverterMode")
+        if order is None:
+            order = tree("MultiUnitOrder")
+        try:
+            conv = int(converter or 0)
+        except (TypeError, ValueError):
+            conv = 0
+        try:
+            order = max(0, min(3, int(order or 0)))
+        except (TypeError, ValueError):
+            order = 0
+        word = getattr(self, "multi_unit_role", 0) & 0x7
+        if out_adat:
+            word |= 0x08
+        if in_adat:
+            word |= 0x10
+        if conv in (1, 2, 3):
+            word |= {1: 0x20, 2: 0x28, 3: 0x30}[conv]
+        return word | (order << 6)
+
     def _monitor_mute_mono(self, ch: int, mute: bool | None = None,
                            mono: bool | None = None) -> int:
         """Monitor param 0x03 value: bit 1 mute, bit 0 mono.  The switch
@@ -3894,8 +3932,13 @@ class HardwareRouter:
                 return
 
             if control == "DigitalOutputMode":
-                # 0=SPDIF, 8=ADAT (param=0x21, ch_idx=0)
-                hw_value = int(value) if value else 0
+                # 0=SPDIF, 8=ADAT (param=0x21, ch_idx=0): the TOSLink output
+                # bit of the device-mode word, the other bits go along
+                try:
+                    out_adat = bool(int(value) & 0x08) if value else False
+                except (TypeError, ValueError):
+                    out_adat = False
+                hw_value = self._device_mode_word(out_adat=out_adat)
                 log.info("HW MONITOR: DigitalOutputMode = %r → %d",
                          value, hw_value)
                 self.backend.set_mixer_param(
@@ -4183,11 +4226,20 @@ class HardwareRouter:
                 MONITOR_PARAM["DimLevel"], step)
             return
 
-        if control == "TOSLinkOutput":
-            # /devices/0/TOSLinkOutput ("S/PDIF" or "ADAT") → DigitalOutputMode
-            hw_value = TOSLINK_OUTPUT_MAP.get(str(value), 0)
-            log.info("HW MONITOR: TOSLinkOutput = %r → DigitalOutputMode %d "
-                     "(param=0x21, ch_idx=0)", value, hw_value)
+        if control in ("TOSLinkOutput", "TOSLink", "ConverterMode",
+                       "MultiUnitOrder"):
+            # One device-mode word (other param 0x21) carries all four, as
+            # CMxMixer::PushDeviceMode composes it: the new value plus the
+            # tree's other fields
+            over = {"TOSLinkOutput": "out_adat", "TOSLink": "in_adat",
+                    "ConverterMode": "converter",
+                    "MultiUnitOrder": "order"}[control]
+            arg = value
+            if over in ("out_adat", "in_adat"):
+                arg = TOSLINK_OUTPUT_MAP.get(str(value), 0) == 8
+            hw_value = self._device_mode_word(**{over: arg})
+            log.info("HW MONITOR: %s = %r → device mode 0x%02x "
+                     "(param=0x21, ch_idx=0)", control, value, hw_value)
             self.backend.set_mixer_param(
                 MONITOR_CHANNEL_TYPE, 0,
                 MONITOR_PARAM["DigitalOutputMode"], hw_value)
