@@ -70,6 +70,11 @@ static void ua_write(struct ua_device *ua, u32 off, u32 v)
 		note("bell");
 	}
 }
+/* The Hi-band dwell has its own test (test_hi_dwell.py) */
+static void ua_audio_hi_dwell(struct ua_device *ua, unsigned int idx)
+{ (void)ua; (void)idx; }
+static void ua_audio_clock_written(struct ua_device *ua, unsigned int idx)
+{ (void)ua; (void)idx; }
 static void msleep(unsigned int ms)
 {
 	assert(ms == 10);

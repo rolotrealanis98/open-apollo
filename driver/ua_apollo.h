@@ -1399,6 +1399,9 @@ struct ua_audio {
 	/* Clock-change acknowledgements by notification bit */
 	unsigned int clock_ack_count[3];    /* [0] bit 5, [1] bit 22, [2] bit 4 */
 	u32 clock_ack_last;                 /* 0xC030 at the last ack */
+	/* Clock at 176.4/192 kHz since (jiffies), see ua_audio_hi_dwell() */
+	unsigned int hi_clock_idx;          /* 0: the clock is not Hi-band */
+	unsigned long hi_clock_since;
 	/* AX_CONTROL fault flags (bit 7, bit 8), latched until the next prepare */
 	u8 ax_fault_latch;                  /* bit 0: bit 7 seen, bit 1: bit 8 */
 	unsigned int ax_fault_count[2];     /* samples with bit 7 / bit 8 set */

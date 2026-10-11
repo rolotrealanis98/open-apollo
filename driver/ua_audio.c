@@ -105,6 +105,10 @@ static bool post_start_clock = true;
 module_param(post_start_clock, bool, 0644);
 MODULE_PARM_DESC(post_start_clock,
 		 "Write the clock after every transport start (default: on; the kext only writes it on a rate or source change)");
+static unsigned int hi_dwell_ms = 3000;
+module_param(hi_dwell_ms, uint, 0644);
+MODULE_PARM_DESC(hi_dwell_ms,
+		 "Keep the clock at 176.4/192 kHz at least this long before changing it again (default 3000 ms; 0 = off). Leaving sooner wedged the x4's firmware rate until a reload or power cycle");
 static bool ax_control_ext;
 module_param(ax_control_ext, bool, 0644);
 MODULE_PARM_DESC(ax_control_ext,
@@ -4304,6 +4308,63 @@ static u32 ua_clock_ack_mask(void)
  * the service loop.  Caller holds ua->lock, which keeps the service loop
  * from clearing the ack before we see it.
  */
+/*
+ * Leaving 176.4 or 192 kHz too soon after the clock got there wedges the
+ * firmware's rate (x4, titan 2026-10-11).  The firmware keeps rate index
+ * 6 and the Hi-band IO layout whatever is written next, every stream
+ * then records silence (192 kHz alone still works), a soft reconnect
+ * does not clear it, a reload sometimes does, otherwise the reload's
+ * ACEFACE times out and only an Apollo power cycle helps.  192 kHz runs
+ * of 2 s followed by a change to 48 or 44.1 kHz wedged it 3 times in 4;
+ * after 3 or 4 s it never did (4 of 4); changes between the Lo and Mid
+ * rates every second are fine.  So the clock stays at a Hi-band rate for
+ * hi_dwell_ms after it was written there before anything changes it.
+ */
+static void ua_audio_clock_written(struct ua_device *ua, unsigned int idx)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (idx != UA_RATE_176400 && idx != UA_RATE_192000) {
+		audio->hi_clock_idx = 0;
+	} else if (audio->hi_clock_idx != idx) {
+		audio->hi_clock_idx = idx;
+		audio->hi_clock_since = jiffies;
+	}
+}
+
+static u32 ua_audio_service_step(struct ua_device *ua);
+
+/*
+ * Before a clock write to rate index @new_idx: wait out the Hi-band
+ * dwell.  Caller holds ua->lock; the DSP service loop is blocked on it,
+ * so do its work meanwhile.
+ */
+static void ua_audio_hi_dwell(struct ua_device *ua, unsigned int new_idx)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned long until;
+	unsigned int waited = 0;
+
+	if (!hi_dwell_ms || !audio->hi_clock_idx ||
+	    new_idx == audio->hi_clock_idx)
+		return;
+	until = audio->hi_clock_since + msecs_to_jiffies(hi_dwell_ms);
+	if (!time_before(jiffies, until))
+		return;
+
+	dev_info(&ua->pdev->dev,
+		 "clock at %u Hz for %u ms: waiting %u ms before changing it (hi_dwell_ms)\n",
+		 ua_rate_hz(audio->hi_clock_idx),
+		 jiffies_to_msecs(jiffies - audio->hi_clock_since),
+		 jiffies_to_msecs(until - jiffies));
+	while (time_before(jiffies, until) && waited < hi_dwell_ms) {
+		if (ua_audio_service_step(ua) == 0xFFFFFFFF)
+			return;
+		msleep(25);
+		waited += 25;
+	}
+}
+
 static int ua_audio_clock_change_locked(struct ua_device *ua,
 					u32 clock_config)
 {
@@ -4314,7 +4375,9 @@ static int ua_audio_clock_change_locked(struct ua_device *ua,
 	 * Write to bank-shifted clock config register.
 	 * 0xC074 = BAR0 + 0x28 + 0xC04C (bank_shift=0x0A).
 	 */
+	ua_audio_hi_dwell(ua, (clock_config >> 8) & 0xff);
 	ua_write(ua, UA_REG_NOTIF_CLOCK_CFG, clock_config);
+	ua_audio_clock_written(ua, (clock_config >> 8) & 0xff);
 	status = ua_read(ua, UA_REG_NOTIF_STATUS);
 	if (status == 0xFFFFFFFF)
 		return -ENODEV;
@@ -5072,6 +5135,7 @@ static void ua_audio_post_start_clock(struct ua_device *ua)
 	ua_write(ua, UA_REG_NOTIF_CLOCK_CFG,
 		 (audio->rate_index << 8) | audio->clock_source);
 	ua_write(ua, UA_REG_AX_CONNECT, UA_AX_CLOCK_DOORBELL);
+	ua_audio_clock_written(ua, audio->rate_index);
 	dev_dbg(&ua->pdev->dev,
 		"post-transport clock write (capture enable)\n");
 
@@ -5161,6 +5225,7 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 	dev_info(&ua->pdev->dev,
 		 "%u Hz start with the clock at rate index %u: running 48 kHz first\n",
 		 rate, hw_idx);
+	ua_audio_hi_dwell(ua, UA_RATE_48000);
 
 	/* The rate-change path of ua_pcm_prepare_locked(), to 48 kHz */
 	audio->period_timer_running = false;
@@ -5503,6 +5568,7 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 		ua_pause_set(ua, UA_PAUSE_RATE);
 
 		if (audio->connected) {
+			ua_audio_hi_dwell(ua, new_idx);
 			dev_info(&ua->pdev->dev,
 				 "pcm_prepare: rate change %u → %u (disconnect/reconnect)\n",
 				 audio->sample_rate, sub->runtime->rate);
