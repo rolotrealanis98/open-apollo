@@ -1,0 +1,76 @@
+# synthesized from devices/apollo-x8p.json (tools/gen-io-map-fixture.py), not a hardware capture
+io_map		1 (descriptor layout, auto)
+model		Apollo x8p (device type 0x22)
+rate		48000 Hz
+
+record: 32 ALSA channels, DMA frame 33 slots, ADAT mode
+  ch  0  slot  0  0x0001  MIC/LINE/HIZ 1
+  ch  1  slot  1  0x0002  MIC/LINE/HIZ 2
+  ch  2  slot  2  0x0103  MIC/LINE 3
+  ch  3  slot  3  0x0104  MIC/LINE 4
+  ch  4  slot  4  0x0305  LINE 5
+  ch  5  slot  5  0x0306  LINE 6
+  ch  6  slot  6  0x0307  LINE 7
+  ch  7  slot  7  0x0308  LINE 8
+  ch  8  slot  8  0x0401  ADAT 1
+  ch  9  slot  9  0x0402  ADAT 2
+  ch 10  slot 10  0x0403  ADAT 3
+  ch 11  slot 11  0x0404  ADAT 4
+  ch 12  slot 12  0x0405  ADAT 5
+  ch 13  slot 13  0x0406  ADAT 6
+  ch 14  slot 14  0x0407  ADAT 7
+  ch 15  slot 15  0x0408  ADAT 8
+  ch 16  slot 16  0x0701  VIRTUAL 1
+  ch 17  slot 17  0x0702  VIRTUAL 2
+  ch 18  slot 18  0x0703  VIRTUAL 3
+  ch 19  slot 19  0x0704  VIRTUAL 4
+  ch 20  slot 20  0x0705  VIRTUAL 5
+  ch 21  slot 21  0x0706  VIRTUAL 6
+  ch 22  slot 22  0x0707  VIRTUAL 7
+  ch 23  slot 23  0x0708  VIRTUAL 8
+  ch 24  slot 24  0x0901  MON L
+  ch 25  slot 25  0x0902  MON R
+  ch 26  slot 26  0x0201  AUX1 L
+  ch 27  slot 27  0x0202  AUX1 R
+  ch 28  slot 28  0x0203  AUX2 L
+  ch 29  slot 29  0x0204  AUX2 R
+  ch 30  slot 30  0x0b01  TALKBACK 1
+  ch 31  slot 31  0x0b02  TALKBACK 2
+record descriptor: 32 slots, word5 0x0
+
+playback: 34 ALSA channels, DMA frame 35 slots, ADAT mode
+  ch  0  slot  0  0x0901  MON L
+  ch  1  slot  1  0x0902  MON R
+  ch  2  slot  2  0x0301  LINE 1
+  ch  3  slot  3  0x0302  LINE 2
+  ch  4  slot  4  0x0303  LINE 3
+  ch  5  slot  5  0x0304  LINE 4
+  ch  6  slot  6  0x0305  LINE 5
+  ch  7  slot  7  0x0306  LINE 6
+  ch  8  slot  8  0x0307  LINE 7
+  ch  9  slot  9  0x0308  LINE 8
+  ch 10  slot 10  0x0401  ADAT 1
+  ch 11  slot 11  0x0402  ADAT 2
+  ch 12  slot 12  0x0403  ADAT 3
+  ch 13  slot 13  0x0404  ADAT 4
+  ch 14  slot 14  0x0405  ADAT 5
+  ch 15  slot 15  0x0406  ADAT 6
+  ch 16  slot 16  0x0407  ADAT 7
+  ch 17  slot 17  0x0408  ADAT 8
+  ch 18  slot 18  0x0701  VIRTUAL 1
+  ch 19  slot 19  0x0702  VIRTUAL 2
+  ch 20  slot 20  0x0703  VIRTUAL 3
+  ch 21  slot 21  0x0704  VIRTUAL 4
+  ch 22  slot 22  0x0705  VIRTUAL 5
+  ch 23  slot 23  0x0706  VIRTUAL 6
+  ch 24  slot 24  0x0707  VIRTUAL 7
+  ch 25  slot 25  0x0708  VIRTUAL 8
+  ch 26  slot 26  0x0a01  CUE1 L
+  ch 27  slot 27  0x0a02  CUE1 R
+  ch 28  slot 28  0x0a03  CUE2 L
+  ch 29  slot 29  0x0a04  CUE2 R
+  ch 30  slot 30  0x0a05  CUE3 L
+  ch 31  slot 31  0x0a06  CUE3 R
+  ch 32  slot 32  0x0a07  CUE4 L
+  ch 33  slot 33  0x0a08  CUE4 R
+playback descriptor: 34 slots, word5 0x0

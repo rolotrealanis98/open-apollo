@@ -30,6 +30,13 @@ POLL_INTERVAL = 5  # seconds
 # _IOWR('U', 0x10, 8) = (3 << 30) | (ord('U') << 8) | 0x10 | (8 << 16)
 IOCTL_REG_READ = (3 << 30) | (ord('U') << 8) | 0x10 | (8 << 16)
 
+# UA_IOCTL_GET_SYSTEM_INFO = _IOR('U', 0x05, struct ua_system_info), 148 bytes.
+# The first 12 u32: fpga_rev, device_type, public_type, subsystem_id,
+# pci_device, num_dsps, fw_version, fw_v2, ext_caps, hw_uid_lo, hw_uid_hi,
+# mixer_kind.  Only device_type and public_type are used here.
+SYSTEM_INFO_SIZE = 148
+IOCTL_GET_SYSTEM_INFO = (2 << 30) | (SYSTEM_INFO_SIZE << 16) | (ord('U') << 8) | 0x05
+
 
 class ApolloState:
     """Snapshot of Apollo hardware + daemon state."""
@@ -62,6 +69,33 @@ def read_register(fd, offset):
     return struct.unpack('II', result)[1]
 
 
+def card_name():
+    """Name the driver gave its ALSA card ("Apollo x8p"), from
+    /proc/asound/cards: "<n> [<id>]: ua_apollo - <name>".  None when the
+    driver has no card (yet)."""
+    try:
+        with open('/proc/asound/cards') as f:
+            for line in f:
+                if ': ua_apollo - ' in line:
+                    return line.split(': ua_apollo - ', 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def read_system_info(fd):
+    """(device_type, public_type) from UA_IOCTL_GET_SYSTEM_INFO, or None on
+    a driver without it."""
+    try:
+        raw = fcntl.ioctl(fd, IOCTL_GET_SYSTEM_INFO, bytes(SYSTEM_INFO_SIZE))
+    except OSError:
+        return None
+    if len(raw) < 12:
+        return None
+    _fpga, dev_type, public_type = struct.unpack_from('3I', raw)
+    return dev_type, public_type
+
+
 def poll_state():
     """Check Apollo hardware and daemon state."""
     state = ApolloState()
@@ -85,20 +119,19 @@ def poll_state():
                 state.pcie_alive = reg0 != 0xFFFFFFFF
 
                 if state.pcie_alive:
-                    dev_type = read_register(fd, 0x000C)
                     state.seq_wr = read_register(fd, 0x3808)
                     state.seq_rd = read_register(fd, 0x380C)
                     state.dsp_alive = (
                         state.seq_wr == state.seq_rd and state.seq_wr > 0
                     )
-                    # Device name from type
-                    names = {
-                        0x1F: 'Apollo x4', 0x1E: 'Apollo x6',
-                        0x14: 'Apollo x8', 0x15: 'Apollo x8p',
-                        0x10: 'Apollo x16', 0x20: 'Apollo Twin X',
-                        0x21: 'Apollo Solo',
-                    }
-                    state.device_name = names.get(dev_type, f'Apollo (0x{dev_type:02X})')
+                    # Model name: the driver's own card name; without a card
+                    # fall back to the device type from GET_SYSTEM_INFO
+                    name = card_name()
+                    if name is None:
+                        info = read_system_info(fd)
+                        if info is not None:
+                            name = f'Apollo (type 0x{info[0]:02X})'
+                    state.device_name = name or 'Apollo'
             finally:
                 os.close(fd)
         except OSError:

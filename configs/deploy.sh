@@ -65,9 +65,9 @@ echo "Installing UCM2 profile..."
 mkdir -p /usr/share/alsa/ucm2/ua_apollo
 mkdir -p /usr/share/alsa/ucm2/conf.d/ua_apollo
 cp "$SCRIPT_DIR/ucm2/ua_apollo/ua_apollo.conf" /usr/share/alsa/ucm2/ua_apollo/
-cp "$SCRIPT_DIR/ucm2/ua_apollo/HiFi.conf" /usr/share/alsa/ucm2/ua_apollo/
+cp "$SCRIPT_DIR"/ucm2/ua_apollo/HiFi*.conf /usr/share/alsa/ucm2/ua_apollo/
 echo "  -> /usr/share/alsa/ucm2/ua_apollo/ua_apollo.conf"
-echo "  -> /usr/share/alsa/ucm2/ua_apollo/HiFi.conf"
+echo "  -> /usr/share/alsa/ucm2/ua_apollo/HiFi*.conf (one per model)"
 
 # Create symlink for driver name match (UCM2 looks up conf.d/${CardDriver}/${CardDriver}.conf)
 ln -sf ../../ua_apollo/ua_apollo.conf /usr/share/alsa/ucm2/conf.d/ua_apollo/ua_apollo.conf

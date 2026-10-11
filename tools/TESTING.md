@@ -33,7 +33,8 @@ tone on the MON outputs. It asks before each step:
 1. Stop PipeWire/WirePlumber (restored when the script ends).
 2. For each sample rate (44.1, 48, 88.2, 96, 176.4, 192 kHz): play the tone on
    playback channels 1/2 while recording every record channel, then check the
-   MON L/R record channels (found by channel ID 0x0901/0x0902 from `io_map`).
+   MON L/R record channels (the first two record channels with a type 0x09 channel
+   ID in `io_map`, 0x0901/0x0902 on the models seen so far).
 
 Answer `n` to skip a rate, `a` to run the rest without asking, `q` to stop.
 Options: `--rates "48000 96000"`, `--card N`, `--report FILE`, `--keep` (keep

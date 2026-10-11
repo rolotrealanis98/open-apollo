@@ -2,8 +2,8 @@
 # apollo-report.sh - read-only diagnostic collector for Open Apollo testers
 #
 # Writes ONE text file you can review and attach to a bug report.  Nothing is
-# written to the hardware or to the driver; the only hardware access is two
-# read-only ioctls (GET_DEVICE_INFO, GET_HW_READBACK).
+# written to the hardware or to the driver; the only hardware access is three
+# read-only ioctls (GET_DEVICE_INFO, GET_SYSTEM_INFO, GET_HW_READBACK).
 #
 # Run it as your normal user.  sudo is only used if you pass --sudo, for
 # things Linux hides from unprivileged users on some distros:
@@ -253,15 +253,22 @@ if [ -z "$NODES" ]; then
 elif ! have python3; then
     note "python3 not installed"
 else
+    # Model name from the driver's io_map header (empty on an older driver)
+    MODEL=""
+    if [ -n "$CARD" ] && [ -r "/proc/asound/card$CARD/io_map" ]; then
+        MODEL="$(awk '/^model[ \t]/ { sub(/^model[ \t]+/, ""); sub(/ \(device type.*$/, ""); print; exit }' \
+            "/proc/asound/card$CARD/io_map")"
+    fi
     for n in $NODES; do
         note "-- $n"
-        python3 - "$n" >> "$OUT" 2>&1 <<'PY'
+        python3 - "$n" "$MODEL" >> "$OUT" 2>&1 <<'PY'
 import fcntl, os, struct, sys, time
 
 def ior(nr, size):
     return (2 << 30) | (size << 16) | (ord("U") << 8) | nr
 
 GET_DEVICE_INFO = ior(0x01, 64)    # struct ua_device_info: 16 x u32
+GET_SYSTEM_INFO = ior(0x05, 148)   # struct ua_system_info (ABI 1.x)
 GET_HW_READBACK = ior(0x41, 164)   # struct ua_hw_readback: status + 40 x u32
 
 try:
@@ -279,7 +286,7 @@ try:
     fcntl.ioctl(fd, GET_DEVICE_INFO, buf)
     f = struct.unpack("<16I", bytes(buf))
     names = ("fpga_rev", "device_type", "subsystem_id", "num_dsps",
-             "fw_version", "fw_v2", "serial", "ext_caps")
+             "fw_version", "fw_v2", "serial", "ext_caps", "public_type")
     for k, v in zip(names, f):
         if k == "serial":
             print("  serial        (omitted for privacy; %s)"
@@ -288,6 +295,28 @@ try:
             print("  %-13s 0x%08x (%d)" % (k, v, v))
 except OSError as e:
     print("GET_DEVICE_INFO failed: %s" % e)
+
+# GET_SYSTEM_INFO (driver ABI 1.x with UA_FEAT_SYSTEM_INFO): model identity.
+# The serial and hardware uid in it are not printed.
+try:
+    buf = bytearray(148)
+    fcntl.ioctl(fd, GET_SYSTEM_INFO, buf)
+    w = struct.unpack("<12I", bytes(buf[:48]))
+    (s_fpga, s_dtype, s_public, s_subsys, s_pci, s_dsps,
+     s_fw, s_fw2, s_ext, _uid_lo, _uid_hi, s_kind) = w
+    tail = struct.unpack("<13I", bytes(buf[64:116]))
+    print("  system info:")
+    print("    device_type   0x%02x   public_type 0x%08x%s"
+          % (s_dtype, s_public, " (unresolved)" if s_public == 0xFFFFFFFF else ""))
+    print("    mixer_kind    0x%08x%s"
+          % (s_kind, " (none/ungated)" if s_kind == 0xFFFFFFFF else ""))
+    print("    ext_caps      0x%08x" % s_ext)
+    print("    pci_device    0x%04x  subsystem 0x%04x  dsps %d  fw_v2 %d"
+          % (s_pci, s_subsys, s_dsps, s_fw2))
+    print("    channels      play %d / rec %d" % (tail[7], tail[8]))
+except OSError as e:
+    print("GET_SYSTEM_INFO not available: %s (older driver; public_type and "
+          "ext_caps above come from GET_DEVICE_INFO)" % e)
 
 data = None
 status = None
@@ -315,7 +344,13 @@ if status != 1:
 
 # Bit layout: mixer-engine/hardware.py poll_hw_readback
 d0, d2, d3, d6, d7 = data[0], data[2], data[3], data[6], data[7]
-print("  decoded (Apollo x4 layout; other models may differ):")
+model = sys.argv[2] if len(sys.argv) > 2 else ""
+if model == "Apollo x4":
+    print("  decoded (Apollo x4 layout):")
+else:
+    print("  decoded with the Apollo x4 bit layout (this is %s; the bit "
+          "positions are only hardware-confirmed on the x4, treat as raw):"
+          % (model or "an unidentified model"))
 b = [(d3 >> (8 * i)) & 0xFF for i in range(4)]
 gc = [b[0] & 0x3F, ((b[1] & 0x1F) << 2) | (b[0] >> 6),
       b[2] & 0x3F, ((b[3] & 0x0F) << 2) | (b[2] >> 6)]

@@ -19,6 +19,10 @@
 #   SKIP    rate not run / not supported by the card
 #   ERROR   aplay/arecord failed or the MON channels could not be located
 #
+# The MON channels are the first two record channels whose channel ID is of
+# type 0x09 (MON) in /proc/asound/cardN/io_map (0x0901 / 0x0902 on the models
+# documented so far); the channel counts come from the card and the io_map.
+#
 # TURN YOUR SPEAKERS/MONITOR LEVEL DOWN FIRST.  The tone is -12 dBFS on the
 # MON outputs.  Run it as your normal user (no sudo): the device nodes are
 # owned by you via udev.  The script writes only temporary WAV files.
@@ -168,6 +172,17 @@ io_count() {   # io_count FILE playback|record
     awk -v d="$2" '$1 == d":" && $3 == "ALSA" {print $2; exit}' "$1" 2>/dev/null
 }
 
+# Channel IDs (0x....,0x....) of the first two record channels of type 0x09
+# (MON) in an io_map file; empty when there are fewer than two
+mon_ids() {   # mon_ids FILE
+    awk '
+        /^record:/   { d = 1; next }
+        /^playback:/ { d = 0; next }
+        d && $1 == "ch" && $3 == "slot" && tolower($5) ~ /^0x09[0-9a-f][0-9a-f]$/ {
+            ids = ids (n ? "," : "") $5; if (++n == 2) { print ids; exit }
+        }' "$1" 2>/dev/null
+}
+
 uniq_words() { printf '%s\n' "$@" | awk 'NF && !seen[$0]++' | tr '\n' ' '; }
 
 # ---------------------------------------------------------------------- run
@@ -193,9 +208,13 @@ run_rate() {
     local rate="$1" pch rch combos_err="" tone cap iomap mon out verdict reason
     local P_CANDS R_CANDS
     # shellcheck disable=SC2046
-    P_CANDS="$(uniq_words "$MAXP" "$P_INIT" 24)"
+    P_CANDS="$(uniq_words "$MAXP" "$P_INIT")"
     # shellcheck disable=SC2046
-    R_CANDS="$(uniq_words "$MAXR" "$R_INIT" 22)"
+    R_CANDS="$(uniq_words "$MAXR" "$R_INIT")"
+    if [ -z "$P_CANDS" ] || [ -z "$R_CANDS" ]; then
+        record_result "$rate" "-" "-" "-" ERROR "channel counts unknown (card and io_map report none)"
+        return
+    fi
     cap="$WORK/cap-$rate.wav"
     iomap="$WORK/io_map.$rate"
     for pch in $P_CANDS; do
@@ -219,8 +238,14 @@ run_rate() {
             wait "$ppid" || prc=$?
             if [ "$rrc" = 0 ] && [ "$prc" = 0 ]; then
                 [ -s "$iomap" ] || cp "$WORK/io_map.initial" "$iomap"
+                local monids
+                monids="$(mon_ids "$iomap")"
+                if [ -z "$monids" ]; then
+                    record_result "$rate" "$pch" "$rch" "-" ERROR "no two MON (type 0x09) record channels in io_map"
+                    return
+                fi
                 mon="$(python3 "$WAVCHECK" mapids --io-map "$iomap" \
-                        --direction record --ids 0x0901,0x0902 2>&1)" || {
+                        --direction record --ids "$monids" 2>&1)" || {
                     record_result "$rate" "$pch" "$rch" "-" ERROR "MON not in io_map: $mon"
                     return
                 }
@@ -276,7 +301,7 @@ SUMMARY="$WORK/summary.txt"
 {
     echo "Duplex self-test, ALSA card $CARD, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "tone: 997 Hz, -12 dBFS, S32_LE, playback ch 1/2 (0-based 0,1);" \
-         "capture ${CAP_SECONDS}s; MON = record channels with ID 0x0901/0x0902"
+         "capture ${CAP_SECONDS}s; MON = the first two record channels of type 0x09 in io_map"
     printf '%-8s %-5s %-5s %-7s %-7s %s\n' RATE PLAY REC MON VERDICT DETAIL
     awk -F'\t' '{printf "%-8s %-5s %-5s %-7s %-7s %s\n", $1, $2, $3, $4, $5, $6}' "$RESULTS"
     if [ -s "$DETAILS" ]; then
