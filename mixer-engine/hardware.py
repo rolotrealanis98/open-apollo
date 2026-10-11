@@ -643,6 +643,9 @@ HP_CHANNEL_IDX = 1
 HP_LEVEL_PARAMS = {0: MONITOR_PARAM["HP1Level"], 1: MONITOR_PARAM["HP2Level"]}
 
 # ── Driver Parameter IDs ─────────────────────────────────────────
+# ua_audio.c toslink_in_bit: the driver keeps device-mode bit 0x10 clear
+# unless this is on
+TOSLINK_IN_BIT_PARAM = "/sys/module/ua_apollo/parameters/toslink_in_bit"
 DRIVER_PARAM_SAMPLE_RATE = 0
 DRIVER_PARAM_CLOCK_SOURCE = 1
 DRIVER_PARAM_TRANSPORT_RUNNING = 2  # Read-only
@@ -1354,6 +1357,7 @@ class HardwareBackend:
         self._cli_frozen = False     # Set True on first CLI timeout — stops all CLI
         self.last_errno = 0          # errno of the last failed set_mixer_param
         self._features: int | None = None   # GET_VERSION feature bits, cached
+        self._toslink_in_bit: bool | None = None   # module parameter, cached
         # True while the driver says the device is paused for system
         # suspend (UA_PAUSE_DEVICE): every write is refused, see
         # HardwareRouter.set_paused
@@ -1377,6 +1381,7 @@ class HardwareBackend:
             self._cli_enabled = False
             self._cli_frozen = False
             self._features = None
+            self._toslink_in_bit = None
             log.info("Opened hardware device: %s", path)
             return True
         except OSError as e:
@@ -1390,6 +1395,20 @@ class HardwareBackend:
             self.connected = False
             self._cli_enabled = False
             self._features = None
+            self._toslink_in_bit = None
+
+    def toslink_in_bit_enabled(self) -> bool:
+        """The driver's toslink_in_bit module parameter (device-mode word
+        bit 0x10 = TOSLink in is ADAT).  Off unless sysfs says Y/1; a
+        missing file or any other content reads as off.  Cached until the
+        device is reopened."""
+        if self._toslink_in_bit is None:
+            try:
+                with open(TOSLINK_IN_BIT_PARAM) as f:
+                    self._toslink_in_bit = f.read().strip() in ("Y", "y", "1")
+            except OSError:
+                self._toslink_in_bit = False
+        return self._toslink_in_bit
 
     # ── Hot-plug: loss detection and reopen ──────────────────────────
 
@@ -3702,6 +3721,16 @@ class HardwareRouter:
 
     # ── Output/Monitor controls (SEL131 mixer param path) ────────
 
+    def _toslink_in_bit_on(self) -> bool:
+        """Bit 0x10 goes out only when the driver's toslink_in_bit is on:
+        with it off the driver passes the daemon's byte through, and the
+        x8p (ADAT default) would otherwise send 0x18 instead of 0x08."""
+        probe = getattr(self.backend, "toslink_in_bit_enabled", None)
+        try:
+            return bool(probe()) if callable(probe) else False
+        except Exception:
+            return False
+
     def _device_mode_word(self, out_adat: bool | None = None,
                           in_adat: bool | None = None, converter=None,
                           order=None) -> int:
@@ -3733,7 +3762,7 @@ class HardwareRouter:
         word = getattr(self, "multi_unit_role", 0) & 0x7
         if out_adat:
             word |= 0x08
-        if in_adat:
+        if in_adat and self._toslink_in_bit_on():
             word |= 0x10
         if conv in (1, 2, 3):
             word |= {1: 0x20, 2: 0x28, 3: 0x30}[conv]

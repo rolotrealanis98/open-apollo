@@ -45,9 +45,13 @@ class FakeBackend:
         self.features = 0            # UA_FEAT_* bits has_feature() reports
         self.bus_flags = []          # (bus_id, sub_param, side, solo_mute)
         self.system_info = None      # what get_system_info() returns
+        self.toslink_in_bit = False  # the driver's toslink_in_bit parameter
 
     def get_system_info(self):
         return self.system_info
+
+    def toslink_in_bit_enabled(self):
+        return self.toslink_in_bit
 
     def has_feature(self, bit):
         return bool(self.features & bit)

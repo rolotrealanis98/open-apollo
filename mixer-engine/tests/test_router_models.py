@@ -303,6 +303,7 @@ def test_device_mode_word_carries_every_field():
     # (0x08), TOSLink in (0x10), ConverterMode (0x20/0x28/0x30) and the
     # multi-unit order [7:6]; setting one keeps the others
     r, be = router_for(X4)
+    be.toslink_in_bit = True        # the driver's toslink_in_bit module param
     _tree_set(r, "/devices/0/TOSLink/value", "ADAT")
     r.on_set("/devices/0/TOSLinkOutput/value", "ADAT")
     assert be.mixer_params == [(MONITOR_CHANNEL_TYPE, 0,
@@ -317,6 +318,38 @@ def test_device_mode_word_carries_every_field():
     assert be.mixer_params[-1][3] == 0x08 | (2 << 6)
     assert r._device_mode_word(out_adat=False, in_adat=False,
                                converter=3, order=0) == 0x30
+
+
+@pytest.mark.parametrize("path", [X4, X8P])
+@pytest.mark.parametrize("param_on, want", [(False, 0x08), (True, 0x18)])
+def test_toslink_in_bit_only_with_the_driver_parameter(path, param_on, want):
+    # The driver passes bit 0x10 through unless its toslink_in_bit is on, so
+    # the daemon sends it only then: by default a TOSLink-in = ADAT tree
+    # (the x8p default) still writes what it did before 1047eab
+    r, be = router_for(path)
+    be.toslink_in_bit = param_on
+    _tree_set(r, "/devices/0/TOSLink/value", "ADAT")
+    r.on_set("/devices/0/TOSLinkOutput/value", "ADAT")
+    assert be.mixer_params == [(MONITOR_CHANNEL_TYPE, 0,
+                                MONITOR_PARAM["DigitalOutputMode"], want)]
+
+
+def test_toslink_in_bit_parameter_read_from_sysfs(tmp_path, monkeypatch):
+    import hardware
+    b = hardware.HardwareBackend()
+    for text, expect in (("Y\n", True), ("1\n", True), ("N\n", False),
+                         ("junk", False)):
+        f = tmp_path / "p"
+        f.write_text(text)
+        monkeypatch.setattr(hardware, "TOSLINK_IN_BIT_PARAM", str(f))
+        b._toslink_in_bit = None
+        assert b.toslink_in_bit_enabled() is expect
+    monkeypatch.setattr(hardware, "TOSLINK_IN_BIT_PARAM",
+                        str(tmp_path / "missing"))
+    b._toslink_in_bit = None
+    assert b.toslink_in_bit_enabled() is False
+    b.close()                           # nothing open: cache untouched
+    assert b._toslink_in_bit is False
 
 
 def test_single_unit_defaults_keep_the_old_values():
