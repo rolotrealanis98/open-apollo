@@ -97,6 +97,87 @@ RUNTIME_PROPERTIES = {
 # set_value("/Foo/values", x) resolves to the /Foo property and overwrites its
 # "value" field (not "values"), corrupting the actual control value.
 
+# Hot-plug: how the daemon follows the device node.  The watchdog probes the
+# open fd every DEVICE_WATCH_INTERVAL; after a loss it retries the open
+# with a doubling delay (MIN..MAX) and, once the node is back, waits
+# DEVICE_SETTLE for the plugin chain/DSP before re-running the init path.
+DEVICE_WATCH_INTERVAL = 0.25
+DEVICE_REOPEN_MIN = 0.5
+DEVICE_REOPEN_MAX = 5.0
+DEVICE_SETTLE = 3.0
+EXIT_RESTART = 75   # EX_TEMPFAIL: systemd's Restart=on-failure starts us again
+
+
+def load_network_id(path: Path | None) -> str:
+    """The persistent network id, created on first use.
+
+    UA clients key their saved settings on the engine's network id; a new
+    random id per start would make every restart look like a new engine.
+    Stored as {"network_id": "<32 hex>"} in a small JSON file.  A missing
+    or unreadable file gets a fresh id (and an unwritable path just means
+    the id lasts for this run).
+    """
+    import uuid
+    if path is not None:
+        try:
+            with open(path) as f:
+                nid = json.load(f).get("network_id")
+            if isinstance(nid, str) and re_mod.fullmatch(r"[0-9a-f]{32}", nid):
+                return nid
+        except (OSError, ValueError, AttributeError):
+            pass
+    nid = uuid.uuid4().hex
+    if path is not None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            with open(tmp, "w") as f:
+                json.dump({"network_id": nid}, f)
+            tmp.rename(path)
+        except OSError as e:
+            log.warning("Could not save the network id to %s: %s", path, e)
+    return nid
+
+
+def fill_helper_identity(helper_tree: HelperTree | None,
+                         info: dict | None) -> int:
+    """Put the attached device's identity into the helper device tree.
+
+    serial_number / firmware_version / expected_firmware_version are empty
+    in the captured tree.  The driver reports the running firmware only, so
+    the expected version is the running one (no false "update firmware"
+    prompt; firmware_compatibility stays 0).  Format of the strings is not
+    verified against a Console capture: serial as 8 hex digits (like the
+    state file name), firmware as the decimal register value.
+    Returns the number of properties set.
+    """
+    if not helper_tree or not info:
+        return 0
+    fw = str(info["fw_version"])
+    values = {
+        "serial_number": f"{info['serial']:08X}",
+        "firmware_version": fw,
+        "expected_firmware_version": fw,
+    }
+    count = 0
+
+    def walk(node):
+        nonlocal count
+        if not isinstance(node, dict):
+            return
+        props = node.get("properties")
+        if isinstance(props, dict) and "serial_number" in props:
+            for key, val in values.items():
+                if isinstance(props.get(key), dict):
+                    props[key]["value"] = val
+                    count += 1
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(helper_tree.root)
+    return count
+
+
 # Default device map location (relative to this script)
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_DEVICE_MAP = SCRIPT_DIR / "device_maps" / "device_map_apollo_x4.json"
@@ -161,7 +242,9 @@ class MixerDaemon:
                  helper_port: int = DEFAULT_HELPER_PORT,
                  trace: bool = False,
                  helper_tree: HelperTree | None = None,
-                 metering=None):
+                 metering=None,
+                 network_id: str | None = None,
+                 loaded_map: Path | None = None):
         self.state = state
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
         self.hw_router = hw_router
@@ -179,7 +262,7 @@ class MixerDaemon:
 
         # Generate unique IDs matching real mixer engine format (hex UUIDs)
         import uuid
-        self.network_id = uuid.uuid4().hex
+        self.network_id = network_id or uuid.uuid4().hex
         self.process_id = uuid.uuid4().hex
 
         self._init_fired = False  # Track if we've sent the init sequence
@@ -200,6 +283,18 @@ class MixerDaemon:
         # Wire state tree SET notifications to hardware router
         if hw_router:
             self.state.on_set = hw_router.on_set
+
+        # Hot-plug state (see _device_watchdog).  When the daemon starts
+        # without the device, the watchdog owns the init push, so the
+        # late-init paths (timer, meter pump) must leave it alone.
+        self.loaded_map = loaded_map
+        self._hw_online = bool(hw_router and hw_router.backend.connected)
+        self._reopen_delay = DEVICE_REOPEN_MIN
+        self._next_reopen = 0.0
+        self._ready_at: float | None = None
+        if hw_router and not self._hw_online:
+            self._hw_init_done = True
+            self._set_device_online(False)
 
     async def start(self):
         """Start TCP servers on both ports (runs forever)."""
@@ -257,6 +352,113 @@ class MixerDaemon:
         r'meters/(\d+)/'
         r'(MeterLevel|MeterPeakLevel|MeterClip|Clip)/value$'
     )
+
+    # ── Device hot-plug ──────────────────────────────────────────────
+
+    def _set_device_online(self, online: bool):
+        """Report /devices/0/DeviceOnline to clients (not persisted: it
+        describes the hardware right now, not a setting)."""
+        path = "/devices/0/DeviceOnline"
+        if self.state.get_value(path + "/value") == online:
+            return
+        log.info("DeviceOnline -> %s", online)
+        self._push_to_clients(path, online)
+        self.state._dirty.pop(path + "/value", None)
+
+    def _device_lost(self, now: float):
+        log.warning("Apollo device lost — daemon stays up, reopening with backoff")
+        self._hw_online = False
+        self._ready_at = None
+        # The watchdog owns the init push for the next connection
+        self._hw_init_done = True
+        self._reopen_delay = DEVICE_REOPEN_MIN
+        self._next_reopen = now + DEVICE_REOPEN_MIN
+        pending = getattr(self.hw_router, "_gain_pending", None)
+        if pending:
+            pending.clear()   # stale gains must not land on the new session
+        self._set_device_online(False)
+
+    def _device_ready(self):
+        """The device is back and settled: run the init path again."""
+        be = self.hw_router.backend
+        info = be.get_device_info()
+        if info:
+            fill_helper_identity(self.helper_tree, info)
+            if self.loaded_map is not None:
+                new_map = find_device_map(info["device_type"])
+                if new_map and new_map != self.loaded_map:
+                    log.warning("Device is a different model (type 0x%02x): "
+                                "device map %s -> %s, restarting",
+                                info["device_type"], self.loaded_map.name,
+                                new_map.name)
+                    return False
+        log.info("Device ready: re-running the init sequence")
+        self._push_defaults_to_hardware()
+        self._hw_init_done = True
+        self._readback_start_time = time.monotonic()
+        # Resync what the hardware reports now (rate, preamps, monitor)
+        self._poll_driver_rate()
+        rb = self.hw_router.poll_hw_readback()
+        if rb:
+            self._sync_hw_readback(rb, {})   # empty last_rb → push all
+        self._hw_online = True
+        self._set_device_online(True)
+        return True
+
+    def _device_watchdog_step(self, now: float) -> bool:
+        """One tick of the hot-plug state machine.  Returns False when the
+        daemon should exit for a restart (a different Apollo model came
+        back, which needs another device map)."""
+        be = self.hw_router.backend
+        if self._hw_online:
+            if be.connected and be.probe():
+                return True
+            if be.connected:
+                be.mark_lost("probe failed")
+            self._device_lost(now)
+            return True
+
+        if self._ready_at is None:
+            if now < self._next_reopen:
+                return True
+            if be.reopen():
+                log.info("Device node is back, waiting %.0fs for the DSP "
+                         "to settle", DEVICE_SETTLE)
+                self._ready_at = now + DEVICE_SETTLE
+            else:
+                self._reopen_delay = min(self._reopen_delay * 2,
+                                         DEVICE_REOPEN_MAX)
+                self._next_reopen = now + self._reopen_delay
+            return True
+
+        # Reopened, settling: it can vanish again before it is ready
+        if not (be.connected and be.probe()):
+            if be.connected:
+                be.mark_lost("probe failed while settling")
+            self._ready_at = None
+            self._next_reopen = now + DEVICE_REOPEN_MIN
+            self._reopen_delay = DEVICE_REOPEN_MIN
+            return True
+        if now >= self._ready_at:
+            self._ready_at = None
+            return self._device_ready()
+        return True
+
+    async def _device_watchdog(self):
+        """Follow the device node: notice unplug/module reload, reopen when
+        it returns, re-run the init path and tell clients."""
+        be = self.hw_router.backend if self.hw_router else None
+        if be is None or not hasattr(be, "reopen"):
+            return
+        while True:
+            await asyncio.sleep(DEVICE_WATCH_INTERVAL)
+            try:
+                keep_going = self._device_watchdog_step(time.monotonic())
+            except Exception:
+                log.exception("Device watchdog step failed")
+                keep_going = True
+            if not keep_going:
+                raise SystemExit(EXIT_RESTART)
 
     async def _meter_pump(self):
         """Send periodic meter values to subscribed clients.
@@ -1889,8 +2091,10 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                 log.warning("Driver did not report device info "
                             "(pre-GET_DEVICE_INFO?) — using default device map")
         else:
-            log.warning("No hardware device found — running in software-only mode")
-            backend = None
+            # Keep the backend: the daemon follows the device and picks it
+            # up when it appears (udev starts us on add; replug/reload)
+            log.warning("No hardware device found yet — waiting for "
+                        "/dev/ua_apollo* (DeviceOnline=false until it appears)")
 
     index = device_index(backend.device_path if backend else args.device)
     serial = info.get("serial") if info else None
@@ -1930,6 +2134,8 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     state_file = state_file_for(device_map, index, serial)
     state_file.parent.mkdir(exist_ok=True)
     state.enable_persistence(state_file)
+    network_id = load_network_id(state_file.with_name(
+        state_file.name.removesuffix(".state.json") + ".network.json"))
 
     # Load Mixer Helper tree (separate data model for 4720 clients)
     helper_tree = None
@@ -1940,6 +2146,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     else:
         log.warning("Helper tree not found: %s — 4720 clients will use device map",
                      helper_tree_path)
+    fill_helper_identity(helper_tree, info)
 
     # Wire up the hardware router (backend was opened above for device detection)
     hw_router = None
@@ -1957,7 +2164,8 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     # Apollo, else ALSA capture)
     if not args.no_hardware:
         metering = make_meter(args.alsa_device, device_type,
-                              backend.device_path if backend else None)
+                              backend.device_path
+                              if backend and backend.connected else None)
         metering.start()
     else:
         metering = NullMeter()
@@ -1966,7 +2174,9 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     helper_port = args.helper_port if not args.no_helper else 0
     daemon = MixerDaemon(state, hw_router, args.host, args.port,
                          helper_port=helper_port, trace=args.trace,
-                         helper_tree=helper_tree, metering=metering)
+                         helper_tree=helper_tree, metering=metering,
+                         network_id=network_id,
+                         loaded_map=None if args.device_map else device_map)
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None
@@ -1987,13 +2197,16 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     if not args.no_bonjour:
         bonjour = BonjourAnnouncer(
             port=args.port,
-            name=args.name or (f"{_default_name()} {index + 1}" if index else None))
+            name=args.name or (f"{_default_name()} {index + 1}" if index else None),
+            helper_port=helper_port or None)
         bonjour.start()
 
     log.info("Starting ua-mixer-daemon...")
     log.info("  Device map: %s", device_map)
     log.info("  Controls: %d", state.control_count)
-    log.info("  Hardware: %s", "connected" if hw_router else "software-only")
+    log.info("  Hardware: %s",
+             ("connected" if backend.connected else "waiting for device")
+             if hw_router else "software-only")
     log.info("  Metering: %s", type(metering).__name__ if not args.no_hardware
              else "disabled")
     log.info("  TCP (Mixer Engine): tcp://%s:%d", args.host, args.port)
@@ -2009,6 +2222,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             asyncio.create_task(daemon.start()),
             asyncio.create_task(daemon._meter_pump()),
             asyncio.create_task(daemon._meter_pulse_heartbeat()),
+            asyncio.create_task(daemon._device_watchdog()),
         ]
         if ws_server:
             tasks.append(asyncio.create_task(ws_server.start()))

@@ -42,6 +42,7 @@ Ioctl interface (from driver/ua_ioctl.h):
     UA_IOCTL_CLI_COMMAND         _IOWR('U', 0x40, struct ua_cli_command)
 """
 
+import errno
 import fcntl
 import glob
 import logging
@@ -156,6 +157,9 @@ UA_IOCTL_GET_DSP_INFO = _IOWR(UA_IOCTL_MAGIC, 0x02, _DSP_INFO_SIZE)
 # } = 16 * u32 = 64 bytes.  Identifies which Apollo model is attached so the
 # daemon can select the matching device map (x4 vs x8p vs ...).
 _DEVICE_INFO_SIZE = 64
+# errnos that mean the PCI device went away under an open fd (the driver
+# returns -ENODEV for every ioctl after remove)
+_DEVICE_LOST_ERRNOS = (errno.ENODEV, errno.EIO, errno.ENXIO, errno.EBADF)
 UA_IOCTL_GET_DEVICE_INFO = _IOR(UA_IOCTL_MAGIC, 0x01, _DEVICE_INFO_SIZE)
 
 _FW_LOAD_SIZE = 16
@@ -891,6 +895,7 @@ class HardwareBackend:
         self.fd = -1
         self.device_path = device_path
         self.connected = False
+        self.lost = False            # True after mark_lost() until reopened
         self._cli_enabled = False
         self.safe_mode = safe_mode  # Block unmapped DSP writes (bus params, monitor)
         self._last_mixer_write = 0.0  # Throttle: time of last DSP setting write
@@ -910,6 +915,10 @@ class HardwareBackend:
             self.fd = os.open(path, os.O_RDWR)
             self.device_path = path
             self.connected = True
+            self.lost = False
+            # A new device session starts with a working ARM CLI
+            self._cli_enabled = False
+            self._cli_frozen = False
             log.info("Opened hardware device: %s", path)
             return True
         except OSError as e:
@@ -922,6 +931,77 @@ class HardwareBackend:
             self.fd = -1
             self.connected = False
             self._cli_enabled = False
+
+    # ── Hot-plug: loss detection and reopen ──────────────────────────
+
+    def probe(self) -> bool:
+        """True while the open device node still answers.
+
+        False when the node is gone or was replaced (unplug, module
+        reload: the new node is a different inode), or when the driver
+        answers ENODEV/EIO because the PCI device was removed under the
+        open fd.  An old driver without GET_DEVICE_INFO (ENOTTY) counts
+        as alive.
+        """
+        if self.fd < 0:
+            return False
+        try:
+            st_fd = os.fstat(self.fd)
+            st_path = os.stat(self.device_path)
+        except (OSError, TypeError):
+            return False
+        if (st_fd.st_rdev, st_fd.st_ino) != (st_path.st_rdev, st_path.st_ino):
+            return False
+        try:
+            fcntl.ioctl(self.fd, UA_IOCTL_GET_DEVICE_INFO,
+                        bytes(_DEVICE_INFO_SIZE))
+        except OSError as e:
+            return e.errno not in _DEVICE_LOST_ERRNOS
+        return True
+
+    def mark_lost(self, reason: str = ""):
+        """Drop the dead fd and go offline; reopen() brings it back."""
+        if self.fd >= 0:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+        self.fd = -1
+        self.connected = False
+        self.lost = True
+        self._cli_enabled = False
+        log.warning("Hardware device %s lost%s", self.device_path,
+                    f" ({reason})" if reason else "")
+
+    def reopen(self) -> bool:
+        """Try to open the device again after it was lost (or never seen).
+
+        Quiet while the node is absent, so a backoff loop does not flood
+        the log.  The same path is reused: after a replug udev recreates
+        /dev/ua_apolloN with the same name.
+        """
+        path = self.device_path or self._find_device()
+        if not path or not os.path.exists(path):
+            return False
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except OSError as e:
+            log.debug("reopen %s: %s", path, e)
+            return False
+        try:
+            fcntl.ioctl(fd, UA_IOCTL_GET_DEVICE_INFO, bytes(_DEVICE_INFO_SIZE))
+        except OSError as e:
+            if e.errno in _DEVICE_LOST_ERRNOS:
+                os.close(fd)
+                return False
+        self.fd = fd
+        self.device_path = path
+        self.connected = True
+        self.lost = False
+        self._cli_enabled = False
+        self._cli_frozen = False
+        log.info("Reopened hardware device: %s", path)
+        return True
 
     def _find_device(self) -> str | None:
         """Auto-discover /dev/ua_apollo*."""
@@ -1479,6 +1559,11 @@ class HardwareBackend:
             data = list(struct.unpack_from('<40I', buf, 4))
             return (status, data)
         except OSError as e:
+            if e.errno in _DEVICE_LOST_ERRNOS:
+                # Polled at 50 Hz: go offline at once instead of logging
+                # an error per poll until the daemon's watchdog notices
+                self.mark_lost(f"get_hw_readback: {e}")
+                return None
             log.error("get_hw_readback: %s", e)
             return None
 
