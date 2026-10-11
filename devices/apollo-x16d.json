@@ -214,5 +214,18 @@
     {"name": "UNAVAILABLE", "synch_in": 11, "preamp": false, "stereo": false}
   ],
   "mixer_outputs": ["DANTE 1", "DANTE 2", "DANTE 3", "DANTE 4", "DANTE 5", "DANTE 6", "DANTE 7", "DANTE 8", "DANTE 9", "DANTE 10", "DANTE 11", "DANTE 12", "DANTE 13", "DANTE 14", "DANTE 15", "DANTE 16", "AES/EBU 1", "AES/EBU 2", "CUE 1", "CUE 2", "CUE 3", "CUE 4", "MONITOR"],
+  "latency": {
+    "rates": [44100, 48000, 88200, 96000, 176400, 192000],
+    "input": {"default": [10, 10, 10, 10, 11, 11], "boards": {"2": [10, 10, 10, 10, 10, 10]}},
+    "output": {
+      "line": {"default": [9, 9, 8, 8, 8.5, 8.5]},
+      "cue": {"default": [9, 9, 8, 8, 8.5, 8.5]},
+      "monitor": {"default": [13, 13, 12, 12, 12.5, 12.5]},
+      "dsp": {"default": [13, 13, 12, 12, 12.5, 12.5]}
+    },
+    "output_delay_comp": {"default": [13, 13, 12, 12, 12.5, 12.5]},
+    "dsp_to_fpga": 6,
+    "fpga_to_dsp": 2
+  },
   "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: every route entry shown (MixerTypeBase/ReneBase IsChannelShownForIORoute returns true)."
 }

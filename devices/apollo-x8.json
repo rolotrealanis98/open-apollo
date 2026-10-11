@@ -213,5 +213,18 @@
     {"name": "UNAVAILABLE", "synch_in": 11, "preamp": false, "stereo": false}
   ],
   "mixer_outputs": ["ANALOG 1", "ANALOG 2", "ANALOG 3", "ANALOG 4", "ANALOG 5", "ANALOG 6", "ANALOG 7", "ANALOG 8", "ADAT 1", "ADAT 2", "ADAT 3", "ADAT 4", "ADAT 5", "ADAT 6", "ADAT 7", "ADAT 8", "S/PDIF L", "S/PDIF R", "CUE 1", "CUE 2", "CUE 3", "CUE 4", "MONITOR", "HP 1", "HP 2"],
+  "latency": {
+    "rates": [44100, 48000, 88200, 96000, 176400, 192000],
+    "input": {"default": [10, 10, 10, 10, 11, 11], "boards": {"2": [10, 10, 10, 10, 10, 10]}},
+    "output": {
+      "line": {"default": [39, 39, 11.25, 11.25, 11.5, 11.5]},
+      "cue": {"default": [41, 41, 13.25, 13.25, 13.5, 13.5]},
+      "monitor": {"default": [43, 43, 15.25, 15.25, 15.5, 15.5]},
+      "dsp": {"default": [43, 43, 15.25, 15.25, 15.5, 15.5]}
+    },
+    "output_delay_comp": {"default": [43, 43, 15.25, 15.25, 15.5, 15.5]},
+    "dsp_to_fpga": 6,
+    "fpga_to_dsp": 2
+  },
   "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: every route entry shown (MixerTypeBase/ReneBase IsChannelShownForIORoute returns true)."
 }

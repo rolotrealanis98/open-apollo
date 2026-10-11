@@ -135,5 +135,18 @@
     {"name": "UNAVAILABLE", "synch_in": 11, "preamp": false, "stereo": false}
   ],
   "mixer_outputs": ["HP", "LINE 3/4", "CUE 3", "CUE 4", "MONITOR", "HP", "LINE 3/4"],
+  "latency": {
+    "rates": [44100, 48000, 88200, 96000, 176400, 192000],
+    "input": {"default": [5, 5, 5, 5, 6, 6], "boards": {"1": [12, 12, 9, 9, 5, 5]}},
+    "output": {
+      "line": {"default": [44.3, 44.3, 16.35, 16.35, 17.35, 17.35]},
+      "cue": {"default": [44.3, 44.3, 16.35, 16.35, 17.35, 17.35]},
+      "monitor": {"default": [42.3, 42.3, 14.35, 14.35, 15.35, 15.35]},
+      "dsp": {"default": [44.3, 44.3, 16.35, 16.35, 17.35, 17.35]}
+    },
+    "output_delay_comp": {"default": [44.3, 44.3, 16.35, 16.35, 17.35, 17.35]},
+    "dsp_to_fpga": 2,
+    "fpga_to_dsp": 3
+  },
   "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: S/PDIF hidden in ADAT mode, ADAT hidden in S/PDIF mode (both directions follow the input TOSLink mode)."
 }

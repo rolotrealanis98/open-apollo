@@ -90,5 +90,18 @@
     {"name": "MADI 16", "synch_in": 23, "preamp": true, "stereo": false}
   ],
   "mixer_outputs": [],
+  "latency": {
+    "rates": [44100, 48000, 88200, 96000, 176400, 192000],
+    "input": {"default": [12.6, 12.6, 12.6, 12.6, 9.8, 9.8]},
+    "output": {
+      "line": {"default": [9.4, 9.4, 5.6, 5.6, 5.7, 5.7]},
+      "cue": {"default": [15.4, 15.4, 11.6, 11.6, 11.7, 11.7]},
+      "monitor": {"default": [13.4, 13.4, 9.6, 9.6, 9.7, 9.7]},
+      "dsp": {"default": [13.4, 13.4, 9.6, 9.6, 9.7, 9.7]}
+    },
+    "output_delay_comp": {"default": [13.4, 13.4, 9.6, 9.6, 9.7, 9.7]},
+    "dsp_to_fpga": 2,
+    "fpga_to_dsp": 2
+  },
   "provenance": "Derived facts from reverse engineering of UA Mixer Engine 11.9.0 (route tables, IsChannelShownForIORoute, capability overrides) and UAD2System.kext 12.0.0 (serial table, CPcieDevice::Name). Master-unit tables only. route visibility: every route entry shown (MixerTypeBase/ReneBase IsChannelShownForIORoute returns true)."
 }

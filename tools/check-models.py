@@ -10,7 +10,8 @@ Checks, and fails (exit 1) on any error:
      IDs; per rate band x TOSLink mode record/playback route counts against
      `channel_counts` / `channels`; route channel IDs (unique, type byte
      <-> io kind, name <-> channel number); cue buses, talkback, TOSLink
-     rules against the routes.
+     rules against the routes; the shape of the per-rate converter latency
+     tables ("latency").
   2. driver/ua_models_gen.h against the JSON (the same test as
      `gen-driver-models.py --check`).
   3. The hand-written per-model tables against the JSON: the UA_DEV_*
@@ -391,7 +392,67 @@ def check_device(d, rep, type_io):
     if vmax and virt and max(virt) <= vmax:
         rep.warn(rel, f'virtual_max {vmax} hides nothing '
                       f'(highest virtual channel {max(virt)})')
+    check_latency(d, rep)
     return lists
+
+
+# The six sample rates every per-rate table in devices/*.json is indexed by.
+RATE_LIST = [44100, 48000, 88200, 96000, 176400, 192000]
+LATENCY_OUTPUTS = ('line', 'cue', 'monitor', 'dsp')
+
+
+def check_rate_table(rel, what, t, rep):
+    """{"default": [6 frames], "boards": {"1,2": [6 frames]}}"""
+    if not isinstance(t, dict) or 'default' not in t or \
+            set(t) - {'default', 'boards'}:
+        rep.err(rel, f'{what}: must be {{"default": [...], "boards": ...}}')
+        return
+    rows = [('default', t['default'])] + list((t.get('boards') or {}).items())
+    seen = set()
+    for key, row in rows:
+        if not (isinstance(row, list) and len(row) == len(RATE_LIST) and
+                all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and 0 < v < 1000 for v in row)):
+            rep.err(rel, f'{what}[{key}]: need {len(RATE_LIST)} positive '
+                         f'frame counts, one per rate')
+        if key == 'default':
+            continue
+        try:
+            ids = [int(x) for x in key.split(',')]
+        except ValueError:
+            ids = [-1]
+        for i in ids:
+            if not 1 <= i <= 7 or i in seen:
+                rep.err(rel, f'{what}: bad or repeated analog board id in '
+                             f'{key!r} (ids 1-7, board 0 is "default")')
+            seen.add(i)
+        if row == t['default']:
+            rep.warn(rel, f'{what}[{key}] repeats the default row')
+
+
+def check_latency(d, rep):
+    """Converter latencies per rate and analog board (Mixer Engine
+    GetInputDelay / GetOutputDelay / GetOutputDelayForDelayComp, A10)."""
+    rel = d['_rel']
+    lat = d.get('latency')
+    if lat is None:
+        rep.err(rel, 'missing field \'latency\'')
+        return
+    if lat.get('rates') != RATE_LIST:
+        rep.err(rel, f'latency.rates must be {RATE_LIST}')
+    check_rate_table(rel, 'latency.input', lat.get('input'), rep)
+    outs = lat.get('output')
+    if not isinstance(outs, dict) or set(outs) != set(LATENCY_OUTPUTS):
+        rep.err(rel, f'latency.output needs exactly {LATENCY_OUTPUTS}')
+    else:
+        for k in LATENCY_OUTPUTS:
+            check_rate_table(rel, f'latency.output.{k}', outs[k], rep)
+    check_rate_table(rel, 'latency.output_delay_comp',
+                     lat.get('output_delay_comp'), rep)
+    for k in ('dsp_to_fpga', 'fpga_to_dsp'):
+        v = lat.get(k)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
+            rep.err(rel, f'latency.{k} must be a positive frame count')
 
 
 def check_cross(devs, rep):
