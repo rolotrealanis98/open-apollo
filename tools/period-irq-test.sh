@@ -26,8 +26,14 @@
 #      counted apart as timer_dups), the timer phase against SAMPLE_POS,
 #      end-of-buffer interrupts per second (= rate/8192), /proc/interrupts
 #      rate, dmesg
-#   2. mixed periods (period_irq=1): record period 1024 then play 256 (play
+#   2. 192 -> 48 kHz with period_irq=1: a control run with
+#      period_irq_settle=0 (its FAILs are INFO), then with the default 1;
+#      the driver must not fall back with settle on
+#   2b. mixed periods (period_irq=1): record period 1024 then play 256 (play
 #      must fall back to the hrtimer), and 256 then 1024 (both on the IRQ)
+#   Every ALSA run saves /proc/asound/cardN/period_irq_trace (the first 256
+#   timer events of its last two transport sessions) as trace.txt when the
+#   driver has period_irq_trace.
 #   3. runtime switch: period_irq flipped while a capture stream runs
 #   4. start/stop stress, each mode: N duplex open/close cycles; capture
 #      continuous while playback cycles N times; and the reverse
@@ -141,8 +147,15 @@ SUMMARY="$LOGDIR/summary.txt"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/period-irq.XXXXXX")" || die "mktemp failed"
 
 NPASS=0; NFAIL=0; NWARN=0
+SOFT=0   # 1: a control run expected to fail, its FAILs are INFO
 log() { echo "$*" | tee -a "$SUMMARY"; }
 result() {   # result PASS|FAIL|WARN|INFO name detail
+    if [ "$SOFT" = 1 ]; then
+        case "$1" in
+            FAIL|WARN) set -- INFO "$2" "(control) $3" ;;
+            PASS) set -- INFO "$2" "(control) passed: $3" ;;
+        esac
+    fi
     case "$1" in
         PASS) NPASS=$((NPASS + 1)) ;;
         FAIL) NFAIL=$((NFAIL + 1)) ;;
@@ -157,6 +170,8 @@ sudo -n true 2>/dev/null || sudo -v || die "sudo needed for $PARAMS writes"
 FWV2="$(awk '$1 == "fw_v2" { print $2 }' "$PROC")"
 
 ORIG_IRQ="$(cat "$PARAMS/period_irq")"
+ORIG_SETTLE="$(cat "$PARAMS/period_irq_settle" 2>/dev/null)"
+ORIG_TRACE="$(cat "$PARAMS/period_irq_trace" 2>/dev/null)"
 
 set_param() {   # set_param name value
     echo "$2" | sudo tee "$PARAMS/$1" >/dev/null ||
@@ -180,6 +195,8 @@ cleanup() {
     wait 2>/dev/null
     [ "$FORCED_QUANTUM" = 1 ] && pw-metadata -n settings 0 clock.force-quantum 0 >/dev/null 2>&1
     set_param period_irq "$ORIG_IRQ"
+    [ -n "$ORIG_SETTLE" ] && set_param period_irq_settle "$ORIG_SETTLE"
+    [ -n "$ORIG_TRACE" ] && set_param period_irq_trace "$ORIG_TRACE"
     restore_pipewire
     rm -rf "$WORK"
     echo "Logs: $LOGDIR"
@@ -350,6 +367,7 @@ run_duplex() {
     wait "$ppid"; prc=$?
     snap S1
     cat "$PROC" > "$d/proc.end"
+    [ -r "$CARDDIR/period_irq_trace" ] && cat "$CARDDIR/period_irq_trace" > "$d/trace.txt"
     check_kmsg "$name" "$d"
     [ "$bad" = 1 ] && return
 
@@ -439,6 +457,30 @@ run_duplex() {
     fi
     [ "$bad" = 0 ] && result PASS "$name" \
         "owners $ep/$er, wakeups ok, timer $ti/s (dups $td) eob $ei/s irq $it/s (expected $ex), phase ${S1[phase_mean]:-0}/$tf"
+}
+
+# ------------------------------------------- 192 -> 48 kHz rate change
+# The first period_irq=1 transport after 192 -> 48 kHz ran its timer fast
+# and off the period boundaries on titan (2026-10-11).  Control run with
+# period_irq_settle=0 (reproduces it; its FAILs are INFO), then the fix
+# with period_irq_settle=1.  Both leave trace.txt with the timer events.
+rate_down_check() {
+    local settle
+    log ""
+    log "== 192 -> 48 kHz with period_irq=1 (settle off: control, then on)"
+    if [ "$FWV2" != 1 ] || [ -z "$ORIG_SETTLE" ]; then
+        result INFO rate-down "skipped: no period_irq_settle in this driver or no fw_v2"
+        return
+    fi
+    for settle in 0 1; do
+        set_param period_irq_settle "$settle"
+        run_duplex "down-pre-s$settle" 1 192000 256 256 20 irq irq
+        [ "$settle" = 0 ] && SOFT=1
+        run_duplex "down-s$settle" 1 48000 256 256 "$SECONDS_RUN" irq irq
+        SOFT=0
+        log "     settle=$settle: settles ${S0[settles]:-?} -> ${S1[settles]:-?}, fallbacks ${S0[fallbacks]:-?} -> ${S1[fallbacks]:-?}"
+    done
+    set_param period_irq_settle 1
 }
 
 # ------------------------------------------------------ runtime switch
@@ -580,6 +622,7 @@ alsa_part() {
     RCH="$(max_channels arecord)"
     [ -n "$PCH" ] && [ -n "$RCH" ] || die "could not read the channel counts from --dump-hw-params"
     log "     channels: play $PCH, record $RCH"
+    [ -n "$ORIG_TRACE" ] && set_param period_irq_trace 1   # trace.txt per run
     record_env alsa
 
     log ""
@@ -592,6 +635,8 @@ alsa_part() {
             done
         done
     done
+
+    rate_down_check
 
     log ""
     log "== mixed periods (period_irq=1, 48000 Hz)"
