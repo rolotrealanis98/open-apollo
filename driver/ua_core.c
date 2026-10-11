@@ -57,6 +57,14 @@ static dev_t ua_devno;
 static struct class *ua_class;
 static DEFINE_IDA(ua_ida);
 
+/*
+ * Chardev minor -> device.  ua_open() looks the device up here and takes
+ * a reference under ua_devices_lock, so an open racing ua_remove() either
+ * gets a live reference or -ENODEV, never a freed struct.
+ */
+static struct ua_device *ua_devices[UA_MAX_DEVICES];
+static DEFINE_MUTEX(ua_devices_lock);
+
 /* ----------------------------------------------------------------
  * PCI device table
  * ---------------------------------------------------------------- */
@@ -371,9 +379,46 @@ static int ua_program_registers(struct ua_device *ua)
  * Character device file operations
  * ---------------------------------------------------------------- */
 
+/* Device lifetime: the last reference frees the struct */
+static void ua_device_release(struct kref *kref)
+{
+	struct ua_device *ua = container_of(kref, struct ua_device, kref);
+
+	ua_audio_release(ua);
+	pci_dev_put(ua->pdev);
+	kfree(ua);
+}
+
+void ua_get(struct ua_device *ua)
+{
+	kref_get(&ua->kref);
+}
+
+void ua_put(struct ua_device *ua)
+{
+	kref_put(&ua->kref, ua_device_release);
+}
+
+/* devres action: drops probe's reference after ua_remove() or a failed probe */
+static void ua_put_action(void *data)
+{
+	ua_put(data);
+}
+
 static int ua_open(struct inode *inode, struct file *filp)
 {
-	struct ua_device *ua = container_of(inode->i_cdev, struct ua_device, cdev);
+	unsigned int minor = iminor(inode);
+	struct ua_device *ua = NULL;
+
+	mutex_lock(&ua_devices_lock);
+	if (minor < UA_MAX_DEVICES)
+		ua = ua_devices[minor];
+	if (ua)
+		ua_get(ua);
+	mutex_unlock(&ua_devices_lock);
+
+	if (!ua)
+		return -ENODEV;
 
 	filp->private_data = ua;
 	return 0;
@@ -381,6 +426,7 @@ static int ua_open(struct inode *inode, struct file *filp)
 
 static int ua_release(struct inode *inode, struct file *filp)
 {
+	ua_put(filp->private_data);
 	return 0;
 }
 
@@ -2613,11 +2659,16 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct ua_device *ua;
 	int ret, devno;
 
-	ua = devm_kzalloc(&pdev->dev, sizeof(*ua), GFP_KERNEL);
+	ua = kzalloc(sizeof(*ua), GFP_KERNEL);
 	if (!ua)
 		return -ENOMEM;
 
-	ua->pdev = pdev;
+	kref_init(&ua->kref);
+	ua->pdev = pci_dev_get(pdev);
+	ret = devm_add_action_or_reset(&pdev->dev, ua_put_action, ua);
+	if (ret)
+		return ret;
+
 	mutex_init(&ua->lock);
 	spin_lock_init(&ua->irq_lock);
 	pci_set_drvdata(pdev, ua);
@@ -2780,11 +2831,17 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	ua->dev_id = devno;
 
-	cdev_init(&ua->cdev, &ua_fops);
-	ua->cdev.owner = THIS_MODULE;
-	ret = cdev_add(&ua->cdev, MKDEV(MAJOR(ua_devno), devno), 1);
+	ua->cdev = cdev_alloc();
+	if (!ua->cdev) {
+		ret = -ENOMEM;
+		goto err_ida;
+	}
+	ua->cdev->ops = &ua_fops;
+	ua->cdev->owner = THIS_MODULE;
+	ret = cdev_add(ua->cdev, MKDEV(MAJOR(ua_devno), devno), 1);
 	if (ret) {
 		dev_err(&pdev->dev, "cdev_add failed: %d\n", ret);
+		kobject_put(&ua->cdev->kobj);
 		goto err_ida;
 	}
 
@@ -2804,13 +2861,18 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_device;
 	}
 
+	/* Publish last: opens before this point get -ENODEV */
+	mutex_lock(&ua_devices_lock);
+	ua_devices[devno] = ua;
+	mutex_unlock(&ua_devices_lock);
+
 	dev_info(&pdev->dev, "registered as /dev/ua_apollo%d\n", devno);
 	return 0;
 
 err_device:
 	device_destroy(ua_class, MKDEV(MAJOR(ua_devno), devno));
 err_cdev:
-	cdev_del(&ua->cdev);
+	cdev_del(ua->cdev);
 err_ida:
 	ida_free(&ua_ida, devno);
 err_free_irq:
@@ -2882,9 +2944,15 @@ static void ua_remove(struct pci_dev *pdev)
 	/* 8. Release plugin-chain DMA payload buffers */
 	ua_dsp_free_plugin_payloads(ua);
 
-	/* 9. Cleanup chardev and IDA */
+	/*
+	 * 9. Cleanup chardev and IDA.  Open files keep their own reference;
+	 *    probe's is dropped by devres after we return.
+	 */
+	mutex_lock(&ua_devices_lock);
+	ua_devices[ua->dev_id] = NULL;
+	mutex_unlock(&ua_devices_lock);
 	device_destroy(ua_class, MKDEV(MAJOR(ua_devno), ua->dev_id));
-	cdev_del(&ua->cdev);
+	cdev_del(ua->cdev);
 	ida_free(&ua_ida, ua->dev_id);
 }
 

@@ -4424,6 +4424,30 @@ static int ua_mixer_init(struct ua_device *ua)
  * ALSA card and PCM device registration
  * ---------------------------------------------------------------- */
 
+/*
+ * Called with the last reference, just before the struct is freed.  An
+ * ioctl or PCM trigger that passed its shutdown check just before
+ * ua_remove() can still arm the DSP service or the period timer, and
+ * only an open file may be keeping the struct alive, so cancel both here.
+ */
+void ua_audio_release(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (!audio->timers_ready)
+		return;
+	audio->period_timer_running = false;
+	hrtimer_cancel(&audio->period_timer);
+	audio->dsp_service_running = false;
+	cancel_delayed_work_sync(&audio->dsp_service_work);
+}
+
+/* Card freed (after the last PCM close): drop the card's reference */
+static void ua_card_private_free(struct snd_card *card)
+{
+	ua_put(card->private_data);
+}
+
 __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
@@ -4441,6 +4465,7 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 	hrtimer_init(&audio->period_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	audio->period_timer.function = ua_period_timer_callback;
 #endif
+	audio->timers_ready = true;
 	init_completion(&audio->connect_done);
 	audio->sample_rate = 48000;
 	audio->rate_index = UA_RATE_48000;
@@ -4479,6 +4504,11 @@ __attribute__((optimize("Os"))) int ua_audio_init(struct ua_device *ua)
 		dev_err(&ua->pdev->dev, "snd_card_new failed: %d\n", ret);
 		goto err_dma;
 	}
+
+	/* PCM/control callbacks can run after ua_remove(); pin the device */
+	ua_get(ua);
+	card->private_data = ua;
+	card->private_free = ua_card_private_free;
 
 	audio->card = card;
 	strscpy(card->driver, "ua_apollo", sizeof(card->driver));

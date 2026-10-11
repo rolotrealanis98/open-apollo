@@ -20,6 +20,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/kref.h>
 #include <linux/hrtimer_types.h>
 #include <linux/hrtimer.h>
 #include <sound/core.h>
@@ -758,6 +759,7 @@ struct ua_audio {
 	/* Period elapsed polling timer (replaces unreliable HW timer IRQ) */
 	struct hrtimer period_timer;
 	bool period_timer_running;
+	bool timers_ready;          /* dsp_service_work + period_timer set up */
 	snd_pcm_uframes_t last_play_period_pos;
 	snd_pcm_uframes_t last_rec_period_pos;
 
@@ -783,6 +785,14 @@ struct ua_plugin_dma_buf {
 };
 
 struct ua_device {
+	/*
+	 * Lifetime.  ALSA and chardev file handles can outlive ua_remove()
+	 * (Thunderbolt hot-unplug with PipeWire still holding the card), so
+	 * the struct is refcounted: probe, the ALSA card and each open
+	 * chardev file hold a reference.  The pci_dev reference keeps
+	 * &pdev->dev valid for logging until the last put.
+	 */
+	struct kref kref;
 	struct pci_dev *pdev;
 	void __iomem *regs;         /* BAR0 MMIO base */
 	resource_size_t regs_phys;  /* BAR0 physical address */
@@ -833,8 +843,8 @@ struct ua_device {
 	u32 mixer_rb_data[UA_MIXER_RB_WORDS];  /* Cached readback (filled by service loop) */
 	u32 mixer_rb_status;                   /* Cached readback status */
 
-	/* Character device */
-	struct cdev cdev;
+	/* Character device — separately allocated, since open inodes pin it */
+	struct cdev *cdev;
 	struct device *dev;
 	int dev_id;
 
@@ -954,10 +964,15 @@ static inline void ua_disable_vector(struct ua_device *ua, unsigned int vector)
 	}
 }
 
+/* Device lifetime (ua_core.c) */
+void ua_get(struct ua_device *ua);
+void ua_put(struct ua_device *ua);
+
 /* Audio subsystem interface (ua_audio.c) */
 int ua_audio_preinit_dma(struct ua_device *ua);
 int ua_audio_init(struct ua_device *ua);
 void ua_audio_fini(struct ua_device *ua);
+void ua_audio_release(struct ua_device *ua);
 void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate);
 int ua_audio_reconnect(struct ua_device *ua);
