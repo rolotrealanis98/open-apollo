@@ -38,14 +38,14 @@
 static int play_ch = -1;
 static int rec_ch = -1;
 module_param(play_ch, int, 0444);
-MODULE_PARM_DESC(play_ch, "Override playback channel count (legacy io_map=0 only)");
+MODULE_PARM_DESC(play_ch, "Override playback channel count (legacy io_map=0 only; applies to EVERY Apollo, so debugging with one device only)");
 module_param(rec_ch, int, 0444);
-MODULE_PARM_DESC(rec_ch, "Override record channel count (legacy io_map=0 only)");
+MODULE_PARM_DESC(rec_ch, "Override record channel count (legacy io_map=0 only; applies to EVERY Apollo)");
 
 static int io_map = -1;
 module_param(io_map, int, 0444);
 MODULE_PARM_DESC(io_map,
-		 "Channel layout: -1 = auto (default: firmware IO descriptor on models verified with it, the Apollo x4; legacy elsewhere), 0 = legacy (route-table DMA counts, ALSA ch N = DMA slot N), 1 = firmware IO descriptor on every model, channels mapped by ID like the macOS kext");
+		 "Channel layout (applies to every Apollo): -1 = auto (default: firmware IO descriptor on models verified with it, the Apollo x4; legacy elsewhere), 0 = legacy (route-table DMA counts, ALSA ch N = DMA slot N), 1 = firmware IO descriptor on every model, channels mapped by ID like the macOS kext");
 
 static bool no_connect;
 module_param(no_connect, bool, 0444);
