@@ -1711,6 +1711,8 @@ class HardwareBackend:
         flag and would write the right weight into the LEFT entry, which
         corrupts pan; the entry is dropped (and counted as written).
         """
+        if getattr(self, "paused", False):
+            return False
         value_u32 = float_to_uint32(value_float)
 
         # All 32 buses (0x00-0x1f) use direct mapping: setting_index = bus_id.
