@@ -2665,6 +2665,113 @@ int UA_GCC_OPTIMIZE("O1") ua_dsp_test_send_block(struct ua_device *ua)
  * Mixer firmware blob loading (request_firmware API)
  * ---------------------------------------------------------------- */
 
+#define UA_MIXER_FW_HDR_SIZE	16
+#define UA_MIXER_FW_ENTRY_SIZE	12
+#define UA_MIXER_FW_MAX_BLOCKS	64
+
+/*
+ * Check all of ua-apollo-mixer.bin before the first block goes out: the
+ * header, the block count, and every block's size and range.  A block
+ * that failed its check inside the send loop used to leave the blocks
+ * before it already sent to DSP 0, a half-loaded program the driver then
+ * did not mark loaded.  Each block must lie inside the file and after the
+ * block table (the packer puts the payloads there; ranges may alias each
+ * other), be a whole number of dwords, and fit what ua_dsp_send_block()
+ * takes: at most UA_FW_MAX_SIZE, and few enough data descriptors to fit
+ * one command ring with the header.  Returns the block count or a
+ * negative errno; logs the first problem.
+ */
+static int ua_dsp_mixer_fw_check(struct ua_device *ua,
+				 const struct firmware *fw)
+{
+	const u8 *data = fw->data;
+	u32 magic, version, num_blocks;
+	size_t table_end;
+	unsigned int i;
+
+	if (fw->size < UA_MIXER_FW_HDR_SIZE) {
+		dev_err(&ua->pdev->dev, "mixer firmware too small (%zu bytes)\n",
+			fw->size);
+		return -EINVAL;
+	}
+
+	magic = le32_to_cpup((__le32 *)&data[0]);
+	version = le32_to_cpup((__le32 *)&data[4]);
+	num_blocks = le32_to_cpup((__le32 *)&data[8]);
+
+	if (magic != UA_MIXER_FW_MAGIC) {
+		dev_err(&ua->pdev->dev,
+			"mixer firmware bad magic: 0x%08x (expected 0x%08x)\n",
+			magic, UA_MIXER_FW_MAGIC);
+		return -EINVAL;
+	}
+
+	if (version != UA_MIXER_FW_VERSION) {
+		dev_err(&ua->pdev->dev,
+			"mixer firmware version %u unsupported (expected %u)\n",
+			version, UA_MIXER_FW_VERSION);
+		return -EINVAL;
+	}
+
+	if (num_blocks == 0 || num_blocks > UA_MIXER_FW_MAX_BLOCKS) {
+		dev_err(&ua->pdev->dev,
+			"mixer firmware invalid block count: %u\n", num_blocks);
+		return -EINVAL;
+	}
+
+	table_end = UA_MIXER_FW_HDR_SIZE +
+		    (size_t)num_blocks * UA_MIXER_FW_ENTRY_SIZE;
+	if (fw->size < table_end) {
+		dev_err(&ua->pdev->dev,
+			"mixer firmware truncated (need %zu, got %zu)\n",
+			table_end, fw->size);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < num_blocks; i++) {
+		size_t entry_off = UA_MIXER_FW_HDR_SIZE +
+				   (size_t)i * UA_MIXER_FW_ENTRY_SIZE;
+		u32 block_size = le32_to_cpup((__le32 *)&data[entry_off + 4]);
+		u32 block_offset = le32_to_cpup((__le32 *)&data[entry_off + 8]);
+
+		/* Inside the file, no u32 wraparound */
+		if (block_size > fw->size ||
+		    block_offset > fw->size - block_size) {
+			dev_err(&ua->pdev->dev,
+				"block %u overflows firmware (off=%u size=%u total=%zu)\n",
+				i, block_offset, block_size, fw->size);
+			return -EINVAL;
+		}
+
+		/* Not the header or the block table */
+		if (block_size && block_offset < table_end) {
+			dev_err(&ua->pdev->dev,
+				"block %u starts inside the block table (off=%u, table ends at %zu)\n",
+				i, block_offset, table_end);
+			return -EINVAL;
+		}
+
+		if (block_size & 3) {
+			dev_err(&ua->pdev->dev,
+				"block %u size %u not 4-byte aligned\n",
+				i, block_size);
+			return -EINVAL;
+		}
+
+		/* What ua_dsp_send_block() would refuse after earlier blocks */
+		if (block_size > UA_FW_MAX_SIZE ||
+		    DIV_ROUND_UP(block_size, ua_sendblock_chunk()) + 1 >=
+		    UA_RING_NUM_PAGES * UA_RING_ENTRIES_PER_PAGE) {
+			dev_err(&ua->pdev->dev,
+				"block %u too large for one send (%u bytes)\n",
+				i, block_size);
+			return -E2BIG;
+		}
+	}
+
+	return num_blocks;
+}
+
 /**
  * ua_dsp_load_mixer_blocks - Send the ua-apollo-mixer.bin stream to DSP 0
  * @ua: device (must hold ua->lock)
@@ -2699,9 +2806,7 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 {
 	const struct firmware *fw;
 	const u8 *data;
-	u32 magic, version, num_blocks;
-	unsigned int header_size, table_size;
-	unsigned int i;
+	unsigned int i, num_blocks;
 	int ret;
 
 	ret = request_firmware(&fw, UA_MIXER_FW_NAME, &ua->pdev->dev);
@@ -2716,53 +2821,13 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 		return ret;
 	}
 
+	/* The whole table, before anything is sent */
+	ret = ua_dsp_mixer_fw_check(ua, fw);
+	if (ret < 0)
+		goto out;
+	num_blocks = ret;
+	ret = 0;
 	data = fw->data;
-
-	/* Validate header (16 bytes minimum) */
-	if (fw->size < 16) {
-		dev_err(&ua->pdev->dev, "mixer firmware too small (%zu bytes)\n",
-			fw->size);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	magic = le32_to_cpup((__le32 *)&data[0]);
-	version = le32_to_cpup((__le32 *)&data[4]);
-	num_blocks = le32_to_cpup((__le32 *)&data[8]);
-
-	if (magic != UA_MIXER_FW_MAGIC) {
-		dev_err(&ua->pdev->dev,
-			"mixer firmware bad magic: 0x%08x (expected 0x%08x)\n",
-			magic, UA_MIXER_FW_MAGIC);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (version != UA_MIXER_FW_VERSION) {
-		dev_err(&ua->pdev->dev,
-			"mixer firmware version %u unsupported (expected %u)\n",
-			version, UA_MIXER_FW_VERSION);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (num_blocks == 0 || num_blocks > 64) {
-		dev_err(&ua->pdev->dev,
-			"mixer firmware invalid block count: %u\n", num_blocks);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	header_size = 16;
-	table_size = num_blocks * 12;
-
-	if (fw->size < header_size + table_size) {
-		dev_err(&ua->pdev->dev,
-			"mixer firmware truncated (need %u, got %zu)\n",
-			header_size + table_size, fw->size);
-		ret = -EINVAL;
-		goto out;
-	}
 
 	dev_dbg(&ua->pdev->dev,
 		"loading mixer firmware: %u blocks, %zu bytes\n",
@@ -2776,30 +2841,11 @@ int ua_dsp_load_mixer_blocks(struct ua_device *ua)
 
 	/* Firmware transaction (0x120000) for each block */
 	for (i = 0; i < num_blocks; i++) {
-		u32 sram_addr, block_size, block_offset;
-		unsigned int entry_off = header_size + i * 12;
-
-		sram_addr = le32_to_cpup((__le32 *)&data[entry_off]);
-		block_size = le32_to_cpup((__le32 *)&data[entry_off + 4]);
-		block_offset = le32_to_cpup((__le32 *)&data[entry_off + 8]);
-
-		/* Validate block bounds (no u32 wraparound) */
-		if (block_size > fw->size ||
-		    block_offset > fw->size - block_size) {
-			dev_err(&ua->pdev->dev,
-				"block %u overflows firmware (off=%u size=%u total=%zu)\n",
-				i, block_offset, block_size, fw->size);
-			ret = -EINVAL;
-			goto out;
-		}
-
-		if (block_size & 3) {
-			dev_err(&ua->pdev->dev,
-				"block %u size %u not 4-byte aligned\n",
-				i, block_size);
-			ret = -EINVAL;
-			goto out;
-		}
+		size_t entry_off = UA_MIXER_FW_HDR_SIZE +
+				   (size_t)i * UA_MIXER_FW_ENTRY_SIZE;
+		u32 sram_addr = le32_to_cpup((__le32 *)&data[entry_off]);
+		u32 block_size = le32_to_cpup((__le32 *)&data[entry_off + 4]);
+		u32 block_offset = le32_to_cpup((__le32 *)&data[entry_off + 8]);
 
 		/*
 		 * The block table's sram_addr is the capture's host address
