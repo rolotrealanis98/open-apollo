@@ -38,6 +38,7 @@
 
 #include "ua_apollo.h"
 
+
 /* Internal ring entry layout */
 struct ua_ring_entry {
 	__le32 word0;   /* cmd_code OR (size_dwords | 0x80000000) */
@@ -992,6 +993,7 @@ void ua_dsp_rings_fini(struct ua_device *ua, bool dma_quiet)
 void ua_dsp_rings_quiesce(struct ua_device *ua)
 {
 	unsigned int i;
+
 
 	for (i = 0; i < ua->num_dsps; i++) {
 		struct ua_dsp_state *ds = &ua->dsp[i];
@@ -3445,60 +3447,258 @@ void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx)
 	ua_dsp_ring_resync(ua, &ds->cmd);
 }
 
-/**
- * ua_dsp_set_bus_param - Send one bus coefficient entry to the DSP
- * @ua: device (caller must hold ua->lock)
- * @bus_id: input bus (0x00-0x1F)
- * @param: 0 CR, 1 HP1, 2 HP2, 3 Aux 1, 4 Aux 2, 5 HP3, 6 HP4
- * @side: 0 = left, 1 = right output weight
- * @value_u32: coefficient as IEEE 754 float packed in u32
- *
- * One call is one entry of the kext's SetMixerBusParam, sent as
- * {0x001D0004, bus, (side << 24) | param, value}.  The Mixer Engine sends
- * two entries per bus and param (L and R), so a caller that wants pan or a
- * stereo send calls this twice.
- *
- * Returns 0 on success, negative errno on failure.
+/*
+ * bus_solo_sign: honour UA_DSP_BUSP_SOLO_MUTE on a bus coefficient.  The Mixer
+ * Engine marks a solo-muted input by sending its weights negated, with an
+ * exact zero replaced by -1.0e-9 (bits 0xb089705f) so the sign survives the
+ * multiplication; the DSP reads the sign bit as the solo-mute flag
+ * (parity/14 B13, iokit-mixer-mapping.md "Solo Behavior").  The stock mixer
+ * daemon sends 0.0 for a muted channel and has no sign to send, so with the
+ * knob off (default) the flag is ignored and every value goes out as given.
+ * With it on, a caller that sets the flag gets the sign forced in the driver.
  */
-int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
-			 u32 param, u32 side, u32 value_u32)
+static bool bus_solo_sign;
+module_param(bus_solo_sign, bool, 0644);
+MODULE_PARM_DESC(bus_solo_sign,
+		 "Bus coefficient writes that carry UA_DSP_BUSP_SOLO_MUTE are sent as the macOS Mixer Engine sends a solo-muted weight: negative, an exact zero replaced by -1.0e-9 (default: off, values are sent as given)");
+
+#define UA_BUS_SOLO_ZERO_BITS	0xb089705fu	/* -1.0e-9f (ME 0x100062268) */
+
+static u32 ua_bus_solo_mute_value(u32 value)
 {
-	struct ua_dsp_state *dsp0 = &ua->dsp[0];
-	u32 bank_base = ua_dsp_base(0);
-	u32 ring_base = bank_base + UA_RING_CMD_OFFSET;
+	if (!(value & 0x7fffffff))
+		return UA_BUS_SOLO_ZERO_BITS;
+	return value | 0x80000000u;
+}
+
+static unsigned int ua_bus_coef_cell(u32 bus, u32 param, u32 side)
+{
+	return (bus * UA_BUS_COEF_PARAMS + param) * UA_BUS_COEF_SIDES + side;
+}
+
+/* The DSP that hosts @bus (default 0); DSP 0 for anything unusable */
+static unsigned int ua_dsp_bus_owner(struct ua_device *ua, u32 bus)
+{
+	unsigned int owner = ua->dspx.bus_owner[bus];
+
+	if (owner >= ua->num_dsps || !ua->dsp[owner].rings_allocated)
+		return 0;
+	return owner;
+}
+
+/*
+ * Queue one {0x001D0004, bus, (side << 24) | param, value} on @dsp.  With
+ * @wait the caller may sleep until the ring has a free slot (replay sends
+ * hundreds of entries back to back); otherwise a full ring fails at once.
+ */
+static int ua_dsp_bus_cmd_send(struct ua_device *ua, unsigned int dsp,
+			       u32 bus_id, u32 param, u32 side, u32 value,
+			       bool wait)
+{
+	struct ua_dsp_state *ds = &ua->dsp[dsp];
 	struct ua_ring_entry entry;
 	int ret;
 
-	if (!dsp0->rings_allocated)
+	if (!ds->rings_allocated)
 		return -ENODEV;
-
-	if (bus_id > 0x1f || param > 6 || side > 1)
-		return -EINVAL;
 
 	entry = (struct ua_ring_entry){
 		.word0 = cpu_to_le32(UA_DSP_CMD_BUS_PARAM),
 		.word1 = cpu_to_le32(bus_id),
 		.word2 = cpu_to_le32((side << 24) | param),
-		.word3 = cpu_to_le32(value_u32),
+		.word3 = cpu_to_le32(value),
 	};
+
+	if (wait) {
+		ret = ua_dsp_ring_wait_space(ua, &ds->cmd, 1, 50);
+		if (ret)
+			return ret;
+	}
 
 	/*
 	 * Circular ring: a slot is free again once the DSP has consumed
 	 * it, so this only fails if the DSP has stopped consuming (1023
 	 * entries outstanding) — not after ~1024 fader moves per boot.
 	 */
-	ret = ua_dsp_ring_put_entry(ua, &dsp0->cmd, &entry);
-	if (ret) {
+	ret = ua_dsp_ring_put_entry(ua, &ds->cmd, &entry);
+	if (ret)
+		return ret;
+
+	ua_dsp_ring_doorbell(ua, &ds->cmd,
+			     ua_dsp_base(dsp) + UA_RING_CMD_OFFSET);
+	return 0;
+}
+
+/**
+ * ua_dsp_set_bus_param_flags - Send one bus coefficient entry to the DSP
+ * @ua: device (caller must hold ua->lock)
+ * @bus_id: input bus (0x00-0x1F)
+ * @param: 0 CR, 1 HP1, 2 HP2, 3 Aux 1, 4 Aux 2, 5 HP3, 6 HP4
+ * @side: 0 = left, 1 = right output weight
+ * @value_u32: coefficient as IEEE 754 float packed in u32
+ * @flags: UA_DSP_BUSP_SOLO_MUTE (honoured only with bus_solo_sign)
+ *
+ * One call is one entry of the kext's SetMixerBusParam, sent as
+ * {0x001D0004, bus, (side << 24) | param, value}.  The Mixer Engine sends
+ * two entries per bus and param (L and R), so a caller that wants pan or a
+ * stereo send calls this twice.
+ *
+ * Where it goes (CUAD2DeviceMixer::SetMixerBusParam 0x3031e, parity/14 B4):
+ * the DSP that hosts the bus, and also DSP 0 when that is another DSP.
+ * Every bus is hosted by DSP 0 on the Apollo x4 (table default 0, nothing
+ * moves an input yet), so one entry goes to DSP 0 exactly as before.
+ * The kext additionally follows the span links of a spanned input (an
+ * origin bus's coefficient is reused, and the partner is re-synced); that
+ * needs the DSP strip engine's placement and is not implemented here.
+ *
+ * The request is cached per (bus, param, side) for
+ * ua_dsp_replay_bus_params(), whether or not the ring accepted it.
+ *
+ * Returns 0 on success, negative errno on failure.
+ */
+int ua_dsp_set_bus_param_flags(struct ua_device *ua, u32 bus_id, u32 param,
+			       u32 side, u32 value_u32, u32 flags)
+{
+	unsigned int owner;
+	int ret, ret0 = 0;
+
+	if (!ua->dsp[0].rings_allocated)
+		return -ENODEV;
+
+	if (bus_id > 0x1f || param > 6 || side > 1)
+		return -EINVAL;
+
+	if ((flags & UA_DSP_BUSP_SOLO_MUTE) && bus_solo_sign)
+		value_u32 = ua_bus_solo_mute_value(value_u32);
+
+	ua->dspx.bus_coef[bus_id][param][side] = value_u32;
+	__set_bit(ua_bus_coef_cell(bus_id, param, side),
+		  ua->dspx.bus_coef_valid);
+
+	owner = ua_dsp_bus_owner(ua, bus_id);
+	ret = ua_dsp_bus_cmd_send(ua, owner, bus_id, param, side, value_u32,
+				  false);
+	if (owner)
+		ret0 = ua_dsp_bus_cmd_send(ua, 0, bus_id, param, side,
+					   value_u32, false);
+	if (ret || ret0) {
+		struct ua_dsp_ring *ring = &ua->dsp[ret ? owner : 0].cmd;
+
 		dev_warn_ratelimited(&ua->pdev->dev,
 				     "bus_param ring full (bus=%u param=%u side=%u pos=%u wr=%u)\n",
-				     bus_id, param, side, dsp0->cmd.hw_pos,
-				     dsp0->cmd.write_ptr);
-		return ret;
+				     bus_id, param, side, ring->hw_pos,
+				     ring->write_ptr);
+		return ret ? ret : ret0;
 	}
 
-	ua_dsp_ring_doorbell(ua, &dsp0->cmd, ring_base);
-
 	return 0;
+}
+
+int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
+			 u32 param, u32 side, u32 value_u32)
+{
+	return ua_dsp_set_bus_param_flags(ua, bus_id, param, side, value_u32,
+					  0);
+}
+
+/**
+ * ua_dsp_set_bus_owner - Record which DSP hosts a mixer bus
+ * @ua: device (caller must hold ua->lock)
+ * @bus_id: bus 0-31
+ * @dsp_idx: hosting DSP; 0 is the default every bus starts with
+ *
+ * The kext's per-bus hosting table (this+0x1560[bus], changed by
+ * MoveInputToDSP and spanning).  Nothing moves an input on the x4, so
+ * nothing calls this yet; it is the hook for the strip engine.  Only
+ * coefficients sent afterwards follow the new owner; call
+ * ua_dsp_replay_bus_params() to re-send the cache.
+ */
+int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus_id, u32 dsp_idx)
+{
+	if (bus_id >= UA_BUS_COEF_BUSES || dsp_idx >= ua->num_dsps)
+		return -EINVAL;
+	ua->dspx.bus_owner[bus_id] = dsp_idx;
+	return 0;
+}
+
+/**
+ * ua_dsp_replay_bus_params - Re-send the cached mixer state to a fresh DSP
+ * @ua: device (caller must hold ua->lock)
+ *
+ * After a DSP restart or a cold re-init the DSP holds the firmware's
+ * defaults: bus coefficients zero, every bus enabled.  This re-sends what
+ * the host had set: first the bus-enable commands for the buses that are
+ * off, then every cached (bus, param, side) coefficient in index order,
+ * each to its owner DSP (and DSP 0), exactly as ua_dsp_set_bus_param() did.
+ * Sleeps when a ring is full.  Nothing is replayed that was never set, so
+ * on a driver that has not seen a coefficient yet it sends nothing.
+ *
+ * Where to call it (ua_core.c, not called yet): after a successful
+ * ua_dsp_activate_plugin_chain() -- that chain carries the captured
+ * default coefficients and would overwrite an earlier replay -- in
+ * ua_dsp_init_and_load() and in ua_audio_connect(); and after any other
+ * place that restarts the DSP program.
+ *
+ * Returns 0, or the first error (the replay continues past a failure).
+ */
+int ua_dsp_replay_bus_params(struct ua_device *ua)
+{
+	unsigned int cell, sent = 0, failed = 0, dsp;
+	int err = 0, ret;
+	u32 bus;
+
+	lockdep_assert_held(&ua->lock);
+
+	if (!ua->dsp[0].rings_allocated)
+		return -ENODEV;
+
+	for (bus = 0; bus < 7; bus++) {
+		if (!(ua->bus_enable_known & BIT(bus)) ||
+		    !(ua->bus_disabled_mask & BIT(bus)))
+			continue;
+		for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+			if (!ua->dsp[dsp].rings_allocated)
+				continue;
+			ret = ua_dsp_ring_wait_space(ua, &ua->dsp[dsp].cmd, 1,
+						     50);
+			if (!ret)
+				ret = ua_dsp_ring_send_raw(ua, dsp,
+							   UA_DSP_CMD_BUS_ENABLE,
+							   bus, 0, 0);
+			if (ret) {
+				failed++;
+				err = err ? err : ret;
+			} else {
+				sent++;
+			}
+		}
+	}
+
+	for_each_set_bit(cell, ua->dspx.bus_coef_valid, UA_BUS_COEF_CELLS) {
+		u32 side = cell % UA_BUS_COEF_SIDES;
+		u32 param = (cell / UA_BUS_COEF_SIDES) % UA_BUS_COEF_PARAMS;
+		u32 b = cell / (UA_BUS_COEF_SIDES * UA_BUS_COEF_PARAMS);
+		u32 val = ua->dspx.bus_coef[b][param][side];
+		unsigned int owner = ua_dsp_bus_owner(ua, b);
+
+		ret = ua_dsp_bus_cmd_send(ua, owner, b, param, side, val,
+					  true);
+		if (!ret && owner)
+			ret = ua_dsp_bus_cmd_send(ua, 0, b, param, side, val,
+						  true);
+		if (ret) {
+			failed++;
+			err = err ? err : ret;
+		} else {
+			sent++;
+		}
+	}
+
+	ua->dspx.bus_replays++;
+	dev_info(&ua->pdev->dev,
+		 "bus coefficient replay: %u command(s) sent, %u failed\n",
+		 sent, failed);
+	return err;
 }
 
 /**

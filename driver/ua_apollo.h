@@ -1190,6 +1190,48 @@ struct ua_plugin_dma_buf {
 	void *cpu;                  /* Kernel-visible mapping (coherent) */
 };
 
+/*
+ * DSP-ring extras (ua_dsp.c): the SEL130 coefficient cache and bus owner
+ * table (parity/14 B3/B4), and the DSP message-interrupt state (parity/03
+ * A07, I01-I05).  One member at the end of struct ua_device so other
+ * branches' edits to that struct do not collide.
+ */
+#define UA_BUS_COEF_BUSES	32
+#define UA_BUS_COEF_PARAMS	7
+#define UA_BUS_COEF_SIDES	2
+#define UA_BUS_COEF_CELLS	(UA_BUS_COEF_BUSES * UA_BUS_COEF_PARAMS * \
+				 UA_BUS_COEF_SIDES)
+
+/* ua_dsp_set_bus_param_flags() flags */
+#define UA_DSP_BUSP_SOLO_MUTE	BIT(0)	/* entry is a solo-muted weight */
+
+struct ua_dsp_ext {
+	/* SEL130 coefficient cache: [bus][param][side] -> float bits */
+	u32 bus_coef[UA_BUS_COEF_BUSES][UA_BUS_COEF_PARAMS][UA_BUS_COEF_SIDES];
+	DECLARE_BITMAP(bus_coef_valid, UA_BUS_COEF_CELLS);
+	u8 bus_owner[UA_BUS_COEF_BUSES];	/* hosting DSP, 0 = DSP 0 */
+	u32 bus_replays;			/* ua_dsp_replay_bus_params() runs */
+
+	/* Message FIFO / DSP vectors (dsp_msg_irq) */
+	bool inited;			/* msg_work initialised */
+	bool msg_armed;			/* irq_lock: vectors enabled by us */
+	bool storm_tripped;		/* vectors masked by the storm guard */
+	u32 vec_mask;			/* irq_lock: IMR bits we enabled */
+	struct work_struct msg_work;
+	unsigned long pend_fifo;	/* bit n: DSP n message FIFO vector */
+	unsigned long pend_err;		/* bit 2n: error A, 2n+1: error B */
+	unsigned long pend_rearm;	/* bit 2n: cmd, 2n+1: resp (one-shot) */
+	unsigned long storm_window;	/* jiffies at the window start */
+	u32 storm_count;		/* DSP vectors in this window */
+	u8 msg_rd[UA_MAX_DSPS];		/* software read index into the FIFO */
+	atomic_t vec_count[UA_MAX_DSPS][5];	/* fires per vector 5n+j */
+	u32 msg_total[UA_MAX_DSPS];	/* FIFO messages read */
+	u32 msg_f001[UA_MAX_DSPS];	/* class 0xF001xxxx */
+	u32 msg_f002[UA_MAX_DSPS];	/* class 0xF002xxxx */
+	u32 msg_stale[UA_MAX_DSPS];	/* write index > 0xF seen */
+	u32 msg_last[UA_MAX_DSPS][5];	/* last message, raw words */
+};
+
 struct ua_device {
 	struct pci_dev *pdev;
 	void __iomem *regs;         /* BAR0 MMIO base */
@@ -1309,6 +1351,9 @@ struct ua_device {
 	/* Pause reasons (UA_PAUSE_*): see ua_pause_set()/ua_pause_clear() */
 	atomic_t pause_mask;
 	u32 lock_level;             /* LockSampleRateAndClock level; 0 */
+
+	/* DSP ring extras (ua_dsp.c); keep last */
+	struct ua_dsp_ext dspx;
 };
 
 /* Pause reasons: posts UA_EVT_PAUSED / UA_EVT_RESUMED on a change (ua_core.c) */
@@ -1581,6 +1626,10 @@ int ua_dsp_test_send_block(struct ua_device *ua);
 int ua_dsp_send_routing(struct ua_device *ua);
 int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
 			 u32 param, u32 side, u32 value_u32);
+int ua_dsp_set_bus_param_flags(struct ua_device *ua, u32 bus_id, u32 param,
+			       u32 side, u32 value_u32, u32 flags);
+int ua_dsp_replay_bus_params(struct ua_device *ua);	/* ua->lock */
+int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus_id, u32 dsp_idx);
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
 u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua);
 int ua_dsp_set_input_param(struct ua_device *ua, u32 input, u32 sub,
