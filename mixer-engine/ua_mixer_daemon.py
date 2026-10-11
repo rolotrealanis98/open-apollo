@@ -2571,7 +2571,8 @@ class MixerDaemon:
             return True
 
         if self.hw_router:
-            result = self.hw_router.set_global(canonical, value)
+            result = self.hw_router.set_global(
+                canonical, value, current=self.commands.value_of(canonical))
         else:
             names = set(CLOCK_SOURCE_MAP) | set(
                 (self.state.get_prop_dict("/ClockSource") or {}).get("values")
@@ -2585,6 +2586,13 @@ class MixerDaemon:
             return True
 
         old_value = self.commands.value_of(canonical)
+        if old_value == result.value:
+            # Nothing changed (set_global did not write the driver either):
+            # accepted and echoed, but not published or marked dirty, as a
+            # JUCE property set to its current value
+            if "func_id" in params:
+                self._send_response(client, path, result.value, params)
+            return True
         self.state.set(canonical, result.value, hardware=False)
         if self.helper_tree:
             self.helper_tree.set_value(canonical, result.value)

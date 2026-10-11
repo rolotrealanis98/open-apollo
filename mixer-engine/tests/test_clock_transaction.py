@@ -238,6 +238,62 @@ def test_ws_accepted_clock_change_is_written_once():
     assert r.state.get_value("/SampleRate/value") == 96000
 
 
+# ── A SET to the value already in effect does not touch the driver ──
+
+SAME = [("/SampleRate/value", 48000, 96000),
+        ("/ClockSource/value", "Internal", "S/PDIF"),
+        ("/ClockSource", "Internal", "ADAT")]
+
+
+@pytest.mark.parametrize("binary", [False, True])
+@pytest.mark.parametrize("path,same,other", SAME)
+def test_tcp_same_value_is_echoed_not_written(binary, path, same, other):
+    r = Route(binary)
+    before = r.snapshot()
+    r.set(path, same, func_id="21")
+    r.backend.set_driver_param.assert_not_called()
+    assert r.snapshot() == before and r.seen == []
+    reply = r.replies()[-1]
+    assert reply["data"] == same and reply["parameters"]["func_id"] == 21
+    r.set(path, other)
+    assert r.backend.set_driver_param.call_count == 1
+
+
+@pytest.mark.parametrize("path,same,other", SAME)
+def test_ws_same_value_is_not_written(path, same, other):
+    r = Route(False)
+    ws = WsServer(r.state, r.router)
+    client = Mock(id="ws-1")
+    assert ws._dispatch(client, parse_ws_command(f"set {path} {same}")) == []
+    r.backend.set_driver_param.assert_not_called()
+    assert r.seen == []
+    ws._dispatch(client, parse_ws_command(f"set {path} {other}"))
+    assert r.backend.set_driver_param.call_count == 1
+
+
+def test_driver_value_wins_over_a_stale_tree():
+    # The tree says 48000 but the driver already runs at 96000: no write,
+    # and the tree catches up
+    r = Route(False)
+    r.backend.driver_values[DRIVER_PARAM_SAMPLE_RATE] = 96000
+    r.set("/SampleRate/value", 96000)
+    r.backend.set_driver_param.assert_not_called()
+    assert r.state.get_value("/SampleRate/value") == 96000
+    # and the tree's 48000 is not trusted over the driver: a SET back to it
+    # is a real change
+    r.set("/SampleRate/value", 48000)
+    r.backend.set_driver_param.assert_called_once_with(
+        DRIVER_PARAM_SAMPLE_RATE, 48000)
+
+
+def test_tree_value_does_not_hide_a_driver_difference():
+    r = Route(False)
+    r.backend.driver_values[DRIVER_PARAM_CLOCK_SOURCE] = 0x00     # S/PDIF
+    r.set("/ClockSource/value", "Internal")
+    r.backend.set_driver_param.assert_called_once_with(
+        DRIVER_PARAM_CLOCK_SOURCE, 0x0C)
+
+
 # ── Primitives ──────────────────────────────────────────────────────
 
 def test_normalize_global():
@@ -263,3 +319,14 @@ def test_driver_sync_never_writes_back():
     assert tree.get_value("/SampleRate/value") == 96000
     assert tree.get_value("/ClockSource/value") == "Internal"
     assert writes == [] and be.driver_params == []
+
+
+def test_published_value_decides_when_the_driver_does_not_answer():
+    """Without a driver answer the caller's published value decides."""
+    r = Route(False)
+    r.backend.get_driver_param = Mock(side_effect=OSError("no answer"))
+    assert r.router._clock_already_set("/SampleRate/value", 48000, 48000)
+    assert not r.router._clock_already_set("/SampleRate/value", 96000, 48000)
+    assert r.router._clock_already_set("/ClockSource/value", "Internal",
+                                       "Internal")
+    assert not r.router._clock_already_set("/ClockSource/value", "Internal")

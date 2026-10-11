@@ -216,7 +216,8 @@ class WsServer:
             # As on TCP: written to the driver first, published only when
             # it took the value (MixerDaemon._handle_clock_set)
             if self.hw_router is not None:
-                result = self.hw_router.set_global(canonical, value)
+                result = self.hw_router.set_global(
+                    canonical, value, current=self.state.get_value(canonical))
             else:
                 names = set(CLOCK_SOURCE_MAP) | set(
                     (self.state.get_prop_dict("/ClockSource") or {}).get(
@@ -225,6 +226,8 @@ class WsServer:
             if not result.accepted:
                 return [encode_ws_error(path, "Unable to set value.",
                                         cmd.message_id)]
+            if self.state.get_value(canonical) == result.value:
+                return []       # unchanged: nothing to publish or save
             path, value, hardware = canonical, result.value, False
         self.state.set(path, value, source_client=client.id, hardware=hardware)
         if self.commands is not None:

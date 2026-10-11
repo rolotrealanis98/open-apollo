@@ -742,6 +742,9 @@ VALID_SAMPLE_RATES = {44100, 48000, 88200, 96000, 176400, 192000}
 CLOCK_CONTROL_PATHS = ("/SampleRate/value", "/ClockSource/value")
 
 
+_NO_CURRENT = object()
+
+
 @dataclass(frozen=True)
 class GlobalWriteResult:
     """Outcome of a /SampleRate or /ClockSource write (the daemon's own,
@@ -4494,7 +4497,42 @@ class HardwareRouter:
         menu = getattr(self, "clock_sources", None) or {}
         return set(menu) | set(CLOCK_SOURCE_MAP)
 
-    def set_global(self, path: str, value: Any) -> GlobalWriteResult | None:
+    def _clock_source_code(self, name: str) -> int | None:
+        menu = getattr(self, "clock_sources", None) or {}
+        return menu.get(name, CLOCK_SOURCE_MAP.get(name))
+
+    def _clock_already_set(self, path: str, value: Any,
+                           current: Any = _NO_CURRENT) -> bool:
+        """True when `value` (already normalized) is what the clock
+        already runs at.  The driver's own value wins when the device is
+        connected and answers (the tree can lag the hardware); otherwise
+        `current`, the published value the caller passes (only the SET
+        handlers know it: from the tree's own on_set the tree already holds
+        the new value).  The driver's ua_audio_set_clock_cfg has no same-value
+        shortcut, so a repeated SET would pause and rewrite the clock."""
+        rate = path == "/SampleRate/value"
+        target = value if rate else self._clock_source_code(value)
+        if target is None:
+            return False
+        drv = None
+        if getattr(self.backend, "connected", False):
+            try:
+                drv = self.backend.get_driver_param(
+                    DRIVER_PARAM_SAMPLE_RATE if rate
+                    else DRIVER_PARAM_CLOCK_SOURCE)
+            except Exception:
+                drv = None
+            if not isinstance(drv, int) or (rate and drv <= 0):
+                drv = None              # no answer, or rate not known yet
+        if drv is not None:
+            return drv == target
+        if current is _NO_CURRENT or current is None:
+            return False
+        known = normalize_global(path, current, self.clock_source_names())
+        return bool(known and known.accepted and known.value == value)
+
+    def set_global(self, path: str, value: Any,
+                   current: Any = _NO_CURRENT) -> GlobalWriteResult | None:
         """Validate and write a clock control (SetDriverParameter, sel 0xA6
         in the kext: {paramID, reserved, value_lo, value_hi}).
 
@@ -4503,7 +4541,9 @@ class HardwareRouter:
         accepted; a refused or failed ioctl leaves the tree as it was (the
         hardware may still have changed: that is not a rollback claim).
         A sample rate PipeWire takes over (clock.force-rate) counts as
-        accepted, as before.
+        accepted, as before.  A value equal to what the clock already runs
+        at (the driver's, else `current`, the caller's published value) is
+        accepted without a driver write.
 
         WARNING: Changing sample rate or clock source while streaming
         will disrupt audio. The macOS kext warns but proceeds.
@@ -4519,6 +4559,10 @@ class HardwareRouter:
             else:
                 log.warning("HW DRV: SampleRate invalid value: %r (valid: %s)",
                             value, sorted(VALID_SAMPLE_RATES))
+            return result
+        if self._clock_already_set(path, result.value, current):
+            log.debug("HW DRV: %s already %r, driver not written", path,
+                      result.value)
             return result
         try:
             if path == "/SampleRate/value":
