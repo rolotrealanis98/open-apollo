@@ -119,6 +119,13 @@ EXIT_RESTART = 75   # EX_TEMPFAIL: systemd's Restart=on-failure starts us again
 # safety net: events carry the changes, this only catches a missed one.
 EVENT_SAFETY_POLL = 10.0
 
+# The Mixer Engine mutes the outputs for GetSecsToMuteOnSampleRateChange()
+# seconds after a rate change (MuteUntilSettleDown); its default is not
+# known, 1 s is a placeholder.  0 turns the mute off.
+MUTE_ON_RATE_CHANGE_SECS = 1.0
+# The driver's rate index (UA_RATE_*) of a sample rate
+RATE_INDEX = {44100: 1, 48000: 2, 88200: 3, 96000: 4, 176400: 5, 192000: 6}
+
 
 def load_network_id(path: Path | None) -> str:
     """The persistent network id, created on first use.
@@ -308,6 +315,9 @@ class MixerDaemon:
         self._events = DriverEvents(self._on_driver_event)
         self._events_loop = None
         self._last_rate_poll = 0.0
+        self.mute_on_rate_change = MUTE_ON_RATE_CHANGE_SECS
+        self._last_rate_index: int | None = None
+        self._settle_timer = None
         self.io_layout: tuple[int, int] | None = None   # (play, rec) hw channels
         self.layout_changes = 0     # bumped by every LAYOUT_CHANGED event
         if hw_router and not self._hw_online:
@@ -388,6 +398,7 @@ class MixerDaemon:
     def _device_lost(self, now: float):
         log.warning("Apollo device lost — daemon stays up, reopening with backoff")
         self._events_detach()
+        self._cancel_settle()
         self._hw_online = False
         self._ready_at = None
         # The watchdog owns the init push for the next connection
@@ -1010,6 +1021,8 @@ class MixerDaemon:
                             "polling", e)
                 self._events.close()
                 return
+        rate = be.get_driver_param(DRIVER_PARAM_SAMPLE_RATE)
+        self._last_rate_index = RATE_INDEX.get(rate)
         log.info("Driver event channel open: rate poll slowed to %.0f s",
                  EVENT_SAFETY_POLL)
 
@@ -1045,6 +1058,48 @@ class MixerDaemon:
             be.mark_lost(why)
         self._device_lost(time.monotonic())
 
+    def _mute_until_settle(self):
+        """MuteUntilSettleDown: hold the monitor muted for a moment after
+        the clock changed rate, so the converters' re-lock does not reach
+        the speakers.  Needs the event loop to schedule the unmute; without
+        one nothing is muted."""
+        secs = self.mute_on_rate_change
+        if secs <= 0 or not self.hw_router or not self._hw_online:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        mon = self.hw_router.monitor_output_index()
+        if mon is None:
+            return
+        rb = self.hw_router.poll_hw_readback() or {}
+        base = f"/devices/0/outputs/{mon}"
+        muted = rb.get("monitor_mute",
+                       self._truthy_tree(f"{base}/Mute/value"))
+        mono = rb.get("monitor_mono",
+                      self._truthy_tree(f"{base}/MixToMono/value"))
+        if not self.hw_router.begin_settle_mute(muted, mono):
+            return
+        if self._settle_timer is not None:
+            self._settle_timer.cancel()
+        self._settle_timer = loop.call_later(secs, self._end_settle)
+
+    def _truthy_tree(self, path: str) -> bool:
+        return bool(self.state.get_value(path))
+
+    def _end_settle(self):
+        self._settle_timer = None
+        if self.hw_router:
+            self.hw_router.end_settle_mute()
+
+    def _cancel_settle(self):
+        if self._settle_timer is not None:
+            self._settle_timer.cancel()
+            self._settle_timer = None
+        if self.hw_router:
+            self.hw_router.cancel_settle_mute()
+
     def _refresh_clock_source(self, source: int | None = None):
         """Push the driver's clock source (name) to /ClockSource."""
         if not self.hw_router or not self.hw_router.backend.connected:
@@ -1071,7 +1126,12 @@ class MixerDaemon:
         """One struct ua_event from the driver (see events.py)."""
         name = EVENT_NAMES.get(code, f"0x{code:x}")
         log.debug("driver event %s arg=0x%x", name, arg)
-        if code in (UA_EVT_RATE_CHANGED, UA_EVT_CONNECTED, UA_EVT_RATE_INFO):
+        if code == UA_EVT_RATE_CHANGED:
+            self._poll_driver_rate(force=True)
+            if self._last_rate_index not in (None, arg):
+                self._mute_until_settle()
+            self._last_rate_index = arg
+        elif code in (UA_EVT_CONNECTED, UA_EVT_RATE_INFO):
             self._poll_driver_rate(force=True)
         elif code == UA_EVT_CLOCK_CHANGED:
             self._refresh_clock_source(arg)
@@ -2317,6 +2377,12 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                         help="ALSA device for metering (default: auto-detect)")
     parser.add_argument("--name", "-n",
                         help="Bonjour service name (default: hostname)")
+    parser.add_argument("--mute-on-rate-change", type=float,
+                        default=MUTE_ON_RATE_CHANGE_SECS, metavar="SECONDS",
+                        help="Mute the monitor this long after the sample "
+                             "rate changed, as the Mixer Engine does "
+                             f"(default {MUTE_ON_RATE_CHANGE_SECS:g}, "
+                             "0 = off)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Debug logging")
     parser.add_argument("--trace", "-t", action="store_true",
@@ -2439,6 +2505,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                          helper_tree=helper_tree, metering=metering,
                          network_id=network_id,
                          loaded_map=None if args.device_map else device_map)
+    daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None
