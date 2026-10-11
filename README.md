@@ -103,7 +103,8 @@ Talkback audio routing, virtual/monitor loopback, console UI, multi-device suppo
 | Apollo x4 Gen 2 | Needs Testing |
 | Apollo x6 / Gen 2 | Needs Testing |
 | Apollo x8 / Gen 2 | Needs Testing |
-| Apollo x8p / Gen 2 | Needs Testing |
+| Apollo x8p | **Verified by owners** (issues #46/#52) — playback, all 8 preamps, channel identity at 48 kHz. Other rates, digital I/O and clock untested. |
+| Apollo x8p Gen 2 | Needs Testing |
 | Apollo x16 / Gen 2 | Needs Testing |
 | Apollo x16D | Needs Testing |
 | Apollo Twin X / Gen 2 | Needs Testing |
@@ -111,9 +112,12 @@ Talkback audio routing, virtual/monitor loopback, console UI, multi-device suppo
 | Apollo 8P (original) | Needs Testing |
 | Arrow | Needs Testing |
 
-All Thunderbolt Apollo models share the same register map and protocol — the driver
-includes device detection and channel configuration for every model listed above.
-We need community testers to verify each one.
+All Thunderbolt Apollo models share the same register map and protocol. The driver
+follows the macOS driver on every model: it reads each unit's channel layout from the
+firmware, connects its DSPs the same way, and takes preamp, headphone, talkback and
+clock-source details from per-model data (`devices/*.json`, from UA's own Mixer Engine).
+Only the x4 and the x8p have been checked on real hardware, so we need community
+testers for the rest: see [Testing your Apollo](tools/TESTING.md).
 
 ### USB Models
 
@@ -329,9 +333,9 @@ for that device.
 
 ### Quick contribution path
 
-1. Build and load the driver
-2. Run `./tools/contribute/device-probe.sh`
-3. [Submit a device report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml)
+1. Install the driver (`sudo bash scripts/install.sh`)
+2. Run `tools/apollo-report.sh`, then `tools/apollo-selftest.sh` (details in [tools/TESTING.md](tools/TESTING.md))
+3. [Submit a device report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml) with the report file attached
 
 ## License
 
