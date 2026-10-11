@@ -61,6 +61,9 @@ App (PipeWire) → ALSA PCM → ua_audio.c → DMA buffer → Apollo FPGA
 ### The driver never guesses:
 Every register write was traced from the macOS kext via DTrace or Windows via BAR0 captures. If you're adding hardware interaction, trace the working driver first.
 
+### Object commands (`post`) and the daemon's own files:
+`post <object path>/<CommandName> [json]` runs a Mixer Engine object command (`mixer-engine/commands.py`). An unknown command answers `Unable to resolve the command for the post.`, a known one that fails `Unable to execute command.`, both in the get/set error framing (`{"path","error"}`); success is `{"path","data"}` with `true` or the command's result. The parameter keys (`name`, `index`, `file`, `seconds`, ...) are this daemon's own: the engine's `cmdparams` format is not known. Snapshots, presets and sessions are **the daemon's own JSON** in `mixer-engine/state/` (`<device>.snapshots.json`, `<device>.presets.json`, `<device>.sessions/<name>.session.json`), **not UA's session XML**; no UA tool reads them. Licensing commands are never implemented.
+
 ## Where to Start
 
 - **Bug fix in audio routing?** → `driver/ua_audio.c` (pcm_prepare, transport start/stop)

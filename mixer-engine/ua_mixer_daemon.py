@@ -55,6 +55,7 @@ from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, make_meter,
                       meter_channel)
 from bonjour import BonjourAnnouncer, _default_name
+from commands import CommandEngine
 from ubjson_codec import encode_response as ubjson_encode_response, UbjsonFramer
 
 try:
@@ -377,6 +378,8 @@ class MixerDaemon:
         # True between UA_EVT_PAUSED and UA_EVT_RESUMED for the device
         # reason (system suspend): no hardware writes, the tree keeps going
         self.hw_paused = False
+        # `post` object commands (commands.py)
+        self.commands = CommandEngine(self)
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -1224,6 +1227,7 @@ class MixerDaemon:
             return
         log.info("Device paused for system suspend: hardware writes stopped")
         self._cancel_settle()
+        self.commands.on_pause()
         self._set_hw_paused(True)
 
     def _on_device_resumed(self):
@@ -2070,6 +2074,9 @@ class MixerDaemon:
                 self._push_to_clients(f"{base}/CRMonitorLevel",
                                       (monitor_tapered_to_hw(v) - 192) / 2.0)
 
+        # A Snapshot or channel Preset name that exists is recalled
+        self.commands.on_set(path, cmd.value)
+
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
             self._send_response(client, path, cmd.value, resp_params)
@@ -2245,7 +2252,33 @@ class MixerDaemon:
                     1.0, self._fire_init_complete)
             return
 
-        log.debug("%s: POST %s (value=%r) — ignored", client.id, cmd.path, cmd.value)
+        # Object commands (`post <object>/<CommandName>`): the engine's
+        # result, or its error string
+        data, error = self.commands.execute(cmd.path, cmd.value,
+                                            cmd.raw_params)
+        params = {k: v for k, v in (resp_params or {}).items()
+                  if k != "cmdparams"} or None
+        self._send_post_reply(client, cmd.path, data, error, params)
+
+    def _send_post_reply(self, client: MixerClient, path: str, data,
+                         error: str | None, params: dict | None):
+        """Answer a `post` command.  The error reply is the get/set one
+        ({"path", "error"}) with the engine's text; success is
+        {"path", "data"}, data being true or the command's result.  The
+        request's parameters (func_id) are echoed, as for set."""
+        params = self._coerce_params(params)
+        resp: dict = {"path": path}
+        if error is not None:
+            resp["error"] = error
+        else:
+            resp["data"] = data
+        if params:
+            resp["parameters"] = params
+        if client.ubjson:
+            client.send(ubjson_encode_response(resp))
+        else:
+            client.send((json.dumps(resp, separators=(",", ":"))
+                         + "\0").encode("utf-8"))
 
 
 def device_map_path(slug: str) -> Path:
@@ -2595,6 +2628,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         seed_state_file(state_file, state_file_for(device_map, index))
     state_file.parent.mkdir(exist_ok=True)
     state.enable_persistence(state_file)
+    store_stem = state_file.name.removesuffix(".state.json")
     network_id = load_network_id(state_file.with_name(
         state_file.name.removesuffix(".state.json") + ".network.json"))
 
@@ -2649,6 +2683,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                          network_id=network_id,
                          loaded_map=None if args.device_map else device_map)
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
+    daemon.commands.set_store(state_file.parent, store_stem)
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None
@@ -2659,6 +2694,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             trace=args.trace,
             network_id=daemon.network_id,
             process_id=daemon.process_id,
+            commands=daemon.commands,
         )
     elif not args.no_ws and not HAS_WEBSOCKETS:
         log.warning("websockets package not installed — WS server disabled "

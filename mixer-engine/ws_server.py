@@ -24,6 +24,7 @@ except ImportError:
     HAS_WEBSOCKETS = False
 
 from state_tree import StateTree
+from commands import ERR_UNRESOLVED
 from ws_protocol import (
     WsCommand, parse_ws_command,
     encode_ws_response, encode_ws_error,
@@ -67,7 +68,8 @@ class WsServer:
     def __init__(self, state: StateTree, hw_router,
                  host: str = "0.0.0.0", port: int = 4720,
                  trace: bool = False,
-                 network_id: str = "", process_id: str = ""):
+                 network_id: str = "", process_id: str = "",
+                 commands=None):
         self.state = state
         self.hw_router = hw_router
         self.host = host
@@ -75,6 +77,7 @@ class WsServer:
         self.trace = trace
         self.network_id = network_id
         self.process_id = process_id
+        self.commands = commands    # commands.CommandEngine, or None
         self.clients: dict[str, WsClient] = {}
 
     async def start(self):
@@ -202,6 +205,8 @@ class WsServer:
         if path.lower() == "/sleep":
             path = "/Sleep"
         self.state.set(path, cmd.value, source_client=client.id)
+        if self.commands is not None:
+            self.commands.on_set(path, cmd.value)
         return []
 
     def _handle_subscribe(self, client: WsClient, cmd: WsCommand) -> list[str]:
@@ -241,6 +246,14 @@ class WsServer:
             return [encode_ws_response("/request_challenge", "",
                                        cmd.message_id)]
 
-        log.debug("WS %s: POST %s (value=%r) — ignored",
-                  client.id, cmd.path, cmd.value)
-        return []
+        if cmd.path == "/response":
+            return []       # the challenge handshake stays as it was
+        if self.commands is None:
+            return [encode_ws_error(cmd.path, ERR_UNRESOLVED, cmd.message_id)]
+        params = {k: v for k, v in cmd.raw_params.items()
+                  if k not in ("cmdparams", "message_id")} or None
+        data, error = self.commands.execute(cmd.path, cmd.value,
+                                            cmd.raw_params)
+        if error is not None:
+            return [encode_ws_error(cmd.path, error, cmd.message_id)]
+        return [encode_ws_response(cmd.path, data, cmd.message_id, params)]

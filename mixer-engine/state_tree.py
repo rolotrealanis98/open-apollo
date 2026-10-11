@@ -51,6 +51,10 @@ class StateTree:
         self.control_count: int = 0
         # Persistence: track modified values, debounced save
         self._dirty: dict[str, Any] = {}  # path → value (only modified controls)
+        # path → the value it had before its first change (the device map's
+        # default, or the value the saved state replaced): what NewSession
+        # goes back to
+        self._base: dict[str, Any] = {}
         self._save_path: Path | None = None
         self._save_timer: threading.Timer | None = None
         self._save_delay = 2.0  # seconds
@@ -123,6 +127,7 @@ class StateTree:
             for path, value in saved.items():
                 resolved, prop_name = self._resolve_path(path)
                 if resolved is not None and prop_name is not None:
+                    self._base.setdefault(path, resolved.get("value"))
                     resolved["value"] = value
                     self._dirty[path] = value
                     count += 1
@@ -331,14 +336,18 @@ class StateTree:
 
     # ── SET ───────────────────────────────────────────────────────────
 
-    def set(self, path: str, value: Any, source_client: str | None = None) -> bool:
-        """Handle a SET command. Returns True if value was changed.
+    def set(self, path: str, value: Any, source_client: str | None = None,
+            hardware: bool = True) -> bool:
+        """Handle a SET command. Returns True if the path was accepted.
 
         Args:
             path: Control path to set
             value: New value
             source_client: Client ID that initiated the SET (excluded from
                            subscription notifications to prevent echo)
+            hardware: False updates the tree and the subscribers without
+                      calling on_set (a caller that writes the hardware
+                      itself, in its own order, such as a session load)
         """
         # Special paths
         if path == "/Sleep":
@@ -365,10 +374,11 @@ class StateTree:
         if old_value != value:
             log.debug("SET %s: %r → %r", path, old_value, value)
             # Track modified value for persistence
+            self._base.setdefault(path, old_value)
             self._dirty[path] = value
             self._schedule_save()
             # Notify hardware backend
-            if self.on_set:
+            if hardware and self.on_set:
                 self.on_set(path, value)
             # Notify subscribers (exclude originator to prevent echo)
             self._notify_subscribers(path, value, exclude=source_client)
