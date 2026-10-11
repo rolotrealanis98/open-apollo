@@ -4019,7 +4019,7 @@ int ua_dsp_load_programs(struct ua_device *ua)
 	 * that lands.
 	 */
 	dev_info(&ua->pdev->dev,
-		 "loading %u programs for DSP 0\n", UA_X4_DSP0_NUM_PROGRAMS);
+		 "loading %zu programs for DSP 0\n", UA_X4_DSP0_NUM_PROGRAMS);
 
 	for (i = 0; i < UA_X4_DSP0_NUM_PROGRAMS; i++) {
 		const struct ua_dsp_program *prog = &ua_x4_dsp0_programs[i];

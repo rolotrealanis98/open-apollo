@@ -2624,7 +2624,7 @@ static int ua_audio_prepare_transport(struct ua_device *ua,
 	struct ua_audio *audio = &ua->audio;
 	unsigned int block_size;
 	int retries;
-	u32 frame_ctr, acr, readback;
+	u32 frame_ctr, readback;
 
 	/*
 	 * io_map=1: re-read the firmware IO descriptors and commit the
