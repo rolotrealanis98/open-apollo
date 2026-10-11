@@ -32,13 +32,36 @@ struct ua_device_info {
 
 /*
  * DSP info for a single SHARC DSP.
+ *
+ * UA_FEAT_DSP_LOAD (ABI 1.6): the load words of the kext's GetDSPInfo
+ * (selector 112, UAD2DSPInfo), all in 1/100 % (10000 = 100 %); an older
+ * driver leaves them 0.  The kext's DSP % is host bookkeeping: the plugin
+ * loads it allocated plus a rate overhead.  This driver allocates nothing
+ * on the DSPs, so
+ *   alloc_load    = the rate overhead alone (UAD2DSPInfo+0x40): on the x4
+ *                   110 at 44.1 kHz, 119 at 48, 220/239 at 88.2/96, 183/200
+ *                   at 176.4/192.  UA's Mixer Engine shows the average over
+ *                   the DSPs, divided by 100, as TotalDSPLoad.
+ *   measured_load = the DSP's own load word (window +0x0C, UAD2DSPInfo+0x44,
+ *                   the Mixer Engine's MeasuredDSPLoad x 100)
+ *   pgm_load      = pool 3 used / available (the Mixer Engine's
+ *                   TotalPGMLoad x 100): 0, nothing is allocated
+ *   mem_load      = the largest of pools 0-2 used / available
+ *                   (TotalMEMLoad x 100): 0, nothing is allocated
+ *   flags         = UA_DSP_INFO_F_LOADS when the words above are filled
  */
 struct ua_dsp_info {
 	__u32 index;
 	__u32 bank_base;	/* Register bank base offset */
 	__u32 status;		/* 0 = idle, 1 = running */
-	__u32 reserved[5];
+	__u32 alloc_load;
+	__u32 measured_load;
+	__u32 pgm_load;
+	__u32 mem_load;
+	__u32 flags;
 };
+
+#define UA_DSP_INFO_F_LOADS	0x1
 
 /*
  * DMA ring buffer configuration (per-channel).
@@ -178,15 +201,48 @@ struct ua_mixer_param {
 };
 
 /*
- * Driver parameter (kext selector 166 / 0xA6, SetDriverParameter).
- * Controls sample rate, clock source, etc.
- * Input size: 0x10 (16 bytes).
+ * Driver parameter (kext selectors 166 / 0xA6 SetDriverParameter and
+ * 167 / 0xA7 GetDriverParameter; same 16-byte struct).
+ *
+ * Linux ids (unchanged):
+ *   UA_DRIVER_PARAM_RATE        0  sample rate in Hz (set/get)
+ *   UA_DRIVER_PARAM_CLOCK_SRC   1  clock source, UA_CLOCK_* (set/get)
+ *   UA_DRIVER_PARAM_TRANSPORT   2  1 = transport running (get only)
+ *
+ * The kext's own ids 1-5 mean other things (its 1 and 2 collide with the
+ * Linux ones), so they are reached as UA_DRIVER_PARAM_KEXT(id) = 0x100 + id
+ * (UA_FEAT_KEXT_DRIVER_PARAMS, ABI 1.5).  CDeviceManager::Set/
+ * GetDriverParameter (kext 12.0.0 x86 0x1dd38 / 0x1de68) only store them;
+ * here they are stored per device and have no effect:
+ *   KEXT(1) 0x101  "enable all devices" (mgr+0x5100, initial 0):
+ *                  UAD2Pcie2::probe accepts an Apollo subsystem outside its
+ *                  allow-list only when this reads 1.  The Linux driver binds
+ *                  every subsystem anyway.  The Mixer Engine sets it from
+ *                  GetEnableAllDevices in DMixer::Initialize.
+ *   KEXT(2) 0x102  diagnostic flags (SetDiagnosticFlags 0x18d4c, mgr+0x5084,
+ *                  initial 0): bit 0 clears KEXT(3) and is not kept; bits 1
+ *                  and 2 select audio-engine debug logging (copied at engine
+ *                  start, 0x38951).
+ *   KEXT(3) 0x103  a counter (mgr+0x5088): Set clears it whatever the value;
+ *                  nothing in kext 12.0.0 increments it, so it reads 0.
+ *   KEXT(4) 0x104  a 64-bit value (mgr+0x5090, initial 0), stored, never read.
+ *   KEXT(5) 0x105  "mixer connected" (mgr+0x5104, initial 1): the Mixer
+ *                  Engine writes 1 in DMixer::ConnectToHardware; nothing
+ *                  reads it.
+ * 32-bit ids (1, 2, 3, 5) keep the low 32 bits; Get sign-extends ids 1 and
+ * 5 as the kext does.  Any other id: -EINVAL.
  */
 struct ua_driver_param {
 	__u32 param_id;		/* Driver parameter enum */
 	__u32 reserved;
 	__u64 value;		/* 64-bit parameter value */
 };
+
+#define UA_DRIVER_PARAM_RATE		0
+#define UA_DRIVER_PARAM_CLOCK_SRC	1
+#define UA_DRIVER_PARAM_TRANSPORT	2
+#define UA_DRIVER_PARAM_KEXT_BASE	0x100
+#define UA_DRIVER_PARAM_KEXT(n)		(UA_DRIVER_PARAM_KEXT_BASE + (n))
 
 /*
  * Mixer readback (kext selector 136 / 0x88, GetMixerReadback).
@@ -478,7 +534,7 @@ struct ua_dma_test {
  * The struct is fixed size: never change sizeof(struct ua_version).
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		3
+#define UA_ABI_MINOR		6
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -494,6 +550,9 @@ struct ua_dma_test {
 #define UA_FEAT_BUS_SOLO_FLAG	(1u << 11) /* UA_BUS_PARAM_F_SOLO_MUTE */
 #define UA_FEAT_SYSINFO_EXT	(1u << 12) /* pcie_link_*, clock_src_mask, fw_rate_mask in SYSTEM_INFO */
 #define UA_FEAT_PLUGIN_CAPS	(1u << 13) /* UA_IOCTL_GET_PLUGIN_CAPS (ABI 1.3) */
+#define UA_FEAT_FW_RELEASE	(1u << 14) /* fw_release, dev_info in SYSTEM_INFO (ABI 1.4) */
+#define UA_FEAT_KEXT_DRIVER_PARAMS (1u << 15) /* UA_DRIVER_PARAM_KEXT(1..5) (ABI 1.5) */
+#define UA_FEAT_DSP_LOAD	(1u << 16) /* load words in ua_dsp_info (ABI 1.6) */
 
 struct ua_version {
 	__u32 abi_major;
@@ -570,8 +629,26 @@ struct ua_system_info {
 	__u32 pcie_link_width;
 	__u32 clock_src_mask;
 	__u32 fw_rate_mask;
-	__u32 reserved[4];
+	/*
+	 * UA_FEAT_FW_RELEASE (ABI 1.4); an older driver returns 0 here.
+	 * fw_release: BAR0 0x0008, the firmware version word the macOS driver
+	 * returns in UAD2DeviceInfo+0x24 (x4: 0x0b0fc9b3).  Decode it with
+	 * UA_FW_MAJOR/MINOR/BUILD; UA's Mixer Engine shows it "%d.%02d.%03d"
+	 * and accepts a major equal to the model's (9 or 11).  fw_version above
+	 * is BAR0 0x0000, DSP 0's status word, and is not a version.
+	 * dev_info: BAR0 0x01AC (UAD2DeviceInfo+0x80) for the public types the
+	 * macOS driver reads it for, 0xFFFFFFFF for the others, as it reports
+	 * them.  Bits [19:16] are the revision the Mixer Engine's per-device
+	 * firmware checks test (x6/x8/x8p/x16/x16D).
+	 */
+	__u32 fw_release;
+	__u32 dev_info;
+	__u32 reserved[2];
 };
+
+#define UA_FW_MAJOR(v)		(((v) >> 24) & 0xff)
+#define UA_FW_MINOR(v)		(((v) >> 16) & 0xff)
+#define UA_FW_BUILD(v)		((v) & 0xffff)
 
 #define UA_IOCTL_GET_SYSTEM_INFO	_IOR(UA_IOCTL_MAGIC, 0x05, struct ua_system_info)
 

@@ -107,6 +107,27 @@
 #define UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B 0x41  /* Serial 2108 (v12) */
 
 /*
+ * Linux-only device types for the models no serial-table entry names:
+ * 0x80 + the kext's public type (ua_resolve_public_model()).  Products
+ * by the Mixer Engine's CardType -> mixer class (devices/<model>.json):
+ */
+#define UA_PUBLIC_DEVTYPE_BASE      0x80
+#define UA_DEV_PUBLIC(pt)           (UA_PUBLIC_DEVTYPE_BASE | (pt))
+#define UA_DEV_APOLLO_THUNDERBOLT   0x85  /* public 5, ext_caps family 1 */
+#define UA_DEV_APOLLO_16            0x87  /* public 7, family 4 */
+#define UA_DEV_APOLLO_TWIN          0x88  /* public 8, family 5 */
+#define UA_DEV_REALTIME_RACK        0x8B  /* public 0xB, family 6 */
+#define UA_DEV_APOLLO_8             0x8C  /* public 0xC, family 8 */
+#define UA_DEV_APOLLO_16_MKII       0x8D  /* public 0xD, family 9 */
+#define UA_DEV_APOLLO_8P_PUBLIC     0x8E  /* public 0xE, family 11 (no subsystem pin) */
+#define UA_DEV_APOLLO_TWIN_B        0x8F  /* public 0xF, family 10 (Twin card types 22/23) */
+#define UA_DEV_APOLLO_TWIN_MKII     0x92  /* public 0x12, family 14 */
+#define UA_DEV_ARROW_PUBLIC         0x93  /* public 0x13: family 15, serial type 0x1E */
+#define UA_DEV_APOLLO_SOLO_PUBLIC   0x9C  /* public 0x1C: family 15, serial type 0x2A or other */
+#define UA_DEV_APOLLO_TWIN_X        0x99  /* public 0x19, family 19, serial not Gen 2 */
+#define UA_DEV_APOLLO_SOLO_PUBLIC_B 0xA7  /* public 0x27: family 15, serial type 0x3E */
+
+/*
  * AudioExtension vs legacy ring-buffer connect mechanism.
  *
  * From kext CPcieDevice::Connect() disassembly: a 40-bit bitmask at
@@ -208,8 +229,26 @@ static inline bool ua_public_output_mute(u32 pt)
  * All offsets from BAR0 base.
  */
 
-/* Global / Identification */
-#define UA_REG_FW_VERSION       0x0000  /* Firmware version / ID */
+/*
+ * Global / Identification.  0x0000-0x07FF is also DSP 0's register window.
+ *
+ * UA_REG_FW_VERSION keeps its historical name (it fills the ABI's
+ * fw_version fields) but is DSP 0's status word, not a version: 0x1c00 on
+ * the x4.  The firmware version is UA_REG_FW_RELEASE: CPcieDevice::
+ * GetDeviceInfo (kext 12.0.0 x86 0x50ae) returns it as UAD2DeviceInfo+0x24,
+ * which the Mixer Engine prints "%d.%02d.%03d" (major [31:24], minor
+ * [23:16], build [15:0]; CUAD2Info::GetFirmwareVersion) and whose major it
+ * compares with the mixer class's FWMajorVersion, 9 or 11
+ * (MixerTypeBase::CheckFirmwareVersionCompatibility).  x4: 0x0b0fc9b3 =
+ * 11.15.51635.  UA_REG_DEV_INFO is UAD2DeviceInfo+0x80, read only for the
+ * public types in UA_DEVINFO_TYPES (else 0xFFFFFFFF); its [19:16] is the
+ * revision the Mixer Engine's per-device firmware checks test.
+ */
+#define UA_REG_FW_VERSION       0x0000  /* DSP 0 status word (not a version) */
+#define UA_REG_ID_WORD          0x0004  /* identity word, UAD2DeviceInfo+0x28 */
+#define UA_REG_FW_RELEASE       0x0008  /* firmware version, UAD2DeviceInfo+0x24 */
+#define UA_REG_DEV_INFO         0x01AC  /* device info word, UAD2DeviceInfo+0x80 */
+#define UA_DEVINFO_TYPES        0x3ff16fcf9a0ULL  /* public types, <= 0x29 */
 #define UA_REG_HW_UID_LO        0x0030  /* Hardware UID low 32 bits */
 #define UA_REG_HW_UID_HI        0x0034  /* Hardware UID high 32 bits */
 #define UA_REG_FPGA_REV         0x2218  /* FPGA revision (cached on init) */
@@ -1549,6 +1588,14 @@ struct ua_device {
 	atomic_t pause_mask;
 	u32 lock_level;             /* LockSampleRateAndClock level; 0 */
 
+	/*
+	 * The kext's driver parameters 1-5 (UA_DRIVER_PARAM_KEXT(n), stored
+	 * only, under ->lock); bit n of kext_param_set = id n was written,
+	 * else Get returns the kext's initial value.
+	 */
+	u64 kext_param[6];
+	u32 kext_param_set;
+
 	/* DSP ring extras (ua_dsp.c); keep last */
 	struct ua_dsp_ext dspx;
 };
@@ -1875,6 +1922,8 @@ bool ua_dsp_solo_flag_honoured(void);
 void ua_dsp_irq_arm(struct ua_device *ua);		/* ua->lock */
 int ua_dsp_start_transport_notify(struct ua_device *ua);	/* ua->lock */
 int ua_dsp_disconnect_notify(struct ua_device *ua);	/* ua->lock */
+u32 ua_dsp_alloc_load(const struct ua_device *ua, u32 rate);
+u32 ua_dsp_measured_load(struct ua_device *ua, unsigned int dsp);
 struct snd_card;
 int ua_dsp_proc_init(struct ua_device *ua, struct snd_card *card);
 void ua_dsp_flush_bus_params(struct ua_device *ua);

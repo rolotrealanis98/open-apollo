@@ -2,6 +2,7 @@
   "model": "Apollo Twin X Gen 2",
   "device_type": "0x3B",
   "device_types": ["0x3B", "0x3C", "0x40", "0x41"],
+  "public_types": ["0x25", "0x29"],
   "serial_prefixes": ["2090", "2091", "2107", "2108"],
   "status": "unverified",
   "device_type_names": {"0x40": "Apollo Twin X Gen 2 TB4", "0x41": "Apollo Twin X Gen 2 TB4"},

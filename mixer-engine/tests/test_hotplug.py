@@ -266,7 +266,7 @@ class TestWatchdog:
         d = MixerDaemon(tree, HardwareRouter(hp_backend, tree),
                         loaded_map=Path("/maps/x4.json"))
         monkeypatch.setattr(umd, "find_device_map",
-                            lambda t: Path("/maps/x8p.json"))
+                            lambda t, pt=None: Path("/maps/x8p.json"))
         hp_backend.present = False
         d._device_watchdog_step(1.0)
         hp_backend.present = True
@@ -276,7 +276,7 @@ class TestWatchdog:
     def test_same_model_keeps_running(self, hp_backend, tree, monkeypatch):
         m = Path("/maps/x4.json")
         d = MixerDaemon(tree, HardwareRouter(hp_backend, tree), loaded_map=m)
-        monkeypatch.setattr(umd, "find_device_map", lambda t: m)
+        monkeypatch.setattr(umd, "find_device_map", lambda t, pt=None: m)
         hp_backend.present = False
         d._device_watchdog_step(1.0)
         hp_backend.present = True

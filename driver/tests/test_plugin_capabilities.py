@@ -57,7 +57,7 @@ int main(void)
 	assert(_IOC_NR(UA_IOCTL_GET_PLUGIN_CAPS) == 7);
 	assert(_IOC_DIR(UA_IOCTL_GET_PLUGIN_CAPS) == _IOC_READ);
 	assert(_IOC_SIZE(UA_IOCTL_GET_PLUGIN_CAPS) == 64);
-	assert(UA_ABI_MAJOR == 1 && UA_ABI_MINOR == 3);
+	assert(UA_ABI_MAJOR == 1 && UA_ABI_MINOR >= 3);
 	assert(UA_FEAT_PLUGIN_CAPS == 1u << 13);
 
 	/* Nothing set: no operations, no state */

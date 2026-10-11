@@ -246,6 +246,7 @@ static irqreturn_t ua_irq_thread(int irq, void *data)
 /* Forward declarations */
 static void ua_read_serial_type(struct ua_device *ua);
 static u32 ua_compute_public_type(struct ua_device *ua);
+static void ua_resolve_public_model(struct ua_device *ua);
 static void ua_resume_work(struct work_struct *work);
 
 /* ----------------------------------------------------------------
@@ -451,6 +452,7 @@ static int ua_detect_capabilities(struct ua_device *ua)
 	}
 
 	ua->public_type = ua_compute_public_type(ua);
+	ua_resolve_public_model(ua);
 	return 0;
 }
 
@@ -530,25 +532,38 @@ static void ua_read_serial_type(struct ua_device *ua)
 }
 
 /*
+ * CUAD2Device::_deviceTypeFromFPGAVersion (kext x86 0x14528): a new-format
+ * FPGA_REV ((rev & 0x60) == 0x20) carries the serial-table type in bits
+ * [30:24] (titan's x4: 0x9f0ea929 -> 0x1F), an old one only rev >> 28.
+ */
+static u32 ua_type_from_fpga_rev(u32 rev)
+{
+	return (rev & 0x60) == 0x20 ? (rev >> 24) & 0x7f : rev >> 28;
+}
+
+/*
  * ua_compute_public_type - the kext's UAD2DeviceType (CPcieDevice::
  * GetCapabilities, x86 0x464c; parity/11 rows B5 and section 2.3).
  *
- * v1 firmware: 0.  v2: the ext_caps family ((ext_caps >> 20) & 0x3f)
- * indexes a table at 0x4d5c; the entries for the x-series families are
- * then refined by the serial-table type (_deviceTypeFromSerialNumber).
- * The kext's FPGA-version fallback (_deviceTypeFromFPGAVersion) is not
- * ported: where it would be consulted the type stays at the family value
- * (HEXA, 0x19) or UA_PUBTYPE_NONE (QUAD, as the kext's -1 when that check
- * fails too).  The serial is read independently of device_type, which the
- * Solo and 8p subsystem pins override.
+ * v1 firmware: 0.  v2: the ext_caps family ((ext_caps >> 20) & 0x3f) - 1
+ * indexes a 22-entry jump table at 0x4d5c (families 20 and 21 give 0,
+ * family 22 the x16D's 0x20); the entries for the x-series families are
+ * then refined by the serial-table type (_deviceTypeFromSerialNumber,
+ * tables at 0x4db4, 0x4de4, 0x4dd4) and, for QUAD and HEXA, by the
+ * FPGA_REV type when the serial does not decide.  HEXA serial 0x35 (x16D)
+ * gives 0x21, not 0x20: the kext stores 0x20 and falls through into the
+ * 0x37 case (x86 0x4a30, arm64e 0xcda8), so the value is mirrored; an
+ * x16D on its own family 22 gets 0x20.  The serial is read independently
+ * of device_type, which the Solo and 8p subsystem pins override.
  */
 static u32 ua_compute_public_type(struct ua_device *ua)
 {
 	static const u8 family_map[] = {
 		0x05, 0x04, 0x00, 0x07, 0x08, 0x0B, 0x04, 0x0C, 0x0D, 0x0F,
-		0x0E, 0x00, 0x00, 0x12, 0x13, 0x1A, 0x16, 0x18, 0x19, 0x20,
+		0x0E, 0x00, 0x00, 0x12, 0x13, 0x1A, 0x16, 0x18, 0x19, 0x00,
+		0x00, 0x20,
 	};
-	u32 fam, base, st;
+	u32 fam, base, st, ft;
 
 	if (!ua->fw_v2)
 		return 0;
@@ -564,6 +579,7 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 		return base;
 
 	st = ua_serial_lookup(ua, false);
+	ft = ua_type_from_fpga_rev(ua->fpga_rev);
 
 	switch (base) {
 	case 0x13:
@@ -573,6 +589,9 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 			return 0x27;
 		return 0x1C;		/* serial 2032 or any other */
 	case 0x1A:
+		if (st != UA_DEV_APOLLO_X4 && st != UA_DEV_APOLLO_X4_GEN2 &&
+		    st != UA_DEV_APOLLO_X4_GEN2_TB4)
+			st = ft;
 		if (st == UA_DEV_APOLLO_X4)
 			return 0x1A;
 		if (st == UA_DEV_APOLLO_X4_GEN2)
@@ -584,11 +603,11 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 		if (st >= UA_DEV_APOLLO_X6 && st <= UA_DEV_APOLLO_X16)
 			return 0x14 + (st - UA_DEV_APOLLO_X6);
 		if (st == UA_DEV_APOLLO_X16D)
-			return 0x20;
+			return 0x21;	/* the kext's fall-through, see above */
 		if (st >= UA_DEV_APOLLO_X6_GEN2 &&
 		    st <= UA_DEV_APOLLO_X16_GEN2)
 			return 0x21 + (st - UA_DEV_APOLLO_X6_GEN2);
-		return 0x16;
+		return ft == UA_DEV_APOLLO_X16D ? 0x20 : 0x16;
 	default:			/* 0x19 */
 		if (st == UA_DEV_APOLLO_SOLO || st == UA_DEV_ARROW ||
 		    st == 0x26 || st == 0x2E || st == 0x2F)
@@ -600,6 +619,62 @@ static u32 ua_compute_public_type(struct ua_device *ua)
 		    st == UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B)
 			return 0x29;
 		return 0x19;
+	}
+}
+
+/*
+ * Models the serial table cannot name (the pre-x Apollos, the Twin family,
+ * the Rack) are named by the public type, as the kext and UA's Mixer
+ * Engine do: GetCapabilities gives each its own ext_caps family and type
+ * (Apollo 5, Apollo 16 7, Twin 8/0xF, Rack 0xB, Apollo 8 0xC, Apollo 16
+ * MkII 0xD, 8p 0xE, Twin MkII 0x12, Twin X 0x19) and CUAD2Info::CardType
+ * (arm64 ME 0x1002b5ef0) picks the mixer class from it.  Such a device gets
+ * device type UA_DEV_PUBLIC(public type), which devices/<model>.json lists;
+ * a type >= 0x80 keeps every path an unresolved type 0 takes (AudioExtension
+ * connect, no legacy DMA row, no output mute).
+ *
+ * Serials 2024/2025 (0x27/0x28) on the Twin X family (public 0x19) are Twin
+ * X units, not a Solo/Arrow: the kext refines family 19 to 0x19 for them
+ * (x86 0x4b03) and the Mixer Engine's card types for 0x19 are the Lavern
+ * (Twin X) class.  Their legacy DMA row (3/2) is the 3/2 fallback, so only
+ * the name and the preamp counts change.
+ *
+ * On the Conrad family (ext_caps family 15) the public type names the
+ * product too: 0x13 (serial 2016) is the Arrow (card type 31), 0x1C
+ * (serial 2032 or other) and 0x27 (serial 2110) the Solo (cards 32/54).
+ * The serial-table types 0x1E/0x2A/0x3E there, which the driver never
+ * named, and the 0x000F subsystem pin on an Arrow (public 0x13) take
+ * UA_DEV_PUBLIC(public type); a pinned Solo keeps 0x27.  Their legacy DMA
+ * rows (0x1E 24/22, 0x2A 34/34, frozen from wrong names) become the 3/2
+ * fallback the Solo row has; the descriptor layout (io_map default) is
+ * not affected.
+ */
+static void ua_resolve_public_model(struct ua_device *ua)
+{
+	u32 pt = ua->public_type, dt = ua->device_type;
+	const char *why = NULL;
+
+	if (pt == 0 || pt == UA_PUBTYPE_NONE || pt >= UA_PUBLIC_DEVTYPE_BASE)
+		return;
+	if (pt == 0x19 && (dt == UA_DEV_APOLLO_SOLO || dt == UA_DEV_ARROW))
+		why = "the Twin X family (public type 0x19): Twin X";
+	else if ((pt == 0x13 || pt == 0x1C || pt == 0x27) &&
+		 (dt == UA_DEV_SERIAL_2016 || dt == UA_DEV_SERIAL_2032 ||
+		  dt == UA_DEV_SERIAL_2110 ||
+		  (pt == 0x13 && dt == UA_DEV_APOLLO_SOLO)))
+		why = "the Conrad family: Arrow (0x13) or Solo (0x1C/0x27)";
+	if (why) {
+		dev_info(&ua->pdev->dev,
+			 "device type 0x%02x on %s, public type 0x%02x\n",
+			 dt, why, pt);
+		ua->device_type = UA_DEV_PUBLIC(pt);
+		return;
+	}
+	if (!ua->device_type) {
+		ua->device_type = UA_DEV_PUBLIC(pt);
+		dev_info(&ua->pdev->dev,
+			 "no serial-table type: device type 0x%02x from public type 0x%02x\n",
+			 ua->device_type, pt);
 	}
 }
 
@@ -901,7 +976,8 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 			    UA_FEAT_SYSTEM_INFO | UA_FEAT_BUS_PARAM_BATCH |
 			    UA_FEAT_PAUSE_INFO | UA_FEAT_PAUSE_EVENTS |
 			    UA_FEAT_UNIT_GROUP | UA_FEAT_SYSINFO_EXT |
-			    UA_FEAT_PLUGIN_CAPS,
+			    UA_FEAT_PLUGIN_CAPS | UA_FEAT_FW_RELEASE |
+			    UA_FEAT_KEXT_DRIVER_PARAMS | UA_FEAT_DSP_LOAD,
 	};
 
 	/*
@@ -916,6 +992,20 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 	if (copy_to_user((void __user *)arg, &v, sizeof(v)))
 		return -EFAULT;
 	return 0;
+}
+
+/*
+ * UAD2DeviceInfo+0x80 as CPcieDevice::GetDeviceInfo (kext x86 0x5156)
+ * fills it: BAR0 0x01AC for the public types in UA_DEVINFO_TYPES,
+ * 0xFFFFFFFF for every other type.
+ */
+static u32 ua_read_dev_info(struct ua_device *ua)
+{
+	u32 pt = ua->public_type;
+
+	if (pt > 0x29 || !((UA_DEVINFO_TYPES >> pt) & 1))
+		return 0xFFFFFFFFu;
+	return ua_read(ua, UA_REG_DEV_INFO);
 }
 
 static long ua_ioctl_get_system_info(struct ua_device *ua, unsigned long arg)
@@ -935,6 +1025,8 @@ static long ua_ioctl_get_system_info(struct ua_device *ua, unsigned long arg)
 	si.pci_device = ua->pdev->device;
 	si.num_dsps = ua->num_dsps;
 	si.fw_version = ua_read(ua, UA_REG_FW_VERSION);
+	si.fw_release = ua_read(ua, UA_REG_FW_RELEASE);
+	si.dev_info = ua_read_dev_info(ua);
 	si.fw_v2 = ua->fw_v2 ? 1 : 0;
 	si.ext_caps = ua_read(ua, UA_REG_EXT_CAPS);
 	si.hw_uid_lo = ua_read(ua, UA_REG_HW_UID_LO);
@@ -1062,6 +1154,13 @@ static long ua_ioctl_get_dsp_info(struct ua_device *ua, unsigned long arg)
 
 	info.bank_base = ua_dsp_base(info.index);
 	info.status = ua_read(ua, info.bank_base) ? 1 : 0;
+	/* UA_FEAT_DSP_LOAD: no plugin allocations, so pools stay unused */
+	info.alloc_load = ua_dsp_alloc_load(ua,
+					    READ_ONCE(ua->audio.sample_rate));
+	info.measured_load = ua_dsp_measured_load(ua, info.index);
+	info.pgm_load = 0;
+	info.mem_load = 0;
+	info.flags = UA_DSP_INFO_F_LOADS;
 
 	if (copy_to_user((void __user *)arg, &info, sizeof(info)))
 		return -EFAULT;
@@ -3043,6 +3142,53 @@ static long ua_ioctl_read_mixer_setting(struct ua_device *ua,
 	return 0;
 }
 
+/*
+ * The kext's driver parameters 1-5 (UA_DRIVER_PARAM_KEXT(n), ua_ioctl.h):
+ * CDeviceManager::SetDriverParameter (kext x86 0x1dd38) stores them and
+ * GetDriverParameter (0x1de68) returns them; nothing here acts on them.
+ * Initial values as CDeviceManager::Initialize leaves them: 5 reads 1,
+ * the others 0.
+ */
+static int ua_kext_param_set(struct ua_device *ua, u32 id, u64 value)
+{
+	unsigned int n = id - UA_DRIVER_PARAM_KEXT_BASE;
+
+	if (id < UA_DRIVER_PARAM_KEXT(1) || id > UA_DRIVER_PARAM_KEXT(5))
+		return -EINVAL;
+	if (n == 2)
+		value &= 0xfffffffeu;	/* bit 0: clear 3, not kept (0x18db6) */
+	else if (n == 3)
+		value = 0;		/* Set clears the counter (0x1ddbc) */
+	else if (n != 4)
+		value = (u32)value;
+	mutex_lock(&ua->lock);
+	ua->kext_param[n] = value;
+	ua->kext_param_set |= BIT(n);
+	if (n == 2) {			/* bit 0 cleared the counter */
+		ua->kext_param[3] = 0;
+		ua->kext_param_set |= BIT(3);
+	}
+	mutex_unlock(&ua->lock);
+	return 0;
+}
+
+static int ua_kext_param_get(struct ua_device *ua, u32 id, u64 *value)
+{
+	unsigned int n = id - UA_DRIVER_PARAM_KEXT_BASE;
+	u64 v;
+
+	if (id < UA_DRIVER_PARAM_KEXT(1) || id > UA_DRIVER_PARAM_KEXT(5))
+		return -EINVAL;
+	mutex_lock(&ua->lock);
+	v = (ua->kext_param_set & BIT(n)) ? ua->kext_param[n] :
+	    (n == 5 ? 1 : 0);
+	mutex_unlock(&ua->lock);
+	if (n == 1 || n == 5)		/* movslq in GetDriverParameter */
+		v = (u64)(s64)(s32)(u32)v;
+	*value = v;
+	return 0;
+}
+
 static long ua_ioctl_set_driver_param(struct ua_device *ua, unsigned long arg)
 {
 	struct ua_driver_param dp;
@@ -3078,7 +3224,7 @@ static long ua_ioctl_set_driver_param(struct ua_device *ua, unsigned long arg)
 	}
 
 	default:
-		return -EINVAL;
+		return ua_kext_param_set(ua, dp.param_id, dp.value);
 	}
 }
 
@@ -3099,8 +3245,13 @@ static long ua_ioctl_get_driver_param(struct ua_device *ua, unsigned long arg)
 	case 2:  /* Transport running */
 		dp.value = ua->audio.transport_running ? 1 : 0;
 		break;
-	default:
-		return -EINVAL;
+	default: {
+		int ret = ua_kext_param_get(ua, dp.param_id, &dp.value);
+
+		if (ret)
+			return ret;
+		break;
+	}
 	}
 
 	if (copy_to_user((void __user *)arg, &dp, sizeof(dp)))
@@ -4193,6 +4344,15 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev_info(&pdev->dev, "device type 0x%02x, public type 0x%02x%s\n",
 		 ua->device_type, ua->public_type,
 		 ua->public_type == UA_PUBTYPE_NONE ? " (unresolved)" : "");
+	{
+		u32 rel = ua_read(ua, UA_REG_FW_RELEASE);
+
+		/* UA's Mixer Engine shows this word "%d.%02d.%03d" */
+		dev_info(&pdev->dev,
+			 "firmware %u.%02u.%03u (BAR0 0x0008 = 0x%08x)\n",
+			 UA_FW_MAJOR(rel), UA_FW_MINOR(rel), UA_FW_BUILD(rel),
+			 rel);
+	}
 
 	if (ua->fw_v2) {
 		/*

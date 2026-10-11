@@ -107,6 +107,45 @@ def test_unknown_type_falls_back_to_x4(monkeypatch, tmp_path, caplog):
     assert "falling back to Apollo x4" in caplog.text
 
 
+def test_public_type_picks_the_model_when_device_type_has_none():
+    find = ua_mixer_daemon.find_descriptor
+    # the driver's retyped pre-x models list 0x80 + public type directly
+    assert find(0x88)[0] == "apollo-twin"
+    assert find(0x99)[0] == "apollo-twin-x"
+    # an older driver leaves them at 0: the public type names them
+    assert find(0, 0x08)[0] == "apollo-twin"
+    assert find(0, 0x0C)[0] == "apollo-8"
+    assert find(0, 0x12)[0] == "apollo-twin-mkii"
+    # serial types without a descriptor: 2016 is the Arrow, 2032 the Solo
+    assert find(0x1E, 0x13)[0] == "arrow"
+    assert find(0x2A, 0x1C)[0] == "apollo-solo"
+    # device_type wins over the public type
+    assert find(0x1F, 0x08)[0] == "apollo-x4"
+    # no public type, or one outside 1-0x29: no match
+    assert find(0x77) == (None, None)
+    assert find(0x77, 0xFFFFFFFF) == (None, None)
+    assert find(0x77, 0) == (None, None)
+
+
+def test_public_type_reaches_the_map(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    m = ua_mixer_daemon.find_device_map(0, 0x1A)
+    assert m.name == "device_map_apollo_x4.json"
+    assert ua_mixer_daemon.device_model_name(0, 0x19) == "Apollo Twin X"
+
+
+def test_read_device_info_carries_the_public_type():
+    class Be:
+        def get_device_info(self):
+            return {"device_type": 0, "serial": 0}
+
+        def get_system_info(self):
+            return {"public_type": 0x08, "serial": "2017123456789012"}
+
+    info = ua_mixer_daemon.read_device_info(Be())
+    assert info["public_type"] == 0x08
+
+
 def test_unwritable_cache_falls_back_to_x4(monkeypatch, tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("")

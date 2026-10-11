@@ -2,6 +2,7 @@
   "model": "Apollo x16",
   "device_type": "0x23",
   "device_types": ["0x23"],
+  "public_types": ["0x17"],
   "serial_prefixes": ["2020"],
   "status": "unverified",
   "mixer_class": "Rene16",

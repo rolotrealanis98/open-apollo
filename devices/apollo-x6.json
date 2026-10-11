@@ -2,6 +2,7 @@
   "model": "Apollo x6",
   "device_type": "0x20",
   "device_types": ["0x20"],
+  "public_types": ["0x14"],
   "serial_prefixes": ["2019"],
   "status": "unverified",
   "mixer_class": "Rene2",

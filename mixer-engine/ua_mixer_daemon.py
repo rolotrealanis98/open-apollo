@@ -166,10 +166,74 @@ DEVICE_REOPEN_MAX = 5.0
 DEVICE_SETTLE = 3.0
 EXIT_RESTART = 75   # EX_TEMPFAIL: systemd's Restart=on-failure starts us again
 
-# Firmware majors the kext accepts (FWMajorVersion, parity 16 F43): 9 for the
-# Apollo/8/8p/A16/Twin/Conrad family, 11 for Freud, Rene and Lavern.  The
-# per-device minimums are not known and are not checked.
+# Firmware majors UA's Mixer Engine accepts (MixerType*::FWMajorVersion,
+# parity 16 F43): 9 for the Apollo/8/8p/A16/Twin/Conrad family, 11 for
+# Freud, Rene and Lavern and their subclasses (arm64 ME 11.9.0: Base
+# 0x1000af088 returns 9; Freud 0x100427c70, Lavern 0x1001147f4, ReneBase
+# 0x10029a4d8 return 11).
 ACCEPTED_FW_MAJORS = (9, 11)
+FW_MAJOR_11_CLASSES = frozenset({
+    "Freud", "FreudG2", "Lavern", "LavernG2", "Shirley",
+    "Rene2", "Rene4", "Rene8", "Rene16", "ReneLax",
+    "Rene2G2", "Rene4G2", "Rene8G2", "Rene16G2"})
+# CMxRoot::_checkFirmwareVersionCompatibility (0x100095af8) checks only the
+# public types in 0x3ff3efdffe8 whose GetDeviceInfo carries a hardware id,
+# which the macOS driver fills for the types in 0x3ff16fcf9a0.
+FW_CHECK_TYPES = 0x3ff3efdffe8 & 0x3ff16fcf9a0
+
+
+def firmware_text(fw_release: int) -> str:
+    """The firmware version word as UA's Mixer Engine prints it."""
+    return "%d.%02d.%03d" % ((fw_release >> 24) & 0xFF,
+                             (fw_release >> 16) & 0xFF, fw_release & 0xFFFF)
+
+
+def firmware_problem(info: dict, mixer_class: str | None) -> str | None:
+    """Why UA's Mixer Engine would ask for a firmware update, or None.
+
+    Needs the driver's fw_release (UA_FEAT_FW_RELEASE); None when it is
+    missing or the public type is one the Mixer Engine does not check.
+    The major must be the mixer class's (9 or 11; either one when the class
+    is not known), then the per-device minimums
+    (CheckDeviceSpecificFirmwareVersionCompatibility):
+      ReneBase (x6/x8/x8p, Gen 2 too) 0x10029a4e0: dev_info[19:16] > 2
+      Rene16 (x16, Gen 2 too)         0x100172a18: dev_info[19:18] != 0
+      ReneLax (x16D)                  0x1002cf8c4: dev_info[19:17] > 2
+      Armstrong (Twin)                0x100048688: on public type 0x10,
+                                                   FPGA_REV[23:19] > 4
+    """
+    rel = info.get("fw_release")
+    if not isinstance(rel, int) or rel in (0, 0xFFFFFFFF):
+        return None
+    pt = info.get("public_type")
+    if isinstance(pt, int) and (pt > 0x29 or not (FW_CHECK_TYPES >> pt) & 1):
+        return None
+    major = (rel >> 24) & 0xFF
+    if mixer_class is None:
+        want = ACCEPTED_FW_MAJORS
+    else:
+        want = (11,) if mixer_class in FW_MAJOR_11_CLASSES else (9,)
+    if major not in want:
+        return "major %d, the model needs %s" % (
+            major, " or ".join(map(str, want)))
+    dev = info.get("dev_info")
+    rev = ((dev >> 16) & 0xF) if isinstance(dev, int) else None
+    if mixer_class in ("Rene2", "Rene4", "Rene8",
+                       "Rene2G2", "Rene4G2", "Rene8G2"):
+        ok = rev is not None and rev > 2
+    elif mixer_class in ("Rene16", "Rene16G2"):
+        ok = rev is not None and bool(rev & 0xC)
+    elif mixer_class == "ReneLax":
+        ok = rev is not None and (rev >> 1) > 2
+    elif mixer_class == "Armstrong" and pt == 0x10:
+        fpga = info.get("fpga_rev")
+        ok = isinstance(fpga, int) and ((fpga >> 19) & 0x1F) > 4
+    else:
+        ok = True
+    if not ok:
+        return "below the %s minimum (device info 0x%08x)" % (
+            mixer_class, dev if isinstance(dev, int) else 0)
+    return None
 
 # With the driver's event channel open, the 1 Hz driver-rate poll becomes a
 # safety net: events carry the changes, this only catches a missed one.
@@ -260,6 +324,9 @@ def read_device_info(backend) -> dict | None:
         serial = sysinfo.get("serial")
         if isinstance(serial, str) and serial.strip().strip("0 ") != "":
             info = dict(info, serial_str=serial.strip())
+        # the kext's public type: the model when device_type has no map
+        if isinstance(sysinfo.get("public_type"), int):
+            info = dict(info, public_type=sysinfo["public_type"])
     return info
 
 
@@ -547,7 +614,8 @@ class MixerDaemon:
         if info:
             fill_helper_identity(self.helper_tree, info)
             if self.loaded_map is not None:
-                new_map = find_device_map(info["device_type"])
+                new_map = find_device_map(info["device_type"],
+                                          info.get("public_type"))
                 if new_map and new_map != self.loaded_map:
                     log.warning("Device is a different model (type 0x%02x): "
                                 "device map %s -> %s, restarting",
@@ -1342,16 +1410,33 @@ class MixerDaemon:
                         "and any dock)", pcie_link_text(speed, width))
 
     def _check_firmware(self, info: dict | None):
-        """Log one warning when the firmware major is not one the kext
-        accepts (9 or 11).  Informational only: firmware_compatibility
-        stays 0 and nothing is refused."""
+        """Log one warning when UA's Mixer Engine would refuse the running
+        firmware (firmware_problem()).  Informational only:
+        firmware_compatibility stays 0 and nothing is refused.
+
+        The firmware version is the driver's fw_release (BAR0 0x0008,
+        UA_FEAT_FW_RELEASE).  fw_version is BAR0 0x0000, DSP 0's status
+        word (0x1c00 on the x4); an older driver has only that, so only a
+        value that can be a major (1-255) is judged there."""
         if self._fw_warned or not info:
             return
+        rel = info.get("fw_release")
+        if isinstance(rel, int) and rel not in (0, 0xFFFFFFFF):
+            dt = info.get("device_type")
+            cls = descriptor_mixer_class(find_descriptor(
+                dt, info.get("public_type"))[0]) \
+                if isinstance(dt, int) else None
+            text = firmware_text(rel)
+            problem = firmware_problem(info, cls)
+            if problem:
+                self._fw_warned = True
+                log.warning("Firmware %s is not one UA's software accepts "
+                            "for this model (%s): this combination is "
+                            "untested", text, problem)
+            else:
+                log.info("Firmware %s", text)
+            return
         fw = info.get("fw_version")
-        # The driver's fw_version is BAR0 0x0000, which on the x4 reads
-        # 0x1c00: DSP 0's status word, not a firmware major.  Only a value
-        # that can be a major (1-255) is judged; the real source of the
-        # firmware version is still to be found (plan N13).
         if not isinstance(fw, int) or not 0 < fw < 256:
             log.debug("Firmware version word 0x%x is not a major number; "
                       "not checked", fw if isinstance(fw, int) else 0)
@@ -1488,35 +1573,32 @@ class MixerDaemon:
     def _poll_dsp_load(self):
         """Poll DSP load and push to state tree at ~1 Hz.
 
-        On macOS, DSP and session load come from kext selectors 110 and
-        112 (parity/01-user-client.md).  On Linux, we query each DSP's
-        running status via GET_DSP_INFO ioctl.
-
-        The real load figures would need the kext's source for them,
-        which is not decoded yet.
-        For now, we report whether DSPs are active (binary 0/100%) and
-        will refine to actual load percentages when we identify the
-        correct ring buffer query or register.
+        UA's Mixer Engine sets /TotalDSPLoad, /TotalPGMLoad, /TotalMEMLoad
+        from CUAD2Info::GetAllocatedLoads (kext selector 112, GetDSPInfo):
+        host bookkeeping of the plugin loads and DSP memory it allocated
+        plus a rate overhead, not a DSP counter.  With UA_FEAT_DSP_LOAD the
+        driver reports the same figures for a DSP with no plugins (x4: DSP
+        load 1.19 % at 48 kHz, PGM/MEM 0); an older driver gives 0.
         """
         if not self.hw_router or not self.hw_router.backend.connected:
             return
 
-        # Real DSP load needs the selector 110/112 equivalent (not decoded).  The binary running/idle status from GET_DSP_INFO is
-        # not useful — it's always 100% when DSP is alive.  Report 0% until
-        # we implement actual load polling.
-        dsp_load = 0.0
+        get = getattr(self.hw_router.backend, "get_dsp_loads", None)
+        loads = get() if callable(get) else None
+        dsp_load, pgm_load, mem_load = loads or (0.0, 0.0, 0.0)
 
-        # PGM/MEM load require deeper DSP queries (ring buffer commands)
-        pgm_load = 0.0
-        mem_load = 0.0
-
-        # Push to state tree (only if changed)
+        # Push to state tree (only if changed); device status, not saved
         for path, val in [("/TotalDSPLoad", dsp_load),
                           ("/TotalPGMLoad", pgm_load),
                           ("/TotalMEMLoad", mem_load)]:
-            current = self.state.get_value(path)
-            if current is None or abs(float(current) - val) > 0.1:
+            current = self.state.get_value(path + "/value")
+            try:
+                same = abs(float(current) - val) <= 0.005
+            except (TypeError, ValueError):
+                same = False
+            if not same:
                 self._push_to_clients(path, val)
+                self.state._dirty.pop(path + "/value", None)
 
     def _push_to_clients(self, path: str, value):
         """Push a hardware readback change to helper tree and state tree.
@@ -2562,14 +2644,31 @@ def device_map_path(slug: str) -> Path:
     return SCRIPT_DIR / "device_maps" / f"device_map_{slug.replace('-', '_')}.json"
 
 
-def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
+def find_descriptor(device_type: int,
+                    public_type: int | None = None) -> tuple[str | None, str | None]:
     """Resolve a driver device_type to (slug, model) via devices/*.json.
 
     Each devices/*.json descriptor lists its driver "device_types" (hex strings)
     and its "model" (e.g. "Apollo x8p"). (None, None) if no descriptor matches.
+
+    When no descriptor lists device_type and the driver reported the kext's
+    public type (GET_SYSTEM_INFO), the descriptor whose "public_types" holds
+    it is used: UA's Mixer Engine picks the model from that type
+    (CUAD2Info::CardType).  That names a type-0 unit on a driver that does
+    not retype it, and the serial types 0x1E (2016, the Arrow), 0x2A (2032)
+    and 0x3E (2110, the Solo) the driver leaves unnamed.
     """
     if not DEVICES_DIR.is_dir():
         return None, None
+    found = _find_descriptor_by(device_type, ("device_types", "device_type"))
+    if found[0] is None and isinstance(public_type, int) and \
+            0 < public_type <= 0x29:
+        found = _find_descriptor_by(public_type, ("public_types",))
+    return found
+
+
+def _find_descriptor_by(value: int, keys: tuple) -> tuple[str | None, str | None]:
+    """The first devices/*.json listing `value` under one of `keys`."""
     for desc_path in sorted(DEVICES_DIR.glob("*.json")):
         try:
             desc = json.loads(desc_path.read_text())
@@ -2580,9 +2679,13 @@ def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
             log.warning("Ignoring device descriptor %s: not a JSON object", desc_path)
             continue
 
-        types = list(desc.get("device_types") or [])
-        if desc.get("device_type") is not None:
-            types.append(desc["device_type"])
+        types = []
+        for key in keys:
+            v = desc.get(key)
+            if isinstance(v, list):
+                types.extend(v)
+            elif v is not None:
+                types.append(v)
         match = False
         for dt in types:
             try:
@@ -2590,10 +2693,10 @@ def find_descriptor(device_type: int) -> tuple[str | None, str | None]:
                 # rather than reading a bare "32" as hex (= 50).
                 dt_value = dt if isinstance(dt, int) else int(str(dt), 0)
             except ValueError:
-                log.warning("Ignoring device descriptor %s: bad device_type %r",
-                            desc_path, dt)
+                log.warning("Ignoring device descriptor %s: bad %s %r",
+                            desc_path, keys[0], dt)
                 continue
-            if dt_value == device_type:
+            if dt_value == value:
                 match = True
                 break
         if not match:
@@ -2648,12 +2751,14 @@ def descriptor_model(slug: str | None) -> ModelInfo | None:
         return None
 
 
-def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
-    """Resolve a driver device_type to (model, captured_map_path).
+def lookup_device(device_type: int, public_type: int | None = None
+                  ) -> tuple[str | None, Path | None]:
+    """Resolve a driver device_type (else the public type) to
+    (model, captured_map_path).
 
     The path is None if the model has no captured map (x4 and x8p do).
     """
-    slug, model = find_descriptor(device_type)
+    slug, model = find_descriptor(device_type, public_type)
     if slug is None:
         return None, None
     candidate = device_map_path(slug)
@@ -2681,16 +2786,19 @@ def generate_device_map(slug: str) -> Path | None:
         return None
 
 
-def device_model_name(device_type: int) -> str:
+def device_model_name(device_type: int, public_type: int | None = None) -> str:
     """Human-readable model name for a device_type (for logging)."""
-    model, _ = lookup_device(device_type)
+    model, _ = lookup_device(device_type, public_type)
     return model or f"device_type 0x{device_type:02x}"
 
 
-def find_device_map(device_type: int | None = None) -> Path | None:
+def find_device_map(device_type: int | None = None,
+                    public_type: int | None = None) -> Path | None:
     """Find the best available device map, preferring the attached device's own.
 
-    Order, when the connected hardware's device_type is known:
+    The model is the descriptor listing device_type, else the one listing
+    the driver's public type (find_descriptor).  Order, when the connected
+    hardware's model is known:
       1. the model's captured map (live UA Mixer Engine session: x4, x8p);
       2. a map generated from devices/<model>.json (tools/gen-device-map.py:
          x4 structure with the model's channel counts), cached under
@@ -2698,7 +2806,7 @@ def find_device_map(device_type: int | None = None) -> Path | None:
       3. the Apollo x4 map, with a warning that controls/routing may not match.
     """
     if device_type is not None:
-        slug, model = find_descriptor(device_type)
+        slug, model = find_descriptor(device_type, public_type)
         label = model or f"device_type 0x{device_type:02x}"
         if slug is not None:
             captured = device_map_path(slug)
@@ -2870,6 +2978,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     # Apollo model and load the device map that matches it.
     backend = None
     device_type = None
+    public_type = None
     info = None
     if not args.no_hardware:
         backend = HardwareBackend(args.device, safe_mode=args.safe_mode)
@@ -2877,9 +2986,11 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             info = read_device_info(backend)
             if info:
                 device_type = info["device_type"]
+                public_type = info.get("public_type")
                 log.info("Detected %s (device_type=0x%02x, subsystem=0x%04x, "
                          "%d DSPs, serial=%s)",
-                         device_model_name(device_type), device_type,
+                         device_model_name(device_type, public_type),
+                         device_type,
                          info["subsystem_id"], info["num_dsps"],
                          serial_text(info))
             else:
@@ -2901,7 +3012,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         args.ws_port = DEFAULT_WS_PORT + PORT_STRIDE * index
 
     # Find device map (prefer one matching the attached device; --device-map wins)
-    device_map = args.device_map or find_device_map(device_type)
+    device_map = args.device_map or find_device_map(device_type, public_type)
     if not device_map or not device_map.exists():
         log.error("Device map not found. Searched:")
         log.error("  %s", DEFAULT_DEVICE_MAP)
@@ -2944,10 +3055,10 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         hw_router = HardwareRouter(
             backend, state, stereo_sends=args.stereo_sends,
             input_buses=descriptor_input_buses(
-                find_descriptor(device_type)[0]
+                find_descriptor(device_type, public_type)[0]
                 if device_type is not None else None),
             model=descriptor_model(
-                find_descriptor(device_type)[0]
+                find_descriptor(device_type, public_type)[0]
                 if device_type is not None else None))
         # Per-model facts (monitor taper, engine feature flags)
         hw_router.set_model_data(load_descriptor(
@@ -2956,7 +3067,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         # The settle mute uses OutputsAttenuate, which only some mixer
         # types support (OUTPUTS_ATTENUATE_CLASSES)
         hw_router.supports_outputs_attenuate = descriptor_mixer_class(
-            find_descriptor(device_type)[0]
+            find_descriptor(device_type, public_type)[0]
             if device_type is not None else None) \
             in OUTPUTS_ATTENUATE_CLASSES
         log.info("Hardware backend: %s", backend.device_path)

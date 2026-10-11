@@ -2,6 +2,7 @@
   "model": "Apollo x4 Gen 2",
   "device_type": "0x36",
   "device_types": ["0x36", "0x3F"],
+  "public_types": ["0x26", "0x28"],
   "serial_prefixes": ["2092", "2109"],
   "status": "unverified",
   "device_type_names": {"0x3F": "Apollo x4 Gen 2 TB4"},

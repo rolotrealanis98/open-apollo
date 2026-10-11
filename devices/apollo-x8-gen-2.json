@@ -2,6 +2,7 @@
   "model": "Apollo x8 Gen 2",
   "device_type": "0x38",
   "device_types": ["0x38"],
+  "public_types": ["0x22"],
   "serial_prefixes": ["2087"],
   "status": "unverified",
   "mixer_class": "Rene4G2",

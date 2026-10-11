@@ -1,10 +1,11 @@
 {
   "model": "Apollo 8p",
   "device_type": "0x0A",
-  "device_types": ["0x0A"],
+  "device_types": ["0x0A", "0x8E"],
+  "public_types": ["0x0E"],
   "serial_prefixes": [],
   "status": "unverified",
-  "identity_note": "Internal type 0x0A is the ext_caps family the driver pins by PCI subsystem 0x0006.",
+  "identity_note": "Internal type 0x0A is the ext_caps family index the driver pins by PCI subsystem 0x0006. ext_caps family 11 gives the kext's public type 0xE (CPcieDevice::GetCapabilities, x86 jump table 0x4d5c); UA's Mixer Engine maps that type to this mixer class (CUAD2Info::CardType, arm64 0x1002b5ef0). No serial-table entry names it, so without the pin the driver's device type is 0x80 + the public type (ua_resolve_public_model).",
   "subsystem_id": "0x0006",
   "mixer_class": "Peyton",
   "mixer_type_id": 5,

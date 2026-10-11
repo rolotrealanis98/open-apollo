@@ -1,10 +1,11 @@
 {
   "model": "Apollo Solo",
   "device_type": "0x27",
-  "device_types": ["0x27"],
+  "device_types": ["0x27", "0x9C", "0xA7"],
+  "public_types": ["0x1C", "0x27"],
   "serial_prefixes": ["2024"],
   "status": "unverified",
-  "identity_note": "Internal type 0x27 (serial 2024) comes from the earlier kext analysis and the driver pins it by PCI subsystem 0x000F; UAD2System 12.0.0 Name() does not name 0x27.",
+  "identity_note": "Internal type 0x27 (serial 2024) comes from the earlier kext analysis and the driver pins it by PCI subsystem 0x000F; UAD2System 12.0.0 Name() does not name 0x27. In kext 12.0.0 the Solo is public type 0x1C (serial 2032 or any serial but 2016/2110 on ext_caps family 15) or 0x27 (serial 2110), which the Mixer Engine maps to card types 32 and 54, the ApolloSolo class; serial 2024 on family 19 is a Twin X (the driver retypes it). Serial types 0x2A/0x3E on family 15 get 0x9C/0xA7 = 0x80 + the public type.",
   "subsystem_id": "0x000F",
   "mixer_class": "ApolloSolo",
   "mixer_type_id": 16,

@@ -4982,6 +4982,64 @@ int ua_dsp_disconnect_notify(struct ua_device *ua)
 }
 
 /* ----------------------------------------------------------------
+ * DSP load figures (UA_IOCTL_GET_DSP_INFO, kext GetDSPInfo)
+ * ---------------------------------------------------------------- */
+
+/**
+ * ua_dsp_alloc_load - the kext's allocated load of one DSP with no
+ * plugin, in 1/100 % (10000 = 100 %, the allocator's limit at 0x21a8d).
+ * @ua: the device (its public type picks the constants)
+ * @rate: the sample rate in Hz; 0 gives 0
+ *
+ * CDSPResourceManager::GetDSPInfo (kext 12.0.0 x86 0x21e1a) reports
+ * UAD2DSPInfo+0x40 = the plugin loads it allocated (none here) plus
+ * _cpuLoadOverhead(rate) (0x22016): for a mixer device (public type in
+ * 0x3ff3efdffe8) rate * k / 44100 below 100001 Hz, rate * k' / 192000
+ * above, times a 16.16 clock factor.  k, k' and the factor are set per
+ * public type in CDSPResourceManager::Initialize (0x21c20-0x21c77): 118/207
+ * for 0x14-0x17 and 0x20-0x24, 90/190 for 0xA-0xB, 110/200 for the rest;
+ * factor 1.017 (0x1046a) for 0x14-0x17 and 0x20-0x24, else 1.0.  The x4 at
+ * 48 kHz: 119 (1.19 %).  The Mixer Engine shows the DSP average / 100 as
+ * TotalDSPLoad (CUAD2Info::GetAllocatedLoads, arm64 0x1002b490c).
+ */
+u32 ua_dsp_alloc_load(const struct ua_device *ua, u32 rate)
+{
+	u32 pt = ua->public_type, lo, hi, clk, v;
+
+	if (pt > 0x29 || !((0x3ff3efdffe8ULL >> pt) & 1))
+		return 0;
+	if (pt <= 0x24 && ((0x1f00f00000ULL >> pt) & 1)) {
+		lo = 118;
+		hi = 207;
+		clk = 0x1046a;
+	} else if (pt <= 0x24 && ((0xc00ULL >> pt) & 1)) {
+		lo = 90;
+		hi = 190;
+		clk = 0x10000;
+	} else {
+		lo = 110;
+		hi = 200;
+		clk = 0x10000;
+	}
+	if (rate > 100000)
+		v = ((u64)(rate * hi) * 0x57619f1ULL) >> 44;
+	else
+		v = ((u64)(rate * lo) * 0xbe37c63bULL) >> 47;
+	return (v * clk) >> 16;
+}
+
+/*
+ * The DSP's own load word, window +0x0C: CPcieDSP::GetProperty(0) (0x8a99),
+ * which GetDSPInfo returns at UAD2DSPInfo+0x44 on request and the Mixer
+ * Engine divides by 100 (CUAD2Info::MeasuredDSPLoad, 0x1002b4624).  titan's
+ * x4 DSP 0 reads 0x783 (19.23 %).
+ */
+u32 ua_dsp_measured_load(struct ua_device *ua, unsigned int dsp)
+{
+	return ua_read(ua, ua_dsp_window(dsp) + 0x0c);
+}
+
+/* ----------------------------------------------------------------
  * /proc/asound/cardN/dsp_state (parity/03 E6): read-only DSP window dump
  * ---------------------------------------------------------------- */
 
@@ -4989,19 +5047,24 @@ static const struct {
 	u32 off;
 	const char *name;
 } ua_dsp_win_regs[] = {
+	/*
+	 * Pool n = the kext's UAD2ResourceType n: CDSPResourceManager::
+	 * Initialize (x86 0x21a4a) gives pool n size +0x10+4n, base
+	 * +0x184+4n and (n >= 1) scratch +0x190+4n (GetProperty(6) 0x8e99).
+	 */
 	{ 0x000, "status (A01)" },
-	{ 0x00c, "property 0 (A03)" },
-	{ 0x010, "pool size 0 code (A04)" },
-	{ 0x014, "pool size 2 (A04)" },
-	{ 0x018, "pool size 1 (A04)" },
-	{ 0x01c, "pool size 3 (A04)" },
-	{ 0x184, "pool base 0 (A08)" },
-	{ 0x188, "pool base 2 (A08)" },
-	{ 0x18c, "pool base 1 (A08)" },
-	{ 0x190, "pool base 3 (A08)" },
-	{ 0x194, "scratch 2 (A08)" },
-	{ 0x198, "scratch 1 (A08)" },
-	{ 0x19c, "scratch 3 (A08)" },
+	{ 0x00c, "measured load (A03)" },
+	{ 0x010, "pool 0 size (A04)" },
+	{ 0x014, "pool 1 size (A04)" },
+	{ 0x018, "pool 2 size (A04)" },
+	{ 0x01c, "pool 3 size (A04)" },
+	{ 0x184, "pool 0 base (A08)" },
+	{ 0x188, "pool 1 base (A08)" },
+	{ 0x18c, "pool 2 base (A08)" },
+	{ 0x190, "pool 3 base (A08)" },
+	{ 0x194, "pool 1 scratch (A08)" },
+	{ 0x198, "pool 2 scratch (A08)" },
+	{ 0x19c, "pool 3 scratch (A08)" },
 	{ 0x1a0, "property 7 (A09)" },
 	{ 0x1a4, "boot word (A10)" },
 	{ 0x1a8, "reset slot (A11)" },
@@ -5065,6 +5128,13 @@ static void ua_dsp_state_proc_read(struct snd_info_entry *entry,
 
 		snd_iprintf(buf, "\ndsp %u: window BAR0+0x%04x, rings %s\n",
 			    dsp, win, ds->rings_allocated ? "allocated" : "none");
+		{
+			u32 al = ua_dsp_alloc_load(ua, ua->audio.sample_rate);
+			u32 ml = ua_dsp_measured_load(ua, dsp);
+
+			snd_iprintf(buf, "  load: allocated %u.%02u %% (rate overhead, no plugins), measured %u.%02u %%\n",
+				    al / 100, al % 100, ml / 100, ml % 100);
+		}
 		for (i = 0; i < ARRAY_SIZE(ua_dsp_win_regs); i++)
 			snd_iprintf(buf, "  +0x%03x %-24s 0x%08x\n",
 				    ua_dsp_win_regs[i].off,
