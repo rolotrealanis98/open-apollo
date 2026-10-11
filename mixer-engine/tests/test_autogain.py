@@ -580,3 +580,30 @@ def test_prefs_file_sets_settings(stack, tmp_path):
     stack.autogain.load_settings(tmp_path)
     s = stack.autogain.settings
     assert (s.duration, s.peak_target) == (6, -12.0)
+
+
+def test_stereo_input_peak_is_the_louder_side(stack):
+    class M:
+        channel_ids = [0x0001, 0x0002, 0x0003, 0x0004]
+
+        def get_channel_meter(self, cap):
+            return ((-20.0, -9.0, -30.0, -30.0)[cap], -3.0, False)
+
+    stack._metering = M()
+    assert stack.autogain.io.peak_db(0) == -20.0
+    stack.state.set("/devices/0/inputs/0/Stereo/value", True)
+    assert stack.autogain.io.peak_db(0) == -9.0     # ANALOG 2, the right
+
+
+def test_pad_only_on_a_mic_input(stack):
+    io = stack.autogain.io
+    base = "/devices/0/inputs/0"
+    assert stack.state.get_value(f"{base}/IOType/value") == "Mic"
+    stack.state.set(f"{base}/preamps/0/Pad/value", False)
+    stack.state.set(f"{base}/preamps/0/HiZ/value", False)
+    assert io.can_use_pad(0)
+    stack.state.set(f"{base}/IOType/value", "Line")
+    assert not io.can_use_pad(0)
+    stack.state.set(f"{base}/IOType/value", "Mic")
+    stack.state.set(f"{base}/preamps/0/HiZ/value", True)
+    assert not io.can_use_pad(0)

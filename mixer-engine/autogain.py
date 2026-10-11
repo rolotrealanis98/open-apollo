@@ -654,13 +654,18 @@ class DaemonIO:
         log.info("autogain: input %d Gain = %d dB", ch, int(db))
 
     def can_use_pad(self, ch: int) -> bool:
-        """The Pad control exists and is off, and the input is not on its
-        Hi-Z jack (UA: IOType "Mic"; the Apollo IOType value is unconfirmed)."""
+        """CanUsePad: the input type is "Mic" (the Helper reads "Hi-Z"
+        while HiZ is on), the Pad control exists and Pad is off.  The
+        engine's input IOType is the Mic/Line switch ("Mic" or "Line" on a
+        preamp input in the captured x4 and x8p maps; the readback keeps it
+        current), so a Line-mode input never gets the pad."""
         st = self.d.state
         base = PREAMP.format(ch=ch)
         pad = st.get_value(f"{base}/Pad/value")
-        return pad is not None and not pad and \
-            not st.get_value(f"{base}/HiZ/value")
+        if pad is None or pad or st.get_value(f"{base}/HiZ/value"):
+            return False
+        iotype = st.get_value(f"/devices/0/inputs/{ch}/IOType/value")
+        return iotype is None or iotype == "Mic"
 
     def set_pad(self, ch: int, on: bool):
         base = PREAMP.format(ch=ch)
@@ -675,18 +680,24 @@ class DaemonIO:
         the PipeWire/ALSA meters it is the sample peak of the capture
         stream, which is what UA uses; on the x4 family the default
         ReadbackMeter reads the DSP's input meters instead (pass
-        --alsa-device for the capture-stream peak)."""
+        --alsa-device for the capture-stream peak).
+
+        A stereo (linked) input gives the louder of its two channels, as
+        the Helper's analysis keeps one running max over every channel of
+        the input."""
         from metering import meter_channel
         d = self.d
         base = PREAMP.format(ch=ch).rsplit("/preamps", 1)[0]
         meter = d._metering
-        cap = meter_channel("inputs", ch, 0,
-                            d.state.get_value(f"{base}/Name/value"),
-                            bool(d.state.get_value(f"{base}/Stereo/value")),
-                            list(meter.channel_ids))
-        if cap is None:
-            return FLOOR_DB
-        return max(FLOOR_DB, float(meter.get_channel_meter(cap)[0]))
+        name = d.state.get_value(f"{base}/Name/value")
+        stereo = bool(d.state.get_value(f"{base}/Stereo/value"))
+        ids = list(meter.channel_ids)
+        best = FLOOR_DB
+        for side in ((0, 1) if stereo else (0,)):
+            cap = meter_channel("inputs", ch, side, name, stereo, ids)
+            if cap is not None:
+                best = max(best, float(meter.get_channel_meter(cap)[0]))
+        return best
 
 
 class AutoGainService:
