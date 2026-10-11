@@ -1491,35 +1491,32 @@ class MixerDaemon:
     def _poll_dsp_load(self):
         """Poll DSP load and push to state tree at ~1 Hz.
 
-        On macOS, DSP and session load come from kext selectors 110 and
-        112 (parity/01-user-client.md).  On Linux, we query each DSP's
-        running status via GET_DSP_INFO ioctl.
-
-        The real load figures would need the kext's source for them,
-        which is not decoded yet.
-        For now, we report whether DSPs are active (binary 0/100%) and
-        will refine to actual load percentages when we identify the
-        correct ring buffer query or register.
+        UA's Mixer Engine sets /TotalDSPLoad, /TotalPGMLoad, /TotalMEMLoad
+        from CUAD2Info::GetAllocatedLoads (kext selector 112, GetDSPInfo):
+        host bookkeeping of the plugin loads and DSP memory it allocated
+        plus a rate overhead, not a DSP counter.  With UA_FEAT_DSP_LOAD the
+        driver reports the same figures for a DSP with no plugins (x4: DSP
+        load 1.19 % at 48 kHz, PGM/MEM 0); an older driver gives 0.
         """
         if not self.hw_router or not self.hw_router.backend.connected:
             return
 
-        # Real DSP load needs the selector 110/112 equivalent (not decoded).  The binary running/idle status from GET_DSP_INFO is
-        # not useful — it's always 100% when DSP is alive.  Report 0% until
-        # we implement actual load polling.
-        dsp_load = 0.0
+        get = getattr(self.hw_router.backend, "get_dsp_loads", None)
+        loads = get() if callable(get) else None
+        dsp_load, pgm_load, mem_load = loads or (0.0, 0.0, 0.0)
 
-        # PGM/MEM load require deeper DSP queries (ring buffer commands)
-        pgm_load = 0.0
-        mem_load = 0.0
-
-        # Push to state tree (only if changed)
+        # Push to state tree (only if changed); device status, not saved
         for path, val in [("/TotalDSPLoad", dsp_load),
                           ("/TotalPGMLoad", pgm_load),
                           ("/TotalMEMLoad", mem_load)]:
-            current = self.state.get_value(path)
-            if current is None or abs(float(current) - val) > 0.1:
+            current = self.state.get_value(path + "/value")
+            try:
+                same = abs(float(current) - val) <= 0.005
+            except (TypeError, ValueError):
+                same = False
+            if not same:
                 self._push_to_clients(path, val)
+                self.state._dirty.pop(path + "/value", None)
 
     def _push_to_clients(self, path: str, value):
         """Push a hardware readback change to helper tree and state tree.

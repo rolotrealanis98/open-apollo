@@ -226,6 +226,9 @@ _SYSTEM_INFO_EXT_OFF = 64 + 4 * len(_SYSTEM_INFO_TAIL)
 #   dev_info    BAR0 0x01AC for the types UA's driver reads it for, else
 #               0xFFFFFFFF; [19:16] feed the per-device firmware checks
 UA_FEAT_FW_RELEASE = 1 << 14
+# ABI 1.6: the load words of struct ua_dsp_info (see get_dsp_info)
+UA_FEAT_DSP_LOAD = 1 << 16
+UA_DSP_INFO_F_LOADS = 0x1
 _SYSTEM_INFO_FW = ("fw_release", "dev_info")
 _SYSTEM_INFO_FW_OFF = _SYSTEM_INFO_EXT_OFF + 4 * len(_SYSTEM_INFO_EXT)
 
@@ -2011,15 +2014,44 @@ class HardwareBackend:
         if self.fd < 0:
             return None
 
-        # struct ua_dsp_info { index, bank_base, status, reserved[5] } = 32 bytes
+        # struct ua_dsp_info { index, bank_base, status, alloc_load,
+        #   measured_load, pgm_load, mem_load, flags } = 32 bytes; the load
+        # words (1/100 %) are filled with UA_FEAT_DSP_LOAD (ABI 1.6)
         buf = struct.pack('<III20x', dsp_index, 0, 0)
         try:
             result = fcntl.ioctl(self.fd, UA_IOCTL_GET_DSP_INFO, buf)
-            idx, bank_base, status = struct.unpack_from('<III', result)
-            return {"index": idx, "bank_base": bank_base, "status": status}
+            vals = struct.unpack_from('<8I', result)
         except OSError as e:
             log.debug("get_dsp_info(dsp=%d): %s", dsp_index, e)
             return None
+        info = dict(zip(("index", "bank_base", "status"), vals[:3]))
+        if self.has_feature(UA_FEAT_DSP_LOAD) and vals[7] & UA_DSP_INFO_F_LOADS:
+            info.update(zip(("alloc_load", "measured_load", "pgm_load",
+                             "mem_load"), vals[3:7]))
+        return info
+
+    def get_dsp_loads(self) -> tuple[float, float, float] | None:
+        """(TotalDSPLoad, TotalPGMLoad, TotalMEMLoad) in percent, as UA's
+        Mixer Engine computes them (CUAD2Info::GetAllocatedLoads, arm64
+        0x1002b490c): the average over the DSPs of the allocated load, of
+        pool 3 use and of the busiest of pools 0-2.  None without
+        UA_FEAT_DSP_LOAD or a device.  With no plugins the driver's
+        allocated load is the kext's rate overhead (x4: 1.19 % at 48 kHz)
+        and the pools are unused."""
+        if self.fd < 0 or not self.has_feature(UA_FEAT_DSP_LOAD):
+            return None
+        rows = []
+        for i in range(8):          # the driver refuses an index past the last DSP
+            info = self.get_dsp_info(i)
+            if info is None:
+                break
+            if "alloc_load" in info:
+                rows.append(info)
+        if not rows:
+            return None
+        n = float(len(rows))
+        return tuple(sum(r[k] for r in rows) / 100.0 / n
+                     for k in ("alloc_load", "pgm_load", "mem_load"))
 
     def get_all_dsp_status(self) -> list[dict]:
         """Query all 4 DSPs and return their status."""
