@@ -2991,23 +2991,28 @@ int ua_dsp_wait_ready(struct ua_device *ua)
  * @ua: device (must hold ua->lock)
  *
  * The kext's connect retries a failed connect at most once more, after
- * ResetDMAEngine(0) + CPcieDSP::ProgramRegisters(DSP 0).  Linux re-points
- * and resyncs the DSP rings (the ProgramRegisters part) but does not pulse
- * a DMA engine reset: the driver has no per-engine reset and the
- * all-engine pulse would drop the audio SG state.  Off unless
- * dsp_ready_wait is set, so the default path is one plain call.
+ * ResetDMAEngine(0) + CPcieDSP::ProgramRegisters(DSP 0).  With
+ * kext_connect the engine reset is done as the kext does it (enable bit
+ * cleared, strobe pulsed, engine re-enabled after the ring is
+ * reprogrammed); with dsp_ready_wait alone only the rings are
+ * re-pointed and resynced, as before.  Neither: one plain call.
  */
 int ua_dsp_connect_retry(struct ua_device *ua)
 {
 	int ret = ua_dsp_connect_all(ua);
 
-	if (!ret || !dsp_ready_wait || atomic_read(&ua->shutdown))
+	if (!ret || atomic_read(&ua->shutdown) ||
+	    !(dsp_ready_wait || ua_kext_connect))
 		return ret;
 
 	dev_warn(&ua->pdev->dev,
 		 "DSP connect failed (%d), reprogramming rings and retrying once\n",
 		 ret);
+	if (ua_kext_connect)
+		ua_dma_reset_engine(ua, 0);
 	ua_dsp_rings_reprogram(ua);
+	if (ua_kext_connect)
+		ua_dma_enable_engine(ua, 0);
 	ret = ua_dsp_connect_all(ua);
 	dev_info(&ua->pdev->dev, "DSP connect retry: %s (%d)\n",
 		 ret ? "failed" : "ok", ret);

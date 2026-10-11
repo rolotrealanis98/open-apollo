@@ -2287,6 +2287,10 @@ post_handshake:
 				audio->connected = true;
 				ua_event_post(ua, UA_EVT_CONNECTED, 0);
 
+				/* kext_connect: CPcieDevice::Connect's ring
+				 * connect follows the ACEFACE handshake */
+				ua_kext_ring_connect(ua);
+
 				/*
 				 * Activate plugin chain AFTER ACEFACE connect
 				 * succeeds and BEFORE mixer batch protocol

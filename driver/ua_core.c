@@ -79,6 +79,16 @@ module_param(warm_dma_reset, bool, 0444);
 MODULE_PARM_DESC(warm_dma_reset,
 		 "With a live mixer DSP (warm probe/resume), also write TRANSPORT=0 and reset the DMA engines with the macOS driver's 4/8-engine masks before reprogramming the SG table (default: off; an earlier 8-engine reset killed a running mixer DSP)");
 
+static bool warm_transport0;
+module_param(warm_transport0, bool, 0444);
+MODULE_PARM_DESC(warm_transport0,
+		 "Write TRANSPORT (0x2220) = 0 at every probe/resume, also with a live mixer DSP, as the macOS MapHardware does (default: off; a warm probe leaves the previous owner's value)");
+
+bool ua_kext_connect;
+module_param_named(kext_connect, ua_kext_connect, bool, 0444);
+MODULE_PARM_DESC(kext_connect,
+		 "EXPERIMENTAL A/B: ring-connect every device the macOS driver does, chosen by its public device type (the Apollo x4 included): per-DSP {0x230002,1} plus the dated finalize after the ACEFACE handshake, on every start; supersedes v12_connect (default: off, the x4 starts exactly as before)");
+
 static bool v12_connect;
 module_param(v12_connect, bool, 0444);
 MODULE_PARM_DESC(v12_connect,
@@ -716,6 +726,19 @@ static void ua_hw_stop_xport_irqs(struct ua_device *ua)
 	ua_write(ua, UA_REG_AX_CONTROL, 0);
 	(void)ua_read(ua, UA_REG_AX_CONTROL);
 	ua->audio.transport_running = false;
+
+	/*
+	 * CPcieDevice::MapHardware's first write (kext x86 0x72ca) is
+	 * TRANSPORT = 0, on every start.  The cold path always does it
+	 * (ua_program_registers); a warm one only with warm_dma_reset, so
+	 * this makes it unconditional on request (parity/11 row B1).
+	 */
+	if (warm_transport0) {
+		dev_info(&ua->pdev->dev,
+			 "warm_transport0: TRANSPORT 0x%08x -> 0\n",
+			 ua_read(ua, UA_REG_TRANSPORT));
+		ua_write(ua, UA_REG_TRANSPORT, 0);
+	}
 
 	ua_irq_mask_all(ua, true);
 }
@@ -2421,9 +2444,38 @@ static long ua_ioctl_load_firmware(struct ua_device *ua, unsigned long arg)
  */
 static bool ua_needs_ring_connect(struct ua_device *ua)
 {
+	if (ua_kext_connect)
+		return ua_public_ring_connect(ua->public_type);
 	if (v12_connect)
 		return ua_ring_connect_v12(ua->device_type);
 	return !ua_uses_audio_extension(ua->device_type);
+}
+
+/*
+ * kext_connect, AudioExtension devices (the x4 among them): the kext runs
+ * the ring connect inside Connect(), after the ACEFACE handshake and on
+ * every start, cold or warm.  Here the handshake completes in
+ * ua_audio_connect(), which calls ua_kext_ring_connect() right after it,
+ * so probe leaves the ring connect to that call.
+ */
+static bool ua_ring_connect_deferred(struct ua_device *ua)
+{
+	return ua_kext_connect && ua_uses_audio_extension(ua->device_type) &&
+	       ua_needs_ring_connect(ua);
+}
+
+/* Caller holds ua->lock; ACEFACE has just completed. */
+void ua_kext_ring_connect(struct ua_device *ua)
+{
+	int ret;
+
+	if (!ua_ring_connect_deferred(ua) || atomic_read(&ua->shutdown))
+		return;
+
+	ret = ua_dsp_connect_retry(ua);
+	dev_info(&ua->pdev->dev,
+		 "kext_connect: ring connect + dated finalize after ACEFACE (public type 0x%02x): %s (%d)\n",
+		 ua->public_type, ret ? "failed" : "ok", ret);
 }
 
 /*
@@ -2457,7 +2509,8 @@ static long ua_ioctl_dsp_connect(struct ua_device *ua)
 		 * re-does the ACEFACE handshake + routing + service.
 		 */
 		ret = ua_audio_reconnect(ua);
-		if (ret || !ua_needs_ring_connect(ua))
+		if (ret || !ua_needs_ring_connect(ua) ||
+		    ua_ring_connect_deferred(ua))
 			return ret;
 	}
 
@@ -3071,7 +3124,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 					 ua->aceface_done ? "done" : "FAILED");
 			}
 
-			if (ua_needs_ring_connect(ua)) {
+			if (ua_needs_ring_connect(ua) &&
+			    !ua_ring_connect_deferred(ua)) {
 				/* v12_connect: ACEFACE before ring connect */
 				ua_v12_aceface_first(ua);
 
