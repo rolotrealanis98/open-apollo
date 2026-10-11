@@ -4760,6 +4760,7 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 	if (ua_audio_connect(ua))
 		return;
 	ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION, true);
+	ua_dsp_irq_arm(ua);	/* disconnect_hw masked every vector */
 
 	if (ua_audio_prepare_transport(ua, 0) || ua_audio_start_transport(ua))
 		return;
@@ -5087,8 +5088,10 @@ ua_pcm_prepare_locked(struct ua_device *ua, struct snd_pcm_substream *sub)
 		 * Registers, disabled only by Shutdown).  The transport
 		 * vectors follow in prepare_transport() below.
 		 */
-		if (rate_changed)
+		if (rate_changed) {
 			ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION, true);
+			ua_dsp_irq_arm(ua);	/* masked by disconnect_hw */
+		}
 
 		/*
 		 * DSP connected — start periodic readback drain.  This
