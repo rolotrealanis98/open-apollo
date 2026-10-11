@@ -1561,12 +1561,31 @@ class MixerDaemon:
         log.debug("%s: POST %s (value=%r) — ignored", client.id, cmd.path, cmd.value)
 
 
+def device_map_path(slug: str) -> Path:
+    """Map file for a devices/<slug>.json model: apollo-x8p -> device_map_apollo_x8p.json.
+
+    Captured maps (x4, x8p) and generated ones (tools/gen-device-map.py) share
+    the naming; a generated map says so with a top-level "generated": true.
+    """
+    return SCRIPT_DIR / "device_maps" / f"device_map_{slug.replace('-', '_')}.json"
+
+
+def is_generated_map(path: Path) -> bool:
+    """True if the device map is marked "generated": true (written first in the file)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            head = f.read(2048)
+    except OSError:
+        return False
+    return '"generated":true' in head or '"generated": true' in head
+
+
 def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
     """Resolve a driver device_type to (model, device_map_path) via devices/*.json.
 
-    Each devices/apollo-*.json descriptor carries a "device_type" (hex string)
-    and "model" (e.g. "Apollo x8p"). The device map filename is derived from the
-    model's suffix: "Apollo x8p" -> device_maps/device_map_apollo_x8p.json.
+    Each devices/*.json descriptor lists its driver "device_types" (hex strings)
+    and its "model" (e.g. "Apollo x8p"); the map file is named after the
+    descriptor file (apollo-x8p.json -> device_maps/device_map_apollo_x8p.json).
     Returns (model, path) where path is None if the map file doesn't exist yet.
     """
     if not DEVICES_DIR.is_dir():
@@ -1581,25 +1600,29 @@ def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
             log.warning("Ignoring device descriptor %s: not a JSON object", desc_path)
             continue
 
-        dt = desc.get("device_type")
-        if dt is None:
-            continue
-        try:
-            # Descriptors store hex strings ("0x20"). Base 0 honours the prefix
-            # rather than reading a bare "32" as hex (= 50).
-            dt_value = dt if isinstance(dt, int) else int(str(dt), 0)
-        except ValueError:
-            log.warning("Ignoring device descriptor %s: bad device_type %r",
-                        desc_path, dt)
-            continue
-        if dt_value != device_type:
+        types = list(desc.get("device_types") or [])
+        if desc.get("device_type") is not None:
+            types.append(desc["device_type"])
+        match = False
+        for dt in types:
+            try:
+                # Descriptors store hex strings ("0x20"). Base 0 honours the prefix
+                # rather than reading a bare "32" as hex (= 50).
+                dt_value = dt if isinstance(dt, int) else int(str(dt), 0)
+            except ValueError:
+                log.warning("Ignoring device descriptor %s: bad device_type %r",
+                            desc_path, dt)
+                continue
+            if dt_value == device_type:
+                match = True
+                break
+        if not match:
             continue
 
         model = desc.get("model")
         if not isinstance(model, str) or not model.strip():
             model = None
-        suffix = (model.split()[-1] if model else desc_path.stem.split("-")[-1]).lower()
-        candidate = SCRIPT_DIR / "device_maps" / f"device_map_apollo_{suffix}.json"
+        candidate = device_map_path(desc_path.stem)
         return model, (candidate if candidate.exists() else None)
     return None, None
 
@@ -1613,15 +1636,22 @@ def device_model_name(device_type: int) -> str:
 def find_device_map(device_type: int | None = None) -> Path | None:
     """Find the best available device map, preferring the attached device's own.
 
-    When the connected hardware's device_type is known, load the matching map
-    (e.g. Apollo x8p -> device_map_apollo_x8p.json). Otherwise, or if no such map
-    exists, fall back to the default Apollo x4 map.
+    Order, when the connected hardware's device_type is known:
+      1. the model's captured map (live UA Mixer Engine session: x4, x8p);
+      2. the model's generated map (tools/gen-device-map.py: x4 structure with
+         the model's channel counts; "generated": true), with a warning;
+      3. the Apollo x4 map, with a warning that controls/routing may not match.
     """
-    # Device-specific map, keyed off the attached hardware
     if device_type is not None:
         model, dev_map = lookup_device(device_type)
+        label = model or f"device_type 0x{device_type:02x}"
         if dev_map:
-            log.info("Selected device map for %s", model or f"0x{device_type:02x}")
+            if is_generated_map(dev_map):
+                log.warning("Using the generated device map for %s (%s): structure "
+                            "from the Apollo x4 capture, channels from devices/*.json; "
+                            "not captured from this model.", label, dev_map.name)
+            else:
+                log.info("Selected device map for %s", label)
             return dev_map
         if model:
             log.warning("No device map for %s (device_type 0x%02x) — falling back "
