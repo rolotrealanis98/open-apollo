@@ -1755,6 +1755,9 @@ static void ua_dsp_service_handler(struct work_struct *work)
 		ua->mixer_rb_status = 1;
 		ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
 
+		/* Front-panel changes → ALSA controls (no write back) */
+		ua_mixer_sync_readback(ua);
+
 		if (!ua->mixer_rb_seen) {
 			ua->mixer_rb_seen = true;
 			dev_dbg(&ua->pdev->dev,
@@ -4750,6 +4753,14 @@ void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
  *
  * Cache strategy: write-through.  .put writes to HW first and only
  * updates the cache on success.  .get returns cached values (no HW read).
+ * The cache follows the hardware too: ua_mixer_sync_readback() compares
+ * each mixer readback with the previous one and, for what the front panel
+ * changed, updates the cache and notifies the control (no write back).
+ *
+ * Cache-only, by design (nothing reaches the device): Digital Input Mode
+ * (host-side route selection) and DSP Spanning Switch (a NOP param in the
+ * kext).  Clock Mode is a read-only view of Clock Source.  Everything else
+ * writes the mixer settings.
  * ---------------------------------------------------------------- */
 
 /* Pack channel index + param_id into kcontrol->private_value */
@@ -4757,15 +4768,22 @@ void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 #define UA_CTL_CH(pv)          ((pv) >> 16)
 #define UA_CTL_PARAM(pv)       ((pv) & 0xFFFF)
 
-/* --- Preamp Gain (INTEGER, per-channel) --- */
+static int ua_ctl_preamp_write(struct ua_device *ua, unsigned int ch,
+			       u32 param_id, u32 value);
+
+/* --- Preamp Gain (INTEGER dB, per-channel; settings: GainA/B/C triplet) --- */
+
+/* 1 dB steps, 10..65 dB (GainA/GainB = dB-10 up to 54, GainC = dB-9 up to 56) */
+static const DECLARE_TLV_DB_SCALE(preamp_gain_tlv,
+				  UA_PREAMP_GAIN_MIN_DB * 100, 100, 0);
 
 static int ua_preamp_gain_info(struct snd_kcontrol *kctl,
 			       struct snd_ctl_elem_info *info)
 {
 	info->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
 	info->count = 1;
-	info->value.integer.min = -144;
-	info->value.integer.max = 65;
+	info->value.integer.min = UA_PREAMP_GAIN_MIN_DB;
+	info->value.integer.max = UA_PREAMP_GAIN_MAX_DB;
 	info->value.integer.step = 1;
 	return 0;
 }
@@ -4776,7 +4794,9 @@ static int ua_preamp_gain_get(struct snd_kcontrol *kctl,
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 	unsigned int ch = UA_CTL_CH(kctl->private_value);
 
-	val->value.integer.value[0] = ua->audio.preamp[ch].gain;
+	val->value.integer.value[0] =
+		min_t(int, max_t(int, ua->audio.preamp[ch].gain,
+				 UA_PREAMP_GAIN_MIN_DB), UA_PREAMP_GAIN_MAX_DB);
 	return 0;
 }
 
@@ -4786,15 +4806,32 @@ static int ua_preamp_gain_put(struct snd_kcontrol *kctl,
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 	unsigned int ch = UA_CTL_CH(kctl->private_value);
 	int newval = val->value.integer.value[0];
+	unsigned int a, c;
+	int ret;
 
-	if (newval < -144 || newval > 65)
+	if (newval < UA_PREAMP_GAIN_MIN_DB || newval > UA_PREAMP_GAIN_MAX_DB)
 		return -EINVAL;
 
 	if (newval == ua->audio.preamp[ch].gain)
 		return 0;
 
-	/* Cache-only: daemon handles gain via ioctl (DSP settings path).
-	 * CLI commands to ARM MCU freeze the hardware. */
+	/*
+	 * The Mixer Engine's triplet: GainA and GainB are dB-10, GainC (the
+	 * field the readback reports) dB-9.  One lock hold, so the three go
+	 * out in the same mailbox commit.
+	 */
+	a = newval - 10;
+	c = newval - 9;
+	mutex_lock(&ua->lock);
+	ret = ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_GAIN_A, a);
+	if (!ret)
+		ret = ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_GAIN_B, a);
+	if (!ret)
+		ret = ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_GAIN_C, c);
+	mutex_unlock(&ua->lock);
+	if (ret)
+		return ret;
+
 	ua->audio.preamp[ch].gain = newval;
 	return 1;  /* value changed */
 }
@@ -4854,14 +4891,29 @@ static int ua_preamp_switch_put(struct snd_kcontrol *kctl,
 	unsigned int ch = UA_CTL_CH(kctl->private_value);
 	u32 param = UA_CTL_PARAM(kctl->private_value);
 	bool newval = !!val->value.integer.value[0];
+	int ret;
 
 	if (newval == ua_preamp_switch_cached(&ua->audio.preamp[ch], param))
 		return 0;
 
-	/* Cache-only: daemon handles preamp flags via ioctl (DSP settings).
-	 * CLI commands to ARM MCU freeze the hardware. */
+	ret = ua_ctl_preamp_write(ua, ch, param, newval);
+	if (ret)
+		return ret;
+
 	ua_preamp_switch_set_cache(&ua->audio.preamp[ch], param, newval);
 	return 1;
+}
+
+/* Preamp flag write (settings 0/12), under ua->lock like the monitor ones */
+static int ua_ctl_preamp_write(struct ua_device *ua, unsigned int ch,
+			       u32 param_id, u32 value)
+{
+	int ret;
+
+	mutex_lock(&ua->lock);
+	ret = ua_preamp_write_locked(ua, ch, param_id, value);
+	mutex_unlock(&ua->lock);
+	return ret;
 }
 
 /*
@@ -4926,6 +4978,59 @@ static int ua_monitor_vol_put(struct snd_kcontrol *kctl,
 	return 1;
 }
 
+/*
+ * --- Headphone 1/2 Volume (INTEGER, same raw scale as the monitor) ---
+ *
+ * HP1 is setting[2] bits 15:8 (param 0x02, readback word 2 15:8).  HP2 is
+ * readback only (word 7 7:0): its write param is not confirmed on the
+ * hardware, so the control is read-only.  The knobs apply themselves.
+ */
+
+static int ua_hp_vol_get(struct snd_kcontrol *kctl,
+			 struct snd_ctl_elem_value *val)
+{
+	struct ua_device *ua = snd_kcontrol_chip(kctl);
+
+	val->value.integer.value[0] =
+		(UA_CTL_PARAM(kctl->private_value) == UA_MON_PARAM_HP1_VOL) ?
+		ua->audio.monitor.hp1_vol : ua->audio.monitor.hp2_vol;
+	return 0;
+}
+
+static int ua_hp_vol_put(struct snd_kcontrol *kctl,
+			 struct snd_ctl_elem_value *val)
+{
+	struct ua_device *ua = snd_kcontrol_chip(kctl);
+	int newval = val->value.integer.value[0];
+	int ret;
+
+	if (newval < 0 || newval > 192)
+		return -EINVAL;
+
+	if (newval == ua->audio.monitor.hp1_vol)
+		return 0;
+
+	ret = ua_ctl_monitor_set_param(ua, 1, UA_MON_PARAM_HP1_VOL,
+				       (u32)newval);
+	if (ret)
+		return ret;
+
+	ua->audio.monitor.hp1_vol = newval;
+	return 1;
+}
+
+/* --- HiZ detect (BOOLEAN, read-only: readback word 0 bit 24 + input) --- */
+
+static int ua_hiz_get(struct snd_kcontrol *kctl,
+		      struct snd_ctl_elem_value *val)
+{
+	struct ua_device *ua = snd_kcontrol_chip(kctl);
+	unsigned int ch = UA_CTL_CH(kctl->private_value);
+
+	val->value.integer.value[0] = ua->audio.preamp[ch].hiz ? 1 : 0;
+	return 0;
+}
+
 /* --- Monitor Mute (BOOLEAN, inverted: ALSA 1=unmuted → HW 0) --- */
 
 static int ua_monitor_mute_get(struct snd_kcontrol *kctl,
@@ -4950,7 +5055,10 @@ static int ua_monitor_mute_put(struct snd_kcontrol *kctl,
 	if (hw_val == ua->audio.monitor.mute)
 		return 0;
 
-	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, (u32)hw_val);
+	/* Param 0x03 carries mute and mono: keep the mono bit */
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE,
+				       hw_val | (ua->audio.monitor.mono ?
+						 UA_MON_MONO : 0));
 	if (ret)
 		return ret;
 
@@ -4987,7 +5095,7 @@ static int ua_monitor_dim_put(struct snd_kcontrol *kctl,
 	return 1;
 }
 
-/* --- Preamp Input Select (ENUMERATED: Mic/Line, per-channel) --- */
+/* --- Preamp Input Select (ENUMERATED: Mic/Line, per-channel; readback +0 = Line) --- */
 
 static const char * const ua_input_select_names[] = { "Mic", "Line" };
 
@@ -5015,6 +5123,7 @@ static int ua_input_select_put(struct snd_kcontrol *kctl,
 	unsigned int ch = UA_CTL_CH(kctl->private_value);
 	unsigned int idx = val->value.enumerated.item[0];
 	bool newval;
+	int ret;
 
 	if (idx >= ARRAY_SIZE(ua_input_select_names))
 		return -EINVAL;
@@ -5023,8 +5132,10 @@ static int ua_input_select_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.preamp[ch].mic_line)
 		return 0;
 
-	/* Cache-only: daemon handles Mic/Line via ioctl (DSP settings).
-	 * CLI commands to ARM MCU freeze the hardware. */
+	ret = ua_ctl_preamp_write(ua, ch, UA_PREAMP_PARAM_MIC_LINE, newval);
+	if (ret)
+		return ret;
+
 	ua->audio.preamp[ch].mic_line = newval;
 	return 1;
 }
@@ -5050,8 +5161,14 @@ static int ua_monitor_mono_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.monitor.mono)
 		return 0;
 
-	/* VERIFIED 2026-02-20: mono uses param 0x03 value=1 (same param as mute) */
-	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, newval ? 1 : 0);
+	/*
+	 * VERIFIED 2026-02-20: mono is param 0x03 (the mute's param), value
+	 * bit 0.  Keep the mute bit: they are independent on the hardware.
+	 */
+	ret = ua_ctl_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE,
+				       (newval ? UA_MON_MONO : 0) |
+				       (ua->audio.monitor.mute == UA_MON_MUTE_ON ?
+					UA_MON_MUTE_ON : 0));
 	if (ret)
 		return ret;
 
@@ -5077,7 +5194,11 @@ static int ua_monitor_source_get(struct snd_kcontrol *kctl,
 {
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 
-	val->value.enumerated.item[0] = ua->audio.monitor.source;
+	/* The cache can hold any 3-bit value the daemon sent */
+	val->value.enumerated.item[0] =
+		(unsigned int)ua->audio.monitor.source <
+		ARRAY_SIZE(ua_monitor_source_names) ?
+		ua->audio.monitor.source : 0;
 	return 0;
 }
 
@@ -5120,10 +5241,11 @@ static int ua_hp_source_get(struct snd_kcontrol *kctl,
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 	u32 param = UA_CTL_PARAM(kctl->private_value);
 
-	if (param == UA_MON_PARAM_HP1_SOURCE)
-		val->value.enumerated.item[0] = ua->audio.monitor.hp1_source;
-	else
-		val->value.enumerated.item[0] = ua->audio.monitor.hp2_source;
+	int src = (param == UA_MON_PARAM_HP1_SOURCE) ?
+		  ua->audio.monitor.hp1_source : ua->audio.monitor.hp2_source;
+
+	val->value.enumerated.item[0] =
+		(unsigned int)src < ARRAY_SIZE(ua_hp_source_names) ? src : 0;
 	return 0;
 }
 
@@ -5349,7 +5471,7 @@ static int ua_output_ref_get(struct snd_kcontrol *kctl,
 {
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 
-	val->value.enumerated.item[0] = ua->audio.monitor.output_ref;
+	val->value.enumerated.item[0] = ua->audio.monitor.output_ref ? 1 : 0;
 	return 0;
 }
 
@@ -5375,7 +5497,13 @@ static int ua_output_ref_put(struct snd_kcontrol *kctl,
 	return 1;
 }
 
-/* --- Clock Mode (ENUMERATED: Internal/External — cache-only) --- */
+/*
+ * --- Clock Mode (ENUMERATED: Internal/External, read-only) ---
+ *
+ * This used to be a cache-only control that wrote nothing: whether the
+ * clock is the internal one or an external one is just the Clock Source.
+ * This is that, read-only; set Clock Source.
+ */
 
 static const char * const ua_clock_mode_names[] = { "Internal", "External" };
 
@@ -5391,32 +5519,9 @@ static int ua_clock_mode_get(struct snd_kcontrol *kctl,
 {
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 
-	/* Map HW value to enum: 0x00→0 (Internal), 0x0C→1 (External) */
 	val->value.enumerated.item[0] =
-		(ua->audio.monitor.clock_mode == UA_CLOCK_MODE_EXTERNAL) ? 1 : 0;
+		READ_ONCE(ua->audio.clock_source) != UA_CLOCK_INTERNAL;
 	return 0;
-}
-
-static int ua_clock_mode_put(struct snd_kcontrol *kctl,
-			     struct snd_ctl_elem_value *val)
-{
-	struct ua_device *ua = snd_kcontrol_chip(kctl);
-	unsigned int idx = val->value.enumerated.item[0];
-	int hw_val;
-
-	if (idx >= ARRAY_SIZE(ua_clock_mode_names))
-		return -EINVAL;
-
-	hw_val = idx ? UA_CLOCK_MODE_EXTERNAL : UA_CLOCK_MODE_INTERNAL;
-	if (hw_val == ua->audio.monitor.clock_mode)
-		return 0;
-
-	/*
-	 * Clock Mode is SEL163, NOT a SEL131 mixer param.
-	 * Cache-only — the daemon handles actual HW write.
-	 */
-	ua->audio.monitor.clock_mode = hw_val;
-	return 1;
 }
 
 /* --- CUE Mirror Source (ENUMERATED, per-CUE) --- */
@@ -5770,7 +5875,10 @@ static int ua_sample_rate_get(struct snd_kcontrol *kctl,
 	struct ua_device *ua = snd_kcontrol_chip(kctl);
 
 	/* rate_index is 1-based (UA_RATE_44100=1), enum is 0-based */
-	val->value.enumerated.item[0] = ua->audio.rate_index - 1;
+	val->value.enumerated.item[0] =
+		(ua->audio.rate_index >= 1 &&
+		 ua->audio.rate_index <= ARRAY_SIZE(ua_rate_values)) ?
+		ua->audio.rate_index - 1 : 0;
 	return 0;
 }
 
@@ -5854,19 +5962,180 @@ static int ua_clock_source_put(struct snd_kcontrol *kctl,
 
 void ua_notify_clock_controls(struct ua_device *ua)
 {
-	struct snd_ctl_elem_id eid;
+	ua_ctl_notify_name(ua, "Sample Rate");
+	ua_ctl_notify_name(ua, "Clock Source");
+	ua_ctl_notify_name(ua, "Clock Mode");
+}
 
-	if (!ua->audio.card)
+/*
+ * Every control goes through here so a notification can carry the numid
+ * (alsa-lib's hctl matches events by numid, an id with only a name is
+ * dropped) and the readback sync can find it by name.
+ */
+static int ua_ctl_register(struct ua_device *ua, struct snd_kcontrol *kctl)
+{
+	struct ua_audio *audio = &ua->audio;
+	int ret = snd_ctl_add(audio->card, kctl);
+
+	if (!ret && audio->num_kctls < UA_MAX_KCTLS)
+		audio->kctls[audio->num_kctls++] = kctl;
+	return ret;
+}
+
+/* Value-changed event for the control called @name, if there is one */
+void ua_ctl_notify_name(struct ua_device *ua, const char *name)
+{
+	struct ua_audio *audio = &ua->audio;
+	unsigned int i;
+
+	if (!audio->card)
 		return;
+	for (i = 0; i < audio->num_kctls; i++) {
+		if (!strcmp(audio->kctls[i]->id.name, name)) {
+			snd_ctl_notify(audio->card, SNDRV_CTL_EVENT_MASK_VALUE,
+				       &audio->kctls[i]->id);
+			return;
+		}
+	}
+}
 
-	memset(&eid, 0, sizeof(eid));
-	eid.iface = SNDRV_CTL_ELEM_IFACE_CARD;
+static void ua_sync_bool(struct ua_device *ua, bool *cache, bool val,
+			 const char *name)
+{
+	if (*cache == val)
+		return;
+	*cache = val;
+	ua_ctl_notify_name(ua, name);
+}
 
-	strscpy(eid.name, "Sample Rate", sizeof(eid.name));
-	snd_ctl_notify(ua->audio.card, SNDRV_CTL_EVENT_MASK_VALUE, &eid);
+static void ua_sync_int(struct ua_device *ua, int *cache, int val,
+			const char *name)
+{
+	if (*cache == val)
+		return;
+	*cache = val;
+	ua_ctl_notify_name(ua, name);
+}
 
-	strscpy(eid.name, "Clock Source", sizeof(eid.name));
-	snd_ctl_notify(ua->audio.card, SNDRV_CTL_EVENT_MASK_VALUE, &eid);
+/**
+ * ua_mixer_sync_readback - follow the hardware in the ALSA control cache
+ * @ua: device (caller holds ua->lock; ua->mixer_rb_data is fresh)
+ *
+ * The front panel (and the monitor knob, which applies itself; the host
+ * only mirrors it) changes the device, and the device reports it in the
+ * readback.  For each field that differs from the readback this ran on
+ * last time, set the cached value and notify the control.  Nothing is
+ * written back to the hardware.  Comparing with the previous readback
+ * rather than with the cache keeps a stale readback right after a put (the
+ * cache is already new, the readback not yet) from undoing it; the first
+ * readback seeds everything.
+ *
+ * Readback layout (hardware-verified on the x4, 2026-10-10):
+ *   word 0  6 bits per input (+0 Line, +1 PAD, +2 Link, +3 48V, +4 LowCut,
+ *           +5 Phase); bit 24/25 HiZ detect of input 1/2
+ *   word 2  monitor volume 7:0 (192 + 2*dB), HP1 volume 15:8, mute 16,
+ *           mono 17, dim 31
+ *   word 3  GainC fields (UA_RB_PREAMP_GAINC), dB = GainC + 9
+ *   word 6  bit 8 talkback
+ *   word 7  HP2 volume 7:0
+ * The clock lock (word 6 bit 31, valid when bit 30) is not a control here.
+ */
+void ua_mixer_sync_readback(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	const u32 *rb = ua->mixer_rb_data;
+	u32 *old = audio->rb_synced;
+	u32 chg[UA_MIXER_RB_WORDS];
+	unsigned int ch, n, i;
+	char name[44];
+
+	for (i = 0; i < UA_MIXER_RB_WORDS; i++)
+		chg[i] = audio->rb_synced_valid ? rb[i] ^ old[i] : ~0u;
+	memcpy(old, rb, sizeof(audio->rb_synced));
+	audio->rb_synced_valid = true;
+
+	/* Word 0, 3: the four inputs the words describe */
+	n = min_t(unsigned int, audio->num_preamps, 4);
+	for (ch = 0; ch < n; ch++) {
+		struct ua_preamp_state *st = &audio->preamp[ch];
+		u32 flags = (chg[0] >> (ch * 6)) & 0x3f;
+
+		if (flags & BIT(0)) {
+			snprintf(name, sizeof(name), "Line %u Input Select",
+				 ch + 1);
+			ua_sync_bool(ua, &st->mic_line,
+				     UA_RB_PREAMP_MICLINE(rb[0], ch), name);
+		}
+		if (flags & BIT(1)) {
+			snprintf(name, sizeof(name), "Line %u Pad Switch",
+				 ch + 1);
+			ua_sync_bool(ua, &st->pad, UA_RB_PREAMP_PAD(rb[0], ch),
+				     name);
+		}
+		if (flags & BIT(3)) {
+			snprintf(name, sizeof(name),
+				 "Mic %u 48V Phantom Power Switch", ch + 1);
+			ua_sync_bool(ua, &st->phantom,
+				     UA_RB_PREAMP_48V(rb[0], ch), name);
+		}
+		if (flags & BIT(4)) {
+			snprintf(name, sizeof(name), "Line %u LowCut Switch",
+				 ch + 1);
+			ua_sync_bool(ua, &st->lowcut,
+				     UA_RB_PREAMP_LOWCUT(rb[0], ch), name);
+		}
+		if (flags & BIT(5)) {
+			snprintf(name, sizeof(name),
+				 "Line %u Phase Invert Switch", ch + 1);
+			ua_sync_bool(ua, &st->phase,
+				     UA_RB_PREAMP_PHASE(rb[0], ch), name);
+		}
+		if (ch < 2 && ch < audio->num_hiz && (chg[0] & BIT(24 + ch))) {
+			snprintf(name, sizeof(name),
+				 "Line %u HiZ Detect Switch", ch + 1);
+			ua_sync_bool(ua, &st->hiz, UA_RB_HIZ_DETECT(rb[0], ch),
+				     name);
+		}
+		if (UA_RB_PREAMP_GAINC(chg[3], ch)) {
+			snprintf(name, sizeof(name), "Line %u Capture Volume",
+				 ch + 1);
+			ua_sync_int(ua, &st->gain,
+				    min_t(int, max_t(int,
+					    UA_RB_PREAMP_GAIN_DB(rb[3], ch),
+					    UA_PREAMP_GAIN_MIN_DB),
+					  UA_PREAMP_GAIN_MAX_DB), name);
+		}
+	}
+
+	/* Word 2: monitor section */
+	if (chg[2] & 0xff)
+		ua_sync_int(ua, &audio->monitor.level,
+			    min_t(int, UA_RB_MON_VOLUME(rb[2]), 192),
+			    "Monitor Playback Volume");
+	if (chg[2] & 0xff00)
+		ua_sync_int(ua, &audio->monitor.hp1_vol,
+			    min_t(int, UA_RB_HP1_VOLUME(rb[2]), 192),
+			    "Headphone 1 Playback Volume");
+	if (chg[2] & BIT(16))
+		ua_sync_int(ua, &audio->monitor.mute,
+			    UA_RB_MON_MUTE(rb[2]) ? UA_MON_MUTE_ON :
+						    UA_MON_MUTE_OFF,
+			    "Monitor Playback Switch");
+	if (chg[2] & BIT(17))
+		ua_sync_bool(ua, &audio->monitor.mono, UA_RB_MON_MONO(rb[2]),
+			     "Monitor Mono Switch");
+	if (chg[2] & BIT(31))
+		ua_sync_bool(ua, &audio->monitor.dim, UA_RB_MON_DIM(rb[2]),
+			     "Monitor Dim Switch");
+
+	/* Word 6: talkback button; word 7: HP2 knob */
+	if (chg[6] & BIT(8))
+		ua_sync_bool(ua, &audio->monitor.talkback,
+			     UA_RB_TALKBACK(rb[6]), "Monitor Talkback Switch");
+	if (chg[7] & 0xff)
+		ua_sync_int(ua, &audio->monitor.hp2_vol,
+			    min_t(int, UA_RB_HP2_VOLUME(rb[7]), 192),
+			    "Headphone 2 Playback Volume");
 }
 
 /*
@@ -5880,7 +6149,6 @@ void ua_notify_clock_controls(struct ua_device *ua)
 static int ua_mixer_init(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
-	struct snd_card *card = audio->card;
 	struct snd_kcontrol_new ctl;
 	struct snd_kcontrol *kctl;
 	unsigned int ch, total = 0;
@@ -5893,16 +6161,19 @@ static int ua_mixer_init(struct ua_device *ua)
 		/* Gain */
 		ctl = (struct snd_kcontrol_new){};
 		ctl.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+		ctl.access = SNDRV_CTL_ELEM_ACCESS_READWRITE |
+			     SNDRV_CTL_ELEM_ACCESS_TLV_READ;
+		ctl.tlv.p = preamp_gain_tlv;
 		snprintf(name, sizeof(name), "Line %u Capture Volume", ch + 1);
 		ctl.name = name;
 		ctl.info = ua_preamp_gain_info;
 		ctl.get = ua_preamp_gain_get;
 		ctl.put = ua_preamp_gain_put;
-		ctl.private_value = UA_CTL_PACK(ch, UA_ARM_PARAM_GAIN);
+		ctl.private_value = UA_CTL_PACK(ch, UA_PREAMP_PARAM_GAIN_C);
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -5920,7 +6191,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -5937,7 +6208,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -5955,7 +6226,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -5973,7 +6244,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -5991,12 +6262,30 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
 
-		/* HiZ: hardware auto-detect only, no software control */
+		/* HiZ: hardware auto-detect only, so a read-only indicator */
+		if (ch < audio->num_hiz && ch < 2) {
+			ctl = (struct snd_kcontrol_new){};
+			ctl.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+			ctl.access = SNDRV_CTL_ELEM_ACCESS_READ;
+			snprintf(name, sizeof(name),
+				 "Line %u HiZ Detect Switch", ch + 1);
+			ctl.name = name;
+			ctl.info = ua_preamp_switch_info;
+			ctl.get = ua_hiz_get;
+			ctl.private_value = UA_CTL_PACK(ch, 0);
+			kctl = snd_ctl_new1(&ctl, ua);
+			if (!kctl)
+				return -ENOMEM;
+			ret = ua_ctl_register(ua, kctl);
+			if (ret)
+				return ret;
+			total++;
+		}
 	}
 
 	/* Monitor Volume */
@@ -6015,7 +6304,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&mon_vol, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6034,7 +6323,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&mon_sw, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6053,7 +6342,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&mon_dim, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6072,7 +6361,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&mon_mono, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6091,7 +6380,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&mon_src, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6109,7 +6398,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6127,10 +6416,41 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
+	}
+
+	/* Headphone 1 Volume, Headphone 2 Volume (read-only mirror) */
+	{
+		unsigned int hp;
+
+		for (hp = 1; hp <= 2; hp++) {
+			char name[32];
+
+			ctl = (struct snd_kcontrol_new){};
+			ctl.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+			ctl.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
+				     (hp == 1 ? SNDRV_CTL_ELEM_ACCESS_READWRITE :
+						SNDRV_CTL_ELEM_ACCESS_READ);
+			snprintf(name, sizeof(name),
+				 "Headphone %u Playback Volume", hp);
+			ctl.name = name;
+			ctl.info = ua_monitor_vol_info;
+			ctl.get = ua_hp_vol_get;
+			ctl.put = ua_hp_vol_put;
+			ctl.tlv.p = monitor_vol_tlv;
+			ctl.private_value = UA_CTL_PACK(0, hp == 1 ?
+				UA_MON_PARAM_HP1_VOL : 0);
+			kctl = snd_ctl_new1(&ctl, ua);
+			if (!kctl)
+				return -ENOMEM;
+			ret = ua_ctl_register(ua, kctl);
+			if (ret)
+				return ret;
+			total++;
+		}
 	}
 
 	/* Monitor Dim Level */
@@ -6146,7 +6466,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&dim_lvl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6165,7 +6485,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&mon_tb, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6184,7 +6504,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&dig_mode, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6204,7 +6524,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&dig_in_mode, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6223,26 +6543,26 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&out_ref, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
 	}
 
-	/* Clock Mode (cache-only — SEL163, not a mixer param) */
+	/* Clock Mode (read-only view of Clock Source) */
 	{
 		static const struct snd_kcontrol_new clk_mode = {
 			.iface = SNDRV_CTL_ELEM_IFACE_CARD,
+			.access = SNDRV_CTL_ELEM_ACCESS_READ,
 			.name = "Clock Mode",
 			.info = ua_clock_mode_info,
 			.get = ua_clock_mode_get,
-			.put = ua_clock_mode_put,
 		};
 
 		kctl = snd_ctl_new1(&clk_mode, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6260,7 +6580,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6278,7 +6598,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6296,7 +6616,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6314,7 +6634,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6333,7 +6653,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&dig_mirr, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6352,7 +6672,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ident, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6371,7 +6691,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&src_sw, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6390,7 +6710,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&dsp_span, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6408,7 +6728,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6426,7 +6746,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6444,7 +6764,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6462,7 +6782,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6481,7 +6801,7 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&rate_ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
@@ -6500,14 +6820,14 @@ static int ua_mixer_init(struct ua_device *ua)
 		kctl = snd_ctl_new1(&clk_ctl, ua);
 		if (!kctl)
 			return -ENOMEM;
-		ret = snd_ctl_add(card, kctl);
+		ret = ua_ctl_register(ua, kctl);
 		if (ret)
 			return ret;
 		total++;
 	}
 
 	dev_info(&ua->pdev->dev,
-		 "ALSA mixer: %u controls (%u preamp ch × 6, 23 monitor/routing, 3 clock)\n",
+		 "ALSA mixer: %u controls (%u preamp ch × 6 + HiZ, monitor/routing, clock)\n",
 		 total, audio->num_preamps);
 
 	return 0;
@@ -6772,7 +7092,8 @@ int ua_audio_init(struct ua_device *ua)
 		audio->monitor.talkback = false;
 		audio->monitor.digital_mode = 0; /* S/PDIF */
 		audio->monitor.output_ref = 0;   /* +4 dBu */
-		audio->monitor.clock_mode = UA_CLOCK_MODE_INTERNAL;
+		audio->monitor.hp1_vol = 192;    /* the knob sets it; mirrored */
+		audio->monitor.hp2_vol = 192;
 		audio->monitor.cue1_mirror = (int)0xFFFFFFFF; /* NONE */
 		audio->monitor.cue2_mirror = (int)0xFFFFFFFF; /* NONE */
 		audio->monitor.cue1_mirror_en = false;

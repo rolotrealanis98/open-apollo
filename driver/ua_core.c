@@ -1128,18 +1128,15 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		break;
 	case UA_MON_PARAM_MUTE:		/* 0x03 -> bits[17:16] */
 		/*
-		 * 3-state (VERIFIED 2026-02-20):
-		 *   value=0: unmuted, stereo -> bits[17:16] = 00
-		 *   value=1: mono (MixToMono) -> bit 17 set
-		 *   value=2: muted            -> bit 16 set
+		 * Bit 1 of the value is the mute (setting[2] bit 16), bit 0
+		 * the mono (bit 17); the readback reports them as two
+		 * independent bits (the front panel can set both), so 3 is
+		 * both.  0, 1 and 2 are what the Mixer Engine sends
+		 * (VERIFIED 2026-02-20): off, MixToMono, muted.
 		 */
 		setting_idx = 2;
-		if (value == UA_MON_MUTE_ON)       /* value == 2 */
-			hw_val = 0x00010000;       /* bit 16 = mute */
-		else if (value == 1)               /* MixToMono */
-			hw_val = 0x00020000;       /* bit 17 = mono */
-		else
-			hw_val = 0;               /* unmuted, stereo */
+		hw_val = ((value & UA_MON_MUTE_ON) ? BIT(16) : 0) |
+			 ((value & UA_MON_MONO) ? BIT(17) : 0);
 		hw_mask = 0x00030000;
 		break;
 	case UA_MON_PARAM_SOURCE:	/* 0x04 -> bit29 + bits[19:18] */
@@ -1541,6 +1538,69 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 					     hw_val, hw_mask);
 }
 
+/**
+ * ua_preamp_write_locked - write one preamp parameter to the mixer settings
+ * @ua: device (caller holds ua->lock)
+ * @ch: input (0-31 for the route/level params, else a preamp channel)
+ * @param_id: UA_PREAMP_PARAM_*
+ * @value: 0/1 for the flags (phase: 1 or a negative float), dB-9 for GainC,
+ *         raw byte for the other gain params
+ *
+ * Preamp controls go through DSP mixer settings only; CLI commands freeze the
+ * ARM MCU (setInputParamARM routes everything to CPcieDeviceMixer::
+ * WriteSetting in the kext).  Flags (0x00-0x05): setting[0] (inputs 1-4) or
+ * [12], 6-bit stride, bit = param_id.  GainC (0x06): setting[3] or [14], the
+ * 6-bit fields of UA_RB_PREAMP_GAINC().  Others (0x07-0x17): byte-packed in
+ * setting[param_id+7] (+15 above input 4).  Returns the setting write result.
+ */
+int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
+			   u32 param_id, u32 value)
+{
+	unsigned int setting_idx, shift;
+	u32 hw_mask, hw_val;
+
+	if (param_id <= UA_PREAMP_PARAM_PHASE) {
+		bool flag_set;
+
+		setting_idx = (ch > 3) ? 12 : 0;
+		shift = (ch & 3) * 6;
+		hw_mask = (1u << param_id) << shift;
+
+		/*
+		 * Phase: the kext takes a float (+1.0f normal, -1.0f invert)
+		 * but the daemon sends an int (0 normal, 1 invert).
+		 */
+		if (param_id == UA_PREAMP_PARAM_PHASE)
+			flag_set = !!(value & BIT(31)) || value == 1;
+		else
+			flag_set = !!value;
+
+		hw_val = flag_set ? hw_mask : 0;
+	} else if (param_id == UA_PREAMP_PARAM_GAIN_C) {
+		/*
+		 * Kext disasm (sub_48734): mask 0x3F with a 4-bit gap between
+		 * the pairs: inputs 1-4 at shifts 0/6/16/22.
+		 */
+		setting_idx = (ch > 3) ? 14 : 3;
+		shift = (ch & 3) * 6;
+		if (ch & 2)
+			shift += 4;
+		hw_mask = 0x3Fu << shift;
+		hw_val = (value & 0x3F) << shift;
+	} else if (param_id <= 0x17) {
+		setting_idx = param_id + ((ch <= 3) ? 7 : 15);
+		if (setting_idx >= UA_MIXER_BATCH_COUNT)
+			return 0;
+		shift = (ch & 3) * 8;
+		hw_mask = 0xFFu << shift;
+		hw_val = (value & 0xFF) << shift;
+	} else {
+		return 0;
+	}
+
+	return ua_mixer_write_setting_locked(ua, setting_idx, hw_val, hw_mask);
+}
+
 /* ----------------------------------------------------------------
  * Mixer / CLI ioctl handlers
  * ---------------------------------------------------------------- */
@@ -1605,71 +1665,8 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			goto out_unlock;
 		}
 
-		/* Write to DSP mixer settings (kext-verified path) */
-		if (param.param_id <= 0x05) {
-			/* Flag params: 6-bit stride, shared setting */
-			unsigned int setting_idx;
-			unsigned int shift;
-			u32 hw_val, hw_mask;
-			bool flag_set;
-
-			setting_idx = (param.channel_idx > 3) ? 12 : 0;
-			shift = (param.channel_idx & 3) * 6;
-			hw_mask = (1u << param.param_id) << shift;
-
-			/*
-			 * Phase: kext uses float (+1.0f=normal, -1.0f=invert)
-			 * but daemon sends int (0=normal, 1=invert).
-			 * Handle both: bit 31 set (negative float) OR non-zero int.
-			 */
-			if (param.param_id == UA_PREAMP_PARAM_PHASE)
-				flag_set = !!(param.value & BIT(31)) || param.value == 1;
-			else
-				flag_set = !!param.value;
-
-			hw_val = flag_set ? hw_mask : 0;
-			ret = ua_mixer_write_setting_locked(ua, setting_idx,
-							    hw_val, hw_mask);
-		} else if (param.param_id == 0x06) {
-			/*
-			 * GainC: 6-bit field at setting[3] (ch0-3) or [14] (ch4-7).
-			 * Kext disasm (sub_48734): mask=0x3F with a +4 bit gap
-			 * between channel pairs:
-			 *   ch0=shift 0, ch1=shift 6, ch2=shift 16, ch3=shift 22
-			 * Bits [15:12] and [31:28] are reserved gaps.
-			 */
-			unsigned int setting_idx;
-			unsigned int base_shift, shift;
-			u32 value, mask;
-
-			setting_idx = (param.channel_idx > 3) ? 14 : 3;
-			base_shift = (param.channel_idx & 3) * 6;
-			shift = (param.channel_idx & 2) ?
-				(base_shift + 4) : base_shift;
-			mask = 0x3Fu << shift;
-			value = (param.value & 0x3F) << shift;
-			ret = ua_mixer_write_setting_locked(ua, setting_idx,
-							    value, mask);
-		} else if (param.param_id <= 0x17) {
-			/* GainA(0x0A), GainB(0x09), other: 8-bit byte packing */
-			unsigned int setting_idx;
-			unsigned int shift;
-			u32 value, mask;
-
-			if (param.channel_idx <= 3)
-				setting_idx = param.param_id + 7;
-			else
-				setting_idx = param.param_id + 15;
-
-			if (setting_idx < UA_MIXER_BATCH_COUNT) {
-				shift = (param.channel_idx & 3) * 8;
-				value = (param.value & 0xFF) << shift;
-				mask = 0xFF << shift;
-				ret = ua_mixer_write_setting_locked(ua,
-								    setting_idx,
-								    value, mask);
-			}
-		}
+		ret = ua_preamp_write_locked(ua, param.channel_idx,
+					     param.param_id, param.value);
 
 		/*
 		 * Not written (mixer not ready: quiesced, or a resume
@@ -1725,25 +1722,18 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 		/* Update ALSA cache and prepare notification */
 		switch (param.param_id) {
 		case UA_MON_PARAM_LEVEL:
-			ua->audio.monitor.level = (int)param.value;
+			ua->audio.monitor.level = min_t(int, param.value & 0xFF, 192);
 			ctl_name = "Monitor Playback Volume";
 			notify_alsa = true;
 			break;
 		case UA_MON_PARAM_MUTE:
-			/*
-			 * Param 0x03 3-state: 0=off, 1=mono, 2=muted
-			 * Update both mute and mono cache accordingly.
-			 */
-			if (param.value == 1) {
-				/* MixToMono: not muted, mono on */
-				ua->audio.monitor.mute = UA_MON_MUTE_OFF;
-				ua->audio.monitor.mono = true;
-				ctl_name = "Monitor Mono Switch";
-			} else {
-				ua->audio.monitor.mute = (int)param.value;
-				ua->audio.monitor.mono = false;
-				ctl_name = "Monitor Playback Switch";
-			}
+			/* Param 0x03: bit 1 = mute, bit 0 = mono (see the write) */
+			ua->audio.monitor.mute = (param.value & UA_MON_MUTE_ON) ?
+						 UA_MON_MUTE_ON : UA_MON_MUTE_OFF;
+			ua->audio.monitor.mono = !!(param.value & UA_MON_MONO);
+			/* Both controls follow it; the second goes out below */
+			ua_ctl_notify_name(ua, "Monitor Mono Switch");
+			ctl_name = "Monitor Playback Switch";
 			notify_alsa = true;
 			break;
 		case UA_MON_PARAM_DIM:
@@ -1755,6 +1745,11 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			/* Legacy kext property ID 0x36 */
 			ua->audio.monitor.mono = !!param.value;
 			ctl_name = "Monitor Mono Switch";
+			notify_alsa = true;
+			break;
+		case UA_MON_PARAM_HP1_VOL:
+			ua->audio.monitor.hp1_vol = min_t(int, param.value & 0xFF, 192);
+			ctl_name = "Headphone 1 Playback Volume";
 			notify_alsa = true;
 			break;
 		case UA_MON_PARAM_SOURCE:
@@ -1889,15 +1884,10 @@ out_unlock:
 
 	/* Notify ALSA userspace after releasing the lock */
 	if (notify_alsa && ua->audio.card) {
-		struct snd_ctl_elem_id eid;
 		char name[44];
 
-		memset(&eid, 0, sizeof(eid));
-		eid.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 		snprintf(name, sizeof(name), ctl_name, ch + 1);
-		strscpy(eid.name, name, sizeof(eid.name));
-		snd_ctl_notify(ua->audio.card,
-			       SNDRV_CTL_EVENT_MASK_VALUE, &eid);
+		ua_ctl_notify_name(ua, name);
 	}
 
 	return ret;

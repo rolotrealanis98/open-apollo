@@ -489,6 +489,7 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 
 /* Max preamp channels across all Apollo models */
 #define UA_MAX_PREAMP_CH        8
+#define UA_MAX_KCTLS            96      /* ALSA controls ua_mixer_init() adds */
 
 /*
  * Preamp parameter IDs (from DTrace SEL131 SetMixerParam captures).
@@ -509,9 +510,18 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_PREAMP_PARAM_48V     0x03
 #define UA_PREAMP_PARAM_LOWCUT  0x04    /* NOT HiZ! Verified via DTrace */
 #define UA_PREAMP_PARAM_PHASE   0x05    /* Float: -1.0f=invert, +1.0f=normal */
-#define UA_PREAMP_PARAM_GAIN_A  0x06    /* Gain param A (1st write, dB-9) */
-#define UA_PREAMP_PARAM_GAIN_B  0x09    /* Gain param B (2nd write, dB-10) */
-#define UA_PREAMP_PARAM_GAIN_C  0x0A    /* Gain param C (3rd write, dB-10) */
+/*
+ * The gain is written as a triplet.  GainC (0x06, dB-9) is the 6-bit field
+ * the readback reports in word 3; GainA (0x0A) and GainB (0x09) are dB-10.
+ * (This header used to call 0x06 "A" and 0x0A "C", opposite to the Mixer
+ * Engine's names and to what the ALSA cache update keyed on.)
+ */
+#define UA_PREAMP_PARAM_GAIN_C  0x06    /* GainC: dB-9, 6 bits, in readback */
+#define UA_PREAMP_PARAM_GAIN_B  0x09    /* GainB: dB-10 */
+#define UA_PREAMP_PARAM_GAIN_A  0x0A    /* GainA: dB-10 */
+/* Mixer gain range the preamps take (dB) */
+#define UA_PREAMP_GAIN_MIN_DB   10
+#define UA_PREAMP_GAIN_MAX_DB   65
 #define UA_PREAMP_PARAM_ROUTE   0x13    /* Channel routing mask (0x0001ffff) */
 #define UA_PREAMP_PARAM_LEVEL   0x16    /* Default level (0xa0 = -16dB) */
 
@@ -520,7 +530,6 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_ARM_PARAM_48V        UA_PREAMP_PARAM_48V
 #define UA_ARM_PARAM_LOWCUT     UA_PREAMP_PARAM_LOWCUT
 #define UA_ARM_PARAM_PHASE      UA_PREAMP_PARAM_PHASE
-#define UA_ARM_PARAM_GAIN       UA_PREAMP_PARAM_GAIN_C
 
 /* ARM hardware ID encoding: channel index → hw_id */
 #define UA_ARM_HW_ID(ch)        ((ch) * 0x800)
@@ -556,6 +565,9 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 /* --- Setting[4]: Mono (dev_type==3 ONLY, NOP on x4) --- */
 #define UA_MON_PARAM_MONO       0x36  /* kext property ID (NOT used on x4) */
 #define UA_MON_PARAM_MIX_TO_MONO UA_MON_PARAM_MUTE /* uses param 0x03 val=1 */
+/* Param 0x03 value bits: UA_MON_MUTE_ON (2) = mute (bit 16), UA_MON_MONO (1)
+ * = mono (bit 17); 3 sets both, as the front panel can */
+#define UA_MON_MONO             1
 
 /* --- Setting[6]: Mirror A / Identify / MirrorsToDigital --- */
 #define UA_MON_PARAM_UNKNOWN_0A 0x0a  /* setting[6] bits[9:8], 2-bit */
@@ -628,9 +640,6 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_MON_PARAM_DSP_SPANNING  0x16   /* ch_idx=0, DSP pairing mode */
 /* 0x0b, 0x0c, 0x0d, 0x10, 0x11, 0x12, 0x17, 0x18, 0x26-0x29 */
 
-/* Clock mode values (from SEL163 SetClockMode): 0x0C is internal */
-#define UA_CLOCK_MODE_INTERNAL   0x0C
-#define UA_CLOCK_MODE_EXTERNAL   0x00
 
 /* Monitor mute values (NOT boolean — uses 2/0 encoding) */
 #define UA_MON_MUTE_ON          2
@@ -680,6 +689,12 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_RB_PREAMP_PHASE(data0, ch)    (((data0) >> ((ch)*6 + 5)) & 1)
 #define UA_RB_HIZ_ACTIVE(data0)          (((data0) >> 24) & 1)
 
+/*
+ * HiZ detect: word 0 bit 24 is input 1 and bit 25 input 2 (bit 25 is not
+ * hardware-confirmed yet); UA_RB_HIZ_ACTIVE() is input 1 only.
+ */
+#define UA_RB_HIZ_DETECT(data0, ch)      (((data0) >> (24 + (ch))) & 1)
+
 /* rb_data[2]: Monitor section */
 #define UA_RB_MON_VOLUME(data2)          ((data2) & 0xFF)
 #define UA_RB_HP1_VOLUME(data2)          (((data2) >> 8) & 0xFF)
@@ -687,8 +702,20 @@ static inline bool ua_ring_connect_v12(u32 device_type)
 #define UA_RB_MON_MONO(data2)            (((data2) >> 17) & 1)
 #define UA_RB_MON_DIM(data2)             (((data2) >> 31) & 1)
 
-/* rb_data[3]: Preamp gain, 8 bits per channel */
-#define UA_RB_PREAMP_GAIN(data3, ch)     (((data3) >> ((ch)*8)) & 0xFF)
+/*
+ * rb_data[3]: GainC, 6-bit fields at shifts 0/6/16/22 for inputs 1-4
+ * (the same layout setting[3] is written with); dB = GainC + 9.  Bits
+ * 15:12 are a gap and 31:28 track the front-panel selection.
+ */
+#define UA_RB_PREAMP_GAINC(data3, ch) \
+	(((data3) >> (((ch) & 3) * 6 + (((ch) & 2) ? 4 : 0))) & 0x3F)
+#define UA_RB_PREAMP_GAIN_DB(data3, ch)  (UA_RB_PREAMP_GAINC(data3, ch) + 9)
+
+/* rb_data[6]: bit 8 talkback; bit 31 clock locked, valid when bit 30 set */
+#define UA_RB_TALKBACK(data6)            (((data6) >> 8) & 1)
+
+/* rb_data[7]: bits 7:0 headphone 2 volume (same raw scale as the monitor) */
+#define UA_RB_HP2_VOLUME(data7)          ((data7) & 0xFF)
 
 /* Hardware Readback Registers (GetReadback in kext) */
 #define UA_REG_MIXER_RB_STATUS  0x3810  /* Readback: 1=ready, write 0 to re-arm */
@@ -793,7 +820,8 @@ struct ua_monitor_state {
 	bool talkback;   /* Talkback engaged */
 	int digital_mode; /* 0=S/PDIF, 8=ADAT */
 	int output_ref;  /* 0=+4dBu, 1=-10dBV */
-	int clock_mode;      /* UA_CLOCK_MODE_INTERNAL / UA_CLOCK_MODE_EXTERNAL */
+	int hp1_vol;     /* 0..192, same raw scale as level (setting[2] 15:8) */
+	int hp2_vol;     /* 0..192, readback only (word 7 7:0) */
 	int cue1_mirror;     /* Output pair value (SPDIF=6, LINE1-2=8, etc.) or 0xFFFFFFFF=NONE */
 	int cue2_mirror;     /* Same encoding */
 	bool cue1_mirror_en; /* CUE1 mirror enable */
@@ -971,6 +999,18 @@ struct ua_audio {
 	/* ALSA mixer control cache (write-through) */
 	struct ua_preamp_state preamp[UA_MAX_PREAMP_CH];
 	struct ua_monitor_state monitor;
+
+	/*
+	 * Every kcontrol ua_mixer_init() registered, so a notification can
+	 * carry the numid (alsa-lib matches events by numid) and the
+	 * readback sync can find controls by name.  Set at probe, then
+	 * read-only.
+	 */
+	struct snd_kcontrol *kctls[UA_MAX_KCTLS];
+	unsigned int num_kctls;
+	/* Last readback words ua_mixer_sync_readback() acted on */
+	u32 rb_synced[UA_MIXER_RB_WORDS];
+	bool rb_synced_valid;
 
 	/* Position tracking (updated from IRQ) */
 	snd_pcm_uframes_t play_pos;
@@ -1308,6 +1348,8 @@ int ua_audio_set_clock_source(struct ua_device *ua, unsigned int source);
 bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source);
 int ua_audio_reconnect(struct ua_device *ua);
 void ua_notify_clock_controls(struct ua_device *ua);
+void ua_ctl_notify_name(struct ua_device *ua, const char *name);
+void ua_mixer_sync_readback(struct ua_device *ua);	/* ua->lock */
 void ua_dsp_service_start(struct ua_device *ua);
 void ua_dsp_service_stop(struct ua_device *ua);
 const char *ua_device_name(u32 device_type);
@@ -1331,6 +1373,8 @@ void ua_set_output_mute_locked(struct ua_device *ua, bool mute,
 /* Preamp/monitor hardware access wrappers (ua_core.c) */
 int ua_preamp_set_param(struct ua_device *ua, unsigned int ch,
 			u32 param_id, u32 value);
+int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
+			   u32 param_id, u32 value);	/* ua->lock */
 int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 			 u32 param_id, u32 value);
 
