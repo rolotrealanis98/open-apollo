@@ -2703,6 +2703,10 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 	 * loading on cold boot AND for routing config on warm boot.
 	 * On resume the existing rings are reprogrammed instead.
 	 */
+	/* Kext ProgramRegisters waits for the DSP boot word first (D14). */
+	if (dsp_was_dead)
+		(void)ua_dsp_wait_ready(ua);
+
 	ret = ua_dsp_rings_init(ua);
 	if (ret)
 		dev_warn(&pdev->dev, "DSP ring init failed (%d)\n", ret);
@@ -2832,7 +2836,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 				/* v12_connect: ACEFACE before ring connect */
 				ua_v12_aceface_first(ua);
 
-				fw_ret = ua_dsp_connect_all(ua);
+				fw_ret = ua_dsp_connect_retry(ua);
 				/*
 				 * Non-AudioExtension devices connect in
 				 * probe; activate the plugin chain now so

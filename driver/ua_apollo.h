@@ -1392,6 +1392,8 @@ int ua_dsp_load_firmware_to(struct ua_device *ua, unsigned int dsp_idx,
 int ua_dsp_load_mixer_blocks(struct ua_device *ua);
 int ua_dsp_load_mixer_blocks_to(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_connect_all(struct ua_device *ua);
+int ua_dsp_connect_retry(struct ua_device *ua);
+int ua_dsp_wait_ready(struct ua_device *ua);
 int ua_dsp_load_plugin_payloads(struct ua_device *ua);
 void ua_dsp_free_plugin_payloads(struct ua_device *ua);
 int ua_dsp_activate_plugin_chain(struct ua_device *ua);

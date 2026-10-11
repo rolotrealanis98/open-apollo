@@ -29,6 +29,8 @@
 #include <linux/firmware.h>
 #include <linux/log2.h>
 #include <linux/math64.h>
+#include <linux/module.h>
+#include <linux/sched/signal.h>
 #include <linux/slab.h>
 #include <linux/timekeeping.h>
 
@@ -2714,6 +2716,137 @@ int ua_dsp_connect_all(struct ua_device *ua)
 	ua->dsps_connected = true;
 	dev_info(&ua->pdev->dev, "all %u DSPs connected\n", ua->num_dsps);
 	return 0;
+}
+
+/* ----------------------------------------------------------------
+ * DSP-ready wait and connect retry (audit gap D14)
+ * ---------------------------------------------------------------- */
+
+/*
+ * CPcieDSP::_waitFor469ToStart (kext 12.0.0 x86 0x8526, called from
+ * CPcieDSP::ProgramRegisters 0x8258) polls the DSP window word at +0x1a4.
+ * The word reads 0 or 0xa8caed0f until the DSP's boot code has run; any
+ * other value means started.  Per DSP: 100 polls of 300 ms for DSP 0, 10
+ * for the others.  The kext polls only when the capability word the device
+ * reports in UAD2DeviceInfo+8 is 1.  CPcieDevice::GetCapabilities (0x464c)
+ * fills that with ext_caps (0x2234) bits[7:4] on v2 firmware, 0 on v1.
+ */
+#define UA_DSP_READY_REG	0x1a4
+#define UA_DSP_READY_MAGIC	0xa8caed0fu
+#define UA_DSP_READY_POLL_MS	300
+
+static int dsp_ready_wait;
+module_param(dsp_ready_wait, int, 0444);
+MODULE_PARM_DESC(dsp_ready_wait,
+		 "EXPERIMENTAL (kext-vs-driver audit D14), 0 = off (default). On a cold start, before the DSP rings are set up, poll each DSP's ready word as the macOS driver does, and retry a failed DSP connect once. 1 = only on devices whose ext_caps bits[7:4] == 1 (the macOS driver's rule); 2 = every v2 device regardless of capability. One log line reports the outcome.");
+
+/* DSP n's register window: n * 0x800, plus 0x2000 for DSPs 4-7 */
+static inline u32 ua_dsp_window(unsigned int dsp_idx)
+{
+	return dsp_idx * 0x800 + (dsp_idx > 3 ? 0x2000 : 0);
+}
+
+/**
+ * ua_dsp_wait_ready - Bounded poll of each DSP's boot-ready word
+ * @ua: device
+ *
+ * No register access unless dsp_ready_wait is set.  Never fails the probe:
+ * a timeout is logged and the cold start continues as before.
+ *
+ * Returns 0 when every polled DSP is ready (or none was polled),
+ * -ETIMEDOUT when one never became ready, -ENODEV when the device went
+ * away, -EINTR on a fatal signal.
+ */
+int ua_dsp_wait_ready(struct ua_device *ua)
+{
+	struct device *dev = &ua->pdev->dev;
+	u32 ext_caps, cap;
+	unsigned int i, polled = 0, late = 0;
+	int ret = 0;
+
+	if (!dsp_ready_wait)
+		return 0;
+
+	if (!ua->fw_v2) {
+		dev_info(dev, "DSP-ready wait: v1 firmware (capability 0), skipped\n");
+		return 0;
+	}
+
+	ext_caps = ua_read(ua, UA_REG_EXT_CAPS);
+	cap = (ext_caps >> 4) & 0xf;
+	if (dsp_ready_wait != 2 && cap != 1) {
+		dev_info(dev,
+			 "DSP-ready wait: ext_caps 0x%08x, capability %u != 1, skipped (as the macOS driver)\n",
+			 ext_caps, cap);
+		return 0;
+	}
+
+	for (i = 0; i < ua->num_dsps; i++) {
+		unsigned int tries = i == 0 ? 100 : 10;
+		unsigned int n;
+		u32 v = 0;
+
+		for (n = 0; n < tries; n++) {
+			if (atomic_read(&ua->shutdown) ||
+			    ua_read(ua, UA_REG_FPGA_REV) == 0xFFFFFFFF) {
+				dev_warn(dev,
+					 "DSP-ready wait: device gone, aborted at DSP %u\n",
+					 i);
+				return -ENODEV;
+			}
+			v = ua_read(ua, ua_dsp_window(i) + UA_DSP_READY_REG);
+			if (v && v != UA_DSP_READY_MAGIC)
+				break;
+			if (fatal_signal_pending(current))
+				return -EINTR;
+			msleep(UA_DSP_READY_POLL_MS);
+		}
+
+		polled++;
+		if (n == tries) {
+			late++;
+			ret = -ETIMEDOUT;
+			dev_warn(dev,
+				 "DSP-ready wait: DSP %u not ready after %u ms (word 0x%08x)\n",
+				 i, tries * UA_DSP_READY_POLL_MS, v);
+		} else if (n) {
+			dev_dbg(dev, "DSP %u ready after %u polls (0x%08x)\n",
+				i, n, v);
+		}
+	}
+
+	dev_info(dev,
+		 "DSP-ready wait: ext_caps 0x%08x, %u DSP(s) polled, %u not ready\n",
+		 ext_caps, polled, late);
+	return ret;
+}
+
+/**
+ * ua_dsp_connect_retry - ua_dsp_connect_all() with the kext's second pass
+ * @ua: device (must hold ua->lock)
+ *
+ * The kext's connect retries a failed connect at most once more, after
+ * ResetDMAEngine(0) + CPcieDSP::ProgramRegisters(DSP 0).  Linux re-points
+ * and resyncs the DSP rings (the ProgramRegisters part) but does not pulse
+ * a DMA engine reset: the driver has no per-engine reset and the
+ * all-engine pulse would drop the audio SG state.  Off unless
+ * dsp_ready_wait is set, so the default path is one plain call.
+ */
+int ua_dsp_connect_retry(struct ua_device *ua)
+{
+	int ret = ua_dsp_connect_all(ua);
+
+	if (!ret || !dsp_ready_wait || atomic_read(&ua->shutdown))
+		return ret;
+
+	dev_warn(&ua->pdev->dev,
+		 "DSP connect failed (%d), reprogramming rings and retrying once\n",
+		 ret);
+	ua_dsp_rings_reprogram(ua);
+	ret = ua_dsp_connect_all(ua);
+	dev_info(&ua->pdev->dev, "DSP connect retry: %s (%d)\n",
+		 ret ? "failed" : "ok", ret);
+	return ret;
 }
 
 /* ----------------------------------------------------------------
