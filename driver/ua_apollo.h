@@ -1780,6 +1780,7 @@ u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua);
 int ua_dsp_set_input_param(struct ua_device *ua, u32 input, u32 sub,
 			   u32 value);
 int ua_dsp_send_rate_ack(struct ua_device *ua, u32 rate);
+int ua_audio_rate_ack_request(struct ua_device *ua);
 void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
 			  u32 w0, u32 w1, u32 w2, u32 w3);

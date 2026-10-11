@@ -2686,6 +2686,11 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 				 param.channel_idx, param.param_id, ret);
 		break;
 
+	case 3:  /* Rate ack: {0x001A0002, current rate} to every DSP */
+		/* channel_idx, param_id and value are ignored */
+		ret = ua_audio_rate_ack_request(ua);
+		break;
+
 	default:
 		ret = -EINVAL;
 	}

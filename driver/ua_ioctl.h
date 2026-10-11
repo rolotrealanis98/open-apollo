@@ -155,6 +155,10 @@ struct ua_mixer_bus_param {
  * The driver routes based on channel_type:
  *   channel_type=1 (preamp) → ARM CLI (gain, 48V, pad, HiZ, phase)
  *   channel_type=2 (monitor) → hardware registers (level, mute, dim)
+ *   channel_type=3 (rate ack) → {0x001A0002, current rate} to every DSP, as
+ *     the Mixer Engine's AckSampleRateChange; the other fields are ignored.
+ *     -EBUSY while audio is paused, -ENODEV before the connect, -EINVAL on a
+ *     driver that predates it (no feature bit)
  *
  * Preamp params (ch_type=1, ch_idx=input channel):
  *   ARM paramIDs: Mute=0x00, Phase=0x01, 48V=0x04, Pad=0x08,
@@ -167,7 +171,7 @@ struct ua_mixer_bus_param {
  *   DimOn:          param=0x44, ch_idx=0, value = 1/0
  */
 struct ua_mixer_param {
-	__u32 channel_type;	/* 1=input/preamp, 2=output/monitor */
+	__u32 channel_type;	/* 0=bus enable, 1=input/preamp, 2=output/monitor, 3=rate ack */
 	__u32 channel_idx;	/* Channel index within type */
 	__u32 param_id;		/* Parameter ID */
 	__u32 value;		/* Parameter value (integer) */

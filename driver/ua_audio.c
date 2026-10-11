@@ -2751,8 +2751,8 @@ static void ua_audio_read_connect_readback(struct ua_device *ua)
  * AckSampleRateChange queues on every clock event (parity/12 C10).
  * Caller holds ua->lock.
  */
-static void ua_audio_rate_ack_send(struct ua_device *ua, unsigned int rate,
-				   const char *why)
+static int ua_audio_rate_ack_send(struct ua_device *ua, unsigned int rate,
+				 const char *why)
 {
 	struct ua_audio *audio = &ua->audio;
 	int ret = ua_dsp_send_rate_ack(ua, rate);
@@ -2761,6 +2761,27 @@ static void ua_audio_rate_ack_send(struct ua_device *ua, unsigned int rate,
 	audio->rate_acked = rate;
 	dev_info(&ua->pdev->dev, "rate ack %u Hz to the DSPs (%s)%s\n", rate,
 		 why, ret ? ": a ring was full" : "");
+	return ret;
+}
+
+/*
+ * SET_MIXER_PARAM channel_type 3: send {0x001A0002, current rate} to every
+ * DSP, whatever rate_ack_real says (the host asking for the ack).  -EBUSY
+ * while audio is paused for a rate change, a phase correction or a suspend
+ * (the rings are not to be touched then), -ENODEV before the connect.
+ * Caller holds ua->lock.
+ */
+int ua_audio_rate_ack_request(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+
+	if (atomic_read(&ua->pause_mask) &
+	    (UA_PAUSE_PHASE | UA_PAUSE_RATE | UA_PAUSE_DEVICE))
+		return -EBUSY;
+	if (!audio->connected || !audio->sample_rate)
+		return -ENODEV;
+	return ua_audio_rate_ack_send(ua, audio->sample_rate,
+				      "SET_MIXER_PARAM type 3");
 }
 
 /* The same, only with rate_ack_real */
