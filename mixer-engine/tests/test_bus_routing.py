@@ -481,6 +481,7 @@ class TestBusParamSides:
         be = HardwareBackend.__new__(HardwareBackend)
         be.fd = 3
         be.safe_mode = False
+        be._features = hardware.UA_FEAT_BUS_PARAM_SIDE   # the driver has it
         monkeypatch.setattr(hardware.fcntl, "ioctl",
                             lambda fd, req, buf: sent.append(buf))
         be.set_mixer_bus_param(0x02, 3, 0.5)

@@ -42,14 +42,21 @@ class FakeBackend:
         self.driver_values = {}      # param_id -> value returned by get_driver_param
         self.readback = None         # what get_hw_readback() returns
         self.other = []              # (method name, args)
+        self.features = 0            # UA_FEAT_* bits has_feature() reports
+        self.bus_flags = []          # (bus_id, sub_param, side, solo_mute)
+
+    def has_feature(self, bit):
+        return bool(self.features & bit)
 
     def set_mixer_param(self, channel_type, channel_idx, param_id, value):
         self.mixer_params.append((channel_type, channel_idx, param_id, value))
         return True
 
-    def set_mixer_bus_param(self, bus_id, sub_param, value, side=0):
+    def set_mixer_bus_param(self, bus_id, sub_param, value, side=0,
+                            solo_mute=False):
         (self.bus_params_r if side else self.bus_params).append(
             (bus_id, sub_param, value))
+        self.bus_flags.append((bus_id, sub_param, side, solo_mute))
         return True
 
     def set_driver_param(self, param_id, value):
@@ -75,6 +82,7 @@ class FakeBackend:
         self.mixer_params.clear()
         self.bus_params.clear()
         self.bus_params_r.clear()
+        self.bus_flags.clear()
         self.driver_params.clear()
         self.other.clear()
 

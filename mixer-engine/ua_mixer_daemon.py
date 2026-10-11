@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import re as re_mod
+import shutil
 import signal
 import sys
 import time
@@ -181,6 +182,32 @@ def load_network_id(path: Path | None) -> str:
     return nid
 
 
+def serial_text(info: dict) -> str:
+    """The serial the daemon reports: the real one from GET_SYSTEM_INFO
+    when the driver gave it, else the legacy 8-hex-digit BAR0 value."""
+    real = info.get("serial_str")
+    if isinstance(real, str) and real:
+        return real
+    return f"{info['serial']:08X}"
+
+
+def read_device_info(backend) -> dict | None:
+    """GET_DEVICE_INFO plus, when the driver has UA_FEAT_SYSTEM_INFO, the
+    real serial string as info["serial_str"].  An old driver (or an
+    unreadable/blank serial) leaves it out and callers fall back to the
+    8-hex legacy serial."""
+    info = backend.get_device_info()
+    if not info:
+        return info
+    sysinfo = backend.get_system_info() \
+        if hasattr(backend, "get_system_info") else None
+    if isinstance(sysinfo, dict):
+        serial = sysinfo.get("serial")
+        if isinstance(serial, str) and serial.strip().strip("0 ") != "":
+            info = dict(info, serial_str=serial.strip())
+    return info
+
+
 def fill_helper_identity(helper_tree: HelperTree | None,
                          info: dict | None) -> int:
     """Put the attached device's identity into the helper device tree.
@@ -189,15 +216,18 @@ def fill_helper_identity(helper_tree: HelperTree | None,
     in the captured tree.  The driver reports the running firmware only, so
     the expected version is the running one (no false "update firmware"
     prompt; firmware_compatibility stays 0).  Format of the strings is not
-    verified against a Console capture: serial as 8 hex digits (like the
-    state file name), firmware as the decimal register value.
+    verified against a Console capture: firmware is the decimal register
+    value, the serial is the driver's real 16-character serial
+    (info["serial_str"], from GET_SYSTEM_INFO; see read_device_info) and,
+    on an older driver, the legacy BAR0 value as 8 hex digits (which reads
+    00000000 on the x4).
     Returns the number of properties set.
     """
     if not helper_tree or not info:
         return 0
     fw = str(info["fw_version"])
     values = {
-        "serial_number": f"{info['serial']:08X}",
+        "serial_number": serial_text(info),
         "firmware_version": fw,
         "expected_firmware_version": fw,
     }
@@ -436,7 +466,7 @@ class MixerDaemon:
     def _device_ready(self):
         """The device is back and settled: run the init path again."""
         be = self.hw_router.backend
-        info = be.get_device_info()
+        info = read_device_info(be)
         if info:
             fill_helper_identity(self.helper_tree, info)
             if self.loaded_map is not None:
@@ -2329,16 +2359,52 @@ def device_index(path) -> int:
     return int(m.group(1)) if m else 0
 
 
-def state_file_for(device_map: Path, index: int, serial: int | None = None) -> Path:
+def state_file_for(device_map: Path, index: int,
+                   serial: "int | str | None" = None) -> Path:
     """Per-device state file.  /dev/ua_apollo0 keeps the historical
     <map>.state.json name; other indexes get .devN (and the serial when the
-    driver reported one) so two Apollos of one model never share a file."""
+    driver reported one) so two Apollos of one model never share a file.
+
+    `serial` is the legacy numeric serial (suffix "-%08x", unchanged so
+    existing files keep their names) or the real serial string from
+    GET_SYSTEM_INFO (suffix "-<serial>", reduced to [A-Za-z0-9_]).
+    """
     stem = device_map.stem
     if index:
         stem += f".dev{index}"
-        if serial:
+        if isinstance(serial, str):
+            safe = re_mod.sub(r"[^A-Za-z0-9_]", "", serial)
+            if safe:
+                stem += f"-{safe}"
+        elif serial:
             stem += f"-{serial:08x}"
     return SCRIPT_DIR / "state" / f"{stem}.state.json"
+
+
+def state_serial(info: dict | None) -> "int | str | None":
+    """Serial for state_file_for().  The legacy numeric serial wins when it
+    is non-zero (the name an existing install already uses); it reads 0 on
+    the x4, where the real string from GET_SYSTEM_INFO takes over."""
+    if not info:
+        return None
+    return info.get("serial") or info.get("serial_str") or None
+
+
+def seed_state_file(path: Path, legacy: Path) -> bool:
+    """First start with a serial-suffixed name: copy the unsuffixed
+    .devN state (what this index used before the serial was known) so the
+    saved mixer settings carry over.  The old file stays; it is a copy, not
+    a rename, because it may belong to another unit that used this index."""
+    if path == legacy or path.exists() or not legacy.exists():
+        return False
+    try:
+        path.parent.mkdir(exist_ok=True)
+        shutil.copyfile(legacy, path)
+    except OSError as e:
+        log.warning("Could not seed %s from %s: %s", path, legacy, e)
+        return False
+    log.info("State file %s seeded from %s", path.name, legacy.name)
+    return True
 
 
 def main():
@@ -2394,6 +2460,12 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                              "rate changed, as the Mixer Engine does "
                              f"(default {MUTE_ON_RATE_CHANGE_SECS:g}, "
                              "0 = off)")
+    parser.add_argument("--stereo-sends", action="store_true",
+                        help="also write the right (side-1) entry of every "
+                             "send and of talkback, with the sub-0 pan law "
+                             "where the send has a pan (default off until a "
+                             "listening test; needs a driver with "
+                             "UA_FEAT_BUS_PARAM_SIDE)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Debug logging")
     parser.add_argument("--trace", "-t", action="store_true",
@@ -2415,13 +2487,14 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     if not args.no_hardware:
         backend = HardwareBackend(args.device, safe_mode=args.safe_mode)
         if backend.open():
-            info = backend.get_device_info()
+            info = read_device_info(backend)
             if info:
                 device_type = info["device_type"]
                 log.info("Detected %s (device_type=0x%02x, subsystem=0x%04x, "
-                         "%d DSPs, serial=0x%08x)",
+                         "%d DSPs, serial=%s)",
                          device_model_name(device_type), device_type,
-                         info["subsystem_id"], info["num_dsps"], info["serial"])
+                         info["subsystem_id"], info["num_dsps"],
+                         serial_text(info))
             else:
                 log.warning("Driver did not report device info "
                             "(pre-GET_DEVICE_INFO?) — using default device map")
@@ -2432,7 +2505,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                         "/dev/ua_apollo* (DeviceOnline=false until it appears)")
 
     index = device_index(backend.device_path if backend else args.device)
-    serial = info.get("serial") if info else None
+    serial = state_serial(info)
     if args.port is None:
         args.port = DEFAULT_PORT + PORT_STRIDE * index
     if args.helper_port is None:
@@ -2467,6 +2540,8 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
 
     # Enable persistent state (saves modified values across restarts)
     state_file = state_file_for(device_map, index, serial)
+    if isinstance(serial, str):
+        seed_state_file(state_file, state_file_for(device_map, index))
     state_file.parent.mkdir(exist_ok=True)
     state.enable_persistence(state_file)
     network_id = load_network_id(state_file.with_name(
@@ -2487,7 +2562,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
     hw_router = None
     if backend is not None:
         hw_router = HardwareRouter(
-            backend, state,
+            backend, state, stereo_sends=args.stereo_sends,
             input_buses=descriptor_input_buses(
                 find_descriptor(device_type)[0]
                 if device_type is not None else None))

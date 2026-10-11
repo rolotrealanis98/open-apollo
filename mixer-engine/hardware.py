@@ -113,6 +113,12 @@ UA_IOCTL_SET_MIXER_BUS_PARAM = _IOW(UA_IOCTL_MAGIC, 0x30, _MIXER_BUS_PARAM_SIZE)
 # kext's API takes both sides, so a pan or stereo send is two calls.
 UA_BUS_PARAM_FLAGS = 0x02
 UA_BUS_PARAM_F_SIDE_R = 0x100
+# This input is muted by a solo elsewhere: the driver applies the kext's
+# negated pair / -1.0e-9 rule to the entry (the value stays the normal
+# coefficient, so unsolo only has to write it again without the flag).
+# Needs UA_FEAT_BUS_SOLO_FLAG; an older driver would ignore the flag and
+# write the live coefficient, so it must not be sent there.
+UA_BUS_PARAM_F_SOLO_MUTE = 0x200
 
 # struct ua_mixer_setting { index, value, mask, reserved } = 16 bytes
 # Atomic mixer setting read/write via sequence handshake in kernel.
@@ -184,6 +190,19 @@ UA_FEAT_BUS_PARAM_BATCH = 1 << 7
 UA_FEAT_PAUSE_INFO = 1 << 8
 UA_FEAT_PAUSE_EVENTS = 1 << 9
 UA_FEAT_UNIT_GROUP = 1 << 10
+UA_FEAT_BUS_SOLO_FLAG = 1 << 11
+
+# struct ua_system_info (ABI 1.x, 148 bytes): the first 12 u32, the 16-byte
+# serial, 13 more u32 and reserved[8].  Field names in order.
+_SYSTEM_INFO_SIZE = 148
+UA_IOCTL_GET_SYSTEM_INFO = _IOR(UA_IOCTL_MAGIC, 0x05, _SYSTEM_INFO_SIZE)
+_SYSTEM_INFO_HEAD = ("fpga_rev", "device_type", "public_type", "subsystem_id",
+                     "pci_device", "num_dsps", "fw_version", "fw_v2",
+                     "ext_caps", "hw_uid_lo", "hw_uid_hi", "mixer_kind")
+_SYSTEM_INFO_TAIL = ("sample_rate", "rate_index", "clock_source",
+                     "clock_lock_valid", "clock_locked", "connected",
+                     "transport_running", "play_channels", "rec_channels",
+                     "unit_group", "unit_index", "unit_count", "unit_role")
 
 _FW_LOAD_SIZE = 16
 UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
@@ -1133,6 +1152,7 @@ class HardwareBackend:
         self._last_cli_write = 0.0   # Throttle: time of last ARM CLI command
         self._cli_frozen = False     # Set True on first CLI timeout — stops all CLI
         self.last_errno = 0          # errno of the last failed set_mixer_param
+        self._features: int | None = None   # GET_VERSION feature bits, cached
 
     def open(self, device_path: str | None = None) -> bool:
         """Open the device node. Auto-discovers /dev/ua_apollo* if no path given."""
@@ -1151,6 +1171,7 @@ class HardwareBackend:
             # A new device session starts with a working ARM CLI
             self._cli_enabled = False
             self._cli_frozen = False
+            self._features = None
             log.info("Opened hardware device: %s", path)
             return True
         except OSError as e:
@@ -1163,6 +1184,7 @@ class HardwareBackend:
             self.fd = -1
             self.connected = False
             self._cli_enabled = False
+            self._features = None
 
     # ── Hot-plug: loss detection and reopen ──────────────────────────
 
@@ -1202,6 +1224,7 @@ class HardwareBackend:
         self.connected = False
         self.lost = True
         self._cli_enabled = False
+        self._features = None
         log.warning("Hardware device %s lost%s", self.device_path,
                     f" ({reason})" if reason else "")
 
@@ -1232,6 +1255,7 @@ class HardwareBackend:
         self.lost = False
         self._cli_enabled = False
         self._cli_frozen = False
+        self._features = None
         log.info("Reopened hardware device: %s", path)
         return True
 
@@ -1638,7 +1662,8 @@ class HardwareBackend:
     # ── SetMixerBusParam (SEL130 equivalent) ──────────────────────────
 
     def set_mixer_bus_param(self, bus_id: int, sub_param: int,
-                            value_float: float, side: int = 0) -> bool:
+                            value_float: float, side: int = 0,
+                            solo_mute: bool = False) -> bool:
         """Set a mixer bus parameter — equivalent to macOS IOKit SEL130.
 
         Sends fader level, pan, and send gain values. Values are IEEE 754
@@ -1658,6 +1683,17 @@ class HardwareBackend:
             sub_param:   0=main mix, 1/2=CUE 1/2, 3/4=AUX 1/2, 5/6=CUE 3/4
             value_float: Linear gain as float (0.0 = silence, 1.0 = unity)
             side:        0 = left output weight, 1 = right output weight
+            solo_mute:   the input is muted by a solo: send the normal
+                         coefficient with UA_BUS_PARAM_F_SOLO_MUTE and the
+                         driver applies the kext's negated pair rule.  A
+                         driver without UA_FEAT_BUS_SOLO_FLAG gets 0.0
+                         instead (the flag would be ignored and the live
+                         coefficient would stay audible).
+
+        Feature gating (GET_VERSION): a side-1 entry is only sent when the
+        driver reports UA_FEAT_BUS_PARAM_SIDE.  An older driver ignores the
+        flag and would write the right weight into the LEFT entry, which
+        corrupts pan; the entry is dropped (and counted as written).
         """
         value_u32 = float_to_uint32(value_float)
 
@@ -1674,13 +1710,26 @@ class HardwareBackend:
                      value_float, value_u32)
             return False
 
+        if side and not self.has_feature(UA_FEAT_BUS_PARAM_SIDE):
+            log.debug("BUS_PARAM side-1 dropped (driver has no "
+                      "UA_FEAT_BUS_PARAM_SIDE): bus=0x%04x sub=%d "
+                      "value=%.6f", bus_id, sub_param, value_float)
+            return True
         flags = UA_BUS_PARAM_FLAGS | (UA_BUS_PARAM_F_SIDE_R if side else 0)
+        if solo_mute:
+            if self.has_feature(UA_FEAT_BUS_SOLO_FLAG):
+                flags |= UA_BUS_PARAM_F_SOLO_MUTE
+            else:
+                log.debug("BUS_PARAM solo-mute flag not supported: bus=0x%04x "
+                          "sub=%d side=%d written as 0.0", bus_id, sub_param,
+                          side)
+                value_u32 = float_to_uint32(0.0)
         buf = struct.pack('<IIII', bus_id, sub_param, value_u32, flags)
         try:
             fcntl.ioctl(self.fd, UA_IOCTL_SET_MIXER_BUS_PARAM, buf)
             log.debug("BUS_PARAM: bus=0x%04x sub=%d side=%d value=%.6f "
-                      "(0x%08x)", bus_id, sub_param, side, value_float,
-                      value_u32)
+                      "(0x%08x) flags=0x%x", bus_id, sub_param, side,
+                      value_float, value_u32, flags)
             return True
         except OSError as e:
             log.error("set_mixer_bus_param(bus=0x%04x, sub=%d, side=%d, "
@@ -1689,7 +1738,8 @@ class HardwareBackend:
 
     def set_bus_fader(self, bus_id: int, linear_gain: float,
                      mix_coeff: float = 0.0,
-                     mix_coeff_r: float | None = None) -> bool:
+                     mix_coeff_r: float | None = None,
+                     solo_mute: bool = False) -> bool:
         """Send a fader change: sub 0 (fader x pan mix coefficient), L and R.
 
         The Mixer Engine moves a fader through sub 0 only.  Sub 3 and 4 are
@@ -1704,12 +1754,17 @@ class HardwareBackend:
         mix_coeff_r, when given, is the right-output weight, written as the
         side-1 entry of sub 0 (fader_linear × √2 × sin((pan + 1) × π/4));
         without it only the left entry is written, as before.
+
+        solo_mute marks both entries as muted by a solo (see
+        set_mixer_bus_param); the coefficients stay the live ones.
         """
         write_fn = self.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
             else self.set_mixer_bus_param
-        ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff)
+        kw = {"solo_mute": True} if solo_mute else {}
+        ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff, **kw)
         if mix_coeff_r is not None:
-            ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff_r, side=1) and ok
+            ok = write_fn(bus_id, SUB_PARAM_MIX, mix_coeff_r, side=1,
+                          **kw) and ok
         return ok
 
     def set_bus_pan(self, bus_id: int, mix_coeff: float,
@@ -1915,6 +1970,49 @@ class HardwareBackend:
             "driver_name": name.split(b'\0', 1)[0].decode('ascii', 'replace'),
         }
 
+    def features(self) -> int:
+        """UA_FEAT_* bits of the open driver (0 for a driver without
+        GET_VERSION).  Read once per device session; 0 and uncached while
+        there is no device, so it is asked again after the open."""
+        if self.fd < 0:
+            return 0
+        if self._features is None:
+            ver = self.get_version()
+            self._features = int(ver["features"]) if ver else 0
+            log.info("Driver features: 0x%x%s", self._features,
+                     "" if ver else " (no GET_VERSION: pre-ABI driver)")
+        return self._features
+
+    def has_feature(self, bit: int) -> bool:
+        return bool(self.features() & bit)
+
+    def get_system_info(self) -> dict | None:
+        """UA_IOCTL_GET_SYSTEM_INFO as a dict (every field of
+        struct ua_system_info, `serial` as the real 16-character string).
+
+        None without UA_FEAT_SYSTEM_INFO, without a device, or when the
+        call fails.  Unlike get_device_info()['serial'] (BAR0 0x2238, 0 on
+        the x4) the serial here is the one printed on the unit.
+        """
+        if self.fd < 0 or not self.has_feature(UA_FEAT_SYSTEM_INFO):
+            return None
+        try:
+            raw = fcntl.ioctl(self.fd, UA_IOCTL_GET_SYSTEM_INFO,
+                              bytes(_SYSTEM_INFO_SIZE))
+        except OSError as e:
+            log.debug("get_system_info: %s", e)
+            return None
+        if len(raw) < _SYSTEM_INFO_SIZE:
+            return None
+        head = struct.unpack_from('<12I', raw, 0)
+        tail = struct.unpack_from('<13I', raw, 64)
+        info = dict(zip(_SYSTEM_INFO_HEAD, head))
+        info.update(zip(_SYSTEM_INFO_TAIL, tail))
+        # NUL-padded after the first NUL, unterminated when all 16 are used
+        info["serial"] = raw[48:64].split(b'\0', 1)[0].decode(
+            'ascii', 'replace').strip()
+        return info
+
     # ── Driver parameter access ──────────────────────────────────────
 
     def set_driver_param(self, param_id: int, value: int) -> bool:
@@ -1960,7 +2058,8 @@ class HardwareBackend:
     # ── Direct mixer setting writes for bus params ────────────────────
 
     def set_bus_param_direct(self, bus_id: int, sub_param: int,
-                             value_float: float, side: int = 0) -> bool:
+                             value_float: float, side: int = 0,
+                             solo_mute: bool = False) -> bool:
         """Write a bus param directly to the correct mixer setting.
 
         Looks up (bus_id, sub_param) in BUS_SETTING_MAP. If found,
@@ -1969,14 +2068,15 @@ class HardwareBackend:
         to set_mixer_bus_param() if the mapping is unknown.
         """
         key = (bus_id, sub_param)
-        setting_idx = BUS_SETTING_MAP.get(key) if not side else None
+        setting_idx = BUS_SETTING_MAP.get(key) \
+            if not (side or solo_mute) else None
 
         if setting_idx is None:
             log.debug("BUS_PARAM_DIRECT: no mapping for bus=0x%04x sub=%d "
                       "side=%d, falling back to ioctl", bus_id, sub_param,
                       side)
             return self.set_mixer_bus_param(bus_id, sub_param, value_float,
-                                            side)
+                                            side, solo_mute=solo_mute)
 
         value_u32 = float_to_uint32(value_float)
 
@@ -2079,12 +2179,19 @@ class HardwareRouter:
     """
 
     def __init__(self, backend: HardwareBackend, state_tree=None,
-                 input_buses: dict | None = None):
+                 input_buses: dict | None = None,
+                 stereo_sends: bool = False):
         """`input_buses` maps an input name of the device map to its bus ID
         (the model's devices/<model>.json mixer_inputs synch_in); it wins
         over the name rule of bus_id_for_input_name().  Only needed where a
-        model deviates from the rule (the Twin MkII's talkback input)."""
+        model deviates from the rule (the Twin MkII's talkback input).
+
+        `stereo_sends` also writes the right (side-1) entry of every send
+        and of the talkback bus (parity/14 s5: the Mixer Engine always sends
+        L and R).  Off by default until a listening test; the entry is only
+        sent when the driver reports UA_FEAT_BUS_PARAM_SIDE."""
         self.backend = backend
+        self.stereo_sends = stereo_sends
         self.state_tree = state_tree
         self._input_bus_overrides = {
             str(k).strip().upper(): v for k, v in (input_buses or {}).items()}
@@ -2336,6 +2443,40 @@ class HardwareRouter:
         except (TypeError, ValueError):
             return default
 
+    def _has_feature(self, bit: int) -> bool:
+        fn = getattr(self.backend, "has_feature", None)
+        return bool(fn(bit)) if callable(fn) else False
+
+    def _send_pan(self, send_base: str) -> float | None:
+        """The send's own Pan (-1..1), None when its map has none."""
+        v = self._tree_value(f"{send_base}/Pan/value")
+        try:
+            return max(-1.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return None
+
+    def _write_send(self, bus: int, sub: int, linear: float,
+                    pan: float | None = None):
+        """Write one send coefficient: the left entry, and with
+        --stereo-sends the right entry too.
+
+        With a pan the pair follows the sub-0 law (encode_mix_coeff_r):
+        left = linear x sqrt2 x cos((pan+1) pi/4), right = ... sin; at
+        centre both equal `linear`.  Without one the right entry equals the
+        left.  Without --stereo-sends only the left entry is written, with
+        `linear` as before (the pan is not applied).
+        """
+        if not self.stereo_sends:
+            self.backend.set_mixer_bus_param(bus, sub, linear)
+            return
+        left = right = linear
+        if pan is not None and linear:
+            theta = (pan + 1.0) * math.pi / 4.0
+            left = linear * math.sqrt(2.0) * math.cos(theta)
+            right = linear * math.sqrt(2.0) * math.sin(theta)
+        self.backend.set_mixer_bus_param(bus, sub, left)
+        self.backend.set_mixer_bus_param(bus, sub, right, side=1)
+
     def _write_post_fader_sends(self, ch: int, bus: int, fader_db: float,
                                 muted: bool):
         """Re-write the input's post-fader sends after a fader/mute change.
@@ -2349,9 +2490,11 @@ class HardwareRouter:
             sub = self._send_sub(base, send_idx, _SEND_IDX_TO_SUB)
             if sub is None or not self._send_is_post_fader(base, send_idx):
                 continue
-            self.backend.set_mixer_bus_param(
-                bus, sub, self._input_send_linear(
-                    ch, send_idx, fader_db=fader_db, muted=muted))
+            self._write_send(
+                bus, sub,
+                self._input_send_linear(
+                    ch, send_idx, fader_db=fader_db, muted=muted),
+                self._send_pan(f"{base}/sends/{send_idx}"))
 
     def _get_input_pan(self, ch: int) -> float:
         """Read current Pan value for an input from the state tree."""
@@ -2479,11 +2622,19 @@ class HardwareRouter:
     def _talkback_coeff(db: float) -> float:
         return 0.0 if db <= -144.0 else 10.0 ** (db / 20.0) * TALKBACK_UNITY
 
+    def _write_talkback(self, bus: int, coeff: float):
+        """Talkback sub 0: the left entry, plus R = L with --stereo-sends."""
+        self.backend.set_bus_pan(
+            bus, coeff, coeff if self.stereo_sends else None)
+
     def _handle_solo_recalc(self):
         """Recalculate all bus gains based on solo state.
 
         When any channel is soloed, only soloed channels are audible —
-        all non-soloed channels get their effective gain set to 0.0.
+        all non-soloed channels get their effective gain set to 0.0, or,
+        with UA_FEAT_BUS_SOLO_FLAG, their normal coefficients plus the
+        solo-mute flag on sub 0 (the driver applies the kext's negated
+        pair / -1.0e-9 rule).  Their sends are still written as 0.0.
         When no channels are soloed, all channels get their real fader gain.
         Muted channels always get 0.0 regardless of solo state.
         """
@@ -2506,12 +2657,23 @@ class HardwareRouter:
             if solo:
                 any_solo = True
 
+        solo_flag = any_solo and self._has_feature(UA_FEAT_BUS_SOLO_FLAG)
         for i, bus, soloed, fader_db, muted in channels:
             if bus == TALKBACK_BUS_START:
                 # Talkback has its own encoding (sub 0 only, unity 3.976)
                 db = -144.0 if (muted or (any_solo and not soloed)) \
                     else fader_db
-                self.backend.set_bus_pan(bus, self._talkback_coeff(db))
+                self._write_talkback(bus, self._talkback_coeff(db))
+            elif not muted and any_solo and not soloed and solo_flag:
+                # Muted by a solo (not by its own Mute): the driver applies
+                # the kext's negated pair rule to the live coefficients, so
+                # these are the unmuted values plus the flag.
+                pan = self._get_input_pan(i)
+                self.backend.set_bus_fader(
+                    bus, encode_input_fader(fader_db),
+                    encode_mix_coeff(fader_db, pan),
+                    encode_mix_coeff_r(fader_db, pan), solo_mute=True)
+                self._write_post_fader_sends(i, bus, fader_db, True)
             elif muted or (any_solo and not soloed):
                 self.backend.set_bus_fader(bus, 0.0, 0.0, 0.0)
                 self._write_post_fader_sends(i, bus, fader_db, True)
@@ -2666,9 +2828,7 @@ class HardwareRouter:
                 linear = self._talkback_coeff(db)
                 log.info("HW BUS: talkback.Fader = %.1f dB → %.6f "
                          "(bus=0x%04x, sub=0 only)", db, linear, bus)
-                write_fn = self.backend.set_bus_param_direct if USE_DIRECT_MIXER_WRITES \
-                    else self.backend.set_mixer_bus_param
-                write_fn(bus, SUB_PARAM_MIX, linear)
+                self._write_talkback(bus, linear)
                 return
 
             linear = encode_input_fader(db)
@@ -2828,13 +2988,22 @@ class HardwareRouter:
             log.info("HW BUS: input[%d].send[%d].Gain = %.1f dB → "
                      "linear=%.6f (bus=0x%04x sub=%d)",
                      ch, send_idx, db, linear, bus, sub)
-            self.backend.set_mixer_bus_param(bus, sub, linear)
+            self._write_send(bus, sub, linear, self._send_pan(base))
             return
 
         if control == "Pan":
-            # Send pan — only meaningful for AUX sends (sub=3/4)
+            # Send pan — only meaningful for AUX sends (sub=3/4).  It moves
+            # the left/right pair only with --stereo-sends; otherwise there
+            # is only a left entry and nothing to pan.
             log.info("HW BUS: input[%d].send[%d].Pan = %r (bus=0x%04x)",
                      ch, send_idx, value, bus)
+            if self.stereo_sends and not self._send_bypassed(base):
+                try:
+                    pan = max(-1.0, min(1.0, float(value)))
+                except (TypeError, ValueError):
+                    return
+                self._write_send(bus, sub,
+                                 self._input_send_linear(ch, send_idx), pan)
             return
 
         if control == "Bypass":
@@ -2845,7 +3014,7 @@ class HardwareRouter:
             log.info("HW BUS: input[%d].send[%d].Bypass = %r → %.6f "
                      "(bus=0x%04x sub=%d)", ch, send_idx, value, linear,
                      bus, sub)
-            self.backend.set_mixer_bus_param(bus, sub, linear)
+            self._write_send(bus, sub, linear, self._send_pan(base))
             return
 
         log.debug("SET %s = %r (send control, unhandled)", path, value)
@@ -3244,7 +3413,7 @@ class HardwareRouter:
             log.info("HW BUS: aux[%d].send[%d].Gain = %.1f dB → "
                      "linear=%.6f (bus=0x%04x sub=%d)", bus, send_idx, db,
                      linear, bus_id, sub)
-            self.backend.set_mixer_bus_param(bus_id, sub, linear)
+            self._write_send(bus_id, sub, linear, self._send_pan(send_base))
             return
 
         if control == "Bypass":
@@ -3257,7 +3426,7 @@ class HardwareRouter:
             log.info("HW BUS: aux[%d].send[%d].Bypass = %r → %.6f "
                      "(bus=0x%04x sub=%d)", bus, send_idx, value, linear,
                      bus_id, sub)
-            self.backend.set_mixer_bus_param(bus_id, sub, linear)
+            self._write_send(bus_id, sub, linear, self._send_pan(send_base))
             return
 
         log.debug("SET %s = %r (aux send control, unhandled)", path, value)
