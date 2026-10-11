@@ -202,7 +202,15 @@ def _decode_length(data: bytes, pos: int) -> tuple[int, int]:
             f"Expected integer marker for length at pos {pos}, "
             f"got {chr(marker)!r} (0x{marker:02x})"
         )
-    return _decode_int(data, pos + 1, marker)
+    length, pos = _decode_int(data, pos + 1, marker)
+    # Every count/length covers at least one byte per element/char, so one
+    # past the bytes left is corrupt -- and a $Z/$T/$F container of that count
+    # would otherwise spin on the event loop consuming nothing.
+    if length < 0 or length > len(data) - pos:
+        raise ValueError(
+            f"UBJSON count/length {length} exceeds the {len(data) - pos} "
+            f"bytes remaining at pos {pos}")
+    return length, pos
 
 
 def _decode_typed_value(data: bytes, pos: int, type_marker: int) -> tuple[Any, int]:

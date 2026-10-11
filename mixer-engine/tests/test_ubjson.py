@@ -102,3 +102,26 @@ class TestFramer:
         bad = u.frame(b"\xff\xff")
         out = u.UbjsonFramer().feed(bad + u.encode_response(self.CMD))
         assert out == [self.CMD]
+
+
+@pytest.mark.parametrize("payload", [
+    b"[$Z#l" + struct.pack("<i", 0x7FFFFFFF),
+    b"[$T#L" + struct.pack("<q", 2**62),
+    b"[$F#i\xff",
+    b"{$Z#l" + struct.pack("<i", 0x7FFFFFFF),
+    b"[#l" + struct.pack("<i", 0x7FFFFFFF),
+    b"Sl" + struct.pack("<i", 0x7FFFFFFF) + b"ab",
+    b"S" + b"i\xfe" + b"ab",
+])
+def test_count_bomb_is_rejected_fast(payload):
+    import time
+    t = time.monotonic()
+    with pytest.raises(ValueError):
+        u.decode(payload)
+    assert time.monotonic() - t < 0.1
+
+
+def test_typed_arrays_still_decode():
+    assert u.decode(b"[$U#i\x03\x01\x02\x03")[0] == [1, 2, 3]
+    assert u.decode(b"[$Z#i\x00")[0] == []
+    assert u.decode(b"[$Z#i\x02xx")[0] == [None, None]
