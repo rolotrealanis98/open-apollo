@@ -79,10 +79,10 @@ module_param(warm_dma_reset, bool, 0444);
 MODULE_PARM_DESC(warm_dma_reset,
 		 "With a live mixer DSP (warm probe/resume), also write TRANSPORT=0 and reset the DMA engines with the macOS driver's 4/8-engine masks before reprogramming the SG table (default: off; an earlier 8-engine reset killed a running mixer DSP)");
 
-static bool mixer_fw_stage = true;
+static bool mixer_fw_stage;
 module_param(mixer_fw_stage, bool, 0644);
 MODULE_PARM_DESC(mixer_fw_stage,
-		 "On a cold start, send ua-apollo-mixer.bin to DSP 0 as 0x12 firmware transactions (default: on). The macOS driver sends nothing at start and the x4 answers every block with DSP status 0xF0010006; 0 skips the stage (A/B)");
+		 "On a cold start, send ua-apollo-mixer.bin to DSP 0 as 0x12 firmware transactions (default: off, as the macOS driver, which sends nothing at start; the x4 answers every block with DSP status 0xF0010006 and cold-starts the same without it). 1 restores the stage");
 
 static bool warm_transport0;
 module_param(warm_transport0, bool, 0444);
@@ -3767,7 +3767,9 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 		 * "Bill" streams) to DSP 0 as 0x12 transactions.  The kext sends
 		 * nothing at start, and on titan's x4 every one of the 15 blocks
 		 * comes back with DSP status 0xF0010006 (kext result -68) on
-		 * every cold start.  mixer_fw_stage=0 skips it for the A/B.
+		 * every cold start.  Without the stage two cold starts (Apollo
+		 * power cycles) connected, ran every rate and the mixer, so it
+		 * is off by default; mixer_fw_stage=1 brings it back.
 		 */
 		if (mixer_fw_stage) {
 			fw_ret = ua_dsp_load_mixer_blocks(ua);
