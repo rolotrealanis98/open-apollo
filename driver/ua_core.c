@@ -186,7 +186,7 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	}
 	status_lo &= ua->irq_mask_lo;
 
-	if (ua->fw_v2)
+	if (ua_irq64(ua))
 		status_hi = ua_read(ua, UA_REG_EXT_IRQ_STATUS) &
 			    ua->irq_mask_hi;
 
@@ -317,7 +317,7 @@ void ua_reset_dma(struct ua_device *ua)
 	/* Clear all pending interrupts */
 	ua_write(ua, UA_REG_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
 
-	if (ua->fw_v2)
+	if (ua_irq64(ua))
 		ua_write(ua, UA_REG_EXT_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
 }
 

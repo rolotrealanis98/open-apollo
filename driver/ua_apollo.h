@@ -1575,6 +1575,20 @@ static inline u32 ua_dsp_base(unsigned int dsp_idx)
  *   HW bits 0-31 → ISR/IMR at 0x2208/0x2204
  *   HW bits 32-63 → ISR_HI/IMR_HI at 0x2264/0x2268
  */
+/*
+ * 64-vector mode (IMR_HI / ISR_HI in use).  CPcieIntrManager::MapHardware
+ * (kext 0x97da, parity/11 B2) turns it on for FPGA_REV bit 31 (v2), ext_caps
+ * bit 31 set and family ((ext_caps >> 20) & 0x3f) != 6.  ua->ext_caps is
+ * read at probe, before any vector is enabled, and is 0 on a v1 part.  The
+ * same for every known Apollo; a family-6 device would stay in 32-vector
+ * mode as in the kext.
+ */
+static inline bool ua_irq64(const struct ua_device *ua)
+{
+	return ua->fw_v2 && (ua->ext_caps & BIT(31)) &&
+	       ((ua->ext_caps >> 20) & 0x3f) != 6;
+}
+
 static inline int ua_vector_to_hwbit(unsigned int vector)
 {
 	switch (vector) {
@@ -1610,7 +1624,7 @@ static inline void ua_enable_vector(struct ua_device *ua, unsigned int vector,
 	int hwbit = ua_vector_to_hwbit(vector);
 	unsigned long flags;
 
-	if (hwbit < 0 || (hwbit >= 32 && !ua->fw_v2))
+	if (hwbit < 0 || (hwbit >= 32 && !ua_irq64(ua)))
 		return;
 
 	spin_lock_irqsave(&ua->irq_lock, flags);
@@ -1648,11 +1662,11 @@ static inline void ua_irq_mask_all(struct ua_device *ua, bool clear_pending)
 	ua->irq_mask_lo = 0;
 	ua->irq_mask_hi = 0;
 	ua_write(ua, UA_REG_IRQ_ENABLE, 0);
-	if (ua->fw_v2)
+	if (ua_irq64(ua))
 		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, 0);
 	if (clear_pending) {
 		ua_write(ua, UA_REG_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
-		if (ua->fw_v2)
+		if (ua_irq64(ua))
 			ua_write(ua, UA_REG_EXT_IRQ_STATUS, UA_IRQ_CLEAR_ALL);
 	}
 	spin_unlock_irqrestore(&ua->irq_lock, flags);
@@ -1664,7 +1678,7 @@ static inline void ua_disable_vector(struct ua_device *ua, unsigned int vector)
 	int hwbit = ua_vector_to_hwbit(vector);
 	unsigned long flags;
 
-	if (hwbit < 0 || (hwbit >= 32 && !ua->fw_v2))
+	if (hwbit < 0 || (hwbit >= 32 && !ua_irq64(ua)))
 		return;
 
 	spin_lock_irqsave(&ua->irq_lock, flags);

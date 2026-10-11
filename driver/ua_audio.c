@@ -3770,7 +3770,7 @@ static int ua_audio_start_transport(struct ua_device *ua)
 
 		if (stale_lo)
 			ua_write(ua, UA_REG_IRQ_STATUS, stale_lo);
-		if (ua->fw_v2) {
+		if (ua_irq64(ua)) {
 			stale_hi = ua_read(ua, UA_REG_EXT_IRQ_STATUS);
 			if (stale_hi)
 				ua_write(ua, UA_REG_EXT_IRQ_STATUS, stale_hi);
