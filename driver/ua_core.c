@@ -241,7 +241,8 @@ void ua_reset_dma(struct ua_device *ua)
  *   - FPGA rev (0x2218) bit 31 clear → v1 firmware, type from bits[31:28]-1
  *   - FPGA rev bit 31 set → v2 firmware, read ext_caps (0x2234):
  *       bits[25:20] - 1 = device family index
- *       bits[15:8]      = DSP count
+ *       bits[15:8]      = DSP count (at most 8)
+ *   - v1 DSP count: table on FPGA rev bits[31:28], see below
  *   - Some v2 devices need serial prefix (0x20-0x2C) to get exact type
  */
 static void ua_detect_capabilities(struct ua_device *ua)
@@ -254,13 +255,28 @@ static void ua_detect_capabilities(struct ua_device *ua)
 		ua->fw_v2 = false;
 		ua->device_type = (fpga >> 28) - 1;
 
-		/* v1 DSP count from subsystem ID */
-		switch (ua->subsystem_id) {
-		case UA_SUBSYS_APOLLO_X4_QUAD:
+		/*
+		 * v1 DSP count: CPcieDevice::_allocateDSPs (kext 12.0.0 x86
+		 * 0x7678) indexes a table by FPGA_REV[31:28], valid for 1-4:
+		 * {1: 1, 2: 2, 3: 4, 4: 1}.  Any other nibble means no DSPs and
+		 * an error log.  The PCI subsystem id plays no part.
+		 */
+		switch (fpga >> 28) {
+		case 1:
+		case 4:
+			ua->num_dsps = 1;
+			break;
+		case 2:
+			ua->num_dsps = 2;
+			break;
+		case 3:
 			ua->num_dsps = 4;
 			break;
 		default:
-			ua->num_dsps = 1;
+			ua->num_dsps = 0;
+			dev_err(&ua->pdev->dev,
+				"v1 firmware: FPGA_REV[31:28]=%u has no DSP count\n",
+				fpga >> 28);
 			break;
 		}
 	} else {
