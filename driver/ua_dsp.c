@@ -33,11 +33,15 @@
 #include <linux/sched/signal.h>
 #include <linux/slab.h>
 #include <linux/timekeeping.h>
+#include <linux/workqueue.h>
 
 #include "ua_dsp_modules.h"
 
 #include "ua_apollo.h"
 
+/* Defined with the DSP vector code at the end of the file */
+static void ua_dsp_msg_work(struct work_struct *work);
+static void ua_dsp_irq_disarm(struct ua_device *ua);
 
 /* Internal ring entry layout */
 struct ua_ring_entry {
@@ -772,6 +776,11 @@ int ua_dsp_rings_init(struct ua_device *ua)
 	unsigned int i;
 	int ret;
 
+	if (!ua->dspx.inited) {
+		INIT_WORK(&ua->dspx.msg_work, ua_dsp_msg_work);
+		ua->dspx.inited = true;
+	}
+
 	for (i = 0; i < ua->num_dsps; i++) {
 		struct ua_dsp_state *ds = &ua->dsp[i];
 		u32 bank_base = ua_dsp_base(i);
@@ -945,6 +954,9 @@ int ua_dsp_rings_init(struct ua_device *ua)
 			r2228, r222c, r2230, r2234, r2238, r223c);
 	}
 
+	/* dsp_msg_irq: DSP message/error vectors, after the rings exist */
+	ua_dsp_irq_arm(ua);
+
 	dev_info(&ua->pdev->dev, "DSP ring buffers initialized\n");
 	return 0;
 }
@@ -962,6 +974,8 @@ int ua_dsp_rings_init(struct ua_device *ua)
 void ua_dsp_rings_fini(struct ua_device *ua, bool dma_quiet)
 {
 	unsigned int i;
+
+	ua_dsp_irq_disarm(ua);
 
 	for (i = 0; i < ua->num_dsps; i++) {
 		struct ua_dsp_state *ds = &ua->dsp[i];
@@ -994,6 +1008,8 @@ void ua_dsp_rings_quiesce(struct ua_device *ua)
 {
 	unsigned int i;
 
+	/* dsp_msg_irq: stop counting and reading before the rings are emptied */
+	ua_dsp_irq_disarm(ua);
 
 	for (i = 0; i < ua->num_dsps; i++) {
 		struct ua_dsp_state *ds = &ua->dsp[i];
@@ -2881,6 +2897,8 @@ int ua_dsp_connect_all(struct ua_device *ua)
 		ua->dsp[0].cmd.write_ptr);
 
 	ua->dsps_connected = true;
+	/* A reconnect after the audio side masked every vector */
+	ua_dsp_irq_arm(ua);
 	dev_info(&ua->pdev->dev, "all %u DSPs connected\n", ua->num_dsps);
 	return 0;
 }
@@ -4327,4 +4345,299 @@ int ua_dsp_send_routing(struct ua_device *ua)
 		UA_IO_DESC_WORDS, UA_IO_DESC_WORDS);
 
 	return 0;
+}
+
+/* ----------------------------------------------------------------
+ * DSP message FIFO and DSP interrupt vectors (parity/03 A07, I01-I05, I09,
+ * I10; parity/13 section 5.3)
+ *
+ * Each DSP raises five vectors: 5n+0 command ring consumed, 5n+1 response
+ * ring filled (both one-shot: the kext's filter masks them as they fire and
+ * the ring service re-enables them), 5n+2 message FIFO, 5n+3 / 5n+4 error A
+ * and B.  With more than four DSPs the map is 4n+j and error B does not
+ * exist (I09).  Linux polls the rings through POSITION and never enabled any
+ * of them; dsp_msg_irq enables the FIFO and error vectors (1) and, for
+ * diagnostics, also the two ring vectors with the one-shot re-arm (2).  The
+ * handler only counts and queues work; the rings are still polled exactly
+ * as before and nothing here touches a ring or its response buffers.
+ *
+ * The FIFO is read-only for the host: the DSP publishes its write index at
+ * window+0x40 (values above 0xF are stale) and 16 slots of five dwords from
+ * window+0x44.  The kext keeps its own read index (CPcieDSP+0xD8), copies
+ * slots from there up to the write index and writes nothing back
+ * (_serviceMessageFIFO 0x93de, disassembled).  The index starts at the DSP's
+ * current write index here, so messages from before the driver armed the
+ * vectors are not replayed.
+ * ---------------------------------------------------------------- */
+
+#define UA_DSP_WIN_FIFO_IDX	0x40
+#define UA_DSP_WIN_FIFO_MSG	0x44
+#define UA_DSP_FIFO_SLOTS	16
+#define UA_DSP_FIFO_WORDS	5
+#define UA_DSP_STORM_LIMIT	10000	/* DSP vectors per second */
+
+static int dsp_msg_irq;
+module_param(dsp_msg_irq, int, 0444);
+MODULE_PARM_DESC(dsp_msg_irq,
+		 "EXPERIMENTAL (parity/03 E1), 0 = off (default, no DSP vector is enabled). 1 = enable each DSP's message-FIFO and error vectors; the handler counts them and a work item reads the FIFO (read only) and logs messages. 2 = also the command/response ring vectors, counted only, with the kext's one-shot re-arm. The rings stay polled either way. Counters are in /proc/asound/cardN/dsp_state");
+
+/* Hardware ISR/IMR bit of DSP @dsp's vector 5n+@j, or -1 */
+static int ua_dsp_vec_hwbit(const struct ua_device *ua, unsigned int dsp,
+			    unsigned int j)
+{
+	if (dsp >= UA_MAX_DSPS || j > 4)
+		return -1;
+	if (ua->num_dsps > 4)
+		return j == 4 ? -1 : (int)(dsp * 4 + j);
+	return dsp * 5 + j;
+}
+
+/**
+ * ua_dsp_irq_arm - Enable the DSP vectors selected by dsp_msg_irq
+ * @ua: device (ua->lock held, or probe)
+ *
+ * No effect with dsp_msg_irq = 0.  Safe to repeat; call it again after
+ * anything that masks every vector (ua_irq_mask_all), as the kext enables
+ * these in CPcieDSP::Initialize with clearPending = 1 (R01).  Done after
+ * the rings are programmed, from ua_dsp_rings_init() and
+ * ua_dsp_connect_all().
+ */
+void ua_dsp_irq_arm(struct ua_device *ua)
+{
+	struct ua_dsp_ext *x = &ua->dspx;
+	unsigned int dsp, j, first;
+	unsigned long flags;
+	u32 bits = 0;
+
+	if (!dsp_msg_irq || !x->inited || atomic_read(&ua->shutdown))
+		return;
+
+	first = dsp_msg_irq >= 2 ? 0 : 2;
+	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+		u32 widx;
+
+		if (!ua->dsp[dsp].rings_allocated)
+			continue;
+		widx = ua_read(ua, ua_dsp_window(dsp) + UA_DSP_WIN_FIFO_IDX);
+		x->msg_rd[dsp] = widx & (UA_DSP_FIFO_SLOTS - 1);
+		for (j = first; j < 5; j++) {
+			int hw = ua_dsp_vec_hwbit(ua, dsp, j);
+
+			if (hw >= 0)
+				bits |= BIT(hw);
+		}
+	}
+	if (!bits)
+		return;
+
+	spin_lock_irqsave(&ua->irq_lock, flags);
+	x->vec_mask = bits;
+	x->msg_armed = true;
+	x->storm_tripped = false;
+	x->storm_count = 0;
+	x->storm_window = jiffies;
+	ua->irq_mask_lo |= bits;
+	ua_write(ua, UA_REG_IRQ_STATUS, bits);		/* clearPending */
+	ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
+	spin_unlock_irqrestore(&ua->irq_lock, flags);
+	(void)ua_read(ua, UA_REG_FPGA_REV);		/* posted-write flush */
+
+	dev_info(&ua->pdev->dev,
+		 "DSP vectors armed (dsp_msg_irq=%d, IMR bits 0x%08x)\n",
+		 dsp_msg_irq, bits);
+}
+
+/* Mask our vectors and stop the work; the caller may sleep, not hold irq_lock */
+static void ua_dsp_irq_disarm(struct ua_device *ua)
+{
+	struct ua_dsp_ext *x = &ua->dspx;
+	unsigned long flags;
+
+	if (!x->inited)
+		return;
+
+	spin_lock_irqsave(&ua->irq_lock, flags);
+	x->msg_armed = false;
+	if (x->vec_mask) {
+		ua->irq_mask_lo &= ~x->vec_mask;
+		ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
+		x->vec_mask = 0;
+	}
+	spin_unlock_irqrestore(&ua->irq_lock, flags);
+	cancel_work_sync(&x->msg_work);
+}
+
+/**
+ * ua_dsp_irq - DSP vector dispatch, called from the main ISR
+ * @ua: device
+ * @status_lo: ISR bits 0-31 already masked with IMR and acknowledged
+ * @status_hi: ISR_HI, unused (every DSP vector is in the low word)
+ *
+ * Hard-IRQ context.  Counts the fired vectors, auto-masks the one-shot
+ * ring vectors the way CPcieIntrManager::ServiceInterrupt does (I10),
+ * and defers all register reads to ua_dsp_msg_work().  Returns at once
+ * with dsp_msg_irq = 0, where none of these bits is ever unmasked.
+ */
+void ua_dsp_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
+{
+	struct ua_dsp_ext *x = &ua->dspx;
+	unsigned long fifo = 0, err = 0, rearm = 0, flags;
+	u32 oneshot = 0;
+	unsigned int dsp, j;
+
+	if (!dsp_msg_irq || !status_lo || !x->msg_armed)
+		return;
+
+	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+		for (j = 0; j < 5; j++) {
+			int hw = ua_dsp_vec_hwbit(ua, dsp, j);
+
+			if (hw < 0 || !(status_lo & BIT(hw)))
+				continue;
+			atomic_inc(&x->vec_count[dsp][j]);
+			switch (j) {
+			case 0:
+			case 1:
+				oneshot |= BIT(hw);
+				rearm |= BIT(dsp * 2 + j);
+				break;
+			case 2:
+				fifo |= BIT(dsp);
+				break;
+			default:
+				err |= BIT(dsp * 2 + (j - 3));
+				break;
+			}
+		}
+	}
+	if (!fifo && !err && !rearm)
+		return;
+
+	spin_lock_irqsave(&ua->irq_lock, flags);
+	if (!x->msg_armed) {
+		spin_unlock_irqrestore(&ua->irq_lock, flags);
+		return;
+	}
+
+	if (time_after(jiffies, x->storm_window + HZ)) {
+		x->storm_window = jiffies;
+		x->storm_count = 0;
+	}
+	if (++x->storm_count > UA_DSP_STORM_LIMIT) {
+		/* Storm guard: give the vectors up until the next arm */
+		ua->irq_mask_lo &= ~x->vec_mask;
+		ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
+		x->vec_mask = 0;
+		x->msg_armed = false;
+		x->storm_tripped = true;
+		schedule_work(&x->msg_work);
+		spin_unlock_irqrestore(&ua->irq_lock, flags);
+		return;
+	}
+
+	if (oneshot) {
+		/* Re-enabled by the work item once the event is counted */
+		ua->irq_mask_lo &= ~oneshot;
+		ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
+	}
+	x->pend_fifo |= fifo;
+	x->pend_err |= err;
+	x->pend_rearm |= rearm;
+	schedule_work(&x->msg_work);
+	spin_unlock_irqrestore(&ua->irq_lock, flags);
+}
+
+/* Read the new messages of one DSP's FIFO (CPcieDSP::_serviceMessageFIFO) */
+static void ua_dsp_fifo_drain(struct ua_device *ua, unsigned int dsp)
+{
+	struct ua_dsp_ext *x = &ua->dspx;
+	u32 win = ua_dsp_window(dsp);
+	unsigned int rd = x->msg_rd[dsp], n = 0, i;
+	u32 widx = ua_read(ua, win + UA_DSP_WIN_FIFO_IDX);
+
+	if (widx == 0xFFFFFFFF)
+		return;
+	if (widx >= UA_DSP_FIFO_SLOTS) {
+		x->msg_stale[dsp]++;
+		return;
+	}
+
+	while (rd != widx && n < UA_DSP_FIFO_SLOTS) {
+		u32 base = win + UA_DSP_WIN_FIFO_MSG + rd * UA_DSP_FIFO_WORDS * 4;
+		u32 w[UA_DSP_FIFO_WORDS];
+
+		for (i = 0; i < UA_DSP_FIFO_WORDS; i++) {
+			w[i] = ua_read(ua, base + i * 4);
+			x->msg_last[dsp][i] = w[i];
+		}
+		x->msg_total[dsp]++;
+		if ((w[2] & 0xffff0000u) == 0xf0010000u)
+			x->msg_f001[dsp]++;
+		else if ((w[2] & 0xffff0000u) == 0xf0020000u)
+			x->msg_f002[dsp]++;
+		dev_info_ratelimited(&ua->pdev->dev,
+				     "DSP %u message: %08x %08x class %08x arg %08x %08x\n",
+				     dsp, w[0], w[1], w[2], w[3], w[4]);
+		rd = (rd + 1) & (UA_DSP_FIFO_SLOTS - 1);
+		n++;
+	}
+	x->msg_rd[dsp] = rd;
+}
+
+static void ua_dsp_msg_work(struct work_struct *work)
+{
+	struct ua_device *ua = container_of(work, struct ua_device,
+					    dspx.msg_work);
+	struct ua_dsp_ext *x = &ua->dspx;
+	unsigned long fifo, err, rearm;
+	bool tripped;
+	unsigned int dsp, j;
+
+	spin_lock_irq(&ua->irq_lock);
+	fifo = x->pend_fifo;
+	err = x->pend_err;
+	rearm = x->pend_rearm;
+	x->pend_fifo = x->pend_err = x->pend_rearm = 0;
+	tripped = x->storm_tripped;
+	spin_unlock_irq(&ua->irq_lock);
+
+	if (atomic_read(&ua->shutdown))
+		return;
+
+	if (tripped)
+		dev_warn(&ua->pdev->dev,
+			 "DSP vectors fired over %u/s, masked until the next arm (dsp_msg_irq=%d)\n",
+			 UA_DSP_STORM_LIMIT, dsp_msg_irq);
+
+	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+		if (fifo & BIT(dsp))
+			ua_dsp_fifo_drain(ua, dsp);
+		if (err & (BIT(dsp * 2) | BIT(dsp * 2 + 1)))
+			dev_warn_ratelimited(&ua->pdev->dev,
+					     "DSP %u error vector%s%s fired (DSPEvent 7/8)\n",
+					     dsp,
+					     err & BIT(dsp * 2) ? " A" : "",
+					     err & BIT(dsp * 2 + 1) ? " B" : "");
+	}
+
+	if (!rearm)
+		return;
+
+	/* One-shot re-arm, only while the FIFO vectors are still enabled */
+	spin_lock_irq(&ua->irq_lock);
+	for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+		int fhw = ua_dsp_vec_hwbit(ua, dsp, 2);
+
+		if (fhw < 0 || !(ua->irq_mask_lo & BIT(fhw)))
+			continue;
+		for (j = 0; j < 2; j++) {
+			int hw = ua_dsp_vec_hwbit(ua, dsp, j);
+
+			if (hw >= 0 && (rearm & BIT(dsp * 2 + j)) &&
+			    (x->vec_mask & BIT(hw)))
+				ua->irq_mask_lo |= BIT(hw);
+		}
+	}
+	ua_write(ua, UA_REG_IRQ_ENABLE, ua->irq_mask_lo);
+	spin_unlock_irq(&ua->irq_lock);
 }

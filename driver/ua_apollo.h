@@ -1638,6 +1638,9 @@ int ua_dsp_send_rate_ack(struct ua_device *ua, u32 rate);
 void ua_dsp_ring_reset(struct ua_device *ua, unsigned int dsp_idx);
 int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp_idx,
 			  u32 w0, u32 w1, u32 w2, u32 w3);
+/* DSP message FIFO / vectors (dsp_msg_irq), kext_connect notifications */
+void ua_dsp_irq(struct ua_device *ua, u32 status_lo, u32 status_hi);
+void ua_dsp_irq_arm(struct ua_device *ua);		/* ua->lock */
 void ua_dsp_flush_bus_params(struct ua_device *ua);
 int ua_dsp_configure_modules(struct ua_device *ua);
 struct ua_dma_test;

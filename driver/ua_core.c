@@ -213,6 +213,9 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	/* Dispatch audio-related interrupts */
 	ua_audio_irq(ua, status_lo, status_hi);
 
+	/* DSP message FIFO / error vectors (dsp_msg_irq, default off) */
+	ua_dsp_irq(ua, status_lo, status_hi);
+
 	return IRQ_HANDLED;
 }
 
