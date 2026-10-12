@@ -29,6 +29,10 @@ Offline:
   convert --in FILE --out FILE [--trim] [--catalogs]
   mock-serve --snapshot FILE [--port N] [--meters]  loopback MockEngine until killed
 
+UA Mixer Helper (4720; read-only: identity, get, subscribe, get /ping):
+  helper [--seconds N] [--out FILE] [--raw FILE]     settings, drivers, native inserts; --out engine-form
+                                                    snapshot, --raw the helper's own format
+
 Defaults: --host 127.0.0.1 --port 4710.";
 
 struct Args {
@@ -95,6 +99,7 @@ fn main() -> ExitCode {
         "compare" => compare(&mut args),
         "convert" => convert(&mut args),
         "mock-serve" => mock_serve(&mut args),
+        "helper" => helper(&endpoint, &mut args),
         _ => Err(format!("unknown command {cmd}\n\n{USAGE}")),
     };
     match result {
@@ -682,4 +687,152 @@ fn mock_serve(args: &mut Args) -> R {
     loop {
         std::thread::sleep(Duration::from_secs(60));
     }
+}
+
+/// Reads the UA Mixer Helper (port 4720 unless --port/--endpoint says otherwise) read-only.
+fn helper(endpoint: &Endpoint, args: &mut Args) -> R {
+    let seconds: f64 = args
+        .opt("--seconds")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3.0);
+    let out = args.opt("--out");
+    let raw = args.opt("--raw");
+    let ep = if endpoint.port == ua_engine::DEFAULT_PORT {
+        Endpoint::new(endpoint.host.clone(), ua_engine::HELPER_PORT)
+    } else {
+        endpoint.clone()
+    };
+    let mut store = ua_engine::HelperStore::new();
+    store.connect(ep.clone());
+    assert!(!store.connection().is_some_and(|h| h.options().allow_writes));
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let started = Instant::now();
+    while *store.status() != Status::Live {
+        store.drain();
+        if let Status::Failed(r) = store.status() {
+            return Err(format!("{ep}: {r}"));
+        }
+        if Instant::now() > deadline {
+            return Err(format!("{ep}: not live: {:?}", store.status()));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let loaded = started.elapsed();
+    let bytes = store
+        .connection()
+        .map(|h| h.counters().bytes_in)
+        .unwrap_or(0);
+    let watch = Instant::now();
+    let rev0 = store.revision();
+    while watch.elapsed().as_secs_f64() < seconds {
+        store.drain();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let t = store.tree();
+    let info = store.info();
+    println!(
+        "{ep}: tree {:.2} MB in {:.2} s, {} nodes, {} properties; {} value changes in {seconds:.0} s",
+        bytes as f64 / 1e6,
+        loaded.as_secs_f64(),
+        t.node_count(),
+        t.property_count(),
+        store.revision() - rev0
+    );
+    println!(
+        "helper {} {} · sample rate {:?} · driver {} ({}%, initialized {:?}) · latency {:?} · io buffer {:?} · render buffer {:?} · native engine {}",
+        info.name.as_deref().unwrap_or("?"),
+        info.version.as_deref().unwrap_or("?"),
+        info.sample_rate,
+        info.driver_status.as_deref().unwrap_or("?"),
+        info.initialized_percent.unwrap_or(f64::NAN),
+        info.initialized,
+        info.latency,
+        info.io_buffer_size,
+        info.render_buffer_size,
+        if info.native_engine_active {
+            "active"
+        } else {
+            "inactive"
+        }
+    );
+    println!("root children: {}", t.children("/").join(", "));
+    if let Some(a) = info.apollo() {
+        println!(
+            "apollo driver: {} ({}, {} in / {} out): {}",
+            a.name,
+            a.kind,
+            a.num_inputs,
+            a.num_outputs,
+            a.input_names.join(", ")
+        );
+    }
+    println!(
+        "other drivers: {}",
+        info.drivers.iter().filter(|d| !d.is_apollo()).count()
+    );
+    for device in t.children("/devices") {
+        let base = format!("/devices/{device}");
+        let name = t
+            .value(&format!("{base}/name"))
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let colls: Vec<String> = t
+            .children(&base)
+            .iter()
+            .map(|c| format!("{c} {}", t.children(&format!("{base}/{c}")).len()))
+            .collect();
+        println!("device {device} {name}: {}", colls.join(", "));
+        for bus in t.children(&format!("{base}/buses")) {
+            let bp = format!("{base}/buses/{bus}");
+            let v = |k: &str| {
+                t.value(&format!("{bp}/{k}"))
+                    .map(|v| v.to_string())
+                    .unwrap_or_default()
+            };
+            println!(
+                "  bus {} {} slots {}",
+                v("name"),
+                v("bus_type"),
+                t.children(&format!("{bp}/effects")).len()
+            );
+        }
+    }
+    let native = store.native_inserts();
+    println!("native inserts: {}", native.len());
+    for n in &native {
+        println!(
+            "  {:?} {} {} {} power {}",
+            n.owner,
+            n.owner_name.as_deref().unwrap_or("?"),
+            n.slot,
+            n.plugin_name,
+            n.power
+        );
+    }
+    if let (Some(f), Some(h)) = (raw, store.connection()) {
+        let m = h
+            .request_with_timeout("/", true, Duration::from_secs(60))
+            .wait(Duration::from_secs(61))
+            .map_err(|e| e.to_string())?;
+        std::fs::write(
+            &f,
+            serde_json::to_vec(&m.data.unwrap_or_default()).unwrap_or_default(),
+        )
+        .map_err(|e| e.to_string())?;
+        println!("wrote {f} (helper format)");
+    }
+    if let Some(f) = out {
+        let snap = Snapshot::new(
+            store.tree().clone(),
+            ua_engine::SnapshotInfo {
+                source: Some(format!("helper {ep} via ua-engine-probe helper")),
+                captured: Some(ua_engine::iso8601_now()),
+                ..Default::default()
+            },
+        );
+        snap.save(&f, false).map_err(|e| e.to_string())?;
+        println!("wrote {f} (engine-form tree)");
+    }
+    store.disconnect();
+    Ok(())
 }
