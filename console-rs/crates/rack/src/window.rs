@@ -226,7 +226,13 @@ impl CellRows {
         let rec_row = !aux || strips.iter().any(|s| s.kind == StripKind::Talkback);
         let style = cells::SendStyle::of(view.sends_overview, aux);
         Self {
-            input: (!aux).then_some(if open(Section::Inputs) { INPUT_CELL_H } else { HEADER_H }),
+            input: (!aux).then_some(if !open(Section::Inputs) {
+                HEADER_H
+            } else if size == InsertSize::Small {
+                INPUT_CELL_H - cells::INPUT_CELL_SMALL_DH
+            } else {
+                INPUT_CELL_H
+            }),
             inserts: if open(Section::Inserts) { cells::inserts_cell_h(slots, size, rec_row) } else { HEADER_H },
             sends: if open(Section::Sends) { cells::sends_cell_h(sends, style) } else { HEADER_H },
             slots,
@@ -555,6 +561,7 @@ fn scrollbar_column(ui: &mut Ui, x: f32, main_y: f32, status_y: f32, visible: f3
 fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
     const ROW_ICON: Rgba = Rgba::rgb8(246, 201, 91);
     const ROW_ICON_EDGE: Rgba = Rgba::rgb8(44, 46, 48);
+    const ROW_ICON_SMALL: Rgba = Rgba::rgb8(144, 155, 161);
     let main_y = r.h - rows.main;
     // Measured on p1 and the 1470-pt user shot: the cells column is (76, 80, 83) between a 1-pt
     // channel_strip_separator_line and a black right edge (x 487, against the first strip's own
@@ -577,10 +584,12 @@ fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
                     ui.image(img, Rect::new(17.0, y + 5.0, 12.0, 12.0), None, None, 1.0);
                 }
                 if open && h >= 50.0 {
+                    // Yellow in LARGE, blue-grey in SMALL (s47/s48: (144, 155, 161)).
+                    let c = if rows.size == InsertSize::Small { ROW_ICON_SMALL } else { ROW_ICON };
                     let icon = Rect::new(15.0, y + 35.0, 16.0, 15.0);
                     ui.fill(icon, ROW_ICON_EDGE);
-                    ui.fill(Rect::new(icon.x + 1.0, icon.y + 1.0, 14.0, 6.0), ROW_ICON);
-                    ui.fill(Rect::new(icon.x + 1.0, icon.y + 8.0, 14.0, 6.0), ROW_ICON);
+                    ui.fill(Rect::new(icon.x + 1.0, icon.y + 1.0, 14.0, 6.0), c);
+                    ui.fill(Rect::new(icon.x + 1.0, icon.y + 8.0, 14.0, 6.0), c);
                 }
                 ui.hit(Rect::new(0.0, y, r.w, HEADER_H), ControlId { strip: navigator::NAV_ID.into(), control: Control::Section(sec) }, HitKind::Toggle);
             }
@@ -704,7 +713,7 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
         }
         ui.cell_header(&s.title, false, false, Rect::new(0.0, 0.0, STRIP_W, HEADER_H));
         if h > HEADER_H {
-            input_cell(ui, model, s);
+            input_cell(ui, model, s, rows.size);
         }
         y += h;
     }
@@ -737,17 +746,19 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
 
 /// Input cell (`Rack_ChannelStripCell_Input::resized` 0x1814b90a0): Unison slot from y = 25,
 /// then the preamp overview at 101 (measured in p1; `Resized_InputOrInstrument` 0x1814aeb80).
-fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo) {
+fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, size: InsertSize) {
+    // SMALL: the Unison block is 27 shorter (a 23-pt slot), the preamp moves up with it.
+    let dy = if size == InsertSize::Small { cells::INPUT_CELL_SMALL_DH } else { 0.0 };
     if let Some(layout) = &s.preamp_layout {
-        unison(ui, &model.unison(s), model.unison_label(s).as_ref(), s, Rect::new(0.0, 25.0, STRIP_W, 77.0));
+        unison(ui, &model.unison(s), model.unison_label(s).as_ref(), s, size, Rect::new(0.0, 25.0, STRIP_W, 77.0 - dy));
         if let Some(state) = model.preamp(s) {
             // Rack_Overview_Preamp's secondary_background (Secondary-Channel-Inserts-Background)
             // runs 2 pt past the 129-pt plate, as under SR CONVERT.
-            ui.background("Secondary-Channel-Inserts-Background", Rect::new(4.0, 101.0, STRIP_W - 8.0, 131.0));
-            draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0, STRIP_W, 129.0));
+            ui.background("Secondary-Channel-Inserts-Background", Rect::new(4.0, 101.0 - dy, STRIP_W - 8.0, 131.0));
+            draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0 - dy, STRIP_W, 129.0));
         }
     } else if s.shows_sr_convert {
-        sr_convert(ui, Rect::new(0.0, 167.0, STRIP_W, 65.0));
+        sr_convert(ui, Rect::new(0.0, 167.0 - dy, STRIP_W, 65.0));
     }
 }
 
@@ -768,10 +779,14 @@ fn sr_convert(ui: &mut Ui, r: Rect) {
 /// `Rack_Inserts_Unison`: a one-slot `Rack_Inserts` with its header row. Background
 /// `(4, 0, w−8, h)`, "UNISON" label `(0, 5, w, 16)` (Silk-Screen), slot `(0, 5+16+1, w, 48)`;
 /// height = RequiredHeight(LARGE, 1, header) = 50 + 11 + 16 (0x18143b330).
-fn unison(ui: &mut Ui, state: &crate::model::InsertState, label: Option<&crate::model::InsertLabel>, s: &StripInfo, r: Rect) {
+fn unison(ui: &mut Ui, state: &crate::model::InsertState, label: Option<&crate::model::InsertLabel>, s: &StripInfo, size: InsertSize, r: Rect) {
     ui.background("Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, r.h));
     ui.font_text("Silk-Screen", "UNISON", Rect::new(r.x, r.y + 5.0, r.w, 16.0), Align::Center);
-    ui.insert_slot(state, label, Rect::new(r.x, r.y + 22.0, r.w, 48.0), cid(s, Control::Insert(255)));
+    let slot = Rect::new(r.x, r.y + 22.0, r.w, size.pitch() - 2.0);
+    match size {
+        InsertSize::Large => ui.insert_slot(state, label, slot, cid(s, Control::Insert(255))),
+        InsertSize::Small => cells::small_slot(ui, state, label, slot, cid(s, Control::Insert(255))),
+    }
 }
 
 /// `Rack_UADRecord` (resized 0x18149a990) at `(0, y, w, 42)`: the REC/MON LED art

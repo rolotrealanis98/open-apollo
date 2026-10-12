@@ -14,6 +14,9 @@ use crate::ui::Ui;
 pub const HEADER_H: f32 = 22.0;
 /// Input cell with Unison + preamp (measured, §1.2).
 pub const INPUT_CELL_H: f32 = 237.0;
+/// SMALL shrinks the Unison slot like the insert slots (50 → 23): the input cell loses 27
+/// (user captures s47/s48).
+pub const INPUT_CELL_SMALL_DH: f32 = 27.0;
 /// `Rack_UADRecord` row under the input inserts list (`(0, listH + 30, w, 42)`).
 pub const REC_ROW_H: f32 = 42.0;
 /// Send heights: medium (mini send) 75, compact 35, full (`Rack_SendChannelStrip`) 322; pitch
@@ -139,7 +142,7 @@ pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[
 }
 
 /// SMALL insert slot: stretched slot art with the plug-in name (no icon).
-fn small_slot(ui: &mut Ui, state: &InsertState, label: Option<&InsertLabel>, r: Rect, id: Option<ControlId>) {
+pub fn small_slot(ui: &mut Ui, state: &InsertState, label: Option<&InsertLabel>, r: Rect, id: Option<ControlId>) {
     let skin = ui.skin("inserts", "Small-Normal");
     let img = skin.and_then(|k| match state {
         InsertState::Empty => k.image("image-empty"),

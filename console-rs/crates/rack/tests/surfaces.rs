@@ -258,3 +258,28 @@ fn status_bar_loads_and_scene() {
     assert!(find(&hits, "status", &Control::StatusScene).is_none());
 }
 
+
+#[test]
+fn view_specs_and_1_3_1_view_modes() {
+    let assets = assets();
+    let model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    view.apply_spec("ctrl=1,sends=1,overview=1,small,presets-open=Bass|Guitar,tab=presets").unwrap();
+    assert!(view.show_ctrl_room && view.show_aux && view.sends_overview && view.sections.sends);
+    assert_eq!(view.browser.presets_open, vec!["Bass".to_string(), "Guitar".to_string()]);
+    assert!(view.apply_spec("nope=1").is_err());
+    let (hits, _) = build(&assets, &model, &view);
+    // SMALL shrinks the Unison slot with the insert slots (s47/s48).
+    assert_eq!(find(&hits, "in0", &Control::Insert(255)).unwrap().rect.h, 21.0);
+    // CTRL ROOM: the talkback strip and the control-room column's SOURCE buttons.
+    assert!(find(&hits, "tb", &Control::Fader).is_some());
+    assert!(find(&hits, "monitor", &Control::CrSource(1)).is_some());
+    // PRESETS: folders toggle open.
+    let folder = find(&hits, "browser", &Control::BrowserPresetFolder(1)).unwrap().clone();
+    let mut model = model;
+    tap(&hits, &folder, &mut view, &mut model);
+    assert!(view.browser.presets_open.iter().any(|n| n == "Drums"));
+    // Assign mode targets a slot; the next catalog tap loads into it.
+    view.begin_assign("aux0".into(), 1);
+    assert!(view.show_browser && view.browser.assign_to.is_some());
+}
