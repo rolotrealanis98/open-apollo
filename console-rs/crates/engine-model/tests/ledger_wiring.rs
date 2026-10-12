@@ -250,10 +250,15 @@ impl Audit {
                 }
             }
             self.press(name, base, &hits, hit, None);
-            // Right click: a context menu (or a Sends window) for this control?
+            // Right click: a context menu (or a Sends window) for this control? A fader also
+            // gets one on its meter, which has no hit of its own (the meter menu).
+            let mut points = vec![hit.rect.center()];
+            if hit.id.control == Control::Fader {
+                points.push((hit.rect.max_x() + 8.0, hit.rect.y + hit.rect.h / 2.0));
+            }
+            for (cx, cy) in points {
             self.fresh();
             let mut v = base.clone();
-            let (cx, cy) = hit.rect.center();
             if v.context_click(&hits, cx, cy) && v.menu.is_some() {
                 let menu_hits = self.hits(&v);
                 let target = v.menu.as_ref().map(|m| m.target.clone()).expect("open menu");
@@ -284,6 +289,7 @@ impl Audit {
                     };
                     self.press(&format!("{name} › right-click {}", shape(&hit.id.control)), &v, &menu_hits, row, Some((menu_name.clone(), label)));
                 }
+            }
             }
         }
     }
