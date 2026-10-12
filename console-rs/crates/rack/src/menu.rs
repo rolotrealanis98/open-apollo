@@ -1701,7 +1701,7 @@ impl ViewState {
                         let (title, verb) = if *op == SceneOp::Overwrite { ("Overwrite Scene", "overwrite") } else { ("Clear Scene", "clear") };
                         let ok = ControlId { strip: "global".into(), control: Control::SceneCommand(*op, *i) };
                         let message = format!("Are you sure you want to {verb} \"{name}\"?");
-                        self.popover = Some(PopoverState { kind: Popover::Confirm { title: title.into(), message, ok }, anchor });
+                        self.popover = Some(PopoverState { kind: Popover::Confirm { title: title.into(), message, ok, ok_label: "OK".into() }, anchor });
                     }
                     _ => {}
                 }

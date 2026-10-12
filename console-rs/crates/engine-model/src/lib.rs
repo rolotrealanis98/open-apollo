@@ -107,6 +107,7 @@ impl EngineMixer {
     pub fn connect_with(endpoint: Endpoint, options: Options, writes: bool) -> EngineMixer {
         let helper = EngineMixer::helper_endpoint(&endpoint);
         let local = is_loopback(&endpoint.host);
+        let options_allow_writes = options.allow_writes;
         let mut store = Store::new();
         store.connect(endpoint, options);
         store.set_writes_enabled(writes);
@@ -116,7 +117,7 @@ impl EngineMixer {
         }
         // The UA Mixer Helper on host:4720, read-only (native inserts, helper state).
         if let Some(h) = helper {
-            mixer.connect_helper(h);
+            mixer.connect_helper_writable(h, writes && options_allow_writes);
         }
         mixer
     }

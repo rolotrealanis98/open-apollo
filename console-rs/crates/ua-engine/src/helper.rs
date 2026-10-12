@@ -326,7 +326,7 @@ impl NativeInsert {
 }
 
 /// Status properties kept subscribed (read-only `subscribe <p>/value`).
-const STATUS_PATHS: [&str; 15] = [
+const STATUS_PATHS: [&str; 17] = [
     "/sample_rate",
     "/driver_status",
     "/initialized",
@@ -342,7 +342,44 @@ const STATUS_PATHS: [&str; 15] = [
     "/post_fader_meters",
     "/drivers/connected",
     "/auto_gain/status",
+    // Settings › NETWORK › NETWORK INTERFACE (Console 1.3.1 capture s30): the adapters (a JSON
+    // text `[{adapter_name, adapter_address}]`) and the chosen one.
+    "/dante/available_network_adapters",
+    "/dante/primary_network_adapter",
 ];
+
+/// The helper property NETWORK INTERFACE writes (`set …/value "<adapter_name>"`).
+pub const PRIMARY_NETWORK_ADAPTER: &str = "/dante/primary_network_adapter";
+/// The helper property listing the host's network adapters.
+pub const AVAILABLE_NETWORK_ADAPTERS: &str = "/dante/available_network_adapters";
+
+/// One host network adapter as the helper lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetworkAdapter {
+    pub name: String,
+    /// IPv4 address, empty when the adapter has none.
+    pub address: String,
+}
+
+impl NetworkAdapter {
+    /// Parses `/dante/available_network_adapters` (a JSON text: `[{"adapter_name", "adapter_address"}]`).
+    pub fn list(text: &str) -> Vec<NetworkAdapter> {
+        let Ok(Json::Array(items)) = serde_json::from_str::<Json>(text) else { return Vec::new() };
+        items
+            .iter()
+            .filter_map(|a| {
+                let name = a.get("adapter_name")?.as_str()?.to_owned();
+                let address = a.get("adapter_address").and_then(Json::as_str).unwrap_or("").to_owned();
+                Some(NetworkAdapter { name, address })
+            })
+            .collect()
+    }
+
+    /// How Console lists it: `en0  (192.168.1.4)`, `en14  ()` (capture s30).
+    pub fn label(&self) -> String {
+        format!("{}  ({})", self.name, self.address)
+    }
+}
 /// Effect-slot properties kept subscribed on every supercore bus and track.
 const SLOT_PROPS: [&str; 3] = ["plugin_name", "plugin_power", "enabled"];
 
@@ -408,6 +445,43 @@ impl HelperStore {
     /// Connects read-only (identity, `get`, `subscribe`, `get /ping`; never `set`/`post`).
     pub fn connect(&mut self, endpoint: Endpoint) {
         self.connect_with(endpoint, Options::helper());
+    }
+
+    /// Connects like [`HelperStore::connect`]; with `writes` the connection also accepts `set`
+    /// (Console writes helper settings such as NETWORK INTERFACE). Read-only otherwise.
+    pub fn connect_writable(&mut self, endpoint: Endpoint, writes: bool) {
+        self.disconnect();
+        let mut options = Options::helper();
+        options.allow_writes = writes;
+        options.load_tree = false;
+        self.status = Status::Connecting(endpoint.to_string());
+        self.handle = Some(Engine::connect(endpoint, options));
+    }
+
+    /// `set <path>/value <value>` on the helper. Refused (false) unless connected with
+    /// [`HelperStore::connect_writable`]`(…, true)`. The local tree follows at once.
+    pub fn set(&mut self, path: &str, value: &Value) -> bool {
+        let Some(h) = &self.handle else { return false };
+        if h.send(Command::set(path, value, false)).is_err() {
+            return false;
+        }
+        if self.tree.set_value(path, value.clone()) {
+            self.revision += 1;
+        }
+        true
+    }
+
+    /// The host's network adapters and the selected one (`/dante/…`), when the helper has them.
+    pub fn network_adapters(&self) -> (Vec<NetworkAdapter>, Option<String>) {
+        let list = match self.tree.value(AVAILABLE_NETWORK_ADAPTERS) {
+            Some(Value::String(s)) => NetworkAdapter::list(s),
+            _ => Vec::new(),
+        };
+        let cur = match self.tree.value(PRIMARY_NETWORK_ADAPTER) {
+            Some(Value::String(s)) => Some(s.clone()),
+            _ => None,
+        };
+        (list, cur)
     }
 
     /// Like [`HelperStore::connect`]; `allow_writes` is forced off.

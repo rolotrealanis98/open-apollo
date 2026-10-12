@@ -173,7 +173,8 @@ pub enum Popover {
     SessionNewFolder,
     /// Console's confirmation (`Rack_Window` 0x180a40730: a Popover-Header title, the message,
     /// CANCEL and a primed OK). OK taps `ok`.
-    Confirm { title: String, message: String, ok: ControlId },
+    /// A question with CANCEL and `ok_label` (OK, or YES for SWITCH NETWORK INTERFACE?).
+    Confirm { title: String, message: String, ok: ControlId, ok_label: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -534,6 +535,30 @@ impl ViewState {
                 self.open_urls.push(url.into());
                 return Vec::new();
             }
+        }
+        // NETWORK INTERFACE: picking another adapter asks first (`Rack_NetworkSettings`
+        // 0x180e3f230); YES sends the choice as `nic-set:` (a helper write).
+        if let C::SettingChoose(k, i) = &id.control
+            && let Some(path) = k.strip_prefix("nic:")
+        {
+            self.settings.menu = None;
+            let current = model.properties().and_then(|p| {
+                let cur = p.prop(&format!("{}{}", crate::settings::HELPER_PREFIX, crate::settings::NIC_PATH))?;
+                p.choices(&format!("{}{}", crate::settings::HELPER_PREFIX, crate::settings::NIC_LIST_PATH)).iter().position(|c| c.value.same(&cur))
+            });
+            if current != Some(*i as usize) {
+                let ok = ControlId { strip: id.strip.clone(), control: C::SettingChoose(format!("nic-set:{path}").into(), *i) };
+                self.popover = Some(PopoverState {
+                    kind: Popover::Confirm {
+                        title: crate::settings::NIC_CONFIRM_TITLE.into(),
+                        message: crate::settings::NIC_CONFIRM_MESSAGE.into(),
+                        ok,
+                        ok_label: "YES".into(),
+                    },
+                    anchor: id.clone(),
+                });
+            }
+            return Vec::new();
         }
         // Picking a settings option closes its dropdown.
         if matches!(id.control, C::SettingChoose(..)) {

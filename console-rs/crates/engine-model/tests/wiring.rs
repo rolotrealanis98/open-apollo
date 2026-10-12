@@ -76,7 +76,7 @@ fn scene_operations_post_console_keys() {
     v.dispatch(Action::Tap(global(Control::SceneCommand(SceneOp::Recall, 2))), &mut m);
     // Overwrite asks first ("Overwrite Scene"); OK sends it.
     v.dispatch(Action::Tap(global(Control::Menu(MenuCmd::Scene(SceneOp::Overwrite, 2)))), &mut m);
-    let Some(Popover::Confirm { title, message, ok }) = v.popover.as_ref().map(|p| p.kind.clone()) else { panic!("no confirmation: {:?}", v.popover) };
+    let Some(Popover::Confirm { title, message, ok, .. }) = v.popover.as_ref().map(|p| p.kind.clone()) else { panic!("no confirmation: {:?}", v.popover) };
     assert_eq!(title, "Overwrite Scene");
     assert_eq!(message, "Are you sure you want to overwrite \"VERSE\"?");
     v.dispatch(Action::Tap(ok), &mut m);

@@ -56,7 +56,7 @@ pub use connection::{
 };
 pub use error::{Error, Result};
 pub use framing::NulFramer;
-pub use helper::{DriverInfo, HELPER_PORT, HelperInfo, HelperStore, NativeInsert, NativeOwner};
+pub use helper::{AVAILABLE_NETWORK_ADAPTERS, DriverInfo, HELPER_PORT, HelperInfo, HelperStore, NativeInsert, NativeOwner, NetworkAdapter, PRIMARY_NETWORK_ADAPTER};
 pub use message::Message;
 pub use session::{ModifiedSession, SessionCommand, SessionEntry, SessionState, SnapshotCommand};
 pub use meters::{MeterHandle, MeterProperty, MeterReading, MeterStats, MeterStore};

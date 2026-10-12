@@ -227,7 +227,7 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
         Popover::SessionRename => text_popover(ui, a, bounds, "RENAME SESSION", view.text_edit.as_ref()),
         Popover::SessionNewFolder => text_popover(ui, a, bounds, "NEW FOLDER", view.text_edit.as_ref()),
         Popover::Tempo => text_popover(ui, a, bounds, "TEMPO", view.text_edit.as_ref()),
-        Popover::Confirm { title, message, ok } => confirm_dialog(ui, title, message, ok, bounds),
+        Popover::Confirm { title, message, ok, ok_label } => confirm_dialog(ui, title, message, ok, ok_label, bounds),
         Popover::CueOutputs => cue_outputs_popover(ui, model, a, bounds),
         Popover::Headphone { output } => {
             let hps = model.headphone_outputs();
@@ -339,7 +339,7 @@ pub fn anchored_menu(ui: &mut Ui, menu: &PopupMenu, look: MenuLook, anchor: Rect
 /// Console's confirmation (`Rack_Window` 0x180a40730 → 0x180a3fa40): a `Popover-Header` title,
 /// the message, CANCEL and a primed OK, centred in the window. Sized like the SAVE SESSION
 /// question (no capture of this one yet).
-fn confirm_dialog(ui: &mut Ui, title: &str, message: &str, ok: &ControlId, bounds: Rect) {
+fn confirm_dialog(ui: &mut Ui, title: &str, message: &str, ok: &ControlId, ok_label: &str, bounds: Rect) {
     let (w, h) = (360.0, 118.0);
     let (cx, cy) = bounds.center();
     let r = Rect::new((cx - w / 2.0).round(), (cy - h / 2.0).round(), w, h);
@@ -356,7 +356,7 @@ fn confirm_dialog(ui: &mut Ui, title: &str, message: &str, ok: &ControlId, bound
     ui.text(message, body, Rect::new(r.x + 16.0, r.y + 36.0, r.w - 32.0, 30.0), Align::Center);
     let by = r.max_y() - 34.0;
     ui.flat_button("CANCEL", false, Rect::new(r.max_x() - 12.0 - 96.0 * 2.0 - 8.0, by, 96.0, 22.0), pid(Control::PopoverDismiss));
-    ui.flat_button("OK", true, Rect::new(r.max_x() - 12.0 - 96.0, by, 96.0, 22.0), ok.clone());
+    ui.flat_button(ok_label, true, Rect::new(r.max_x() - 12.0 - 96.0, by, 96.0, 22.0), ok.clone());
 }
 
 fn text_popover(ui: &mut Ui, anchor: Rect, bounds: Rect, title: &str, edit: Option<&TextEdit>) {
