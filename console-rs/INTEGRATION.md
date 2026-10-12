@@ -275,3 +275,38 @@ red/green/red output pixels and a single reused full/resampled texture slot.
 test above); locked release build, p1 158/158, p2 195/195, windows_check and
 live-snapshot ledger/scorecard pass. No UA assets or native correction profiles were committed,
 and no real-engine correction RPC or hardware write was sent.
+
+## P2 — manual scorecard refresh
+
+`tools/ledger/refresh_catalog.py` refreshes the external catalogue with a
+bounded, idempotent managed block, preserving unrelated edits and a timestamped
+backup outside git. It replaces stale claims that clipboard, presets,
+scenes/session folders, drag routing, multi-device grouping, MIDI and
+correction retrieval are entirely absent. Existing measured alignment labels
+are retained; implemented drag views are rendered, not claimed pixel-aligned,
+and missing native device tabs are explicit.
+
+Statuses distinguish source/mock/software evidence from hardware acceptance.
+A/B is still a chrome-only toggle with no engine action; sidechain/IN-OUT/
+multi-out and typed-entry acceptance remain open. Native opaque preset state,
+DSP execution, real demo activation, shared-bus ownership, NOTE-scene mapping,
+native MIDI time units, headphone graph placement and calibrated-profile
+pixel parity are not marked verified. SET DEFAULT is still a no-op; the exact
+insert operation has not been established (numeric remote-default setters
+alone do not prove the insert behavior).
+
+Windows traffic capture is blocked separately: the existing wine-ua-131 prefix
+still contains Console 1.2.9.905, not verified 1.3.x, and no private X server is
+installed. The old launch script points at real ports and captures the user
+session; it was not run. Live hardware acceptance remains blocked by the
+recorded Thunderbolt PCI enumeration failure. No Mac Console was driven.
+
+The catalogue is regenerated with build_ledger.py after the full §2 checks.
+
+Validation: 284 workspace tests pass (10 ignored; GPU correction acceptance was
+run explicitly in P1), locked release build, p1 158/158, p2 195/195 and
+windows_check. Ledger tests and regeneration complete. The refreshed catalogue
+reports 109 elements, 70 aligned, 76 wired and 75% with verification evidence;
+that percentage combines unit/mock/trace evidence, not hardware acceptance.
+The wire-profile report still flags undo-refresh and drag-uncoalesced false;
+these are retained findings, not silently treated as fully matched protocol.
