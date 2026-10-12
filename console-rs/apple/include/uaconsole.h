@@ -47,7 +47,8 @@ extern "C" {
 #define UAC_POINTER_MOVE   1
 #define UAC_POINTER_UP     2
 #define UAC_POINTER_CANCEL 3
-#define UAC_POINTER_SECONDARY 4 /* right click / long press: insert context menu, assign mode */
+#define UAC_POINTER_SECONDARY 4 /* right click / long press: Console's context menus */
+#define UAC_POINTER_HOVER  5 /* motion with no button down: highlights an open menu's rows */
 
 /* uac_pointer flags. */
 #define UAC_POINTER_DOUBLE (1u << 0) /* double tap: reset a dragged control to its default */
@@ -211,6 +212,27 @@ const char *uac_model_status(UacContext *ctx);
 
 /* Takes the oldest pending plug-in window request into *out; false when there is none. */
 bool uac_take_plugin_request(UacContext *ctx, UacPluginRequest *out);
+
+/* Console's menu bar as JSON for native menus: {"app": [entries], "menus": [{"title",
+ * "items": [entries]}]}. An entry is {"type":"item","label","command","enabled","ticked",
+ * "shortcut":{"key","command","shift","option","control"}|null}, {"type":"separator"},
+ * {"type":"header","label"} or {"type":"submenu","label","enabled","items"}. "app" holds the
+ * macOS application menu's extra items when `mac`. Valid until the next call or uac_destroy();
+ * rebuild native menus when they open. NULL on error. */
+const char *uac_menu_bar_json(UacContext *ctx, bool mac);
+
+/* Runs a menu command by id (an item's "command", e.g. "show_browser", "undo"). 1 = ran,
+ * 0 = unknown or disabled now. Shell-level commands come back through uac_take_command(). */
+int32_t uac_run_command(UacContext *ctx, const char *command_id);
+
+/* The oldest command the menus left for the host ("quit", "toggle_full_screen",
+ * "open_documentation_url_app", "select_new_session_panel", "open_session", "save_bookmark",
+ * "save_as", ...), or NULL. Valid until the next call or uac_destroy(). */
+const char *uac_take_command(UacContext *ctx);
+
+/* Draws Windows Console's in-window menu bar in the title bar (hosts without a native menu
+ * bar). Off by default. */
+void uac_set_menu_bar(UacContext *ctx, bool on);
 
 /* Copies the latest stats into *out. */
 int32_t uac_get_stats(UacContext *ctx, UacStats *out);

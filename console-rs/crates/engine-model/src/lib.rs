@@ -26,6 +26,7 @@
 //! [`InsertPaths::parameter`](ua_engine::InsertPaths::parameter)).
 
 mod sessions;
+mod menus;
 mod slots;
 mod surfaces;
 
@@ -591,6 +592,14 @@ impl MixerModel for EngineMixer {
             return;
         }
         self.surface_set_text(id, text);
+    }
+
+    fn strip_menu_state(&self, s: &StripInfo) -> rack::menu::StripMenuState {
+        self.surface_strip_menu_state(s)
+    }
+
+    fn menu_state(&self) -> rack::menu::MenuModelState {
+        self.surface_menu_state()
     }
 
     fn apply(&mut self, action: &Action) {

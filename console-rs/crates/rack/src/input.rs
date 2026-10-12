@@ -150,6 +150,9 @@ pub enum Control {
     /// [model] `set_text` targets: Save As name, Open path (engine host).
     SessionSaveAsName,
     SessionOpenPath,
+    /// A popup-menu row or menu-bar title (`menu`): view commands (`MenuCmd::is_view`) are
+    /// consumed by `ViewState`, the rest reach `MixerModel::apply` as `Action::Tap`.
+    Menu(crate::menu::MenuCmd),
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the
@@ -193,6 +196,10 @@ pub enum PluginWindowButton {
     Favorite,
     /// "Help & Video".
     Help,
+    /// "Resize Plug-In" scale in percent (the "more" menu).
+    Scale(u16),
+    /// "Apply To All" (the scale to every plug-in window).
+    ApplyToAll,
 }
 
 #[derive(Clone, Debug, PartialEq)]
