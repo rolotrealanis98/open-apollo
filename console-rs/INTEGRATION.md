@@ -180,3 +180,35 @@ as verified native gesture parity. Selection is currently session-local.
 Validation: three interaction/routing tests, 276 workspace tests, locked
 release build, p1 158/158 and p2 195/195, windows_check, live-snapshot ledger
 and regenerated scorecard pass. No real-engine writes or GUI automation.
+
+## P1 — incoming MIDI buffers
+
+Task branch `codex/p1-midi` adds bounded JUCE MemoryBlock decoding and native
+MidiBuffer records (little-endian i32 position, u16 length, message bytes).
+Provenance: Mac CMxGetMidiBuffers::execute 0x10028c168; Windows reply
+0x180e10810 and iterator 0x181e003d0. RFC base64/raw-stream assumptions are
+rejected. Malformed batches fail atomically, with byte/batch limits.
+
+A selected MIDI input polls the audited GetMidiBuffers RPC with correlation,
+backoff and duplicate watermarks reset on input/transport changes. Exact typed
+read APIs also cover GetCorrectionImage's three valid slots; arbitrary posts
+remain gated. MIDI writes use the normal writer. NOTE-on/nonzero CONTROLLER
+messages matching configured tap channel/number feed four-tap tempo. Host
+receipt time is used conservatively, at most one tap per batch: native event
+position/timestamp units remain unproven. Program Change recalls only an
+existing scene; zero-based program-to-scene indexing is an explicit Rust
+policy awaiting native traffic parity. NOTE-to-scene mapping remains pending.
+
+Validation: bounded codec/malformed record tests, tap filtering and duplicate
+suppression, scene existence/channel filtering and closed writer gate, and
+owned synthetic loopback RPC correlation/polling with writes enabled/disabled.
+281 workspace tests (9 ignored), locked release build, p1 158/158, p2 195/195,
+windows_check and live-snapshot ledger/scorecard pass at this task boundary. No live MIDI RPC
+or hardware writes were sent.
+
+A separate read-only Linux preflight reported Apollo x4 DeviceOnline=false.
+The proposed supervised test is prepared outside git at
+`/tmp/apollo-supervised-test-plan.md`; the user approved its bounded fader-and-restore limits and subsequently
+authorized Apollo investigation while unused. A fresh preflight still reported
+DeviceOnline=false, so no hardware writes were sent. The daemon remains running;
+ALSA currently enumerates no Apollo, and Thunderbolt device enumeration is empty.
