@@ -35,8 +35,10 @@ pub const MIN_HORIZONTAL_SCALE: f32 = 0.7;
 
 /// Stem darkening (outline embolden, device px per em px) for text lighter than mid grey.
 /// macOS draws Console's light-on-dark labels with font smoothing, which thickens stems; dark
-/// text on light backgrounds shows no measurable difference (tools/align/text_diff.py ink mass).
-pub const SMOOTHING: f32 = 0.0;
+/// text on light backgrounds shows no measurable difference. Calibrated on refpair p1 with
+/// tools/align/text_diff.py (ink mass ours/Console, labels of equal size): light text 0.76 → 1.0
+/// at 0.018; dark text 1.006 either way.
+pub const SMOOTHING: f32 = 0.018;
 
 /// Ascent and descent (fraction of the em) of the faces Console names, as CoreText reports them
 /// (macOS 27, CTFontGetAscent/Descent). JUCE's font height is their sum.
