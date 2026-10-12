@@ -310,3 +310,25 @@ reports 109 elements, 70 aligned, 76 wired and 75% with verification evidence;
 that percentage combines unit/mock/trace evidence, not hardware acceptance.
 The wire-profile report still flags undo-refresh and drag-uncoalesced false;
 these are retained findings, not silently treated as fully matched protocol.
+
+## P3 — ConsoleLink touch and host callbacks
+
+Dedicated Mac ConsoleLink-console1to1 worktree: task commit e4f34f1, merged with
+history into feat/console-1to1 as f2b1c9c; both trees clean, nothing pushed.
+RustConsoleView.swift forwards TOUCH through normal touches and the complete
+long-press lifecycle (SECONDARY/MOVE/UP/CANCEL), with recognizer ownership
+preventing an old cancelled touch from cancelling the new drag.
+
+The host drains URL strings before their FFI lifetime ends, opens http/https,
+reveals files through Finder on Mac and explicitly reports unavailable iPad
+file reveal. OPTIONS/MIDI JSON preferences use app-container Application
+Support; background notifications send the sleep hint and reconnect reapplies
+the current state. Observer tokens are released with the driver.
+
+Validation: all three Apple Rust XCFramework slices rebuilt; macOS and iPad
+Pro 13-inch (M5) simulator xcodebuild succeed. Full Linux §2 checks also pass:
+284 tests (10 ignored), p1 158/158, p2 195/195, window positions and ledger
+regeneration. Build acceptance does not establish physical iPad touch/URL
+behavior; signed device install is still pending. No app or UA Console was
+launched and no real-engine writes or native plug-in loads were sent.
+Separate macOS layer windows remain the next P3 task.
