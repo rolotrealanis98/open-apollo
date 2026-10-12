@@ -380,3 +380,34 @@ Verification at this documentation-only task boundary: 285 workspace tests
 pass (10 ignored), locked release build, p1 158/158, p2 195/195,
 windows_check and ledger regeneration. The original framework's recomputed
 hash matches its retained inventory. Native driver WIP remains untouched.
+
+## Mac CLI response-only hardware experiment
+
+The user explicitly requested a genuine CLI command/capture with the Apollo
+connected to Mac Studio. The x4 is now detected through CalDigit TS5 Plus;
+installed Plugin Support matches the pinned framework hash. Passive PID/kernel
+CLI tracing was blocked by SIP; security settings and vendor apps were not
+modified. ualogger's original code uses logging selectors, not CLI commands.
+
+The initial source-shaped selector-175 query omitted the framework's scalar
+selector-0 handshake and returned 0xe00002c2. Original OpenUAD2SystemDevice
+0x1c910 and kext session initialization explain the prerequisite. A corrected
+single query completed: session open 0, GetCLIResponse 0, 304-byte output,
+zero response bytes. No EnableCLI or SendCLICommand request was sent. The
+getter can acknowledge queued responses; this was an authorized consuming
+query, not labelled passive observation or a successful command capture.
+
+Before/after snapshots stored outside git differ only in MeterPulse/meters.
+The guarded C probe and bounded passive DTrace template are under
+`tools/cli-capture/`. Genuine text command vocabulary remains unestablished;
+empty mailbox data does not establish enablement, support, a memory reader or
+firmware plaintext. Native driver WIP and the existing CLI refusal stay intact.
+
+Validation: C11 warning-clean builds and device-free ABI checks on Linux and
+Mac; capture requires an explicit flag and exact inspected driver version.
+285 workspace tests pass (10 ignored), locked release build, p1 158/158,
+p2 195/195, windows_check and ledger regeneration. Native dispatcher return
+masking means a zero outer result is not an MCU acknowledgement. The actual
+passive capture attempt also failed to attach under SIP; it was not counted
+as an empty successful trace. Raw snapshots, response logs and comparison
+results are retained outside git in console-port/continuation-evidence.
