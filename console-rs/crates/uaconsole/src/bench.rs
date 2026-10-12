@@ -33,6 +33,8 @@ pub fn render_png(
     view_spec: Option<&str>,
     menu: Option<&str>,
     menu_bar: bool,
+    screen: Option<Rect>,
+    window_pos: &[(String, (f32, f32))],
     out: &Path,
 ) -> Result<(), String> {
     let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
@@ -57,6 +59,12 @@ pub fn render_png(
     };
     if let Some(spec) = view_spec {
         view.apply_spec(spec)?;
+    }
+    // `--screen`: Console's separate windows, placed on that screen (`rack::layers`).
+    if let Some(screen) = screen {
+        let mut w = rack::Windowing::new(screen);
+        w.positions.extend(window_pos.iter().cloned());
+        view.windowing = Some(w);
     }
     if let Some(name) = open {
         view.open_named(name);
@@ -103,8 +111,21 @@ pub fn render_png(
     let gpu = gpu()?;
     let mut renderer = gfx::Renderer::new(&gpu.device, &gpu.queue, FORMAT, assets.images.clone());
     let t = Instant::now();
-    gpu.render_png(&mut renderer, &frame.list, frame.layout.size(), scale, out)
-        .map_err(|e| format!("write {}: {e}", out.display()))?;
+    if screen.is_some() {
+        // Composite: the mixer plus every separate window at its screen offset, on a canvas
+        // 8 pt larger than their union (like `uadcap.sh`'s region), mixer points + origin.
+        let size = frame.layout.size();
+        let c = rack::layers::canvas(size, &frame.layers);
+        let canvas = Rect::new(c.x - 8.0, c.y - 8.0, c.w + 16.0, c.h + 16.0);
+        let list = composite(&frame, size).translated(-canvas.x, -canvas.y);
+        gpu.render_png(&mut renderer, &list, (canvas.w, canvas.h), scale, out)
+            .map_err(|e| format!("write {}: {e}", out.display()))?;
+        std::fs::write(out.with_extension("layers.json"), layers_json(&frame, canvas, scale))
+            .map_err(|e| format!("write layers sidecar: {e}"))?;
+    } else {
+        gpu.render_png(&mut renderer, &frame.list, frame.layout.size(), scale, out)
+            .map_err(|e| format!("write {}: {e}", out.display()))?;
+    }
     let render_ms = ms(t.elapsed());
     let s = renderer.stats;
     eprintln!(
@@ -119,6 +140,40 @@ pub fn render_png(
         s.glyphs
     );
     Ok(())
+}
+
+/// The frame as the screen shows it with separate windows: the mixer (clipped to its window),
+/// then each layer clipped to its own window, in order.
+fn composite(frame: &crate::frame::Frame, size: (f32, f32)) -> rack::DrawList {
+    let parts = rack::layers::split(&frame.list, &frame.hits, &frame.scrolls, frame.layers.len(), &frame.marks);
+    let mut out = rack::DrawList::default();
+    let rects = std::iter::once(Rect::new(0.0, 0.0, size.0, size.1)).chain(frame.layers.iter().map(|l| l.rect));
+    for (part, r) in parts.iter().zip(rects) {
+        out.push(rack::Draw::Clip(Some(r)));
+        out.items.extend(part.list.items.iter().cloned());
+        out.push(rack::Draw::Clip(None));
+    }
+    out
+}
+
+/// `<out>.layers.json`: the canvas origin and every window rect in mixer-window points, in the
+/// form of `uadcap.sh`'s NAME.json (`origin_in_window_pt`, `windows_window_pt`).
+fn layers_json(frame: &crate::frame::Frame, canvas: Rect, scale: f32) -> String {
+    let (w, h) = frame.layout.size();
+    let mut wins = vec![format!("{{\"id\": \"main\", \"kind\": \"main\", \"x\": 0, \"y\": 0, \"w\": {w}, \"h\": {h}}}")];
+    for l in &frame.layers {
+        let r = l.rect;
+        wins.push(format!(
+            "{{\"id\": {:?}, \"kind\": \"{:?}\", \"x\": {}, \"y\": {}, \"w\": {}, \"h\": {}}}",
+            l.id, l.kind, r.x, r.y, r.w, r.h
+        ));
+    }
+    format!(
+        "{{\"scale\": {scale}, \"origin_in_window_pt\": [{}, {}], \"windows_window_pt\": [\n {}\n]}}\n",
+        canvas.x,
+        canvas.y,
+        wins.join(",\n ")
+    )
 }
 
 /// Renders `frames` frames (after one warm-up frame that uploads textures) into an offscreen

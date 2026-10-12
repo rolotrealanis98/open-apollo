@@ -1555,7 +1555,10 @@ pub fn draw_menu(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: 
     loop {
         let open = state.open.get(level as usize).copied();
         let hover = state.hover.filter(|(l, _)| *l == level).map(|(_, i)| i);
+        // Each level is its own JUCE window (`crate::layers`).
+        ui.begin_layer(format!("menu:{level}"), crate::layers::LayerKind::Menu, frame.frame, 0.0);
         ui.popup_menu(level_menu, look, &frame, level, hover, open);
+        ui.end_layer();
         let Some(i) = open else { break };
         let (Some(PopupEntry::Submenu { menu: sub, .. }), Some(row)) = (level_menu.entries.get(i as usize), frame.rows.get(i as usize)) else { break };
         let probe = layout_menu(ui, sub, look, (0.0, 0.0), 0.0, bounds);

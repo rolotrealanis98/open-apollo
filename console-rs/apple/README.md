@@ -79,6 +79,54 @@ Rust tests (`cargo test -p uaconsole-ffi`) exercise the C entry points offscreen
 rename routing through `ViewState`, plug-in requests, a snapshot, and a read-only connection to
 ua-engine's `MockEngine` (a fader drag sends nothing).
 
+## Console's separate windows on macOS (child windows)
+
+UAD Console shows every popup menu level, the Settings window, its panels and dialogs as
+windows of their own. Menus open under their control even when that hangs past the mixer
+window; Settings keeps where it was moved. With `uac_set_windowing` the renderer reports
+these as layers instead of drawing them inside the view. Without it, the default and the
+iPad's only mode, they stay inside the view.
+
+Host loop (macOS, in the view's display-link tick, after `uac_frame`):
+
+```swift
+// Once per layout / window move: the screen's usable area in view points (y down).
+let vf = window.screen!.visibleFrame                       // AppKit, y up
+let topLeft = view.convert(window.convertPoint(fromScreen: NSPoint(x: vf.minX, y: vf.maxY)), from: nil)
+uac_set_windowing(ctx, Float(topLeft.x), Float(topLeft.y), Float(vf.width), Float(vf.height))
+
+// Every frame: one borderless child window per layer id.
+var seen = Set<String>()
+for i in 0..<max(0, uac_layer_count(ctx)) {
+    var l = UacLayer(); guard uac_layer_info(ctx, UInt32(i), &l) else { continue }
+    let id = String(cString: l.id); seen.insert(id)
+    let w = children[id] ?? makeChild(id, kind: l.kind)    // NSPanel, .borderless,
+                                                           // .nonactivatingPanel for menus,
+                                                           // level .popUpMenu for menus
+    // view points (y down) -> screen frame (y up)
+    let origin = window.convertPoint(toScreen: view.convert(NSPoint(x: CGFloat(l.x), y: CGFloat(l.y + l.height)), to: nil))
+    w.setFrame(NSRect(x: origin.x, y: origin.y, width: CGFloat(l.width), height: CGFloat(l.height)), display: false)
+    let px = w.backingScaleFactor
+    uac_attach_layer(ctx, l.id, Unmanaged.passUnretained(w.metalLayer).toOpaque(),
+                     UInt32(CGFloat(l.width) * px), UInt32(CGFloat(l.height) * px))
+    if w.parent == nil { window.addChildWindow(w, ordered: .above) }
+}
+for (id, w) in children where !seen.contains(id) { uac_detach_layer(ctx, id); w.close(); children[id] = nil }
+```
+
+Each child's view forwards its mouse events with `uac_layer_pointer(ctx, id, kind, x, y,
+flags)` in window-local points (y down). A press on a `UAC_LAYER_WINDOW` / `_DIALOG`
+within `title_height` that the renderer does not take (return 0) moves the window with
+`performDrag(with:)`. Report the new origin with `uac_layer_moved` so Console's placement
+is remembered. Keys keep going to `uac_key` / `uac_key_text` whichever window is key.
+The next frame draws the view and every attached child, all on the same GPU device.
+
+`uaconsole` on Linux, Windows and macOS does the same with winit windows (`--windows
+separate`, the default where windows can be placed; `--x11` under Wayland). `uaconsole
+--render --screen X,Y,W,H [--window-pos ID=X,Y]` renders the mixer and its windows
+composited at their screen offsets. `tools/align/windows_check.py` compares every window
+rect with the drive captures.
+
 ## iPad
 
 ### Build the XCFramework

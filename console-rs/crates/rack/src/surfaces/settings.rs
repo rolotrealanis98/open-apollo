@@ -76,6 +76,7 @@ pub(crate) struct Drawn {
 /// the close X at the left, then the light page frame. Swallows taps on the body. Returns the
 /// page interior.
 pub(crate) fn window_frame(ui: &mut Ui, r: Rect, title: &str, close: ControlId) -> Rect {
+    ui.chrome_layer(r, TITLE_H);
     ui.fill(r.offset(0.0, 6.0), Rgba::BLACK.with_alpha(0.25));
     ui.fill(r, Rgba::rgb8(26, 26, 26));
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
@@ -298,8 +299,11 @@ pub(crate) fn centred(bounds: Rect, size: (f32, f32)) -> Rect {
 
 /// The Settings window over `bounds` (modal: the backdrop swallows taps).
 pub fn draw_settings_sheet(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
-    ui.fill(bounds, Rgba::BLACK.with_alpha(0.5));
-    ui.hit(bounds, pid(Control::PopoverDismiss), HitKind::Tap);
+    // A separate window does not dim the mixer (`crate::layers`).
+    if !ui.windowed() {
+        ui.fill(bounds, Rgba::BLACK.with_alpha(0.5));
+        ui.hit(bounds, pid(Control::PopoverDismiss), HitKind::Tap);
+    }
     let r = centred(bounds, (WIN_W, WIN_H));
     window_frame(ui, r, "SETTINGS", sid(Control::SettingsClose));
     footer(ui, model, Rect::new(r.x + COL_X + 10.0, r.y + PAGE_BOTTOM + 2.0, COL_W - 20.0, 19.0));

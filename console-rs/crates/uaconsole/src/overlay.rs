@@ -338,13 +338,23 @@ impl OverlayStack {
         let hits = ui.hits.len();
         for i in 0..self.panels.len() {
             let r = self.rect_of(&*self.panels[i]);
-            if self.panels[i].modal() {
+            if self.panels[i].modal() && !ui.windowed() {
                 ui.fill(area, DIM);
             }
+            // Console's plug-in windows are windows of their own (`rack::layers`).
+            ui.begin_layer(format!("plugin:{i}"), rack::LayerKind::Popover, r, 0.0);
             ui.clip(Some(r));
             self.panels[i].build(ui, r);
             ui.clip(None);
-            self.panels[i].build_popups(ui, r);
+            ui.end_layer();
+            match self.panels[i].popup_rect() {
+                Some(p) => {
+                    ui.begin_layer(format!("plugin-menu:{i}"), rack::LayerKind::Menu, p, 0.0);
+                    self.panels[i].build_popups(ui, r);
+                    ui.end_layer();
+                }
+                None => self.panels[i].build_popups(ui, r),
+            }
         }
         ui.hits.truncate(hits);
     }

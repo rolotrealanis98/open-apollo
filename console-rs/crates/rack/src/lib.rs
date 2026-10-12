@@ -6,6 +6,7 @@
 pub mod draw;
 pub mod geometry;
 pub mod input;
+pub mod layers;
 pub mod menu;
 pub mod model;
 pub mod preamp;
@@ -18,6 +19,7 @@ pub mod window;
 
 pub use draw::{Align, Draw, DrawList, Frame, TextStyle};
 pub use houston::{Insets, Rect, Rgba};
+pub use layers::{Layer, LayerKind, LayerMark, LayerPart, Windowing};
 pub use input::{Action, Control, ControlId, Hit, HitKind, Interaction, PluginWindowButton, ScrollRegion, ScrollTarget};
 pub use model::{ConsoleModel, CueOutput, EngineSettings, HeadphoneOutput, InsertLabel, MixerModel, MonitorOptions, PluginBadge, PluginEntry, PresetNode, PreviewMixer, StatusInfo};
 pub use menu::{Command, MenuCmd, PopupMenu};

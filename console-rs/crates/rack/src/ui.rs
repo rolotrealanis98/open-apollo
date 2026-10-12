@@ -44,11 +44,144 @@ pub struct Ui<'a> {
     pub scrolls: Vec<ScrollRegion>,
     origin: (f32, f32),
     clips: Vec<Rect>,
+    /// Separate-window placement (`ViewState::windowing`); None draws every layer in place.
+    pub windowing: Option<crate::layers::Windowing>,
+    /// Console's separate windows drawn this frame, in order (`crate::layers`).
+    pub layers: Vec<crate::layers::Layer>,
+    /// Which draws / hits / scroll regions belong to which layer.
+    pub layer_marks: Vec<crate::layers::LayerMark>,
+    /// Open layers: (layer number, the enclosing origin and clip stack to restore).
+    layer_stack: Vec<(u16, (f32, f32), Vec<Rect>)>,
+    /// The id and kind the next window chrome (`chrome_layer`) opens a layer as, and where its
+    /// window goes when its opener anchors it.
+    layer_hint: Option<(String, crate::layers::LayerKind, Option<(f32, f32)>)>,
 }
 
 impl<'a> Ui<'a> {
     pub fn new(assets: &'a Assets) -> Self {
-        Self { assets, list: DrawList::default(), hits: Vec::new(), scrolls: Vec::new(), origin: (0.0, 0.0), clips: Vec::new() }
+        Self {
+            assets,
+            list: DrawList::default(),
+            hits: Vec::new(),
+            scrolls: Vec::new(),
+            origin: (0.0, 0.0),
+            clips: Vec::new(),
+            windowing: None,
+            layers: Vec::new(),
+            layer_marks: Vec::new(),
+            layer_stack: Vec::new(),
+            layer_hint: None,
+        }
+    }
+
+    // MARK: layers (separate windows)
+
+    /// Menus, Settings and panels are separate OS windows (`ViewState::windowing`).
+    pub fn windowed(&self) -> bool {
+        self.windowing.is_some()
+    }
+
+    /// Where popups must stay: the screen when windowed, else `bounds` (the mixer window).
+    pub fn screen_or(&self, bounds: Rect) -> Rect {
+        self.windowing.as_ref().map(|w| w.screen).unwrap_or(bounds)
+    }
+
+    fn mark(&mut self, layer: u16) {
+        let m = crate::layers::LayerMark { draw: self.list.len(), hit: self.hits.len(), scroll: self.scrolls.len(), layer };
+        match self.layer_marks.last_mut() {
+            Some(last) if (last.draw, last.hit, last.scroll) == (m.draw, m.hit, m.scroll) => *last = m,
+            _ => self.layer_marks.push(m),
+        }
+    }
+
+    /// Starts layer `id` (a window of Console's own: menu level, Settings, panel, dialog) whose
+    /// window is `r` (local points). Windowed, a movable window opens where it was last left and
+    /// a dialog centres on the screen: everything drawn until [`Ui::end_layer`] moves with it.
+    /// Layers start unclipped. Returns the window rect actually used (absolute points).
+    pub fn begin_layer(&mut self, id: impl Into<String>, kind: crate::layers::LayerKind, r: Rect, title_h: f32) -> Rect {
+        self.begin_layer_at(id, kind, r, title_h, None)
+    }
+
+    /// [`Ui::begin_layer`] with the window's top-left at `at` (absolute points) when given.
+    pub fn begin_layer_at(&mut self, id: impl Into<String>, kind: crate::layers::LayerKind, r: Rect, title_h: f32, at: Option<(f32, f32)>) -> Rect {
+        use crate::layers::LayerKind as K;
+        let id = id.into();
+        let abs = self.abs(r);
+        let anchored = at.map(|(x, y)| Rect::new(x, y, abs.w, abs.h)).unwrap_or(abs);
+        let placed = match &self.windowing {
+            Some(w) => {
+                let to = match kind {
+                    K::Window => w.positions.get(&id).map(|&(x, y)| Rect::new(x, y, abs.w, abs.h)).unwrap_or(anchored),
+                    // JUCE `centreWithSize`: whole-point centre minus half the size, rounded down.
+                    K::Dialog => {
+                        let (cx, cy) = ((w.screen.x + w.screen.w / 2.0).floor(), (w.screen.y + w.screen.h / 2.0).floor());
+                        Rect::new(cx - (abs.w / 2.0).floor(), cy - (abs.h / 2.0).floor(), abs.w, abs.h)
+                    }
+                    K::Menu | K::Popover => anchored,
+                };
+                if kind == K::Menu { to } else { crate::layers::constrain(to, w.screen) }
+            }
+            None => anchored,
+        };
+        let saved_origin = self.origin;
+        self.origin = (saved_origin.0 + placed.x - abs.x, saved_origin.1 + placed.y - abs.y);
+        let saved_clips = std::mem::take(&mut self.clips);
+        if !saved_clips.is_empty() {
+            self.list.push(Draw::Clip(None));
+        }
+        self.layers.push(crate::layers::Layer { id, kind, rect: placed, title_h });
+        let n = self.layers.len() as u16;
+        self.layer_stack.push((n, saved_origin, saved_clips));
+        self.mark(n);
+        placed
+    }
+
+    /// Ends the innermost open layer; drawing continues in the enclosing one.
+    pub fn end_layer(&mut self) {
+        let Some((_, origin, clips)) = self.layer_stack.pop() else { return };
+        self.origin = origin;
+        self.clips = clips;
+        let parent = self.layer_stack.last().map(|l| l.0).unwrap_or(0);
+        self.mark(parent);
+        if let Some(c) = self.clips.last().copied() {
+            self.list.push(Draw::Clip(Some(c)));
+        }
+    }
+
+    /// Ends every open layer (after a panel whose chrome began one).
+    pub fn end_layers(&mut self) {
+        while !self.layer_stack.is_empty() {
+            self.end_layer();
+        }
+    }
+
+    /// The next window chrome drawn ([`Ui::chrome_layer`]) is layer `id` of `kind` (set by
+    /// `build_window_with` before a sheet, panel or popover).
+    pub fn layer_hint(&mut self, id: impl Into<String>, kind: crate::layers::LayerKind) {
+        self.layer_hint = Some((id.into(), kind, None));
+    }
+
+    /// [`Ui::layer_hint`] for a window whose top-left Console puts at `at` (absolute points),
+    /// whatever rect its chrome is drawn at.
+    pub fn layer_hint_at(&mut self, id: impl Into<String>, kind: crate::layers::LayerKind, at: Option<(f32, f32)>) {
+        self.layer_hint = Some((id.into(), kind, at));
+    }
+
+    pub fn clear_layer_hint(&mut self) {
+        self.layer_hint = None;
+    }
+
+    /// Called by window chrome (title bar frames, dialog frames, callouts) with its window
+    /// rect: opens the hinted layer, if any. Ended by `build_window_with` after the panel.
+    pub fn chrome_layer(&mut self, r: Rect, title_h: f32) {
+        if let Some((id, kind, at)) = self.layer_hint.take() {
+            self.begin_layer_at(id, kind, r, title_h, at);
+        }
+    }
+
+    /// The layer being drawn (0 = the mixer window).
+    pub fn current_layer(&self) -> u16 {
+        self.layer_stack.last().map(|l| l.0).unwrap_or(0)
     }
 
     /// Runs `f` with local coordinates offset by (dx, dy).

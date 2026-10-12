@@ -69,6 +69,7 @@ fn sub_window(ui: &mut Ui, bounds: Rect, size: (f32, f32), title: &str) -> Rect 
 /// dark title bar (close X at the left, title centred) over a light (`light`) or dark body.
 /// Swallows taps on the body; returns the body.
 fn dialog_frame(ui: &mut Ui, r: Rect, title: &str, light: bool) -> Rect {
+    ui.chrome_layer(r, 27.0);
     ui.fill(r.offset(0.0, 6.0), Rgba::BLACK.with_alpha(0.25));
     ui.fill(r, Rgba::rgb8(26, 26, 26));
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
@@ -392,6 +393,7 @@ const SCENE_ROW_H: f32 = 31.75;
 pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect, browser: Option<Rect>, close: Control) {
     let full = browser.unwrap_or_else(|| centred(bounds, (290.0, 560.0)));
     let r = Rect::new(full.x, full.y, 290.0f32.min(full.w), full.h);
+    ui.chrome_layer(r, 30.0);
     // `Scenes-Main-Background` (72, 76, 78); swallows taps.
     ui.fill(r, Rgba::rgb8(44, 47, 50));
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
@@ -781,6 +783,7 @@ fn tempo(ui: &mut Ui, view: &ViewState, bounds: Rect) {
         Some(f) => Rect::new(f.x, (f.y - size.1 - 0.5).max(bounds.y), size.0, size.1),
         None => centred(bounds, size),
     };
+    ui.chrome_layer(r, 27.0);
     // sb-tempo (2 px per pt): a 0.5-pt black outline, a 1-pt (147,153,157) border, a 26-pt dark
     // title bar (close X at the left, TEMPO centred), a light body.
     ui.fill(r.inset(-0.5, -0.5, -0.5, -0.5), Rgba::rgb8(3, 4, 4));

@@ -232,6 +232,16 @@ pub struct SettingsView {
     pub scene: Option<u16>,
     /// The selected row of a panel list (ADD DEVICE, I/O PRESETS, source categories).
     pub list: Option<u16>,
+    /// A window Settings opened over itself (ADD DEVICE, Route Presets, the I/O Matrix source
+    /// picker): Console keeps Settings open underneath (set-adddev, set-d-iopresets,
+    /// set-d-insrc).
+    pub child: Option<crate::settings::Panel>,
+}
+
+/// Panels Console opens over the Settings window rather than in its place.
+pub fn opens_over_settings(p: crate::settings::Panel) -> bool {
+    use crate::settings::Panel as P;
+    matches!(p, P::AddDevice | P::IoPresets | P::RouteSource { .. })
 }
 
 /// UI-only state: owned by the app shell, read by `build_window_with`, changed by `route`.
@@ -283,6 +293,9 @@ pub struct ViewState {
     pub commands: Vec<crate::menu::Command>,
     /// Model effects a menu command produced outside `route` (File > Save → the session tap).
     pub deferred: Vec<Effect>,
+    /// Console's menus, Settings and panels as separate OS windows placed on the screen
+    /// (`crate::layers`); None draws them inside the mixer window (iPad, plain `--render`).
+    pub windowing: Option<crate::layers::Windowing>,
 }
 
 impl Default for ViewState {
@@ -315,6 +328,7 @@ impl Default for ViewState {
             show_navigator: true,
             commands: Vec::new(),
             deferred: Vec::new(),
+            windowing: None,
         }
     }
 }
@@ -581,9 +595,13 @@ impl ViewState {
             C::ShowSettings => {
                 self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) };
                 self.settings.scroll = 0.0;
+                self.settings.child = None;
             }
+            // A window over Settings closes alone (its X); Settings' own X closes both.
+            C::PanelClose if self.settings.child.is_some() => self.settings.child = None,
             C::SettingsClose | C::PanelClose => {
                 self.sheet = None;
+                self.settings.child = None;
                 self.text_edit = self.text_edit.take().filter(|t| !matches!(t.target, TextTarget::Setting(_)));
             }
             C::SettingsTab(t) => {
@@ -740,6 +758,10 @@ impl ViewState {
     /// `headphone-correction`, `plugin-scenes`, `about`) for `--open` and tests. Tabs:
     /// `hardware`, `io-matrix`, `plug-ins`, `options`, `midi`, `dante`. False if unknown.
     pub fn open_named(&mut self, name: &str) -> bool {
+        // `settings:io-matrix+io-presets`: each in turn (a window over Settings stays over it).
+        if let Some((a, b)) = name.split_once('+') {
+            return self.open_named(a) && self.open_named(b);
+        }
         let (what, tab) = name.split_once(':').unwrap_or((name, ""));
         let panel = match what {
             "settings" => {
@@ -776,6 +798,10 @@ impl ViewState {
             self.scene_info = true;
             return true;
         }
+        if self.sheet == Some(Sheet::Settings) && opens_over_settings(panel) {
+            self.settings.child = Some(panel);
+            return true;
+        }
         self.sheet = Some(Sheet::Panel(panel));
         self.settings.panel_tab = tab.parse().unwrap_or(0);
         true
@@ -785,6 +811,11 @@ impl ViewState {
     fn toggle_panel(&mut self, p: Panel, model: &dyn MixerModel) {
         if p == Panel::PluginScenes {
             self.toggle_scenes(model);
+            return;
+        }
+        if self.sheet == Some(Sheet::Settings) && opens_over_settings(p) {
+            self.settings.child = if self.settings.child == Some(p) { None } else { Some(p) };
+            self.settings.list = None;
             return;
         }
         if self.sheet == Some(Sheet::Panel(p)) {
@@ -900,6 +931,8 @@ impl ViewState {
             self.text_edit = None;
         } else if self.settings.menu.is_some() {
             self.settings.menu = None;
+        } else if self.settings.child.is_some() {
+            self.settings.child = None;
         } else if self.sheet.is_some() {
             self.sheet = None;
         } else if self.browser.assign_to.is_some() {
