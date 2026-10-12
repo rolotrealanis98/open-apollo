@@ -107,6 +107,9 @@ pub enum Control {
     BrowserScroll,
     /// [view] Select a catalog entry (index into `plugin_catalog`); the next insert tap assigns it.
     BrowserItem(u16),
+    /// Explicit activation (double click or Assign), distinct from row selection.
+    BrowserActivate(u16),
+    BrowserPresetActivate(u16, u16),
     /// [view] Session navigator: make this input the first visible strip.
     SessionNavigate(u16),
     /// [view] Cells scrollbar thumb (drag; value = 1 − scroll fraction).
@@ -360,7 +363,17 @@ impl Interaction {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
         match &hit.kind {
             HitKind::Toggle => vec![Action::Toggle(hit.id.clone())],
-            HitKind::Tap => vec![Action::Tap(hit.id.clone())],
+            HitKind::Tap => {
+                let mut id = hit.id.clone();
+                if double {
+                    id.control = match id.control {
+                        Control::BrowserItem(i) => Control::BrowserActivate(i),
+                        Control::BrowserPresetFile(top, child) => Control::BrowserPresetActivate(top, child),
+                        other => other,
+                    };
+                }
+                vec![Action::Tap(id)]
+            }
             HitKind::Drag { value, span, reset } => {
                 if double {
                     if let Some(r) = reset {

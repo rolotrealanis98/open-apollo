@@ -1299,7 +1299,7 @@ pub fn browser_item_menu(model: &dyn MixerModel, index: u16) -> PopupMenu {
     let cat = model.plugin_catalog();
     let Some(p) = cat.get(index as usize) else { return m };
     m.header(p.display_name().to_string());
-    m.push(PopupItem::new("Assign", ControlId { strip: "browser".into(), control: Control::BrowserItem(index) }));
+    m.push(PopupItem::new("Assign", ControlId { strip: "browser".into(), control: Control::BrowserActivate(index) }));
     m.finish()
 }
 
