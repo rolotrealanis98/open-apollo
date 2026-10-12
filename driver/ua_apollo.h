@@ -1514,6 +1514,7 @@ struct ua_device {
 	 * among it) came from an earlier session, possibly Windows or macOS.
 	 * The per-DSP ring connect is not sent then: it makes the DSPs drop
 	 * those strips, and Linux cannot build them again (titan 2026-10-11).
+	 * Cleared when the driver cold-starts the DSP.
 	 */
 	bool dsp_inherited;
 	bool pcie_setup_done;       /* PCIe ASPM/timeout configured */

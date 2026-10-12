@@ -3908,6 +3908,9 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 		ua->fw_loaded = false;
 		ua->dsps_connected = false;
 		ua->plugins_activated = false;
+		/* No strips survive a cold start (a resume after the
+		 * Apollo lost power): connect the fresh DSPs again */
+		ua->dsp_inherited = false;
 	}
 
 	seq_wr = ua_read(ua, UA_REG_MIXER_SEQ_WR);

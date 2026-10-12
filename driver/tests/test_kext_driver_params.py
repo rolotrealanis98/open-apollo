@@ -121,3 +121,7 @@ def test_inherited_dsp_keeps_its_input_strips():
     init = csrc.extract(core, 'static int ua_dsp_init_and_load(')
     alive = init.index('mixer DSP alive!')
     assert 'ua->dsp_inherited = true' in init[alive:alive + 400]
+    # A cold re-init (resume after the Apollo lost power) has nothing to
+    # keep: the fresh DSPs get the ring connect again
+    cold = init.index('ret = ua_program_registers(ua);')
+    assert 'ua->dsp_inherited = false' in init[cold:cold + 600]
