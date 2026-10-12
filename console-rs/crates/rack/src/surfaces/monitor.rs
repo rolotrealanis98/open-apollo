@@ -164,6 +164,15 @@ impl MonitorMetersGeometry {
     }
 }
 
+/// The monitor column of a window `window_h` tall at `x` (full layout: flush right,
+/// `window_w − 96`): `Rack_MonitorSection_UAD2` runs from `MONITOR_TOP` to the status bar, and
+/// its stack is built up from that bottom (p1 1920×1050: 1824, 27…1010; p2 1470×1105: 1374,
+/// 27…1065).
+pub fn monitor_rect(x: f32, window_h: f32) -> Rect {
+    use crate::geometry::window as W;
+    Rect::new(x, W::MONITOR_TOP, STRIP_W, window_h - W::STATUS_BAR.1 - W::MONITOR_TOP)
+}
+
 /// The monitor column in `r` (window points; x = monitor column, y = section top).
 pub fn draw_monitor_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     let m = model.monitor();
@@ -461,5 +470,20 @@ mod tests {
         assert_eq!((abs(g.left.y), abs(g.left.max_y())), (73.0, 520.0));
         let rows: Vec<f32> = g.mark_rows().into_iter().map(abs).collect();
         assert_eq!(rows, vec![80.0, 120.0, 160.0, 199.0, 239.0, 279.0, 319.0, 359.0, 399.0, 438.0, 478.0, 518.0]);
+    }
+
+    #[test]
+    fn column_follows_the_window_size() {
+        // p2 refpair (1470×1105): column 1374, 27…1065; gain 965, MONO 917, CUE 667, bars 73…575.
+        let r = super::monitor_rect(1470.0 - 96.0, 1105.0);
+        assert_eq!((r.x, r.y, r.h), (1374.0, 27.0, 1038.0));
+        let s = MonitorStack::new(r.h, 0, true, true, true);
+        let abs = |y: f32| y + r.y;
+        assert_eq!((abs(s.gain), abs(s.mono_mute), abs(s.cue_outputs), abs(s.silk)), (965.0, 917.0, 667.0, 607.0));
+        let g = MonitorMetersGeometry::new(s.silk - 4.0, 17.0, 38.0);
+        assert_eq!((abs(g.left.y), g.left.h), (73.0, 502.0));
+        // p1 (1920×1050) is unchanged.
+        let r1 = super::monitor_rect(1920.0 - 96.0, 1050.0);
+        assert_eq!((r1.x, r1.h), (1824.0, 983.0));
     }
 }

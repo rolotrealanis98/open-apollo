@@ -180,7 +180,13 @@ impl EngineMixer {
                 .then(|| self.bool_at(&format!("{dev}/HeadphoneCorrectionPower")).unwrap_or(true)),
             speaker_correction: (self.bool_at(&format!("{dev}/SupportsSpeakerCorrection")) == Some(true))
                 .then(|| self.bool_at(&format!("{dev}/SpeakerCorrectionPower")).unwrap_or(true)),
-            knob_focus: true,
+            // The front-panel knob drives the monitor unless an input (preamp) or another
+            // output is `SelectedOnFront` (p1: none → green dot; p2: inputs/0 → off).
+            knob_focus: !["inputs", "outputs"].iter().any(|kind| {
+                self.store.tree().indices(&format!("{dev}/{kind}")).into_iter().any(|n| {
+                    (*kind != "outputs" || n != m.index) && self.bool_at(&format!("{dev}/{kind}/{n}/SelectedOnFront")) == Some(true)
+                })
+            }),
         }
     }
 

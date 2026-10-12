@@ -9,7 +9,7 @@ use crate::model::{MixerModel, StripInfo};
 use crate::preamp::draw_preamp;
 use crate::surfaces::browser::draw_browser;
 use crate::surfaces::cells::{self, HEADER_H, INPUT_CELL_H, insert_list, send_list, visible_slots};
-use crate::surfaces::monitor::{draw_control_room, draw_monitor_column};
+use crate::surfaces::monitor::{draw_control_room, draw_monitor_column, monitor_rect};
 use crate::surfaces::navigator::{self, VisibleRows, draw_navigator};
 use crate::surfaces::popover::draw_popover;
 use crate::surfaces::session_nav::draw_session_navigator;
@@ -183,7 +183,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
         }
         MonitorPage::ControlRoom => draw_control_room(ui, model, Rect::new(l.aux_x(), W::COLUMN.0, aux_w, col_h)),
     }
-    draw_monitor_column(ui, model, view, Rect::new(l.monitor_x(), W::MONITOR_TOP, STRIP_W, W::STATUS_BAR.0 - W::MONITOR_TOP));
+    draw_monitor_column(ui, model, view, monitor_rect(if l.compact { l.monitor_x() } else { width - STRIP_W }, height));
     draw_status_bar(ui, model, Rect::new(0.0, W::STATUS_BAR.0, width, W::STATUS_BAR.1));
 
     // Overlays.
