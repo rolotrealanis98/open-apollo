@@ -14,7 +14,9 @@ Which images are searched:
   * --draws (default `auto`: OURS with `.draws.json`, written by `uaconsole --render`): every UA
     image our renderer drew inside the crop, at its drawn size (9-slices rendered at that size, plug-in
     icons scaled), plus the other state images of every skin that uses it (catches on/off and
-    alternative-art differences). OURS detections also carry the drawn rect (`drawn`).
+    alternative-art differences). Template pixels that OURS shows covered (labels, children) are
+    masked out. OURS detections must sit on a drawn instance; REF detections far from every drawn
+    instance of their family need --strong. OURS detections carry the drawn rect (`drawn`).
   * --skins SPEC (adds to the drawn set; the only source when there is no sidecar): comma list of
     areas (strip, monitor, ...), skin keys (`views/Switch-Small` or `Switch-Small`), and globs over
     keys or image paths (`views/Switch*`, `img:buttons/btn_category_*`).
@@ -462,6 +464,19 @@ def pair(refs, ours, max_dist):
     return pairs, [r for i, r in enumerate(refs) if i not in used_r], [o for j, o in enumerate(ours) if j not in used_o]
 
 
+def near_drawn(r, drawn, fam, dist):
+    """Whether an image of r's family was drawn with its centre within `dist` pt of r's centre."""
+    g = r["group"]
+    cx, cy = centre(r)
+    for d in drawn:
+        if fam.get(d["key"]) != g:
+            continue
+        x, y, w, h = d["dst"]
+        if math.hypot(x + w / 2 - cx, y + h / 2 - cy) <= dist:
+            return True
+    return False
+
+
 def attach_drawn(ours, drawn):
     """OURS detection -> the drawn dst of the same image nearest to it (pt)."""
     for o in ours:
@@ -528,6 +543,9 @@ def main():
     ap.add_argument("--max-rmse", type=float, default=48.0, help="max colour RMS error over opaque pixels")
     ap.add_argument("--max-dist", type=float, default=16.0, help="max centre distance for a pair, pt (default 16)")
     ap.add_argument("--min-size", type=float, default=4.0, help="skip drawn images smaller than this, pt")
+    ap.add_argument("--strong", type=float, default=0.95,
+                    help="draws mode: REF matches farther than --max-dist from anything we drew of their family are"
+                         " kept only at this score or above (default 0.95)")
     ap.add_argument("--tol", type=float, default=0.25, help="|d| <= tol pt counts as aligned (default 0.25)")
     ap.add_argument("--moved", action="store_true", help="table: only pairs off by more than --tol")
     ap.add_argument("--overlay", help="write PREFIX-ref.png / PREFIX-ours.png with boxes (UA art: keep out of git)")
@@ -595,6 +613,12 @@ def main():
         for o in ours:
             o["rect"] = [round(o["rect"][0] + sx, 3), round(o["rect"][1] + sy, 3), *o["rect"][2:]]
     if drawn:
+        fam = {t.image: t.group for t in templates}
+        before = (len(refs), len(ours))
+        ours = [o for o in ours if near_drawn(o, drawn, fam, 3.0)]
+        refs = [r for r in refs if r["score"] >= args.strong or near_drawn(r, drawn, fam, args.max_dist)]
+        log(f"placement_diff: dropped {before[0] - len(refs)} weak REF and {before[1] - len(ours)} OURS matches"
+            " away from any drawn instance of their family")
         attach_drawn(ours, drawn)
     pairs, un_ref, un_ours = pair(refs, ours, args.max_dist)
     seen = {r["image"] for r in refs + ours}
@@ -609,7 +633,7 @@ def main():
             "state_ref": state(a), "state_ours": state(b),
             "ref": a["rect"], "ours": b["rect"], "ref_px": a["rect_px"], "ours_px": b["rect_px"],
             "dx": d[0], "dy": d[1], "dw": d[2], "dh": d[3],
-            "score_ref": a["score"], "score_ours": b["score"],
+            "score_ref": a["score"], "score_ours": b["score"], "rmse_ref": a["rmse"], "rmse_ours": b["rmse"],
             "aligned": all(abs(v) <= args.tol for v in d),
             **({"drawn": b["drawn"]} if "drawn" in b else {}),
         })

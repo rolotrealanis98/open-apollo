@@ -11,4 +11,5 @@ houston = { version = "0.1.0", path = "../houston" }
 png = "0.18.1"
 pollster = "1.0.1"
 rack = { version = "0.1.0", path = "../rack" }
+swash = "0.2.10"
 wgpu = "30"

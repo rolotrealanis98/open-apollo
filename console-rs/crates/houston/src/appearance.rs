@@ -45,19 +45,28 @@ impl SkinValue {
     }
 }
 
-/// Font of a skin: `font`, `font-size`, `font-style`, `color-text`.
+/// Font of a skin: `font`, `font-size`, `font-size-dyn`, `font-size-max`, `font-style`,
+/// `font-kerning`, `color-text`, resolved the way Rack.dll's `GUI_FontInfo` does (see
+/// [`crate::fonts`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FontSpec {
     pub family: String,
+    /// Em size in points: what a renderer that sizes text by the em draws. `height` converted
+    /// with the face's ascent + descent ([`crate::fonts::em_for_height`]).
     pub size: f32,
+    /// JUCE font height (ascent + descent) in points: `font-size`, plus
+    /// [`crate::fonts::FONT_SIZE_ADJUST`] when `font-size-dyn`, capped at `font-size-max`.
+    pub height: f32,
     pub bold: bool,
     pub italic: bool,
     pub color: Option<Rgba>,
+    /// `font-kerning`: JUCE extra kerning factor (each glyph advances `kerning × height` more).
+    pub kerning: f32,
 }
 
 impl Default for FontSpec {
     fn default() -> Self {
-        Self { family: "Helvetica".into(), size: 9.0, bold: false, italic: false, color: None }
+        Self { family: "Helvetica".into(), size: 9.0, height: 9.0, bold: false, italic: false, color: None, kerning: 0.0 }
     }
 }
 
@@ -128,13 +137,30 @@ impl Skin {
         Rgba::parse(s).or_else(|| self.palette.get(s.trim()).copied())
     }
     pub fn font(&self) -> FontSpec {
+        self.font_with_adjust(crate::fonts::FONT_SIZE_ADJUST)
+    }
+
+    /// [`Skin::font`] with another `font_size_adjust` (Console's Increase/Decrease Font Size;
+    /// 2 is the Windows default).
+    pub fn font_with_adjust(&self, adjust: f32) -> FontSpec {
         let style = self.get("font-style").and_then(SkinValue::as_str).unwrap_or("");
+        let family = self.get("font").and_then(SkinValue::as_str).unwrap_or("Helvetica").to_string();
+        let (bold, italic) = (style.contains("bold"), style.contains("italic"));
+        let mut height = self.number("font-size").unwrap_or(9.0) as f32;
+        if self.flag("font-size-dyn") {
+            height += adjust.max(0.0);
+            if let Some(max) = self.number("font-size-max").filter(|m| *m > 0.0) {
+                height = height.min(max as f32);
+            }
+        }
         FontSpec {
-            family: self.get("font").and_then(SkinValue::as_str).unwrap_or("Helvetica").to_string(),
-            size: self.number("font-size").unwrap_or(9.0) as f32,
-            bold: style.contains("bold"),
-            italic: style.contains("italic"),
+            size: crate::fonts::em_for_height(&family, bold, italic, height),
+            height,
+            family,
+            bold,
+            italic,
             color: self.color("color-text"),
+            kerning: self.number("font-kerning").unwrap_or(0.0) as f32,
         }
     }
 }

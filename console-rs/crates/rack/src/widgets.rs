@@ -1,6 +1,6 @@
 //! Rack components, drawn from Appearance.json skins.
 
-use houston::{Rect, Rgba};
+use houston::{Insets, Rect, Rgba};
 
 use crate::draw::{Align, Frame};
 use crate::geometry::{FaderAndMetersGeometry, FaderMetrics};
@@ -12,15 +12,35 @@ use crate::ui::{ART_SCALE, Ui};
 impl Ui<'_> {
     /// `Rack_Background` with a `backgrounds` (or `views`) skin: 9-slice if declared, stretched
     /// (corner-preserving) if `stretch`, otherwise natural size at the rect origin.
+    /// `Rack_Background::paint` (Rack.dll 0x1809903d0). A skin with a JSON size that is not
+    /// `stretch` draws its image at that size minus `inset-background`, centred with integer
+    /// halves (or, when `resizable`, fitted uniformly); otherwise the image is a 9-slice over the
+    /// rect minus `inset-background`, with `inset-9-slice-background` or third-of-image corners.
     pub fn background(&mut self, key: &str, r: Rect) {
         let Some(skin) = self.skin("backgrounds", key).or_else(|| self.skin("views", key)) else { return };
         let Some(path) = skin.image("image") else { return };
-        if let Some(slice) = skin.insets("inset-9-slice-background") {
-            self.image(path, r, Some(slice), None, 1.0);
-        } else if skin.flag("stretch") || skin.flag("resizable") {
-            self.image_stretched(path, r, 1.0);
-        } else if let Some((w, h)) = self.image_size(path) {
-            self.image(path, Rect::new(r.x, r.y, w, h), None, None, 1.0);
+        let path = path.to_string();
+        let ib = skin.insets("inset-background").unwrap_or_default();
+        let size = skin.size().filter(|(w, h)| *w > 0.0 && *h > 0.0);
+        match size {
+            Some((w, h)) if !skin.flag("stretch") => {
+                if skin.flag("resizable") {
+                    let f = (r.w / w).min(r.h / h);
+                    self.image(&path, r.centered(w * f, h * f), None, None, 1.0);
+                } else {
+                    let x = r.x + ib.l + ((r.w / 2.0).trunc() - (w / 2.0).trunc());
+                    let y = r.y + ib.t + ((r.h / 2.0).trunc() - (h / 2.0).trunc());
+                    self.image(&path, Rect::new(x, y, w - ib.l - ib.r, h - ib.t - ib.b), None, None, 1.0);
+                }
+            }
+            _ => {
+                let dst = r.inset(ib.l, ib.t, ib.r, ib.b);
+                let slice = skin.insets("inset-9-slice-background").or_else(|| {
+                    let img = self.assets.images.get(&path)?;
+                    Some(Insets::thirds(img.width, img.height))
+                });
+                self.image(&path, dst, slice, None, 1.0);
+            }
         }
     }
 

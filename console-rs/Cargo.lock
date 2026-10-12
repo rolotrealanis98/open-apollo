@@ -1073,6 +1073,7 @@ dependencies = [
  "png",
  "pollster",
  "rack",
+ "swash",
  "wgpu",
 ]
 
