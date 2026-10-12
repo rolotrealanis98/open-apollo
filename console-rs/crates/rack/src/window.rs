@@ -377,6 +377,9 @@ fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo) {
     if let Some(layout) = &s.preamp_layout {
         unison(ui, &model.unison(s), s, Rect::new(0.0, 25.0, STRIP_W, 77.0));
         if let Some(state) = model.preamp(s) {
+            // Rack_Overview_Preamp's secondary_background (Secondary-Channel-Inserts-Background)
+            // runs 2 pt past the 129-pt plate, as under SR CONVERT.
+            ui.background("Secondary-Channel-Inserts-Background", Rect::new(4.0, 101.0, STRIP_W - 8.0, 131.0));
             draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0, STRIP_W, 129.0));
         }
     } else if s.shows_sr_convert {
