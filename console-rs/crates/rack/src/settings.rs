@@ -618,7 +618,11 @@ pub fn io_routes(src: &dyn PropertySource, outputs: bool) -> Vec<IoRoute> {
             }
         })
         .collect();
-    v.sort_by_key(|r| (r.channel, r.index));
+    // Console lists the routes in engine order and numbers them 1…n (capture s12).
+    v.sort_by_key(|r| r.index);
+    for (i, r) in v.iter_mut().enumerate() {
+        r.channel = i as i64 + 1;
+    }
     v
 }
 
@@ -773,7 +777,9 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             f.extend(mapped(src, "metering", "/PostFaderMetering", "METERING", 0));
             f.extend(engine_choice(src, "/ClipHold", "CLIP HOLD", 0));
             f.extend(engine_choice(src, "/PeakHold", "PEAK HOLD", 0));
-            f.push(SettingField::new("pref-reset:dont_show_again", "\"DON'T SHOW AGAIN\" DIALOGS", FieldKind::Action("RESET".into()), 0));
+            // RESET is live only while some dialog is suppressed (disabled in capture s15).
+            let suppressed = bool_at(src, "pref:dont_show_again").unwrap_or(false);
+            f.push(SettingField::new("pref-reset:dont_show_again", "\"DON'T SHOW AGAIN\" DIALOGS", FieldKind::Action("RESET".into()), 0).disabled(!suppressed));
             f.push(pref_text(src, "modifiers_timeout", "MODIFIERS TIMEOUT", 1));
         }
         SettingsGroup::Editing => {
@@ -790,11 +796,12 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
                 }
             }
             f.extend(dev.map(|d| d.at(0.0, 0.0)));
-            f.push(pref_text(src, "tap_tempo_channel", "TAP TEMPO CHANNEL", 0).at(170.0, 0.0));
+            // Cells 164 apart, rows 60 apart (capture s16).
+            f.push(pref_text(src, "tap_tempo_channel", "TAP TEMPO CHANNEL", 0).at(164.0, 0.0));
             let number = pref_text(src, "tap_tempo_number", "", 0);
-            f.push(pref_choice(src, "tap_tempo_event", "TAP TEMPO EVENT", 0).at(340.0, 0.0).with_inline(number));
-            f.push(pref_text(src, "scenes_channel", "PLUG-IN SCENES CHANNEL", 1).at(170.0, 68.0));
-            f.push(pref_choice(src, "scenes_event", "PLUG-IN SCENES EVENT", 1).at(340.0, 68.0));
+            f.push(pref_choice(src, "tap_tempo_event", "TAP TEMPO EVENT", 0).at(328.0, 0.0).with_inline(number));
+            f.push(pref_text(src, "scenes_channel", "PLUG-IN SCENES CHANNEL", 1).at(164.0, 60.0));
+            f.push(pref_choice(src, "scenes_event", "PLUG-IN SCENES EVENT", 1).at(328.0, 60.0));
         }
         SettingsGroup::Network => {
             // `Rack_NetworkSettings` / Dante (capture s17).

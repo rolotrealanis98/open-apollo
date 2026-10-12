@@ -154,8 +154,8 @@ pub(crate) fn choice_box(ui: &mut Ui, f: &SettingField, r: Rect) {
 fn text_box(ui: &mut Ui, f: &SettingField, text: &str, edit: Option<&TextEdit>, r: Rect) {
     let editing = edit.filter(|e| matches!(&e.target, TextTarget::Setting(k) if *k == f.key));
     let shown = editing.map(|e| format!("{}|", e.text)).unwrap_or_else(|| text.to_string());
+    // The `rename_field` art is a translucent dark plate (`inset-background` 2, 3, 2, 3).
     let art = r.inset(2.0, 3.0, 2.0, 3.0);
-    ui.fill(art, Rgba::rgb8(20, 28, 32));
     if let Some(img) = ui.skin("views", "Text-Edit-Field").and_then(|s| s.image("image")) {
         let img = img.to_string();
         ui.image_stretched(&img, art, 1.0);
@@ -476,22 +476,22 @@ fn io_matrix_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page:
     let used = field_grid(ui, &f, (page.x + 10.0, page.y + 10.0), page.w, edit, drawn);
     let top = page.y + 10.0 + used;
     let table = Rect::new(page.x + 10.0, top, page.w - 20.0, page.max_y() - top);
-    let half = 474.0;
+    let half = 471.0;
     let row_h = 40.0;
     let devices = settings::devices(src);
     let dev_name = devices.first().map(|d| d.name.clone()).unwrap_or_default();
     let inputs = settings::io_routes(src, false);
     let outputs = settings::io_routes(src, true);
     let n = inputs.len().max(outputs.len()) as f32;
-    let list_y = top + 28.0 + 25.0;
+    let list_y = top + 29.0 + 26.0;
     let list_h = (table.max_y() - list_y).max(0.0);
     let overflow = (n * row_h - list_h).max(0.0);
     let off = (overflow * view.settings.scroll).round();
     for (k, (title, kind, routes)) in [("INPUTS", "INPUT", &inputs), ("OUTPUTS", "OUTPUT", &outputs)].into_iter().enumerate() {
         let x = table.x + k as f32 * half;
         let w = if k == 0 { half } else { table.w - half };
-        section_header(ui, title, Rect::new(x, top, w, 28.0));
-        let head = Rect::new(x, top + 28.0, w, 25.0);
+        section_header(ui, title, Rect::new(x, top, w, 29.0));
+        let head = Rect::new(x, top + 29.0, w, 26.0);
         ui.fill(head, Rgba::rgb8(48, 53, 55));
         ui.fill(Rect::new(x, head.max_y() - 1.0, w, 1.0), DIVIDER);
         let cols = [(0.0, 40.0, "CH"), (40.0, 95.0, "DEVICE"), (135.0, 77.0, kind), (212.0, w - 212.0, "CUSTOM NAME")];
@@ -524,6 +524,15 @@ fn io_matrix_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page:
         }
         ui.clip(None);
         ui.scroll_region(area, ScrollTarget::Settings, overflow);
+        if k == 1 && overflow > 0.0 {
+            // The shared scrollbar at the right of OUTPUTS (10 wide, 5 in from the edge).
+            let track = Rect::new(x + w - 15.0, area.y + 4.0, 10.0, area.h - 8.0);
+            ui.fill(track, Rgba::rgb8(20, 24, 28));
+            let th = (track.h * list_h / (n * row_h)).max(24.0);
+            let ty = track.y + (track.h - th) * view.settings.scroll;
+            ui.fill(Rect::new(track.x + 2.0, ty, 6.0, th), Rgba::rgb8(70, 76, 80));
+            ui.hit(track, sid(Control::SettingsScroll), HitKind::Drag { value: 1.0 - view.settings.scroll as f64, span: track.h, reset: None });
+        }
     }
 }
 
@@ -534,7 +543,14 @@ fn network_page(ui: &mut Ui, src: &dyn PropertySource, page: Rect, edit: Option<
     let used = field_grid(ui, &f, (page.x + 10.0, page.y + 10.0), page.w, edit, drawn);
     let top = page.y + 10.0 + used;
     let t = Rect::new(page.x + 10.0, top, page.w - 20.0, 82.0);
-    section_header(ui, "Dante NETWORK SETTINGS", Rect::new(t.x, t.y, t.w, 30.0));
+    section_header(ui, "", Rect::new(t.x, t.y, t.w, 30.0));
+    // `Dante-Logo-Small` (60 × 22) then NETWORK SETTINGS, centred together.
+    let mut hs_title = ui.style("fonts", "Settings-Section-Header-Static-Text");
+    hs_title.color = Rgba::WHITE.with_alpha(0.8);
+    let tw = crate::window::helvetica_bold_width("NETWORK SETTINGS", hs_title.size) + 2.0;
+    let x0 = t.x + ((t.w - (44.0 + tw)) / 2.0).round();
+    ui.background("Dante-Logo-Small", Rect::new(x0 - 8.0, t.y + 4.0, 60.0, 22.0));
+    ui.text("NETWORK SETTINGS", hs_title, Rect::new(x0 + 44.0, t.y, tw + 4.0, 30.0), Align::Left);
     let hs = ui.style("views", "Settings-Col-Header-Text");
     let groups = Rect::new(t.x, t.y + 30.0, t.w, 26.0);
     ui.fill(groups, Rgba::rgb8(58, 63, 66));

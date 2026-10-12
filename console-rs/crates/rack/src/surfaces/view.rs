@@ -525,6 +525,7 @@ impl ViewState {
                     "options" => SettingsTab::Options,
                     "midi" => SettingsTab::Midi,
                     "dante" => SettingsTab::DanteDevices,
+                    "network" => SettingsTab::Network,
                     _ => return false,
                 };
                 return true;
