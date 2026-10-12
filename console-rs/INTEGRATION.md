@@ -132,3 +132,32 @@ assumptions. No real-engine writes, vendor UI input, push or UA assets in git.
 P0 still needs genuine DSP-backed instance/preset/demo operations before
 hardware acceptance. Those operations now return errors instead of false
 success. The old daemon gaps are covered at the host/software contract layer.
+
+## P1 — multiple-unit identity and offline projection
+
+Task branch `codex/p1-multiple-apollos` adds ordered per-device topologies for
+actual `/devices` indices (including sparse ids), subscribes each unit while
+deduplicating shared root/catalogue/route subscriptions, and invalidates
+layouts on DeviceOnline and MultiUnitOrder changes. Input strips are grouped
+contiguously in cascade order. Show Offline Devices now changes the drawn
+input projection and session navigator/layout counts; complete model lookups
+keep hidden/offline strips addressable.
+
+Send windows retain the owning device across content, anchor, navigation and
+layer ids; CLI accepts `input-sends:DEVICE:INPUT` and `aux-sends:DEVICE:AUX`.
+Send availability/pre-fader defaults and insert-label online state use the
+owning unit. Native helper name joins are accepted only when unambiguous,
+avoiding duplicate channel names crossing device boundaries.
+
+The shared control-room/aux model still uses the first cascade unit; the exact
+shared-bus ownership and native device-tab presentation need source/runtime
+confirmation. No guessed multi-device hardware writes or new unverified tab
+art were introduced. Full paths and input grouping are verified, not a
+hardware cascade acceptance claim.
+
+Validation: four synthetic/mocked sparse-device tests (2 and 7), correct second
+unit wire targets, shared subscription deduplication, live reorder/online
+pushes, offline filtering and device-aware send targets; 273 workspace tests;
+locked release build; p1 158/158, p2 195/195, windows_check, live-snapshot ledger
+and regenerated scorecard all pass. Existing helper tests also pass. No real
+engines or UA GUI were driven.

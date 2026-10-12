@@ -92,7 +92,7 @@ impl WindowLayout {
     }
     /// The layout for `model`'s strips under `view` (bus strips per the SHOW toggles).
     pub fn for_model(model: &dyn MixerModel, view: &ViewState) -> Self {
-        Self::new(view, model.inputs().len(), bus_strips(model, view).len())
+        Self::new(view, model.inputs_for_view(view.show_offline_devices).len(), bus_strips(model, view).len())
     }
     /// With the aux scrollbar shown or not (it depends on the aux cells' height).
     pub fn with_aux_scroll(mut self, aux_scroll: bool) -> Self {
@@ -276,7 +276,7 @@ pub fn build_window(ui: &mut Ui, model: &dyn MixerModel, compact: bool) -> Windo
 /// Builds the window for `view` (navigator toggles, browser, popovers, sheet, pages).
 pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) -> WindowLayout {
     ui.windowing = view.windowing.clone();
-    let inputs = model.inputs();
+    let inputs = model.inputs_for_view(view.show_offline_devices);
     let bus = bus_strips(model, view);
     let base = WindowLayout::new(view, inputs.len(), bus.len());
     let bottom = base.strips_bottom();
@@ -328,7 +328,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let first = view.first_strip.min(inputs.len().saturating_sub(visible));
     ui.fill(Rect::new(l.side_x(), W::COLUMN.0, l.aux_x() - l.side_x(), col_h), PANEL);
     // The navigator ends on the bus section's first whole point (p2 1181, s08 972).
-    draw_session_navigator(ui, model, Rect::new(l.side_x(), W::CONTENT_TOP, l.aux_x().ceil() - l.side_x(), W::COLUMN.0 - W::CONTENT_TOP), first, visible);
+    draw_session_navigator(ui, model, view.show_offline_devices, Rect::new(l.side_x(), W::CONTENT_TOP, l.aux_x().ceil() - l.side_x(), W::COLUMN.0 - W::CONTENT_TOP), first, visible);
     side_section(ui, &rows, off, Rect::new(l.side_x(), W::COLUMN.0, W::SIDE_SECTION.1, col_h));
 
     for (i, s) in inputs.iter().enumerate().skip(first).take(visible) {
@@ -778,7 +778,8 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
     if bus {
         // The aux's SENDS header opens its sends window (`Rack_SendsPopover`, capture s51).
         let k = s.id.trim_end_matches(|c: char| !c.is_ascii_digit()).chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>().chars().rev().collect::<String>().parse::<u8>().unwrap_or(0);
-        let of = if s.kind == StripKind::Talkback { crate::settings::SendsOf::Talkback } else { crate::settings::SendsOf::Aux(k) };
+        let device = s.id.split('/').nth(2).and_then(|d| d.parse().ok()).unwrap_or(0);
+        let of = if s.kind == StripKind::Talkback { crate::settings::SendsOf::Talkback } else { crate::settings::SendsOf::Aux(k).on_device(device) };
         ui.hit(Rect::new(0.0, y, STRIP_W, HEADER_H), ControlId { strip: s.id.clone(), control: Control::ShowPanel(crate::settings::Panel::Sends(of)) }, HitKind::Tap);
     }
     if rows.sends > HEADER_H {

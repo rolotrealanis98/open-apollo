@@ -18,13 +18,13 @@ const FRAME_FILL: Rgba = Rgba::rgb8(53, 53, 53);
 
 /// `r`: the panel (x, top, width, height to the strips); `first` / `visible`: the strip range
 /// shown in the mixer.
-pub fn draw_session_navigator(ui: &mut Ui, model: &dyn MixerModel, r: Rect, first: usize, visible: usize) {
+pub fn draw_session_navigator(ui: &mut Ui, model: &dyn MixerModel, show_offline: bool, r: Rect, first: usize, visible: usize) {
     // The panel's top edge sits under the title bar; only its body and bottom edge show.
     ui.background("Monitor-Nav", Rect::new(r.x, r.y - 6.0, r.w, r.h + 6.0));
     let well_y = 31.0;
     crate::surfaces::navigator::background_max_corners(ui, "Display-Nav", Rect::new(r.x, well_y, r.w - 4.0, 37.0));
     let inner = Rect::new(r.x + 9.0, well_y + 5.0, r.w - 18.0 - 0.0, 27.0);
-    let inputs = model.inputs();
+    let inputs = model.inputs_for_view(show_offline);
     let n = inputs.len();
     if n == 0 {
         return;

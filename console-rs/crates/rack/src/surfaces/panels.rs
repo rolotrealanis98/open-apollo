@@ -628,11 +628,11 @@ fn meter_window(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect) {
 
 /// The window title and send nodes of `of`: (`…/sends/N`, name), cues within `CueBusCount`.
 fn send_nodes(src: &dyn PropertySource, of: SendsOf) -> (String, Vec<(String, String)>) {
-    let dev = "/devices/0";
+    let device = of.parts().map(|p| p.0).unwrap_or(0);
+    let dev = format!("/devices/{device}");
     let node = match of {
         SendsOf::Talkback => src.indices(&format!("{dev}/inputs")).into_iter().map(|i| format!("{dev}/inputs/{i}")).find(|p| str_at(src, &format!("{p}/IOType")).as_deref() == Some("TalkbackMic")),
-        SendsOf::Aux(k) => Some(format!("{dev}/auxs/{k}")),
-        SendsOf::Input(k) => Some(format!("{dev}/inputs/{k}")),
+        _ => of.node(),
     };
     let Some(node) = node else { return (String::new(), Vec::new()) };
     let active_cues = src.prop("/CueBusCount").and_then(|v| v.as_i64()).unwrap_or(2).max(0) as usize;
@@ -651,7 +651,7 @@ fn send_nodes(src: &dyn PropertySource, of: SendsOf) -> (String, Vec<(String, St
         .collect();
     let title = match of {
         SendsOf::Talkback => "TALKBACK".to_string(),
-        SendsOf::Aux(_) | SendsOf::Input(_) => str_at(src, &format!("{node}/Name")).unwrap_or_else(|| "SENDS".into()),
+        _ => str_at(src, &format!("{node}/Name")).unwrap_or_else(|| "SENDS".into()),
     };
     (title, sends)
 }
@@ -666,9 +666,8 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
     let col = 96.0;
     let size = (2.0 + sends.len().max(1) as f32 * col, 362.0);
     let strip: Option<Arc<str>> = match of {
-        SendsOf::Aux(k) => Some(format!("/devices/0/auxs/{k}").into()),
-        SendsOf::Input(k) => Some(format!("/devices/0/inputs/{k}").into()),
         SendsOf::Talkback => ui.hits.iter().find(|h| h.id.control == Control::ShowPanel(Panel::Sends(SendsOf::Talkback))).map(|h| h.id.strip.clone()),
+        _ => of.node().map(Into::into),
     };
     let anchor = strip.and_then(|st| {
         let name = ui.hit_rect(&ControlId { strip: st.clone(), control: Control::Name })?;
@@ -695,10 +694,10 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
         let level = src.prop(&format!("{node}/GainTapered")).and_then(|v| v.as_f64()).unwrap_or(0.0);
         let db = src.prop(&format!("{node}/Gain")).and_then(|v| v.as_f64()).unwrap_or(-144.0);
         // Mono input sends carry their pan (send-cell); bus and talkback sends do not (s50/s51).
-        let mono_input = matches!(of, SendsOf::Input(_)) && src.prop(&format!("{node}/Pan")).is_some();
+        let mono_input = of.is_input() && src.prop(&format!("{node}/Pan")).is_some();
         let pan = mono_input.then(|| ((src.prop(&format!("{node}/Pan")).and_then(|v| v.as_f64()).unwrap_or(0.0) + 1.0) / 2.0, None));
         let ids = crate::surfaces::cells::FullSendIds {
-            bus: !matches!(of, SendsOf::Input(_)),
+            bus: !of.is_input(),
             pan,
             mute: Some(sid(Control::SettingPress(format!("toggle:{node}/Bypass").into()))),
             level: Some(sid(Control::SettingSet(format!("fader:{node}/GainTapered").into()))),
@@ -709,13 +708,8 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
     // ‹ › step through the auxes, or through the input strips: `Popover-Left` / `-Right`
     // (12 × 12 chevrons) centred in (w − 58, 1, 20, 27) and (w − 28, 1, 20, 27), dimmed at
     // the ends.
-    let step: Option<(u8, &str, fn(u8) -> SendsOf)> = match of {
-        SendsOf::Aux(k) => Some((k, "auxs", SendsOf::Aux)),
-        SendsOf::Input(k) => Some((k, "inputs", SendsOf::Input)),
-        SendsOf::Talkback => None,
-    };
-    if let Some((k, kind, make)) = step {
-        let exists = |t: u8| src.prop(&format!("/devices/0/{kind}/{t}/Name")).is_some();
+    if let Some((device, kind, k)) = of.parts() {
+        let exists = |t: u8| src.prop(&format!("/devices/{device}/{kind}/{t}/Name")).is_some();
         let prev = (0..k).rev().find(|t| exists(*t));
         let next = (k.saturating_add(1)..=u8::MAX).take(64).find(|t| exists(*t));
         for (i, (key, to)) in [("Popover-Left", prev), ("Popover-Right", next)].into_iter().enumerate() {
@@ -725,7 +719,7 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
                 ui.image(&img, Rect::new(b.x + 4.0, b.y + 7.5, 12.0, 12.0), None, None, if to.is_some() { 1.0 } else { 0.3 });
             }
             if let Some(to) = to {
-                ui.hit(b, sid(Control::ShowPanel(Panel::Sends(make(to)))), HitKind::Tap);
+                ui.hit(b, sid(Control::ShowPanel(Panel::Sends(of.with_index(to)))), HitKind::Tap);
             }
         }
     }

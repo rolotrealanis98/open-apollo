@@ -906,8 +906,10 @@ impl ViewState {
             "about" => Panel::About,
             "meters" => Panel::MeterWindow,
             "talkback" => Panel::Sends(crate::settings::SendsOf::Talkback),
-            "aux-sends" => Panel::Sends(crate::settings::SendsOf::Aux(tab.parse().unwrap_or(0))),
-            "input-sends" => Panel::Sends(crate::settings::SendsOf::Input(tab.parse().unwrap_or(0))),
+            "aux-sends" | "input-sends" => {
+                let (device, index) = tab.split_once(':').map(|(d, n)| (d.parse().unwrap_or(0), n.parse().unwrap_or(0))).unwrap_or((0, tab.parse().unwrap_or(0)));
+                Panel::Sends((if what == "aux-sends" { crate::settings::SendsOf::Aux(index) } else { crate::settings::SendsOf::Input(index) }).on_device(device))
+            }
             "add-device" => Panel::AddDevice,
             "io-presets" => Panel::IoPresets,
             "input-source" => Panel::RouteSource { route: tab.parse().unwrap_or(0), outputs: false },
@@ -1079,7 +1081,8 @@ fn sends_of(hits: &[Hit], strip: &Arc<str>) -> Option<crate::settings::SendsOf> 
         return Some(SendsOf::Talkback);
     }
     let n = strip.rsplit('/').next().and_then(|t| t.trim_start_matches(|c: char| !c.is_ascii_digit()).parse::<u8>().ok())?;
-    if strip.contains("aux") { Some(SendsOf::Aux(n)) } else { Some(SendsOf::Input(n)) }
+    let device = strip.split('/').nth(2).and_then(|d| d.parse().ok()).unwrap_or(0);
+    Some((if strip.contains("aux") { SendsOf::Aux(n) } else { SendsOf::Input(n) }).on_device(device))
 }
 
 fn apply_effects(effects: Vec<Effect>, model: &mut dyn MixerModel) {

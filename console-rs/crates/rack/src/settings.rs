@@ -271,6 +271,38 @@ pub enum SendsOf {
     /// An input strip (`inputs/N`): AUX 1 / 2, CUE 1 / 2 with their pans (capture send-cell,
     /// a right click on the strip's sends cell).
     Input(u8),
+    AuxDevice(usize, u8),
+    InputDevice(usize, u8),
+}
+
+impl SendsOf {
+    pub fn parts(self) -> Option<(usize, &'static str, u8)> {
+        match self {
+            Self::Talkback => None,
+            Self::Aux(k) => Some((0, "auxs", k)),
+            Self::Input(k) => Some((0, "inputs", k)),
+            Self::AuxDevice(d, k) => Some((d, "auxs", k)),
+            Self::InputDevice(d, k) => Some((d, "inputs", k)),
+        }
+    }
+    pub fn on_device(self, device: usize) -> Self {
+        match self.parts() {
+            Some((_, "auxs", k)) => if device == 0 { Self::Aux(k) } else { Self::AuxDevice(device, k) },
+            Some((_, _, k)) => if device == 0 { Self::Input(k) } else { Self::InputDevice(device, k) },
+            None => Self::Talkback,
+        }
+    }
+    pub fn node(self) -> Option<String> {
+        self.parts().map(|(d, kind, k)| format!("/devices/{d}/{kind}/{k}"))
+    }
+    pub fn is_input(self) -> bool { matches!(self, Self::Input(_) | Self::InputDevice(..)) }
+    pub fn with_index(self, index: u8) -> Self {
+        match self.parts() {
+            Some((d, "auxs", _)) => Self::Aux(index).on_device(d),
+            Some((d, _, _)) => Self::Input(index).on_device(d),
+            None => Self::Talkback,
+        }
+    }
 }
 
 impl Panel {
@@ -283,8 +315,8 @@ impl Panel {
             Panel::About => "ABOUT",
             Panel::MeterWindow => "",
             Panel::Sends(SendsOf::Talkback) => "TALKBACK",
-            Panel::Sends(SendsOf::Aux(_)) => "AUX",
-            Panel::Sends(SendsOf::Input(_)) => "SENDS",
+            Panel::Sends(SendsOf::Aux(_) | SendsOf::AuxDevice(..)) => "AUX",
+            Panel::Sends(SendsOf::Input(_) | SendsOf::InputDevice(..)) => "SENDS",
             Panel::AddDevice => "ADD DEVICE",
             Panel::IoPresets => "I/O PRESETS",
             Panel::RouteSource { .. } => "INPUT",

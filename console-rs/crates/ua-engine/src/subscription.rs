@@ -114,6 +114,22 @@ const PLUGIN_PROPS: [&str; 13] = [
 const TALKBACK_ROOT: [&str; 3] = ["/TalkbackOn", "/TalkbackInPhysicalCR", "/TalkbackMaster"];
 
 impl SubscriptionPlan {
+    /// Subscribe all units, but shared root/catalogue/route properties once.
+    pub fn for_devices(topologies: &[Topology], tree: &Tree) -> Self {
+        let mut batches = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for topology in topologies {
+            for mut batch in Self::new(topology, tree).batches {
+                batch.paths.retain(|p| seen.insert(p.clone()));
+                if topologies.len() > 1 {
+                    batch.label = format!("device {} / {}", topology.device, batch.label);
+                }
+                if !batch.paths.is_empty() { batches.push(batch); }
+            }
+        }
+        if topologies.is_empty() { return Self::new(&Topology::default(), tree); }
+        Self { batches }
+    }
     pub fn new(topology: &Topology, tree: &Tree) -> SubscriptionPlan {
         let value = |property: &str| {
             tree.has_property(property)

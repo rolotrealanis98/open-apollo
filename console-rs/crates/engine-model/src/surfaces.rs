@@ -47,7 +47,8 @@ impl EngineMixer {
 
     /// The input's sends Console shows: AUX 1/2, and the cues within `CueBusCount` that are active.
     pub(crate) fn input_send_paths(&self, s: &InputStrip) -> Vec<SendPaths> {
-        let active: Vec<String> = self.store.topology().cues.iter().filter(|c| c.is_active).map(|c| c.bus()).collect();
+        let topology = self.store.topology_for_device(s.device).unwrap_or(self.store.topology());
+        let active: Vec<String> = topology.cues.iter().filter(|c| c.is_active).map(|c| c.bus()).collect();
         s.sends.iter().filter(|p| p.is_aux() || (p.is_cue() && p.is_available && active.contains(&p.id))).cloned().collect()
     }
 
@@ -72,7 +73,8 @@ impl EngineMixer {
             0 => true,
             1 => false,
             _ => {
-                let bus = self.store.topology().auxes.iter().find(|a| p.is_aux() && p.bus_number() == Some(a.index as u32 + 1));
+                let topology = self.store.topology_for_device(s.device).unwrap_or(self.store.topology());
+                let bus = topology.auxes.iter().find(|a| p.is_aux() && p.bus_number() == Some(a.index as u32 + 1));
                 bus.map(|a| !self.bool_at(&a.send_post_fader()).unwrap_or(true)).unwrap_or(false)
             }
         })

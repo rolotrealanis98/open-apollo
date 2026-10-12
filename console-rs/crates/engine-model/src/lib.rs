@@ -198,12 +198,13 @@ impl EngineMixer {
 
     /// A shown input strip, or the talkback mic strip.
     fn input(&self, id: &str) -> Option<&InputStrip> {
-        let t = self.store.topology();
-        t.inputs.iter().find(|s| s.base == id).or_else(|| t.talkback.strip.as_ref().filter(|s| s.base == id))
+        self.store.topologies().iter().find_map(|t| {
+            t.all_inputs.iter().find(|s| s.base == id).or_else(|| t.talkback.strip.as_ref().filter(|s| s.base == id))
+        })
     }
 
     fn aux(&self, id: &str) -> Option<&AuxStrip> {
-        self.store.topology().auxes.iter().find(|a| a.base == id)
+        self.store.topologies().iter().flat_map(|t| &t.auxes).find(|a| a.base == id)
     }
 
     fn f64_at(&self, path: &str) -> Option<f64> {
@@ -220,9 +221,10 @@ impl EngineMixer {
 
     /// The aux's cue sends Console shows: available (within `CueBusCount`) and on an active cue.
     fn aux_sends(&self, a: &AuxStrip) -> Vec<SendPaths> {
+        let device = a.base.split('/').nth(2).and_then(|d| d.parse().ok()).unwrap_or(self.store.topology().device);
         let active: Vec<String> = self
             .store
-            .topology()
+            .topology_for_device(device).unwrap_or(self.store.topology())
             .cues
             .iter()
             .filter(|c| c.is_active)
@@ -346,6 +348,13 @@ impl MixerModel for EngineMixer {
                 console_model: self.input_console_model(s),
             })
             .collect()
+    }
+
+    fn inputs_for_view(&self, show_offline: bool) -> Vec<StripInfo> {
+        self.inputs().into_iter().filter(|s| {
+            let device = s.id.split('/').nth(2).and_then(|d| d.parse::<usize>().ok());
+            show_offline || device.and_then(|d| self.bool_at(&format!("/devices/{d}/DeviceOnline"))).unwrap_or(true)
+        }).collect()
     }
 
     fn auxes(&self) -> Vec<StripInfo> {
@@ -676,13 +685,11 @@ impl MixerModel for EngineMixer {
     }
 
     fn devices(&self) -> Vec<rack::model::DeviceInfo> {
-        let tree = self.store.tree();
-        tree.indices("/devices")
-            .into_iter()
-            .map(|i| rack::model::DeviceInfo {
-                index: i,
-                name: self.str_at(&format!("/devices/{i}/DeviceName")).unwrap_or("").to_owned(),
-                online: self.bool_at(&format!("/devices/{i}/DeviceOnline")).unwrap_or(true),
+        self.store.topologies().iter()
+            .map(|t| rack::model::DeviceInfo {
+                index: t.device,
+                name: t.device_name.clone().unwrap_or_default(),
+                online: t.device_online,
             })
             .collect()
     }
