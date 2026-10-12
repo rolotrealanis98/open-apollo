@@ -185,6 +185,14 @@ impl UaNetBridge {
         }
     }
 
+    /// The bridge for a page opened with `query`: its base path is the `path` key exactly as the
+    /// GUI reads it ([`GuiQuery::parse`](crate::GuiQuery::parse): one trailing `/` dropped, like
+    /// Console's `GetSelectedInsertURL` and the client's `k()`), so every request the GUI builds
+    /// from `<path>/…` lands on it. `plugin_id` and the host keys are the page's business.
+    pub fn for_query(query: &crate::GuiQuery, map: ControlMap) -> Self {
+        Self::new(query.path.clone(), map)
+    }
+
     fn control_path(&self, id: &str, prop: &str) -> String {
         format!("{}/controls/{id}/{prop}/value", self.base)
     }
@@ -483,6 +491,19 @@ mod tests {
         assert_eq!(pushes.len(), 3);
         let first: Json = serde_json::from_str(&pushes[0]).unwrap();
         assert_eq!(first, json!({"path": format!("{P}/controls/input/normalized_value/value"), "data": 0.75}));
+    }
+
+    #[test]
+    fn bridge_answers_the_path_console_131_puts_in_the_url() {
+        let mut p = params();
+        let url = crate::content::page_url(&crate::GuiQuery::console("127.0.0.1", 50000, &format!("{P}/"), "uaudio_ssl_g_bus_compressor"));
+        let q = crate::GuiQuery::parse(&url).unwrap();
+        let ids: Vec<String> = ["input"].iter().map(|s| s.to_string()).collect();
+        let mut b = UaNetBridge::for_query(&q, ControlMap::build(&ids, &p, &BTreeMap::new(), vec![]));
+        assert_eq!(b.base, P);
+        let sub = b.handle(&format!("get {}?flatvalue=1&commands=1&cmd_id=get_base_path_subtree&recursive=1&message_id=U%3A1", q.path), &mut p);
+        let sub: Json = serde_json::from_str(&sub[0]).unwrap();
+        assert_eq!((sub["path"].as_str(), sub["data"]["properties"]["type"].as_str()), (Some(P), Some("effect")));
     }
 
     #[test]

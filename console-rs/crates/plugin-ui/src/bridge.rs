@@ -155,6 +155,22 @@ fn read_loop(id: ConnId, sock: Socket, tx: Sender<BridgeEvent>, sockets: Arc<Mut
 mod tests {
     use super::*;
 
+    /// A page on `ua-content://gui/…` (Console 1.3.1's scheme) opens its socket with that Origin.
+    #[test]
+    fn accepts_ua_content_origin() {
+        use tungstenite::client::IntoClientRequest;
+        let server = BridgeServer::bind(0).unwrap();
+        let mut req = format!("ws://127.0.0.1:{}", server.port()).into_client_request().unwrap();
+        req.headers_mut().insert("Origin", "ua-content://gui".parse().unwrap());
+        let client = std::thread::spawn(move || {
+            let (mut ws, resp) = tungstenite::connect(req).unwrap();
+            ws.close(None).ok();
+            resp.status().as_u16()
+        });
+        assert!(matches!(server.next(Duration::from_secs(5)), Some(BridgeEvent::Connected(..))));
+        assert_eq!(client.join().unwrap(), 101);
+    }
+
     #[test]
     fn echo_round_trip() {
         let server = BridgeServer::bind(0).unwrap();

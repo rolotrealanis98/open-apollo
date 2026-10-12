@@ -118,6 +118,101 @@ folder (or `UAD Console.app` or its `Contents`) anywhere in Files, e.g. iCloud D
 copies it into Documents. You can also drop the folder into the app's Documents with Finder
 file sharing (iPad → Files → uaconsole) as `UADConsoleResources` or `Resources`.
 
+## UA's HTML plug-in GUIs in WKWebView (`ua-content://`)
+
+UAD Console 1.3.1 loads a lunacomponent GUI as
+`ua-content://gui/index.html?host=<h>&port=<p>&path=<insert path>&plugin_id=<component id>`
+and answers the scheme with one `WKURLSchemeHandler` per web view (`UAPWSchemeHandler`,
+registered with `setURLSchemeHandler:forURLScheme:`). An Apple host (ConsoleLink, or a SwiftUI
+shell over `uaconsole-ffi`) should do the same, so the page sees the origin and URL keys it sees
+in Console. The rules are in `crates/plugin-ui/WEBBRIDGE.md` §8, and `plugin_ui::content` is
+the Rust version used on Linux.
+
+- **Root.** The component's `<id>.lunacomponent/gui.bundle/Contents/Resources/html` folder.
+  Ignore the URL host (`gui`), take the percent-decoded path, standardize it, and serve it only
+  if it stays inside the root.
+- **Reply.** Status 200, `HTTP/1.1`, `Content-Type` by extension (default
+  `application/octet-stream`), `Content-Length`, `Access-Control-Allow-Origin: *`,
+  `Cache-Control: no-cache`. Read off the main thread, and deliver only while the task is
+  still active: calling a stopped task throws. Fail anything else with
+  `URLError(.fileDoesNotExist)`.
+- **Keys.** `host` first (the client's `getURLParams` glues the first key to the URL), `port`
+  = a UANet WebSocket endpoint (plugin-ui's bridge, or the server that owns the insert),
+  `path` = the insert node with no trailing `/`, `plugin_id` last.
+- **Registration.** A scheme handler can only be set on a `WKWebViewConfiguration` before the
+  view is created, and `ua-content` is not a scheme WebKit handles itself.
+- `uaconsole-ffi` draws the mixer only; it creates no web views. The Swift host owns the
+  `WKWebView`, the handler and the window placement.
+
+```swift
+import WebKit
+
+/// Serves ua-content://gui/<file> from one lunacomponent's html folder (UAD Console 1.3.1's rules).
+final class UAContentSchemeHandler: NSObject, WKURLSchemeHandler {
+    private let root: URL
+    private var active = Set<ObjectIdentifier>()
+    private static let types = [
+        "html": "text/html", "htm": "text/html", "js": "text/javascript", "mjs": "text/javascript",
+        "css": "text/css", "json": "application/json", "map": "application/json",
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif",
+        "svg": "image/svg+xml", "webp": "image/webp", "ico": "image/x-icon", "woff": "font/woff",
+        "woff2": "font/woff2", "ttf": "font/ttf", "otf": "font/otf", "wasm": "application/wasm",
+        "mp4": "video/mp4", "webm": "video/webm", "mp3": "audio/mpeg", "wav": "audio/wav",
+        "txt": "text/plain", "xml": "application/xml", "pdf": "application/pdf",
+    ]
+
+    init(htmlFolder: URL) { root = htmlFolder.standardizedFileURL }
+
+    func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+        guard let url = task.request.url, let file = resolve(url) else {
+            return task.didFailWithError(URLError(.fileDoesNotExist))
+        }
+        let id = ObjectIdentifier(task)
+        active.insert(id)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let data = try? Data(contentsOf: file)
+            DispatchQueue.main.async { [self] in
+                guard active.remove(id) != nil else { return } // stopped meanwhile
+                guard let data else { return task.didFailWithError(URLError(.fileDoesNotExist)) }
+                let headers = [
+                    "Content-Type": Self.types[file.pathExtension.lowercased()] ?? "application/octet-stream",
+                    "Content-Length": String(data.count),
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "no-cache",
+                ]
+                task.didReceive(HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers)!)
+                task.didReceive(data)
+                task.didFinish()
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {
+        active.remove(ObjectIdentifier(task))
+    }
+
+    /// The URL's path (decoded; the host is ignored), standardized, and only inside the root.
+    private func resolve(_ url: URL) -> URL? {
+        let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? ""
+        let file = root.appendingPathComponent(path.isEmpty ? "index.html" : path).standardizedFileURL
+        return file.path.hasPrefix(root.path + "/") ? file : nil
+    }
+}
+
+// One handler per web view, set before the view exists.
+let config = WKWebViewConfiguration()
+config.setURLSchemeHandler(UAContentSchemeHandler(htmlFolder: htmlFolder), forURLScheme: "ua-content")
+let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 950, height: 175), configuration: config) // manifest.json "window"
+var page = URLComponents(string: "ua-content://gui/index.html")!
+page.queryItems = [ // host first
+    URLQueryItem(name: "host", value: "127.0.0.1"),
+    URLQueryItem(name: "port", value: String(bridgePort)),
+    URLQueryItem(name: "path", value: "/devices/0/inputs/0/effects/0"),
+    URLQueryItem(name: "plugin_id", value: "uaudio_ua_1176_rev_a"),
+]
+web.load(URLRequest(url: page.url!))
+```
+
 ## Measured (2026-10-11, Mac Studio M2 Ultra, macOS 27.2, Xcode 27.1)
 
 | where | first frame | warm frame |

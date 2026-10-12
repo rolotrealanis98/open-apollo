@@ -309,13 +309,14 @@ mod web {
             let spec = specs.and_then(|l| l.spec_for_effect(&window.effect_name));
             let meters = spec.as_ref().and_then(|s| s.meter_sources.as_ref()).map(|m| m.keys().cloned().collect()).unwrap_or_default();
             let map = ControlMap::build(&scrape_control_ids(&bundle), params, &BTreeMap::new(), meters);
-            let mut uanet = UaNetBridge::new(window.slot.to_string(), map);
+            // Console 1.3.1's keys (host, port, path, plugin_id); the bridge answers that path.
+            let query = GuiQuery::console("127.0.0.1", server.port(), &window.slot, &component.id);
+            let mut uanet = UaNetBridge::for_query(&query, map);
             if let Some(s) = &spec {
                 uanet.defaults = s.parameters.iter().map(|p| (p.index, p.default_value.unwrap_or(0.0))).collect();
             }
             uanet.effect.preset_name = window.chrome.preset.clone();
             uanet.effect.power = window.chrome.power;
-            let query = GuiQuery::new("127.0.0.1", server.port(), &window.slot);
             let gui = WebPanelWindow::open(component, &query, &window.chrome.title, false)?;
             Ok(Self { window: gui, server, uanet })
         }

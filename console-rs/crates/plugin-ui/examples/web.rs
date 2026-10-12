@@ -10,7 +10,9 @@
 //! By default the example runs plugin-ui's UANet bridge on an ephemeral 127.0.0.1 port and
 //! answers the GUI from mock parameters (the ConsoleLink spec's defaults when one matches;
 //! control ids scraped from the bundle). `--port P` instead points the GUI at an existing
-//! endpoint and runs no bridge. `--file` loads `file://…/index.html` instead of `uapw://`.
+//! endpoint and runs no bridge. The page loads as Console 1.3.1 loads it,
+//! `ua-content://gui/index.html?host=…&port=…&path=…&plugin_id=…`; `--file` loads the 1.2.x
+//! `file://…/index.html` form instead.
 //! `--zero` starts every parameter at 0 (the LUNA references' state); `--compare ref.png` reports
 //! the share of pixels that differ from a reference of the same size.
 
@@ -21,7 +23,7 @@ use std::collections::BTreeMap;
 
 use plugin_ui::bridge::{BridgeEvent, BridgeServer};
 use plugin_ui::uanet::{ControlMap, UaNetBridge, scrape_control_ids};
-use plugin_ui::webview::{self, WebPanelWindow};
+use plugin_ui::webview::{self, GuiSource, WebPanelWindow};
 use plugin_ui::{GuiQuery, LunaLibrary, LunaLocator, MockParams, ParamSource, PluginSpecLibrary};
 
 fn arg(name: &str) -> Option<String> {
@@ -68,12 +70,7 @@ fn main() {
     let ids = scrape_control_ids(&bundle);
     let meters: Vec<String> = spec.as_ref().and_then(|s| s.meter_sources.as_ref()).map(|m| m.keys().cloned().collect()).unwrap_or_default();
     let map = ControlMap::build(&ids, &params, &BTreeMap::new(), meters);
-    let mut uanet = UaNetBridge::new(&path, map);
-    uanet.writes_enabled = true; // mock parameters only
-    if let Some(s) = &spec {
-        uanet.defaults = s.parameters.iter().map(|p| (p.index, p.default_value.unwrap_or(0.0))).collect();
-    }
-    let mapped: Vec<String> = uanet.map.controls.iter().map(|(id, k)| format!("{id}={}", k.map(|k| k.to_string()).unwrap_or("-".into()))).collect();
+    let mapped: Vec<String> = map.controls.iter().map(|(id, k)| format!("{id}={}", k.map(|k| k.to_string()).unwrap_or("-".into()))).collect();
     eprintln!("spec: {}; controls: {}", spec.as_ref().map(|s| s.effect_name.as_str()).unwrap_or("none"), mapped.join(" "));
 
     let server = match arg("--port").and_then(|p| p.parse::<u16>().ok()) {
@@ -84,9 +81,17 @@ fn main() {
         })),
     };
     let port = server.as_ref().map(|s| s.port()).or_else(|| arg("--port").and_then(|p| p.parse().ok())).unwrap_or(4718);
-    let query = GuiQuery::new(&ip, port, &path);
     let file = std::env::args().any(|a| a == "--file");
-    eprintln!("url: {}", if file { component.url(&query) } else { webview::page_url(&query) });
+    // Console 1.3.1 adds plugin_id to ua-content URLs only; 1.2.x file:// URLs carry the three keys.
+    let query = if file { GuiQuery::new(&ip, port, &path) } else { GuiQuery::console(&ip, port, &path, &component.id) };
+    let url = if file { component.url(&query) } else { component.content_url(&query) };
+    eprintln!("url: {url}");
+    // The bridge's base is the `path` the GUI reads back from that URL.
+    let mut uanet = UaNetBridge::for_query(&GuiQuery::parse(&url).unwrap_or_else(|| query.clone()), map);
+    uanet.writes_enabled = true; // mock parameters only
+    if let Some(s) = &spec {
+        uanet.defaults = s.parameters.iter().map(|p| (p.index, p.default_value.unwrap_or(0.0))).collect();
+    }
 
     let show = std::env::args().any(|a| a == "--show");
     if !show {
@@ -98,7 +103,7 @@ fn main() {
         eprintln!("web: gtk: {e}");
         std::process::exit(3);
     });
-    let win = WebPanelWindow::open_with(component, &query, &format!("{} (preview)", component.name), !show, file).unwrap_or_else(|e| {
+    let win = WebPanelWindow::open_with(component, &query, &format!("{} (preview)", component.name), !show, if file { GuiSource::File } else { GuiSource::UaContent }).unwrap_or_else(|e| {
         eprintln!("web: webview: {e}");
         std::process::exit(3);
     });

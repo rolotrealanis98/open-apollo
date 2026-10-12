@@ -201,7 +201,7 @@ Parser rules [obs]:
 
 | Item | Finding |
 |---|---|
-| URL | `Rack_PluginWebViewHelper::GetSelectedInsertURL` (0x1809ed3b0) builds `<guiBase>` + (`/uaserver.html` if source mode == 8, else `/index.html`) + `?host=` + client host + `&port=` + client port + `&path=` + insert path with trailing `/` trimmed + optional `&plugin_id=<id>` [obs strings 0x183879a10…a48; order from the pseudo-C]. Host and port are those of the `MxClnt_Client` that owns the insert, so **Console points the GUI straight at the server for that client and does not proxy it** [inf]. |
+| URL | (1.3.1 on macOS: §8.) `Rack_PluginWebViewHelper::GetSelectedInsertURL` (0x1809ed3b0) builds `<guiBase>` + (`/uaserver.html` if source mode == 8, else `/index.html`) + `?host=` + client host + `&port=` + client port + `&path=` + insert path with trailing `/` trimmed + optional `&plugin_id=<id>` [obs strings 0x183879a10…a48; order from the pseudo-C]. Host and port are those of the `MxClnt_Client` that owns the insert, so **Console points the GUI straight at the server for that client and does not proxy it** [inf]. |
 | GUI base | `FUN_1809ecc10` switches on source mode: 1 → `http://<client host>/gui/plugins/…` + `.uad/html`; 2 → `http://js.uaudio.com/…`; 3 → `http://127.0.0.1…`; 4/5/8 → `file://` + the installed component path. The default is 5 unless a feature flag is set [obs strings; inf meaning]. |
 | Insert path | `MxClnt_Paths` vfunc +0x98. The UAD2 variant (0x181a72770) looks up a stored slot path per channel and insert, falling back to a stringstream path built from `device` and `effect`. The HB variant is 0x181a7ef40. On UAD2 this is most likely `/devices/D/inputs/N/effects/K` [inf]. |
 | 4718 | `default_deviced_port` is a UAFeatureKey_Int at 0x184c33f70, value 0x126e, initialised at 0x180891be8. `ClientTypeToPort` (0x1816cb4c0) gives it to client types 0/1 (HB, `_uadevice._tcp.`); type 5 (UAD2) gets 4710 and types 2/3/4 get 4720 [obs]. |
@@ -212,8 +212,8 @@ Parser rules [obs]:
 
 ## 7. Minimal Rust host design
 
-1. **Load the page.** Point wry at the html directory. Either serve it from the bridge as `http://127.0.0.1:P/gui/<plugin_id>/index.html`, which also makes `fetch("hbgf_dev_features.json")` work, or use `file://`. Use the query `?host=127.0.0.1&port=P&path=<slot path>`, keeping `host` first and the `path` value URL-encoded. Size the view from `manifest.window`.
-2. **Run a bridge.** Bind 127.0.0.1 on an ephemeral port, accept WebSockets from any Origin (a `file://` page sends `Origin: null`), and treat every text frame as one UANet request.
+1. **Load the page.** As Console 1.3.1 does: `ua-content://gui/index.html?host=127.0.0.1&port=P&path=<slot path>&plugin_id=<id>`, with a `ua-content` handler rooted at the component's html directory (§8; this is what console-rs does, and `fetch("hbgf_dev_features.json")` works). The 1.2.x `file://` form also works. Keep `host` first. Size the view from `manifest.window`.
+2. **Run a bridge.** Bind 127.0.0.1 on an ephemeral port, accept WebSockets from any Origin (a `file://` page sends `Origin: null`, a `ua-content` page `Origin: ua-content://gui`), and treat every text frame as one UANet request.
 3. **Answer locally:**
    * `get /status…heartbeat`: reply `{"path":"/status","data":{},"parameters":<echo>}`.
    * `post /logs/send_log`: ack, and optionally forward to the tracing log.
@@ -240,9 +240,33 @@ Parser rules [obs]:
 - [ ] Answer `/logs/send_log`, `notify_gui_loaded`, `set_touch` and `get_*_for_normalized_value` locally. Never forward unknown `post`s to the engine.
 - [ ] **Write gate.** While writes are disabled, reply to `set` and `set_control_default_value` with `{"path":p,"error":"writes disabled","parameters":<echo>}`, then push the engine's current value back so the knob snaps back. The GUI has already updated itself optimistically (`isShortCircuit`). Never translate a GUI write unless the app's engine write gate is open.
 - [ ] Inject `window.notify_gui_loaded` and `lunaOpenInExternalBrowser` (and optionally the `lunaPresetBrowser*` functions) through `with_initialization_script`, bridged to `window.ipc.postMessage(JSON.stringify({message,payload}))`.
-- [ ] Do not use `transport=ble`: on a `file://` page `window.origin` is `"null"`. A custom scheme registered as secure may block `ws://` as mixed content [inf]. Plain `http://127.0.0.1` or `file://` avoids both problems.
+- [ ] Do not use `transport=ble`: on a `file://` page `window.origin` is `"null"`. Console 1.3.1's own scheme, `ua-content://gui/…` (§8), does reach `ws://127.0.0.1` from WebKitGTK through wry: tested with the 1176 Rev A (origin `ua-content://gui`, GUI loaded, 0.000% pixels off the reference).
 
-## 8. Unknowns
+## 8. `ua-content://`: how Console 1.3.1 loads the page (macOS)
+
+Sources: Mac `Rack` 1.3.1 x86_64 (thinned slice), REA evidence `ev_c165e9a8…` (0x1df630),
+`ev_69f64119…` (0x1a44280), `ev_7afd3171…` (`setURLSchemeHandler:forURLScheme:` in 0x1a43360), and
+`llvm-objdump --macho --objc-meta-data` plus disassembly of the `UAPWSchemeHandler` class.
+Implemented in [`content`](src/content.rs) and used by [`webview`](src/webview.rs).
+
+| Item | Finding |
+|---|---|
+| URL | Same builder as 1.2.9 (§6). In source mode 5, when the GUI base starts with `file://`, the folder (the URL minus `file://`) goes to an out-parameter and the base becomes `"ua-content"` + `"://gui"`. The page is `ua-content://gui/index.html?host=<h>&port=<p>&path=<insert path, one trailing / dropped>&plugin_id=<id>` [obs]. `plugin_id` is appended because the out-parameter is set; the 1.2.x `file://` URL has the first three keys. Values are appended unencoded (engine paths need no escaping). |
+| Page view | `location.href` is that URL and `location.origin` is `ua-content://gui` (checked in WebKitGTK). `getURLParams` glues `host` to the href and drops it, but finds `port`, `path` and `plugin_id`; `doConnect` reads `host` from `location.search` (§1). `GuiQuery::parse` reproduces both, and the tests check Console's URL survives them. The 1.7.0 and 1.9.0 clients never read `plugin_id`. |
+| Handler | `UAPWSchemeHandler` (ivars `mRootPath`, `mAllowedRoots`, `mActiveTasks`; methods `setRootPath:`, `setAllowedRoots:`, `resolvePathForURL:` 0x1a3e620, `removeTaskIfActive:`, `webView:startURLSchemeTask:` 0x1a3ea10, `webView:stopURLSchemeTask:` 0x1a3f100). The root is set per web view at 0x1a442e8 (from the out-parameter); allowed roots at 0x1a4440c. |
+| Resolution | `NSURLComponents.path` (percent-decoded; host `gui` ignored) → `stringByStandardizingPath` → appended to the root → standardized again; served only if it equals the root or starts with `root + "/"`, and the root lies under an allowed root [obs]. |
+| Reply | File read on a global queue (`dataWithContentsOfFile:`), delivered on the main queue if the task is still active: `NSHTTPURLResponse` status **200**, `HTTP/1.1`, headers `Content-Type` (lowercased extension → html/htm `text/html`, js/mjs `text/javascript`, css `text/css`, json/map `application/json`, png, jpg/jpeg, gif, svg `image/svg+xml`, webp, ico `image/x-icon`, woff, woff2, ttf, otf, wasm, mp4, webm, mp3 `audio/mpeg`, wav, txt, xml `application/xml`, pdf; otherwise `application/octet-stream`), `Content-Length`, `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache` [obs]. |
+| Errors | No root or a path outside it: "No content root or invalid path"; unreadable file: "Failed to read file". Both fail the task with `NSURLErrorDomain` −1100 [obs]. A wry handler must return a response, so ours answers 404. |
+| Windows | 1.2.9 keeps `file://` with a WebView2 `WebResourceRequested` filter. Whether Windows 1.3.x moved to `ua-content` is [unk] (`unk_f0ad4779…`). |
+
+console-rs serves the scheme in wry with one `ContentRoots` per web view (`for_component`: root
+= the component's `html` folder, allowed root = its `.lunacomponent`). It also accepts
+`ua-content://gui/<component id>/…` (`for_library`, one handler for a whole library) and serves
+`index.html` for an empty path; Console does neither. `GuiSource::File` keeps the 1.2.x
+`file://` page. Apple hosts register the same handler with `WKURLSchemeHandler`
+(`console-rs/apple/README.md`).
+
+## 9. Unknowns
 
 - [unk] Whether UA Mixer Engine 4710 accepts a WebSocket upgrade and answers `flatvalue=1` gets with array `children`. Do not rely on it: the control vocabulary is missing from the engine.
 - [unk] Which helper port (4720 or 4748 on the Mac) and which path layout serve native (UADx) inserts in UAD Console, and the exact `path` value Console passes for UAD2 inserts. To settle this, decompile the callers of 0x1809ed3b0 (0x1809ee270, 0x180df91f0, 0x180dff800) and `MxClnt_HBPaths` 0x181a7ef40.

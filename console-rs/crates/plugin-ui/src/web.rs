@@ -127,9 +127,16 @@ impl LunaComponent {
         self.html_dir.join("index.html")
     }
 
-    /// `file://…/index.html?<query>` for the webview.
+    /// `file://…/index.html?<query>`: the Windows (Console 1.2.x) layout, `GetSelectedInsertURL`
+    /// with a `file://` GUI base (WEBBRIDGE.md §6).
     pub fn url(&self, query: &GuiQuery) -> String {
         format!("file://{}?{}", percent_path(&self.index_html()), query.to_query())
+    }
+
+    /// `ua-content://gui/index.html?<query>`: Console 1.3.1's macOS form, served from this
+    /// component's `html` folder by a `ua-content` handler ([`crate::content`]).
+    pub fn content_url(&self, query: &GuiQuery) -> String {
+        crate::content::page_url(query)
     }
 
     /// True when `effect_name` (engine `EffectName`, e.g. "UAD SSL G Bus Compressor") names this
@@ -142,9 +149,9 @@ impl LunaComponent {
     }
 }
 
-/// Query parameters the GUI's `@uaudio/client` reads from `window.location.search`, with
-/// Console's keys `host`, `port`, `path` (WEBBRIDGE.md). `path` must not be the first key: one
-/// of the GUI's parsers glues the first key to the page URL.
+/// Query parameters the GUI's `@uaudio/client` reads, with Console's keys `host`, `port`, `path`
+/// and (1.3.1, `ua-content` URLs) `plugin_id` (WEBBRIDGE.md §1). `path` must not be the first
+/// key: one of the GUI's parsers glues the first key to the page URL.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GuiQuery {
     /// Host of the WebSocket the GUI connects to (`host`).
@@ -153,20 +160,99 @@ pub struct GuiQuery {
     pub port: u16,
     /// The plug-in slot in the engine tree (`path`), e.g. `/devices/0/inputs/0/effects/3`.
     pub path: String,
+    /// `plugin_id`: Console 1.3.1 appends it to `ua-content` URLs (the component id,
+    /// `uaudio_ua_1176_rev_a`). The 1.7.0 and 1.9.0 clients do not read it [obs].
+    pub plugin_id: Option<String>,
     /// Extra `key=value` pairs, appended in order.
     pub extra: Vec<(String, String)>,
 }
 
+/// The client's default WebSocket port (`"4718"`, HB deviced).
+pub const CLIENT_DEFAULT_PORT: u16 = 4718;
+
 impl GuiQuery {
+    /// `host`, `port`, `path`. Like `GetSelectedInsertURL`, one trailing `/` of `path` is dropped.
     pub fn new(ip: &str, port: u16, path: &str) -> Self {
-        Self { ip: ip.into(), port, path: path.into(), extra: vec![] }
+        Self { ip: ip.into(), port, path: trim_slash(path).into(), plugin_id: None, extra: vec![] }
+    }
+
+    /// Console 1.3.1's keys for an installed component (`ua-content` URL): `host`, `port`, `path`
+    /// (one trailing `/` dropped), `plugin_id`, in that order (Mac `GetSelectedInsertURL`
+    /// 0x1df630).
+    pub fn console(ip: &str, port: u16, path: &str, plugin_id: &str) -> Self {
+        Self::new(ip, port, path).with_plugin_id(plugin_id)
+    }
+
+    pub fn with_plugin_id(mut self, plugin_id: &str) -> Self {
+        self.plugin_id = (!plugin_id.is_empty()).then(|| plugin_id.to_string());
+        self
     }
 
     pub fn to_query(&self) -> String {
         let mut parts = vec![format!("host={}", encode(&self.ip)), format!("port={}", self.port), format!("path={}", encode(&self.path))];
+        if let Some(id) = &self.plugin_id {
+            parts.push(format!("plugin_id={}", encode(id)));
+        }
         parts.extend(self.extra.iter().map(|(k, v)| format!("{}={}", encode(k), encode(v))));
         parts.join("&")
     }
+
+    /// What the GUI bundle makes of a page URL (`ua-content://…`, `file://…` or a bare query), by
+    /// its own two parsers (WEBBRIDGE.md §1):
+    /// - `MixerBase.doConnect` splits `location.search` on `&`/`=`, keeps pairs with exactly one
+    ///   `=`, and takes the host from `ip`, then `host`;
+    /// - `Application.getURLParams` runs `URLSearchParams` over the **whole href**, so the first
+    ///   key is glued to the URL and lost; it supplies `deviceId` (the host fallback), `port`,
+    ///   `transport` and `path`, and its `path` wins.
+    ///
+    /// `port` defaults to 4718 and one trailing `/` is dropped from `path`. None when the GUI
+    /// would find no `path` (it then starts offline, without connecting): no `path` key, or
+    /// `path` as the first key of an href.
+    pub fn parse(href: &str) -> Option<Self> {
+        let search = match href.split_once('?') {
+            Some((_, q)) => q,
+            None if href.contains('=') && !href.contains("://") => href,
+            None => "",
+        };
+        let search = search.split('#').next().unwrap_or("");
+        // doConnect: `M(window.location.search)`.
+        let connect: Vec<(String, String)> = search
+            .split('&')
+            .filter_map(|kv| {
+                let mut it = kv.split('=');
+                let (k, v) = (it.next()?, it.next()?);
+                it.next().is_none().then(|| (percent_decode(k), percent_decode(v)))
+            })
+            .collect();
+        // getURLParams: `new URLSearchParams(window.location.href)`; the first key carries the
+        // href's prefix, so it never matches.
+        let whole = if href.contains('?') || href.contains("://") { href } else { "" };
+        let url_params: Vec<(String, String)> = whole
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .split('&')
+            .map(|kv| {
+                let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+                (form_decode(k), form_decode(v))
+            })
+            .collect();
+        let get = |pairs: &[(String, String)], key: &str| pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        // The GUI goes offline when getURLParams finds no `path` (`n2 = !t2.path`); a bare query
+        // has no href, so doConnect's copy is all there is.
+        let path = if whole.is_empty() { get(&connect, "path") } else { get(&url_params, "path") }.filter(|p| !p.is_empty())?;
+        let ip = get(&connect, "ip").or_else(|| get(&connect, "host")).or_else(|| get(&url_params, "deviceId")).unwrap_or_default();
+        let port = get(&url_params, "port").or_else(|| get(&connect, "port")).and_then(|p| p.parse().ok()).unwrap_or(CLIENT_DEFAULT_PORT);
+        let plugin_id = get(&connect, "plugin_id").or_else(|| get(&url_params, "plugin_id")).filter(|p| !p.is_empty());
+        let known = ["ip", "host", "deviceId", "port", "path", "plugin_id"];
+        let extra = connect.iter().filter(|(k, _)| !known.contains(&k.as_str())).cloned().collect();
+        Some(Self { ip, port, path: trim_slash(&path).into(), plugin_id, extra })
+    }
+}
+
+/// `GetSelectedInsertURL` drops one trailing `/` from the insert path.
+fn trim_slash(path: &str) -> &str {
+    path.strip_suffix('/').filter(|p| !p.is_empty()).unwrap_or(path)
 }
 
 /// Every component found in the [`LunaLocator`] folders.
@@ -253,6 +339,31 @@ fn percent_path(p: &Path) -> String {
     encode(&p.to_string_lossy())
 }
 
+/// `decodeURIComponent`, leniently: invalid escapes stay as written.
+pub(crate) fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `URLSearchParams` decoding: `+` is a space, then percent escapes.
+fn form_decode(s: &str) -> String {
+    percent_decode(&s.replace('+', " "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,6 +394,30 @@ mod tests {
         let lib = LunaLibrary { folders: vec![], components: vec![ssl, a] };
         assert_eq!(lib.named("ssl_g_bus_compressor").map(|c| c.name.as_str()), Some("SSL G Bus Compressor"));
         assert_eq!(lib.component_for_effect("UAD UA 1176 Rev A").map(|c| c.id.as_str()), Some("uaudio_ua_1176_rev_a"));
+    }
+
+    #[test]
+    fn console_131_keys_survive_both_bundle_parsers() {
+        let c = component("1176 Rev A", "uaudio_ua_1176_rev_a", &[]);
+        let q = GuiQuery::console("127.0.0.1", 41234, "/devices/0/inputs/2/effects/3/", &c.id);
+        let url = c.content_url(&q);
+        assert_eq!(url, "ua-content://gui/index.html?host=127.0.0.1&port=41234&path=/devices/0/inputs/2/effects/3&plugin_id=uaudio_ua_1176_rev_a");
+        // The GUI's view of it: host from doConnect, port/path from getURLParams.
+        assert_eq!(GuiQuery::parse(&url), Some(q.clone()));
+        // The file:// (1.2.x) form reads the same.
+        let file = c.url(&GuiQuery::new("127.0.0.1", 41234, "/devices/0/inputs/2/effects/3"));
+        let back = GuiQuery::parse(&file).unwrap();
+        assert_eq!((back.ip.as_str(), back.port, back.path.as_str(), back.plugin_id), ("127.0.0.1", 41234, "/devices/0/inputs/2/effects/3", None));
+        // `ip` beats `host`; `deviceId` is the fallback; the default port is 4718.
+        let p = GuiQuery::parse("ua-content://gui/index.html?x=1&deviceId=10.0.0.2&path=%2Fa%2Fb").unwrap();
+        assert_eq!((p.ip.as_str(), p.port, p.path.as_str()), ("10.0.0.2", 4718, "/a/b"));
+        let p = GuiQuery::parse("ua-content://gui/index.html?host=h&ip=i&path=/a").unwrap();
+        assert_eq!(p.ip, "i");
+        // `path` first, or missing: the GUI starts offline.
+        assert_eq!(GuiQuery::parse("ua-content://gui/index.html?path=/a&host=h&port=1"), None);
+        assert_eq!(GuiQuery::parse("ua-content://gui/index.html?host=h&port=1"), None);
+        // A bare query (no href) is read like location.search.
+        assert_eq!(GuiQuery::parse("host=h&port=9&path=/z/").map(|q| q.path), Some("/z".into()));
     }
 
     #[test]
