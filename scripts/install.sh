@@ -92,6 +92,38 @@ run_sudo() {
     fi
 }
 
+# Debian 13 removed the legacy AppIndicator package. Ayatana provides a
+# compatible API under its own GI namespace and is available on supported apt
+# releases.
+apt_appindicator_package() {
+    printf '%s\n' gir1.2-ayatanaappindicator3-0.1
+}
+
+# Print the usable GI namespace for the tray, preferring the current Ayatana
+# package but retaining compatibility with the legacy AppIndicator package.
+appindicator_namespace() {
+    local namespace
+    for namespace in AyatanaAppIndicator3 AppIndicator3; do
+        if python3 - "$namespace" <<'PY' 2>/dev/null
+import sys
+import gi
+
+namespace = sys.argv[1]
+try:
+    gi.require_version(namespace, '0.1')
+    module = __import__('gi.repository', fromlist=[namespace])
+    getattr(module, namespace)
+except (ImportError, ValueError, AttributeError):
+    raise SystemExit(1)
+PY
+        then
+            printf '%s\n' "$namespace"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # --- Initramfs regen (dracut bakes /etc/modules-load.d into the initrd) ---
 regen_initramfs() {
     if command -v dracut &>/dev/null; then
@@ -325,11 +357,11 @@ check_install_deps() {
         ok "pavucontrol"
     fi
     # AppIndicator3 for tray indicator
-    if ! python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
+    if ! appindicator_namespace >/dev/null; then
         missing+=("appindicator")
         case "$PKG_MGR" in
             dnf)    missing_pkgs+=("libappindicator-gtk3") ;;
-            apt)    missing_pkgs+=("gir1.2-appindicator3-0.1") ;;
+            apt)    missing_pkgs+=("$(apt_appindicator_package)") ;;
             pacman) missing_pkgs+=("libappindicator-gtk3") ;;
             zypper) missing_pkgs+=("typelib-1_0-AppIndicator3-0_1") ;;
         esac
@@ -1244,7 +1276,7 @@ main() {
     # Launch tray indicator
     pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
     tray_script="$PROJECT_DIR/tools/open-apollo-tray.py"
-    if [ -n "$pw_user" ] && [ -f "$tray_script" ] && python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
+    if [ -n "$pw_user" ] && [ -f "$tray_script" ] && appindicator_namespace >/dev/null; then
         if ! pgrep -f "open-apollo-tray" > /dev/null 2>&1; then
             info "Starting Open Apollo tray indicator..."
             sudo -u "$pw_user" python3 "$tray_script" &>/dev/null &

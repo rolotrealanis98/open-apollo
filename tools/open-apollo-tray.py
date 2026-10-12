@@ -4,7 +4,8 @@
 Shows Apollo hardware status with quick actions for init, daemon
 management, and PipeWire profile reload.
 
-Dependencies: gir1.2-appindicator3-0.1 (Ubuntu) or libappindicator-gtk3 (Fedora)
+Dependencies: an AppIndicator3-compatible GI namespace (AppIndicator3 or
+AyatanaAppIndicator3).
 """
 
 import os
@@ -16,8 +17,14 @@ import signal
 
 import gi
 gi.require_version('Gtk', '3.0')
-gi.require_version('AppIndicator3', '0.1')
-from gi.repository import Gtk, GLib, AppIndicator3
+from gi.repository import Gtk, GLib
+
+try:
+    gi.require_version('AyatanaAppIndicator3', '0.1')
+    from gi.repository import AyatanaAppIndicator3 as AppIndicator3
+except (ImportError, ValueError):
+    gi.require_version('AppIndicator3', '0.1')
+    from gi.repository import AppIndicator3
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
