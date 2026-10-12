@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
-use rack::menu::{Command, MenuCmd, MenuModelState, PluginOp, PluginScope, StripMenuState};
+use rack::menu::{Command, MenuCmd, MenuModelState, PluginOp, PluginScope, SceneOp, StripMenuState};
+
+const RECALLED_SCENE: &str = "/pluginscenes/0/RecalledSceneIndex";
 use rack::model::StripInfo;
 use ua_engine::{InsertPaths, Json};
 
@@ -28,12 +30,45 @@ impl EngineMixer {
             can_redo: redo.is_some(),
             post_fader_metering: self.bool_at("/PostFaderMetering"),
             clipboard: self.clipboard.clone(),
+            recalled_scene: self
+                .store
+                .value(RECALLED_SCENE)
+                .and_then(|v| v.as_f64())
+                .filter(|i| *i >= 0.0)
+                .map(|i| i as u16),
         }
     }
 
-    /// `/UndoRedo` values `{value, type: undo | current | redo, enabled}`: the nearest enabled
-    /// undo step before the current one and the nearest redo step after it.
+    /// `post /SceneOperation {"<op>Scene": index}` (Rack.dll `MxClnt_PluginScenesData::ClearScene`
+    /// 0x181903810, `OverwriteScene` 0x181904080, `MxClnt_UAD2PluginScenesData::RecallScene`
+    /// 0x181b0ffd0, `StoreScene` 0x181b105b0; the keys follow `SceneOperation` in UA Mixer
+    /// Engine 12's strings). Rename is a `set` of the scene's `SceneName`.
+    pub(crate) fn scene_operation(&mut self, op: SceneOp, index: u16) {
+        let key = match op {
+            SceneOp::Save => "StoreScene",
+            SceneOp::Recall => "RecallScene",
+            SceneOp::Clear => "ClearScene",
+            SceneOp::Overwrite => "OverwriteScene",
+            SceneOp::Rename => return,
+        };
+        let args: Json = [(key, Json::from(index as i64))].into_iter().collect();
+        self.store.post("/SceneOperation", Some(&args));
+    }
+
+    /// `/UndoRedo` values `{value, type: undo | current | redo, enabled}`: whether an undo / redo
+    /// step is enabled, as the value Console would set. UA Mixer Engine 12 only acts on
+    /// current − 1 (undo) and current + 1 (redo) (`CMxUndoManager::SetProperty` 0x1000b5084).
     fn undo_redo_targets(&self) -> (Option<Json>, Option<Json>) {
+        let current = self.store.value(ua_engine::UNDO_REDO).and_then(|v| v.as_f64()).map(|c| c as i64);
+        let (undo, redo) = self.undo_redo_entries();
+        match current {
+            Some(c) => (undo.map(|_| Json::from(c - 1)), redo.map(|_| Json::from(c + 1))),
+            None => (undo, redo),
+        }
+    }
+
+    /// The enabled undo and redo entries of the `/UndoRedo` list.
+    fn undo_redo_entries(&self) -> (Option<Json>, Option<Json>) {
         let Some(Json::Array(list)) = self.store.meta("/UndoRedo").and_then(|m| m.values.clone()) else { return (None, None) };
         let mut undo = None;
         let mut redo = None;
@@ -132,13 +167,14 @@ impl EngineMixer {
                     Command::Redo => redo,
                     _ => None,
                 };
+                // Unbracketed (an /UndoRecording group around an undo would record a step).
                 if let Some(v) = target.and_then(|v| v.as_i64()) {
-                    self.store.commit("/UndoRedo", v);
+                    self.store.set_now(ua_engine::UNDO_REDO, v);
                 }
             }
-            // `post /ClearClips {path?, reset}` (the engine's own `commands` list): a strip's
-            // meter, or every meter without a path. "reset" also clears the peak holds, as
-            // Console's CLEAR does (inferred: no captured Console traffic).
+            // Meter menu CLEAR (`Rack_Meter::HandlePopupMenu` 0x1809cadf0 →
+            // `MxClnt_MixerData::ClearClips` 0x1817ddcc0): Meter posts `/ClearClips {"path": …}`
+            // for the strip; All Meters posts `/ClearClips {}` (0x1817dd5c0). No "reset".
             MenuCmd::ClearMeter | MenuCmd::ClearAllMeters => {
                 let mut args: Vec<(&str, Json)> = Vec::new();
                 if *cmd == MenuCmd::ClearMeter {
@@ -149,7 +185,6 @@ impl EngineMixer {
                     let Some(path) = path else { return };
                     args.push(("path", Json::String(path)));
                 }
-                args.push(("reset", Json::Bool(true)));
                 self.store.post("/ClearClips", Some(&args.into_iter().collect::<Json>()));
             }
             // `post /CopyToSends {"send": i}`: the monitor mix into send `i` (fader / pan menu).
@@ -157,9 +192,9 @@ impl EngineMixer {
                 let args: Json = [("send", Json::from(*i as i64))].into_iter().collect();
                 self.store.post("/CopyToSends", Some(&args));
             }
-            // Scene save / rename / overwrite / clear: the `SceneOperation` arguments are not
-            // known yet, so these send nothing (Recall is `RecallScene`, a plain control).
-            MenuCmd::Scene(..) => {}
+            // Rename / Overwrite / Clear are the view's (edit field, confirmation); Save and
+            // Recall arrive as `Control::SceneCommand`.
+            MenuCmd::Scene(op @ (SceneOp::Save | SceneOp::Recall), i) => self.scene_operation(*op, *i),
             _ => {}
         }
     }

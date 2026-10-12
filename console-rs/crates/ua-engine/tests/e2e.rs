@@ -46,17 +46,23 @@ fn store_goes_live_read_only() {
         &cmds[..2]
     );
     assert_eq!(cmds[1], r#"{"path":"client_id","data":"uaconsole"}"#);
+    // Console's hello (`Options::console_hello`), then the tree.
+    assert_eq!(cmds[2], "set /Sleep false");
+    assert_eq!(cmds[3], "subscribe /MixerState/value");
+    assert!(cmds[4].starts_with("subscribe /errors?func_id=") && cmds[4].ends_with("&recursive=1"), "{}", cmds[4]);
+    assert_eq!(cmds[5], "get /errors");
     assert!(
-        cmds[2].starts_with("get /?func_id=") && cmds[2].ends_with("&recursive=1"),
+        cmds[6].starts_with("get /?func_id=") && cmds[6].ends_with("&recursive=1"),
         "{}",
-        cmds[2]
+        cmds[6]
     );
-    assert_eq!(cmds[3], "subscribe mode=multi");
+    assert!(cmds.iter().position(|c| c == "subscribe mode=multi").is_some_and(|i| i > 6));
     assert!(store.subscribed_paths().len() > 3000);
+    // Read-only: no write but the per-socket sleep hint.
     assert!(
         !cmds
             .iter()
-            .any(|c| c.starts_with("set ") || c.starts_with("post "))
+            .any(|c| (c.starts_with("set ") || c.starts_with("post ")) && c != "set /Sleep false")
     );
 
     // An engine-side change arrives in a multi envelope and lands in the store.
@@ -144,6 +150,68 @@ fn writes_reach_engine_when_allowed() {
     assert_eq!(store.value(&strip.fader()), Some(&Value::Number(0.1)));
 }
 
+/// Writes carry Console 1.3.1's request query (pcap `protocol/v131/console.pcap`): mixer sets
+/// `?context_type=main&func_id=N`, the undo bracket and posts `?func_id=N`, one running
+/// counter shared with `get`.
+#[test]
+fn writes_use_console_wire_format() {
+    let server = mock(MockOptions::default());
+    let mut store = live_store(
+        &server,
+        Options {
+            allow_writes: true,
+            ..Options::default()
+        },
+    );
+    let strip = store.topology().inputs[1].clone();
+    store.set_writes_enabled(true);
+    store.commit(&strip.mute(), true);
+    store.post("/SaveLastUsedSession", Some(&serde_json::json!({})));
+    wait_until("writes", T, || server.raw_write_commands().len() == 4);
+    let raw = server.raw_write_commands();
+    let ids: Vec<u64> = raw
+        .iter()
+        .map(|c| {
+            let q = c.split('?').nth(1).unwrap();
+            let id = q.split(['&', ' ']).find_map(|kv| kv.strip_prefix("func_id=")).unwrap();
+            id.parse().unwrap()
+        })
+        .collect();
+    assert_eq!(
+        raw,
+        [
+            format!("set /UndoRecording/value?func_id={} true", ids[0]),
+            format!("set {}/value?context_type=main&func_id={} true", strip.mute(), ids[1]),
+            format!("set /UndoRecording/value?func_id={} false", ids[2]),
+            format!("post /SaveLastUsedSession?func_id={} {{}}", ids[3]),
+        ]
+    );
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "func_id is a running counter: {ids:?}");
+    assert_eq!(server.value(&strip.mute()), Some(Value::Bool(true)));
+
+    // Only func_id for non-mix controls (RecordPreEffects, as in the 1.2.x traces); no query
+    // for insert assignment or a reset to the default.
+    store.commit(&strip.record_pre_effects(), true);
+    store.commit(&strip.inserts[0].effect_name(), "UAD 1176");
+    store.reset(&strip.pan(), 0.0);
+    wait_until("more writes", T, || server.raw_write_commands().len() == 13);
+    let raw = server.raw_write_commands();
+    let strip_ids = |c: &str| {
+        let (path, value) = c.split_once(' ').unwrap().1.split_once(' ').unwrap();
+        let query = path.split_once('?').map(|(_, q)| q.split('&').filter(|kv| !kv.starts_with("func_id=")).collect::<Vec<_>>().join("&"));
+        (path.split('?').next().unwrap().to_owned(), query, value.to_owned())
+    };
+    let rec = strip_ids(&raw[5]);
+    assert_eq!(rec, (format!("{}/value", strip.record_pre_effects()), Some(String::new()), "true".to_owned()));
+    let fx = strip_ids(&raw[8]);
+    assert_eq!(fx, (format!("{}/value", strip.inserts[0].effect_name()), None, "\"UAD 1176\"".to_owned()));
+    let pan = strip_ids(&raw[11]);
+    assert_eq!(pan, (format!("{}/value", strip.pan()), None, "\"default\"".to_owned()));
+    assert!(raw[10].starts_with("set /UndoRecording/value?func_id=") && raw[12].starts_with("set /UndoRecording/value?func_id="));
+    // The UI shows the default at once.
+    assert_eq!(store.value(&strip.pan()), Some(&Value::Number(0.0)));
+}
+
 /// A drag is not pulled back by echoes of its own earlier values.
 #[test]
 fn echoes_do_not_pull_back_a_drag() {
@@ -217,6 +285,8 @@ fn requests_correlate_by_func_id() {
         server.endpoint(),
         Options {
             load_tree: false,
+            // No hello: its /MixerState subscription reply would be an update.
+            console_hello: false,
             ..Options::default()
         },
     );
@@ -454,4 +524,23 @@ fn endpoint_parsing() {
         Endpoint::parse("studio.local").to_string(),
         "studio.local:4710"
     );
+}
+
+/// Console's opening (1.2.x traces): after the identity, `set /Sleep false`, `/MixerState` and
+/// `/errors` subscriptions; `set /Sleep` is a per-socket hint that read-only connections send.
+/// The MIDI input list is polled every second while live.
+#[test]
+fn console_hello_sleep_hint_and_midi_poll() {
+    let server = mock(MockOptions::default());
+    let mut store = live_store(&server, Options::default());
+    let cmds = server.received_commands();
+    let pos = |p: &str| cmds.iter().position(|c| c.starts_with(p)).unwrap_or_else(|| panic!("{p} not in {cmds:?}"));
+    assert!(pos("set /Sleep false") < pos("subscribe /MixerState/value"));
+    assert!(pos("subscribe /errors?func_id=") < pos("get /?func_id="));
+    pos("get /errors");
+    store.set_sleep(true);
+    wait_until("sleep", T, || server.received_commands().iter().any(|c| c == "set /Sleep true"));
+    assert!(server.write_commands().is_empty(), "no mixer writes from a read-only store: {:?}", server.write_commands());
+    let polls = || server.received_commands().iter().filter(|c| c.starts_with("get /MidiInputDevice/values?func_id=")).count();
+    drain_until(&mut store, "two MIDI polls", Duration::from_secs(5), |_| polls() >= 2);
 }

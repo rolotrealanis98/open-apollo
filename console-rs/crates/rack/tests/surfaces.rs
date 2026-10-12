@@ -361,14 +361,14 @@ fn plugin_scenes_panel_primes_and_recalls() {
     assert!(view.show_scenes, "PLUG-IN SCENES is the window's column (s10), not a sheet");
     assert!(view.sheet.is_none());
     let (hits, _) = build(&assets, &model, &view);
-    assert!(find(&hits, "global", &Control::RecallScene(0)).is_none(), "RECALL needs a primed scene");
+    assert!(find(&hits, "global", &Control::SceneCommand(rack::menu::SceneOp::Recall, 0)).is_none(), "RECALL needs a primed scene");
     press(&mut view, &mut model, &hits, "settings", Control::SceneSelect(1));
     assert_eq!(view.settings.scene, Some(1));
     let (hits, _) = build(&assets, &model, &view);
     press(&mut view, &mut model, &hits, "settings", Control::SceneStep(false));
     assert_eq!(view.settings.scene, Some(2));
     let (hits, _) = build(&assets, &model, &view);
-    press(&mut view, &mut model, &hits, "global", Control::RecallScene(2));
+    press(&mut view, &mut model, &hits, "global", Control::SceneCommand(rack::menu::SceneOp::Recall, 2));
     assert_eq!(model.status.scene.as_deref(), Some(model.scenes[2].as_str()));
     // The navigator button closes it again.
     let (hits, _) = build(&assets, &model, &view);

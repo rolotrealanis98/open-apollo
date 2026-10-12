@@ -20,6 +20,10 @@ use crate::value::Value;
 
 pub const UNDO_RECORDING_PATH: &str = "/UndoRecording";
 
+/// The literal a `set` carries to reset a property to the engine's default
+/// (`CMxNtwk_Server::setObjectValue`; Console's double-click: `set …/Pan/value "default"`).
+pub const DEFAULT_VALUE: &str = "default";
+
 /// What the writer needs from the model it writes into.
 pub(crate) trait LocalModel {
     /// Optimistic local write: applies now and holds back engine echoes.
@@ -106,6 +110,20 @@ impl Writer {
             apply_companion(model, &p, &value);
         }
         if self.pending.insert(p.clone(), value).is_none() {
+            self.order.push(p);
+        }
+        self.pending_since.get_or_insert_with(Instant::now);
+    }
+
+    /// Resets `path` to the engine's default: `local` (the UI's idea of the default) shows at
+    /// once, the wire carries the literal `"default"`.
+    pub(crate) fn reset(&mut self, model: &mut impl LocalModel, path: &str, local: Value) {
+        let p = path::property_path(path).to_owned();
+        model.apply_local(&p, local.clone());
+        if self.updates_companions {
+            apply_companion(model, &p, &local);
+        }
+        if self.pending.insert(p.clone(), Value::String(DEFAULT_VALUE.into())).is_none() {
             self.order.push(p);
         }
         self.pending_since.get_or_insert_with(Instant::now);

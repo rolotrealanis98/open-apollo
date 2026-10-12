@@ -19,7 +19,7 @@ pub struct SubscriptionPlan {
     pub batches: Vec<Batch>,
 }
 
-const INPUT_PROPS: [&str; 30] = [
+const INPUT_PROPS: [&str; 33] = [
     "Stereo",
     "Active",
     "IOType",
@@ -50,6 +50,10 @@ const INPUT_PROPS: [&str; 30] = [
     "LLMDiskMix",
     "LLMDiskChannelR",
     "StickyDanteNodeIOType",
+    // In the engine 12 tree but not in our first plan (protocol/v131/MAP.md item 9).
+    "LLMDiskTrimLevelTapered",
+    "LLMDiskTrimLevel",
+    "AdatPreampState",
 ];
 const PREAMP_PROPS: [&str; 9] = [
     "GainTapered",
@@ -71,7 +75,7 @@ const SEND_PROPS: [&str; 7] = [
     "Pan",
     "PostFaderOverride",
 ];
-const AUX_PROPS: [&str; 11] = [
+const AUX_PROPS: [&str; 17] = [
     "Name",
     "Active",
     "FaderLevelTapered",
@@ -83,6 +87,29 @@ const AUX_PROPS: [&str; 11] = [
     "LLMDiskEnabled",
     "LLMDiskChannel",
     "LLMDiskChannelR",
+    "EnabledByUser",
+    "GainTapered",
+    "Gain",
+    "Isolate",
+    "LLMDiskTrimLevelTapered",
+    "LLMDiskTrimLevel",
+];
+/// The plug-in catalogue properties Console subscribes for every `/plugins/N` (1.2.x traces:
+/// 1,540 subscriptions on an x4), so licence, demo and status changes reach the browser.
+const PLUGIN_PROPS: [&str; 13] = [
+    "Name",
+    "Status",
+    "RemoteGUI",
+    "Authorized",
+    "AuthHardware",
+    "AuthUpdateRequired",
+    "Categories",
+    "DefaultPreset",
+    "DemoAvailable",
+    "DemoDaysRemaining",
+    "Demoing",
+    "Unison",
+    "VstID",
 ];
 const TALKBACK_ROOT: [&str; 3] = ["/TalkbackOn", "/TalkbackInPhysicalCR", "/TalkbackMaster"];
 
@@ -250,6 +277,33 @@ impl SubscriptionPlan {
             label: "global".into(),
             paths: g,
         });
+
+        // Driver routes (the I/O MATRIX): Console subscribes `/inputroutes` and `/outputroutes`
+        // recursively; here every route property.
+        let mut r = Vec::new();
+        for node in ["/inputroutes", "/outputroutes"] {
+            for n in tree.indices(node) {
+                let base = format!("{node}/{n}");
+                if let Some(nd) = tree.node(&base) {
+                    r.extend(nd.properties.iter().filter(|k| *k != "Type").filter_map(|k| value(&format!("{base}/{k}"))));
+                }
+            }
+        }
+        batches.push(Batch { label: "routes".into(), paths: r });
+
+        // Plug-in scenes: the recalled index and every scene's name and tempo.
+        let mut sc: Vec<String> = ["RecalledSceneIndex"].iter().filter_map(|k| value(&format!("/pluginscenes/0/{k}"))).collect();
+        for n in tree.indices("/pluginscenes/0/scenes") {
+            sc.extend(["SceneName", "SceneTempo"].iter().filter_map(|k| value(&format!("/pluginscenes/0/scenes/{n}/{k}"))));
+        }
+        batches.push(Batch { label: "scenes".into(), paths: sc });
+
+        // The plug-in catalogue.
+        let mut pl = Vec::new();
+        for n in tree.indices("/plugins") {
+            pl.extend(PLUGIN_PROPS.iter().filter_map(|k| value(&format!("/plugins/{n}/{k}"))));
+        }
+        batches.push(Batch { label: "plugins".into(), paths: pl });
 
         batches.retain(|b| !b.paths.is_empty());
         SubscriptionPlan { batches }

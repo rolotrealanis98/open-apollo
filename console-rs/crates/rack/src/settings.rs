@@ -557,8 +557,8 @@ fn map_table(name: &str) -> Vec<(&'static str, PropValue)> {
         "dante_latency" => vec![("Manual", PropValue::Int(0)), ("1 msec", PropValue::Int(1000)), ("2 msec", PropValue::Int(2000)), ("5 msec", PropValue::Int(5000))],
         // DISPLAY › METERING (`PostFaderMetering`).
         "metering" => vec![("PRE-FADER", PropValue::Bool(false)), ("POST-FADER", PropValue::Bool(true))],
-        // OUTPUT REFERENCE LEVELS (`Pad`: the −10 dBV consumer level); Rack's order
-        // (0x180e5a9d0, capture s24). [I] Pad ↔ −10 dBV.
+        // OUTPUT REFERENCE LEVELS (`Pad`: true = −10 dBV, false = +4 dBu, MAP.md "I/O and
+        // outputs"); Rack's order (0x180e5a9d0, capture s24).
         "ref_level" => vec![("-10 dBV", PropValue::Bool(true)), ("+4 dBu", PropValue::Bool(false))],
         // MON LEVEL (monitor output `Pad`): "14 dBu" / "20 dBu" (0x180e5a9d0). [I] Pad ↔ 14 dBu.
         "mon_level" => vec![("14 dBu", PropValue::Bool(true)), ("20 dBu", PropValue::Bool(false))],
@@ -1047,8 +1047,9 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             vec![Write::Post(format!("/{cmd}"), payload)]
         }
         ("route", SettingOp::Choose(i)) => {
-            // route:<node>:<IOType>: pick channel `i` of that type for the route. [I] the write
-            // (IOType + ChannelIndex) is inferred from the tree, not observed.
+            // route:<node>:<IOType>: pick channel `i` of that type for the route: `IOType` +
+            // `ChannelIndex` (1-based within the type; `DeviceHwID` only on multi-unit setups),
+            // per UA Mixer Engine 12's route handlers (protocol/v131/MAP.md, "Routes").
             let mut it = rest.rsplitn(2, ':');
             let (ty, node) = (it.next().unwrap_or(""), it.next().unwrap_or(""));
             vec![Write::Set(format!("{node}/IOType"), PropValue::Str(ty.to_string())), Write::Set(format!("{node}/ChannelIndex"), PropValue::Int(*i as i64 + 1))]

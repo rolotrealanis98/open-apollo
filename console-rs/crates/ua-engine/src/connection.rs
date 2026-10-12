@@ -102,6 +102,10 @@ pub struct Options {
     /// [`Update::Tree`]. The [`Store`](crate::Store) needs this.
     pub load_tree: bool,
     pub tree_timeout: Duration,
+    /// Console's opening after the identity (1.2.x Console traces, MAP.md "Connect
+    /// sequence"): `set /Sleep false`, `subscribe /MixerState/value`, `subscribe
+    /// /errors?recursive=1` and `get /errors`.
+    pub console_hello: bool,
 }
 
 impl Default for Options {
@@ -120,6 +124,7 @@ impl Default for Options {
             request_timeout: Duration::from_secs(20),
             load_tree: true,
             tree_timeout: Duration::from_secs(60),
+            console_hello: true,
         }
     }
 }
@@ -133,6 +138,7 @@ impl Options {
             network_id_key: "network_id".into(),
             ping_interval: Some(Duration::from_secs(5)),
             load_tree: false,
+            console_hello: false,
             request_timeout: Duration::from_secs(60),
             ..Options::default()
         }
@@ -426,7 +432,7 @@ impl EngineHandle {
     /// Queues a command. `set`/`post` are refused unless `allow_writes`; anything is refused while
     /// disconnected (commands are never replayed into a later connection).
     pub fn send(&self, command: Command) -> Result<()> {
-        if command.is_write() && !self.options.allow_writes {
+        if command.is_write() && !command.is_socket_hint() && !self.options.allow_writes {
             self.shared.counters.refused_writes.fetch_add(1, Relaxed);
             log::info!("refused write on read-only connection: {command}");
             return Err(Error::WriteRefused);
@@ -679,6 +685,18 @@ impl Task {
                 count_out += 1;
             }
         }
+        if self.options.console_hello {
+            let id = self.next_func_id();
+            for c in [
+                Command::set_raw("/Sleep", "false"),
+                Command::Subscribe("/MixerState/value".into()),
+                Command::Subscribe(format!("/errors?func_id={id}&recursive=1")),
+                Command::get("/errors"),
+            ] {
+                out.extend(NulFramer::encode(&c.text()));
+                count_out += 1;
+            }
+        }
         let mut pending: HashMap<u64, Pending> = HashMap::new();
         let mut load = None;
         if self.options.load_tree {
@@ -809,10 +827,15 @@ impl Task {
             } => {
                 if g != generation {
                     self.shared.counters.dropped.fetch_add(1, Relaxed);
-                } else if command.is_write() && !self.options.allow_writes {
+                } else if command.is_write() && !command.is_socket_hint() && !self.options.allow_writes {
                     // Defence in depth: the handle already refuses these.
                     self.shared.counters.refused_writes.fetch_add(1, Relaxed);
                 } else {
+                    let command = if command.is_write() {
+                        command.with_func_id(self.next_func_id())
+                    } else {
+                        command
+                    };
                     out.extend(NulFramer::encode(&command.text()));
                     self.shared.counters.commands_out.fetch_add(1, Relaxed);
                 }

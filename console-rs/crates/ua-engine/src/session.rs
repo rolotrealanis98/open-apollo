@@ -72,10 +72,11 @@ pub enum SessionCommand {
     Delete { name: String },
     /// `post /RenameSession {"origName":"…","newName":"…"}` (`…::RenamePreset`).
     Rename { from: String, to: String },
-    /// `post /NewFolder {"path":"/Session","folder":"…"}` (engine 12 catalogue; Console 1.2.9
-    /// sends `{"folder":…,"type":"session"}`).
+    /// `post /NewFolder {"folder":"…","type":"session"}`. The engine's `CMxNewFolder::execute`
+    /// takes `type: "session"` for session folders; a `path` is for preset folders only
+    /// (`<effect or channel>/Preset`) and anything else fails (protocol/v131/MAP.md).
     NewFolder { folder: String },
-    /// `post /DeleteFolder {"path":"/Session","folder":"…"}` (engine 12 catalogue).
+    /// `post /DeleteFolder {"folder":"…","type":"session"}` (same handler shape).
     DeleteFolder { folder: String },
     /// `post /SaveLastUsedSession {}`: Console sends it after each edit (T6:33331).
     SaveLastUsed,
@@ -110,12 +111,32 @@ impl SessionCommand {
                 post("RenameSession", serde_json::json!({ "origName": from, "newName": to }))
             }
             SessionCommand::NewFolder { folder } => {
-                post("NewFolder", serde_json::json!({ "path": SESSION, "folder": folder }))
+                post("NewFolder", serde_json::json!({ "folder": folder, "type": "session" }))
             }
             SessionCommand::DeleteFolder { folder } => {
-                post("DeleteFolder", serde_json::json!({ "path": SESSION, "folder": folder }))
+                post("DeleteFolder", serde_json::json!({ "folder": folder, "type": "session" }))
             }
             SessionCommand::SaveLastUsed => post("SaveLastUsedSession", serde_json::json!({})),
+        }
+    }
+
+    /// False for a request the engine must never get: an empty Save As name (only `.uadmix`) or
+    /// Open path, and empty names or folders elsewhere. UA Mixer Engine 12 answers an empty
+    /// `SaveSessionAs` / a missing `OpenSession` path with a native file dialog on the engine
+    /// host (MAP.md, "Sessions").
+    pub fn is_sendable(&self) -> bool {
+        let blank = |s: &str| s.trim().is_empty();
+        match self {
+            SessionCommand::SaveAs { name } => {
+                let stem = name.trim();
+                let stem = if stem.to_ascii_lowercase().ends_with(EXTENSION) { &stem[..stem.len() - EXTENSION.len()] } else { stem };
+                !blank(stem)
+            }
+            SessionCommand::Open { path } => !blank(path),
+            SessionCommand::Load(n) | SessionCommand::Delete { name: n } => !blank(n),
+            SessionCommand::Rename { from, to } => !blank(from) && !blank(to),
+            SessionCommand::NewFolder { folder } | SessionCommand::DeleteFolder { folder } => !blank(folder),
+            _ => true,
         }
     }
 
