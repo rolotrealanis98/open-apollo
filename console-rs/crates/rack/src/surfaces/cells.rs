@@ -57,13 +57,14 @@ pub fn inserts_cell_h(slots: usize, size: InsertSize, rec_row: bool) -> f32 {
     HEADER_H + inserts_list_h(slots, size) + if rec_row { 55.0 } else { 9.0 }
 }
 
-/// Sends cell: header + Σ(H + 3) + 5, or 87 without sends.
+/// Sends cell: header 22 + `CalcNeededContentHeight` (0x1814c01f0: 4 + Σ(H + 3) − 3 + 5), or 87
+/// without sends. p2: an aux with CUE 1–4 rows is 22 + 4 + 3·78 + 75 + 5 = 340.
 pub fn sends_cell_h(sends: usize, overview: bool) -> f32 {
     if sends == 0 {
         return SENDS_DEFAULT_H;
     }
     let h = if overview { SEND_H_COMPACT } else { SEND_H };
-    26.0 + sends as f32 * (h + 3.0) + 5.0
+    HEADER_H + 4.0 + sends as f32 * (h + 3.0) - 3.0 + 5.0
 }
 
 fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
@@ -218,8 +219,8 @@ mod tests {
         assert_eq!(inserts_cell_h(4, InsertSize::Large, true), 288.0);
         assert_eq!(inserts_cell_h(4, InsertSize::Large, false), 242.0);
         assert_eq!(inserts_cell_h(4, InsertSize::Small, true), 22.0 + 92.0 + 11.0 + 55.0);
-        // Aux sends: 22 + 26 + 2 × 78 (+ 5 bottom margin).
-        assert_eq!(sends_cell_h(2, false), 26.0 + 156.0 + 5.0);
+        // p2: the aux Sends cell (CUE 1–4 rows) runs 326 → 666.
+        assert_eq!(sends_cell_h(4, false), 340.0);
         assert_eq!(sends_cell_h(0, false), SENDS_DEFAULT_H);
     }
 

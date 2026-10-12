@@ -71,6 +71,14 @@ impl WindowLayout {
     }
 }
 
+/// Vertical offset of a cells stack: scrolled when it overflows the column; when it is shorter,
+/// Console anchors it at the bottom, against the fader area (p2: input header at 119, aux at 84),
+/// which is a negative offset.
+pub fn cells_offset(rows: &CellRows, cells_h: f32, scroll: f32) -> f32 {
+    let spare = rows.total() - cells_h;
+    if spare >= 0.0 { (scroll.clamp(0.0, 1.0) * spare).round() } else { spare.floor() }
+}
+
 fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
     Some(ControlId { strip: strip.id.clone(), control })
 }
@@ -92,7 +100,7 @@ impl CellRows {
     pub fn new(model: &dyn MixerModel, view: &ViewState, strips: &[StripInfo], aux: bool) -> Self {
         let sec = view.sections;
         let slots = strips.iter().map(|s| visible_slots(&model.inserts(s), view.fixed_slots)).max().unwrap_or(4);
-        let sends = strips.iter().map(|s| if aux { model.sends(s).len() } else { model.input_sends(s).len() }).max().unwrap_or(0);
+        let sends = strips.iter().map(|s| model.send_rows(s)).max().unwrap_or(0);
         Self {
             input: (!aux).then_some(if sec.inputs { INPUT_CELL_H } else { HEADER_H }),
             inserts: if sec.inserts { cells::inserts_cell_h(slots, view.insert_size, !aux) } else { HEADER_H },
@@ -142,7 +150,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let rows = CellRows::new(model, view, &inputs, false);
     let cells_h = col_h - rows.main - 5.0;
     let overflow = (rows.total() - cells_h).max(0.0);
-    let off = (view.cells_scroll.clamp(0.0, 1.0) * overflow).round();
+    let off = cells_offset(&rows, cells_h, view.cells_scroll);
     let visible_rows = {
         let vis = |s: Section| rows.rows().iter().any(|&(r, y, h)| r == s && y - off + h > 0.0 && y - off < cells_h);
         VisibleRows { inputs: vis(Section::Inputs), inserts: vis(Section::Inserts), sends: vis(Section::Sends) }
@@ -179,7 +187,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
             for (i, s) in auxes.iter().enumerate() {
                 let r = Rect::new(l.aux_x() + i as f32 * STRIP_W, W::COLUMN.0, STRIP_W, col_h);
                 ui.fill(r, PANEL);
-                strip_column(ui, model, view, s, &aux_rows, 0.0, GroupPos { index: i, last: i + 1 == auxes.len() }, r);
+                strip_column(ui, model, view, s, &aux_rows, cells_offset(&aux_rows, cells_h, 0.0), GroupPos { index: i, last: i + 1 == auxes.len() }, r);
             }
         }
         MonitorPage::ControlRoom => draw_control_room(ui, model, Rect::new(l.aux_x(), W::COLUMN.0, aux_w, col_h)),
@@ -475,4 +483,22 @@ fn name_plate(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, r: Rect) {
         ui.text("[ ISOLATE ]", style, Rect::new(r.x, r.y + 18.0, r.w, 9.0), Align::Center);
     }
     ui.hit(r, ControlId { strip: s.id.clone(), control: Control::Name }, HitKind::Tap);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::surfaces::view::InsertSize;
+
+    /// p2 (1470×1105): the cells area is 77…666 (589). Inputs with Sends collapsed (237 + 288 +
+    /// 22) sit on the fader area, header at 119; the aux stack (242 + 340) starts at 84.
+    #[test]
+    fn short_stacks_anchor_at_the_bottom() {
+        let inputs = CellRows { input: Some(INPUT_CELL_H), inserts: cells::inserts_cell_h(4, InsertSize::Large, true), sends: HEADER_H, slots: 4, main: main_strip::HEIGHT };
+        assert_eq!(77.0 - cells_offset(&inputs, 589.0, 0.0), 119.0);
+        let aux = CellRows { input: None, inserts: cells::inserts_cell_h(4, InsertSize::Large, false), sends: cells::sends_cell_h(4, false), slots: 4, main: main_strip::HEIGHT };
+        assert_eq!(77.0 - cells_offset(&aux, 589.0, 0.0), 84.0);
+        // p1 (534): both overflow and scroll from the top.
+        assert_eq!(cells_offset(&aux, 534.0, 0.0), 0.0);
+    }
 }

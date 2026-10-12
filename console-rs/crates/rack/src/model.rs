@@ -274,6 +274,12 @@ pub trait MixerModel {
     fn input_sends(&self, _s: &StripInfo) -> Vec<SendState> {
         Vec::new()
     }
+    /// Send rows Console reserves in the strip's Sends cell. Console sizes the cell for every
+    /// send the engine lists (an Apollo aux has CUE 1–4) but draws only the active ones, so the
+    /// cell is taller than the visible sends (`GetChannelStripCellHeight_Sends` 0x18145a6e0).
+    fn send_rows(&self, s: &StripInfo) -> usize {
+        if s.kind == crate::geometry::StripKind::Aux { self.sends(s).len() } else { self.input_sends(s).len() }
+    }
     /// Pre state of send `k` (input or aux strip); None hides the PRE button.
     fn send_pre(&self, _s: &StripInfo, _k: usize) -> Option<bool> {
         None
