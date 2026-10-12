@@ -150,13 +150,12 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
         }
         draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, W::STATUS_BAR.0, visible_rows);
     }
-    title_bar(ui, model, width);
 
     // Strip area panel and session navigator.
     let visible = l.visible_inputs();
     let first = view.first_strip.min(inputs.len().saturating_sub(visible));
     ui.fill(Rect::new(l.side_x(), W::COLUMN.0, l.aux_x() - l.side_x(), col_h), PANEL);
-    draw_session_navigator(ui, model, Rect::new(l.side_x(), W::NAV_STRIP.0, l.aux_x() - l.side_x(), W::NAV_STRIP.1 - W::NAV_STRIP.0), first, visible);
+    draw_session_navigator(ui, model, Rect::new(l.side_x(), W::CONTENT_TOP, l.aux_x() + 0.5 - l.side_x(), W::COLUMN.0 - W::CONTENT_TOP), first, visible);
     side_section(ui, &rows, off, Rect::new(l.side_x(), W::COLUMN.0, W::SIDE_SECTION.1, col_h));
 
     for (i, s) in inputs.iter().enumerate().skip(first).take(visible) {
@@ -182,6 +181,8 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     }
     draw_monitor_column(ui, model, view, Rect::new(l.monitor_x(), W::MONITOR_TOP, STRIP_W, W::STATUS_BAR.0 - W::MONITOR_TOP));
     draw_status_bar(ui, model, Rect::new(0.0, W::STATUS_BAR.0, width, W::STATUS_BAR.1));
+    // Last of the chrome: its bottom line covers the first point of the columns below.
+    title_bar(ui, model, width);
 
     // Overlays.
     if view.sheet == Some(Sheet::Settings) {

@@ -131,6 +131,17 @@ pub mod layout {
     pub const SHOW_Y: f32 = 612.0;
 }
 
+/// A `stretch` background drawn with the largest corners that fit: every image row/column is
+/// kept 1:1 except the middle one. Console 1.3.1 draws the session navigator's Display-Nav
+/// well (174 × 354 px art at 2338 × 74 px) this way; 12 px corners smear its 20 px bevel.
+pub(crate) fn background_max_corners(ui: &mut Ui, key: &str, r: Rect) {
+    let Some(path) = ui.skin("backgrounds", key).and_then(|s| s.image("image")) else { return };
+    let Some(img) = ui.assets.images.get(path) else { return };
+    let ix = (img.width as f32 / 2.0 - 1.0).min(r.w * crate::ui::ART_SCALE / 2.0).max(0.0).floor();
+    let iy = (img.height as f32 / 2.0 - 1.0).min(r.h * crate::ui::ART_SCALE / 2.0).max(0.0).floor();
+    ui.image(path, r, Some(houston::Insets { l: ix, t: iy, r: ix, b: iy }), None, 1.0);
+}
+
 /// Rounded rectangle fill with anti-aliased corners at 0.5 pt (one 2× pixel) resolution.
 pub(crate) fn fill_rounded(ui: &mut Ui, r: Rect, radius: f32, color: Rgba) {
     let steps = (radius * 2.0).ceil() as usize;
