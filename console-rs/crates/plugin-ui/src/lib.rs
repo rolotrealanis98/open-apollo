@@ -22,6 +22,7 @@ pub mod panel;
 pub mod params;
 pub mod paths;
 pub mod spec;
+pub mod uanet;
 pub mod web;
 pub mod window;
 #[cfg(all(feature = "webview", target_os = "linux"))]
