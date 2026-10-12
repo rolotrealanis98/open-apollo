@@ -306,7 +306,8 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let visible = l.visible_inputs();
     let first = view.first_strip.min(inputs.len().saturating_sub(visible));
     ui.fill(Rect::new(l.side_x(), W::COLUMN.0, l.aux_x() - l.side_x(), col_h), PANEL);
-    draw_session_navigator(ui, model, Rect::new(l.side_x(), W::CONTENT_TOP, l.aux_x() + 0.5 - l.side_x(), W::COLUMN.0 - W::CONTENT_TOP), first, visible);
+    // The navigator ends on the bus section's first whole point (p2 1181, s08 972).
+    draw_session_navigator(ui, model, Rect::new(l.side_x(), W::CONTENT_TOP, l.aux_x().ceil() - l.side_x(), W::COLUMN.0 - W::CONTENT_TOP), first, visible);
     side_section(ui, &rows, off, Rect::new(l.side_x(), W::COLUMN.0, W::SIDE_SECTION.1, col_h));
 
     for (i, s) in inputs.iter().enumerate().skip(first).take(visible) {
@@ -316,7 +317,8 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     }
     // Empty columns after the last strip, then the cells scrollbar column while they overflow.
     let main_y = W::COLUMN.0 + col_h - rows.main;
-    let scroll_x = l.aux_x() - SCROLLBAR_W - 0.5;
+    // On a whole point: p1 1596 (bus at 1613.5), s46 971 (bus at 989).
+    let scroll_x = (l.aux_x() - SCROLLBAR_W - 0.5).floor();
     let strips_end = l.strips_x() + inputs.len().saturating_sub(first).min(visible) as f32 * STRIP_W;
     empty_columns(ui, strips_end, if overflow > 0.0 { scroll_x } else { l.aux_x() }, main_y, bottom);
     let cells_area = Rect::new(l.side_x(), W::COLUMN.0 + 5.0, l.aux_x() - l.side_x(), cells_h);
@@ -334,7 +336,10 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     if l.aux_scroll {
         let aux_main_y = W::COLUMN.0 + col_h - aux_rows.main;
         let id = ControlId { strip: "view".into(), control: Control::AuxCellsScroll };
-        scrollbar_column(ui, l.aux_x() + aux_w + 0.5, aux_main_y, bottom, aux_cells_h, aux_rows.total(), view.aux_scroll, Some(id), true);
+        // Half a point after the strips before the monitor column (p1/p2); flush against the
+        // control-room column, which it meets (s08: 1260…1278).
+        let sx = l.aux_x() + aux_w + if l.ctrl_room { 0.0 } else { 0.5 };
+        scrollbar_column(ui, sx, aux_main_y, bottom, aux_cells_h, aux_rows.total(), view.aux_scroll, Some(id), true);
         ui.scroll_region(Rect::new(l.aux_x(), W::COLUMN.0 + 5.0, aux_w + SCROLLBAR_W, aux_cells_h), ScrollTarget::AuxCells, aux_overflow);
     }
     for (i, s) in bus.iter().enumerate() {
@@ -708,7 +713,11 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
     ui.cell_header("INSERTS", true, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
     if rows.inserts > HEADER_H {
         let slots = model.inserts(s);
-        insert_list(ui, s, &slots, &model.insert_labels(s), rows.slots, rows.size, y + 26.0);
+        let targeted = match &view.browser.assign_to {
+            Some(ControlId { strip, control: Control::Insert(k) }) if *strip == s.id => Some(*k),
+            _ => None,
+        };
+        insert_list(ui, s, &slots, &model.insert_labels(s), rows.slots, rows.size, targeted, y + 26.0);
         if s.kind != StripKind::Aux && rows.rec_row {
             rec_mon(ui, model.records_pre_effects(s), s, y + 26.0 + cells::inserts_list_h(rows.slots, rows.size) + 4.0);
         }

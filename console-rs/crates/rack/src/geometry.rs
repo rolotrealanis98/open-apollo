@@ -90,7 +90,8 @@ impl MainStripGeometry {
             pre_post,
             mono_mute,
             talkback,
-            fader_meters: Rect::new(0.0, 108.0 - k, w, f - 112.0 + k),
+            // Talkback: `(0, 83, w, F − 87)` (mixer-geometry §2.3), a point below the aux's.
+            fader_meters: if kind == StripKind::Talkback { Rect::new(0.0, 83.0, w, f - 87.0) } else { Rect::new(0.0, 108.0 - k, w, f - 112.0 + k) },
             label: Rect::new(0.0, h - main_strip::LABEL_H, w, main_strip::LABEL_H),
         }
     }

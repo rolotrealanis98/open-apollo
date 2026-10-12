@@ -99,8 +99,11 @@ pub fn sends_cell_h(sends: usize, style: SendStyle) -> f32 {
     if sends == 0 {
         return SENDS_DEFAULT_H;
     }
-    let n = if style == SendStyle::Overview { 1 } else { sends };
-    HEADER_H + 4.0 + n as f32 * (style.send_h() + 3.0) - 3.0 + 5.0
+    if style == SendStyle::Overview {
+        // One panel; the cell is a point taller than header + 4 + 77 + 5 (s46/s47: 109).
+        return HEADER_H + 4.0 + OVERVIEW_H + 5.0 + 1.0;
+    }
+    HEADER_H + 4.0 + sends as f32 * (style.send_h() + 3.0) - 3.0 + 5.0
 }
 
 fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
@@ -110,7 +113,9 @@ fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
 /// Insert list (`Rack_Inserts`) at `y`, sized for `list_slots`: `Channel-Inserts-Background`
 /// at `(4, 0, w−8, h)` and slot k at `(0, 5 + k·pitch + 1, w, pitch − 2)` (resized 0x181440960).
 /// `labels[k]` is Console's label for slot k ([`crate::MixerModel::insert_labels`]).
-pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[Option<InsertLabel>], list_slots: usize, size: InsertSize, y: f32) {
+/// `targeted`: the slot an "Assign..." is choosing a plug-in for (`image-targeted`, s08).
+#[allow(clippy::too_many_arguments)]
+pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[Option<InsertLabel>], list_slots: usize, size: InsertSize, targeted: Option<u8>, y: f32) {
     let pitch = size.pitch();
     ui.background("Channel-Inserts-Background", Rect::new(4.0, y, STRIP_W - 8.0, inserts_list_h(list_slots, size)));
     for (k, slot) in slots.iter().take(list_slots).enumerate() {
@@ -119,6 +124,16 @@ pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[
         match size {
             InsertSize::Large => ui.insert_slot(slot, label, r, cid(s, Control::Insert(k as u8))),
             InsertSize::Small => small_slot(ui, slot, label, r, cid(s, Control::Insert(k as u8))),
+        }
+        if targeted == Some(k as u8) {
+            if let Some(img) = ui.skin("inserts", "Small-Normal").and_then(|k| k.image("image-targeted")) {
+                let img = img.to_string();
+                ui.image_centered(&img, r, 1.0);
+            }
+            if let Some(plus) = ui.skin("inserts", "Small-Normal").and_then(|k| k.image("image-plus")) {
+                let plus = plus.to_string();
+                ui.image_centered(&plus, r, 1.0);
+            }
         }
     }
 }
@@ -281,11 +296,15 @@ fn overview_panel(ui: &mut Ui, s: &StripInfo, sends: &[SendState], y: f32) {
     let gap = (panel.w - n * iw) / (n + 1.0);
     let aux = s.kind == crate::geometry::StripKind::Aux;
     for (k, send) in sends.iter().enumerate() {
-        let cx = panel.x + gap * (k as f32 + 1.0) + iw * k as f32 + iw / 2.0;
+        // Item x (whole points): the LED starts on it, the 7-pt cap one point left (s46/s47).
+        let ix = (panel.x + gap * (k as f32 + 1.0) + iw * k as f32).round();
+        let cx = ix + 2.5;
         if !aux {
-            ui.film("meters", "Signal-Present", "image-film", 0.0, Rect::new(cx - 2.5, y + 12.0, 5.0, 5.0));
+            ui.film("meters", "Signal-Present", "image-film", 0.0, Rect::new(ix, y + 12.0, 5.0, 5.0));
         }
-        ui.fader("Send-Overview-Fader", send.level, Rect::new(cx - 3.5, y + 18.5, 7.0, 28.0), cid(s, Control::SendLevel(k as u8)));
+        // Caps (top) at y + 38.5 for −∞, + 23.5 at −6 dB, + 21.5 at 0 dB (s46/s47): a 22-pt
+        // travel, which the skin's 5-pt margin gives in a 39-pt box from y + 12.5.
+        ui.fader("Send-Overview-Fader", send.level, Rect::new(cx - 3.5, y + 12.5, 7.0, 39.0), cid(s, Control::SendLevel(k as u8)));
         let cue = send.name.starts_with("CUE");
         ui.fill(Rect::new(cx - 3.0, y + 47.5, 6.0, 6.0), if cue { Rgba::rgb8(44, 43, 41) } else { Rgba::rgb8(41, 35, 28) });
         ui.fill(Rect::new(cx - 3.5, y + 56.0, 7.0, 1.5), route_bar(&send.name));
@@ -320,7 +339,7 @@ mod tests {
         // p2: the aux Sends cell (CUE 1–4 rows) runs 326 → 666.
         assert_eq!(sends_cell_h(4, SendStyle::Medium), 340.0);
         assert_eq!(sends_cell_h(0, SendStyle::Medium), SENDS_DEFAULT_H);
-        assert_eq!(sends_cell_h(4, SendStyle::Overview), 22.0 + 4.0 + 77.0 + 5.0);
+        assert_eq!(sends_cell_h(4, SendStyle::Overview), 109.0);
     }
 
     #[test]

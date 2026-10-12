@@ -34,21 +34,21 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
         ui.fill(panel.inset(0.5, 0.5, 0.5, 0.5), PANEL);
         let top = panel.y;
         ui.font_text("CR-Label", "DIM AMOUNT", Rect::new(panel.x, top + 6.0, panel.w, 14.0), Align::Center);
-        let knob = Rect::new(30.0, top + 15.0, 40.0, 46.0);
+        let knob = Rect::new(30.0, top + 17.0, 40.0, 46.0);
         ui.knob("Main-Level-Small", opts.dim_level, knob, Some(mid(Control::DimLevel)), None);
         ui.background("Main-Readout", Rect::new(15.0, top + 63.0, 70.0, 22.0));
         let mut readout = ui.style("views", "Main-Readout");
         readout.color = Rgba::WHITE.with_alpha(0.75);
         ui.text(&opts.dim_readout, readout, Rect::new(15.0, top + 63.0, 70.0, 22.0), Align::Center);
         let dim = opts.dim.unwrap_or(false);
-        ui.toggle("Switch-Large", Some("DIM"), dim, opts.dim.is_some(), Rect::new(10.0, top + 87.5, 80.0, 40.0), Some(mid(Control::MonitorDim)), None);
+        ui.toggle("Switch-Large", Some("DIM"), dim, opts.dim.is_some(), Rect::new(10.0, top + 88.0, 80.0, 40.0), Some(mid(Control::MonitorDim)), None);
         ui.fill(Rect::new(panel.x, top + 130.0, panel.w, 1.0), RULE);
         ui.font_text("CR-Label", "SOURCE", Rect::new(panel.x, top + 137.0, panel.w, 14.0), Align::Center);
-        ui.toggle("Switch-Large", Some("MONITOR"), opts.cr_source == 0, true, Rect::new(10.0, top + 151.5, 80.0, 40.0), Some(mid(Control::CrSource(0))), None);
+        ui.toggle("Switch-Large", Some("MONITOR"), opts.cr_source == 0, true, Rect::new(10.0, top + 152.0, 80.0, 40.0), Some(mid(Control::CrSource(0))), None);
         for i in 0..2u8 {
             let label = format!("CUE\n{}", i + 1);
             let enabled = cues.len() > i as usize;
-            ui.toggle("Switch", Some(&label), opts.cr_source == i + 1, enabled, Rect::new(10.0 + 40.0 * i as f32, top + 191.5, 40.0, 40.0), Some(mid(Control::CrSource(i + 1))), None);
+            ui.toggle("Switch", Some(&label), opts.cr_source == i + 1, enabled, Rect::new(10.0 + 40.0 * i as f32, top + 192.0, 40.0, 40.0), Some(mid(Control::CrSource(i + 1))), None);
         }
         ui.fill(Rect::new(panel.x, top + 236.0, panel.w, 1.0), RULE);
         let mut name = ui.style("views", "Control-Room-Name");
