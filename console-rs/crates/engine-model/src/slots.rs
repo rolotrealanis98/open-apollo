@@ -75,6 +75,14 @@ impl EngineMixer {
         self.helper = Some(h);
     }
 
+    /// Like [`EngineMixer::connect_helper`]; with `writes` the helper also takes Console's
+    /// helper settings (NETWORK INTERFACE).
+    pub fn connect_helper_writable(&mut self, endpoint: Endpoint, writes: bool) {
+        let mut h = HelperStore::new();
+        h.connect_writable(endpoint, writes);
+        self.helper = Some(h);
+    }
+
     /// The helper endpoint that goes with an engine endpoint (`host:4720` for `host:4710`).
     pub fn helper_endpoint(engine: &Endpoint) -> Option<Endpoint> {
         (engine.port == DEFAULT_PORT).then(|| Endpoint::new(engine.host.clone(), HELPER_PORT))

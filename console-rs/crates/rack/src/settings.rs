@@ -149,7 +149,18 @@ pub enum Write {
     Post(String, String),
     /// A client preference (Console keeps these in its own preferences, not in the engine).
     Pref(String, PropValue),
+    /// `set <path>/value <v>` on the UA Mixer Helper (4720), e.g. NETWORK INTERFACE.
+    Helper(String, PropValue),
 }
+
+/// PropertySource prefix for UA Mixer Helper properties (`helper:/dante/…`).
+pub const HELPER_PREFIX: &str = "helper:";
+/// The helper property NETWORK INTERFACE sets, and the one listing the adapters.
+pub const NIC_PATH: &str = "/dante/primary_network_adapter";
+pub const NIC_LIST_PATH: &str = "/dante/available_network_adapters";
+/// Console's question before switching (`Rack_NetworkSettings` 0x180e3f230).
+pub const NIC_CONFIRM_TITLE: &str = "SWITCH NETWORK INTERFACE?";
+pub const NIC_CONFIRM_MESSAGE: &str = "Switching the network interface may interrupt audio with Apollo E devices. Proceed?";
 
 /// What a control did to a field.
 #[derive(Clone, Debug, PartialEq)]
@@ -575,6 +586,21 @@ fn map_table(name: &str) -> Vec<(&'static str, PropValue)> {
     }
 }
 
+/// NETWORK INTERFACE: the helper's adapters (`en0  (192.168.1.4)`), the selected one ticked.
+/// Picking one asks [`NIC_CONFIRM_TITLE`] first (the view), then writes the helper (`nic-set:`).
+fn network_interface_field(src: &dyn PropertySource) -> SettingField {
+    let adapters = src.choices(&format!("{HELPER_PREFIX}{NIC_LIST_PATH}"));
+    let cur = src.prop(&format!("{HELPER_PREFIX}{NIC_PATH}"));
+    let selected = cur.as_ref().and_then(|c| adapters.iter().position(|a| a.value.same(c)));
+    let (options, enabled) = adapters.iter().map(|c| (c.label.clone(), c.enabled)).unzip();
+    let mut f = SettingField::new(format!("nic:{NIC_PATH}"), "NETWORK INTERFACE", FieldKind::Choice { options, enabled, selected }, 0);
+    f.display = match selected {
+        Some(i) => Some(adapters[i].label.clone()),
+        None => cur.map(|c| c.display()).filter(|s| !s.is_empty()),
+    };
+    f
+}
+
 fn pref_text(src: &dyn PropertySource, name: &str, label: &str, row: u8) -> SettingField {
     let cur = src.prop(&format!("pref:{name}")).map(|v| v.display()).unwrap_or_default();
     SettingField::new(format!("pref:{name}"), label, FieldKind::Text(cur), row)
@@ -842,13 +868,9 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             f.push(pref_choice(src, "scenes_event", "PLUG-IN SCENES EVENT", 1).at(328.0, 60.0));
         }
         SettingsGroup::Network => {
-            // `Rack_NetworkSettings` / Dante (capture s17).
-            let cur = src.prop("pref:network_interface").map(|v| v.display()).unwrap_or_default();
-            let mut nic = pref_choice(src, "network_interface", "NETWORK INTERFACE", 0);
-            if !cur.is_empty() {
-                nic.display = Some(cur);
-            }
-            f.push(nic);
+            // `Rack_NetworkSettings` / Dante (captures s17, s30): the helper's adapters
+            // (`helper:/dante/available_network_adapters`) and choice (`…/primary_network_adapter`).
+            f.push(network_interface_field(src));
             f.push(SettingField::new("launch:dante_controller", "DANTE CONTROLLER", FieldKind::Action("LAUNCH".into()), 0));
             f.push(SettingField::new("launch:dante_patents", "DANTE PATENT INFORMATION", FieldKind::Action("MORE INFO".into()), 0));
             f.push(SettingField::new("launch:dante_discovery", "DANTE DISCOVERY", FieldKind::Action("REFRESH".into()), 0));
@@ -1035,6 +1057,13 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             vec![Write::Pref(rest.to_string(), PropValue::Bool(!on))]
         }
         ("pref-reset", SettingOp::Press) => vec![Write::Pref(rest.to_string(), PropValue::Bool(false))],
+        // NETWORK INTERFACE: the view asks SWITCH NETWORK INTERFACE? first; YES sends `nic-set`.
+        ("nic", _) => Vec::new(),
+        ("nic-set", SettingOp::Choose(i)) => src
+            .choices(&format!("{HELPER_PREFIX}{NIC_LIST_PATH}"))
+            .get(*i)
+            .map(|c| vec![Write::Helper(rest.to_string(), c.value.clone())])
+            .unwrap_or_default(),
         ("fader", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0))),
         ("post-text", SettingOp::Text(t)) => {
             // post-text:<Command>[:<orig>]: SAVE AS / RENAME of an I/O preset.
@@ -1154,6 +1183,11 @@ impl MemoryProperties {
                 }
             }
             Write::Pref(name, v) => self.prefs.set(name, v.clone()),
+            Write::Helper(path, v) => {
+                if let Some(p) = self.props.get_mut(&format!("{HELPER_PREFIX}{path}")) {
+                    p.value = v.clone();
+                }
+            }
             Write::Post(..) => {}
         }
     }

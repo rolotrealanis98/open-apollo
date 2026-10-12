@@ -37,7 +37,12 @@ impl ModelSource {
             },
             ModelSource::Engine { addr, writes } => OpenedModel {
                 // Read-only unless `writes` (both the writer gate and the connection refuse set/post).
-                model: Box::new(engine_model::EngineMixer::connect(ua_engine::Endpoint::new(addr.host.clone(), addr.port), *writes)),
+                model: Box::new({
+                    let mut m = engine_model::EngineMixer::connect(ua_engine::Endpoint::new(addr.host.clone(), addr.port), *writes);
+                    // Console's own preferences (OPTIONS, MIDI), next to uaconsole.toml.
+                    m.set_prefs_path(crate::settings::Settings::path().map(|p| p.with_file_name("console-prefs.json")));
+                    m
+                }),
                 live_meters: true,
                 label: addr.to_string(),
             },

@@ -493,6 +493,17 @@ pub fn menu_bar_json(model: &dyn MixerModel, view: &ViewState, mac: bool) -> Str
 
 /// `open_documentation_url_app` (`Rack_Configuration::GetDeviceDocumentationURL` 0x180a189a0).
 pub const DOCUMENTATION_URL: &str = "https://help.uaudio.com/hc/en-us/sections/12262368930324-Apollo-UAD-2-Documentation";
+/// UAD Console Manual (`Rack.dll` 0x180a19fb0).
+pub const CONSOLE_MANUAL_URL: &str = "https://help.uaudio.com/hc/en-us/sections/25052396869908-UAD-Console-Manual";
+/// NETWORK › DANTE CONTROLLER › LAUNCH when Dante Controller isn't installed (`Rack.dll`
+/// 0x18085ca10; Console launches `DanteController.exe` when it is).
+pub const DANTE_CONTROLLER_URL: &str = "https://www.audinate.com/products/software/dante-controller";
+/// NETWORK › DANTE PATENT INFORMATION › MORE INFO (`Rack.dll` 0x18085cc00).
+pub const DANTE_PATENTS_URL: &str = "https://www.audinate.com/legal/patents-trademarks";
+/// FEEDBACK / Help › Give Feedback... Console opens its REPORT FEEDBACK dialog, which submits
+/// to UA's feedback service with the user's UA account; this console has no access to that
+/// service, so feedback goes to the open-apollo project instead.
+pub const FEEDBACK_URL: &str = "https://github.com/rolotrealanis98/open-apollo/issues/new";
 
 /// Plug-in operations of the Edit menu and the inserts context menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -753,6 +764,11 @@ fn gid(cmd: MenuCmd) -> ControlId {
     ControlId { strip: "global".into(), control: Control::Menu(cmd) }
 }
 
+/// A hit that runs Console command `c` (the title bar's FEEDBACK button runs Give Feedback).
+pub fn command_control(c: Command) -> ControlId {
+    gid(MenuCmd::App(c))
+}
+
 fn find_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
     model.inputs().into_iter().chain(model.auxes()).find(|s| &*s.id == id)
 }
@@ -919,7 +935,7 @@ pub fn build_menu(model: &dyn MixerModel, view: &ViewState, target: &MenuTarget,
         MenuTarget::MonitorMeter => (monitor_meter_menu(), MenuLook::Context),
         MenuTarget::SceneRow(i) => (scene_row_menu(model, *i), MenuLook::Context),
         MenuTarget::Setting(key) => (setting_menu(model, key), MenuLook::Base),
-        MenuTarget::SessionDots => (session_dots_menu(), MenuLook::Context),
+        MenuTarget::SessionDots => (session_dots_menu(model), MenuLook::Context),
         MenuTarget::SessionRow(i) => (session_row_menu(model, *i), MenuLook::Context),
         MenuTarget::SampleRate => (crate::surfaces::popover::sample_rate_menu(model), MenuLook::Base),
         MenuTarget::ClockSource => (crate::surfaces::popover::clock_source_menu(model), MenuLook::Base),
@@ -1115,19 +1131,25 @@ pub fn setting_menu(model: &dyn MixerModel, key: &str) -> PopupMenu {
 }
 
 /// The CURRENT SESSION panel's ••• (sess-dots): New Folder, Show In Finder.
-pub fn session_dots_menu() -> PopupMenu {
-    use crate::surfaces::session::SessionOp;
+pub fn session_dots_menu(model: &dyn MixerModel) -> PopupMenu {
+    use crate::surfaces::session::{REVEAL_SESSIONS_FOLDER, SessionOp};
     let mut m = PopupMenu::new();
     m.push(PopupItem::new("New Folder", session_id(Control::Session(SessionOp::NewFolder))));
-    m.push(show_in_finder());
+    m.push(show_in_finder(model, REVEAL_SESSIONS_FOLDER));
     m.finish()
 }
 
-/// "Show In Finder" (the Sessions folder on the engine's host): no engine command is known, so
-/// the row is drawn like Console's but does nothing.
-fn show_in_finder() -> PopupItem {
-    PopupItem::new("Show In Finder", gid(MenuCmd::Noop))
+/// "Show In Finder" ("Show In File Explorer" on Windows): Console reveals the file or folder
+/// itself (`juce::File::revealToUser`, `Rack_PresetsView::ShowPopupMenu` case 5), so the row
+/// works only when the engine's Sessions folder is on this computer.
+fn show_in_finder(model: &dyn MixerModel, row: u16) -> PopupItem {
+    use crate::surfaces::session::SessionOp;
+    let local = model.session().local_dir.is_some();
+    PopupItem::new(SHOW_IN_FINDER_LABEL, session_id(Control::Session(SessionOp::Reveal(row)))).enabled(local)
 }
+
+/// Console 1.3.1's label on macOS ("Show In File Explorer" on Windows; captures sess-row, browser-cat2).
+pub const SHOW_IN_FINDER_LABEL: &str = "Show In Finder";
 
 fn session_id(control: Control) -> ControlId {
     ControlId { strip: crate::surfaces::session::SESSION_STRIP.into(), control }
@@ -1152,13 +1174,17 @@ pub fn session_row_menu(model: &dyn MixerModel, row: u16) -> PopupMenu {
             m.push(PopupItem::new("Rename", session_id(Control::Session(SessionOp::Rename(*i)))));
         }
         PanelRowKind::Folder { root, .. } => {
-            // Folder delete / rename have engine commands but no folder index in the model yet.
-            m.push(PopupItem::new("Delete", gid(MenuCmd::Noop)).enabled(!root));
-            m.push(PopupItem::new("Rename", gid(MenuCmd::Noop)).enabled(!root));
-            m.push(PopupItem::new("New Folder", session_id(Control::Session(SessionOp::NewFolder))));
+            // `Rack_PresetsView` folder ops: Delete → `DeleteFolder {folder, type: session}`,
+            // Rename → `RenameSession {origName, newName}` (the engine's
+            // `SessionFileManager::Rename` resolves files and directories alike), New Folder
+            // inside this folder (the root's goes to the top level).
+            m.push(PopupItem::new("Delete", session_id(Control::Session(SessionOp::FolderDelete(row)))).enabled(!root));
+            m.push(PopupItem::new("Rename", session_id(Control::Session(SessionOp::FolderRename(row)))).enabled(!root));
+            let new = if *root { SessionOp::NewFolder } else { SessionOp::NewFolderIn(row) };
+            m.push(PopupItem::new("New Folder", session_id(Control::Session(new))));
         }
     }
-    m.push(show_in_finder());
+    m.push(show_in_finder(model, row));
     m.finish()
 }
 
@@ -1692,7 +1718,7 @@ impl ViewState {
                         let (title, verb) = if *op == SceneOp::Overwrite { ("Overwrite Scene", "overwrite") } else { ("Clear Scene", "clear") };
                         let ok = ControlId { strip: "global".into(), control: Control::SceneCommand(*op, *i) };
                         let message = format!("Are you sure you want to {verb} \"{name}\"?");
-                        self.popover = Some(PopoverState { kind: Popover::Confirm { title: title.into(), message, ok }, anchor });
+                        self.popover = Some(PopoverState { kind: Popover::Confirm { title: title.into(), message, ok, ok_label: "OK".into() }, anchor });
                     }
                     _ => {}
                 }
@@ -1720,6 +1746,11 @@ impl ViewState {
             C::MixerBankLeft | C::MixerBankRight => {
                 let bank = self.visible_strips(model).max(1);
                 self.first_strip = if c == C::MixerBankLeft { self.first_strip.saturating_sub(bank) } else { (self.first_strip + bank).min(model.inputs().len().saturating_sub(1)) };
+            }
+            C::Documentation => self.open_urls.push(DOCUMENTATION_URL.into()),
+            C::GiveFeedback => self.open_urls.push(FEEDBACK_URL.into()),
+            C::About => {
+                self.open_named("about");
             }
             C::MixerFarLeft => self.first_strip = 0,
             C::MixerFarRight => self.first_strip = model.inputs().len().saturating_sub(1),

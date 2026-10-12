@@ -467,6 +467,8 @@ pub struct UacContext {
     mixer: ViewState,
     /// Console window size pinned by the host (`uac_set_window_size`); None follows the view.
     window: Option<(f32, f32)>,
+    /// Where Console's client preferences live (`uac_set_prefs_path`).
+    prefs_path: Option<PathBuf>,
     /// Engine meter generation drawn by the last frame.
     meter_generation: u64,
     last_present: Option<Instant>,
@@ -477,6 +479,7 @@ pub struct UacContext {
     /// Keeps `uac_menu_bar_json` / `uac_take_command` strings alive.
     menu_json: CString,
     taken_command: CString,
+    taken_url: CString,
     dirty: bool,
     stats: UacStats,
     adapter_name: CString,
@@ -522,6 +525,7 @@ impl UacContext {
             view: View::new(width, height, scale),
             mixer: ViewState::default(),
             window: None,
+            prefs_path: None,
             meter_generation: 0,
             last_present: None,
             plugin_requests: VecDeque::new(),
@@ -529,6 +533,7 @@ impl UacContext {
             status: CString::default(),
             menu_json: CString::default(),
             taken_command: CString::default(),
+            taken_url: CString::default(),
             dirty: true,
             stats: UacStats::default(),
             adapter_name,
@@ -618,6 +623,9 @@ impl UacContext {
             return UAC_SKIPPED;
         }
         self.model.pump();
+        if self.mixer.expire_modifier(self.model.as_ref(), Instant::now()) {
+            self.dirty = true;
+        }
         if let Some(generation) = self.engine().map(EngineMixer::meter_generation) {
             self.meter_generation = generation;
         }
@@ -720,7 +728,8 @@ impl UacContext {
         let addr = endpoint.to_string();
         // Read-only unless `writes`: the connection refuses set/post and the writer gate stays
         // closed, so controls move locally only.
-        let model = EngineMixer::connect(endpoint, writes);
+        let mut model = EngineMixer::connect(endpoint, writes);
+        model.set_prefs_path(self.prefs_path.clone());
         self.set_model(Box::new(model), Source::Engine { addr, writes });
     }
 
@@ -1474,6 +1483,48 @@ pub unsafe extern "C" fn uac_take_command(ctx: *mut UacContext) -> *const c_char
         let cmd = c.mixer.commands.remove(0);
         c.taken_command = cstring(cmd.id());
         c.taken_command.as_ptr()
+    })
+}
+
+/// Keeps Console's client preferences (Settings › OPTIONS and MIDI) in the JSON file `path` (the
+/// host's Application Support or container), loaded now and saved on each change. NULL or empty
+/// keeps them in memory.
+///
+/// # Safety
+/// `ctx` is null or a live context; `path` is null or a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_set_prefs_path(ctx: *mut UacContext, path: *const c_char) {
+    let path = unsafe { str_arg(path) };
+    guard((), || {
+        if let Some(c) = unsafe { ctx_mut(ctx) } {
+            c.prefs_path = path.map(PathBuf::from);
+            let p = c.prefs_path.clone();
+            if let Some(m) = c.model.as_any_mut().and_then(|a| a.downcast_mut::<EngineMixer>()) {
+                m.set_prefs_path(p);
+                c.dirty = true;
+            }
+        }
+    })
+}
+
+/// Takes the oldest URL the console asked the host to open (`ViewState::take_open_urls`): a
+/// `file://` URL from Show In Finder (reveal it: `NSWorkspace.activateFileViewerSelecting`), the
+/// documentation, Dante Controller (launch the app when installed, else open the page) and Dante
+/// patent pages, and the feedback page. NULL when there is none; the string stays valid until the
+/// next call or `uac_destroy`.
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_take_open_url(ctx: *mut UacContext) -> *const c_char {
+    guard(std::ptr::null(), || {
+        let Some(c) = (unsafe { ctx_mut(ctx) }) else { return std::ptr::null() };
+        if c.mixer.open_urls.is_empty() {
+            return std::ptr::null();
+        }
+        let url = c.mixer.open_urls.remove(0);
+        c.taken_url = cstring(&url);
+        c.taken_url.as_ptr()
     })
 }
 

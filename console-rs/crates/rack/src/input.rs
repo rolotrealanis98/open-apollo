@@ -218,6 +218,10 @@ pub enum Control {
     /// [model] `set_text` targets: a session file's new name, a new folder's name.
     SessionRenameTo(u16),
     SessionNewFolderName,
+    /// [model] `set_text` targets of a CURRENT SESSION folder row (by panel row index): its new
+    /// name (`RenameSession` renames folders too) and a new sub-folder's name.
+    SessionFolderRenameTo(u16),
+    SessionNewFolderIn(u16),
     /// [view] CURRENT SESSION panel: a tree row (folder or file, by panel row index) and the
     /// ••• button.
     SessionPanelRow(u16),

@@ -254,6 +254,15 @@ int32_t uac_run_command(UacContext *ctx, const char *command_id);
  * "save_as", ...), or NULL. Valid until the next call or uac_destroy(). */
 const char *uac_take_command(UacContext *ctx);
 
+/* The oldest URL the console wants opened, or NULL: a file:// URL from Show In Finder (reveal
+ * it in Finder), documentation, Dante Controller (launch the app when installed, else open the
+ * page), Dante patents, feedback. Valid until the next call or uac_destroy. */
+const char *uac_take_open_url(UacContext *ctx);
+
+/* Keeps Console's client preferences (OPTIONS, MIDI) in the JSON file at path (loaded now, saved
+ * on each change); NULL keeps them in memory. */
+void uac_set_prefs_path(UacContext *ctx, const char *path);
+
 /* Draws Windows Console's in-window menu bar in the title bar (hosts without a native menu
  * bar). Off by default. */
 void uac_set_menu_bar(UacContext *ctx, bool on);

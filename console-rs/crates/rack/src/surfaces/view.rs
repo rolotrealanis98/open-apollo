@@ -178,7 +178,8 @@ pub enum Popover {
     SessionNewFolder,
     /// Console's confirmation (`Rack_Window` 0x180a40730: a Popover-Header title, the message,
     /// CANCEL and a primed OK). OK taps `ok`.
-    Confirm { title: String, message: String, ok: ControlId },
+    /// A question with CANCEL and `ok_label` (OK, or YES for SWITCH NETWORK INTERFACE?).
+    Confirm { title: String, message: String, ok: ControlId, ok_label: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -202,6 +203,9 @@ pub enum TextTarget {
     SessionRename(u16),
     /// The CURRENT SESSION panel's New Folder.
     SessionNewFolder,
+    /// A folder row's Rename and New Folder, by panel row index.
+    SessionFolderRename(u16),
+    SessionNewFolderIn(u16),
     /// A PLUG-IN SCENES row's Rename (`Rack_ScenesListBoxRow::EditSceneName`), by scene index.
     SceneName(u16),
     /// A preset name for SAVE AS / RENAME / NEW FOLDER on the PRESETS target's strip.
@@ -310,6 +314,12 @@ pub struct ViewState {
     pub commands: Vec<crate::menu::Command>,
     /// Model effects a menu command produced outside `route` (File > Save → the session tap).
     pub deferred: Vec<Effect>,
+    /// URLs the console asked the host to open, oldest first (`take_open_urls`): Show In
+    /// Finder's `file://` URLs, documentation, Dante Controller and patent pages, feedback.
+    pub open_urls: Vec<String>,
+    /// When the armed navigator modifier was armed or last used: it disarms after OPTIONS ›
+    /// MODIFIERS TIMEOUT seconds (`expire_modifier`).
+    pub modifier_armed: Option<std::time::Instant>,
     /// Console's menus, Settings and panels as separate OS windows placed on the screen
     /// (`crate::layers`); None draws them inside the mixer window (iPad, plain `--render`).
     pub windowing: Option<crate::layers::Windowing>,
@@ -355,6 +365,8 @@ impl Default for ViewState {
             deferred: Vec::new(),
             drag: None,
             drag_pending: None,
+            open_urls: Vec::new(),
+            modifier_armed: None,
             windowing: None,
         }
     }
@@ -509,6 +521,38 @@ impl ViewState {
         Ok(())
     }
 
+    /// Seconds an armed modifier stays armed (OPTIONS › MODIFIERS TIMEOUT, Console's default 6;
+    /// 0 or blank: until disarmed by hand).
+    pub fn modifier_timeout(model: &dyn MixerModel) -> Option<f32> {
+        let text = model.properties().and_then(|p| p.prop("pref:modifiers_timeout")).map(|v| v.display());
+        let secs = text.as_deref().map(str::trim).unwrap_or("6").parse::<f32>().ok()?;
+        (secs > 0.0).then_some(secs)
+    }
+
+    /// When the armed modifier disarms (`None` when none is armed or there is no timeout).
+    pub fn modifier_deadline(&self, model: &dyn MixerModel) -> Option<std::time::Instant> {
+        self.modifier?;
+        Some(self.modifier_armed? + std::time::Duration::from_secs_f32(Self::modifier_timeout(model)?))
+    }
+
+    /// Disarms the modifier once MODIFIERS TIMEOUT has passed since it was armed or last used.
+    /// Call once per frame; true when it changed the view.
+    pub fn expire_modifier(&mut self, model: &dyn MixerModel, now: std::time::Instant) -> bool {
+        match self.modifier_deadline(model) {
+            Some(t) if now >= t => {
+                self.modifier = None;
+                self.modifier_armed = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// URLs to open (Show In Finder, links, launch buttons) since the last call, oldest first.
+    pub fn take_open_urls(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.open_urls)
+    }
+
     /// A text field has keyboard focus.
     pub fn editing(&self) -> bool {
         self.text_edit.is_some()
@@ -539,6 +583,43 @@ impl ViewState {
         }
         if !press {
             return vec![Effect::Model(action)];
+        }
+        // NETWORK's LAUNCH / MORE INFO open pages (Console: `Rack_NetworkSettings` 0x18085ca10,
+        // 0x18085cc00); they send nothing to the engine.
+        if let C::SettingPress(k) = &id.control {
+            let url = match &**k {
+                "launch:dante_controller" => Some(crate::menu::DANTE_CONTROLLER_URL),
+                "launch:dante_patents" => Some(crate::menu::DANTE_PATENTS_URL),
+                _ => None,
+            };
+            if let Some(url) = url {
+                self.open_urls.push(url.into());
+                return Vec::new();
+            }
+        }
+        // NETWORK INTERFACE: picking another adapter asks first (`Rack_NetworkSettings`
+        // 0x180e3f230); YES sends the choice as `nic-set:` (a helper write).
+        if let C::SettingChoose(k, i) = &id.control
+            && let Some(path) = k.strip_prefix("nic:")
+        {
+            self.settings.menu = None;
+            let current = model.properties().and_then(|p| {
+                let cur = p.prop(&format!("{}{}", crate::settings::HELPER_PREFIX, crate::settings::NIC_PATH))?;
+                p.choices(&format!("{}{}", crate::settings::HELPER_PREFIX, crate::settings::NIC_LIST_PATH)).iter().position(|c| c.value.same(&cur))
+            });
+            if current != Some(*i as usize) {
+                let ok = ControlId { strip: id.strip.clone(), control: C::SettingChoose(format!("nic-set:{path}").into(), *i) };
+                self.popover = Some(PopoverState {
+                    kind: Popover::Confirm {
+                        title: crate::settings::NIC_CONFIRM_TITLE.into(),
+                        message: crate::settings::NIC_CONFIRM_MESSAGE.into(),
+                        ok,
+                        ok_label: "YES".into(),
+                    },
+                    anchor: id.clone(),
+                });
+            }
+            return Vec::new();
         }
         // Picking a settings option closes its dropdown.
         if matches!(id.control, C::SettingChoose(..)) {
@@ -571,6 +652,9 @@ impl ViewState {
                 }
             }
             let to = |control| ControlId { strip: id.strip.clone(), control };
+            if self.modifier.is_some() {
+                self.modifier_armed = Some(std::time::Instant::now()); // a use restarts the timeout
+            }
             return vec![Effect::Model(match self.modifier {
                 Some(Modifier::Power) => Action::Tap(to(C::InsertPower(k))),
                 Some(Modifier::Remove) => Action::Tap(to(C::InsertRemove(k))),
@@ -619,7 +703,10 @@ impl ViewState {
             C::InsertSize(s) => self.insert_size = s,
             C::FixedSlots => self.fixed_slots ^= true,
             C::SendsOverview => self.sends_overview ^= true,
-            C::Modifier(m) => self.modifier = if self.modifier == Some(m) { None } else { Some(m) },
+            C::Modifier(m) => {
+                self.modifier = if self.modifier == Some(m) { None } else { Some(m) };
+                self.modifier_armed = self.modifier.map(|_| std::time::Instant::now());
+            }
             C::ShowBrowser => self.show_browser ^= true,
             C::ShowPluginScenes => self.toggle_scenes(model),
             C::ShowSettings => {
@@ -784,7 +871,7 @@ impl ViewState {
             TextTarget::Search => Vec::new(),
             TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
             TextTarget::Preset(strip, scope, cmd) => self.commit_preset_text(strip, scope, cmd, edit.text),
-            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder) => self.commit_session_text(&t, edit.text, model),
+            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder | TextTarget::SessionFolderRename(_) | TextTarget::SessionNewFolderIn(_)) => self.commit_session_text(&t, edit.text, model),
         }
     }
 

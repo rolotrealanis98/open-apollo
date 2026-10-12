@@ -522,6 +522,8 @@ fn title_bar(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, width: f32) 
     if let Some(img) = ui.skin("views", "Toggle-Feedback-LP").and_then(|s| s.image("image-overlay")) {
         ui.image(img, Rect::new(b.max_x() - 3.0 - 26.0, b.y, 26.0, 22.0), None, None, 1.0);
     }
+    // `Toggle-Feedback` runs Give Feedback (Rack.dll 0x180d75d90).
+    ui.hit(b, crate::menu::command_control(crate::menu::Command::GiveFeedback), HitKind::Tap);
 }
 
 /// Empty strip columns from `x0` (the edge after the last strip) to `x1`, at the strip pitch
