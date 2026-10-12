@@ -267,31 +267,68 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
 /// a mini send, then the strip body (`Secondary-Send-Background`) with the pan knob, M and a
 /// fader with its meters. Positions measured on user capture s45 (input sends, OVERVIEW off).
 fn full_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, sy: f32) {
+    // Send pans are white on every strip (s45: `knob_pan_white`); stereo strips have none.
+    let ids = FullSendIds {
+        bus: false,
+        pan: if s.stereo { None } else { Some((0.5, cid(s, Control::SendPan(k as u8)))) },
+        mute: cid(s, Control::SendMute(k as u8)),
+        level: cid(s, Control::SendLevel(k as u8)),
+    };
+    let readout = crate::scales::format_db(crate::scales::fader_db(send.level));
+    full_send_strip(ui, s.fader_skin(), send, &readout, sy, SEND_H_FULL, ids);
+}
+
+/// What a full send strip's controls are bound to (the mixer's strip controls, or the Sends
+/// window's), and its pan: `Some((value, id))` draws the pan knob (mono input sends). `bus`:
+/// a bus's or talkback's sends (Sends window s50 / s51), laid out without the pan row.
+pub(crate) struct FullSendIds {
+    pub bus: bool,
+    pub pan: Option<(f64, Option<ControlId>)>,
+    pub mute: Option<ControlId>,
+    pub level: Option<ControlId>,
+}
+
+/// `Rack_SendChannelStrip` (resized 0x18148ad60) `h` pt tall at `sy`, 96 wide from x 0: the
+/// route plate, the body, the pan knob (when `ids.pan`), M and the fader with its meters. A
+/// taller strip (the Sends window's 326) lowers −∞ by the difference. Without a pan the M
+/// button sits in the right third, `w − (w − (2·32 + 12))/3 − 32 − 6` = 52 (resized).
+pub(crate) fn full_send_strip(ui: &mut Ui, fader_skin: &str, send: &SendState, readout: &str, sy: f32, h: f32, ids: FullSendIds) {
     let top = 35.0;
-    let plate = Rect::new(7.0, sy + 3.5, STRIP_W - 14.0, 29.0);
+    // Route (sends-aux / send-cell, sRGB): the `Send-Route-Background` well (4, 0, w − 8, 35),
+    // the `Flex-Route-Focus` plate (10, 6, w − 20, 23) with the `Slot-Color` bar at its foot and
+    // the route name; then the `Send-Lower-State-Plate` body (6, 34, w − 12, h − 36), as on a
+    // mini send.
+    ui.background("Send-Route-Background", Rect::new(4.0, sy, STRIP_W - 8.0, top));
+    let plate = Rect::new(10.0, sy + 6.0, STRIP_W - 20.0, 23.0);
     if let Some(img) = ui.skin("views", "Flex-Route-Focus").and_then(|k| k.image("image")) {
         let img = img.to_string();
         ui.image_stretched(&img, plate, 1.0);
     }
-    ui.fill(Rect::new(plate.x + 3.5, plate.max_y() - 6.5, plate.w - 7.0, 3.0), route_bar(&send.name));
+    ui.fill(Rect::new(plate.x + 0.5, plate.max_y() - 3.5, plate.w - 1.0, 3.0), route_bar(&send.name));
     let mut label = ui.style("fonts", "Flex-Route-Value-Font");
     if let Some(c) = ui.skin("fonts", "Flex-Route-Value-Font").and_then(|k| k.color("color-text-off")) {
         label.color = c;
     }
-    ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 6.0), Align::Center);
-    let body = Rect::new(4.0, sy + top, STRIP_W - 8.0, SEND_H_FULL - top);
-    ui.background("Secondary-Send-Background", body);
-    // Send pans are white on every strip (s45: `knob_pan_white`); stereo strips have none.
-    if !s.stereo {
-        ui.knob("Pan-White", 0.5, Rect::new(28.0, sy + top + 3.0, 40.0, 46.0), cid(s, Control::SendPan(k as u8)), Some(0.5));
+    ui.text(&send.name, label, Rect::new(plate.x, plate.y + 0.5, plate.w, plate.h - 0.5), Align::Center);
+    ui.background("Send-Lower-State-Plate", Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, h - top - 1.0));
+    // The fader-and-meters box ends 4 pt above the strip's foot (`h − y − 4`, resized; meters,
+    // their well and the readout measured on s45 and the Sends window); the fader runs from 4 pt
+    // into the box to 4 pt short of the box's foot (s45: caps −∞ at 369, 0 dB at 254 for a send
+    // at 118; the fader scale and −∞ cap of the Sends windows).
+    if let Some((value, id)) = ids.pan {
+        ui.knob("Pan-White", value, Rect::new(28.0, sy + top + 3.0, 40.0, 46.0), id, Some(0.5));
     }
-    ui.toggle("Send-Mute", Some("M"), send.muted, true, Rect::new(32.0, sy + top + 55.0, 32.0, 18.0), cid(s, Control::SendMute(k as u8)), None);
-    // Meters as a 203-pt fader-and-meters box from sy + 109 (s45: meter 238…397 for a send at
-    // 118); the fader runs 205 pt from its top + 4 (caps: −∞ at 369, 0 dB at 254).
-    let fm = Rect::new(0.0, sy + 109.0, STRIP_W, 203.0);
-    let readout = crate::scales::format_db(crate::scales::fader_db(send.level));
-    let fader = Rect::new(2.0, 4.0, (STRIP_W / 2.0).floor(), 205.0);
-    ui.fader_and_meters_with(s.fader_skin(), false, send.level, Default::default(), &readout, fm, cid(s, Control::SendLevel(k as u8)), Some(fader));
+    // Input sends keep the pan row (stereo strips leave it empty): M centred at top + 55, the
+    // box from 109 (s45). Bus sends: M in the right third 6 pt under the route, the box 24 pt
+    // under it (sends-aux).
+    let (mute, fm) = if ids.bus {
+        (Rect::new(52.0, sy + top + 6.0, 32.0, 18.0), Rect::new(0.0, sy + top + 24.0, STRIP_W, h - top - 24.0 - 4.0))
+    } else {
+        (Rect::new(32.0, sy + top + 55.0, 32.0, 18.0), Rect::new(0.0, sy + 109.0, STRIP_W, h - 109.0 - 4.0))
+    };
+    ui.toggle("Send-Mute", Some("M"), send.muted, true, mute, ids.mute, None);
+    let fader = Rect::new(2.0, 4.0, (STRIP_W / 2.0).floor(), fm.h - 4.0);
+    ui.fader_and_meters_with(fader_skin, false, send.level, Default::default(), readout, fm, ids.level, Some(fader));
 }
 
 /// SENDS OVERVIEW panel (`Rack_Overview_Sends`, one per strip): `Birds-Eye-Send-Background`
