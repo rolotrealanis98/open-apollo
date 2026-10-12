@@ -481,7 +481,7 @@ fn headphone_correction(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, b
 
 // ---- PLUG-IN SCENES ([cap] s10) ----
 
-const SCENE_ROW_H: f32 = 31.75;
+const SCENE_ROW_H: f32 = 32.0;
 
 /// `Rack_SceneSection` (capture s10, at 1470 × 1105): a 290-pt column under the title bar —
 /// header 30, the CURRENT / PRIMED inset (10…280, y 39…186) with RECALL / SAVE / ▲ ▼, then
@@ -492,44 +492,56 @@ const SCENE_ROW_H: f32 = 31.75;
 pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect, browser: Option<Rect>, close: Control) {
     let full = browser.unwrap_or_else(|| centred(bounds, (290.0, 560.0)));
     let r = Rect::new(full.x, full.y, 290.0f32.min(full.w), full.h);
-    ui.chrome_layer(r, 30.0);
-    // `Scenes-Main-Background` (72, 76, 78); swallows taps.
-    ui.fill(r, Rgba::rgb8(44, 47, 50));
+    ui.chrome_layer(r, 33.0);
+    // `Rack_SceneSection::resized` 0x1811f8630 (capture sb-scene): `Scenes-Main-Background`
+    // (72, 76, 78) 288 wide; the close X in (260, 8, 20, 20); the `Scenes-Inset-Background`
+    // (28, 29, 32) at (5, 33, w − 10, h − 38) holding the status panel (10, 38, w − 20, 150):
+    // CURRENT / PRIMED captions at y 7 / 65 and their 253 × 30 boxes at y 26 / 85 (panel
+    // coordinates), RECALL / SAVE (96 × 20) and ▲ ▼ (20 × 20) at y 123; the scene list from 193.
+    let sw = 288.0f32.min(r.w);
+    ui.fill(r, Rgba::rgb8(72, 76, 78));
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
-    let header = Rect::new(r.x, r.y, r.w, 30.0);
-    ui.fill(header, Rgba::rgb8(52, 56, 59));
     let hs = ui.style("fonts", "Scenes-Header-Font");
     let tw = crate::window::helvetica_bold_width("PLUG-IN SCENES", hs.size);
-    let tx = header.x + ((header.w - tw - 16.0) / 2.0).round();
-    ui.fill(Rect::new(tx, header.y + 10.0, 11.0, 11.0), Rgba::rgb8(224, 32, 208));
-    ui.text("PLUG-IN SCENES", hs, Rect::new(tx + 17.0, header.y, tw + 4.0, header.h), Align::Left);
+    let tx = r.x + ((sw - tw - 18.0) / 2.0).round();
+    ui.fill(Rect::new(tx, r.y + 12.0, 12.0, 12.0), Rgba::BLACK);
+    ui.fill(Rect::new(tx + 1.0, r.y + 13.0, 10.0, 10.0), Rgba::rgb8(255, 0, 255));
+    ui.text("PLUG-IN SCENES", hs, Rect::new(tx + 18.0, r.y + 3.5, tw + 4.0, 33.0), Align::Left);
     if let Some(x) = ui.skin("views", "Browser-Modal-Close-White").and_then(|s| s.image("image")) {
         let x = x.to_string();
-        ui.image(&x, Rect::new(header.x + 262.0, header.y + 9.0, 12.0, 12.0), None, None, 0.9);
+        ui.image(&x, Rect::new(r.x + 264.0, r.y + 12.0, 12.0, 12.0), None, None, 0.95);
     }
-    ui.hit(Rect::new(header.x + 254.0, header.y, 36.0, 30.0), sid(close), HitKind::Tap);
+    ui.hit(Rect::new(r.x + 254.0, r.y, 36.0, 33.0), sid(close), HitKind::Tap);
 
     let scenes = model.plugin_scenes();
     let current = model.status().scene;
     let primed = view.settings.scene.and_then(|i| scenes.get(i as usize).cloned());
-    // CURRENT / PRIMED (`Scenes-Inset-Background`).
-    let inset = Rect::new(r.x + 10.0, r.y + 39.0, 270.0, 147.0);
-    ui.fill(inset, Rgba::rgb8(72, 76, 78));
+    ui.fill(Rect::new(r.x + 5.0, r.y + 33.0, sw - 10.0, r.h - 38.0), Rgba::rgb8(28, 29, 32));
+    let panel = Rect::new(r.x + 10.0, r.y + 38.0, sw - 20.0, 150.0);
+    let framed = |ui: &mut Ui, b: Rect, edge: Rgba, fill: Rgba| {
+        ui.fill(b, edge);
+        ui.fill(b.inset(1.0, 1.0, 1.0, 1.0), fill);
+    };
+    framed(ui, Rect::new(panel.x, panel.y + 1.0, panel.w, panel.h), Rgba::rgb8(83, 86, 88), Rgba::rgb8(67, 70, 72));
     let ls = ui.style("fonts", "Scenes-Current-Primed-Label-Text");
-    let vs = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.85));
+    let vs = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.85));
     for (k, (label, value)) in [("CURRENT", current.clone()), ("PRIMED", primed)].into_iter().enumerate() {
-        let y = inset.y + 3.0 + k as f32 * 58.0;
-        ui.text(label, ls.clone(), Rect::new(inset.x, y, inset.w, 16.0), Align::Center);
-        let v = Rect::new(r.x + 18.0, y + 22.0, 252.0, 28.0);
-        ui.fill(v, Rgba::rgb8(36, 38, 40));
-        ui.text(value.as_deref().unwrap_or("(NONE)"), vs.clone(), v, Align::Center);
+        let y = panel.y + 7.0 + k as f32 * 58.0;
+        ui.text(label, ls.clone(), Rect::new(panel.x + 7.0, y + 0.5, 253.0, 13.0), Align::Center);
+        let v = Rect::new(panel.x + 7.0, y + 20.0, 253.0, 30.0);
+        framed(ui, v, Rgba::rgb8(83, 86, 88), Rgba::rgb8(46, 49, 52));
+        ui.text(value.as_deref().unwrap_or("(NONE)"), vs.clone(), v.offset(0.0, 1.5), Align::Center);
     }
-    // RECALL, SAVE, ▲ ▼.
-    let by = r.y + 161.0;
-    let recall = Rect::new(r.x + 18.0, by, 94.0, 20.0);
+    // RECALL, SAVE, ▲ ▼ (flat (89, 91, 94) plates with a 1-pt (109) rim).
+    let by = panel.y + 124.0;
+    let recall = Rect::new(panel.x + 7.0, by, 96.0, 20.0);
     let can_recall = view.settings.scene.is_some();
-    ui.fill(recall, Rgba::rgb8(86, 90, 93));
-    let bs = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(if can_recall { 0.85 } else { 0.3 }));
+    let plate = |ui: &mut Ui, b: Rect| {
+        ui.fill(b, Rgba::rgb8(109, 111, 113));
+        ui.fill(b.inset(0.0, 1.0, 0.0, 1.0), Rgba::rgb8(89, 91, 94));
+    };
+    plate(ui, recall);
+    let bs = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(if can_recall { 0.85 } else { 0.3 }));
     ui.text("RECALL", bs.clone(), recall, Align::Center);
     // RECALL / SAVE (`Rack_SceneSection::buttonClicked` 0x1811f7e80): RecallScene / StoreScene of
     // the selected (primed) row.
@@ -537,24 +549,28 @@ pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, boun
     if let Some(i) = view.settings.scene {
         ui.hit(recall, scene_cmd(crate::menu::SceneOp::Recall, i), HitKind::Tap);
     }
-    let save = Rect::new(r.x + 120.0, by, 96.0, 20.0);
-    ui.fill(save, Rgba::rgb8(86, 90, 93));
+    let save = Rect::new(panel.x + 110.0, by, 96.0, 20.0);
+    plate(ui, save);
     ui.text("SAVE", bs.clone(), save, Align::Center);
     if let Some(i) = view.settings.scene {
         ui.hit(save, scene_cmd(crate::menu::SceneOp::Save, i), HitKind::Tap);
     }
     for (i, up) in [true, false].into_iter().enumerate() {
-        let b = Rect::new(r.x + 224.0 + i as f32 * 26.0, by, 18.0, 20.0);
-        ui.fill(b, Rgba::rgb8(86, 90, 93));
-        ui.text(if up { "▲" } else { "▼" }, bs.clone(), b, Align::Center);
+        let b = Rect::new(panel.x + 213.0 + i as f32 * 27.0, by, 20.0, 20.0);
+        plate(ui, b);
+        if let Some(img) = ui.skin("views", if up { "Popover-Up" } else { "Popover-Down" }).and_then(|s| s.image("image")) {
+            let img = img.to_string();
+            ui.image(&img, Rect::new(b.x + 4.0, b.y + 4.0, 12.0, 12.0), None, None, 0.6);
+        }
         ui.hit(b, sid(Control::SceneStep(up)), HitKind::Tap);
     }
-    // The scene list (`Rack_ScenesListBox`).
-    let list = Rect::new(r.x, r.y + 195.0, r.w, (r.max_y() - r.y - 195.0).max(0.0));
-    ui.fill(list, Rgba::rgb8(29, 31, 33));
+    // The scene list (`Rack_ScenesListBox`, (7, 193, w − 14, h − 200)).
+    let list = Rect::new(r.x + 7.0, r.y + 193.0, sw - 14.0, (r.h - 200.0).max(0.0));
+    ui.fill(list, Rgba::rgb8(28, 29, 32));
     let overflow = (scenes.len() as f32 * SCENE_ROW_H - list.h).max(0.0);
     let off = overflow * view.settings.scroll;
-    ui.clip(Some(list));
+    // Clip from the column's left edge so the rows' hits keep x = 0 (the row menus anchor on it).
+    ui.clip(Some(Rect::new(r.x, list.y, list.max_x() - r.x, list.h)));
     let mut st = ui.style("views", "Scenes-List-Box-Number");
     st.color = Rgba::WHITE.with_alpha(0.9);
     for (i, n) in scenes.iter().enumerate() {
@@ -562,22 +578,32 @@ pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, boun
         if y + SCENE_ROW_H < list.y || y > list.max_y() {
             continue;
         }
-        let row = Rect::new(list.x, y, list.w - 14.0, SCENE_ROW_H);
+        let row = Rect::new(list.x - 7.0, y, list.w - 7.0, SCENE_ROW_H);
         if view.settings.scene == Some(i as u16) {
             ui.fill(row, Rgba::rgb8(64, 58, 40));
         } else if Some(n) == current.as_ref() {
             ui.fill(row, Rgba::WHITE.with_alpha(0.06));
         }
-        ui.text(&format!("{}", i + 1), st.clone(), Rect::new(row.x + 14.0, y, 28.0, SCENE_ROW_H), Align::Center);
+        ui.text(&format!("{}", i + 1), st.clone(), Rect::new(row.x + 14.0, y + 1.0, 28.0, SCENE_ROW_H), Align::Center);
         // Rename edits the row in place (`Rack_ScenesListBoxRow::EditSceneName`).
         let editing = view.text_edit.as_ref().filter(|e| e.target == TextTarget::SceneName(i as u16));
         if editing.is_some() {
             ui.fill(Rect::new(row.x + 56.0, y + 6.0, row.w - 60.0, SCENE_ROW_H - 12.0), Rgba::rgb8(78, 83, 88));
         }
-        ui.text(editing.map_or(n.as_str(), |e| e.text.as_str()), st.clone(), Rect::new(row.x + 59.0, y, row.w - 62.0, SCENE_ROW_H), Align::Left);
+        ui.text(editing.map_or(n.as_str(), |e| e.text.as_str()), st.clone(), Rect::new(row.x + 59.0, y + 1.0, row.w - 62.0, SCENE_ROW_H), Align::Left);
         ui.hit(row, sid(Control::SceneSelect(i as u16)), HitKind::Tap);
     }
     ui.clip(None);
+    // `Small-Vertical-Scroll-Bar` thumb in the list's right 18 pt (sb-scene).
+    if overflow > 0.0 {
+        let track = Rect::new(list.max_x() - 18.0, list.y + 4.0, 18.0, list.h - 8.0);
+        let thumb_h = (track.h * list.h / (scenes.len() as f32 * SCENE_ROW_H)).round().max(18.0);
+        let ty = (track.y + (track.h - thumb_h) * view.settings.scroll.clamp(0.0, 1.0)).round();
+        if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|s| s.image("image")) {
+            let img = img.to_string();
+            ui.image_stretched(&img, Rect::new(track.x, ty, track.w, thumb_h), 1.0);
+        }
+    }
     ui.scroll_region(list, ScrollTarget::Settings, overflow);
 }
 
