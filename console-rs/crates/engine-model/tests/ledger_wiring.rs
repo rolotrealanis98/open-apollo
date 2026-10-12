@@ -331,6 +331,8 @@ const KNOWN_NOOPS: &[&str] = &[
     "settings SceneStep(true)",
     // Benign with one device: selecting the device that is already selected.
     "settings SettingsDevice(#)",
+    // Benign when every strip is already REC (the live-session snapshot): nothing to change.
+    "nav AllRecordPreEffects(true)",
 ];
 
 #[test]
