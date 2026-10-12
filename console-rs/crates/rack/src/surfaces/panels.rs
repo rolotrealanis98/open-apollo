@@ -60,31 +60,6 @@ fn sub_window(ui: &mut Ui, bounds: Rect, size: (f32, f32), title: &str) -> Rect 
     window_frame(ui, centred(bounds, size), title, sid(Control::PanelClose))
 }
 
-/// The small-window chrome of Console's dialogs (captures s26 / s38 / s44 / s50): a 27-pt
-/// dark title bar (close X at the left, title centred) over a light (`light`) or dark body.
-/// Swallows taps on the body; returns the body.
-fn dialog_frame(ui: &mut Ui, r: Rect, title: &str, light: bool) -> Rect {
-    ui.chrome_layer(r, 27.0);
-    ui.fill(r.offset(0.0, 6.0), Rgba::BLACK.with_alpha(0.25));
-    ui.fill(r, Rgba::rgb8(26, 26, 26));
-    ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
-    let bar = Rect::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, 26.0);
-    ui.fill(bar, Rgba::rgb8(41, 41, 41));
-    if !title.is_empty() {
-        let mut style = ui.style("views", "Button-Popover-Header");
-        style.color = Rgba::WHITE.with_alpha(0.8);
-        ui.text(title, style, Rect::new(r.x, r.y, r.w, 27.0), Align::Center);
-    }
-    if let Some(x) = ui.skin("views", "Browser-Modal-Close-White").and_then(|s| s.image("image")) {
-        let x = x.to_string();
-        ui.image(&x, Rect::new(r.x + 9.0, r.y + 8.0, 11.0, 11.0), None, None, 0.95);
-    }
-    ui.hit(Rect::new(r.x, r.y, 30.0, 27.0), sid(Control::PanelClose), HitKind::Tap);
-    let body = Rect::new(r.x + 1.0, r.y + 27.0, r.w - 2.0, r.h - 28.0);
-    ui.fill(body, if light { Rgba::rgb8(192, 195, 197) } else { Rgba::rgb8(41, 44, 46) });
-    body
-}
-
 /// `Rack_Popover::paint` 0x181164400 / `::resized` 0x1811647e0: `Popover-Header` over
 /// (0, 0, w, 27) and `Popover-Content` below it; the close X (`Popover-Close-Old`, 12 × 12)
 /// centred in (8, 1, 20, 27); the title (`Rack_CalloutBoxHeader`, `Button-Popover-Header`)
@@ -610,28 +585,43 @@ pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, boun
 // ---- Monitor Meters ([cap] s44, 164 × 645) ----
 
 fn meter_window(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect) {
-    // 118 × 599 (s44): meters at x 29.5 / 71.5 (18 wide), y 83…585; scales left, centre, right.
+    // `Rack_MonitorMetersWindow` (resized 0x180d9f0c0; capture s44, 118 × 599): the sub-window
+    // header, then the monitor meters on (43, 46, 48): the UA logo, two `Monitor-Meter` bars
+    // 23.5 wide at x 27 / 69 from y 74 to 565, scale rows from y 80 to 563 (12 marks) with 3-pt
+    // ticks outside the bars, 1-pt dots between, 2-pt dots between the bars, the numbers centred
+    // at x 14.4 / 59.4 / 104.4, and L / R under the bars.
     let r = centred(bounds, (118.0, 599.0));
-    let body = dialog_frame(ui, r, "", false);
-    ui.fill(body, Rgba::rgb8(45, 45, 45));
+    sub_window_frame(ui, r, "");
+    ui.fill(Rect::new(r.x + 0.5, r.y + 27.0, r.w - 1.5, r.h - 27.5), Rgba::rgb8(43, 46, 48));
     ui.background("UA-Logo", Rect::new(r.x + 44.0, r.y + 37.0, 30.0, 24.0));
     let m: MeterFrame = model.monitor_meters();
-    let (top, h) = (r.y + 83.0, 502.0);
-    for (k, (lvl, clip)) in [(m.left, m.clip_left), (m.right, m.clip_right)].into_iter().enumerate() {
-        let x = r.x + 29.5 + k as f32 * 42.0;
-        ui.fill(Rect::new(x - 2.5, top - 3.0, 23.0, h + 6.0), Rgba::rgb8(0, 0, 0));
-        ui.bar_meter("Monitor-Meter", lvl, clip, Rect::new(x, top, 18.0, h));
-    }
-    let st = Ui::plain_style("Helvetica", 8.0, false, Rgba::rgb8(99, 104, 108));
-    for (i, db) in [0, 3, 6, 9, 12, 15, 18, 21, 27, 36, 46, 60].iter().enumerate() {
-        let y = top + 4.0 + i as f32 * (h - 8.0) / 11.0;
-        for (x, align) in [(r.x + 3.0, Align::Right), (r.x + 50.0, Align::Center), (r.x + 94.0, Align::Left)] {
-            ui.text(&format!("{db}"), st.clone(), Rect::new(x, y - 5.0, 20.0, 10.0), align);
+    let left = Rect::new(r.x + 26.75, r.y + 74.0, 23.5, 491.0);
+    let right = Rect::new(r.x + 68.75, r.y + 74.0, 23.5, 491.0);
+    ui.bar_meter("Monitor-Meter", m.left, m.clip_left, left);
+    ui.bar_meter("Monitor-Meter", m.right, m.clip_right, right);
+    let skin = ui.skin("meters", "Monitor-Meter");
+    let tick = skin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::rgb8(93, 101, 105));
+    let mut numbers = ui.style("meters", "Monitor-Meter");
+    numbers.color = tick;
+    let n = crate::scales::METER_MARKS.len();
+    let rows: Vec<f32> = (0..n).map(|i| (r.y + 80.0 + (563.0 - 80.0) * i as f32 / (n - 1) as f32 + 0.5).floor()).collect();
+    for (i, &y) in rows.iter().enumerate() {
+        ui.fill(Rect::new(r.x + 21.75, y, 3.0, 1.0), tick);
+        ui.fill(Rect::new(r.x + 94.0, y, 3.0, 1.0), tick);
+        if i > 0 {
+            let ym = ((rows[i - 1] + y) / 2.0 + 0.5).floor();
+            ui.fill(Rect::new(r.x + 23.75, ym, 1.0, 1.0), tick);
+            ui.fill(Rect::new(r.x + 94.0, ym, 1.0, 1.0), tick);
+            ui.fill(Rect::new(r.x + 58.25, ym, 2.0, 1.0), tick);
+        }
+        let db = -crate::scales::METER_MARKS[i] as i32;
+        for cx in [14.4, 59.4, 104.4] {
+            ui.text(&db.to_string(), numbers.clone(), Rect::new(r.x + cx - 10.0, y - 4.0, 20.0, 9.0), Align::Center);
         }
     }
-    let lr = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.6));
-    ui.text("L", lr.clone(), Rect::new(r.x + 29.5, top + h + 6.0, 18.0, 12.0), Align::Center);
-    ui.text("R", lr, Rect::new(r.x + 71.5, top + h + 6.0, 18.0, 12.0), Align::Center);
+    for (label, meter) in [("L", left), ("R", right)] {
+        ui.font_text("Silk-Screen-Surround-Mode", label, Rect::new(meter.x, meter.max_y() + 9.5, meter.w, 16.0), Align::Center);
+    }
 }
 
 // ---- Sends ([cap] s50 TALKBACK, s51 AUX n; 97-pt columns, 408 tall) ----
