@@ -17,7 +17,7 @@ pub mod window;
 pub use draw::{Align, Draw, DrawList, Frame, TextStyle};
 pub use houston::{Insets, Rect, Rgba};
 pub use input::{Action, Control, ControlId, Hit, HitKind, Interaction, PluginWindowButton, ScrollRegion, ScrollTarget};
-pub use model::{CueOutput, EngineSettings, HeadphoneOutput, MixerModel, MonitorOptions, PluginEntry, PreviewMixer, StatusInfo};
+pub use model::{CueOutput, EngineSettings, HeadphoneOutput, MixerModel, MonitorOptions, PluginBadge, PluginEntry, PreviewMixer, StatusInfo};
 pub use surfaces::{Effect, ViewState};
 pub use ui::{Assets, Ui};
 pub use window::{WindowLayout, build_window, build_window_with};
