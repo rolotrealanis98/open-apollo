@@ -105,9 +105,9 @@ impl EngineMixer {
         self.helper.as_ref().map(HelperStore::info)
     }
 
-    fn device_online(&self) -> bool {
+    fn device_online(&self, device: usize) -> bool {
         self.store
-            .value("/devices/0/DeviceOnline")
+            .value(&format!("/devices/{device}/DeviceOnline"))
             .and_then(Value::as_bool)
             .unwrap_or(false)
     }
@@ -143,7 +143,11 @@ impl EngineMixer {
 
     /// Console's label and italics for a UAD-2 plug-in.
     pub fn plugin_label(&self, effect_name: &str) -> (String, bool) {
-        if !self.device_online() {
+        self.plugin_label_on_device(effect_name, self.store.topology().device)
+    }
+
+    fn plugin_label_on_device(&self, effect_name: &str, device: usize) -> (String, bool) {
+        if !self.device_online(device) {
             let long = effect_name.strip_prefix("UAD ").unwrap_or(effect_name);
             return (long.to_owned(), true);
         }
@@ -232,14 +236,20 @@ impl EngineMixer {
                 n.owner == NativeOwner::Track
                     && n.owner_name
                         .as_deref()
-                        .is_some_and(|o| names.contains(&o.trim().to_lowercase()))
+                        .is_some_and(|o| {
+                            let owner = o.trim().to_lowercase();
+                            names.contains(&owner) && !self.store.topology().all_inputs.iter()
+                                .filter(|other| other.base != s.base)
+                                .any(|other| self.input_names(other).contains(&owner))
+                        })
             })
             .collect()
     }
 
     fn uad2_slot(&self, slot: &InsertPaths) -> Option<SlotInfo> {
         let name = self.str_at(&slot.effect_name()).filter(|n| !n.is_empty())?;
-        let (label, italic) = self.plugin_label(name);
+        let device = slot.base.split('/').nth(2).and_then(|s| s.parse().ok()).unwrap_or(self.store.topology().device);
+        let (label, italic) = self.plugin_label_on_device(name, device);
         Some(SlotInfo {
             state: InsertState::Loaded {
                 name: name.to_owned(),

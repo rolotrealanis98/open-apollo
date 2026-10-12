@@ -510,6 +510,8 @@ pub trait MixerModel {
         crate::surfaces::session::SessionInfo::from_name(&self.session_name())
     }
     fn inputs(&self) -> Vec<StripInfo>;
+    /// The visible projection; complete lookups keep offline strips addressable.
+    fn inputs_for_view(&self, _show_offline: bool) -> Vec<StripInfo> { self.inputs() }
     fn auxes(&self) -> Vec<StripInfo>;
     /// Channel presets (the PRESETS tab): a strip's `Preset` values tree.
     fn channel_presets(&self) -> Vec<PresetNode> {

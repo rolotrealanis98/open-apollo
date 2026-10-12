@@ -67,7 +67,7 @@ impl Changes<'_> {
 }
 
 /// Properties whose change alters the strip layout.
-const STRUCTURAL: [&str; 10] = [
+const STRUCTURAL: [&str; 12] = [
     "Stereo",
     "Active",
     "IOType",
@@ -78,6 +78,8 @@ const STRUCTURAL: [&str; 10] = [
     "CueBusCount",
     "DeviceName",
     "ID",
+    "DeviceOnline",
+    "MultiUnitOrder",
 ];
 /// Properties whose change can change other properties' metadata (`48V/enabled`…). A new
 /// `EffectName` means the slot's `parameters` subtree was replaced.
@@ -200,6 +202,7 @@ pub struct Store {
     default_writes: bool,
     status: Status,
     topology: Topology,
+    topologies: Vec<Topology>,
     topology_revision: u64,
     tree_revision: u64,
     node_revision: u64,
@@ -275,6 +278,7 @@ impl Store {
             default_writes: false,
             status: Status::Empty,
             topology: Topology::default(),
+            topologies: Vec::new(),
             topology_revision: 0,
             tree_revision: 0,
             node_revision: 0,
@@ -327,6 +331,15 @@ impl Store {
 
     pub fn topology(&self) -> &Topology {
         &self.topology
+    }
+
+    /// Per-device topology in cascade order, preserving complete device paths.
+    pub fn topologies(&self) -> &[Topology] {
+        &self.topologies
+    }
+
+    pub fn topology_for_device(&self, device: usize) -> Option<&Topology> {
+        self.topologies.iter().find(|t| t.device == device)
     }
 
     /// Bumped only when the topology actually changes.
@@ -662,11 +675,21 @@ impl Store {
 
     fn recompute_topology(&mut self) {
         self.model.topology_dirty = false;
-        let t = Topology::new(&self.model.tree, 0);
-        if t != self.topology {
+        let tree = &self.model.tree;
+        let mut devices = tree.indices("/devices");
+        devices.sort_by_key(|d| (tree.value(&format!("/devices/{d}/MultiUnitOrder")).and_then(Value::as_i64).unwrap_or(*d as i64), *d));
+        let all: Vec<Topology> = devices.iter().map(|d| Topology::new(tree, *d)).collect();
+        // Keep one primary control-room/bus model; do not guess how a cascade
+        // shares aux/monitor ownership. Inputs are grouped by cascade order.
+        let mut t = all.first().cloned().unwrap_or_else(|| Topology::new(tree, 0));
+        t.all_inputs = all.iter().flat_map(|d| d.all_inputs.iter().cloned()).collect();
+        t.inputs = all.iter().flat_map(|d| d.inputs.iter().cloned()).collect();
+        if t != self.topology || all != self.topologies {
             self.topology = t;
+            self.topologies = all;
             self.topology_revision += 1;
         }
+        self.info.device = self.topology.device_name.clone();
         self.sync_subscriptions();
     }
 
@@ -677,7 +700,7 @@ impl Store {
             return;
         }
         let Some(handle) = &self.handle else { return };
-        let plan = SubscriptionPlan::new(&self.topology, &self.model.tree);
+        let plan = SubscriptionPlan::for_devices(&self.topologies, &self.model.tree);
         if self.subscribed.is_empty() {
             let _ = handle.send(Command::SubscribeMulti);
         }

@@ -165,6 +165,8 @@ pub fn panel_id(p: crate::settings::Panel) -> String {
         P::Sends(SendsOf::Talkback) => "panel:sends:talkback".into(),
         P::Sends(SendsOf::Aux(k)) => format!("panel:sends:aux{k}"),
         P::Sends(SendsOf::Input(k)) => format!("panel:sends:in{k}"),
+        P::Sends(SendsOf::InputDevice(d, k)) => format!("panel:sends:device{d}:in{k}"),
+        P::Sends(SendsOf::AuxDevice(d, k)) => format!("panel:sends:device{d}:aux{k}"),
         P::AddDevice => "panel:add-device".into(),
         P::IoPresets => "panel:io-presets".into(),
         P::RouteSource { route, outputs } => format!("panel:route-source:{}{route}", if outputs { "out" } else { "in" }),

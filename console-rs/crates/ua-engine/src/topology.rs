@@ -669,6 +669,8 @@ impl TalkbackPaths {
 pub struct Topology {
     pub device: usize,
     pub device_name: Option<String>,
+    pub device_online: bool,
+    pub cascade_order: i64,
     /// Every input strip (pairs folded), visible or not, excluding the talkback mic.
     pub all_inputs: Vec<InputStrip>,
     /// The input strips Console shows, in order (the visible subset of `all_inputs`).
@@ -799,6 +801,8 @@ impl Topology {
             .collect();
         Topology {
             device,
+            device_online: b(tree, &format!("{dev}/DeviceOnline")).unwrap_or(true),
+            cascade_order: tree.value(&format!("{dev}/MultiUnitOrder")).and_then(Value::as_i64).unwrap_or(device as i64),
             device_name: s(tree, &format!("{dev}/DeviceName")),
             all_inputs: inputs,
             inputs: visible,
