@@ -8,10 +8,10 @@
 //!   without "UAD " ("Millennia NSEQ-2"), in italics;
 //! - a native plug-in shows its `plugin_name` (no live sample yet: see the ua-engine README).
 
-use rack::model::{InsertState, StripInfo};
+use rack::model::{ConsoleModel, InsertState, StripInfo};
 use ua_engine::{
-    DEFAULT_PORT, Endpoint, HELPER_PORT, HelperInfo, HelperStore, InsertPaths, Json, NativeInsert,
-    NativeOwner, Value,
+    AuxStrip, DEFAULT_PORT, Endpoint, HELPER_PORT, HelperInfo, HelperStore, InputStrip,
+    InsertPaths, Json, NativeInsert, NativeOwner, Value,
 };
 
 use crate::{EngineMixer, INSERT_SLOTS};
@@ -122,6 +122,70 @@ impl EngineMixer {
         (self.short_name(effect_name).unwrap_or(long), false)
     }
 
+    /// Lowercased names a helper track may carry for this input (display, engine and default
+    /// names).
+    fn input_names(&self, s: &InputStrip) -> Vec<String> {
+        let display = self
+            .str_at(&s.display_name_path())
+            .unwrap_or(&s.name)
+            .to_owned();
+        [Some(display), Some(s.name.clone()), s.default_name.clone()]
+            .into_iter()
+            .flatten()
+            .map(|n| n.trim().to_lowercase())
+            .collect()
+    }
+
+    /// Lowercased names a helper bus may carry for this aux.
+    fn aux_names(&self, a: &AuxStrip) -> Vec<String> {
+        [
+            self.str_at(&a.name_path()).map(str::to_owned),
+            Some(a.name.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|n| n.trim().to_lowercase())
+        .collect()
+    }
+
+    /// The console model assigned to a supercore track (inputs) or bus (auxes) named like the
+    /// strip: the `plugin_id` of its `effects/console` slot (`insert_type` `"console"`, the slot
+    /// Rack reads as insert kind 3, index 0). Apollo strips on 4710 have no console slot, so
+    /// without a matching helper track or bus this is None. `plugin_id` is not among the
+    /// subscribed slot properties: it comes from the helper's full read and its `tracks` polls,
+    /// so a model assigned to a bus shows after a reconnect.
+    pub(crate) fn console_model_of(&self, names: &[String], owner: NativeOwner) -> Option<ConsoleModel> {
+        let tree = self.helper.as_ref()?.tree();
+        let coll = match owner {
+            NativeOwner::Track => "tracks",
+            NativeOwner::Bus => "buses",
+        };
+        tree.children("/devices").iter().find_map(|device| {
+            let cp = format!("/devices/{device}/{coll}");
+            tree.children(&cp).iter().find_map(|uid| {
+                let base = format!("{cp}/{uid}");
+                let name = tree.value(&format!("{base}/name")).and_then(Value::as_str)?;
+                if !names.contains(&name.trim().to_lowercase()) {
+                    return None;
+                }
+                let id = tree
+                    .value(&format!("{base}/effects/console/plugin_id"))
+                    .and_then(Value::as_str)?;
+                ConsoleModel::from_plugin_id(id)
+            })
+        })
+    }
+
+    pub(crate) fn input_console_model(&self, s: &InputStrip) -> Option<ConsoleModel> {
+        self.helper.as_ref()?;
+        self.console_model_of(&self.input_names(s), NativeOwner::Track)
+    }
+
+    pub(crate) fn aux_console_model(&self, a: &AuxStrip) -> Option<ConsoleModel> {
+        self.helper.as_ref()?;
+        self.console_model_of(&self.aux_names(a), NativeOwner::Bus)
+    }
+
     /// Native plug-ins on the helper track that matches this strip (by name, case-insensitive:
     /// the track ↔ Apollo input mapping has not been observed live).
     pub fn native_inserts(&self, strip: &StripInfo) -> Vec<NativeInsert> {
@@ -131,20 +195,8 @@ impl EngineMixer {
         let Some(s) = self.input(&strip.id) else {
             return Vec::new();
         };
-        let display = self
-            .str_at(&s.display_name_path())
-            .unwrap_or(&s.name)
-            .to_owned();
-        let names: Vec<String> = [
-            Some(display),
-            Some(s.name.clone()),
-            s.default_name.clone(),
-            Some(strip.title.clone()),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|n| n.trim().to_lowercase())
-        .collect();
+        let mut names = self.input_names(s);
+        names.push(strip.title.trim().to_lowercase());
         h.native_inserts()
             .into_iter()
             .filter(|n| {

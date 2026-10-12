@@ -9,7 +9,7 @@ use houston::Resources;
 use rack::geometry::StripKind;
 use rack::model::{InsertState, MainState, StripInfo};
 use rack::surfaces::{InsertSize, Modifier, MonitorPage, Popover, PopoverState, Section, Sheet, TextEdit, TextTarget};
-use rack::{Assets, Control, ControlId, MixerModel, PreviewMixer, Ui, ViewState, build_window_with};
+use rack::{Assets, ConsoleModel, Control, ControlId, MixerModel, PreviewMixer, Ui, ViewState, build_window_with};
 
 fn id(strip: &str, control: Control) -> ControlId {
     ControlId { strip: strip.into(), control }
@@ -24,10 +24,19 @@ fn many_inputs() -> PreviewMixer {
     let mut m = PreviewMixer::default();
     for i in 0..8 {
         let sid = format!("adat{i}");
-        let s = StripInfo { id: sid.as_str().into(), title: format!("ADAT {}", i + 1), kind: StripKind::Input, stereo: false, preamp_layout: None, shows_sr_convert: false };
+        let s = StripInfo { id: sid.as_str().into(), title: format!("ADAT {}", i + 1), kind: StripKind::Input, stereo: false, preamp_layout: None, shows_sr_convert: false, console_model: None };
         m.mains.insert(s.id.clone(), MainState { name: format!("Track {}", i + 7), fader: 0.4 + 0.05 * i as f64, solo: i == 3, ..Default::default() });
         m.inserts.insert(s.id.clone(), vec![InsertState::Empty; 4]);
         m.inputs.push(s);
+    }
+    m
+}
+
+/// PreviewMixer with every strip assigned `model` (console-model strip skins).
+fn with_model(model: ConsoleModel) -> PreviewMixer {
+    let mut m = PreviewMixer::default();
+    for s in m.inputs.iter_mut().chain(m.auxes.iter_mut()) {
+        s.console_model = Some(model);
     }
     m
 }
@@ -36,6 +45,8 @@ fn scenarios() -> Vec<(&'static str, Box<dyn Fn() -> (PreviewMixer, ViewState)>)
     let base = || (PreviewMixer::default(), ViewState::default());
     vec![
         ("full", Box::new(base)),
+        ("model-api-summing", Box::new(|| (with_model(ConsoleModel::ApiSumming), ViewState::default()))),
+        ("model-neve-8028", Box::new(|| (with_model(ConsoleModel::Neve8028), ViewState::default()))),
         (
             "collapsed",
             Box::new(|| {

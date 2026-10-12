@@ -297,7 +297,7 @@ impl EngineMixer {
                 if let Control::SendMute(_) = id.control {
                     self.toggle(&p.bypass(), false);
                 } else {
-                    let strip = StripInfo { id: id.strip.clone(), title: String::new(), kind: rack::geometry::StripKind::Input, stereo: false, preamp_layout: None, shows_sr_convert: false };
+                    let strip = StripInfo { id: id.strip.clone(), title: String::new(), kind: rack::geometry::StripKind::Input, stereo: false, preamp_layout: None, shows_sr_convert: false, console_model: None };
                     let pre = self.surface_send_pre(&strip, *k as usize).unwrap_or(false);
                     self.store.commit(&p.post_fader_override(), if pre { 1i64 } else { 0i64 });
                 }

@@ -159,6 +159,7 @@ fn session_navigator_scrolls_many_strips() {
             stereo: false,
             preamp_layout: None,
             shows_sr_convert: false,
+            console_model: None,
         };
         model.inputs.push(s);
     }

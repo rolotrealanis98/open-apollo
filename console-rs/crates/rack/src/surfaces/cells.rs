@@ -165,7 +165,8 @@ fn route_bar(name: &str) -> Rgba {
 ///   plate (`slot_bg`, inset-background 10,6,10,6) with the route name (`Flex-Route-Value-Font`)
 ///   and the `Slot-Color` bar at its foot;
 /// * slot background `(4, 0, w−8, H)` (`Secondary-Send-Background`) and the lower plate
-///   `(6, 34, w−12, h−34−2)` (`Send-Lower-State-Plate`, as the ref shows);
+///   `(6, 34, w−12, h−34−2)` (`Send-Lower-State-Plate`, as the ref shows; a console model's
+///   `Lower-State-Plate-*`, and its `Gain-*` knob, on a strip that has one);
 /// * knob meter + knob `(7, 35−4, 41, 49)`;
 /// * pre_and_mute `(46, 35+14, L, 19)`: L = mute + 10 with `Send-Mute` centred, or PRE + M
 ///   (`Mini-Send-Pre`, `Mini-Send-Mute`) 2 apart.
@@ -185,10 +186,10 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
         label.color = c;
     }
     ui.text(&send.name, label, Rect::new(plate.x, plate.y + 0.5, plate.w, plate.h - 0.5), Align::Center);
-    ui.background("Send-Lower-State-Plate", Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, SEND_H - top - 1.0));
+    ui.background(s.send_plate_skin(), Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, SEND_H - top - 1.0));
     let knob = Rect::new(7.0, sy + top - 4.0, 41.0, 49.0);
     ui.film("meters", "Knob-Meter", "image-film", 0.0, knob);
-    ui.knob("Mini-Send-Level", send.level, knob, cid(s, Control::SendLevel(k as u8)), Some(crate::scales::UNITY));
+    ui.knob(s.send_knob_skin(), send.level, knob, cid(s, Control::SendLevel(k as u8)), Some(crate::scales::UNITY));
     let y = sy + top + 14.0;
     match pre {
         Some(on) => {

@@ -36,6 +36,17 @@ browser filters, popovers, modifiers) and hand the rest to the `MixerModel` (`ap
 `set_text` for names, plug-in loads and tempo). New `MixerModel` methods all have defaults.
 `cargo run -p rack --example surfaces -- shots` renders the surfaces in several states.
 
+Console models: a strip's `StripInfo::console_model` (API Summing, Neve 8028, and the API
+Vision / API 2500 / Century extensions, which use the API Summing skins) swaps its skins as
+Console's `Rack_ExtensionCustomization_*` do: fader `Main-Input-Fader-*` (inputs and buses),
+bus bottom `Aux-Channel-Bottom-*`, send plate `Lower-State-Plate-*`, send knob `Gain-*`, bus pan
+`Pan-*` (input pans stay `Pan-Black`). The model comes from the strip's console slot, which
+only the helper's (4720) supercore tracks and buses have (`effects/console/plugin_id`);
+`engine-model` matches them to strips by name. Apollo (4710) strips have no console slot, so
+the default skins apply. Evidence and addresses are on `rack::model::ConsoleModel`. Not done:
+the model fader scales (`Rack_FaderMarksPainter_{APISumming,Neve8028}`), summing tapers and
+the bus extension views (`Rack_ExtensionView_*`).
+
 Frame pipeline: engine pushes → `ua-engine::Store` (main-thread owned) and `MeterStore`
 (atomics, written by the network task) → `rack` builds the whole window's `DrawList`
 (≈2–3k quads, microseconds) → `gfx` draws it in a few draw calls. Redraw happens on engine

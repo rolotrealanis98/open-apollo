@@ -606,6 +606,9 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
         }
         StripKind::Aux => {
             ui.fill(Rect::new(0.0, 0.0, STRIP_W, main_strip::HEIGHT), AUX_MAIN_BG);
+            if let Some(bottom) = s.aux_bottom_skin() {
+                ui.background(bottom, Rect::new(0.0, 0.0, STRIP_W, g.label.y));
+            }
             ui.fill(Rect::new(0.0, 0.0, STRIP_W, 2.0), SEPARATOR);
             if pos.index > 0 {
                 ui.fill(Rect::new(0.0, 5.0, 2.0, g.label.y - 10.0), SEPARATOR);
@@ -614,11 +617,12 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
     }
     if let Some(p) = g.pans {
         let half = (p.w / 2.0).floor();
+        let pan = s.pan_skin();
         if s.stereo {
-            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x, p.y, half, p.h), cid(s, Control::PanL), Some(0.0));
-            ui.knob("Pan-Black", st.pan_r, Rect::new(p.x + half, p.y, half, p.h), cid(s, Control::PanR), Some(1.0));
+            ui.knob(pan, st.pan_l, Rect::new(p.x, p.y, half, p.h), cid(s, Control::PanL), Some(0.0));
+            ui.knob(pan, st.pan_r, Rect::new(p.x + half, p.y, half, p.h), cid(s, Control::PanR), Some(1.0));
         } else {
-            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x + (half / 2.0).floor(), p.y, half, p.h), cid(s, Control::PanL), Some(0.5));
+            ui.knob(pan, st.pan_l, Rect::new(p.x + (half / 2.0).floor(), p.y, half, p.h), cid(s, Control::PanL), Some(0.5));
         }
     }
     if let Some(r) = g.solo_mute {
@@ -636,8 +640,7 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
         ui.toggle("Switch", Some("MONO"), st.mono, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::Mono), None);
         ui.toggle("Switch-Red", Some("MUTE"), st.mute, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::Mute), None);
     }
-    let fader_key = if s.kind == StripKind::Aux { "Main-Bus-Fader" } else { "Main-Input-Fader" };
-    ui.fader_and_meters(fader_key, s.stereo, st.fader, meters, &st.readout, g.fader_meters, cid(s, Control::Fader));
+    ui.fader_and_meters(s.fader_skin(), s.stereo, st.fader, meters, &st.readout, g.fader_meters, cid(s, Control::Fader));
     name_plate(ui, model, s, g.label);
 }
 
