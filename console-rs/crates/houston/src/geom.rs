@@ -48,6 +48,26 @@ impl Insets {
     pub const fn uniform(v: f32) -> Self {
         Self { l: v, t: v, r: v, b: v }
     }
+
+    /// 9-slice corners of a `w`×`h` px image whose skin gives no insets: a third of each side
+    /// (integer division), as Rack.dll's 9-slice painter (0x181c237c0) does for every
+    /// `"stretch": true` skin. On refpair p1 the channel-strip panel drawn this way differs from
+    /// Console by RMS 0.5/255 along its edges, against 3.0 with 12-px corners.
+    pub const fn thirds(w: u32, h: u32) -> Self {
+        let (x, y) = ((w / 3) as f32, (h / 3) as f32);
+        Self { l: x, t: y, r: x, b: y }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thirds() {
+        assert_eq!(Insets::thirds(194, 614), Insets { l: 64.0, t: 204.0, r: 64.0, b: 204.0 });
+        assert_eq!(Insets::thirds(2, 2), Insets::uniform(0.0));
+    }
 }
 
 /// Straight-alpha colour, components 0…1.
