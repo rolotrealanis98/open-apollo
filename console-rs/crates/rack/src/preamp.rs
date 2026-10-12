@@ -39,8 +39,17 @@ pub fn draw_preamp(ui: &mut Ui, layout_name: &str, state: &PreampState, strip: &
                         _ => "Input-Mic-Big",
                     };
                     ui.toggle(key, Some(&state.source), false, true, r, None, Some(source_color(&state.source)));
+                    // Tap opens the MIC / LINE / HI-Z picker (`ViewState`, Popover::InputSource).
+                    if let Some(id) = id("input_source") {
+                        ui.hit(r, id, crate::input::HitKind::Tap);
+                    }
                 }
-                "input_source_button" => ui.toggle("Switch-Small", Some("IN"), false, true, r, None, None),
+                "input_source_button" => {
+                    ui.toggle("Switch-Small", Some("IN"), false, true, r, None, None);
+                    if let Some(id) = id("input_source") {
+                        ui.hit(r, id, crate::input::HitKind::Tap);
+                    }
+                }
                 "preamp_db_gain" => ui.font_text("Small-Label-Font", &state.gain_text, r, Align::Center),
                 "48v" => {
                     let label = state.phantom_enabled.then_some("48V");

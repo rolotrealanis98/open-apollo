@@ -7,3 +7,7 @@ license.workspace = true
 [dependencies]
 houston = { version = "0.1.0", path = "../houston" }
 parking_lot = "0.12.5"
+
+[dev-dependencies]
+# Example renderer only (dev-dependency cycle rack ↔ gfx is fine for examples).
+gfx = { version = "0.1.0", path = "../gfx" }

@@ -224,7 +224,12 @@ impl Ui<'_> {
                 }
                 let short = name.strip_prefix("UAD ").unwrap_or(name);
                 let style = TextStyle { family: "Helvetica".into(), size: 9.0, bold: false, italic: true, color: Rgba::WHITE.with_alpha(if *power { 0.85 } else { 0.45 }) };
-                self.text(short, style, Rect::new(r.x + 13.0, r.y + 31.0, r.w - 26.0, 12.0), Align::Center);
+                let name_r = Rect::new(r.x + 13.0, r.y + 31.0, r.w - 26.0, 12.0);
+                // Long names are clipped to the plate (Console elides with "…").
+                let fits = short.chars().count() <= 16;
+                self.clip(Some(name_r));
+                self.text(short, style, if fits { name_r } else { Rect::new(name_r.x + 1.0, name_r.y, 200.0, name_r.h) }, if fits { Align::Center } else { Align::Left });
+                self.clip(None);
             }
         }
         if let Some(id) = id {
