@@ -2,6 +2,7 @@
 //! clip, 9-slice expansion on the CPU, and text rasterised by cosmic-text into a glyph atlas
 //! so text keeps its place in the draw order. Renders to a surface or offscreen to PNG.
 
+pub mod surface;
 mod text;
 
 use std::collections::HashMap;
@@ -11,7 +12,9 @@ use houston::{ImageCache, Insets, Rect, Rgba};
 use rack::{Draw, DrawList, Frame};
 use wgpu::util::DeviceExt;
 
+pub use surface::SurfaceGpu;
 pub use text::TextSystem;
+pub use wgpu;
 pub use wgpu::TextureFormat;
 
 const ART_SCALE: f32 = 2.0;
@@ -223,6 +226,25 @@ impl Renderer {
         scale: f32,
         clear: Rgba,
     ) {
+        self.render_at(device, queue, list, target, size_px, scale, (0.0, 0.0), clear);
+    }
+
+    /// [`Renderer::render`] with the list's origin placed at `offset` pixels in the target
+    /// (letterboxing, panning). Areas the list does not cover are cleared to `clear`. Whole-pixel
+    /// offsets keep art and text crisp.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_at(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &DrawList,
+        target: &wgpu::TextureView,
+        size_px: (u32, u32),
+        scale: f32,
+        offset: (f32, f32),
+        clear: Rgba,
+    ) {
+        let scaled = |r: Rect, s: f32| Rect::new(r.x * s + offset.0, r.y * s + offset.1, r.w * s, r.h * s);
         let mut verts: Vec<Vertex> = Vec::with_capacity(list.len() * 6);
         let mut batches: Vec<Batch> = Vec::new();
         let mut scissor: Option<[u32; 4]> = None;
@@ -246,10 +268,11 @@ impl Renderer {
             match item {
                 Draw::Clip(r) => {
                     scissor = r.map(|r| {
-                        let x0 = (r.x * scale).max(0.0).floor() as u32;
-                        let y0 = (r.y * scale).max(0.0).floor() as u32;
-                        let x1 = ((r.max_x() * scale).ceil() as u32).min(size_px.0);
-                        let y1 = ((r.max_y() * scale).ceil() as u32).min(size_px.1);
+                        let r = scaled(r, scale);
+                        let x0 = r.x.max(0.0).floor() as u32;
+                        let y0 = r.y.max(0.0).floor() as u32;
+                        let x1 = (r.max_x().max(0.0).ceil() as u32).min(size_px.0);
+                        let y1 = (r.max_y().max(0.0).ceil() as u32).min(size_px.1);
                         [x0.min(size_px.0), y0.min(size_px.1), x1.saturating_sub(x0), y1.saturating_sub(y0)]
                     });
                 }
@@ -334,10 +357,6 @@ impl Renderer {
         queue.submit([encoder.finish()]);
         self.stats = FrameStats { quads, batches: batches.len(), textures: self.gpu_textures.len(), texture_bytes: self.stats.texture_bytes, glyphs };
     }
-}
-
-fn scaled(r: Rect, s: f32) -> Rect {
-    Rect::new(r.x * s, r.y * s, r.w * s, r.h * s)
 }
 
 fn quad(v: &mut Vec<Vertex>, r: Rect, uv: [f32; 4], c: Rgba, mode: f32) {
