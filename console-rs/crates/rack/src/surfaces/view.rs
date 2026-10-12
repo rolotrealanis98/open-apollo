@@ -198,6 +198,8 @@ pub struct ViewState {
     pub popover: Option<PopoverState>,
     pub text_edit: Option<TextEdit>,
     pub sheet: Option<Sheet>,
+    /// Window size in points; the full layout follows it (None: Console's 1920 × 1050).
+    pub window: Option<(f32, f32)>,
 }
 
 impl Default for ViewState {
@@ -217,6 +219,7 @@ impl Default for ViewState {
             popover: None,
             text_edit: None,
             sheet: None,
+            window: None,
         }
     }
 }

@@ -84,6 +84,7 @@ fn main() -> ExitCode {
                 &assets,
                 &*opened.model,
                 args.compact,
+                args.size,
                 scale,
                 args.open_plugin.as_ref(),
                 out,

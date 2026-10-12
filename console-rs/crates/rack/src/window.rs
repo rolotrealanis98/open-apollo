@@ -18,9 +18,13 @@ use crate::surfaces::status::draw_status_bar;
 use crate::surfaces::{MonitorPage, Section, Sheet, ViewState};
 use crate::ui::Ui;
 
-/// Column placement. `full` reproduces Console's 1920-pt window (browser + navigator,
-/// aux at 1613.5, monitor at 1823.5; strips beyond the visible range scroll with the session
-/// navigator); `compact` hides the browser/navigator and packs aux and monitor after the last
+/// Column placement (`Rack_WindowLayouts::resized` 0x18167bb40, checked on Console 1.3.1 at
+/// 1920 × 1050 and 1470 × 1105). The full layout follows the window size: browser (345) and
+/// navigator (96) keep their widths from the left, the monitor column (96) and the bus section
+/// pack against the right edge (`Resized_BusSection` 0x181674da0: two aux strips, plus their
+/// 17-pt scrollbar while the aux cells overflow, 1.5 pt before the monitor), and the mixer
+/// page takes what is left; columns run from y 72 down to the status bar, 40 pt above the
+/// bottom. `compact` hides the browser/navigator and packs aux and monitor after the last
 /// strip. `browser` = the plug-in browser is shown (full layout only).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WindowLayout {
@@ -28,9 +32,18 @@ pub struct WindowLayout {
     pub inputs: usize,
     pub auxes: usize,
     pub browser: bool,
+    /// Window size in points (the full layout; compact derives its width from the strips).
+    pub width: f32,
+    pub height: f32,
+    /// The aux cells overflow, so the bus section carries its scrollbar.
+    pub aux_scroll: bool,
 }
 
 const GAP: f32 = 18.0;
+/// Vertical scrollbar column of the mixer page and of the bus section.
+pub const SCROLLBAR_W: f32 = 17.0;
+/// Between the bus section and the monitor column (1.3.1).
+const BUS_MONITOR_GAP: f32 = 1.5;
 const PANEL: Rgba = Rgba::rgb8(72, 76, 78);
 const SEPARATOR: Rgba = Rgba::rgb8(82, 87, 89);
 /// Main strip height with the fader hidden (F = 5, label 28).
@@ -38,7 +51,30 @@ const MAIN_HIDDEN_H: f32 = 5.0 + main_strip::LABEL_H;
 
 impl WindowLayout {
     pub fn new(view: &ViewState, inputs: usize, auxes: usize) -> Self {
-        Self { compact: view.compact, inputs, auxes, browser: view.show_browser && !view.compact }
+        let (w, h) = view.window.unwrap_or(W::SIZE);
+        let mut l = Self { compact: view.compact, inputs, auxes, browser: view.show_browser && !view.compact, width: w, height: h, aux_scroll: true };
+        let (min_w, min_h) = l.min_size();
+        l.width = l.width.max(min_w);
+        l.height = l.height.max(min_h);
+        l
+    }
+    /// With the aux scrollbar shown or not (it depends on the aux cells' height).
+    pub fn with_aux_scroll(mut self, aux_scroll: bool) -> Self {
+        self.aux_scroll = aux_scroll;
+        self
+    }
+    /// Smallest window: one input strip, the bus section and the monitor; the main strip and a
+    /// cell header above it.
+    pub fn min_size(&self) -> (f32, f32) {
+        let w = self.strips_x() + STRIP_W + SCROLLBAR_W + self.bus_w() + BUS_MONITOR_GAP + STRIP_W;
+        (w, W::COLUMN.0 + main_strip::HEIGHT + 5.0 + 22.0 + W::STATUS_BAR.1)
+    }
+    fn aux_w(&self) -> f32 {
+        self.auxes.max(2) as f32 * STRIP_W
+    }
+    /// Aux strips plus the scrollbar column when it shows.
+    pub fn bus_w(&self) -> f32 {
+        self.aux_w() + if self.aux_scroll { SCROLLBAR_W } else { 0.0 }
     }
     /// Navigator column x (full layout).
     pub fn nav_x(&self) -> f32 {
@@ -51,15 +87,17 @@ impl WindowLayout {
         self.side_x() + W::SIDE_SECTION.1
     }
     pub fn aux_x(&self) -> f32 {
-        if self.compact { self.strips_x() + self.inputs as f32 * STRIP_W + GAP } else { W::AUX_X }
+        if self.compact { self.strips_x() + self.inputs as f32 * STRIP_W + GAP } else { self.monitor_x() - BUS_MONITOR_GAP - self.bus_w() }
     }
     pub fn monitor_x(&self) -> f32 {
-        let packed = self.aux_x() + self.auxes.max(2) as f32 * STRIP_W + GAP;
-        if self.compact { packed } else { packed.max(W::MONITOR_X) }
+        if self.compact { self.strips_x() + self.inputs as f32 * STRIP_W + GAP + self.aux_w() + GAP } else { self.width - STRIP_W }
     }
     pub fn size(&self) -> (f32, f32) {
-        let w = self.monitor_x() + STRIP_W + if self.compact { 4.0 } else { 0.0 };
-        (if self.compact { w } else { w.max(W::SIZE.0) }, W::SIZE.1)
+        if self.compact { (self.monitor_x() + STRIP_W + 4.0, self.height) } else { (self.width, self.height) }
+    }
+    /// Top of the status bar (and bottom of the columns).
+    pub fn status_y(&self) -> f32 {
+        self.height - W::STATUS_BAR.1
     }
     /// Input strips that fit between the side section and the aux section.
     pub fn visible_inputs(&self) -> usize {
@@ -127,18 +165,25 @@ pub fn build_window(ui: &mut Ui, model: &dyn MixerModel, compact: bool) -> Windo
 pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) -> WindowLayout {
     let inputs = model.inputs();
     let auxes = model.auxes();
-    let l = WindowLayout::new(view, inputs.len(), auxes.len());
+    let base = WindowLayout::new(view, inputs.len(), auxes.len());
+    let col_h = base.status_y() - W::COLUMN.0;
+
+    // Cell rows. Content that fits is bottom-aligned on the main strips (1.3.1 at 1470 × 1105);
+    // content that overflows scrolls, from the top.
+    let rows = CellRows::new(model, view, &inputs, false);
+    let aux_rows = CellRows::new(model, view, &auxes, true);
+    let cells_h = col_h - rows.main - 5.0;
+    let aux_cells_h = col_h - aux_rows.main - 5.0;
+    let aux_scroll = view.monitor_page == MonitorPage::Aux && aux_rows.total() > aux_cells_h;
+    let l = base.with_aux_scroll(aux_scroll);
     let (width, height) = l.size();
     let bounds = Rect::new(0.0, 0.0, width, height);
-    let col_h = W::COLUMN.1 - W::COLUMN.0;
+    let status_y = l.status_y();
 
     ui.fill(bounds, Rgba::rgb8(41, 43, 46));
 
-    // Input cell rows and scrolling.
-    let rows = CellRows::new(model, view, &inputs, false);
-    let cells_h = col_h - rows.main - 5.0;
     let overflow = (rows.total() - cells_h).max(0.0);
-    let off = (view.cells_scroll.clamp(0.0, 1.0) * overflow).round();
+    let off = if overflow > 0.0 { (view.cells_scroll.clamp(0.0, 1.0) * overflow).round() } else { rows.total() - cells_h };
     let visible_rows = {
         let vis = |s: Section| rows.rows().iter().any(|&(r, y, h)| r == s && y - off + h > 0.0 && y - off < cells_h);
         VisibleRows { inputs: vis(Section::Inputs), inserts: vis(Section::Inserts), sends: vis(Section::Sends) }
@@ -146,9 +191,9 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
 
     if !l.compact {
         if l.browser {
-            draw_browser(ui, model, view, Rect::new(0.0, W::TITLE_BAR, W::BROWSER_W, W::STATUS_BAR.0 - W::TITLE_BAR));
+            draw_browser(ui, model, view, Rect::new(0.0, W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR));
         }
-        draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, W::STATUS_BAR.0, visible_rows);
+        draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, status_y, visible_rows);
     }
 
     // Strip area panel and session navigator.
@@ -170,17 +215,17 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let aux_w = auxes.len().max(2) as f32 * STRIP_W;
     match view.monitor_page {
         MonitorPage::Aux => {
-            let aux_rows = CellRows::new(model, view, &auxes, true);
+            let aux_off = (aux_rows.total() - aux_cells_h).min(0.0);
             for (i, s) in auxes.iter().enumerate() {
                 let r = Rect::new(l.aux_x() + i as f32 * STRIP_W, W::COLUMN.0, STRIP_W, col_h);
                 ui.fill(r, PANEL);
-                strip_column(ui, model, view, s, &aux_rows, 0.0, r);
+                strip_column(ui, model, view, s, &aux_rows, aux_off, r);
             }
         }
         MonitorPage::ControlRoom => draw_control_room(ui, model, Rect::new(l.aux_x(), W::COLUMN.0, aux_w, col_h)),
     }
-    draw_monitor_column(ui, model, view, Rect::new(l.monitor_x(), W::MONITOR_TOP, STRIP_W, W::STATUS_BAR.0 - W::MONITOR_TOP));
-    draw_status_bar(ui, model, Rect::new(0.0, W::STATUS_BAR.0, width, W::STATUS_BAR.1));
+    draw_monitor_column(ui, model, view, Rect::new(l.monitor_x(), W::MONITOR_TOP, STRIP_W, status_y - W::MONITOR_TOP));
+    draw_status_bar(ui, model, Rect::new(0.0, status_y, width, W::STATUS_BAR.1));
     // Last of the chrome: its bottom line covers the first point of the columns below.
     title_bar(ui, model, width);
 
