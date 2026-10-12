@@ -164,7 +164,8 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
 
     for (i, s) in inputs.iter().enumerate().skip(first).take(visible) {
         let x = l.strips_x() + (i - first) as f32 * STRIP_W;
-        strip_column(ui, model, view, s, &rows, off, Rect::new(x, W::COLUMN.0, STRIP_W, col_h));
+        let pos = GroupPos { index: i - first, last: i - first + 1 == visible.min(inputs.len() - first) };
+        strip_column(ui, model, view, s, &rows, off, pos, Rect::new(x, W::COLUMN.0, STRIP_W, col_h));
     }
     // Cells scrolling: wheel region and scrollbar in the gap before the aux section.
     let cells_area = Rect::new(l.side_x(), W::COLUMN.0 + 5.0, l.aux_x() - l.side_x(), cells_h);
@@ -178,7 +179,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
             for (i, s) in auxes.iter().enumerate() {
                 let r = Rect::new(l.aux_x() + i as f32 * STRIP_W, W::COLUMN.0, STRIP_W, col_h);
                 ui.fill(r, PANEL);
-                strip_column(ui, model, view, s, &aux_rows, 0.0, r);
+                strip_column(ui, model, view, s, &aux_rows, 0.0, GroupPos { index: i, last: i + 1 == auxes.len() }, r);
             }
         }
         MonitorPage::ControlRoom => draw_control_room(ui, model, Rect::new(l.aux_x(), W::COLUMN.0, aux_w, col_h)),
@@ -247,129 +248,3 @@ fn rows_open(rows: &CellRows, sec: Section) -> bool {
     }
 }
 
-fn strip_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripInfo, rows: &CellRows, off: f32, r: Rect) {
-    let main_y = r.h - rows.main;
-    ui.at(r.x, r.y, |ui| {
-        ui.fill(Rect::new(1.0, 0.0, 94.0, 4.0), Rgba::rgb8(41, 86, 125)); // swatch
-        ui.clip(Some(Rect::new(0.0, 5.0, STRIP_W, main_y - 5.0)));
-        ui.at(0.0, 5.0 - off, |ui| strip_cells(ui, model, view, s, rows));
-        ui.clip(None);
-        ui.fill(Rect::new(0.0, 5.0, 1.0, main_y - 5.0), SEPARATOR);
-        ui.fill(Rect::new(95.0, 5.0, 1.0, main_y - 5.0), SEPARATOR);
-        ui.at(0.0, main_y, |ui| {
-            if rows.main > MAIN_HIDDEN_H {
-                main_strip(ui, model, s);
-            } else {
-                name_plate(ui, model, s, Rect::new(0.0, 5.0, STRIP_W, main_strip::LABEL_H));
-            }
-        });
-    });
-}
-
-/// Input: input cell → inserts → sends; aux: inserts → sends. Collapsed rows are headers only.
-fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripInfo, rows: &CellRows) {
-    let bus = s.kind == StripKind::Aux;
-    let mut y = 0.0;
-    if let Some(h) = rows.input {
-        ui.cell_header(&s.title, false, false, Rect::new(0.0, 0.0, STRIP_W, HEADER_H));
-        if h > HEADER_H {
-            input_cell(ui, model, s);
-        }
-        y += h;
-    }
-    ui.cell_header("INSERTS", true, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
-    if rows.inserts > HEADER_H {
-        let slots = model.inserts(s);
-        insert_list(ui, s, &slots, rows.slots.min(slots.len()), view.insert_size, y + 26.0);
-        if !bus {
-            rec_mon(ui, model.records_pre_effects(s), s, y + 26.0 + rows.slots as f32 * view.insert_size.pitch() + 4.0);
-        }
-    }
-    y += rows.inserts;
-    ui.cell_header("SENDS", false, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
-    if rows.sends > HEADER_H {
-        let sends = if bus { model.sends(s) } else { model.input_sends(s) };
-        send_list(ui, s, &sends, &|k| model.send_pre(s, k), view, y + 26.0);
-    }
-}
-
-fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo) {
-    if let Some(layout) = &s.preamp_layout {
-        ui.background("Channel-Inserts-Background", Rect::new(4.0, 26.0, 88.0, 73.0));
-        ui.font_text("Send-Label", "UNISON", Rect::new(4.0, 28.0, 88.0, 14.0), Align::Center);
-        let unison = model.unison(s);
-        ui.insert_slot(&unison, Rect::new(0.0, 44.0, STRIP_W, 48.0), cid(s, Control::Insert(255)));
-        if let Some(state) = model.preamp(s) {
-            draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0, STRIP_W, 129.0));
-        }
-    } else if s.shows_sr_convert {
-        ui.background("Secondary-Display-Background", Rect::new(8.0, 174.0, 80.0, 48.0));
-        ui.font_text("Send-Label", "SR CONVERT", Rect::new(8.0, 178.0, 80.0, 14.0), Align::Center);
-        ui.toggle("Switch-Small", Some("OFF"), false, true, Rect::new(14.0, 196.0, 32.0, 19.0), None, None);
-        ui.toggle("Switch-Small", Some("ON"), true, true, Rect::new(50.0, 196.0, 32.0, 19.0), None, None);
-    }
-}
-
-fn rec_mon(ui: &mut Ui, monitor_only: bool, s: &StripInfo, y: f32) {
-    let label = ui.style("fonts", "Send-Label");
-    ui.text("UAD", label.clone(), Rect::new(14.0, y + 2.0, 28.0, 10.0), Align::Center);
-    let (rec, mon) = if monitor_only {
-        (Rgba::rgb8(90, 26, 16), Rgba::rgb8(77, 178, 242))
-    } else {
-        (Rgba::rgb8(237, 77, 38), Rgba::rgb8(51, 64, 77))
-    };
-    ui.fill(Rect::new(10.0, y + 15.0, 12.0, 12.0), rec);
-    ui.fill(Rect::new(34.0, y + 15.0, 12.0, 12.0), mon);
-    ui.text("REC", label.clone(), Rect::new(5.0, y + 29.0, 22.0, 10.0), Align::Center);
-    ui.text("MON", label, Rect::new(28.0, y + 29.0, 24.0, 10.0), Align::Center);
-    ui.hit(Rect::new(4.0, y + 10.0, 44.0, 20.0), ControlId { strip: s.id.clone(), control: Control::RecMon }, HitKind::Toggle);
-    ui.toggle("Switch", Some("INS"), false, true, Rect::new(50.0, y, 40.0, 40.0), None, None);
-}
-
-fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo) {
-    let g = MainStripGeometry::new(s.kind);
-    let st = model.main(s);
-    let meters = model.meters(s);
-    match s.kind {
-        StripKind::Input => ui.background("Channel-Bottom", Rect::new(0.0, 0.0, STRIP_W, g.label.y)),
-        StripKind::Aux => ui.fill(Rect::new(0.0, 0.0, STRIP_W, main_strip::HEIGHT), Rgba::rgb8(56, 60, 62)),
-    }
-    if let Some(p) = g.pans {
-        let half = (p.w / 2.0).floor();
-        if s.stereo {
-            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x, p.y, half, p.h), cid(s, Control::PanL), Some(0.0));
-            ui.knob("Pan-Black", st.pan_r, Rect::new(p.x + half, p.y, half, p.h), cid(s, Control::PanR), Some(1.0));
-        } else {
-            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x + (half / 2.0).floor(), p.y, half, p.h), cid(s, Control::PanL), Some(0.5));
-        }
-    }
-    if let Some(r) = g.solo_mute {
-        let (bw, bh) = ui.skin("views", "Switch-Small").and_then(|k| k.size()).unwrap_or((32.0, 19.0));
-        let y = r.y + ((r.h - bh) / 2.0).floor();
-        let mid = (r.w / 2.0).floor();
-        ui.toggle("Switch-Small", Some("S"), st.solo, true, Rect::new(mid - bw - 3.0, y, bw, bh), cid(s, Control::Solo), None);
-        ui.toggle("Switch-Small-Red", Some("M"), st.mute, true, Rect::new(mid + 3.0, y, bw, bh), cid(s, Control::Mute), None);
-    }
-    if let Some(r) = g.pre_post {
-        ui.toggle("Switch", Some("PRE"), st.pre, true, Rect::new(8.0, r.y, 40.0, 40.0), cid(s, Control::PrePost), None);
-        ui.toggle("Switch", Some("POST"), !st.pre, true, Rect::new(48.0, r.y, 40.0, 40.0), cid(s, Control::PrePost), None);
-    }
-    if let Some(r) = g.mono_mute {
-        ui.toggle("Switch", Some("MONO"), st.mono, true, Rect::new(8.0, r.y, 40.0, 40.0), cid(s, Control::Mono), None);
-        ui.toggle("Switch-Red", Some("MUTE"), st.mute, true, Rect::new(48.0, r.y, 40.0, 40.0), cid(s, Control::Mute), None);
-    }
-    let fader_key = if s.kind == StripKind::Aux { "Main-Bus-Fader" } else { "Main-Input-Fader" };
-    ui.fader_and_meters(fader_key, s.stereo, st.fader, meters, &st.readout, g.fader_meters, cid(s, Control::Fader));
-    name_plate(ui, model, s, g.label);
-}
-
-/// Name plate (tap: rename / isolate) with the "[ ISOLATE ]" tag.
-fn name_plate(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, r: Rect) {
-    let st = model.main(s);
-    ui.name_plate(if s.kind == StripKind::Aux { "Channel-Aux-Name" } else { "Channel-Input-Name" }, &st.name, r);
-    if model.isolated(s) {
-        let color = if s.kind == StripKind::Aux { Rgba::WHITE.with_alpha(0.5) } else { Rgba::rgb8(40, 40, 40) };
-        ui.text("[ ISOLATE ]", Ui::plain_style("Helvetica", 6.5, false, color), Rect::new(r.x, r.y + 17.0, r.w, 9.0), Align::Center);
-    }
-    ui.hit(r, ControlId { strip: s.id.clone(), control: Control::Name }, HitKind::Tap);
-}
