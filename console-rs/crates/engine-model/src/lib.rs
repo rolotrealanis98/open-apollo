@@ -349,6 +349,27 @@ impl MixerModel for EngineMixer {
             .collect()
     }
 
+    fn channel_presets(&self) -> Vec<rack::PresetNode> {
+        // Every strip carries the same `Preset` tree (Channel Strip presets); take the first
+        // shown input's, else the first aux's.
+        let t = self.store.topology();
+        let path = t.inputs.first().map(|s| format!("{}/Preset", s.base)).or_else(|| t.auxes.first().map(|a| format!("{}/Preset", a.base)));
+        let Some(values) = path.and_then(|p| self.store.tree().meta(&p).and_then(|m| m.values.clone())) else { return Vec::new() };
+        fn convert(e: &ua_engine::SessionEntry) -> rack::PresetNode {
+            match e {
+                ua_engine::SessionEntry::File { name, .. } => rack::PresetNode::file(name),
+                ua_engine::SessionEntry::Folder { name, children, .. } => {
+                    let mut c: Vec<_> = children.iter().map(convert).collect();
+                    c.sort_by_key(|n| n.name.to_lowercase());
+                    rack::PresetNode::folder(name, c)
+                }
+            }
+        }
+        let mut out: Vec<_> = ua_engine::session::parse_entries(&values).iter().map(convert).collect();
+        out.sort_by_key(|n| n.name.to_lowercase());
+        out
+    }
+
     fn talkback(&self) -> Option<StripInfo> {
         let s = self.store.topology().talkback.strip.as_ref()?;
         Some(StripInfo {

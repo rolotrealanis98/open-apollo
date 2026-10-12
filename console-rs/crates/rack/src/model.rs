@@ -129,6 +129,23 @@ impl ConsoleModel {
     }
 }
 
+/// A channel preset folder or file (a strip's `Preset` values tree; the PRESETS tab).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PresetNode {
+    pub name: String,
+    /// Some for a folder (its entries, sorted by name as Console lists them).
+    pub children: Option<Vec<PresetNode>>,
+}
+
+impl PresetNode {
+    pub fn file(name: &str) -> Self {
+        Self { name: name.into(), children: None }
+    }
+    pub fn folder(name: &str, children: Vec<PresetNode>) -> Self {
+        Self { name: name.into(), children: Some(children) }
+    }
+}
+
 /// The skins a strip draws with, by kind and console model (the default rendering is the
 /// `console_model == None` case).
 impl StripInfo {
@@ -452,6 +469,10 @@ pub trait MixerModel {
     }
     fn inputs(&self) -> Vec<StripInfo>;
     fn auxes(&self) -> Vec<StripInfo>;
+    /// Channel presets (the PRESETS tab): a strip's `Preset` values tree.
+    fn channel_presets(&self) -> Vec<PresetNode> {
+        Vec::new()
+    }
     /// The talkback mic strip (`IOType` `TalkbackMic`), shown with SHOW CTRL ROOM. Its sends
     /// (AUX 1, AUX 2, CUE 1…) come from `input_sends`.
     fn talkback(&self) -> Option<StripInfo> {
@@ -793,6 +814,15 @@ impl MixerModel for PreviewMixer {
     }
     fn talkback(&self) -> Option<StripInfo> {
         self.talkback.clone()
+    }
+    fn channel_presets(&self) -> Vec<PresetNode> {
+        let f = |names: &[&str]| names.iter().map(|n| PresetNode::file(n)).collect::<Vec<_>>();
+        vec![
+            PresetNode::folder("Bass", f(&["Andrew Scheps - Bass", "Darrell Thorp - Bass"])),
+            PresetNode::folder("Drums", f(&["Andrew Scheps - Kick", "Andrew Scheps - Snare"])),
+            PresetNode::folder("Guitar", f(&["Darrell Thorp - Electric Guitar", "Jeff Balding - Acoustic"])),
+            PresetNode::folder("Vocals", f(&["Darrell Thorp - Vocals", "Dave Isaac - Lead Vox"])),
+        ]
     }
     fn main(&self, s: &StripInfo) -> MainState {
         self.mains.get(&s.id).cloned().unwrap_or_default()

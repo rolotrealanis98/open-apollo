@@ -36,10 +36,12 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
         ui.font_text("CR-Label", "DIM AMOUNT", Rect::new(panel.x, top + 6.0, panel.w, 14.0), Align::Center);
         let knob = Rect::new(30.0, top + 17.0, 40.0, 46.0);
         ui.knob("Main-Level-Small", opts.dim_level, knob, Some(mid(Control::DimLevel)), None);
-        ui.background("Main-Readout", Rect::new(15.0, top + 63.0, 70.0, 22.0));
+        // `Main-Readout` (display_sml, the skin's 28-pt height) at 1291…1365 × 838…866 (s45).
+        let ro = Rect::new(13.0, top + 60.0, 74.0, 28.0);
+        ui.background("Main-Readout", ro);
         let mut readout = ui.style("views", "Main-Readout");
         readout.color = Rgba::WHITE.with_alpha(0.75);
-        ui.text(&opts.dim_readout, readout, Rect::new(15.0, top + 63.0, 70.0, 22.0), Align::Center);
+        ui.text(&opts.dim_readout, readout, ro, Align::Center);
         let dim = opts.dim.unwrap_or(false);
         ui.toggle("Switch-Large", Some("DIM"), dim, opts.dim.is_some(), Rect::new(10.0, top + 88.0, 80.0, 40.0), Some(mid(Control::MonitorDim)), None);
         ui.fill(Rect::new(panel.x, top + 130.0, panel.w, 1.0), RULE);

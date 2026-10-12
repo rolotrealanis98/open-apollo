@@ -192,8 +192,10 @@ pub fn send_list(ui: &mut Ui, s: &StripInfo, sends: &[SendState], pre: &dyn Fn(u
     match style {
         SendStyle::Overview => overview_panel(ui, s, sends, y),
         SendStyle::Medium => {
+            // The talkback strip's sends are bus-style: M only, no PRE (s45).
+            let talkback = s.kind == crate::geometry::StripKind::Talkback;
             for (k, send) in sends.iter().enumerate() {
-                mini_send(ui, s, k, send, pre(k), y + k as f32 * (SEND_H + 3.0));
+                mini_send(ui, s, k, send, if talkback { None } else { pre(k) }, y + k as f32 * (SEND_H + 3.0));
             }
         }
         SendStyle::Full => {
@@ -276,11 +278,17 @@ fn full_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, sy: f32) {
     ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 6.0), Align::Center);
     let body = Rect::new(4.0, sy + top, STRIP_W - 8.0, SEND_H_FULL - top);
     ui.background("Secondary-Send-Background", body);
-    ui.knob(s.pan_skin(), 0.5, Rect::new(28.0, sy + top + 4.0, 40.0, 46.0), cid(s, Control::SendPan(k as u8)), Some(0.5));
-    ui.toggle("Send-Mute", Some("M"), send.muted, true, Rect::new(32.0, sy + top + 56.0, 32.0, 18.0), cid(s, Control::SendMute(k as u8)), None);
-    let fm = Rect::new(0.0, sy + top + 80.0, STRIP_W, SEND_H_FULL - top - 84.0);
+    // Send pans are white on every strip (s45: `knob_pan_white`); stereo strips have none.
+    if !s.stereo {
+        ui.knob("Pan-White", 0.5, Rect::new(28.0, sy + top + 3.0, 40.0, 46.0), cid(s, Control::SendPan(k as u8)), Some(0.5));
+    }
+    ui.toggle("Send-Mute", Some("M"), send.muted, true, Rect::new(32.0, sy + top + 55.0, 32.0, 18.0), cid(s, Control::SendMute(k as u8)), None);
+    // Meters as a 203-pt fader-and-meters box from sy + 109 (s45: meter 238…397 for a send at
+    // 118); the fader runs 205 pt from its top + 4 (caps: −∞ at 369, 0 dB at 254).
+    let fm = Rect::new(0.0, sy + 109.0, STRIP_W, 203.0);
     let readout = crate::scales::format_db(crate::scales::fader_db(send.level));
-    ui.fader_and_meters(s.fader_skin(), false, send.level, Default::default(), &readout, fm, cid(s, Control::SendLevel(k as u8)));
+    let fader = Rect::new(2.0, 4.0, (STRIP_W / 2.0).floor(), 205.0);
+    ui.fader_and_meters_with(s.fader_skin(), false, send.level, Default::default(), &readout, fm, cid(s, Control::SendLevel(k as u8)), Some(fader));
 }
 
 /// SENDS OVERVIEW panel (`Rack_Overview_Sends`, one per strip): `Birds-Eye-Send-Background`

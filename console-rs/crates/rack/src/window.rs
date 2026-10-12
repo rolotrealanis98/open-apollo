@@ -397,7 +397,8 @@ fn strips_hscroll(ui: &mut Ui, l: &WindowLayout, first: usize, visible: usize, r
     let bg = ui.assets.appearance.colors.get("mixer_scrollbar_background").copied().unwrap_or(Rgba::rgb8(35, 36, 40));
     ui.fill(Rect::new(r.x, r.y - 1.0, r.w, 1.0), Rgba::BLACK);
     ui.fill(r, bg);
-    let track = Rect::new(l.strips_x(), r.y, (l.aux_x() - l.strips_x()).max(1.0), r.h);
+    // The track starts a point into the strips (s10: thumb at 777 for strips at 776).
+    let track = Rect::new(l.strips_x() + 1.0, r.y, (l.aux_x() - l.strips_x() - 1.0).max(1.0), r.h);
     let n = l.inputs.max(1) as f32;
     let thumb = Rect::new(track.x + track.w * first as f32 / n, track.y, (track.w * visible as f32 / n).max(30.0), track.h);
     if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|k| k.image("image")) {

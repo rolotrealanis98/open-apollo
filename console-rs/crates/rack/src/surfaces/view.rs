@@ -130,11 +130,14 @@ pub struct BrowserView {
     pub selected: Option<u16>,
     /// An insert slot's "Assign...": the next catalog tap loads into this slot.
     pub assign_to: Option<ControlId>,
+    /// PRESETS tab: open preset folders (by name) and the list scroll (0…1 of the overflow).
+    pub presets_open: Vec<String>,
+    pub presets_scroll: f32,
 }
 
 impl Default for BrowserView {
     fn default() -> Self {
-        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None }
+        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None, presets_open: Vec::new(), presets_scroll: 0.0 }
     }
 }
 
@@ -303,6 +306,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::BrowserLargeRows
             | C::BrowserHintClose
             | C::BrowserAssignClose
+            | C::BrowserPresetFolder(_)
             | C::BrowserGroupReveal
             | C::BrowserInactiveReveal
             | C::BrowserScroll
@@ -353,9 +357,10 @@ impl ViewState {
     /// `inputs|inserts|sends|fader=0|1`, `small` / `large`, `fixed=0|1`, `overview=0|1`,
     /// `scroll=F`, `aux-scroll=F` (0…1), `browser=0|1`, `tab=plugins|presets`, `hint=0|1`,
     /// `aux=0|1`, `ctrl=0|1`, `scenes=0|1`, `scene-info=0|1`, `first=N`,
+    /// `presets-open=Folder|Folder`, `presets-scroll=F`,
     /// `assign=STRIP:SLOT` (slot `u` = Unison), `compact=0|1`.
     pub fn apply_spec(&mut self, spec: &str) -> Result<(), String> {
-        for item in spec.split([',', ' ']).map(str::trim).filter(|s| !s.is_empty()) {
+        for item in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             let (k, v) = item.split_once('=').unwrap_or((item, "1"));
             let flag = || match v {
                 "1" | "on" | "true" | "yes" => Ok(true),
@@ -383,6 +388,8 @@ impl ViewState {
                     }
                 }
                 "hint" => self.browser.hint = flag()?,
+                "presets-open" => self.browser.presets_open = v.split('|').map(str::to_owned).filter(|n| !n.is_empty()).collect(),
+                "presets-scroll" => self.browser.presets_scroll = frac()?,
                 "aux" => self.show_aux = flag()?,
                 "ctrl" => self.show_ctrl_room = flag()?,
                 "scenes" => self.show_scenes = flag()?,
@@ -537,6 +544,15 @@ impl ViewState {
             C::BrowserLargeRows => self.browser.large_rows ^= true,
             C::BrowserHintClose => self.browser.hint = false,
             C::BrowserAssignClose => self.browser.assign_to = None,
+            C::BrowserPresetFolder(k) => {
+                if let Some(f) = model.channel_presets().get(k as usize) {
+                    if let Some(i) = self.browser.presets_open.iter().position(|n| *n == f.name) {
+                        self.browser.presets_open.remove(i);
+                    } else {
+                        self.browser.presets_open.push(f.name.clone());
+                    }
+                }
+            }
             C::BrowserGroupReveal => self.browser.group_open ^= true,
             C::BrowserInactiveReveal => self.browser.inactive_open ^= true,
             C::BrowserItem(i) => match self.browser.assign_to.take() {
@@ -631,6 +647,7 @@ impl ViewState {
             return false;
         }
         let slot = match r.target {
+            ScrollTarget::Browser if self.browser.tab == BrowserTab::Presets => &mut self.browser.presets_scroll,
             ScrollTarget::Browser => &mut self.browser.scroll,
             ScrollTarget::Cells => &mut self.cells_scroll,
             ScrollTarget::AuxCells => &mut self.aux_scroll,

@@ -85,6 +85,8 @@ pub enum Control {
     BrowserHintClose,
     /// [view] The assign header's close button: leave insert-assign mode.
     BrowserAssignClose,
+    /// [view] PRESETS tab: open / close the k-th top-level preset folder.
+    BrowserPresetFolder(u16),
     BrowserGroupReveal,
     /// The "Universal Audio (Inactive)" group's reveal toggle.
     BrowserInactiveReveal,
