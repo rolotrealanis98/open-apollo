@@ -84,6 +84,12 @@ pub struct Options {
     pub client_id: String,
     /// 32 hex digits identifying this client machine, sent as `{"path":"networkID",…}`.
     pub network_id: String,
+    /// The identity key for `network_id`: `networkID` on the engine (4710), `network_id` on the
+    /// UA Mixer Helper (4720).
+    pub network_id_key: String,
+    /// Send `get /ping` this often (the helper's keep-alive; Console pings every 5 s). The
+    /// `{"path":"/ping","data":true}` replies are consumed.
+    pub ping_interval: Option<Duration>,
     /// Permit `set`/`post`. Leave false against a real engine unless the user asked for writes.
     pub allow_writes: bool,
     pub send_identity: bool,
@@ -103,6 +109,8 @@ impl Default for Options {
         Options {
             client_id: "uaconsole".into(),
             network_id: random_network_id(),
+            network_id_key: "networkID".into(),
+            ping_interval: None,
             allow_writes: false,
             send_identity: true,
             reconnect: true,
@@ -112,6 +120,21 @@ impl Default for Options {
             request_timeout: Duration::from_secs(20),
             load_tree: true,
             tree_timeout: Duration::from_secs(60),
+        }
+    }
+}
+
+impl Options {
+    /// Read-only options for the UA Mixer Helper on 4720: `network_id` identity, a 5 s
+    /// `get /ping` keep-alive, no engine-tree load (the [`HelperStore`](crate::HelperStore) reads
+    /// the helper's own tree format).
+    pub fn helper() -> Options {
+        Options {
+            network_id_key: "network_id".into(),
+            ping_interval: Some(Duration::from_secs(5)),
+            load_tree: false,
+            request_timeout: Duration::from_secs(60),
+            ..Options::default()
         }
     }
 }
@@ -649,7 +672,7 @@ impl Task {
         let mut count_out = 0u64;
         if self.options.send_identity {
             for c in [
-                Command::identity("networkID", &self.options.network_id),
+                Command::identity(&self.options.network_id_key, &self.options.network_id),
                 Command::identity("client_id", &self.options.client_id),
             ] {
                 out.extend(NulFramer::encode(&c.text()));
@@ -693,6 +716,8 @@ impl Task {
         let mut framer = NulFramer::new();
         let mut buf = vec![0u8; 1 << 18];
         let mut tick = tokio::time::interval(Duration::from_millis(250));
+        let ping_every = self.options.ping_interval.unwrap_or(Duration::from_secs(3600));
+        let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + ping_every, ping_every);
         loop {
             let mut out: Vec<u8> = Vec::new();
             tokio::select! {
@@ -720,6 +745,10 @@ impl Task {
                             return self.close_session(&mut pending);
                         }
                     }
+                }
+                _ = ping.tick(), if self.options.ping_interval.is_some() => {
+                    out.extend(NulFramer::encode(&Command::get("/ping").text()));
+                    self.shared.counters.commands_out.fetch_add(1, Relaxed);
                 }
                 _ = tick.tick() => {
                     let now = Instant::now();
@@ -857,6 +886,8 @@ impl Task {
                         continue;
                     }
                     values.push((path::property_path(&m.path).to_owned(), v));
+                } else if m.path == "/ping" && m.error.is_none() {
+                    // Keep-alive reply.
                 } else if let Some(err) = m.error.clone() {
                     let _ = self.updates.send(Update::Error {
                         path: m.path,
