@@ -359,3 +359,24 @@ an engine or manipulating UA Console. Physical iPad install/interaction still
 requires the user's signing session. Mixed-DPI child rendering currently uses
 the main view scale; cross-display sharpness and HTML plugin/chrome ownership
 remain explicit limitations. No real Apollo writes or native plugin loads.
+
+## Apollo firmware/CLI investigation
+
+`FIRMWARE-CLI-INVESTIGATION.md` records a read-only review of the device-assisted
+plaintext recovery hypothesis. Selectors 173–175 are confirmed text-mailbox
+wrappers, not a proved memory/decrypt interface. Receive clears the device
+response mailbox. Existing native CLI refusal and reported x4 freezes are
+preserved; the older binary helper does not match the vendor protocol, and
+privileged raw register writes can bypass that refusal.
+
+The updater's full-container DMA transfer is proven; cipher/key location,
+plaintext section boundaries and readable boot/instruction memory are not.
+Neither “no host binary contains a key” nor “CLI dumps decrypted code” follows
+from the available evidence. Private runtime readback and Bill plugin-resource
+streams are distinguished from flash firmware. No native driver edits, CLI
+calls, hardware experiments or UA asset commits occurred.
+
+Verification at this documentation-only task boundary: 285 workspace tests
+pass (10 ignored), locked release build, p1 158/158, p2 195/195,
+windows_check and ledger regeneration. The original framework's recomputed
+hash matches its retained inventory. Native driver WIP remains untouched.
