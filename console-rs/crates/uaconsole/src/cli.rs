@@ -18,8 +18,9 @@ usage:
                                                          --size is the window in points
   uaconsole --bench N [--compact] [--scale N]            render N frames headless, print timings
 
-  --open settings[:hardware|io-matrix|plug-ins|options|midi|dante], cue-outputs,
-  monitor-controller[:1], headphone-correction, plugin-scenes or about opens that window.
+  --open settings[:hardware|io-matrix|options|midi|network], cue-outputs,
+  monitor-controller[:1], headphone-correction, plugin-scenes, meters, talkback,
+  aux-sends:N, add-device, io-presets, input-source:N, tempo or about opens that window.
   --stats starts with the F1 overlay; --open-plugin in0:0 (or in0:unison) opens that insert's
   panel at start (window and --render). --menu opens a Console menu in --render: bar:N,
   insert:STRIP:SLOT, label:STRIP, solo:STRIP, meter:STRIP, preamp:STRIP, browser:N, then >I
