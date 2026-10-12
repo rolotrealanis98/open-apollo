@@ -35,14 +35,10 @@ pub struct VisibleRows {
     pub sends: bool,
 }
 
-/// JUCE `drawFittedText`: shrink `style` so `text` fits `width` (Helvetica Bold widths;
-/// JUCE squeezes horizontally instead, which the renderer cannot do).
-pub(crate) fn fitted(mut style: TextStyle, text: &str, width: f32) -> TextStyle {
-    let w = text.lines().map(|l| crate::window::helvetica_bold_width(l, style.size)).fold(0.0, f32::max);
-    if w > width {
-        style.size *= width / w;
-    }
-    style
+/// JUCE `drawFittedText` box: `r` less 4 pt a side, same centre. The renderer squeezes a
+/// single line wider than it horizontally (down to 0.7, then "..."), as JUCE does.
+fn fit_box(r: Rect) -> Rect {
+    Rect::new(r.x + 4.0, r.y, r.w - 8.0, r.h)
 }
 
 impl Ui<'_> {
@@ -55,7 +51,7 @@ impl Ui<'_> {
             self.image_stretched(p, r, 1.0);
         }
         let overlay = skin.image("image-overlay");
-        let mut style = fitted(self.style("views", key), label, r.w - 8.0);
+        let mut style = self.style("views", key);
         style.color = (if on { skin.color("color-text-on") } else { skin.color("color-text-off") }).unwrap_or(Rgba::WHITE);
         match overlay {
             Some(ov) => {
@@ -63,11 +59,13 @@ impl Ui<'_> {
                 let alpha = skin.number("opacity-overlay").unwrap_or(1.0) as f32;
                 let ov = ov.to_string();
                 self.image(&ov, Rect::new(r.x + b.x, r.y + b.y, b.w, b.h), None, None, alpha);
-                self.text(label, style, Rect::new(r.x - 4.0, r.y + 1.0, r.w + 8.0, 12.0), Align::Center);
+                // Baseline measured on p1/p2 (OPEN, CLOSE, LARGE, SMALL at their full size).
+                self.text(label, style, fit_box(Rect::new(r.x, r.y + 1.5, r.w, 12.0)), Align::Center);
             }
             None => {
                 let i = skin.insets("inset-text").unwrap_or_default();
-                self.text(label, style, r.inset(i.l, i.t, i.r, i.b), Align::Center)
+                let t = r.inset(i.l, i.t, i.r, i.b);
+                self.text(label, style, fit_box(Rect::new(r.x, t.y, r.w, t.h)), Align::Center)
             }
         }
         self.hit(r, id, kind);
@@ -151,8 +149,8 @@ pub(crate) fn fill_rounded(ui: &mut Ui, r: Rect, radius: f32, color: Rgba) {
 
 /// A `CR-Label` group title, fitted to the lower panel.
 fn label(ui: &mut Ui, text: &str, r: Rect, align: Align) {
-    let style = fitted(ui.style("fonts", "CR-Label"), text, r.w - 8.0);
-    ui.text(text, style, r, align);
+    let style = ui.style("fonts", "CR-Label");
+    ui.text(text, style, fit_box(r), align);
 }
 
 /// Draws the navigator column at `x` (window points), from `top` (below the title bar) to

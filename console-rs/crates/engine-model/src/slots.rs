@@ -2,13 +2,15 @@
 //! plug-ins from the UA Mixer Helper (4720), plus the helper connection itself.
 //!
 //! Console's slot labels (reference shots of Console 1.3.1 on macOS):
-//! - a UAD-2 plug-in with the Apollo online is labelled with the catalogue's first short name,
-//!   `/plugins/P/Name/values[0]` ("CL 1B mkII" for `UAD Tube-Tech CL 1B mk II`), upright;
+//! - a UAD-2 plug-in with the Apollo online is labelled with the catalogue's short name that
+//!   fits the slot (`/plugins/P/Name/values`, picked by [`rack::model::insert_label_for`], as
+//!   `Rack_PlugInHeader::GetEffectNameForFont` does: "1176 Rev A" for `UAD UA 1176 Rev A`,
+//!   "CL 1B mkII" for `UAD Tube-Tech CL 1B mk II`), upright;
 //! - with the Apollo offline (`/devices/0/DeviceOnline` false) the label is the engine name
 //!   without "UAD " ("Millennia NSEQ-2"), in italics;
 //! - a native plug-in shows its `plugin_name` (no live sample yet: see the ua-engine README).
 
-use rack::model::{InsertState, StripInfo};
+use rack::model::{InsertLabel, InsertState, StripInfo};
 use ua_engine::{
     DEFAULT_PORT, Endpoint, HELPER_PORT, HelperInfo, HelperStore, InsertPaths, Json, NativeInsert,
     NativeOwner, Value,
@@ -54,6 +56,14 @@ impl SlotInfo {
     pub fn is_native(&self) -> bool {
         self.source == SlotSource::Native
     }
+
+    /// The label rack draws (None for an empty slot).
+    pub fn insert_label(self) -> Option<InsertLabel> {
+        (self.source != SlotSource::Empty).then_some(InsertLabel {
+            text: self.label,
+            italic: self.italic,
+        })
+    }
 }
 
 impl EngineMixer {
@@ -94,32 +104,43 @@ impl EngineMixer {
             .unwrap_or(false)
     }
 
-    /// The catalogue's first short name for an engine plug-in name (`Name/values[0]`).
-    pub fn short_name(&self, effect_name: &str) -> Option<String> {
+    /// The catalogue's short names for an engine plug-in name (`Name/values`), None when the
+    /// catalogue has no such plug-in.
+    pub fn short_names(&self, effect_name: &str) -> Option<Vec<String>> {
         let tree = self.store.tree();
         tree.children("/plugins").iter().find_map(|p| {
             let meta = tree.property(&format!("/plugins/{p}/Name"))?;
             if meta.value.as_ref().and_then(Value::as_str) != Some(effect_name) {
                 return None;
             }
-            match meta.meta.values.as_ref()?.as_array()?.first()? {
-                Json::Object(o) => o.get("value")?.as_str().map(str::to_owned),
-                Json::String(s) => Some(s.clone()),
-                _ => None,
-            }
+            let values = meta.meta.values.as_ref().and_then(Json::as_array);
+            Some(
+                values
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| match v {
+                        Json::Object(o) => o.get("value")?.as_str().map(str::to_owned),
+                        Json::String(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+            )
         })
+    }
+
+    /// The catalogue's first short name for an engine plug-in name (`Name/values[0]`).
+    pub fn short_name(&self, effect_name: &str) -> Option<String> {
+        self.short_names(effect_name)?.into_iter().next()
     }
 
     /// Console's label and italics for a UAD-2 plug-in.
     pub fn plugin_label(&self, effect_name: &str) -> (String, bool) {
-        let long = effect_name
-            .strip_prefix("UAD ")
-            .unwrap_or(effect_name)
-            .to_owned();
         if !self.device_online() {
-            return (long, true);
+            let long = effect_name.strip_prefix("UAD ").unwrap_or(effect_name);
+            return (long.to_owned(), true);
         }
-        (self.short_name(effect_name).unwrap_or(long), false)
+        let shorts = self.short_names(effect_name).unwrap_or_default();
+        (rack::model::insert_label_for(effect_name, &shorts), false)
     }
 
     /// Native plug-ins on the helper track that matches this strip (by name, case-insensitive:

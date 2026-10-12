@@ -363,9 +363,10 @@ impl TextSystem {
         let mut n = 0;
         for p in plan(s, rect, align) {
             let hs_key = (p.hscale * 256.0).round() as u16;
-            let glyphs = s.lines[p.line].glyphs[..p.count].iter().map(|g| (g, p.x0 + g.x * p.hscale));
-            let dots = p.dots.into_iter().flat_map(|dx| s.dots.glyphs.iter().map(move |g| (g, dx + g.x * p.hscale)));
-            for (g, gx) in glyphs.chain(dots) {
+            let glyphs = s.lines[p.line].glyphs[..p.count].iter().map(|g| (g, p.x0 + g.x * p.hscale, hs_key));
+            // JUCE draws the ellipsis with the unsqueezed font.
+            let dots = p.dots.into_iter().flat_map(|dx| s.dots.glyphs.iter().map(move |g| (g, dx + g.x, 256)));
+            for (g, gx, hs_key) in glyphs.chain(dots) {
                 if g.space {
                     continue;
                 }
@@ -396,7 +397,7 @@ struct LinePlan {
     baseline: f32,
     /// Glyphs kept (ellipsis cuts the rest).
     count: usize,
-    /// x of an appended "...".
+    /// x of an appended "..." (unsqueezed).
     dots: Option<f32>,
 }
 
@@ -415,25 +416,22 @@ fn plan(s: &Shaped, rect: Rect, align: Align) -> Vec<LinePlan> {
             let mut count = line.glyphs.len();
             let mut dots = None;
             if single && width > rect.w && rect.w > 0.0 {
-                // GlyphArrangement::fitLineIntoSpace: squeeze, then cut with "...".
+                // GlyphArrangement::fitLineIntoSpace: squeeze down to 0.7, then cut with "..."
+                // (insertEllipsis): drop glyphs from the end, spaces included, until three dots of
+                // the unsqueezed font fit from where the last dropped glyph started.
                 hscale = (rect.w / width).max(MIN_HORIZONTAL_SCALE);
                 if width * hscale > rect.w + 0.5 {
-                    let dots_w = s.dots.width * hscale;
+                    let dot = s.dots.width / 3.0;
+                    let mut x = 0.0;
                     while count > 0 {
-                        let g = &line.glyphs[count - 1];
-                        if !g.space && (g.x + g.w) * hscale + dots_w <= rect.w {
+                        count -= 1;
+                        x = line.glyphs[count].x * hscale;
+                        if x + 3.0 * dot <= rect.w {
                             break;
                         }
-                        count -= 1;
                     }
-                    let end = if count > 0 {
-                        let g = &line.glyphs[count - 1];
-                        (g.x + g.w) * hscale
-                    } else {
-                        0.0
-                    };
-                    dots = Some(end);
-                    width = (end + dots_w) / hscale;
+                    dots = Some(x);
+                    width = (x + 3.0 * dot) / hscale;
                 }
             }
             let w = width * hscale;
@@ -497,9 +495,16 @@ mod tests {
         assert!((p[0].hscale - 0.8).abs() < 1e-6 && p[0].count == 10 && p[0].dots.is_none());
         let p = plan(&s, Rect::new(0.0, 0.0, 50.0, 20.0), Align::Left);
         assert_eq!(p[0].hscale, MIN_HORIZONTAL_SCALE);
-        // At 0.7: glyphs are 7 px, dots 4.2 px: 6 glyphs (42) + dots fit in 50.
+        // At 0.7: glyphs are 7 px, the unsqueezed dots 6 px: 6 glyphs (42) + dots (48) fit in 50.
         assert_eq!(p[0].count, 6);
         assert!((p[0].dots.unwrap() - 42.0).abs() < 1e-4);
+        let p = plan(&s, Rect::new(0.0, 0.0, 50.0, 20.0), Align::Center);
+        assert!((p[0].x0 - 1.0).abs() < 1e-4, "centred on 48 px: {}", p[0].x0);
+        // A space before the cut stays ("Chandler Limited ...").
+        let mut s = shaped(&[10.0; 10], 1);
+        s.lines[0].glyphs[5].space = true;
+        let p = plan(&s, Rect::new(0.0, 0.0, 50.0, 20.0), Align::Left);
+        assert_eq!(p[0].count, 6);
         // Multi-line text is not fitted.
         let s = shaped(&[10.0; 10], 2);
         assert_eq!(plan(&s, Rect::new(0.0, 0.0, 50.0, 40.0), Align::Left)[0].hscale, 1.0);

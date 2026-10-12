@@ -550,7 +550,7 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
     ui.cell_header("INSERTS", true, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
     if rows.inserts > HEADER_H {
         let slots = model.inserts(s);
-        insert_list(ui, s, &slots, rows.slots, view.insert_size, y + 26.0);
+        insert_list(ui, s, &slots, &model.insert_labels(s), rows.slots, view.insert_size, y + 26.0);
         if !bus {
             rec_mon(ui, model.records_pre_effects(s), s, y + 26.0 + cells::inserts_list_h(rows.slots, view.insert_size) + 4.0);
         }
@@ -571,7 +571,7 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
 /// then the preamp overview at 101 (measured in p1; `Resized_InputOrInstrument` 0x1814aeb80).
 fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo) {
     if let Some(layout) = &s.preamp_layout {
-        unison(ui, &model.unison(s), s, Rect::new(0.0, 25.0, STRIP_W, 77.0));
+        unison(ui, &model.unison(s), model.unison_label(s).as_ref(), s, Rect::new(0.0, 25.0, STRIP_W, 77.0));
         if let Some(state) = model.preamp(s) {
             // Rack_Overview_Preamp's secondary_background (Secondary-Channel-Inserts-Background)
             // runs 2 pt past the 129-pt plate, as under SR CONVERT.
@@ -600,10 +600,10 @@ fn sr_convert(ui: &mut Ui, r: Rect) {
 /// `Rack_Inserts_Unison`: a one-slot `Rack_Inserts` with its header row. Background
 /// `(4, 0, w−8, h)`, "UNISON" label `(0, 5, w, 16)` (Silk-Screen), slot `(0, 5+16+1, w, 48)`;
 /// height = RequiredHeight(LARGE, 1, header) = 50 + 11 + 16 (0x18143b330).
-fn unison(ui: &mut Ui, state: &crate::model::InsertState, s: &StripInfo, r: Rect) {
+fn unison(ui: &mut Ui, state: &crate::model::InsertState, label: Option<&crate::model::InsertLabel>, s: &StripInfo, r: Rect) {
     ui.background("Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, r.h));
     ui.font_text("Silk-Screen", "UNISON", Rect::new(r.x, r.y + 5.0, r.w, 16.0), Align::Center);
-    ui.insert_slot(state, Rect::new(r.x, r.y + 22.0, r.w, 48.0), cid(s, Control::Insert(255)));
+    ui.insert_slot(state, label, Rect::new(r.x, r.y + 22.0, r.w, 48.0), cid(s, Control::Insert(255)));
 }
 
 /// `Rack_UADRecord` (resized 0x18149a990) at `(0, y, w, 42)`: the REC/MON LED art

@@ -7,7 +7,7 @@ use houston::{Rect, Rgba};
 use crate::draw::{Align, TextStyle};
 use crate::geometry::STRIP_W;
 use crate::input::{Control, ControlId};
-use crate::model::{InsertState, SendState, StripInfo};
+use crate::model::{InsertLabel, InsertState, SendState, StripInfo};
 use crate::surfaces::view::{InsertSize, ViewState};
 use crate::ui::Ui;
 
@@ -73,20 +73,22 @@ fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
 
 /// Insert list (`Rack_Inserts`) at `y`, sized for `list_slots`: `Channel-Inserts-Background`
 /// at `(4, 0, w−8, h)` and slot k at `(0, 5 + k·pitch + 1, w, pitch − 2)` (resized 0x181440960).
-pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], list_slots: usize, size: InsertSize, y: f32) {
+/// `labels[k]` is Console's label for slot k ([`crate::MixerModel::insert_labels`]).
+pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[Option<InsertLabel>], list_slots: usize, size: InsertSize, y: f32) {
     let pitch = size.pitch();
     ui.background("Channel-Inserts-Background", Rect::new(4.0, y, STRIP_W - 8.0, inserts_list_h(list_slots, size)));
     for (k, slot) in slots.iter().take(list_slots).enumerate() {
         let r = Rect::new(0.0, y + 6.0 + k as f32 * pitch, STRIP_W, pitch - 2.0);
+        let label = labels.get(k).and_then(Option::as_ref);
         match size {
-            InsertSize::Large => ui.insert_slot(slot, r, cid(s, Control::Insert(k as u8))),
-            InsertSize::Small => small_slot(ui, slot, r, cid(s, Control::Insert(k as u8))),
+            InsertSize::Large => ui.insert_slot(slot, label, r, cid(s, Control::Insert(k as u8))),
+            InsertSize::Small => small_slot(ui, slot, label, r, cid(s, Control::Insert(k as u8))),
         }
     }
 }
 
 /// SMALL insert slot: stretched slot art with the plug-in name (no icon).
-fn small_slot(ui: &mut Ui, state: &InsertState, r: Rect, id: Option<ControlId>) {
+fn small_slot(ui: &mut Ui, state: &InsertState, label: Option<&InsertLabel>, r: Rect, id: Option<ControlId>) {
     let skin = ui.skin("inserts", "Small-Normal");
     let img = skin.and_then(|k| match state {
         InsertState::Empty => k.image("image-empty"),
@@ -107,17 +109,15 @@ fn small_slot(ui: &mut Ui, state: &InsertState, r: Rect, id: Option<ControlId>) 
                 ui.image_centered(&plus, plate, 1.0);
             }
         }
-        InsertState::Loaded { name, power } => {
-            let short = name.strip_prefix("UAD ").unwrap_or(name);
+        InsertState::Loaded { power, .. } => {
+            let (text, italic) = crate::widgets::insert_text(state, label);
             let mut style = ui.style("inserts", "Small-Normal");
+            style.italic = italic;
             if !*power {
                 style.color.a *= 0.6;
             }
-            let inner = plate.inset(3.0, 0.0, 3.0, 0.0);
-            let fits = short.chars().count() <= 15;
-            ui.clip(Some(inner));
-            ui.text(short, style, if fits { inner } else { Rect::new(inner.x, inner.y, 200.0, inner.h) }, if fits { Align::Center } else { Align::Left });
-            ui.clip(None);
+            // Same painter as LARGE: fitted into the plate less 4 pt a side.
+            ui.text(&text.unwrap_or_default(), style, plate.inset(4.0, 0.0, 4.0, 0.0), Align::Center);
         }
     }
     if let Some(id) = id {

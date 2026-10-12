@@ -5,7 +5,7 @@ use houston::{Insets, Rect, Rgba};
 use crate::draw::{Align, Frame};
 use crate::geometry::{FaderAndMetersGeometry, FaderMetrics};
 use crate::input::{ControlId, HitKind};
-use crate::model::{InsertState, MeterFrame};
+use crate::model::{INSERT_LABEL_W, InsertLabel, InsertState, MeterFrame};
 use crate::scales;
 use crate::ui::{ART_SCALE, Ui};
 
@@ -261,13 +261,10 @@ impl Ui<'_> {
     }
 
     /// Insert slot (`Rack_InsertsButton`, LARGE): `inserts:Small-Normal` art; "+" when empty;
-    /// when loaded, the plug-in icon and Console's label (the name without "UAD ").
-    pub fn insert_slot(&mut self, state: &InsertState, r: Rect, id: Option<ControlId>) {
-        let label = match state {
-            InsertState::Loaded { name, .. } => Some(name.strip_prefix("UAD ").unwrap_or(name).to_owned()),
-            InsertState::Empty => None,
-        };
-        self.insert_slot_labeled(state, label.as_deref(), false, r, id);
+    /// when loaded, the plug-in icon and Console's label (`label`, else the name without "UAD ").
+    pub fn insert_slot(&mut self, state: &InsertState, label: Option<&InsertLabel>, r: Rect, id: Option<ControlId>) {
+        let (text, italic) = insert_text(state, label);
+        self.insert_slot_labeled(state, text.as_deref(), italic, r, id);
     }
 
     /// Insert slot with an explicit label (`Rack_InsertButtonPainter::PaintInsertContent`
@@ -304,12 +301,10 @@ impl Ui<'_> {
                     if !*power {
                         style.color.a *= 0.6;
                     }
-                    let name_r = Rect::new(r.x + 11.0, r.y + 31.0, r.w - 22.0, 14.0);
-                    // Long labels are clipped to the plate (Console elides with "…").
-                    let fits = label.chars().count() <= 14;
-                    self.clip(Some(name_r));
-                    self.text(label, style, if fits { name_r } else { Rect::new(name_r.x + 1.0, name_r.y, 200.0, name_r.h) }, if fits { Align::Center } else { Align::Left });
-                    self.clip(None);
+                    // drawFittedText in the plate (10, 76) less 4 a side: long names are
+                    // squeezed to 0.7, then cut with "..." (the renderer fits single lines).
+                    let name_r = Rect::new(r.x + 14.0, r.y + 31.0, INSERT_LABEL_W, 14.0);
+                    self.text(label, style, name_r, Align::Center);
                 }
             }
         }
@@ -335,6 +330,15 @@ impl Ui<'_> {
             self.fill(Rect::new(r.x + 11.0, r.y + 12.0, 2.0, 3.0), c);
         }
         self.text(title, style, r, Align::Center);
+    }
+}
+
+/// A loaded slot's text and face: the model's label, else the name without "UAD ", upright.
+pub(crate) fn insert_text(state: &InsertState, label: Option<&InsertLabel>) -> (Option<String>, bool) {
+    match (state, label) {
+        (InsertState::Empty, _) => (None, false),
+        (InsertState::Loaded { .. }, Some(l)) => (Some(l.text.clone()), l.italic),
+        (InsertState::Loaded { name, .. }, None) => (Some(name.replace("UAD ", "")), false),
     }
 }
 

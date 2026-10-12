@@ -60,6 +60,45 @@ pub enum InsertState {
     Loaded { name: String, power: bool },
 }
 
+/// The text Console draws in a loaded insert slot and its face (`Rack_InsertButtonPainter::
+/// GetEffectName` 0x181429980): a running UAD-2 plug-in's catalogue short name upright, an
+/// offline one's long name in italics, a native plug-in's name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InsertLabel {
+    pub text: String,
+    pub italic: bool,
+}
+
+/// Width (pt) Console fits slot labels into: the plate (76 pt) less 4 pt a side
+/// (`PaintInsertContent` 0x18142c290 draws the name at `(x + 4, w − 8)`).
+pub const INSERT_LABEL_W: f32 = 68.0;
+
+/// Em (pt) of `inserts:Small-Normal`, the slot label font: Helvetica bold 9, `font-size-dyn`.
+pub const INSERT_LABEL_SIZE: f32 = 9.0 + houston::fonts::FONT_SIZE_ADJUST;
+
+/// Console's label for a running UAD-2 plug-in: [`effect_name_for_font`] with the slot font
+/// (JUCE's rounded `getStringWidth`) and [`INSERT_LABEL_W`].
+pub fn insert_label_for(name: &str, short_names: &[String]) -> String {
+    let width = |t: &str| crate::window::helvetica_bold_width(t, INSERT_LABEL_SIZE).round();
+    effect_name_for_font(name, short_names, &width, INSERT_LABEL_W)
+}
+
+/// `Rack_PlugInHeader::GetEffectNameForFont` (0x180dfda90 → 0x180dfd680): starting from the
+/// catalogue name, walk the catalogue's short names, taking a longer one that still fits `max_w`
+/// or a shorter one while the current one does not fit; `width` is JUCE's integer
+/// `Font::getStringWidth`. `GetEffectName` then drops "UAD ". "UAD UA 1176 Rev A" with
+/// ["1176 A", "1176 Rev A"] in Helvetica bold 10 → "1176 Rev A".
+pub fn effect_name_for_font(name: &str, short_names: &[String], width: &dyn Fn(&str) -> f32, max_w: f32) -> String {
+    let mut cur = name.to_owned();
+    for c in short_names {
+        let (wc, wn) = (width(&cur), width(c));
+        if (wc < wn && wn <= max_w) || (wc > wn && max_w < wc) {
+            cur = c.clone();
+        }
+    }
+    cur.replace("UAD ", "")
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SendState {
     pub name: String,
@@ -255,6 +294,15 @@ pub trait MixerModel {
     fn preamp(&self, s: &StripInfo) -> Option<PreampState>;
     fn inserts(&self, s: &StripInfo) -> Vec<InsertState>;
     fn unison(&self, s: &StripInfo) -> InsertState;
+    /// Console's label for each slot of [`MixerModel::inserts`]. A slot without one (None, or past
+    /// the end of the list) shows the plug-in name without "UAD ", upright.
+    fn insert_labels(&self, _s: &StripInfo) -> Vec<Option<InsertLabel>> {
+        Vec::new()
+    }
+    /// Console's label for the Unison slot (None: from [`MixerModel::unison`]'s name).
+    fn unison_label(&self, _s: &StripInfo) -> Option<InsertLabel> {
+        None
+    }
     fn sends(&self, s: &StripInfo) -> Vec<SendState>;
     /// UAD REC (false) vs MON (true): `RecordPreEffects`.
     fn records_pre_effects(&self, s: &StripInfo) -> bool;
@@ -755,5 +803,26 @@ impl MixerModel for PreviewMixer {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn insert_labels_pick_like_console() {
+        // p2: the 1176 Rev A on input 0 reads "1176 Rev A" (catalogue values sorted, shortest first).
+        assert_eq!(insert_label_for("UAD UA 1176 Rev A", &names(&["1176 A", "1176 Rev A"])), "1176 Rev A");
+        // p1: CL 1B mkII, not the 90-pt "TubeTech CL1B mkII".
+        assert_eq!(insert_label_for("UAD Tube-Tech CL 1B mk II", &names(&["CL 1B mkII", "TubeTech CL1B mkII"])), "CL 1B mkII");
+        // A name that fits stays; without short names only "UAD " goes.
+        assert_eq!(insert_label_for("UAD dbx 160", &names(&["dbx 160"])), "dbx 160");
+        assert_eq!(insert_label_for("UAD Pultec-Pro Legacy", &[]), "Pultec-Pro Legacy");
+        assert_eq!(insert_label_for("UAD Ampex ATR-102", &names(&["ATR", "ATR-102", "Ampex ATR-102"])), "ATR-102");
     }
 }

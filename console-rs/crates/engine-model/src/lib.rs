@@ -36,8 +36,9 @@ use std::time::Instant;
 
 use rack::geometry::StripKind;
 use rack::model::{
-    CueOutput, EngineSettings, HeadphoneOutput, InsertState, MainState, MeterFrame, MixerModel,
-    MonitorOptions, MonitorState, PluginEntry, PreampState, SendState, StatusInfo, StripInfo,
+    CueOutput, EngineSettings, HeadphoneOutput, InsertLabel, InsertState, MainState, MeterFrame,
+    MixerModel, MonitorOptions, MonitorState, PluginEntry, PreampState, SendState, StatusInfo,
+    StripInfo,
 };
 use rack::{Action, Control, ControlId, scales};
 use ua_engine::{
@@ -428,6 +429,17 @@ impl MixerModel for EngineMixer {
         // UAD-2 (4710) and native (helper, 4720) merged; see `EngineMixer::slots` for labels and
         // the native flag.
         self.slots(strip).into_iter().map(|s| s.state).collect()
+    }
+
+    fn insert_labels(&self, strip: &StripInfo) -> Vec<Option<InsertLabel>> {
+        self.slots(strip)
+            .into_iter()
+            .map(SlotInfo::insert_label)
+            .collect()
+    }
+
+    fn unison_label(&self, strip: &StripInfo) -> Option<InsertLabel> {
+        self.unison_slot(strip).insert_label()
     }
 
     fn unison(&self, strip: &StripInfo) -> InsertState {
