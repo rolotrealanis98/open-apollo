@@ -1,0 +1,15 @@
+[package]
+name = "plugin-ui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+houston = { version = "0.1.0", path = "../houston" }
+parking_lot = "0.12.5"
+rack = { version = "0.1.0", path = "../rack" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.154"
+
+[dev-dependencies]
+gfx = { version = "0.1.0", path = "../gfx" }

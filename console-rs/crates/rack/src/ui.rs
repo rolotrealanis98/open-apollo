@@ -23,6 +23,11 @@ impl Assets {
         Ok(Self { images: Arc::new(ImageCache::new(resources.clone())), resources, appearance, layouts: Mutex::new(HashMap::new()) })
     }
 
+    /// Assets from already-loaded parts (tests, tools, or an image cache with extra roots).
+    pub fn from_parts(resources: Resources, appearance: Appearance, images: Arc<ImageCache>) -> Self {
+        Self { resources, appearance, images, layouts: Mutex::new(HashMap::new()) }
+    }
+
     pub fn layout(&self, name: &str) -> Option<Arc<Layout>> {
         self.layouts.lock().entry(name.to_string()).or_insert_with(|| Layout::load(name, &self.resources).map(Arc::new)).clone()
     }

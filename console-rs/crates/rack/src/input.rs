@@ -29,6 +29,13 @@ pub enum Control {
     MonitorLevel,
     MonitorMono,
     MonitorMute,
+    // Plug-in windows (`plugin-ui`); the strip is the window's slot id. Append-only below.
+    /// A plug-in parameter by ordinal (`<slot>/parameters/<k>`): knob and bar drags.
+    PluginParam(u16),
+    /// A plug-in panel spec element by index (switch, button, zone, menu): tap.
+    PluginElement(u16),
+    /// Set plug-in parameter `.0` to step `.1` (segmented switches, step selectors): tap.
+    PluginStep(u16, u16),
 }
 
 #[derive(Clone, Debug, PartialEq)]

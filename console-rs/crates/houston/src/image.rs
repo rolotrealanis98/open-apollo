@@ -1,7 +1,7 @@
 //! Decoded RGBA images from `Resources/images` and plug-in icons, cached by path.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -43,15 +43,45 @@ impl ImageData {
     }
 }
 
-/// Thread-safe decode cache. Keys are `images/`-relative paths or `plugin:<EffectName>`.
+/// Thread-safe decode cache. Keys are `images/`-relative paths, `plugin:<EffectName>`, or
+/// `<scheme>:<relative path>` for a root registered with [`ImageCache::register_root`] (for
+/// example `spec:Images/UA_dbx-160_PANEL@2x.png` for plug-in panel sprites).
 pub struct ImageCache {
     resources: Resources,
     map: Mutex<HashMap<String, Option<Arc<ImageData>>>>,
+    roots: Mutex<HashMap<String, PathBuf>>,
 }
 
 impl ImageCache {
+    /// Scheme for plug-in panel spec folders (`spec:<path relative to the spec folder>`).
+    pub const SPEC_SCHEME: &'static str = "spec";
+
     pub fn new(resources: Resources) -> Self {
-        Self { resources, map: Mutex::new(HashMap::new()) }
+        Self { resources, map: Mutex::new(HashMap::new()), roots: Mutex::new(HashMap::new()) }
+    }
+
+    /// A cache with one extra root registered (see [`ImageCache::register_root`]).
+    pub fn with_root(resources: Resources, scheme: &str, dir: impl Into<PathBuf>) -> Self {
+        let cache = Self::new(resources);
+        cache.register_root(scheme, dir);
+        cache
+    }
+
+    /// Resolves keys `<scheme>:<relative path>` against `dir` (e.g. `spec` → a plug-in spec
+    /// folder). Registering a new root drops what was cached under the scheme. `plugin` is reserved for
+    /// plug-in icons.
+    pub fn register_root(&self, scheme: &str, dir: impl Into<PathBuf>) {
+        let dir = dir.into();
+        let prev = self.roots.lock().insert(scheme.to_string(), dir.clone());
+        if prev.as_ref() != Some(&dir) {
+            let prefix = format!("{scheme}:");
+            self.map.lock().retain(|k, _| !k.starts_with(&prefix));
+        }
+    }
+
+    /// The folder registered for `scheme`, if any.
+    pub fn root(&self, scheme: &str) -> Option<PathBuf> {
+        self.roots.lock().get(scheme).cloned()
     }
 
     pub fn resources(&self) -> &Resources {
@@ -65,11 +95,25 @@ impl ImageCache {
         }
         let path = match key.strip_prefix("plugin:") {
             Some(name) => self.resources.plugin_icons_dir().join(format!("{name}.png")),
-            None => self.resources.images_dir().join(key),
+            None => match self.rooted(key) {
+                Some(path) => path,
+                None => self.resources.images_dir().join(key),
+            },
         };
         let decoded = ImageData::decode_png(&path).map(Arc::new);
         self.map.lock().insert(key.to_string(), decoded.clone());
         decoded
+    }
+
+    /// `<scheme>:<rel>` under a registered root. `..` components are refused.
+    fn rooted(&self, key: &str) -> Option<PathBuf> {
+        let (scheme, rel) = key.split_once(':')?;
+        let root = self.roots.lock().get(scheme).cloned()?;
+        let rel = Path::new(rel);
+        if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Some(PathBuf::new());
+        }
+        Some(root.join(rel))
     }
 
     /// Keys that failed to load.
@@ -77,5 +121,33 @@ impl ImageCache {
         let mut v: Vec<String> = self.map.lock().iter().filter(|(_, v)| v.is_none()).map(|(k, _)| k.clone()).collect();
         v.sort();
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_png(path: &Path, w: u32, h: u32) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&vec![255; (w * h * 4) as usize]).unwrap();
+    }
+
+    #[test]
+    fn registered_root_resolves_scheme_keys() {
+        let dir = std::env::temp_dir().join(format!("houston-root-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("Images")).unwrap();
+        write_png(&dir.join("Images/knob@2x.png"), 4, 8);
+        let resources = Resources { root: dir.join("no-console"), console_version: None };
+        let cache = ImageCache::new(resources);
+        assert!(cache.get("spec:Images/knob@2x.png").is_none(), "unregistered scheme");
+        cache.register_root(ImageCache::SPEC_SCHEME, &dir);
+        let img = cache.get("spec:Images/knob@2x.png").expect("rooted image");
+        assert_eq!((img.width, img.height), (4, 8));
+        assert!(cache.get("spec:../etc/passwd").is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
