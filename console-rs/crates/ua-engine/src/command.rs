@@ -75,6 +75,59 @@ impl Command {
         }
     }
 
+    /// The write as Console 1.3.1 puts it on the wire (pcap of Console ↔ UA Mixer Engine 12,
+    /// `protocol/v131/console.pcap`; the Windows Console traces agree):
+    ///
+    /// - `set <prop>/value?context_type=main&func_id=N <v>` for mixer properties;
+    /// - `set /UndoRecording/value?func_id=N true|false` (and `/status/timeout_ms`): no context;
+    /// - `post /<Command>?func_id=N <payload>`;
+    /// - `set /Sleep …` and `post /response …` carry no query.
+    ///
+    /// `func_id` is the connection's running request counter (shared with `get`). Paths that
+    /// already carry a query are left alone, and so is everything that is not a write.
+    pub fn with_func_id(self, id: u64) -> Command {
+        match self {
+            Command::Set { path, value } if !path.contains('?') => {
+                let prop = path::property_path(&path);
+                let query = match prop {
+                    "/Sleep" | "/sleep" => return Command::Set { path, value },
+                    crate::writer::UNDO_RECORDING_PATH | "/status/timeout_ms" => format!("func_id={id}"),
+                    _ => format!("context_type=main&func_id={id}"),
+                };
+                Command::Set { path: format!("{path}?{query}"), value }
+            }
+            Command::Post { path, payload } if !path.contains('?') && path != "/response" => {
+                Command::Post { path: format!("{path}?func_id={id}"), payload }
+            }
+            other => other,
+        }
+    }
+
+    /// The text without Console's per-request query (`func_id`, `context_type`): what a test
+    /// compares. Other query parameters (`recursive`, `cmdID`, …) stay.
+    pub fn strip_request_query(text: &str) -> String {
+        let (verb, rest) = text.split_once(' ').unwrap_or((text, ""));
+        let (target, tail) = match rest.split_once(' ') {
+            Some((t, v)) => (t, Some(v)),
+            None => (rest, None),
+        };
+        let target = match target.split_once('?') {
+            Some((p, q)) => {
+                let kept: Vec<&str> = q
+                    .split('&')
+                    .filter(|kv| !kv.starts_with("func_id=") && !kv.starts_with("context_type="))
+                    .collect();
+                if kept.is_empty() { p.to_owned() } else { format!("{p}?{}", kept.join("&")) }
+            }
+            None => target.to_owned(),
+        };
+        match tail {
+            Some(v) => format!("{verb} {target} {v}"),
+            None if rest.is_empty() => verb.to_owned(),
+            None => format!("{verb} {target}"),
+        }
+    }
+
     /// `set` and `post` change engine state; everything else is read-only.
     pub fn is_write(&self) -> bool {
         matches!(self, Command::Set { .. } | Command::Post { .. })

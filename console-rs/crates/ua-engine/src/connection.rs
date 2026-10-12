@@ -813,6 +813,11 @@ impl Task {
                     // Defence in depth: the handle already refuses these.
                     self.shared.counters.refused_writes.fetch_add(1, Relaxed);
                 } else {
+                    let command = if command.is_write() {
+                        command.with_func_id(self.next_func_id())
+                    } else {
+                        command
+                    };
                     out.extend(NulFramer::encode(&command.text()));
                     self.shared.counters.commands_out.fetch_add(1, Relaxed);
                 }

@@ -138,18 +138,29 @@ impl MockEngine {
         lock(&self.state).received.clone()
     }
 
-    /// Received `set` commands only.
+    /// Received `set` commands only, without Console's per-request query (`func_id`,
+    /// `context_type`; [`Command::strip_request_query`](crate::Command::strip_request_query)).
     pub fn set_commands(&self) -> Vec<String> {
         lock(&self.state)
             .received
             .iter()
             .filter(|c| c.starts_with("set "))
-            .cloned()
+            .map(|c| crate::Command::strip_request_query(c))
             .collect()
     }
 
-    /// Received `set` and `post` commands.
+    /// Received `set` and `post` commands, without Console's per-request query.
     pub fn write_commands(&self) -> Vec<String> {
+        lock(&self.state)
+            .received
+            .iter()
+            .filter(|c| c.starts_with("set ") || c.starts_with("post "))
+            .map(|c| crate::Command::strip_request_query(c))
+            .collect()
+    }
+
+    /// Received `set` and `post` commands exactly as sent (with `func_id` / `context_type`).
+    pub fn raw_write_commands(&self) -> Vec<String> {
         lock(&self.state)
             .received
             .iter()

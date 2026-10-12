@@ -144,6 +144,46 @@ fn writes_reach_engine_when_allowed() {
     assert_eq!(store.value(&strip.fader()), Some(&Value::Number(0.1)));
 }
 
+/// Writes carry Console 1.3.1's request query (pcap `protocol/v131/console.pcap`): mixer sets
+/// `?context_type=main&func_id=N`, the undo bracket and posts `?func_id=N`, one running
+/// counter shared with `get`.
+#[test]
+fn writes_use_console_wire_format() {
+    let server = mock(MockOptions::default());
+    let mut store = live_store(
+        &server,
+        Options {
+            allow_writes: true,
+            ..Options::default()
+        },
+    );
+    let strip = store.topology().inputs[1].clone();
+    store.set_writes_enabled(true);
+    store.commit(&strip.mute(), true);
+    store.post("/SaveLastUsedSession", Some(&serde_json::json!({})));
+    wait_until("writes", T, || server.raw_write_commands().len() == 4);
+    let raw = server.raw_write_commands();
+    let ids: Vec<u64> = raw
+        .iter()
+        .map(|c| {
+            let q = c.split('?').nth(1).unwrap();
+            let id = q.split(['&', ' ']).find_map(|kv| kv.strip_prefix("func_id=")).unwrap();
+            id.parse().unwrap()
+        })
+        .collect();
+    assert_eq!(
+        raw,
+        [
+            format!("set /UndoRecording/value?func_id={} true", ids[0]),
+            format!("set {}/value?context_type=main&func_id={} true", strip.mute(), ids[1]),
+            format!("set /UndoRecording/value?func_id={} false", ids[2]),
+            format!("post /SaveLastUsedSession?func_id={} {{}}", ids[3]),
+        ]
+    );
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "func_id is a running counter: {ids:?}");
+    assert_eq!(server.value(&strip.mute()), Some(Value::Bool(true)));
+}
+
 /// A drag is not pulled back by echoes of its own earlier values.
 #[test]
 fn echoes_do_not_pull_back_a_drag() {
