@@ -87,6 +87,7 @@ impl PluginHook for PluginUiHook {
         let slot_path = paths.as_ref().map(|p| p.base.clone()).unwrap_or_else(|| format!("{}/effects/{slot}", strip.id));
         let mut window = PluginWindow::open(slot_path, &name, &format!("{channel}, {which}"), self.specs.as_deref(), Some(&self.luna), self.prefer_web);
         window.chrome.power = power;
+        window.insert_menu = Some(rack::menu::plugin_insert_menu(model, &strip.id, slot));
         if !self.prefer_web {
             if let Some(gui) = self.luna.component_for_effect(&name) {
                 log_line(&format!("{name}: UA's web GUI ({}) is available; showing the {} panel", gui.id, window.content.kind()));
@@ -102,7 +103,12 @@ impl PluginHook for PluginUiHook {
             (None, Some(e), Some(p)) => ParamSnapshot::capture(&EngineSlot::peek(e.store(), p.clone()).view(e.store())),
             _ => ParamSnapshot::default(),
         };
+        window.inline_popover = false;
         Some(Box::new(WindowPanel {
+            popup: None,
+            strip: strip.id.clone(),
+            slot,
+            mixer_actions: Vec::new(),
             window,
             pending: paths,
             engine: None,
@@ -120,6 +126,13 @@ impl PluginHook for PluginUiHook {
 
 /// One open plug-in window.
 pub struct WindowPanel {
+    /// The mixer strip and slot it shows (its ⋮ menu acts on them).
+    strip: Arc<str>,
+    slot: u8,
+    /// Rows of the ⋮ menu picked since the shell last asked (mixer controls).
+    mixer_actions: Vec<Action>,
+    /// The open menu's extent in window points.
+    popup: Option<Rect>,
     window: PluginWindow,
     /// The engine slot, opened (refresh + subscriptions) on the first sync.
     pending: Option<InsertPaths>,
@@ -140,6 +153,7 @@ pub struct WindowPanel {
 
 impl WindowPanel {
     fn refresh(&mut self, model: &mut dyn MixerModel) {
+        self.window.insert_menu = Some(rack::menu::plugin_insert_menu(&*model, &self.strip, self.slot));
         if let Some(e) = engine_mut(model) {
             let store = e.store_mut();
             if self.engine.is_none() {
@@ -237,6 +251,21 @@ impl Panel for WindowPanel {
         self.hits = ui.hits[first..].to_vec();
     }
 
+    fn build_popups(&mut self, ui: &mut Ui, _rect: Rect) {
+        let first = ui.hits.len();
+        self.window.build_popover(ui, self.origin, &self.snapshot);
+        let new = &ui.hits[first..];
+        self.popup = new.iter().map(|h| h.rect).reduce(|a, b| {
+            let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+            Rect::new(x0, y0, a.max_x().max(b.max_x()) - x0, a.max_y().max(b.max_y()) - y0)
+        });
+        self.hits.extend_from_slice(new);
+    }
+
+    fn popup_rect(&self) -> Option<Rect> {
+        self.popup
+    }
+
     fn pointer(&mut self, ev: PointerEvent, model: &mut dyn MixerModel) -> PanelResponse {
         let (dx, dy) = self.origin;
         let actions = match ev {
@@ -250,6 +279,12 @@ impl Panel for WindowPanel {
         }
         let mut close = false;
         for a in &actions {
+            if a.id().strip != self.window.slot && matches!(a, Action::Tap(_) | Action::Toggle(_)) {
+                // A ⋮ menu row: the mixer's.
+                self.window.popover = None;
+                self.mixer_actions.push(a.clone());
+                continue;
+            }
             match self.apply(a, model) {
                 Some(WindowEvent::Close) => close = true,
                 Some(WindowEvent::Button(b)) => self.button(b, model),
@@ -266,6 +301,20 @@ impl Panel for WindowPanel {
 
     fn sync(&mut self, model: &mut dyn MixerModel) {
         self.refresh(model);
+    }
+
+    fn take_mixer_actions(&mut self) -> Vec<Action> {
+        std::mem::take(&mut self.mixer_actions)
+    }
+
+    fn open_menu(&mut self, which: &str) -> bool {
+        self.window.popover = Some(match which {
+            "assign" => B::Assign,
+            "more" | "help" => B::More,
+            _ => return false,
+        });
+        self.window.help_open = which == "help";
+        true
     }
 
     /// Console's plug-in windows are independent windows: the mixer stays usable.

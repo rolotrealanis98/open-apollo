@@ -17,6 +17,7 @@ use std::sync::Arc;
 use crate::input::{Action, Control, ControlId, Hit, ScrollRegion, ScrollTarget};
 use crate::model::{MixerModel, StripInfo};
 use crate::settings::{Panel, SettingOp, SettingsTab};
+use crate::surfaces::session::SessionOp;
 
 /// Cell rows toggled by the navigator (and FADER, the main strip's fader area).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -126,11 +127,13 @@ pub struct BrowserView {
     pub scroll: f32,
     /// Selected catalog index; while set, the next insert tap assigns it (assign mode).
     pub selected: Option<u16>,
+    /// An insert slot's "Assign...": the next catalog tap loads into this slot.
+    pub assign_to: Option<ControlId>,
 }
 
 impl Default for BrowserView {
     fn default() -> Self {
-        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None }
+        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None }
     }
 }
 
@@ -152,6 +155,14 @@ pub enum Popover {
     Scenes,
     /// Tempo editor (uses `ViewState::text_edit`).
     Tempo,
+    /// The navigator SESSION box's menu.
+    Session,
+    /// "SAVE SESSION": the session has unsaved changes; `then` runs after the answer.
+    SaveChanges { then: SessionOp },
+    /// Session name field (Save As; uses `ViewState::text_edit`).
+    SessionSaveAs,
+    /// Session file path field (Open...; uses `ViewState::text_edit`).
+    SessionOpen,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -168,6 +179,9 @@ pub enum TextTarget {
     Tempo,
     /// A settings text field (DEVICE NAME), by field key.
     Setting(Arc<str>),
+    /// Save As; `then` is the session op waiting on the save (from the save-changes question).
+    SessionSaveAs { then: Option<SessionOp> },
+    SessionOpen,
 }
 
 /// A text field with keyboard focus.
@@ -224,6 +238,17 @@ pub struct ViewState {
     pub settings: SettingsView,
     /// Window size in points; the full layout follows it (None: Console's 1920 × 1050).
     pub window: Option<(f32, f32)>,
+    /// The open popup menu (context menu, menu-bar menu), drawn last (`menu::draw_menu`).
+    pub menu: Option<crate::menu::MenuState>,
+    /// Draw Windows Console's in-window menu bar in the title bar (desktop shells without a
+    /// native menu bar). Off for renders compared against macOS Console.
+    pub menu_bar: bool,
+    /// View > Section > Show Mixer Navigation.
+    pub show_navigator: bool,
+    /// Shell-scope commands the menus requested (`take_commands`).
+    pub commands: Vec<crate::menu::Command>,
+    /// Model effects a menu command produced outside `route` (File > Save → the session tap).
+    pub deferred: Vec<Effect>,
 }
 
 impl Default for ViewState {
@@ -245,6 +270,11 @@ impl Default for ViewState {
             sheet: None,
             settings: SettingsView::default(),
             window: None,
+            menu: None,
+            menu_bar: false,
+            show_navigator: true,
+            commands: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 }
@@ -309,7 +339,10 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SceneSelect(_)
             | C::SceneStep(_)
             | C::SettingsScroll
+            | C::SessionMenu
+            | C::SessionSaveChoice(_)
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
+        || matches!(c, C::Menu(m) if m.is_view())
 }
 
 fn find_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
@@ -355,6 +388,17 @@ impl ViewState {
         if matches!(id.control, C::SettingChoose(..)) {
             self.settings.menu = None;
         }
+        if let C::Session(op) = id.control {
+            self.menu = None;
+            return self.route_session(op, model);
+        }
+        // Any other press while a popup menu is open came from one of its rows: it closes.
+        let from_popup = self.menu.take().is_some();
+        if from_popup {
+            if let C::Insert(_) = id.control {
+                return vec![Effect::Model(action)]; // "Open..." (Unison) from the menu
+            }
+        }
         // A tap on a menu item closes its popover; toggles inside panel popovers keep it open.
         let from_menu = matches!(action, Action::Tap(_)) && self.popover.is_some();
         let insert_menu = matches!(self.popover, Some(PopoverState { kind: Popover::InsertMenu { .. }, .. }));
@@ -385,13 +429,26 @@ impl ViewState {
     fn press_view(&mut self, id: ControlId, model: &dyn MixerModel) -> Vec<Effect> {
         use Control as C;
         let mut out = Vec::new();
+        if let C::Menu(cmd) = &id.control {
+            use crate::menu::MenuCmd as M;
+            if !matches!(cmd, M::Row { .. } | M::OpenSub { .. } | M::BarTitle(_)) {
+                self.menu = None;
+            }
+            self.press_menu(&id, cmd, model);
+            out.append(&mut self.deferred);
+            return out;
+        }
+        if self.menu.take().is_some() && id.control == C::PopoverDismiss {
+            return out;
+        }
         let keep_popover = matches!(id.control, C::PopoverDismiss | C::TextCommit | C::TextCancel);
         if !matches!(id.control, C::SettingMenu(_) | C::PopoverDismiss) {
             self.settings.menu = None;
         }
+        let mut closed = None;
         if !keep_popover && self.popover.is_some() {
             // Opening something else (or any view press) replaces the current popover.
-            self.popover = None;
+            closed = self.popover.take();
             self.text_edit = self.text_edit.take().filter(|t| t.target == TextTarget::Search);
         }
         match id.control.clone() {
@@ -468,7 +525,15 @@ impl ViewState {
             C::BrowserHintClose => self.browser.hint = false,
             C::BrowserGroupReveal => self.browser.group_open ^= true,
             C::BrowserInactiveReveal => self.browser.inactive_open ^= true,
-            C::BrowserItem(i) => self.browser.selected = if self.browser.selected == Some(i) { None } else { Some(i) },
+            C::BrowserItem(i) => match self.browser.assign_to.take() {
+                Some(slot) => {
+                    if let Some(p) = model.plugin_catalog().get(i as usize) {
+                        out.push(Effect::SetText(slot, p.name.clone()));
+                    }
+                    self.browser.selected = None;
+                }
+                None => self.browser.selected = if self.browser.selected == Some(i) { None } else { Some(i) },
+            },
             C::SessionNavigate(first) => self.first_strip = first as usize,
             C::StatusTempo => {
                 self.text_edit = Some(TextEdit { target: TextTarget::Tempo, text: format!("{:.2}", model.status().tempo) });
@@ -489,7 +554,15 @@ impl ViewState {
                     self.sheet = None;
                 }
             }
-            C::TextCommit => out.extend(self.commit_text()),
+            C::TextCommit => out.extend(self.commit_text(model)),
+            C::SessionMenu => self.open_session_menu(id),
+            C::SessionSaveChoice(c) => {
+                // press_view closed the question; reopen it so the answer sees `then`.
+                if let Some(p) = closed.take() {
+                    self.popover = Some(p);
+                }
+                out.extend(self.session_choice(c, model));
+            }
             C::TextCancel => {
                 self.popover = None;
                 self.text_edit = None;
@@ -499,14 +572,15 @@ impl ViewState {
         out
     }
 
-    fn commit_text(&mut self) -> Option<Effect> {
+    fn commit_text(&mut self, model: &dyn MixerModel) -> Vec<Effect> {
         self.popover = None;
-        let edit = self.text_edit.take()?;
+        let Some(edit) = self.text_edit.take() else { return Vec::new() };
         match edit.target {
-            TextTarget::Rename(strip) => Some(Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)),
-            TextTarget::Tempo => Some(Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)),
-            TextTarget::Setting(k) => Some(Effect::SetText(ControlId { strip: "settings".into(), control: Control::SettingEdit(k) }, edit.text)),
-            TextTarget::Search => None,
+            TextTarget::Setting(k) => vec![Effect::SetText(ControlId { strip: "settings".into(), control: Control::SettingEdit(k) }, edit.text)],
+            TextTarget::Rename(strip) => vec![Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)],
+            TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
+            TextTarget::Search => Vec::new(),
+            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen) => self.commit_session_text(&t, edit.text, model),
         }
     }
 
@@ -565,6 +639,13 @@ impl ViewState {
 
     /// Secondary click / long press: insert context menu, rename, or browser assign mode.
     pub fn context_click(&mut self, hits: &[Hit], x: f32, y: f32) -> bool {
+        if self.menu.is_some() {
+            self.menu = None;
+            return true;
+        }
+        if self.open_context_menu(hits, x, y) {
+            return true;
+        }
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return false };
         let id = hit.id.clone();
         match id.control {
@@ -611,19 +692,27 @@ impl ViewState {
 
     pub fn key_enter(&mut self, model: &mut dyn MixerModel) {
         if self.text_edit.is_some() {
-            apply_effects(self.commit_text().into_iter().collect(), model);
+            let effects = self.commit_text(&*model);
+            apply_effects(effects, model);
         }
     }
 
     /// Closes the innermost thing: text focus / popover, then the sheet, then the modifier.
     pub fn key_escape(&mut self) {
-        if self.popover.is_some() || self.text_edit.is_some() {
+        if let Some(m) = &mut self.menu {
+            // Innermost submenu first, like JUCE.
+            if m.open.pop().is_none() {
+                self.menu = None;
+            }
+        } else if self.popover.is_some() || self.text_edit.is_some() {
             self.popover = None;
             self.text_edit = None;
         } else if self.settings.menu.is_some() {
             self.settings.menu = None;
         } else if self.sheet.is_some() {
             self.sheet = None;
+        } else if self.browser.assign_to.is_some() {
+            self.browser.assign_to = None;
         } else {
             self.modifier = None;
         }

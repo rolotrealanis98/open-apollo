@@ -5,6 +5,7 @@ use std::sync::Arc;
 use houston::Rect;
 
 use crate::settings::{Panel, SettingsTab};
+use crate::surfaces::session::{SaveChoice, SessionOp};
 use crate::surfaces::{BrowserTab, InsertSize, Modifier, MonitorPage, Section};
 
 /// Which control of which strip ("in0", "aux1", "monitor", …).
@@ -162,6 +163,20 @@ pub enum Control {
     SceneStep(bool),
     /// [view] Settings page scrollbar (drag; value = 1 − scroll fraction).
     SettingsScroll,
+    // Sessions (`surfaces::session`).
+    /// [view] Navigator SESSION box: the session menu.
+    SessionMenu,
+    /// [model] A session request. `ViewState::route` asks about unsaved changes and opens the
+    /// Save As / Open fields first; what is left reaches the model as a tap.
+    Session(SessionOp),
+    /// [view] The save-changes question's buttons.
+    SessionSaveChoice(SaveChoice),
+    /// [model] `set_text` targets: Save As name, Open path (engine host).
+    SessionSaveAsName,
+    SessionOpenPath,
+    /// A popup-menu row or menu-bar title (`menu`): view commands (`MenuCmd::is_view`) are
+    /// consumed by `ViewState`, the rest reach `MixerModel::apply` as `Action::Tap`.
+    Menu(crate::menu::MenuCmd),
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the
@@ -205,6 +220,10 @@ pub enum PluginWindowButton {
     Favorite,
     /// "Help & Video".
     Help,
+    /// "Resize Plug-In" scale in percent (the "more" menu).
+    Scale(u16),
+    /// "Apply To All" (the scale to every plug-in window).
+    ApplyToAll,
 }
 
 #[derive(Clone, Debug, PartialEq)]

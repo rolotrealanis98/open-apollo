@@ -30,21 +30,52 @@ pub fn render_png(
     scale: f32,
     open_plugin: Option<&(String, u8)>,
     open: Option<&str>,
+    menu: Option<&str>,
+    menu_bar: bool,
     out: &Path,
 ) -> Result<(), String> {
     let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
     if let Some((strip, slot)) = open_plugin {
         overlays.on_open_plugin(strip, *slot, model);
     }
+    // `--menu plugin:assign|more|help` opens the plug-in window's menu instead.
+    let menu = match menu.and_then(|m| m.strip_prefix("plugin:")) {
+        Some(which) => {
+            if !overlays.open_menu(which) {
+                return Err(format!("--menu plugin:{which}: no plug-in window menu by that name (open one with --open-plugin)"));
+            }
+            None
+        }
+        None => menu,
+    };
     let mut view = ViewState {
         compact,
         window: size,
+        menu_bar,
         ..ViewState::default()
     };
     if let Some(name) = open {
         view.open_named(name);
     }
+    // Dev: render a session surface open (`UACONSOLE_RENDER_OPEN=session-menu|save-changes|save-as`).
+    if let Ok(what) = std::env::var("UACONSOLE_RENDER_OPEN") {
+        use rack::surfaces::SessionOp;
+        let tap = |c: Control| Action::Tap(ControlId { strip: "session".into(), control: c });
+        let taps: &[Control] = match what.as_str() {
+            "session-menu" => &[Control::SessionMenu],
+            "save-changes" => &[Control::SessionMenu, Control::Session(SessionOp::New)],
+            "save-as" => &[Control::SessionMenu, Control::Session(SessionOp::SaveAs)],
+            _ => &[],
+        };
+        for c in taps {
+            let _ = view.route(tap(c.clone()), model);
+        }
+    }
     let (w, h) = layout_for(model, &view).size();
+    if let Some(spec) = menu {
+        let first = build_frame(assets, model, &view, &mut overlays, Rect::new(0.0, 0.0, w, h), None);
+        view.open_menu_spec(&first.hits, spec)?;
+    }
     let t = Instant::now();
     let frame = build_frame(
         assets,

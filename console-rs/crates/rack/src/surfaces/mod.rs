@@ -10,12 +10,14 @@ pub mod monitor;
 pub mod navigator;
 pub mod panels;
 pub mod popover;
+pub mod session;
 pub mod session_nav;
 pub mod settings;
 pub mod status;
 pub mod view;
 
 pub use popover::{MenuItem, Placement};
+pub use session::{SaveChoice, SessionFile, SessionInfo, SessionOp};
 pub use view::{
     BrowserTab, BrowserView, Effect, InsertSize, Modifier, MonitorPage, Popover, PopoverState, Section, Sections, SettingsView, Sheet, TextEdit, TextTarget, ViewState,
     is_view_control,

@@ -33,6 +33,8 @@ pub struct WindowLayout {
     pub inputs: usize,
     pub auxes: usize,
     pub browser: bool,
+    /// The navigator column is shown (View > Section > Show Mixer Navigation; full layout).
+    pub navigator: bool,
     /// Window size in points (the full layout; compact derives its width from the strips).
     pub width: f32,
     pub height: f32,
@@ -53,7 +55,7 @@ const MAIN_HIDDEN_H: f32 = 5.0 + main_strip::LABEL_H;
 impl WindowLayout {
     pub fn new(view: &ViewState, inputs: usize, auxes: usize) -> Self {
         let (w, h) = view.window.unwrap_or(W::SIZE);
-        let mut l = Self { compact: view.compact, inputs, auxes, browser: view.show_browser && !view.compact, width: w, height: h, aux_scroll: true };
+        let mut l = Self { compact: view.compact, inputs, auxes, browser: view.show_browser && !view.compact, navigator: view.show_navigator, width: w, height: h, aux_scroll: true };
         let (min_w, min_h) = l.min_size();
         l.width = l.width.max(min_w);
         l.height = l.height.max(min_h);
@@ -82,7 +84,7 @@ impl WindowLayout {
         if self.browser { W::BROWSER_W } else { 0.0 }
     }
     pub fn side_x(&self) -> f32 {
-        if self.compact { 0.0 } else { self.nav_x() + W::NAV_COLUMN.1 }
+        if self.compact { 0.0 } else { self.nav_x() + if self.navigator { W::NAV_COLUMN.1 } else { 0.0 } }
     }
     pub fn strips_x(&self) -> f32 {
         self.side_x() + W::SIDE_SECTION.1
@@ -207,7 +209,9 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
         if l.browser {
             draw_browser(ui, model, view, Rect::new(0.0, W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR));
         }
-        draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, status_y, visible_rows);
+        if l.navigator {
+            draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, status_y, visible_rows);
+        }
     }
 
     // Strip area panel and session navigator.
@@ -252,7 +256,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     draw_monitor_column(ui, model, view, monitor_rect(l.monitor_x(), height));
     draw_status_bar(ui, model, Rect::new(0.0, status_y, width, W::STATUS_BAR.1));
     // Last of the chrome: its bottom line covers the first point of the columns below.
-    title_bar(ui, model, width);
+    title_bar(ui, model, view, width);
 
     // Overlays.
     match view.sheet {
@@ -264,6 +268,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
         None => {}
     }
     draw_popover(ui, model, view, bounds);
+    crate::menu::draw_menu(ui, model, view, bounds);
     l
 }
 
@@ -307,24 +312,32 @@ fn stroked_text(ui: &mut Ui, text: &str, style: crate::draw::TextStyle, stroke: 
 /// bar between 1 pt black lines; the window buttons (close, minimise, zoom) dimmed at the
 /// left, the session tab (`Titlebar-Tab-On` + divider, `Session-Tab-Single` text) and
 /// FEEDBACK (`Toggle-Feedback-LP`: label, icon right-aligned 3 pt in, 6 pt from the edge).
-fn title_bar(ui: &mut Ui, model: &dyn MixerModel, width: f32) {
+///
+/// With `ViewState::menu_bar` (desktop shells without a native menu bar) Windows Console's menu
+/// bar takes the window buttons' place and the session tab follows it.
+fn title_bar(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, width: f32) {
     let h = W::CONTENT_TOP;
     let bg = ui.skin("backgrounds", "Main-Title-Bar-LP").and_then(|s| s.color("color-overlay")).unwrap_or(Rgba::rgb8(75, 79, 83));
     ui.fill(Rect::new(0.0, 0.0, width, h), bg);
     ui.fill(Rect::new(0.0, 0.0, width, 1.0), Rgba::BLACK);
     ui.fill(Rect::new(0.0, h - 1.0, width, 1.0), Rgba::BLACK);
-    for (i, key) in ["Window-Button-Close", "Window-Button-Min", "Window-Button-Max-Console"].into_iter().enumerate() {
-        if let Some(img) = ui.skin("views", key).and_then(|s| s.image("image")) {
-            ui.image(img, Rect::new(10.0 + i as f32 * 25.0, 7.0, 12.0, 12.0), None, None, 0.2);
+    let tab_x = if view.menu_bar {
+        (crate::menu::draw_menu_bar(ui, model, view, crate::menu::BAR_X, h) + 12.0).max(80.0)
+    } else {
+        for (i, key) in ["Window-Button-Close", "Window-Button-Min", "Window-Button-Max-Console"].into_iter().enumerate() {
+            if let Some(img) = ui.skin("views", key).and_then(|s| s.image("image")) {
+                ui.image(img, Rect::new(10.0 + i as f32 * 25.0, 7.0, 12.0, 12.0), None, None, 0.2);
+            }
         }
-    }
+        80.0
+    };
     let title = format!("Apollo: {}", model.session_name());
     let style = ui.style("views", "Session-Tab-Single");
     let tab_w = helvetica_bold_width(&title, style.size).ceil() + 26.0;
-    ui.background("Titlebar-Tab-On", Rect::new(80.0, 0.0, tab_w, h));
-    ui.background("Titlebar-Tab-Divider", Rect::new(80.0 + tab_w - 3.0, 0.0, 3.0, h));
+    ui.background("Titlebar-Tab-On", Rect::new(tab_x, 0.0, tab_w, h));
+    ui.background("Titlebar-Tab-Divider", Rect::new(tab_x + tab_w - 3.0, 0.0, 3.0, h));
     let stroke = ui.skin("views", "Session-Tab").and_then(|s| s.color("color-text-stroke")).unwrap_or(Rgba::BLACK.with_alpha(0.4));
-    stroked_text(ui, &title, style, stroke, Rect::new(80.0, 2.0, tab_w, h - 2.0), Align::Center);
+    stroked_text(ui, &title, style, stroke, Rect::new(tab_x, 2.0, tab_w, h - 2.0), Align::Center);
 
     let style = ui.style("views", "Toggle-Feedback-LP");
     let fw = helvetica_bold_width("FEEDBACK", style.size).ceil();

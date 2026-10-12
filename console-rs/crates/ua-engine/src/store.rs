@@ -22,10 +22,11 @@ use crate::connection::{
 use crate::error::Result;
 use crate::meters::{MeterReading, MeterStore};
 use crate::path;
+use crate::session::{self, SessionCommand, SessionState};
 use crate::subscription::SubscriptionPlan;
 use crate::topology::Topology;
 use crate::tree::{Meta, Property, Snapshot, SnapshotInfo, Tree};
-use crate::value::Value;
+use crate::value::{Json, Value};
 use crate::writer::{LocalModel, Writer};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,6 +101,8 @@ struct Model {
     echo_hold: Duration,
     topology_dirty: bool,
     refresh_wanted: Vec<String>,
+    /// A session identity property changed: re-read the session lists.
+    values_wanted: bool,
     live: bool,
 }
 
@@ -132,6 +135,9 @@ impl Model {
         }
         if self.live && METADATA_TRIGGERS.contains(&name) {
             self.refresh_wanted.push(node.to_owned());
+        }
+        if self.live && session::IDENTITY_PATHS.contains(&pp) {
+            self.values_wanted = true;
         }
         true
     }
@@ -194,6 +200,8 @@ pub struct Store {
     subscribed: HashSet<String>,
     refresh_due: HashMap<String, Instant>,
     refresh_inflight: Vec<(String, PendingReply)>,
+    /// `get <property>/values` in flight (session lists).
+    values_inflight: Vec<(String, PendingReply)>,
     last_error: Option<String>,
     waker: Option<Waker>,
     simulation: Option<Simulation>,
@@ -243,6 +251,7 @@ impl Store {
                 echo_hold: Duration::from_millis(350),
                 topology_dirty: false,
                 refresh_wanted: Vec::new(),
+                values_wanted: false,
                 live: false,
             },
             writer: Writer::default(),
@@ -259,6 +268,7 @@ impl Store {
             subscribed: HashSet::new(),
             refresh_due: HashMap::new(),
             refresh_inflight: Vec::new(),
+            values_inflight: Vec::new(),
             last_error: None,
             waker: None,
             simulation: None,
@@ -508,6 +518,7 @@ impl Store {
         self.writer
             .poll(now, &self.model, sink_of(&self.sink, &self.handle));
         self.poll_refresh(now);
+        self.poll_values();
         if self.model.topology_dirty {
             self.recompute_topology();
         }
@@ -856,6 +867,99 @@ impl Store {
     pub fn end_gesture(&mut self) {
         self.writer
             .end_gesture(&self.model, sink_of(&self.sink, &self.handle));
+    }
+
+    /// `post <path> <payload>` through the writer gate (suppressed and counted while writes are
+    /// off), after any pending values.
+    pub fn post(&mut self, path: &str, payload: Option<&Json>) {
+        let command = Command::post(path, payload.map(Json::to_string));
+        self.writer
+            .send_now(&self.model, sink_of(&self.sink, &self.handle), command);
+    }
+
+    /// Runs a session command (load, save, new, …) through the writer gate. Loads move the
+    /// local `/Session` value at once, like any `commit`.
+    pub fn session(&mut self, command: &SessionCommand) {
+        match command {
+            SessionCommand::Load(name) => self.commit(session::SESSION, name.as_str()),
+            SessionCommand::RestoreModified(v) => {
+                self.commit(session::MODIFIED_SESSIONS, v.as_str())
+            }
+            other => self.writer.send_now(
+                &self.model,
+                sink_of(&self.sink, &self.handle),
+                other.command(),
+            ),
+        }
+    }
+
+    /// Runs a snapshot command through the writer gate.
+    pub fn snapshot_command(&mut self, command: &crate::session::SnapshotCommand) {
+        use crate::session::SnapshotCommand as S;
+        match command {
+            S::Recall(n) => self.commit(session::SNAPSHOT, n.as_str()),
+            S::Prime(n) => self.commit(session::PRIMED_SNAPSHOT, n.as_str()),
+            other => self.writer.send_now(
+                &self.model,
+                sink_of(&self.sink, &self.handle),
+                other.command(),
+            ),
+        }
+    }
+
+    /// The open session, the Sessions folder tree and the modified sessions.
+    pub fn session_state(&self) -> SessionState {
+        SessionState::from_tree(&self.model.tree)
+    }
+
+    /// Re-reads `<property>/values` (read-only `get`) and replaces the property's list when the
+    /// reply arrives (in a later `drain`). False when not live.
+    pub fn refresh_values(&mut self, property: &str) -> bool {
+        let prop = path::property_path(property).to_owned();
+        if self.status != Status::Live || !self.model.tree.has_property(&prop) {
+            return false;
+        }
+        let Some(handle) = &self.handle else {
+            return false;
+        };
+        if self.values_inflight.iter().any(|(p, _)| *p == prop) {
+            return true;
+        }
+        let reply = handle.request(&session::values_path(&prop), false);
+        self.values_inflight.push((prop, reply));
+        true
+    }
+
+    fn poll_values(&mut self) {
+        if std::mem::take(&mut self.model.values_wanted) {
+            for p in session::LIST_PATHS {
+                self.refresh_values(p);
+            }
+        }
+        let mut done = Vec::new();
+        self.values_inflight
+            .retain(|(prop, reply)| match reply.try_take() {
+                None => true,
+                Some(Ok(msg)) => {
+                    done.push((prop.clone(), msg.data.unwrap_or(Json::Null)));
+                    false
+                }
+                Some(Err(e)) => {
+                    log::debug!("values refresh of {prop} failed: {e}");
+                    false
+                }
+            });
+        for (prop, data) in done {
+            let Some(mut p) = self.model.tree.property(&prop).cloned() else {
+                continue;
+            };
+            let values = (!data.is_null()).then_some(data);
+            if p.meta.values != values {
+                p.meta.values = values;
+                self.model.tree.set_property(&prop, p);
+                self.model.record(&prop);
+            }
+        }
     }
 
     /// Sends (or counts as suppressed) every pending value now.

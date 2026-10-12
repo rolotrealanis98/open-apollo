@@ -176,6 +176,11 @@ impl MockEngine {
         change(&mut s, path::property_path(path), value.into());
     }
 
+    /// Replaces a property's `values` list (no push: clients re-read lists with `get …/values`).
+    pub fn set_values(&self, prop: &str, values: Json) {
+        set_values(&mut lock(&self.state), path::property_path(prop), values);
+    }
+
     /// Drops every client connection (to exercise reconnects).
     pub fn drop_clients(&self) {
         let mut s = lock(&self.state);
@@ -472,7 +477,76 @@ fn handle(s: &mut State, id: u64, text: String) {
                 c.subs.remove(&prop);
             }
         }
-        _ => {} // post and unknown verbs: recorded only
+        "post" => {
+            let (target, body) = split_first(rest);
+            session_post(s, split_query(target).0, body);
+        }
+        _ => {} // unknown verbs: recorded only
+    }
+}
+
+/// A stand-in for the engine's session handling, so the session UI can be driven offline. The
+/// command shapes are Console's; the effects are assumed (no capture of the real engine saving
+/// or loading exists): Save clears `/Dirty`, Save As adds the file to `/Session/values` and makes
+/// it current, New empties `/Session`, Delete/Rename edit the list. Other posts are recorded only.
+fn session_post(s: &mut State, command: &str, body: &str) {
+    use crate::session;
+    let args: Json = serde_json::from_str(body).unwrap_or(Json::Null);
+    let arg = |k: &str| args.get(k).and_then(Json::as_str).unwrap_or_default().to_owned();
+    let mut files: Vec<String> = s
+        .tree
+        .meta(session::SESSION)
+        .and_then(|m| m.values.clone())
+        .map(|v| session::parse_entries(&v))
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|e| e.files().into_iter().map(|f| f.path().to_owned()).collect::<Vec<_>>())
+        .collect();
+    let strip_ext = |n: &str| {
+        let n = n.rsplit('/').next().unwrap_or(n);
+        n.strip_suffix(session::EXTENSION).unwrap_or(n).to_owned()
+    };
+    let before = files.clone();
+    match command {
+        "/SaveSession" => change(s, session::DIRTY, Value::Bool(false)),
+        "/SaveSessionAs" => {
+            let name = strip_ext(&arg("name"));
+            if !files.contains(&name) {
+                files.push(name.clone());
+            }
+            change(s, session::SESSION, Value::String(name));
+            change(s, session::DIRTY, Value::Bool(false));
+        }
+        "/NewSession" => {
+            change(s, session::SESSION, Value::String(String::new()));
+            change(s, session::DIRTY, Value::Bool(false));
+        }
+        "/OpenSession" => {
+            change(s, session::SESSION, Value::String(strip_ext(&arg("path"))));
+            change(s, session::DIRTY, Value::Bool(false));
+        }
+        "/DeleteSession" => files.retain(|f| *f != strip_ext(&arg("name"))),
+        "/RenameSession" => {
+            let (from, to) = (strip_ext(&arg("origName")), strip_ext(&arg("newName")));
+            for f in files.iter_mut().filter(|f| **f == from) {
+                *f = to.clone();
+            }
+        }
+        _ => {}
+    }
+    if files != before {
+        let list: Vec<Json> = files
+            .iter()
+            .map(|f| serde_json::json!({"value": f, "type": "file", "locked": false}))
+            .collect();
+        set_values(s, session::SESSION, Json::Array(list));
+    }
+}
+
+fn set_values(s: &mut State, prop: &str, values: Json) {
+    if let Some(mut p) = s.tree.property(prop).cloned() {
+        p.meta.values = Some(values);
+        s.tree.set_property(prop, p);
     }
 }
 
@@ -573,6 +647,10 @@ fn set(s: &mut State, id: u64, raw: &str, value_text: &str, query: &[(String, St
         _ => {}
     }
     change(s, &prop, v.clone());
+    if prop == crate::session::SESSION || prop == crate::session::MODIFIED_SESSIONS {
+        // Loading a session (assumed): the loaded session is clean.
+        change(s, crate::session::DIRTY, Value::Bool(false));
+    }
     if query.iter().any(|(k, _)| k == "func_id")
         && let Some(c) = s.clients.get(&id)
     {

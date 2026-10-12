@@ -26,6 +26,8 @@
 //! [`InsertPaths::parameter`](ua_engine::InsertPaths::parameter)).
 
 mod settings;
+mod sessions;
+mod menus;
 mod slots;
 mod surfaces;
 
@@ -301,12 +303,17 @@ impl MixerModel for EngineMixer {
     }
 
     fn session_name(&self) -> String {
-        let name = self
-            .str_at("/Session")
-            .filter(|s| !s.is_empty())
-            .unwrap_or("Session");
+        // Console's name for the `/Session` value (`- New Session -` when never saved).
+        let name = match self.str_at("/Session") {
+            Some(v) => ua_engine::session::display_name(v),
+            None => "Session".to_owned(),
+        };
         let dirty = self.bool_at("/Dirty").unwrap_or(false);
         format!("{name}{}", if dirty { "*" } else { "" })
+    }
+
+    fn session(&self) -> rack::SessionInfo {
+        self.session_info()
     }
 
     fn inputs(&self) -> Vec<StripInfo> {
@@ -588,6 +595,9 @@ impl MixerModel for EngineMixer {
         if let Control::SettingEdit(k) = &id.control {
             return self.apply_setting(k, &rack::settings::SettingOp::Text(text.to_string()));
         }
+        if self.session_set_text(id, text) {
+            return;
+        }
         self.surface_set_text(id, text);
     }
 
@@ -599,6 +609,14 @@ impl MixerModel for EngineMixer {
         self.write_settings(writes);
     }
 
+    fn strip_menu_state(&self, s: &StripInfo) -> rack::menu::StripMenuState {
+        self.surface_strip_menu_state(s)
+    }
+
+    fn menu_state(&self) -> rack::menu::MenuModelState {
+        self.surface_menu_state()
+    }
+
     fn apply(&mut self, action: &Action) {
         if let Action::Tap(id) | Action::Toggle(id) = action {
             match &id.control {
@@ -606,6 +624,9 @@ impl MixerModel for EngineMixer {
                 Control::SettingPress(k) => return self.apply_setting(k, &rack::settings::SettingOp::Press),
                 _ => {}
             }
+        }
+        if self.apply_session(action) {
+            return;
         }
         if self.apply_surface(action) {
             return;

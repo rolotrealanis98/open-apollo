@@ -103,6 +103,22 @@ pub trait Panel {
     }
     /// Called before each build with the model (read state, keep subscriptions).
     fn sync(&mut self, _model: &mut dyn MixerModel) {}
+    /// Mixer actions the panel's menus produced (a plug-in window's ⋮ menu rows are mixer
+    /// controls); the shell routes them through the mixer.
+    fn take_mixer_actions(&mut self) -> Vec<rack::Action> {
+        Vec::new()
+    }
+    /// Draws the panel's menus after its clip is lifted (they may leave the panel).
+    fn build_popups(&mut self, _ui: &mut Ui, _rect: Rect) {}
+    /// Where those menus are (window points), so clicks on them reach the panel.
+    fn popup_rect(&self) -> Option<Rect> {
+        None
+    }
+    /// Opens one of the panel's menus by name (renders: a plug-in window's `assign`, `more`,
+    /// `help`). False when it has none.
+    fn open_menu(&mut self, _which: &str) -> bool {
+        false
+    }
 }
 
 /// Called when the user opens a plug-in insert (`Action::Tap` on `Control::Insert(slot)`).
@@ -279,6 +295,16 @@ impl OverlayStack {
     }
 
     /// Lets every panel read the model before the next build.
+    /// Opens a menu of the top panel (`Panel::open_menu`).
+    pub fn open_menu(&mut self, which: &str) -> bool {
+        self.panels.last_mut().is_some_and(|p| p.open_menu(which))
+    }
+
+    /// Mixer actions from every panel's menus, oldest first.
+    pub fn take_mixer_actions(&mut self) -> Vec<rack::Action> {
+        self.panels.iter_mut().flat_map(|p| p.take_mixer_actions()).collect()
+    }
+
     pub fn sync(&mut self, model: &mut dyn MixerModel) {
         for p in &mut self.panels {
             p.sync(model);
@@ -318,6 +344,7 @@ impl OverlayStack {
             ui.clip(Some(r));
             self.panels[i].build(ui, r);
             ui.clip(None);
+            self.panels[i].build_popups(ui, r);
         }
         ui.hits.truncate(hits);
     }
@@ -330,7 +357,7 @@ impl OverlayStack {
         let r = self.rect_of(&**top);
         let modal = top.modal();
         let (x, y) = ev.pos();
-        let inside = r.contains(x, y);
+        let inside = r.contains(x, y) || top.popup_rect().is_some_and(|p| p.contains(x, y));
         let forward = match ev {
             PointerEvent::Down { .. } => {
                 self.captured = inside;
