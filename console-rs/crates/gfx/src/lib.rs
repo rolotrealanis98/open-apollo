@@ -2,6 +2,7 @@
 //! clip, 9-slice expansion on the CPU, and text rasterised by cosmic-text into a glyph atlas
 //! so text keeps its place in the draw order. Renders to a surface or offscreen to PNG.
 
+pub mod draws;
 pub mod surface;
 mod text;
 
@@ -468,7 +469,7 @@ impl Headless {
         Some(Self { device, queue, adapter_info })
     }
 
-    /// Renders `list` at `scale` into an RGBA8 PNG.
+    /// Renders `list` at `scale` into an RGBA8 PNG, plus `<name>.draws.json` (see [`draws`]).
     pub fn render_png(&self, renderer: &mut Renderer, list: &DrawList, size_pt: (f32, f32), scale: f32, path: &std::path::Path) -> std::io::Result<()> {
         let (w, h) = ((size_pt.0 * scale).ceil() as u32, (size_pt.1 * scale).ceil() as u32);
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -513,6 +514,8 @@ impl Headless {
         enc.set_color(png::ColorType::Rgba);
         enc.set_depth(png::BitDepth::Eight);
         enc.write_header().map_err(std::io::Error::other)?.write_image_data(&pixels).map_err(std::io::Error::other)?;
+        // What was drawn where, for console-rs/tools/align (image paths and labels only).
+        std::fs::write(draws::sidecar_path(path), draws::draws_json(list, size_pt, scale))?;
         Ok(())
     }
 }
