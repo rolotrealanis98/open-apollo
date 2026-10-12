@@ -297,12 +297,12 @@ fn title_bar(ui: &mut Ui, model: &dyn MixerModel, width: f32) {
     ui.background("Titlebar-Tab-On", Rect::new(80.0, 0.0, tab_w, h));
     ui.background("Titlebar-Tab-Divider", Rect::new(80.0 + tab_w - 3.0, 0.0, 3.0, h));
     let stroke = ui.skin("views", "Session-Tab").and_then(|s| s.color("color-text-stroke")).unwrap_or(Rgba::BLACK.with_alpha(0.4));
-    stroked_text(ui, &title, style, stroke, Rect::new(80.0, 1.0, tab_w, h - 2.0), Align::Center);
+    stroked_text(ui, &title, style, stroke, Rect::new(80.0, 2.0, tab_w, h - 2.0), Align::Center);
 
-    let style = crate::surfaces::navigator::console_style(ui, "views", "Toggle-Feedback-LP");
+    let style = ui.style("views", "Toggle-Feedback-LP");
     let fw = helvetica_bold_width("FEEDBACK", style.size).ceil();
     let b = Rect::new(width - 6.0 - (fw + 31.0), (h - 1.0 - 22.0) / 2.0, fw + 31.0, 22.0);
-    ui.text("FEEDBACK", style, Rect::new(b.x + 1.0, b.y, fw + 2.0, b.h), Align::Left);
+    ui.text("FEEDBACK", style, Rect::new(b.x + 1.0, b.y + 1.0, fw + 2.0, b.h), Align::Left);
     if let Some(img) = ui.skin("views", "Toggle-Feedback-LP").and_then(|s| s.image("image-overlay")) {
         ui.image(img, Rect::new(b.max_x() - 3.0 - 26.0, b.y, 26.0, 22.0), None, None, 1.0);
     }

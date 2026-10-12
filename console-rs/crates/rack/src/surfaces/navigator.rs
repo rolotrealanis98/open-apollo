@@ -35,22 +35,6 @@ pub struct VisibleRows {
     pub sends: bool,
 }
 
-/// JUCE text size on macOS for a skin font: `font-size-dyn` fonts come out 10 % larger, and
-/// JUCE's font height maps to 0.84 of the point size for Helvetica Neue (ascent + descent).
-/// Measured on Console 1.3.1 (refpair p1); Helvetica fonts without `font-size-dyn` are exact.
-pub(crate) fn console_style(ui: &Ui, section: &str, key: &str) -> TextStyle {
-    let mut st = ui.style(section, key);
-    if let Some(skin) = ui.skin(section, key) {
-        if skin.flag("font-size-dyn") {
-            st.size *= 1.1;
-        }
-    }
-    if &*st.family == "Helvetica Neue" {
-        st.size *= 0.84;
-    }
-    st
-}
-
 /// JUCE `drawFittedText`: shrink `style` so `text` fits `width` (Helvetica Bold widths;
 /// JUCE squeezes horizontally instead, which the renderer cannot do).
 pub(crate) fn fitted(mut style: TextStyle, text: &str, width: f32) -> TextStyle {
@@ -71,7 +55,7 @@ impl Ui<'_> {
             self.image_stretched(p, r, 1.0);
         }
         let overlay = skin.image("image-overlay");
-        let mut style = fitted(console_style(self, "views", key), label, r.w - 8.0);
+        let mut style = fitted(self.style("views", key), label, r.w - 8.0);
         style.color = (if on { skin.color("color-text-on") } else { skin.color("color-text-off") }).unwrap_or(Rgba::WHITE);
         match overlay {
             Some(ov) => {
@@ -167,7 +151,7 @@ pub(crate) fn fill_rounded(ui: &mut Ui, r: Rect, radius: f32, color: Rgba) {
 
 /// A `CR-Label` group title, fitted to the lower panel.
 fn label(ui: &mut Ui, text: &str, r: Rect, align: Align) {
-    let style = fitted(console_style(ui, "fonts", "CR-Label"), text, r.w - 8.0);
+    let style = fitted(ui.style("fonts", "CR-Label"), text, r.w - 8.0);
     ui.text(text, style, r, align);
 }
 
@@ -181,10 +165,11 @@ pub fn draw_navigator(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: 
         // Session box: "SESSION" over the session name.
         let (sx, sy, sw, sh) = L::SESSION;
         ui.background("Display-Background", Rect::new(sx, sy, sw, sh));
-        ui.font_text("Info-Bridge-Label", "SESSION", Rect::new(sx, sy + 7.0, sw, 12.0), Align::Center);
+        let session = Ui::plain_style("Helvetica", 9.0, false, ui.style("fonts", "Info-Bridge-Label").color);
+        ui.text("SESSION", session, Rect::new(sx, sy + 7.0, sw, 12.0), Align::Center);
         let name = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.5));
         ui.clip(Some(Rect::new(sx + 4.0, sy, sw - 8.0, sh)));
-        ui.text(&model.session_name(), name, Rect::new(sx, sy + 18.5, sw, 13.0), Align::Center);
+        ui.text(&model.session_name(), name, Rect::new(sx, sy + 20.0, sw, 13.0), Align::Center);
         ui.clip(None);
 
         // Section rows on the Display-Nav plate. Text and dot are lit (Icon-Show-Selected) for
@@ -198,13 +183,13 @@ pub fn draw_navigator(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: 
             (Section::Fader, "FADER", L::FADER_Y, false),
         ];
         let select = ui.skin("views", "Display-Select-Console");
-        let base = console_style(ui, "views", "Display-Select-Console");
+        let base = ui.style("views", "Display-Select-Console");
         let inset = select.and_then(|s| s.insets("inset-text")).unwrap_or_default();
         for (s, label, y, lit) in sections {
             let row = Rect::new(8.0, y, 80.0, L::ROW_PITCH);
             let color = select.and_then(|k| k.color(if lit { "color-text-on" } else { "color-text-off" }));
             let st = TextStyle { color: color.unwrap_or(if lit { SECTION_ON } else { SECTION_OFF }), ..base.clone() };
-            ui.text(label, st, Rect::new(row.x + inset.l + 4.0, row.y - 1.0, 60.0, row.h), Align::Left);
+            ui.text(label, st, Rect::new(row.x + inset.l + 4.0, row.y - 0.5, 60.0, row.h), Align::Left);
             let icon = if lit { "Icon-Show-Selected" } else { "Icon-Show" };
             if let Some(img) = ui.skin("views", icon).and_then(|k| k.image(if view.sections.get(s) { "image-on" } else { "image-off" })) {
                 ui.image(img, Rect::new(row.max_x() - 11.0 - 8.0, y + 7.0, 11.0, 11.0), None, None, 1.0);
@@ -249,7 +234,7 @@ pub fn draw_navigator(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: 
         ui.hit(mon, nid(Control::AllRecordPreEffects(true)), HitKind::Tap);
         ui.fill(Rect::new(7.0, ops + 62.0, WIDTH - 14.0, 1.0), DIVIDER);
 
-        label(ui, "MODIFIERS", Rect::new(4.0, ops + 67.0, WIDTH - 8.0, 16.0), Align::Center);
+        label(ui, "MODIFIERS", Rect::new(4.0, ops + 68.5, WIDTH - 8.0, 16.0), Align::Center);
         let mods = [
             (Modifier::Power, "Switch-Power-Mode", "POWER"),
             (Modifier::Remove, "Switch-Remove-Mode", "REMOVE"),
@@ -264,7 +249,7 @@ pub fn draw_navigator(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: 
         ui.fill(Rect::new(7.0, ops + 286.0, WIDTH - 14.0, 1.0), DIVIDER);
 
         // SHOW.
-        label(ui, "SHOW", Rect::new(4.0, L::SHOW_Y, WIDTH - 8.0, 16.0), Align::Center);
+        label(ui, "SHOW", Rect::new(4.0, L::SHOW_Y + 0.5, WIDTH - 8.0, 16.0), Align::Center);
         let scenes_open = matches!(&view.popover, Some(p) if p.anchor.control == Control::ShowPluginScenes);
         let shows = [
             ("BROWSER", view.show_browser, Control::ShowBrowser),
