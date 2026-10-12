@@ -146,6 +146,7 @@ pub struct ImageCache {
     resources: Resources,
     map: Mutex<HashMap<String, Option<Arc<ImageData>>>>,
     roots: Mutex<HashMap<String, PathBuf>>,
+    runtime: Mutex<HashMap<String, (String, (u32, u32), u64)>>,
 }
 
 impl ImageCache {
@@ -153,7 +154,30 @@ impl ImageCache {
     pub const SPEC_SCHEME: &'static str = "spec";
 
     pub fn new(resources: Resources) -> Self {
-        Self { resources, map: Mutex::new(HashMap::new()), roots: Mutex::new(HashMap::new()) }
+        Self { resources, map: Mutex::new(HashMap::new()), roots: Mutex::new(HashMap::new()), runtime: Mutex::new(HashMap::new()) }
+    }
+
+    /// Bounded in-memory correction SVG; nothing is written to the asset directory.
+    /// Only three stable keys are allowed, and replaced rather than accumulated.
+    pub fn correction_svg(&self, slot: &str, svg: &str, size: (u32,u32)) -> Option<String> {
+        if !matches!(slot,"speaker"|"headphone"|"headphone2") || svg.len()>512*1024
+            || size.0==0 || size.1==0 || size.0>2048 || size.1>2048 { return None; }
+        let key=format!("runtime-correction:{slot}");
+        let mut runtime=self.runtime.lock();
+        if runtime.get(&key).is_some_and(|(s,z,_)| s==svg && *z==size) {
+            return self.map.lock().get(&key).and_then(|i| i.as_ref()).map(|_|key);
+        }
+        let revision=runtime.get(&key).map_or(1,|(_,_,n)| n.wrapping_add(1));
+        let image=render_correction_svg(svg,size).map(Arc::new);
+        let good=image.is_some();
+        self.map.lock().insert(key.clone(),image);
+        runtime.insert(key.clone(),(svg.to_owned(),size,revision));
+        good.then_some(key)
+    }
+
+    pub fn runtime_revision(&self,key:&str)->u64 {
+        if !key.starts_with("runtime-correction:") {return 0}
+        self.runtime.lock().get(key).map_or(0,|(_,_,n)| *n)
     }
 
     /// A cache with one extra root registered (see [`ImageCache::register_root`]).
@@ -217,6 +241,59 @@ impl ImageCache {
         let mut v: Vec<String> = self.map.lock().iter().filter(|(_, v)| v.is_none()).map(|(k, _)| k.clone()).collect();
         v.sort();
         v
+    }
+}
+
+fn render_correction_svg(svg:&str,size:(u32,u32))->Option<ImageData> {
+    // Native wrapper supplies these CSS variables (Rack 0x18116b9e0).
+    let mut svg=svg.to_owned();
+    // The native wrapper assigns the same theme curveColor to all these families.
+    for family in ["after","before","before-accuracy","calibration","phase","limits","target","left","right"] {
+        for side in ["","-left","-right"] {
+            svg=svg.replace(&format!("var(--color-curve-{family}{side})"),"#78c86e");
+        }
+    }
+    svg=svg.replace("var(--font-size-tickmark)","10px");
+    let mut options=resvg::usvg::Options::default();
+    // Never follow image hrefs into local files or network resources.
+    options.image_href_resolver.resolve_string=Box::new(|_,_|None);
+    options.image_href_resolver.resolve_data=Box::new(|_,_,_|None);
+    options.fontdb_mut().load_system_fonts();
+    let tree=resvg::usvg::Tree::from_str(&svg,&options).ok()?;
+    if tree.size().width()>4096.0 || tree.size().height()>4096.0 { return None; }
+    let mut pixmap=resvg::tiny_skia::Pixmap::new(size.0,size.1)?;
+    let transform=resvg::tiny_skia::Transform::from_scale(size.0 as f32/tree.size().width(),size.1 as f32/tree.size().height());
+    resvg::render(&tree,transform,&mut pixmap.as_mut());
+    // tiny-skia is premultiplied; ImageData's contract is straight RGBA.
+    let mut rgba=pixmap.take();
+    for p in rgba.chunks_exact_mut(4) {
+        if p[3]>0 { for k in 0..3 { p[k]=((p[k] as u32*255+p[3] as u32/2)/p[3] as u32).min(255) as u8; } }
+    }
+    Some(ImageData{width:size.0,height:size.1,rgba})
+}
+
+#[cfg(test)]
+mod correction_tests {
+    use super::*;
+    #[test]
+    fn svg_pixels_alpha_cache_replacement_and_bounds() {
+        let cache=ImageCache::new(Resources{root:PathBuf::from("/nonexistent"),console_version:None});
+        let svg=r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red" opacity="0.5"/></svg>"#;
+        let key=cache.correction_svg("speaker",svg,(4,4)).unwrap();
+        let image=cache.get(&key).unwrap();
+        assert_eq!(image.rgba[0],255);
+        assert!((126..=129).contains(&image.rgba[3]));
+        let rev=cache.runtime_revision(&key);
+        assert_eq!(cache.correction_svg("speaker",svg,(4,4)).unwrap(),key);
+        assert_eq!(cache.runtime_revision(&key),rev);
+        let green=svg.replace("red","var(--color-curve-after)");
+        cache.correction_svg("speaker",&green,(4,4)).unwrap();
+        assert_eq!(cache.runtime_revision(&key),rev+1);
+        assert!(cache.get(&key).unwrap().rgba[1]>150);
+        assert_eq!(cache.runtime.lock().len(),1);
+        assert!(cache.correction_svg("invalid",svg,(4,4)).is_none());
+        assert!(cache.correction_svg("speaker",svg,(4096,4096)).is_none());
+        assert!(cache.correction_svg("speaker","bad",(4,4)).is_none());
     }
 }
 

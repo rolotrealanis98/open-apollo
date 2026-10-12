@@ -156,23 +156,24 @@ impl MockEngine {
             .collect()
     }
 
-    /// Received `set` and `post` commands, without Console's per-request query.
+    /// Mutating `set`/`post` commands, without Console's per-request query.
+    /// Audited read RPCs stay available in `received_commands`.
     pub fn write_commands(&self) -> Vec<String> {
         lock(&self.state)
             .received
             .iter()
-            .filter(|c| (c.starts_with("set ") || c.starts_with("post ")) && !is_sleep_hint(c))
+            .filter(|c| (c.starts_with("set ") || c.starts_with("post ")) && !is_sleep_hint(c) && !is_read_rpc(c))
             .map(|c| crate::Command::strip_request_query(c))
             .collect()
     }
 
     /// Received `set` and `post` commands exactly as sent (with `func_id` / `context_type`), but
-    /// not the `set /Sleep` socket hint.
+    /// not the `set /Sleep` socket hint or audited read RPCs.
     pub fn raw_write_commands(&self) -> Vec<String> {
         lock(&self.state)
             .received
             .iter()
-            .filter(|c| (c.starts_with("set ") || c.starts_with("post ")) && !is_sleep_hint(c))
+            .filter(|c| (c.starts_with("set ") || c.starts_with("post ")) && !is_sleep_hint(c) && !is_read_rpc(c))
             .cloned()
             .collect()
     }
@@ -1036,4 +1037,15 @@ fn helper_handle(s: &mut HelperState, id: u64, text: String) {
 /// `set /Sleep …` / `set /sleep …`: a per-socket hint, not a mixer write.
 fn is_sleep_hint(c: &str) -> bool {
     c.starts_with("set /Sleep ") || c.starts_with("set /sleep ") || c.starts_with("set /Sleep?") || c.starts_with("set /sleep?")
+}
+
+fn is_read_rpc(c:&str)->bool {
+    let Some(rest)=c.strip_prefix("post ") else {return false};
+    let (target,body)=split_first(rest);
+    let Ok(Json::Object(args))=serde_json::from_str::<Json>(body) else {return false};
+    match split_query(target).0 {
+        "/GetMidiBuffers"=>args.is_empty(),
+        "/GetCorrectionImage"=>args.len()==1 && args.get("type").and_then(Json::as_str).is_some_and(|s|matches!(s,"speaker"|"headphone"|"headphone2")),
+        _=>false,
+    }
 }

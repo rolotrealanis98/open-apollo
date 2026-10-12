@@ -629,6 +629,8 @@ pub trait MixerModel {
     fn properties(&self) -> Option<&dyn crate::settings::PropertySource> {
         None
     }
+    /// Native correction SVG, kept in memory; slot is speaker/headphone/headphone2.
+    fn correction_image(&self,_device:usize,_slot:&str)->Option<&str> {None}
     /// Applies the writes of a settings control (`settings::resolve`): engine `set`s and
     /// `post`s, client preferences. Ignored by default.
     fn apply_setting_writes(&mut self, _writes: Vec<crate::settings::Write>) {}
