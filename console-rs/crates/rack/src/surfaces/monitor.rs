@@ -182,6 +182,8 @@ pub fn draw_monitor_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState
     ui.at(r.x, r.y, |ui| {
         ui.fill(Rect::new(0.0, 0.0, STRIP_W, r.h), SECTION_BG);
         monitor_meters(ui, model.monitor_meters(), st.silk - 4.0);
+        // The meters open the Monitor Meters window (`Rack_MonitorMetersWindow`, capture s44).
+        ui.hit(Rect::new(0.0, 40.0, STRIP_W, (st.silk - 44.0).max(0.0)), mid(Control::ShowPanel(Panel::MeterWindow)), HitKind::Tap);
         ui.background("Silk-Screen", Rect::new(4.0, st.silk, STRIP_W - 8.0, st.gain - 4.0 - st.silk));
 
         ui.font_text("CR-Label", "SHOW", Rect::new(4.0, st.show_label, 88.0, 16.0), Align::Center);
@@ -401,6 +403,8 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
         y += 6.0;
         if opts.talkback.is_some() || opts.dim.is_some() {
             ui.font_text("CR-Label", "TALKBACK / DIM", Rect::new(0.0, y, w, 14.0), Align::Center);
+            // The talkback strip's sends window (`Rack_SendsPopover`, capture s50).
+            ui.hit(Rect::new(0.0, y, w, 14.0), mid(Control::ShowPanel(Panel::Sends(crate::settings::SendsOf::Talkback))), HitKind::Tap);
             y += 16.0;
             if let Some(t) = opts.talkback {
                 ui.toggle("Switch-Large", Some("TALK"), t, true, Rect::new(8.0, y, 80.0, 40.0), Some(mid(Control::Talkback)), None);

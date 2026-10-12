@@ -163,6 +163,10 @@ pub enum Control {
     SceneStep(bool),
     /// [view] Settings page scrollbar (drag; value = 1 − scroll fraction).
     SettingsScroll,
+    /// [view] Select row `.0` of a panel list (ADD DEVICE, I/O PRESETS, source categories).
+    ListSelect(u16),
+    /// [model] Drag a settings value (send faders): `Action::Set(.., 0…1)` on the key.
+    SettingSet(Arc<str>),
     // Sessions (`surfaces::session`).
     /// [view] Navigator SESSION box: the session menu.
     SessionMenu,

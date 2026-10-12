@@ -588,6 +588,11 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
         cell_separators(ui, y, rows.sends);
     }
     ui.cell_header("SENDS", false, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
+    if bus {
+        // The aux's SENDS header opens its sends window (`Rack_SendsPopover`, capture s51).
+        let k = s.id.trim_end_matches(|c: char| !c.is_ascii_digit()).chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>().chars().rev().collect::<String>().parse::<u8>().unwrap_or(0);
+        ui.hit(Rect::new(0.0, y, STRIP_W, HEADER_H), ControlId { strip: s.id.clone(), control: Control::ShowPanel(crate::settings::Panel::Sends(crate::settings::SendsOf::Aux(k))) }, HitKind::Tap);
+    }
     if rows.sends > HEADER_H {
         let sends = if bus { model.sends(s) } else { model.input_sends(s) };
         let well_h = (visible_h - y - 26.0).max(rows.sends - 31.0);

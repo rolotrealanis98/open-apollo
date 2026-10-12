@@ -160,6 +160,8 @@ pub enum SettingOp {
     Press,
     /// Commit edited text.
     Text(String),
+    /// A continuous value 0…1 (send faders).
+    Value(f64),
 }
 
 // ---- Tabs, panels and groups ----
@@ -234,6 +236,27 @@ pub enum Panel {
     PluginScenes,
     /// The About box (`About-Background`).
     About,
+    /// `Rack_MonitorMetersWindow` "Monitor Meters" (capture s44): the tall L / R meter window.
+    MeterWindow,
+    /// `Rack_SendsPopover` (captures s50 / s51): a strip's sends as faders.
+    Sends(SendsOf),
+    /// ADD DEVICE (capture s26), from HARDWARE › DEVICES "+".
+    AddDevice,
+    /// I/O PRESETS (capture s38), from I/O MATRIX › I/O PRESETS.
+    IoPresets,
+    /// The cascading source picker of an I/O MATRIX row (capture s35): route index, outputs.
+    RouteSource { route: u16, outputs: bool },
+    /// TEMPO (capture s05), from the status bar.
+    Tempo,
+}
+
+/// Whose sends a [`Panel::Sends`] shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SendsOf {
+    /// The talkback strip (`inputs/N` with `IOType` `TalkbackMic`): AUX 1 / 2, CUE 1 / 2.
+    Talkback,
+    /// Aux `.0` (`auxs/N`): its cue sends.
+    Aux(u8),
 }
 
 impl Panel {
@@ -244,6 +267,13 @@ impl Panel {
             Panel::HeadphoneCorrection => "HEADPHONE CORRECTION",
             Panel::PluginScenes => "PLUG-IN SCENES",
             Panel::About => "ABOUT",
+            Panel::MeterWindow => "",
+            Panel::Sends(SendsOf::Talkback) => "TALKBACK",
+            Panel::Sends(SendsOf::Aux(_)) => "AUX",
+            Panel::AddDevice => "ADD DEVICE",
+            Panel::IoPresets => "I/O PRESETS",
+            Panel::RouteSource { .. } => "INPUT",
+            Panel::Tempo => "TEMPO",
         }
     }
 }
@@ -325,14 +355,14 @@ pub struct SettingField {
 }
 
 impl SettingField {
-    fn new(key: impl Into<Arc<str>>, label: impl Into<String>, kind: FieldKind, row: u8) -> Self {
+    pub fn new(key: impl Into<Arc<str>>, label: impl Into<String>, kind: FieldKind, row: u8) -> Self {
         Self { key: key.into(), label: label.into(), kind, enabled: true, row, width: 160.0, at: None, inline: None, display: None }
     }
-    fn disabled(mut self, off: bool) -> Self {
+    pub fn disabled(mut self, off: bool) -> Self {
         self.enabled = !off;
         self
     }
-    fn width(mut self, w: f32) -> Self {
+    pub fn width(mut self, w: f32) -> Self {
         self.width = w;
         self
     }
@@ -984,12 +1014,35 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             vec![Write::Pref(rest.to_string(), PropValue::Bool(!on))]
         }
         ("pref-reset", SettingOp::Press) => vec![Write::Pref(rest.to_string(), PropValue::Bool(false))],
+        ("fader", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0))),
+        ("post-text", SettingOp::Text(t)) => {
+            // post-text:<Command>[:<orig>]: SAVE AS / RENAME of an I/O preset.
+            let t = t.trim();
+            if t.is_empty() {
+                return Vec::new();
+            }
+            let (cmd, orig) = rest.split_once(':').unwrap_or((rest, ""));
+            let payload = match cmd {
+                "RenameIOMapPreset" => format!("{{\"newPreset\":{},\"origPreset\":{}}}", json_str(t), json_str(orig)),
+                _ => format!("{{\"ioPresetName\":{}}}", json_str(t)),
+            };
+            vec![Write::Post(format!("/{cmd}"), payload)]
+        }
+        ("route", SettingOp::Choose(i)) => {
+            // route:<node>:<IOType>: pick channel `i` of that type for the route. [I] the write
+            // (IOType + ChannelIndex) is inferred from the tree, not observed.
+            let mut it = rest.rsplitn(2, ':');
+            let (ty, node) = (it.next().unwrap_or(""), it.next().unwrap_or(""));
+            vec![Write::Set(format!("{node}/IOType"), PropValue::Str(ty.to_string())), Write::Set(format!("{node}/ChannelIndex"), PropValue::Int(*i as i64 + 1))]
+        }
         ("post", SettingOp::Press) => {
             // post:<Command>:<arg>; payload shapes from the engine's root `commands` node.
             let (cmd, arg) = rest.split_once(':').unwrap_or((rest, ""));
             let payload = match cmd {
                 "Identify" | "RemoveDevice" | "ResetDanteNetwork" => format!("{{\"path\":{}}}", json_str(arg)),
-                "SaveIOMapPreset" => format!("{{\"ioPresetName\":{}}}", json_str(arg)),
+                "SaveIOMapPreset" | "DeleteIOMapPreset" => format!("{{\"ioPresetName\":{}}}", json_str(arg)),
+                "AddDevice" => format!("{{\"type\":{}}}", json_str(arg)),
+                "Import" => format!("{{\"type\":{}}}", json_str(arg)),
                 "ShowSoundIDReference" => format!("{{\"type\":{}}}", json_str(arg)),
                 _ => "{}".to_string(),
             };
@@ -1184,6 +1237,28 @@ impl MemoryProperties {
             m.insert(&format!("/outputroutes/{i}/ChannelIndex"), I(i as i64 + 1), Vec::new());
             m.insert(&format!("/outputroutes/{i}/Name"), S(n.to_string()), Vec::new());
             m.insert(&format!("/outputroutes/{i}/IOType"), S(if i < 2 { "CtrlRoom" } else { "Line" }.into()), Vec::new());
+        }
+        // The talkback strip and the aux cue sends (p2: talkback → AUX 1 / 2 at −∞, CUE 1 / 2 at −6).
+        m.insert("/devices/0/inputs/22/Name", S("TALKBACK".into()), Vec::new());
+        m.insert("/devices/0/inputs/22/IOType", S("TalkbackMic".into()), Vec::new());
+        for (k, (id, name, gain, tap)) in [("aux1", "AUX 1", -144.0, 0.0), ("aux2", "AUX 2", -144.0, 0.0), ("cue1", "CUE 1", -6.0, 0.6727), ("cue2", "CUE 2", -6.0, 0.6727)].iter().enumerate() {
+            let p = format!("/devices/0/inputs/22/sends/{k}");
+            m.insert(&format!("{p}/ID"), S(id.to_string()), Vec::new());
+            m.insert(&format!("{p}/Name"), S(name.to_string()), Vec::new());
+            m.insert(&format!("{p}/Gain"), PropValue::Float(*gain), Vec::new());
+            m.insert(&format!("{p}/GainTapered"), PropValue::Float(*tap), Vec::new());
+            m.insert(&format!("{p}/Bypass"), B(false), Vec::new());
+        }
+        for a in 0..2 {
+            m.insert(&format!("/devices/0/auxs/{a}/Name"), S(format!("AUX {}", a + 1)), Vec::new());
+            for c in 0..2 {
+                let p = format!("/devices/0/auxs/{a}/sends/{c}");
+                m.insert(&format!("{p}/ID"), S(format!("cue{}", c + 1)), Vec::new());
+                m.insert(&format!("{p}/Name"), S(format!("CUE {}", c + 1)), Vec::new());
+                m.insert(&format!("{p}/Gain"), PropValue::Float(-144.0), Vec::new());
+                m.insert(&format!("{p}/GainTapered"), PropValue::Float(0.0), Vec::new());
+                m.insert(&format!("{p}/Bypass"), B(false), Vec::new());
+            }
         }
         for i in 0..3 {
             m.insert(&format!("/pluginscenes/0/scenes/{i}/SceneName"), S(["VERSE", "CHORUS", "EMPTY SCENE"][i].into()), Vec::new());

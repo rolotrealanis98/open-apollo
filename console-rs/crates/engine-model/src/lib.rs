@@ -618,6 +618,9 @@ impl MixerModel for EngineMixer {
     }
 
     fn apply(&mut self, action: &Action) {
+        if let Action::Set(ControlId { control: Control::SettingSet(k), .. }, v) = action {
+            return self.apply_setting(k, &rack::settings::SettingOp::Value(*v));
+        }
         if let Action::Tap(id) | Action::Toggle(id) = action {
             match &id.control {
                 Control::SettingChoose(k, i) => return self.apply_setting(k, &rack::settings::SettingOp::Choose(*i as usize)),

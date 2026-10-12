@@ -23,10 +23,10 @@ use crate::draw::Align;
 use crate::input::{Control, ControlId, HitKind, ScrollTarget};
 use crate::model::MixerModel;
 use crate::settings::{self, FieldKind, PropertySource, SettingField, SettingsGroup, SettingsTab};
-use crate::surfaces::popover::{MenuItem, Placement, pid};
+use crate::menu::{MenuLook, PopupItem, PopupMenu};
+use crate::surfaces::popover::{anchored_menu, pid};
 use crate::surfaces::view::{TextEdit, TextTarget, ViewState};
 use crate::ui::Ui;
-use crate::window::helvetica_width;
 
 pub const SETTINGS_ID: &str = "settings";
 
@@ -118,7 +118,7 @@ fn section_title(ui: &mut Ui, title: &str, r: Rect) {
 }
 
 /// `Settings-Static-Text` label (Helvetica 9, white 0.6), in a 16-pt row.
-fn static_label(ui: &mut Ui, text: &str, r: Rect, align: Align) {
+pub(crate) fn static_label(ui: &mut Ui, text: &str, r: Rect, align: Align) {
     let style = ui.style("fonts", "Settings-Static-Text");
     ui.text(text, style, r, align);
 }
@@ -145,13 +145,15 @@ pub(crate) fn choice_box(ui: &mut Ui, f: &SettingField, r: Rect) {
         ui.image(&arrow, Rect::new(r.max_x() - 6.0 - 8.0, r.max_y() - 6.0 - 8.0, 8.0, 8.0), None, None, 1.0);
     }
     if usable {
-        ui.hit(r, sid(Control::SettingMenu(f.key.clone())), HitKind::Tap);
+        // I/O PRESETS opens its window (capture s38), not a dropdown.
+        let control = if &*f.key == "iopreset:/IOMapPreset" { Control::ShowPanel(crate::settings::Panel::IoPresets) } else { Control::SettingMenu(f.key.clone()) };
+        ui.hit(r, sid(control), HitKind::Tap);
     }
 }
 
 /// `Text-Edit-Field` (`rename_field` art, Helvetica Neue 16, text inset 10) with the caret while
 /// it has focus.
-fn text_box(ui: &mut Ui, f: &SettingField, text: &str, edit: Option<&TextEdit>, r: Rect) {
+pub(crate) fn text_box(ui: &mut Ui, f: &SettingField, text: &str, edit: Option<&TextEdit>, r: Rect) {
     let editing = edit.filter(|e| matches!(&e.target, TextTarget::Setting(k) if *k == f.key));
     let shown = editing.map(|e| format!("{}|", e.text)).unwrap_or_else(|| text.to_string());
     // The `rename_field` art is a translucent dark plate (`inset-background` 2, 3, 2, 3).
@@ -170,7 +172,7 @@ fn text_box(ui: &mut Ui, f: &SettingField, text: &str, edit: Option<&TextEdit>, 
 }
 
 /// A `Switch-Large` push button (IDENTIFY, SAVE, RESET, …).
-fn push_button(ui: &mut Ui, f: &SettingField, label: &str, r: Rect) {
+pub(crate) fn push_button(ui: &mut Ui, f: &SettingField, label: &str, r: Rect) {
     ui.toggle("Switch-Large", Some(label), false, f.enabled, r, None, None);
     if f.enabled {
         ui.hit(r, sid(Control::SettingPress(f.key.clone())), HitKind::Tap);
@@ -257,7 +259,7 @@ pub(crate) fn field_grid(ui: &mut Ui, fields: &[SettingField], origin: (f32, f32
 
 /// CHANNEL DSP PAIRING slider (`DSP-Spanning-Background`, 210 × 40): the left number, the
 /// segment row (one lit cell) and the right number.
-fn slider(ui: &mut Ui, f: &SettingField, r: Rect) {
+pub(crate) fn slider(ui: &mut Ui, f: &SettingField, r: Rect) {
     let FieldKind::Slider { segments, lit, left, right, .. } = &f.kind else { return };
     ui.fill(r.inset(1.0, 3.0, 1.0, 3.0), Rgba::rgb8(20, 22, 24));
     ui.background("DSP-Spanning-Background", r);
@@ -273,21 +275,19 @@ fn slider(ui: &mut Ui, f: &SettingField, r: Rect) {
     }
 }
 
-/// The open combo's dropdown, anchored to its box (drawn last).
+/// The open combo's dropdown (the MENUS look: `anchored_menu`, `MenuLook::Base`), under its
+/// box (drawn last; captures s18…s39 show the items, the current one ticked).
 pub(crate) fn choice_menu(ui: &mut Ui, view: &ViewState, drawn: &[Drawn], bounds: Rect) {
     let Some(key) = &view.settings.menu else { return };
     let Some(d) = drawn.iter().find(|d| &d.field.key == key) else { return };
     let FieldKind::Choice { options, enabled, selected } = &d.field.kind else { return };
     let Some(anchor) = ui.hit_rect(&sid(Control::SettingMenu(key.clone()))) else { return };
-    let items: Vec<MenuItem> = options
-        .iter()
-        .enumerate()
-        .map(|(i, o)| MenuItem::new(o.clone(), sid(Control::SettingChoose(key.clone(), i as u16))).checked(*selected == Some(i)).enabled(enabled.get(i).copied().unwrap_or(true)))
-        .collect();
-    let width = options.iter().map(|o| helvetica_width(o, 11.0) + 44.0).fold(anchor.w, f32::max);
+    let mut m = PopupMenu::new();
+    for (i, o) in options.iter().enumerate() {
+        m.push(PopupItem::new(o.clone(), sid(Control::SettingChoose(key.clone(), i as u16))).ticked(*selected == Some(i)).enabled(enabled.get(i).copied().unwrap_or(true)));
+    }
     ui.popover_catcher(bounds);
-    let low = anchor.y > bounds.h * 0.6;
-    ui.popover_menu(anchor, if low { Placement::Above } else { Placement::Below }, bounds, None, &items, width);
+    anchored_menu(ui, &m, MenuLook::Base, anchor, bounds);
 }
 
 /// The window rect for `size` centred in `bounds` (clamped to them).
@@ -382,6 +382,7 @@ fn hardware_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page: 
     ui.background("New-Device-Background", add);
     let plus = Ui::plain_style("Helvetica", 12.0, false, Rgba::WHITE.with_alpha(0.5));
     ui.text("+", plus, add, Align::Center);
+    ui.hit(add, sid(Control::ShowPanel(crate::settings::Panel::AddDevice)), HitKind::Tap);
 
     let body = Rect::new(opts.x, body_y, opts.w, bottom - body_y);
     let bg = selected.and_then(|i| devices.iter().find(|d| d.index == i)).map(|d| format!("Device-{}-Settings-Background", d.letter())).unwrap_or_else(|| "No-Device-Settings-Background".into());
@@ -520,6 +521,8 @@ fn io_matrix_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page:
             let st = if r.active { &text } else { &dim };
             ui.text(&dev_name, st.clone(), Rect::new(x + 40.0, y, 95.0, row_h), Align::Center);
             ui.text(&r.default_name, st.clone(), Rect::new(x + 135.0, y, 77.0, row_h), Align::Center);
+            // The INPUT / OUTPUT cell opens the cascading source picker (capture s35).
+            ui.hit(Rect::new(x + 40.0, y, 172.0, row_h), sid(Control::ShowPanel(crate::settings::Panel::RouteSource { route: i as u16, outputs: k == 1 })), HitKind::Tap);
             ui.text(&r.name, text.clone(), Rect::new(x + 222.0, y, w - 232.0, row_h), Align::Left);
         }
         ui.clip(None);

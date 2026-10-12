@@ -921,6 +921,9 @@ impl MixerModel for PreviewMixer {
         }
     }
     fn apply(&mut self, action: &Action) {
+        if let Action::Set(ControlId { control: Control::SettingSet(k), .. }, v) = action {
+            return self.apply_setting(k, &crate::settings::SettingOp::Value(*v));
+        }
         let press = matches!(action, Action::Tap(_) | Action::Toggle(_));
         let id = action.id();
         // Controls that are not per-strip state.

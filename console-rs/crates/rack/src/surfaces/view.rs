@@ -213,6 +213,8 @@ pub struct SettingsView {
     pub scroll: f32,
     /// PLUG-IN SCENES: the selected (primed) scene.
     pub scene: Option<u16>,
+    /// The selected row of a panel list (ADD DEVICE, I/O PRESETS, source categories).
+    pub list: Option<u16>,
 }
 
 /// UI-only state: owned by the app shell, read by `build_window_with`, changed by `route`.
@@ -339,6 +341,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SceneSelect(_)
             | C::SceneStep(_)
             | C::SettingsScroll
+            | C::ListSelect(_)
             | C::SessionMenu
             | C::SessionSaveChoice(_)
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
@@ -490,6 +493,7 @@ impl ViewState {
                 self.settings.scroll = 0.0;
             }
             C::SceneSelect(i) => self.settings.scene = Some(i),
+            C::ListSelect(i) => self.settings.list = Some(i),
             C::SceneStep(up) => {
                 let n = model.plugin_scenes().len() as u16;
                 if n > 0 {
@@ -535,10 +539,8 @@ impl ViewState {
                 None => self.browser.selected = if self.browser.selected == Some(i) { None } else { Some(i) },
             },
             C::SessionNavigate(first) => self.first_strip = first as usize,
-            C::StatusTempo => {
-                self.text_edit = Some(TextEdit { target: TextTarget::Tempo, text: format!("{:.2}", model.status().tempo) });
-                self.open(Popover::Tempo, id);
-            }
+            // TEMPO opens Console's dialog (capture s05).
+            C::StatusTempo => self.toggle_panel(Panel::Tempo, model),
             C::StatusRate | C::SettingsRate => self.open(Popover::SampleRate, id),
             C::StatusClock | C::SettingsClock => self.open(Popover::ClockSource, id),
             C::SettingsBuffer => self.open(Popover::BufferSize, id),
@@ -554,7 +556,12 @@ impl ViewState {
                     self.sheet = None;
                 }
             }
-            C::TextCommit => out.extend(self.commit_text(model)),
+            C::TextCommit => {
+                out.extend(self.commit_text(model));
+                if self.sheet == Some(Sheet::Panel(Panel::Tempo)) {
+                    self.sheet = None;
+                }
+            }
             C::SessionMenu => self.open_session_menu(id),
             C::SessionSaveChoice(c) => {
                 // press_view closed the question; reopen it so the answer sees `then`.
@@ -566,6 +573,9 @@ impl ViewState {
             C::TextCancel => {
                 self.popover = None;
                 self.text_edit = None;
+                if self.sheet == Some(Sheet::Panel(Panel::Tempo)) {
+                    self.sheet = None;
+                }
             }
             _ => {}
         }
@@ -609,6 +619,13 @@ impl ViewState {
             "headphone-correction" => Panel::HeadphoneCorrection,
             "plugin-scenes" => Panel::PluginScenes,
             "about" => Panel::About,
+            "meters" => Panel::MeterWindow,
+            "talkback" => Panel::Sends(crate::settings::SendsOf::Talkback),
+            "aux-sends" => Panel::Sends(crate::settings::SendsOf::Aux(tab.parse().unwrap_or(0))),
+            "add-device" => Panel::AddDevice,
+            "io-presets" => Panel::IoPresets,
+            "input-source" => Panel::RouteSource { route: tab.parse().unwrap_or(0), outputs: false },
+            "tempo" => Panel::Tempo,
             _ => return false,
         };
         self.sheet = Some(Sheet::Panel(panel));
@@ -625,6 +642,10 @@ impl ViewState {
         self.sheet = Some(Sheet::Panel(p));
         self.settings.panel_tab = 0;
         self.settings.scroll = 0.0;
+        self.settings.list = None;
+        if p == Panel::Tempo {
+            self.text_edit = Some(TextEdit { target: TextTarget::Tempo, text: format!("{:.2}", model.status().tempo) });
+        }
         if p == Panel::PluginScenes {
             let current = model.status().scene;
             self.settings.scene = current.and_then(|c| model.plugin_scenes().iter().position(|n| *n == c)).map(|i| i as u16);
