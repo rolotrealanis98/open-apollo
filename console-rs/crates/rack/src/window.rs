@@ -268,6 +268,7 @@ pub fn build_window(ui: &mut Ui, model: &dyn MixerModel, compact: bool) -> Windo
 
 /// Builds the window for `view` (navigator toggles, browser, popovers, sheet, pages).
 pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) -> WindowLayout {
+    ui.windowing = view.windowing.clone();
     let inputs = model.inputs();
     let bus = bus_strips(model, view);
     let base = WindowLayout::new(view, inputs.len(), bus.len());
@@ -372,17 +373,41 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     // Last of the chrome: its bottom line covers the first point of the columns below.
     title_bar(ui, model, view, width);
 
-    // Overlays.
+    // Overlays: Console's separate windows (`crate::layers`). Windowed, they are placed and
+    // clamped on the screen rather than inside the mixer window.
+    let pb = ui.screen_or(bounds);
     match view.sheet {
-        Some(Sheet::Settings) => draw_settings_sheet(ui, model, view, bounds),
+        Some(Sheet::Settings) => {
+            ui.layer_hint("settings", crate::layers::LayerKind::Window);
+            draw_settings_sheet(ui, model, view, pb);
+            ui.end_layers();
+            if let Some(child) = view.settings.child {
+                // Route Presets opens under its field (set-d-iopresets), the I/O Matrix source
+                // picker over its row's cell (set-d-insrc), ADD DEVICE centred (set-adddev).
+                use crate::settings::Panel as P;
+                let field = ui.hit_rect(&ControlId { strip: "settings".into(), control: Control::ShowPanel(child) });
+                let at = match child {
+                    P::IoPresets => field.map(|f| (f.x, f.max_y())),
+                    P::RouteSource { .. } => field.map(|f| (f.x, f.y)),
+                    _ => None,
+                };
+                ui.layer_hint_at(crate::layers::panel_id(child), crate::layers::panel_kind(child), at);
+                draw_panel(ui, model, view, child, pb, None);
+            }
+        }
         Some(Sheet::Panel(p)) => {
             let browser = (l.browser && !l.compact).then(|| Rect::new(0.0, W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR));
-            draw_panel(ui, model, view, p, bounds, browser);
+            ui.layer_hint(crate::layers::panel_id(p), crate::layers::panel_kind(p));
+            draw_panel(ui, model, view, p, pb, browser);
         }
         None => {}
     }
-    draw_popover(ui, model, view, bounds);
-    crate::menu::draw_menu(ui, model, view, bounds);
+    ui.end_layers();
+    ui.layer_hint("popover", crate::layers::LayerKind::Popover);
+    draw_popover(ui, model, view, pb);
+    ui.end_layers();
+    ui.clear_layer_hint();
+    crate::menu::draw_menu(ui, model, view, pb);
     l
 }
 

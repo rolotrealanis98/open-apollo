@@ -15,6 +15,10 @@ pub struct Frame {
     /// Wheel-scrollable areas of the mixer (browser list, cells column).
     pub scrolls: Vec<ScrollRegion>,
     pub layout: WindowLayout,
+    /// Console's separate windows drawn into `list` (menus, Settings, panels, plug-in windows)
+    /// and which draws / hits belong to each (`rack::layers`).
+    pub layers: Vec<rack::Layer>,
+    pub marks: Vec<rack::LayerMark>,
 }
 
 /// The window layout `build_window_with` will produce for `view`, without building it.
@@ -50,6 +54,8 @@ pub fn build_frame(
         hits: ui.hits,
         scrolls: ui.scrolls,
         layout,
+        layers: ui.layers,
+        marks: ui.layer_marks,
     }
 }
 

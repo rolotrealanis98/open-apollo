@@ -100,6 +100,7 @@ impl Ui<'_> {
     pub fn popover_frame(&mut self, anchor: Rect, size: (f32, f32), placement: Placement, bounds: Rect, title: Option<&str>) -> Rect {
         let h = size.1 + if title.is_some() { TITLE_H } else { 0.0 };
         let (r, p) = place(anchor, (size.0, h), placement, bounds);
+        self.chrome_layer(r, 0.0);
         self.fill(r.offset(2.0, 3.0), Rgba::BLACK.with_alpha(0.35));
         self.fill(r, EDGE);
         self.fill(r.inset(1.0, 1.0, 1.0, 1.0), BODY);
@@ -329,7 +330,9 @@ pub fn anchored_menu(ui: &mut Ui, menu: &PopupMenu, look: MenuLook, anchor: Rect
     let h = probe.frame.h;
     let y = if anchor.max_y() + h <= bounds.max_y() { anchor.max_y() } else { (anchor.y - h).max(bounds.y) };
     let f = layout_menu(ui, menu, look, (anchor.x, y), anchor.w, bounds);
+    ui.begin_layer("menu:anchored", crate::layers::LayerKind::Menu, f.frame, 0.0);
     ui.popup_menu(menu, look, &f, 0, None, None);
+    ui.end_layer();
 }
 
 fn text_popover(ui: &mut Ui, anchor: Rect, bounds: Rect, title: &str, edit: Option<&TextEdit>) {

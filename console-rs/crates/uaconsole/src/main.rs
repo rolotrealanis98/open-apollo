@@ -91,6 +91,8 @@ fn main() -> ExitCode {
                 args.view_spec.as_deref(),
                 args.menu.as_deref(),
                 args.menu_bar,
+                args.screen,
+                &args.window_pos,
                 out,
             ),
             (None, Some(n)) => {
