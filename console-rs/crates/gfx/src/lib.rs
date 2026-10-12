@@ -13,7 +13,7 @@ use houston::{ImageCache, Insets, Rect, Rgba};
 use rack::{Draw, DrawList, Frame};
 use wgpu::util::DeviceExt;
 
-pub use surface::SurfaceGpu;
+pub use surface::{SurfaceGpu, WindowSurface};
 pub use text::{TextStats, TextSystem};
 pub use wgpu;
 pub use wgpu::TextureFormat;

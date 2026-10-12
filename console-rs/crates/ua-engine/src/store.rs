@@ -84,6 +84,12 @@ const STRUCTURAL: [&str; 10] = [
 const METADATA_TRIGGERS: [&str; 3] = ["Stereo", "IOType", "EffectName"];
 const LOG_CAP: usize = 16_384;
 const REFRESH_DELAY: Duration = Duration::from_millis(100);
+/// `/UndoRedo`: an int whose `values` are `[{type:"undo"…},{type:"current"…},{type:"redo"…}]`.
+pub const UNDO_REDO: &str = "/UndoRedo";
+const MIDI_INPUT_DEVICE: &str = "/MidiInputDevice";
+const MIDI_POLL: Duration = Duration::from_secs(1);
+/// How long after a gesture the undo list is re-read (Console: 30–90 ms).
+const UNDO_VALUES_DELAY: Duration = Duration::from_millis(40);
 
 struct Hold {
     until: Instant,
@@ -103,6 +109,8 @@ struct Model {
     refresh_wanted: Vec<String>,
     /// A session identity property changed: re-read the session lists.
     values_wanted: bool,
+    /// `/UndoRedo` changed (another client, the hardware): re-read its list.
+    undo_values_wanted: bool,
     live: bool,
 }
 
@@ -138,6 +146,9 @@ impl Model {
         }
         if self.live && session::IDENTITY_PATHS.contains(&pp) {
             self.values_wanted = true;
+        }
+        if self.live && pp == UNDO_REDO {
+            self.undo_values_wanted = true;
         }
         true
     }
@@ -186,6 +197,7 @@ type Waker = Arc<dyn Fn() + Send + Sync>;
 pub struct Store {
     model: Model,
     writer: Writer,
+    default_writes: bool,
     status: Status,
     topology: Topology,
     topology_revision: u64,
@@ -202,6 +214,10 @@ pub struct Store {
     refresh_inflight: Vec<(String, PendingReply)>,
     /// `get <property>/values` in flight (session lists).
     values_inflight: Vec<(String, PendingReply)>,
+    /// When to re-read `/UndoRedo/values` after a gesture.
+    undo_values_due: Option<Instant>,
+    /// Next `/MidiInputDevice/values` poll.
+    midi_poll_due: Option<Instant>,
     last_error: Option<String>,
     waker: Option<Waker>,
     simulation: Option<Simulation>,
@@ -252,9 +268,11 @@ impl Store {
                 topology_dirty: false,
                 refresh_wanted: Vec::new(),
                 values_wanted: false,
+                undo_values_wanted: false,
                 live: false,
             },
             writer: Writer::default(),
+            default_writes: false,
             status: Status::Empty,
             topology: Topology::default(),
             topology_revision: 0,
@@ -269,6 +287,8 @@ impl Store {
             refresh_due: HashMap::new(),
             refresh_inflight: Vec::new(),
             values_inflight: Vec::new(),
+            undo_values_due: None,
+            midi_poll_due: None,
             last_error: None,
             waker: None,
             simulation: None,
@@ -407,6 +427,8 @@ impl Store {
             (!self.refresh_inflight.is_empty()).then(|| Instant::now() + Duration::from_millis(50));
         holds
             .chain(refresh)
+            .chain(self.undo_values_due)
+            .chain(self.midi_poll_due)
             .chain(self.writer.deadline())
             .chain(inflight)
             .min()
@@ -844,10 +866,44 @@ impl Store {
     /// Sets a property (`/a/FaderLevelTapered` or `/a/FaderLevelTapered/value`): the local value
     /// moves now, the wire write is coalesced (latest per path, ~60 Hz).
     pub fn set(&mut self, path: &str, value: impl Into<Value>) {
-        self.writer.set(&mut self.model, path, value.into());
+        if self.default_writes {
+            self.writer.reset(&mut self.model, path, value.into());
+        } else {
+            self.writer.set(&mut self.model, path, value.into());
+        }
         if self.model.topology_dirty {
             self.recompute_topology();
         }
+    }
+
+    /// While on, [`set`](Self::set) resets instead: the value shows locally and the wire carries
+    /// `"default"` (an engine model maps a UI reset through its usual control → path code).
+    pub fn set_default_writes(&mut self, on: bool) {
+        self.default_writes = on;
+    }
+
+    /// Resets a property to the engine's default (Console's double-click): `local` shows now,
+    /// the engine gets `set <path>/value "default"` in its own undo step.
+    pub fn reset(&mut self, path: &str, local: impl Into<Value>) {
+        self.begin_gesture();
+        self.writer.reset(&mut self.model, path, local.into());
+        self.end_gesture();
+    }
+
+    /// Tells the engine this client is in the background (`set /Sleep true`: pushes every
+    /// 100 ms, no metering for this socket) or back (`false`). A per-socket hint, so it goes out
+    /// on read-only connections too.
+    pub fn set_sleep(&mut self, asleep: bool) {
+        if let Some(h) = &self.handle {
+            let _ = h.send(Command::set_raw("/Sleep", if asleep { "true" } else { "false" }));
+        }
+    }
+
+    /// A `set` sent at once with no undo bracket: for properties that are not edits themselves
+    /// (`/UndoRedo`, which an open `/UndoRecording` group would record).
+    pub fn set_now(&mut self, path: &str, value: impl Into<Value>) {
+        self.set(path, value);
+        self.flush();
     }
 
     /// A discrete edit (button, menu): its own gesture, sent at once.
@@ -865,8 +921,14 @@ impl Store {
     }
 
     pub fn end_gesture(&mut self) {
+        let closing = self.writer.gesture_depth() == 1;
         self.writer
             .end_gesture(&self.model, sink_of(&self.sink, &self.handle));
+        // Console re-reads the undo list after every gesture (`get /UndoRedo/values?cmdID=15`,
+        // 30–90 ms later in the 1.3.1 pcap) so Edit › Undo / Redo enable correctly.
+        if closing && self.writer.writes_enabled {
+            self.undo_values_due = Some(Instant::now() + UNDO_VALUES_DELAY);
+        }
     }
 
     /// `post <path> <payload>` through the writer gate (suppressed and counted while writes are
@@ -880,6 +942,10 @@ impl Store {
     /// Runs a session command (load, save, new, …) through the writer gate. Loads move the
     /// local `/Session` value at once, like any `commit`.
     pub fn session(&mut self, command: &SessionCommand) {
+        if !command.is_sendable() {
+            log::warn!("session command refused (empty name or path): {command:?}");
+            return;
+        }
         match command {
             SessionCommand::Load(name) => self.commit(session::SESSION, name.as_str()),
             SessionCommand::RestoreModified(v) => {
@@ -915,6 +981,12 @@ impl Store {
     /// Re-reads `<property>/values` (read-only `get`) and replaces the property's list when the
     /// reply arrives (in a later `drain`). False when not live.
     pub fn refresh_values(&mut self, property: &str) -> bool {
+        self.refresh_values_query(property, None)
+    }
+
+    /// [`refresh_values`](Self::refresh_values) with Console's request query (`cmdID=15` for
+    /// `/UndoRedo`; `func_id` is added by the connection).
+    fn refresh_values_query(&mut self, property: &str, query: Option<&str>) -> bool {
         let prop = path::property_path(property).to_owned();
         if self.status != Status::Live || !self.model.tree.has_property(&prop) {
             return false;
@@ -925,7 +997,11 @@ impl Store {
         if self.values_inflight.iter().any(|(p, _)| *p == prop) {
             return true;
         }
-        let reply = handle.request(&session::values_path(&prop), false);
+        let mut target = session::values_path(&prop);
+        if let Some(q) = query {
+            target = format!("{target}?{q}");
+        }
+        let reply = handle.request(&target, false);
         self.values_inflight.push((prop, reply));
         true
     }
@@ -935,6 +1011,22 @@ impl Store {
             for p in session::LIST_PATHS {
                 self.refresh_values(p);
             }
+        }
+        // Console polls the MIDI input list every second (1.3.1 pcap:
+        // `get /MidiInputDevice/values?func_id=n` at exactly 1.000 s).
+        let now = Instant::now();
+        if self.status == Status::Live && self.model.tree.has_property(MIDI_INPUT_DEVICE) {
+            if self.midi_poll_due.is_none_or(|t| now >= t) {
+                self.midi_poll_due = Some(now + MIDI_POLL);
+                self.refresh_values(MIDI_INPUT_DEVICE);
+            }
+        } else {
+            self.midi_poll_due = None;
+        }
+        let undo_due = self.undo_values_due.is_some_and(|t| Instant::now() >= t);
+        if undo_due || std::mem::take(&mut self.model.undo_values_wanted) {
+            self.undo_values_due = None;
+            self.refresh_values_query(UNDO_REDO, Some("cmdID=15"));
         }
         let mut done = Vec::new();
         self.values_inflight

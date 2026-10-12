@@ -37,6 +37,7 @@ from pathlib import Path
 from protocol import (MessageFramer, Command, parse_command, encode_response_bytes,
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
+from console_commands import ConsoleCommands
 from helper_tree import HelperTree
 from hardware import HardwareBackend, HardwareRouter, preamp_db_to_tapered
 from metering import AlsaMeter, NullMeter, SILENCE_DB
@@ -124,6 +125,7 @@ class MixerClient:
         self.trace = trace
         self.helper = ubjson  # True for 4720 (helper) clients
         self.ubjson = False   # Switched to True after command_format 2
+        self.sleep = False   # Per-socket meter-consumer hint, never mixer state.
         self._send_count = 0
 
     def send(self, data: bytes):
@@ -157,7 +159,7 @@ class MixerDaemon:
                  helper_port: int = DEFAULT_HELPER_PORT,
                  trace: bool = False,
                  helper_tree: HelperTree | None = None,
-                 metering=None):
+                 metering=None, sessions_dir=None):
         self.state = state
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
         self.hw_router = hw_router
@@ -194,6 +196,7 @@ class MixerDaemon:
         # Wire state tree SET notifications to hardware router
         if hw_router:
             self.state.on_set = hw_router.on_set
+        self.commands = ConsoleCommands(state, sessions_dir)
 
     async def start(self):
         """Start TCP servers on both ports (runs forever)."""
@@ -625,6 +628,8 @@ class MixerDaemon:
 
         # Register subscription callback for this client
         def on_notify(path: str, value):
+            if client.sleep and ("/meters/" in path or path == "/MeterPulse/value"):
+                return
             if client.ubjson:
                 resp = {"path": path, "data": value}
                 client.send(ubjson_encode_response(resp))
@@ -745,6 +750,7 @@ class MixerDaemon:
         finally:
             log.info("Disconnected: %s", client)
             client.closed = True
+            self.commands.history.disconnect(client.id)
             self.state.unsubscribe_all(client.id)
             self.state.unregister_callback(client.id)
             self.clients.pop(client.id, None)
@@ -1035,13 +1041,15 @@ class MixerDaemon:
         else:
             client.send(encode_response_bytes(path, data, params))
 
-    def _send_error(self, client: MixerClient, path: str, verb: str):
+    def _send_error(self, client: MixerClient, path: str, verb: str, params=None):
         """Send an error response in the client's protocol."""
+        resp = {"path": path, "error": f"Unable to resolve path for {verb}."}
+        if params:
+            resp["parameters"] = self._coerce_params(params)
         if client.ubjson:
-            resp = {"path": path, "error": f"Unable to resolve path for {verb}."}
             client.send(ubjson_encode_response(resp))
         else:
-            client.send(encode_error_bytes(path, verb))
+            client.send((json.dumps(resp) + "\0").encode())
 
     # ── Command parsing ─────────────────────────────────────────────
 
@@ -1124,6 +1132,9 @@ class MixerDaemon:
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
 
         # Ping — keepalive health check, return immediately
+        if cmd.path.lower().removesuffix("/value") == "/sleep":
+            self._send_response(client, cmd.path, client.sleep, resp_params)
+            return
         if cmd.path in ("/ping", "ping"):
             self._send_response(client, "/ping", True, resp_params or None)
             return
@@ -1152,7 +1163,7 @@ class MixerDaemon:
         data = self.state.get(cmd.path, recursive=cmd.recursive,
                               propfilter=cmd.propfilter or None)
         if data is None:
-            self._send_error(client, cmd.path, "get")
+            self._send_error(client, cmd.path, "get", resp_params)
             return
 
         if cmd.recursive:
@@ -1226,6 +1237,35 @@ class MixerDaemon:
 
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
 
+        # Resolve Console's reset sentinel before helper routing, gain
+        if path.lower().removesuffix("/value") == "/sleep":
+            if not isinstance(cmd.value, bool):
+                self._send_error(client, path, "set", resp_params)
+            else:
+                client.sleep = cmd.value
+                if resp_params:
+                    self._send_response(client, path, cmd.value, resp_params)
+            return
+        try:
+            if self.commands.set(client.id, path, cmd.value):
+                if resp_params:
+                    self._send_response(client, path, self.state.get_value(path), resp_params)
+                return
+        except (ValueError, KeyError, OSError, TypeError) as error:
+            log.warning("Console SET refused: %s (%s)", path, error)
+            self._send_error(client, path, "set", resp_params)
+            return
+        before = self.commands.history.snapshot()
+        if path.endswith("/SceneName/value") and isinstance(cmd.value, str):
+            cmd.value = cmd.value.strip().upper()
+
+        # companion conversion, hardware callbacks, and response echoes.
+        if cmd.value == "default":
+            if not self.state.set(path, cmd.value):
+                self._send_error(client, path, "set", resp_params)
+                return
+            cmd.value = self.state.get_value(path)
+
         if client.helper and self.helper_tree:
             # Try helper tree first, fall back to state tree
             result = self.helper_tree.set_value(path, cmd.value)
@@ -1285,6 +1325,7 @@ class MixerDaemon:
                         client.send(encode_response_bytes(
                             f"{base}/GainTapered/value", tapered))
 
+        self.commands.history.record(client.id, before)
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
             self._send_response(client, path, cmd.value, resp_params)
@@ -1460,7 +1501,36 @@ class MixerDaemon:
                     1.0, self._fire_init_complete)
             return
 
-        log.debug("%s: POST %s (value=%r) — ignored", client.id, cmd.path, cmd.value)
+        if cmd.path in ("/ClearSolos", "/ClearClips"):
+            if cmd.value is not None and not isinstance(cmd.value, dict):
+                self._send_error(client, cmd.path, "post", resp_params)
+                return
+            args = cmd.value or {}
+            scope = args.get("path")
+            if scope is not None and not isinstance(scope, str):
+                self._send_error(client, cmd.path, "post", resp_params)
+                return
+            for prop in list(self.state._props):
+                if scope and not prop.startswith(scope.rstrip("/") + "/"):
+                    continue
+                leaf = prop.rsplit("/", 1)[-1]
+                if cmd.path == "/ClearSolos" and leaf == "Solo":
+                    self.state.set(prop + "/value", False)
+                elif cmd.path == "/ClearClips" and leaf == "MeterClip":
+                    self.state.set(prop + "/value", False)
+            self._send_response(client, cmd.path, True, resp_params)
+            return
+
+        try:
+            if self.commands.post(cmd.path, cmd.value if cmd.value is not None else {}):
+                self._send_response(client, cmd.path, True, resp_params)
+                return
+        except (ValueError, KeyError, OSError, TypeError) as error:
+            log.warning("Console POST refused: %s (%s)", cmd.path, error)
+            self._send_error(client, cmd.path, "post", resp_params)
+            return
+
+        self._send_error(client, cmd.path, "post", resp_params)
 
 
 def lookup_device(device_type: int) -> tuple[str | None, Path | None]:
@@ -1587,6 +1657,8 @@ Examples:
                         help="Debug logging")
     parser.add_argument("--trace", "-t", action="store_true",
                         help="Protocol trace (log every message sent/received)")
+    parser.add_argument("--sessions-dir", type=Path,
+                        help="Session .uadmix directory (default: ~/Documents/Universal Audio/Sessions)")
     args = parser.parse_args()
 
     # Logging
@@ -1680,7 +1752,8 @@ Examples:
     helper_port = args.helper_port if not args.no_helper else 0
     daemon = MixerDaemon(state, hw_router, args.host, args.port,
                          helper_port=helper_port, trace=args.trace,
-                         helper_tree=helper_tree, metering=metering)
+                         helper_tree=helper_tree, metering=metering,
+                         sessions_dir=args.sessions_dir)
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None

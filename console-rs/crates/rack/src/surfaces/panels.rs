@@ -24,15 +24,10 @@ use crate::input::{Control, ControlId, HitKind, ScrollTarget};
 use crate::model::{MeterFrame, MixerModel};
 use crate::settings::{self, FieldKind, Panel, PropertySource, SendsOf, SettingField, SettingsGroup};
 use crate::surfaces::popover::pid;
-use crate::surfaces::settings::{CELL_PITCH_X, Drawn, centred, choice_box, choice_menu, field_grid, section_header, section_header_text, sid, static_label, text_box, window_frame};
+use crate::surfaces::settings::{CELL_PITCH_X, Drawn, centred, choice_box, choice_menu, field_grid, section_header, section_header_text, sid, text_box, window_frame};
 use crate::surfaces::view::{TextTarget, ViewState};
 use crate::ui::Ui;
 
-const BLUE: Rgba = Rgba::rgb8(14, 96, 160);
-const BUTTON_GREY: Rgba = Rgba::rgb8(66, 72, 76);
-const LIST_BG: Rgba = Rgba::rgb8(40, 44, 47);
-const LIST_SEL: Rgba = Rgba::rgb8(72, 78, 82);
-const DARK: Rgba = Rgba::rgb8(28, 35, 42);
 
 /// Draws the open panel. `browser` is the plug-in browser column, which PLUG-IN SCENES covers
 /// when it is shown.
@@ -69,6 +64,7 @@ fn sub_window(ui: &mut Ui, bounds: Rect, size: (f32, f32), title: &str) -> Rect 
 /// dark title bar (close X at the left, title centred) over a light (`light`) or dark body.
 /// Swallows taps on the body; returns the body.
 fn dialog_frame(ui: &mut Ui, r: Rect, title: &str, light: bool) -> Rect {
+    ui.chrome_layer(r, 27.0);
     ui.fill(r.offset(0.0, 6.0), Rgba::BLACK.with_alpha(0.25));
     ui.fill(r, Rgba::rgb8(26, 26, 26));
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
@@ -99,6 +95,7 @@ fn popover_frame(ui: &mut Ui, r: Rect, title: &str) {
 
 /// [`popover_frame`], with or without the close X (dialogs such as ADD DEVICE have none).
 fn popover_frame_with(ui: &mut Ui, r: Rect, title: &str, close: bool) {
+    ui.chrome_layer(r, 27.0);
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
     ui.background("Popover-Header", Rect::new(r.x, r.y, r.w, 27.0));
     ui.background("Popover-Content", Rect::new(r.x, r.y + 27.0, r.w, r.h - 27.0));
@@ -114,18 +111,6 @@ fn popover_frame_with(ui: &mut Ui, r: Rect, title: &str, close: bool) {
         ui.image(&x, Rect::new(r.x + 12.0, r.y + 8.5, 12.0, 12.0), None, None, 1.0);
     }
     ui.hit(Rect::new(r.x + 8.0, r.y + 1.0, 20.0, 27.0), sid(Control::PanelClose), HitKind::Tap);
-}
-
-/// A flat dialog button (CANCEL grey, ADD / OK blue); without an id it draws disabled.
-fn dialog_button(ui: &mut Ui, label: &str, primary: bool, r: Rect, id: Option<ControlId>) {
-    ui.fill(r, if primary { BLUE } else { BUTTON_GREY });
-    ui.fill(Rect::new(r.x, r.max_y() - 1.0, r.w, 1.0), Rgba::BLACK.with_alpha(0.35));
-    let alpha = if id.is_some() { 0.95 } else { 0.4 };
-    let style = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(alpha));
-    ui.text(label, style, r, Align::Center);
-    if let Some(id) = id {
-        ui.hit(r, id, HitKind::Tap);
-    }
 }
 
 /// Section tabs (`Tab-Section-Left` / `-Right`, or `-Single`); returns the content top.
@@ -193,7 +178,7 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
     // Opens beside its button; Console's window may leave the main window, ours stays inside.
     let anchor = ui.hit_rect(&ControlId { strip: "monitor".into(), control: Control::CueOutputs });
     let r = match anchor {
-        Some(a) => Rect::new((a.x - 178.0).min(bounds.max_x() - size.0).max(bounds.x), (a.y - 24.0).clamp(bounds.y, (bounds.max_y() - size.1).max(bounds.y)), size.0, size.1),
+        Some(a) => Rect::new((a.x - 172.0).min(bounds.max_x() - size.0).max(bounds.x), (a.y - 19.0).clamp(bounds.y, (bounds.max_y() - size.1).max(bounds.y)), size.0, size.1),
         None => centred(bounds, size),
     };
     ui.popover_catcher(bounds);
@@ -275,6 +260,7 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
 /// outline, the grey frame (lighter under the title), the title centred in the 27-pt bar and
 /// the close X at the left. Swallows taps.
 fn sub_window_frame(ui: &mut Ui, r: Rect, title: &str) {
+    ui.chrome_layer(r, 27.0);
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
     ui.fill(r, Rgba::rgb8(26, 26, 26));
     let inner = r.inset(0.5, 0.5, 1.0, 0.5);
@@ -506,6 +492,7 @@ const SCENE_ROW_H: f32 = 31.75;
 pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect, browser: Option<Rect>, close: Control) {
     let full = browser.unwrap_or_else(|| centred(bounds, (290.0, 560.0)));
     let r = Rect::new(full.x, full.y, 290.0f32.min(full.w), full.h);
+    ui.chrome_layer(r, 30.0);
     // `Scenes-Main-Background` (72, 76, 78); swallows taps.
     ui.fill(r, Rgba::rgb8(44, 47, 50));
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
@@ -544,13 +531,18 @@ pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, boun
     ui.fill(recall, Rgba::rgb8(86, 90, 93));
     let bs = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(if can_recall { 0.85 } else { 0.3 }));
     ui.text("RECALL", bs.clone(), recall, Align::Center);
+    // RECALL / SAVE (`Rack_SceneSection::buttonClicked` 0x1811f7e80): RecallScene / StoreScene of
+    // the selected (primed) row.
+    let scene_cmd = |op, i: u16| ControlId { strip: "global".into(), control: Control::SceneCommand(op, i) };
     if let Some(i) = view.settings.scene {
-        ui.hit(recall, ControlId { strip: "global".into(), control: Control::RecallScene(i.min(255) as u8) }, HitKind::Tap);
+        ui.hit(recall, scene_cmd(crate::menu::SceneOp::Recall, i), HitKind::Tap);
     }
     let save = Rect::new(r.x + 120.0, by, 96.0, 20.0);
     ui.fill(save, Rgba::rgb8(86, 90, 93));
-    // SAVE: `SceneOperation {}` has no argument shape in the root `commands` node; disabled.
-    ui.text("SAVE", Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.3)), save, Align::Center);
+    ui.text("SAVE", bs.clone(), save, Align::Center);
+    if let Some(i) = view.settings.scene {
+        ui.hit(save, scene_cmd(crate::menu::SceneOp::Save, i), HitKind::Tap);
+    }
     for (i, up) in [true, false].into_iter().enumerate() {
         let b = Rect::new(r.x + 224.0 + i as f32 * 26.0, by, 18.0, 20.0);
         ui.fill(b, Rgba::rgb8(86, 90, 93));
@@ -577,7 +569,12 @@ pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, boun
             ui.fill(row, Rgba::WHITE.with_alpha(0.06));
         }
         ui.text(&format!("{}", i + 1), st.clone(), Rect::new(row.x + 14.0, y, 28.0, SCENE_ROW_H), Align::Center);
-        ui.text(n, st.clone(), Rect::new(row.x + 59.0, y, row.w - 62.0, SCENE_ROW_H), Align::Left);
+        // Rename edits the row in place (`Rack_ScenesListBoxRow::EditSceneName`).
+        let editing = view.text_edit.as_ref().filter(|e| e.target == TextTarget::SceneName(i as u16));
+        if editing.is_some() {
+            ui.fill(Rect::new(row.x + 56.0, y + 6.0, row.w - 60.0, SCENE_ROW_H - 12.0), Rgba::rgb8(78, 83, 88));
+        }
+        ui.text(editing.map_or(n.as_str(), |e| e.text.as_str()), st.clone(), Rect::new(row.x + 59.0, y, row.w - 62.0, SCENE_ROW_H), Align::Left);
         ui.hit(row, sid(Control::SceneSelect(i as u16)), HitKind::Tap);
     }
     ui.clip(None);
@@ -930,6 +927,7 @@ fn route_source(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, route: u1
 /// grey header, the close X centred in (8, 1, 20, 27), the title centred between the X and
 /// `title_right`, a `Horizontal-Divider` under the header. Swallows taps.
 fn legacy_popover_frame(ui: &mut Ui, r: Rect, title: &str, title_right: f32) {
+    ui.chrome_layer(r, 27.0);
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
     ui.fill(r, Rgba::rgb8(26, 26, 26));
     let inner = r.inset(0.5, 0.5, 0.5, 0.5);
@@ -971,9 +969,8 @@ fn tempo(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
         ui.fill(Rect::new(fr.x + 8.0, fr.y + 6.5, w + 2.0, 11.0), Rgba::rgb8(43, 79, 119));
     }
     ui.text(&text, ts, Rect::new(fr.x + 8.5, fr.y + 2.0, fr.w - 10.0, fr.h), Align::Left);
-    // TAP (Switch-Large, 70 × 30 at (109.5, 36.5)): tap tempo needs event timing the UI does
-    // not keep yet, so it is drawn without a hit.
-    ui.toggle("Switch-Large", Some("TAP"), false, true, Rect::new(r.x + 108.5, r.y + 35.5, 71.0, 31.0), None, None);
+    // TAP (Switch-Large, 70 × 30 at (109.5, 36.5)): Console's tap tempo (`TapTempo`).
+    ui.toggle("Switch-Large", Some("TAP"), false, true, Rect::new(r.x + 108.5, r.y + 35.5, 71.0, 31.0), Some(pid(Control::TempoTap)), None);
     popover_button(ui, "CANCEL", false, Rect::new(r.x + 12.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCancel)));
     popover_button(ui, "OK", true, Rect::new(r.x + 104.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCommit)));
 }

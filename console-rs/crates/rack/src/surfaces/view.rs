@@ -171,6 +171,9 @@ pub enum Popover {
     /// Rename / New Folder name fields (CURRENT SESSION panel menus).
     SessionRename,
     SessionNewFolder,
+    /// Console's confirmation (`Rack_Window` 0x180a40730: a Popover-Header title, the message,
+    /// CANCEL and a primed OK). OK taps `ok`.
+    Confirm { title: String, message: String, ok: ControlId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -194,6 +197,8 @@ pub enum TextTarget {
     SessionRename(u16),
     /// The CURRENT SESSION panel's New Folder.
     SessionNewFolder,
+    /// A PLUG-IN SCENES row's Rename (`Rack_ScenesListBoxRow::EditSceneName`), by scene index.
+    SceneName(u16),
 }
 
 /// A text field with keyboard focus.
@@ -227,11 +232,23 @@ pub struct SettingsView {
     pub scene: Option<u16>,
     /// The selected row of a panel list (ADD DEVICE, I/O PRESETS, source categories).
     pub list: Option<u16>,
+    /// A window Settings opened over itself (ADD DEVICE, Route Presets, the I/O Matrix source
+    /// picker): Console keeps Settings open underneath (set-adddev, set-d-iopresets,
+    /// set-d-insrc).
+    pub child: Option<crate::settings::Panel>,
+}
+
+/// Panels Console opens over the Settings window rather than in its place.
+pub fn opens_over_settings(p: crate::settings::Panel) -> bool {
+    use crate::settings::Panel as P;
+    matches!(p, P::AddDevice | P::IoPresets | P::RouteSource { .. })
 }
 
 /// UI-only state: owned by the app shell, read by `build_window_with`, changed by `route`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewState {
+    /// TEMPO window TAP timing.
+    pub tap: crate::menu::TapTempo,
     /// No browser / navigator; aux and monitor packed after the last strip.
     pub compact: bool,
     pub sections: Sections,
@@ -276,11 +293,15 @@ pub struct ViewState {
     pub commands: Vec<crate::menu::Command>,
     /// Model effects a menu command produced outside `route` (File > Save → the session tap).
     pub deferred: Vec<Effect>,
+    /// Console's menus, Settings and panels as separate OS windows placed on the screen
+    /// (`crate::layers`); None draws them inside the mixer window (iPad, plain `--render`).
+    pub windowing: Option<crate::layers::Windowing>,
 }
 
 impl Default for ViewState {
     fn default() -> Self {
         Self {
+            tap: Default::default(),
             compact: false,
             sections: Sections::default(),
             insert_size: InsertSize::Large,
@@ -307,6 +328,7 @@ impl Default for ViewState {
             show_navigator: true,
             commands: Vec::new(),
             deferred: Vec::new(),
+            windowing: None,
         }
     }
 }
@@ -373,6 +395,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::PanelTab(_)
             | C::SceneSelect(_)
             | C::SceneStep(_)
+            | C::TempoTap
             | C::SettingsScroll
             | C::ListSelect(_)
             | C::SessionMenu
@@ -572,9 +595,13 @@ impl ViewState {
             C::ShowSettings => {
                 self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) };
                 self.settings.scroll = 0.0;
+                self.settings.child = None;
             }
+            // A window over Settings closes alone (its X); Settings' own X closes both.
+            C::PanelClose if self.settings.child.is_some() => self.settings.child = None,
             C::SettingsClose | C::PanelClose => {
                 self.sheet = None;
+                self.settings.child = None;
                 self.text_edit = self.text_edit.take().filter(|t| !matches!(t.target, TextTarget::Setting(_)));
             }
             C::SettingsTab(t) => {
@@ -595,6 +622,15 @@ impl ViewState {
             }
             C::SceneSelect(i) => self.settings.scene = Some(i),
             C::ListSelect(i) => self.settings.list = Some(i),
+            C::TempoTap => {
+                if let Some(bpm) = self.tap.tap(std::time::Instant::now()) {
+                    // Console shows it with two decimals and applies it at once (0x1811a05d0).
+                    if let Some(e) = self.text_edit.as_mut().filter(|e| e.target == TextTarget::Tempo) {
+                        e.text = format!("{bpm:.2}");
+                    }
+                    out.push(Effect::SetText(ControlId { strip: "global".into(), control: C::Tempo }, format!("{bpm}")));
+                }
+            }
             C::SceneStep(up) => {
                 let n = model.plugin_scenes().len() as u16;
                 if n > 0 {
@@ -713,6 +749,7 @@ impl ViewState {
             TextTarget::Rename(strip) => vec![Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)],
             TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
             TextTarget::Search => Vec::new(),
+            TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
             t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder) => self.commit_session_text(&t, edit.text, model),
         }
     }
@@ -721,6 +758,10 @@ impl ViewState {
     /// `headphone-correction`, `plugin-scenes`, `about`) for `--open` and tests. Tabs:
     /// `hardware`, `io-matrix`, `plug-ins`, `options`, `midi`, `dante`. False if unknown.
     pub fn open_named(&mut self, name: &str) -> bool {
+        // `settings:io-matrix+io-presets`: each in turn (a window over Settings stays over it).
+        if let Some((a, b)) = name.split_once('+') {
+            return self.open_named(a) && self.open_named(b);
+        }
         let (what, tab) = name.split_once(':').unwrap_or((name, ""));
         let panel = match what {
             "settings" => {
@@ -757,6 +798,10 @@ impl ViewState {
             self.scene_info = true;
             return true;
         }
+        if self.sheet == Some(Sheet::Settings) && opens_over_settings(panel) {
+            self.settings.child = Some(panel);
+            return true;
+        }
         self.sheet = Some(Sheet::Panel(panel));
         self.settings.panel_tab = tab.parse().unwrap_or(0);
         true
@@ -766,6 +811,11 @@ impl ViewState {
     fn toggle_panel(&mut self, p: Panel, model: &dyn MixerModel) {
         if p == Panel::PluginScenes {
             self.toggle_scenes(model);
+            return;
+        }
+        if self.sheet == Some(Sheet::Settings) && opens_over_settings(p) {
+            self.settings.child = if self.settings.child == Some(p) { None } else { Some(p) };
+            self.settings.list = None;
             return;
         }
         if self.sheet == Some(Sheet::Panel(p)) {
@@ -881,6 +931,8 @@ impl ViewState {
             self.text_edit = None;
         } else if self.settings.menu.is_some() {
             self.settings.menu = None;
+        } else if self.settings.child.is_some() {
+            self.settings.child = None;
         } else if self.sheet.is_some() {
             self.sheet = None;
         } else if self.browser.assign_to.is_some() {

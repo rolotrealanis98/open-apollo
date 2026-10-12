@@ -74,6 +74,12 @@ class Command:
 
 def parse_value(raw: str) -> Any:
     """Parse a value string into the appropriate Python type."""
+    # POST payloads are JSON objects; quoted SET strings use JSON escaping.
+    # Keep support for legacy bare strings and numeric text below.
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        pass
     if raw == "true":
         return True
     if raw == "false":

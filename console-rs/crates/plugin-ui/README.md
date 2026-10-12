@@ -34,7 +34,7 @@ No UA asset is in this repository: GUIs, specs, sprites and Console art are read
 
 | What | Search order |
 |---|---|
-| Panel specs | first of `$UACONSOLE_PLUGIN_SPECS`, `~/.local/share/open-apollo/plugin-specs`, `~/wine-ua-work/plugin-specs-local` |
+| Panel specs | first of `$UACONSOLE_PLUGIN_SPECS`, `~/.local/share/open-apollo/plugin-specs`, `~/wine-ua-work/plugin-specs/integrate/stage/Console Link/Console Link/PluginSpecs`, `~/wine-ua-work/plugin-specs-local` |
 | Lunacomponents | every existing folder of `$UACONSOLE_LUNA_COMPONENTS`, `~/.local/share/open-apollo/lunacomponents`, `/Library/Application Support/Universal Audio/Plug-Ins` (macOS), `~/wine-ua-work/lunacomponents` |
 | Console skins, `images/uapw` | houston's `Resources` discovery (`$CONSOLE_RESOURCES`, the Wine install, …) |
 
@@ -124,6 +124,16 @@ allowed roots, headers) and the page keys as the GUI's two URL parsers read them
 hook on engine and preview models.
 
 ## Gaps
+
+The integrated ConsoleLink development catalog was checked on 2026-10-12:
+223 specs decode, their referenced panel sprites exist, and each opens/builds
+a Rust window. This validates loading, not complete Swift runtime parity or
+Linux DSP processing. Combined meters, integer/absolute/hold conditioning,
+and keyed action tables are now supported. The audit found 75 specs using
+additional Swift features still absent in Rust: local UI states, state/meter
+table keys, graphs, sprite-font/meter readouts, touch/held/blink/segment looks,
+swipe/long-press gestures, and copy/random/snapshot actions. See
+[the investigation checkpoint](../../PLUGIN-STATUS.md) for evidence and limits.
 
 - **Web GUIs in the app** are a separate top-level window (above). The full path works in the
   `web` example; the app path builds and is wired but has not been run against a live engine.

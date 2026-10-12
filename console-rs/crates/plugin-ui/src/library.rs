@@ -14,7 +14,8 @@ use crate::spec::PluginSpec;
 /// Where plug-in specs are looked for, in order (first folder with a `PluginSpec_*.json` wins):
 /// 1. `$UACONSOLE_PLUGIN_SPECS`
 /// 2. `~/.local/share/open-apollo/plugin-specs`
-/// 3. `~/wine-ua-work/plugin-specs-local` (development copy)
+/// 3. ConsoleLink's integrated development stage (full catalog and sprites)
+/// 4. `~/wine-ua-work/plugin-specs-local` (small development copy)
 pub struct SpecLocator;
 
 impl SpecLocator {
@@ -29,6 +30,7 @@ impl SpecLocator {
         }
         let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
         out.push(home.join(".local/share/open-apollo/plugin-specs"));
+        out.push(home.join("wine-ua-work/plugin-specs/integrate/stage/Console Link/Console Link/PluginSpecs"));
         out.push(home.join("wine-ua-work/plugin-specs-local"));
         out
     }

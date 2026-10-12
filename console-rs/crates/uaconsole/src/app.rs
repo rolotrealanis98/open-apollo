@@ -3,24 +3,47 @@
 //! Redraws happen on input and model changes only; while live meters (or a live panel) are on,
 //! a 30 Hz `WaitUntil` timer drives them. Otherwise the loop sleeps in `ControlFlow::Wait`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use houston::Rgba;
 use rack::{Action, Assets, Control, ControlId, Effect, Interaction, MixerModel, ViewState};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
+use crate::cli::WindowsMode;
 use crate::frame::{Frame, FrameTimes, Hud, build_frame, layout_for};
+use crate::popups::Popups;
 use crate::input::{ClickTracker, Command, PIXELS_PER_LINE, shortcut, wheel_actions};
 use crate::overlay::{OverlayStack, PointerEvent, Routed};
 use crate::settings::Settings;
 use crate::source::{ModelSource, OpenedModel};
 use crate::view::{Transform, View, ViewMode, zoom_in, zoom_out};
+
+/// The hit regions of the window pointer input came from (`App::active_part`).
+macro_rules! active_hits {
+    ($s:ident) => {
+        match $s.active_part() {
+            Some(k) => &$s.parts[k].hits[..],
+            None => &$s.frame.hits[..],
+        }
+    };
+}
+
+/// The wheel-scrollable regions of that window.
+macro_rules! active_scrolls {
+    ($s:ident) => {
+        match $s.active_part() {
+            Some(k) => &$s.parts[k].scrolls[..],
+            None => &$s.frame.scrolls[..],
+        }
+    };
+}
 
 pub const METER_PERIOD: Duration = Duration::from_nanos(33_333_333);
 pub const LETTERBOX: Rgba = Rgba::rgb8(18, 19, 21);
@@ -42,6 +65,12 @@ pub struct Options {
     pub open: Option<String>,
     /// `--view` spec applied to the mixer view at start.
     pub view_spec: Option<String>,
+    /// `--menu` spec opened once the window is up (testing).
+    pub menu: Option<String>,
+    /// Console's menus, Settings and panels as separate OS windows, or inside the mixer.
+    pub windows: WindowsMode,
+    /// Linux: X11 (XWayland) instead of Wayland, so separate windows can be placed.
+    pub x11: bool,
     pub settings: Settings,
 }
 
@@ -78,11 +107,32 @@ pub struct App {
     scale_factor: f64,
     title: String,
     pub error: Option<String>,
+    /// Requested placement of Console's separate windows.
+    windows: WindowsMode,
+    /// Separate windows are on (requested and the platform can place windows).
+    separate: bool,
+    popups: Popups,
+    /// The frame split per window (part 0 the mixer, part k+1 layer k) while `separate`.
+    parts: Vec<rack::LayerPart>,
+    /// The window the current pointer event came from (index into `popups.wins`; None: mixer).
+    active: Option<usize>,
+    /// Windows the user moved, by layer id (screen position, physical px).
+    moved: HashMap<String, PhysicalPosition<i32>>,
+    main_focused: bool,
+    focus_check: bool,
+    pending_menu: Option<String>,
 }
 
 /// Runs the window until it is closed. Returns an error message if it could not start.
 pub fn run(assets: Assets, opts: Options) -> Result<(), String> {
-    let event_loop = EventLoop::new().map_err(|e| format!("event loop: {e}"))?;
+    #[allow(unused_mut)]
+    let mut builder = EventLoop::builder();
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
+    if opts.x11 {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+        builder.with_x11();
+    }
+    let event_loop = builder.build().map_err(|e| format!("event loop: {e}"))?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(assets, opts);
     event_loop
@@ -152,6 +202,15 @@ impl App {
             scale_factor: 1.0,
             title: String::new(),
             error: None,
+            windows: opts.windows,
+            separate: false,
+            popups: Popups::default(),
+            parts: Vec::new(),
+            active: None,
+            moved: HashMap::new(),
+            main_focused: true,
+            focus_check: false,
+            pending_menu: opts.menu,
         }
     }
 
@@ -172,7 +231,21 @@ impl App {
     }
 
     fn cursor_pt(&self) -> (f32, f32) {
-        self.transform().to_logical(self.cursor)
+        match self.active.and_then(|i| self.popups.wins.get(i)) {
+            Some(w) => w.to_mixer(w.cursor, self.transform().scale),
+            None => self.transform().to_logical(self.cursor),
+        }
+    }
+
+    /// The frame part (window) pointer input goes to: 0 the mixer, k + 1 layer k.
+    fn active_part(&self) -> Option<usize> {
+        if !self.separate || self.parts.is_empty() {
+            return None;
+        }
+        Some(match self.active.and_then(|i| self.popups.wins.get(i)) {
+            Some(w) => 1 + self.frame.layers.iter().position(|l| l.id == w.id)?,
+            None => 0,
+        })
     }
 
     fn fine(&self) -> bool {
@@ -183,6 +256,21 @@ impl App {
         if let Some(g) = &self.gpu {
             g.window.request_redraw();
         }
+        // Separate windows are drawn with the mixer (`redraw`).
+    }
+
+    /// Console's separate windows: the screen and the moved windows' places, in mixer points,
+    /// for a mixer window whose content starts at `inner` under `tf`.
+    fn windowing(&self, g: &Gpu, tf: crate::view::Transform) -> Option<rack::Windowing> {
+        let inner = g.window.inner_position().ok()?;
+        let m = g.window.current_monitor()?;
+        let (mp, ms) = (m.position(), m.size());
+        let (x, y) = crate::popups::to_mixer(inner, tf, mp);
+        let mut w = rack::Windowing::new(houston::Rect::new(x, y, ms.width as f32 / tf.scale, ms.height as f32 / tf.scale));
+        for (id, p) in &self.moved {
+            w.positions.insert(id.clone(), crate::popups::to_mixer(inner, tf, *p));
+        }
+        Some(w)
     }
 
     /// Something visible changed: rebuild before the next frame and ask for one.
@@ -203,6 +291,10 @@ impl App {
         }
         let logical = layout_for(&*self.model, &self.mixer).size();
         let tf = self.view.transform(logical, surface, self.scale_factor);
+        self.mixer.windowing = match (&self.gpu, self.separate) {
+            (Some(g), true) => self.windowing(g, tf),
+            _ => None,
+        };
         let area = tf.visible(logical, surface);
         let stats = self.show_stats.then(|| self.stats_text(tf));
         let hud = stats.as_deref().map(|text| Hud {
@@ -218,6 +310,11 @@ impl App {
             area,
             hud,
         );
+        self.parts = if self.mixer.windowing.is_some() {
+            rack::layers::split(&self.frame.list, &self.frame.hits, &self.frame.scrolls, self.frame.layers.len(), &self.frame.marks)
+        } else {
+            Vec::new()
+        };
         self.times.built(t.elapsed());
         self.dirty = false;
         let title = format!(
@@ -265,7 +362,7 @@ impl App {
         )
     }
 
-    fn redraw(&mut self) {
+    fn redraw(&mut self, event_loop: &ActiveEventLoop) {
         // Engine pushes land here once per frame; live meters rebuild every tick (≈0.2 ms).
         if self.model.pump() || self.live_meters {
             self.dirty = true;
@@ -273,7 +370,29 @@ impl App {
         if self.dirty || self.show_stats {
             self.rebuild();
         }
+        if let Some(spec) = self.pending_menu.take() {
+            match self.mixer.open_menu_spec(&self.frame.hits, &spec, &*self.model) {
+                Ok(()) => self.rebuild(),
+                Err(e) => eprintln!("uaconsole: --menu: {e}"),
+            }
+        }
         let tf = self.transform();
+        if std::env::var_os("UACONSOLE_DEBUG_WINDOWS").is_some() {
+            let ids: Vec<&str> = self.frame.layers.iter().map(|l| l.id.as_str()).collect();
+            eprintln!("frame: menu open {}, windowing {}, layers {ids:?}, size {:?}", self.mixer.menu.is_some(), self.mixer.windowing.is_some(), self.frame.layout.size());
+        }
+        // Separate windows follow the frame's layers (opened, moved, closed).
+        match (&self.gpu, self.mixer.windowing.is_some()) {
+            (Some(g), true) => {
+                if let Ok(inner) = g.window.inner_position() {
+                    self.popups.sync(event_loop, &g.surface, inner, tf, &self.frame.layers);
+                }
+            }
+            _ => self.popups.wins.clear(),
+        }
+        if self.active.is_some_and(|i| i >= self.popups.wins.len()) {
+            self.active = None;
+        }
         let Some(g) = self.gpu.as_mut() else { return };
         let size = g.surface.size();
         let Some(frame) = g.surface.acquire() else {
@@ -283,10 +402,11 @@ impl App {
         let view = frame
             .texture
             .create_view(&gfx::wgpu::TextureViewDescriptor::default());
+        let main_list = self.parts.first().map(|p| &p.list).unwrap_or(&self.frame.list);
         g.renderer.render_at(
             &g.surface.device,
             &g.surface.queue,
-            &self.frame.list,
+            main_list,
             &view,
             size,
             tf.scale,
@@ -295,6 +415,17 @@ impl App {
         );
         g.window.pre_present_notify();
         g.surface.present(frame);
+        // Each separate window: its part of the frame, its rect's origin at the window's corner.
+        for w in &mut self.popups.wins {
+            let Some(k) = self.frame.layers.iter().position(|l| l.id == w.id) else { continue };
+            let Some(part) = self.parts.get(k + 1) else { continue };
+            let Some(pf) = w.surface.acquire(&g.surface) else { continue };
+            let pv = pf.texture.create_view(&gfx::wgpu::TextureViewDescriptor::default());
+            let off = (-w.rect.x * tf.scale, -w.rect.y * tf.scale);
+            g.renderer.render_at(&g.surface.device, &g.surface.queue, &part.list, &pv, w.surface.size(), tf.scale, off, LETTERBOX);
+            w.window.pre_present_notify();
+            g.surface.present(pf);
+        }
         self.times.rendered(Instant::now(), t.elapsed());
     }
 
@@ -327,7 +458,7 @@ impl App {
         if self.dirty {
             self.rebuild();
         }
-        if self.mixer.context_click(&self.frame.hits, x, y) {
+        if self.mixer.context_click(active_hits!(self), x, y) {
             self.changed();
         }
     }
@@ -381,16 +512,26 @@ impl App {
         }
         let actions = self
             .interaction
-            .pointer_down(&self.frame.hits, x, y, double);
+            .pointer_down(active_hits!(self), x, y, double);
         self.apply(actions);
     }
 
     fn pointer_moved(&mut self, pos: (f64, f64)) {
+        if let Some(w) = self.active.and_then(|i| self.popups.wins.get_mut(i)) {
+            w.cursor = pos;
+            self.pointer_motion();
+            return;
+        }
         let last = std::mem::replace(&mut self.cursor, pos);
         if self.panning {
             self.pan_by((pos.0 - last.0) as f32, (pos.1 - last.1) as f32);
             return;
         }
+        self.pointer_motion();
+    }
+
+    /// The pointer moved in the active window: overlays, drags, menu hover.
+    fn pointer_motion(&mut self) {
         let (x, y) = self.cursor_pt();
         if self.route(PointerEvent::Move {
             x,
@@ -402,7 +543,7 @@ impl App {
         if self.interaction.is_dragging() {
             let actions = self.interaction.pointer_move(x, y, self.fine());
             self.apply(actions);
-        } else if self.mixer.menu.is_some() && self.mixer.menu_hover(&self.frame.hits, x, y) {
+        } else if self.mixer.menu.is_some() && self.mixer.menu_hover(active_hits!(self), x, y) {
             self.changed();
         }
     }
@@ -439,12 +580,12 @@ impl App {
             if self.dirty {
                 self.rebuild();
             }
-            if let Some(actions) = wheel_actions(&self.frame.hits, x, y, lines.1, fine) {
+            if let Some(actions) = wheel_actions(active_hits!(self), x, y, lines.1, fine) {
                 self.apply(actions);
                 return;
             }
             if self.mixer.wheel(
-                &self.frame.scrolls,
+                active_scrolls!(self),
                 x,
                 y,
                 -(lines.1 as f32) * SCROLL_PER_LINE,
@@ -651,9 +792,95 @@ impl App {
             surface,
             renderer,
         });
+        // Console's menus and panels are windows of their own where clients can place windows
+        // (not native Wayland: run with --x11 there).
+        self.separate = self.windows == WindowsMode::Separate && can_place_windows(event_loop);
+        if self.windows == WindowsMode::Separate && !self.separate {
+            eprintln!("uaconsole: Wayland cannot place windows: menus and panels stay inside the mixer (--x11 for separate windows)");
+        }
         self.title.clear();
         self.changed();
         Ok(())
+    }
+
+    /// Events for one of Console's separate windows (`popups`).
+    fn popup_event(&mut self, event_loop: &ActiveEventLoop, i: usize, event: WindowEvent) {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                self.active = Some(i);
+                self.pointer_moved((position.x, position.y));
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.active = Some(i);
+                match (button, state) {
+                    (MouseButton::Left, ElementState::Pressed) => {
+                        if !self.title_bar_drag(i) {
+                            self.pointer_down();
+                        }
+                    }
+                    (MouseButton::Left, ElementState::Released) => self.pointer_up(),
+                    (MouseButton::Right, ElementState::Pressed) => self.context_click(),
+                    _ => {}
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.active = Some(i);
+                self.wheel(delta);
+            }
+            WindowEvent::Focused(f) => {
+                let Some(w) = self.popups.wins.get_mut(i) else { return };
+                let lost = w.focused && !f;
+                w.focused = f;
+                self.focus_check |= lost && self.mixer.menu.is_some();
+            }
+            // Moved by its title bar (window manager): remember where, like Console.
+            WindowEvent::Moved(pos) => {
+                let Some(w) = self.popups.wins.get_mut(i) else { return };
+                if pos != w.at && matches!(w.kind, rack::LayerKind::Window | rack::LayerKind::Dialog) {
+                    w.at = pos;
+                    self.moved.insert(w.id.clone(), pos);
+                    self.changed();
+                }
+            }
+            WindowEvent::CloseRequested => {
+                self.mixer.key_escape();
+                self.changed();
+            }
+            WindowEvent::Resized(size) => {
+                if let (Some(g), Some(w)) = (&self.gpu, self.popups.wins.get_mut(i)) {
+                    w.surface.resize(&g.surface, size.width, size.height);
+                }
+                self.request_redraw();
+            }
+            // Drawn with the mixer.
+            WindowEvent::RedrawRequested => self.request_redraw(),
+            // Keys reach the same handlers whichever window has focus.
+            WindowEvent::KeyboardInput { .. } | WindowEvent::ModifiersChanged(_) => {
+                if let Some(g) = &self.gpu {
+                    let id = g.window.id();
+                    self.handle_window_event(event_loop, id, event);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A press on a free window's or dialog's title bar (not on its close X or other
+    /// controls) moves the window, as Console's do.
+    fn title_bar_drag(&mut self, i: usize) -> bool {
+        let Some(w) = self.popups.wins.get(i) else { return false };
+        if !matches!(w.kind, rack::LayerKind::Window | rack::LayerKind::Dialog) || w.title_h <= 0.0 {
+            return false;
+        }
+        let (x, y) = self.cursor_pt();
+        if y - w.rect.y > w.title_h {
+            return false;
+        }
+        let top = active_hits!(self).iter().rev().find(|h| h.rect.contains(x, y));
+        if top.is_some_and(|h| h.id.control != Control::PopoverDismiss) {
+            return false;
+        }
+        w.window.drag_window().is_ok()
     }
 }
 
@@ -679,13 +906,32 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        self.handle_window_event(event_loop, id, event);
+        if std::env::var_os("UACONSOLE_DEBUG_EVENTS").is_some() && !matches!(event, WindowEvent::RedrawRequested) {
+            eprintln!("event {} {:?}", if self.popups.index_of(id).is_some() { "popup" } else { "mixer" }, event);
+        }
+        if let Some(i) = self.popups.index_of(id) {
+            self.popup_event(event_loop, i, event);
+        } else {
+            if matches!(event, WindowEvent::CursorMoved { .. } | WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }) {
+                self.active = None;
+            }
+            self.handle_window_event(event_loop, id, event);
+        }
         if !self.mixer.commands.is_empty() {
             self.run_menu_commands(event_loop);
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Console closes its menus when the app loses focus (none of its windows has it).
+        if std::mem::take(&mut self.focus_check)
+            && !self.main_focused
+            && !self.popups.any_focused()
+            && self.mixer.menu.is_some()
+        {
+            self.mixer.menu = None;
+            self.changed();
+        }
         let live =
             (self.live_meters || self.overlays.live()) && self.gpu.is_some() && !self.occluded;
         if !live {
@@ -700,6 +946,20 @@ impl ApplicationHandler for App {
         };
         self.next_tick = Some(next);
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+    }
+}
+
+/// Clients can place windows (X11, macOS, Windows); native Wayland cannot.
+fn can_place_windows(event_loop: &ActiveEventLoop) -> bool {
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
+    {
+        use winit::platform::wayland::ActiveEventLoopExtWayland;
+        !event_loop.is_wayland()
+    }
+    #[cfg(not(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android")))))]
+    {
+        let _ = event_loop;
+        true
     }
 }
 
@@ -737,12 +997,25 @@ impl App {
                 self.changed();
             }
             WindowEvent::Occluded(occluded) => {
+                if self.occluded != occluded {
+                    self.model.set_background(occluded);
+                }
                 self.occluded = occluded;
                 if !occluded {
                     self.changed();
                 }
             }
+            WindowEvent::Focused(true) => {
+                self.main_focused = true;
+            }
             WindowEvent::Focused(false) => {
+                if std::env::var_os("UACONSOLE_DEBUG_WINDOWS").is_some() {
+                    eprintln!("mixer window lost focus");
+                }
+                // Only a menu that is open when focus goes closes (JUCE); windows report an
+                // initial unfocused state, which is not a change.
+                self.focus_check |= self.main_focused && self.mixer.menu.is_some();
+                self.main_focused = false;
                 let actions = self.interaction.pointer_up();
                 self.apply(actions);
                 self.panning = false;
@@ -776,7 +1049,14 @@ impl App {
                 _ => {}
             },
             WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::RedrawRequested => self.redraw(event_loop),
+            // Separate windows are placed relative to the mixer: follow it.
+            WindowEvent::Moved(p) if self.separate => {
+                if std::env::var_os("UACONSOLE_DEBUG_WINDOWS").is_some() {
+                    eprintln!("mixer window moved to {p:?}");
+                }
+                self.changed()
+            }
             _ => {}
         }
     }

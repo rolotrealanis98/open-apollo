@@ -89,10 +89,13 @@ impl MeterFeed {
             if spec.uses_opcode(src) {
                 continue;
             }
-            if let Some(&r) = by_id.get(&src.vendor_specific_float) {
-                self.targets.insert(meter.clone(), calibrated(r, src, &mode));
+            if let Some(&r) = src.vendor_specific_float.and_then(|id| by_id.get(&id)) {
+                if let Some(target) = calibrated(r, src, &mode) {
+                    self.targets.insert(meter.clone(), target);
+                }
             }
         }
+        self.update_combined(spec);
     }
 
     /// Feeds an opcode reply whose first value is variable `p0`.
@@ -101,8 +104,22 @@ impl MeterFeed {
             let Some(o) = src.opcode.filter(|_| spec.uses_opcode(src)) else { continue };
             let i = o.p0 - p0;
             if i >= 0 && (i as usize) < values.len() {
-                self.targets.insert(meter.clone(), calibrated(values[i as usize], src, &mode));
+                if let Some(target) = calibrated(values[i as usize], src, &mode) {
+                    self.targets.insert(meter.clone(), target);
+                }
             }
+        }
+        self.update_combined(spec);
+    }
+
+    /// ConsoleLink combines calibrated targets, before smoothing the result.
+    fn update_combined(&mut self, spec: &PluginSpec) {
+        for (id, src) in spec.meter_sources.iter().flatten() {
+            let Some(combine) = &src.combine else { continue };
+            if combine.op != "max" { continue; }
+            let value = combine.meters.iter().filter_map(|m| self.targets.get(m).copied()).fold(0.0, f64::max);
+            let value = if src.calibration.is_empty() { value } else { MeterSource::calibrate(value, &src.calibration) };
+            self.targets.insert(id.clone(), value);
         }
     }
 
@@ -129,6 +146,9 @@ fn hex_float(s: &str) -> f64 {
     u32::from_str_radix(s.trim(), 16).map(|b| f32::from_bits(b) as f64).unwrap_or(0.0)
 }
 
-fn calibrated(raw: f64, src: &MeterSource, mode: &impl Fn(u16) -> f64) -> f64 {
-    MeterSource::calibrate(raw, src.curve(src.mode_param.map(mode)))
+fn calibrated(raw: f64, src: &MeterSource, mode: &impl Fn(u16) -> f64) -> Option<f64> {
+    let raw = if src.integer { (raw as f32).to_bits() as i32 as f64 } else { raw };
+    if src.ignore_zero && raw == 0.0 { return None; }
+    let raw = if src.absolute { raw.abs() } else { raw };
+    Some(MeterSource::calibrate(raw, src.curve(src.mode_param.map(mode))))
 }

@@ -120,7 +120,28 @@ pub struct Args {
     pub menu: Option<String>,
     /// `--menu-bar`: the in-window menu bar in `--render`.
     pub menu_bar: bool,
+    /// `--screen X,Y,W,H`: the display's usable area in mixer-window points. `--render` then
+    /// places Console's menus, Settings and panels as separate windows on that screen and
+    /// renders them composited around the mixer (`rack::layers::canvas`).
+    pub screen: Option<houston::Rect>,
+    /// `--window-pos ID=X,Y` (repeatable): where a movable window (`settings`,
+    /// `panel:monitor-controller`, …) was left, in mixer-window points.
+    pub window_pos: Vec<(String, (f32, f32))>,
+    /// `--windows separate|inline`: Console's menus and panels as OS windows (default where
+    /// the platform can place windows) or drawn inside the mixer window.
+    pub windows: Option<WindowsMode>,
+    /// `--x11`: use X11 (XWayland) on Linux, where windows can be placed.
+    pub x11: bool,
     pub help: bool,
+}
+
+/// Where Console's menus, Settings and panels go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowsMode {
+    /// Separate OS windows at Console's screen positions.
+    Separate,
+    /// Inside the mixer window (single surface).
+    Inline,
 }
 
 impl Args {
@@ -170,6 +191,22 @@ impl Args {
                 }
                 "--menu" => out.menu = Some(value("--menu")?),
                 "--menu-bar" => out.menu_bar = true,
+                "--screen" => out.screen = Some(parse_rect(&value("--screen")?)?),
+                "--window-pos" => {
+                    let v = value("--window-pos")?;
+                    let (id, xy) = v.split_once('=').ok_or_else(|| format!("bad --window-pos {v:?} (expected ID=X,Y)"))?;
+                    let (x, y) = xy.split_once(',').ok_or_else(|| format!("bad --window-pos {v:?} (expected ID=X,Y)"))?;
+                    let n = |s: &str| s.trim().parse::<f32>().map_err(|_| format!("bad --window-pos {v:?}"));
+                    out.window_pos.push((id.to_string(), (n(x)?, n(y)?)));
+                }
+                "--windows" => {
+                    out.windows = Some(match value("--windows")?.as_str() {
+                        "separate" => WindowsMode::Separate,
+                        "inline" => WindowsMode::Inline,
+                        v => return Err(format!("bad --windows {v:?} (separate or inline)")),
+                    })
+                }
+                "--x11" => out.x11 = true,
                 "-h" | "--help" => out.help = true,
                 other => return Err(format!("unknown argument {other:?}")),
             }
@@ -182,6 +219,14 @@ impl Args {
 }
 
 /// `WxH` in points, e.g. `1470x1105`.
+fn parse_rect(s: &str) -> Result<houston::Rect, String> {
+    let v: Vec<f32> = s.split(',').map(|p| p.trim().parse::<f32>()).collect::<Result<_, _>>().map_err(|_| format!("bad --screen {s:?} (expected X,Y,W,H in points)"))?;
+    match v[..] {
+        [x, y, w, h] if w > 0.0 && h > 0.0 => Ok(houston::Rect::new(x, y, w, h)),
+        _ => Err(format!("bad --screen {s:?} (expected X,Y,W,H in points)")),
+    }
+}
+
 fn parse_size(s: &str) -> Result<(f32, f32), String> {
     let bad = || format!("bad --size {s:?} (expected WxH in points, e.g. 1470x1105)");
     let (w, h) = s.split_once(['x', 'X']).ok_or_else(bad)?;
@@ -270,6 +315,13 @@ mod tests {
         );
         assert!(parse("--open-plugin in0").is_err());
         assert_eq!(parse("--view ctrl=1,overview=1").unwrap().view_spec.as_deref(), Some("ctrl=1,overview=1"));
+        let a = parse("--screen -853,-300,3200,1770 --window-pos settings=-393,-155 --windows inline --x11").unwrap();
+        assert_eq!(a.screen, Some(houston::Rect::new(-853.0, -300.0, 3200.0, 1770.0)));
+        assert_eq!(a.window_pos, vec![("settings".to_string(), (-393.0, -155.0))]);
+        assert_eq!(a.windows, Some(WindowsMode::Inline));
+        assert!(a.x11);
+        assert!(parse("--screen 1,2,3").is_err());
+        assert!(parse("--window-pos settings").is_err());
         assert!(parse("--view nope=1").is_err());
     }
 }

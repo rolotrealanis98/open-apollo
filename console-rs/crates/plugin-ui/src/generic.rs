@@ -150,7 +150,7 @@ impl GenericPanel {
         match (action, &id.control) {
             (Action::GestureBegin(_), Control::PluginParam(_)) => params.begin_gesture(),
             (Action::GestureEnd(_), Control::PluginParam(_)) => params.end_gesture(),
-            (Action::Set(_, v), Control::PluginParam(k)) => params.set(*k, clamp01(*v)),
+            (Action::Set(_, v) | Action::Reset(_, v), Control::PluginParam(k)) => params.set(*k, clamp01(*v)),
             (Action::Tap(_) | Action::Toggle(_), Control::PluginStep(k, s)) => {
                 let n = params.steps(*k).len();
                 params.commit(*k, step_value(*s as usize, n));

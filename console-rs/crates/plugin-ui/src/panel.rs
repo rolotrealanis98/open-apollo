@@ -219,7 +219,7 @@ impl PluginPanel {
                     let (w, h) = (img.width as f32 / 2.0 * s, img.height as f32 / 2.0 * s);
                     ui.clip(Some(intersect(r, panel)));
                     ui.image(key, Rect::new(r.x, r.y, w, h), None, None, opacity as f32);
-                    ui.clip(Some(panel));
+                    ui.clip(None);
                 }
                 ElementKind::Button => {
                     if el.sprite.is_none() || el.action.is_none() {
@@ -287,7 +287,7 @@ impl PluginPanel {
         match (action, &id.control) {
             (Action::GestureBegin(_), Control::PluginParam(_)) => params.begin_gesture(),
             (Action::GestureEnd(_), Control::PluginParam(_)) => params.end_gesture(),
-            (Action::Set(_, v), Control::PluginParam(k)) => {
+            (Action::Set(_, v) | Action::Reset(_, v), Control::PluginParam(k)) => {
                 let n = self.steps(*k, params);
                 let v = if n > 1 { step_value(step_index(*v, n), n) } else { clamp01(*v) };
                 if v != self.value(*k, params) {
@@ -341,8 +341,17 @@ impl PluginPanel {
                 .table
                 .iter()
                 .flatten()
-                .min_by(|a, b| (a.current - current).abs().total_cmp(&(b.current - current).abs()))
-                .map(|r| r.value),
+                .filter_map(|row| {
+                    let distance = if let Some(keys) = &action.keys {
+                        let key = row.key.as_ref().filter(|key| key.len() == keys.len())?;
+                        keys.iter().zip(key).map(|(k, v)| (self.value(*k, params) - v).abs()).sum::<f64>()
+                    } else {
+                        (row.current? - current).abs()
+                    };
+                    Some((row, distance))
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(r, _)| r.value),
             ActionKind::Multi | ActionKind::Other => None,
         };
         if let Some(v) = target {
@@ -386,7 +395,7 @@ impl PluginPanel {
 
 pub(crate) fn action_id(action: &Action) -> &ControlId {
     match action {
-        Action::GestureBegin(id) | Action::Set(id, _) | Action::GestureEnd(id) | Action::Toggle(id) | Action::Tap(id) => id,
+        Action::GestureBegin(id) | Action::Set(id, _) | Action::Reset(id, _) | Action::GestureEnd(id) | Action::Toggle(id) | Action::Tap(id) => id,
     }
 }
 

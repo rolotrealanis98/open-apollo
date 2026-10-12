@@ -1,0 +1,150 @@
+# 20261010-212605-815189 21:26:22
+post /SaveLastUsedSession {}
+
+# 20261010-220458-1050294 22:05:39
+post /SaveLastUsedSession {}
+
+# 20261010-224732-1323136 22:48:01
+post /SaveLastUsedSession {}
+
+# 20261010-224956-1339439 22:50:36
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:37
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:38
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:38
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:40
+set /devices/0/auxs/0/effects/0/EffectName/value "UAD 4K Buss Compressor"
+
+# 20261010-224956-1339439 22:50:43
+set /UndoRecording/value true
+set /devices/0/auxs/0/effects/0/EffectName/value ""
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:44
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:57
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:57
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:50:58
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:51:06
+set /UndoRecording/value true
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.09807407110929489
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.11007407307624817
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.11807407438755036
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.12607407569885255
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.13807407021522523
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.15807408094406129
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.17807407677173615
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.19007407128810883
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2020740807056427
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.21407407522201539
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.22607406973838807
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.23407407104969026
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.24607408046722413
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2540740668773651
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2580740749835968
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2540740668773651
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2500740885734558
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.24607408046722413
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.24207407236099244
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.23807407915592194
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.23407407104969026
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.22607406973838807
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.21807406842708589
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.21407407522201539
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2020740807056427
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.19407407939434052
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.19007407128810883
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.17807407677173615
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.17007407546043397
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.15807408094406129
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1460740715265274
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1420740783214569
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.13407407701015473
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.13007406890392304
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.12607407569885255
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.12207407504320145
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.12607407569885255
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.13007406890392304
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.13407407701015473
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1420740783214569
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1460740715265274
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1500740796327591
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.15807408094406129
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.16607406735420228
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.17407406866550446
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.17807407677173615
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.18207406997680665
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.19407407939434052
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2020740807056427
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2060740739107132
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.2020740807056427
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.198074072599411
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.19007407128810883
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.18607407808303834
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.17807407677173615
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.16607406735420228
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.16207407414913178
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1540740728378296
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1500740796327591
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.1420740783214569
+set /devices/0/outputs/18/CRMonitorLevelTapered/value?context_type=main 0.13807407021522523
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:51:09
+set /UndoRecording/value true
+set /devices/0/auxs/0/FaderLevelTapered/value?context_type=main 0.7773339152336121
+set /UndoRecording/value false
+
+# 20261010-224956-1339439 22:51:09
+post /SaveLastUsedSession {}
+
+# 20261010-233255-1611310 23:33:09
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-233255-1611310 23:33:12
+set /UndoRecording/value true
+set /devices/0/inputs/2/preamps/0/Phase/value true
+set /UndoRecording/value false
+
+# 20261010-233255-1611310 23:33:13
+set /devices/0/inputs/0/preamps/0/effects/0/EffectName/value "UAD ADA Flanger"
+
+# 20261010-233255-1611310 00:09:11
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-233255-1611310 00:09:12
+set /UndoRecording/value true
+set /UndoRecording/value false
+
+# 20261010-233255-1611310 00:11:31
+set /UndoRecording/value true
+set /devices/0/inputs/3/RecordPreEffects/value false
+set /UndoRecording/value false
+
+# 20261010-233255-1611310 00:14:25
+set /UndoRecording/value true
+set /UndoRecording/value false

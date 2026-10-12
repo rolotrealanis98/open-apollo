@@ -248,6 +248,13 @@ impl EngineMixer {
                     self.store.commit(&slot.effect_name(), text.to_owned());
                 }
             }
+            // `MxClnt_PluginScenesData::SetSceneName` (0x1819047b0): upper-cased, then set.
+            Control::SceneName(i) => {
+                let name = text.trim().to_uppercase();
+                if !name.is_empty() {
+                    self.store.commit(&format!("/pluginscenes/0/scenes/{i}/SceneName"), name);
+                }
+            }
             Control::Tempo => {
                 if let Ok(t) = text.trim().parse::<f64>() {
                     self.store.commit("/Tempo", t.clamp(1.0, 999.0));
@@ -336,12 +343,7 @@ impl EngineMixer {
                 }
             }
             Control::ClearSolos => {
-                let paths: Vec<String> = self.store.topology().inputs.iter().map(InputStrip::solo).collect();
-                for p in paths {
-                    if self.bool_at(&p) == Some(true) {
-                        self.store.commit(&p, false);
-                    }
-                }
+                self.store.post("/ClearSolos", Some(&ua_engine::Json::Object(Default::default())));
             }
             Control::SampleRate(i) | Control::BufferSize(i) => {
                 let path = if matches!(id.control, Control::SampleRate(_)) { "/SampleRate" } else { "/BufferSize" };
@@ -354,7 +356,9 @@ impl EngineMixer {
                     self.store.commit("/ClockSource", v);
                 }
             }
-            Control::RecallScene(i) => self.store.commit("/pluginscenes/0/RecalledSceneIndex", *i as i64),
+            // Console recalls through `SceneOperation` (0x181b0ffd0), not RecalledSceneIndex.
+            Control::RecallScene(i) => self.scene_operation(rack::menu::SceneOp::Recall, *i as u16),
+            Control::SceneCommand(op, i) => self.scene_operation(*op, *i),
             Control::MonitorDim => {
                 if let Some(m) = monitor {
                     self.toggle(&m.dim(), false);
@@ -393,7 +397,8 @@ impl EngineMixer {
                 self.store.set_writes_enabled(!on);
             }
             // No engine path known (clear clips is a helper command; set-default is a preset op).
-            Control::ClearClips | Control::InsertSetDefault(_) => {}
+            Control::ClearClips => self.store.post("/ClearClips", Some(&ua_engine::Json::Object(Default::default()))),
+            Control::InsertSetDefault(_) => {}
             _ => return false,
         }
         true

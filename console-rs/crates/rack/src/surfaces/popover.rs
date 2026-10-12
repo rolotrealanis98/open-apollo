@@ -100,6 +100,7 @@ impl Ui<'_> {
     pub fn popover_frame(&mut self, anchor: Rect, size: (f32, f32), placement: Placement, bounds: Rect, title: Option<&str>) -> Rect {
         let h = size.1 + if title.is_some() { TITLE_H } else { 0.0 };
         let (r, p) = place(anchor, (size.0, h), placement, bounds);
+        self.chrome_layer(r, 0.0);
         self.fill(r.offset(2.0, 3.0), Rgba::BLACK.with_alpha(0.35));
         self.fill(r, EDGE);
         self.fill(r.inset(1.0, 1.0, 1.0, 1.0), BODY);
@@ -226,6 +227,7 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
         Popover::SessionRename => text_popover(ui, a, bounds, "RENAME SESSION", view.text_edit.as_ref()),
         Popover::SessionNewFolder => text_popover(ui, a, bounds, "NEW FOLDER", view.text_edit.as_ref()),
         Popover::Tempo => text_popover(ui, a, bounds, "TEMPO", view.text_edit.as_ref()),
+        Popover::Confirm { title, message, ok } => confirm_dialog(ui, title, message, ok, bounds),
         Popover::CueOutputs => cue_outputs_popover(ui, model, a, bounds),
         Popover::Headphone { output } => {
             let hps = model.headphone_outputs();
@@ -329,7 +331,32 @@ pub fn anchored_menu(ui: &mut Ui, menu: &PopupMenu, look: MenuLook, anchor: Rect
     let h = probe.frame.h;
     let y = if anchor.max_y() + h <= bounds.max_y() { anchor.max_y() } else { (anchor.y - h).max(bounds.y) };
     let f = layout_menu(ui, menu, look, (anchor.x, y), anchor.w, bounds);
+    ui.begin_layer("menu:anchored", crate::layers::LayerKind::Menu, f.frame, 0.0);
     ui.popup_menu(menu, look, &f, 0, None, None);
+    ui.end_layer();
+}
+
+/// Console's confirmation (`Rack_Window` 0x180a40730 → 0x180a3fa40): a `Popover-Header` title,
+/// the message, CANCEL and a primed OK, centred in the window. Sized like the SAVE SESSION
+/// question (no capture of this one yet).
+fn confirm_dialog(ui: &mut Ui, title: &str, message: &str, ok: &ControlId, bounds: Rect) {
+    let (w, h) = (360.0, 118.0);
+    let (cx, cy) = bounds.center();
+    let r = Rect::new((cx - w / 2.0).round(), (cy - h / 2.0).round(), w, h);
+    ui.fill(r.offset(2.0, 3.0), Rgba::BLACK.with_alpha(0.35));
+    ui.fill(r, Rgba::rgb8(16, 17, 18));
+    ui.fill(r.inset(1.0, 1.0, 1.0, 1.0), Rgba::rgb8(47, 50, 53));
+    ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
+    let band = Rect::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, 24.0);
+    ui.fill(band, Rgba::rgb8(36, 38, 41));
+    let mut ts = ui.style("views", "Popover-Header");
+    ts.size = 11.0;
+    ui.text(&title.to_uppercase(), ts, band, Align::Center);
+    let body = Ui::plain_style("Helvetica", 12.0, false, Rgba::WHITE.with_alpha(0.85));
+    ui.text(message, body, Rect::new(r.x + 16.0, r.y + 36.0, r.w - 32.0, 30.0), Align::Center);
+    let by = r.max_y() - 34.0;
+    ui.flat_button("CANCEL", false, Rect::new(r.max_x() - 12.0 - 96.0 * 2.0 - 8.0, by, 96.0, 22.0), pid(Control::PopoverDismiss));
+    ui.flat_button("OK", true, Rect::new(r.max_x() - 12.0 - 96.0, by, 96.0, 22.0), ok.clone());
 }
 
 fn text_popover(ui: &mut Ui, anchor: Rect, bounds: Rect, title: &str, edit: Option<&TextEdit>) {

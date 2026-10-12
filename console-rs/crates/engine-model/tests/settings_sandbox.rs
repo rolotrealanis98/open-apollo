@@ -11,7 +11,10 @@ use rack::MixerModel;
 use rack::settings::{self, SettingOp, SettingsGroup};
 
 fn connect(addr: &str, writes: bool) -> EngineMixer {
-    let mut m = EngineMixer::connect(ua_engine::Endpoint::parse(addr), writes);
+    let endpoint = ua_engine::Endpoint::parse(addr);
+    assert_eq!(endpoint.host, "127.0.0.1", "sandbox tests require loopback");
+    assert_ne!(endpoint.port, 4710, "never write to the hardware daemon");
+    let mut m = EngineMixer::connect(endpoint, writes);
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         m.pump();
@@ -61,7 +64,7 @@ fn settings_round_trip_on_a_sandbox_engine() {
         w.apply_setting(k, &SettingOp::Choose(if v == "ON" { 0 } else { 1 }));
     }
     w.apply_setting("/devices/0/DeviceName", &SettingOp::Text("Sandbox x4".into()));
-    w.apply_setting("pref:modifiers_timeout", &SettingOp::Choose(2));
+    w.apply_setting("pref:modifiers_timeout", &SettingOp::Text("10".into()));
     settle(&mut w);
 
     // A second, read-only client sees the engine's new values.
@@ -75,7 +78,7 @@ fn settings_round_trip_on_a_sandbox_engine() {
         assert_ne!(&now, v, "PT MODE flipped");
     }
     // Preferences never reach the engine.
-    assert!(p.prop("pref:modifiers_timeout").unwrap().as_str() == Some("NONE"));
+    assert_eq!(p.prop("pref:modifiers_timeout").unwrap().as_str(), Some("6"), "a new client has the default (6, capture s15)");
 
     // Restore.
     w.apply_setting("/SampleRate", &SettingOp::Choose(rates.iter().position(|c| c.value.same(&cur)).unwrap()));

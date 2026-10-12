@@ -1,10 +1,10 @@
 //! The engine side of the Settings window and secondary panels: [`rack::settings`] reads the
 //! engine tree through [`PropertySource`] and its writes go out through the store's gated
-//! writer (`set`), the connection (`post`, refused unless writes are allowed) or the client
+//! writer (`set` and `post`, suppressed unless writes are allowed) or the client
 //! preferences.
 
 use rack::settings::{Choice, PropValue, PropertySource, Write};
-use ua_engine::{Command, Json, Value};
+use ua_engine::{Json, Value};
 
 use crate::EngineMixer;
 
@@ -77,23 +77,16 @@ impl PropertySource for EngineMixer {
 
 impl EngineMixer {
     /// Applies settings writes: `set`s through the gated writer (local only while read-only),
-    /// `post`s only with writes enabled (the connection refuses them otherwise too), client
+    /// `post`s through the same gate (including suppression diagnostics), client
     /// preferences locally.
     pub(crate) fn write_settings(&mut self, writes: Vec<Write>) {
         for w in writes {
             match w {
                 Write::Set(path, v) => self.store.commit(&path, to_value(&v)),
-                Write::Post(cmd, payload) => {
-                    if !self.store.writer().writes_enabled {
-                        log::info!("settings: read-only, not sending post {cmd} {payload}");
-                        continue;
-                    }
-                    if let Some(c) = self.store.connection() {
-                        if let Err(e) = c.send(Command::post(cmd.clone(), Some(payload))) {
-                            log::warn!("settings: post {cmd}: {e}");
-                        }
-                    }
-                }
+                Write::Post(cmd, payload) => match serde_json::from_str::<Json>(&payload) {
+                    Ok(args) => self.store.post(&cmd, Some(&args)),
+                    Err(e) => log::warn!("settings: invalid post {cmd}: {e}"),
+                },
                 Write::Pref(name, v) => self.prefs.set(&name, v),
             }
         }
