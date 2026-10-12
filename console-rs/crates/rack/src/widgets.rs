@@ -168,33 +168,49 @@ impl Ui<'_> {
         let meter_w = self.skin("meters", left_key).and_then(|s| s.size()).map(|s| s.0).unwrap_or(if stereo { 4.0 } else { 8.0 });
         let g = FaderAndMetersGeometry::new(r.w, r.h, stereo, meter_w);
         self.at(r.x, r.y, |ui| {
+            // secondary_meter_well then meter_well, same rect (0x18141ea20).
+            ui.background("Secondary-Display-Background", g.meter_well);
             ui.background("Display-Background", g.meter_well);
             ui.bar_meter(left_key, meters.left, meters.clip_left, g.left_meter);
             if let Some(right) = g.right_meter {
                 ui.bar_meter("Right-Input-Meter", meters.right, meters.clip_right, right);
             }
             ui.font_text("Small-Label-Font", readout, g.value_label, Align::Center);
-            // Meter scale: labels span the lit well.
+            // Meter scale (`Rack_MeterMarks`, labels 0x1809d1470): a 3×1 tick at the scale's left
+            // edge per label, a 1×1 dot halfway, the number 7 pt right of the tick (measured).
             let mskin = ui.skin("meters", "Mono-Input-Meter");
             let mcolor = mskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::rgb8(93, 101, 105));
             let content = mskin.and_then(|s| s.rect("bounds-content")).unwrap_or(Rect::new(0.0, 14.0, 16.0, 372.0));
             let (top, bottom) = (g.left_meter.y + content.y / ART_SCALE, g.left_meter.max_y() - (392.0 - content.max_y()) / ART_SCALE);
             let style = Ui::plain_style("Helvetica", 9.5, false, mcolor);
             let n = scales::METER_MARKS.len() as f32 - 1.0;
+            let step = (bottom - top) / n;
             for (i, db) in scales::METER_MARKS.iter().enumerate() {
-                let y = top + (bottom - top) * i as f32 / n;
-                ui.text(&format!("- {}", -db as i32), style.clone(), Rect::new(g.meter_marks.x, y - 5.0, g.meter_marks.w, 10.0), Align::Left);
+                let y = (top + step * i as f32).floor();
+                ui.fill(Rect::new(g.meter_marks.x, y, 3.0, 1.0), mcolor);
+                if i + 1 < scales::METER_MARKS.len() {
+                    ui.fill(Rect::new(g.meter_marks.x, y + (step / 2.0).ceil(), 1.0, 1.0), mcolor);
+                }
+                ui.text(&format!("{}", -db as i32), style.clone(), Rect::new(g.meter_marks.x + 7.0, y - 4.75, 20.0, 10.0), Align::Left);
             }
             ui.background("Fader-Ref-Mark-Dark", g.ref_mark);
-            // Fader scale, placed with the taper.
+            // Fader scale (`Rack_FaderMarks`, 0x1809b1c60), placed with the taper: a 4×1 tick at the
+            // scale's left edge and the number 8 pt right of it.
             let fskin = ui.skin("faders", fader_key);
             let fcolor = fskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::BLACK);
             let m = FaderMetrics::from_skin(fskin);
             let (t, b) = m.travel(g.fader.h);
             let fstyle = Ui::plain_style("Helvetica", 9.5, false, fcolor);
             for (label, db) in scales::FADER_MARKS {
-                let y = g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32;
-                ui.text(&format!("- {label}"), fstyle.clone(), Rect::new(g.fader_marks.x, y - 5.0, 30.0, 10.0), Align::Left);
+                let y = (g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32).floor();
+                ui.fill(Rect::new(g.fader_marks.x, y, 4.0, 1.0), fcolor);
+                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 8.0, y - 4.75, 20.0, 10.0), Align::Left);
+            }
+            // Gain button separator (0x18141ea20, no polarity toggle): a dotted 1-pt line at
+            // (value.x + 6, value.y − 3), value = (well.x, well.bottom − 20); white 0.15 dots every 2 pt.
+            let dots = Rect::new(g.meter_well.x + 6.0, g.meter_well.max_y() - 23.0, g.meter_well.w - 12.0, 1.0);
+            for k in 0..((dots.w as i32 + 3) / 2) {
+                ui.fill(Rect::new(dots.x + 2.0 * k as f32, dots.y, 1.0, 1.0), Rgba::WHITE.with_alpha(0.15));
             }
             ui.fader(fader_key, fader, g.fader, id);
         });
