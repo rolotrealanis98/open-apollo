@@ -19,6 +19,19 @@ stack for USB models, along with a mixer daemon and system tray indicator.
 > configurations, and incomplete features. We're shipping early to get community
 > feedback and testing across different Apollo models.
 
+## Status
+
+[![UA driver parity](docs/status/badge-parity.svg)](docs/status/)
+[![work plan](docs/status/badge-plan.svg)](docs/status/)
+[![models verified](docs/status/badge-models.svg)](docs/status/)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/status/progress-dark.svg">
+  <img alt="Status map: one square per behaviour of UA's drivers, task of the work plan or Apollo model, coloured by status" src="docs/status/progress-light.svg">
+</picture>
+
+Each square is one thing UA's own drivers do (left), one task of the work plan (right) or one Apollo model (bottom right). The legend under the map gives the colours: verified on real hardware, done in code, partial, still to figure out (needs reverse engineering), understood but not done, and blocked (on a decision or on hardware the project doesn't have). The numbers per area and the open tasks are in [docs/status](docs/status/).
+
 ## What Works (Apollo x4 — Thunderbolt, Ubuntu 24.04)
 
 - **Full duplex audio** — 4 analog inputs + 6 analog outputs verified (24/22 total ALSA channels exposed, mapped to the firmware's channel slots by ID; S/PDIF, ADAT, and virtual channels are unverified)
