@@ -248,6 +248,13 @@ impl EngineMixer {
                     self.store.commit(&slot.effect_name(), text.to_owned());
                 }
             }
+            // `MxClnt_PluginScenesData::SetSceneName` (0x1819047b0): upper-cased, then set.
+            Control::SceneName(i) => {
+                let name = text.trim().to_uppercase();
+                if !name.is_empty() {
+                    self.store.commit(&format!("/pluginscenes/0/scenes/{i}/SceneName"), name);
+                }
+            }
             Control::Tempo => {
                 if let Ok(t) = text.trim().parse::<f64>() {
                     self.store.commit("/Tempo", t.clamp(1.0, 999.0));
@@ -354,7 +361,9 @@ impl EngineMixer {
                     self.store.commit("/ClockSource", v);
                 }
             }
-            Control::RecallScene(i) => self.store.commit("/pluginscenes/0/RecalledSceneIndex", *i as i64),
+            // Console recalls through `SceneOperation` (0x181b0ffd0), not RecalledSceneIndex.
+            Control::RecallScene(i) => self.scene_operation(rack::menu::SceneOp::Recall, *i as u16),
+            Control::SceneCommand(op, i) => self.scene_operation(*op, *i),
             Control::MonitorDim => {
                 if let Some(m) = monitor {
                     self.toggle(&m.dim(), false);

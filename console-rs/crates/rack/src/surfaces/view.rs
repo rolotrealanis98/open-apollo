@@ -171,6 +171,9 @@ pub enum Popover {
     /// Rename / New Folder name fields (CURRENT SESSION panel menus).
     SessionRename,
     SessionNewFolder,
+    /// Console's confirmation (`Rack_Window` 0x180a40730: a Popover-Header title, the message,
+    /// CANCEL and a primed OK). OK taps `ok`.
+    Confirm { title: String, message: String, ok: ControlId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -194,6 +197,8 @@ pub enum TextTarget {
     SessionRename(u16),
     /// The CURRENT SESSION panel's New Folder.
     SessionNewFolder,
+    /// A PLUG-IN SCENES row's Rename (`Rack_ScenesListBoxRow::EditSceneName`), by scene index.
+    SceneName(u16),
 }
 
 /// A text field with keyboard focus.
@@ -232,6 +237,8 @@ pub struct SettingsView {
 /// UI-only state: owned by the app shell, read by `build_window_with`, changed by `route`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewState {
+    /// TEMPO window TAP timing.
+    pub tap: crate::menu::TapTempo,
     /// No browser / navigator; aux and monitor packed after the last strip.
     pub compact: bool,
     pub sections: Sections,
@@ -281,6 +288,7 @@ pub struct ViewState {
 impl Default for ViewState {
     fn default() -> Self {
         Self {
+            tap: Default::default(),
             compact: false,
             sections: Sections::default(),
             insert_size: InsertSize::Large,
@@ -373,6 +381,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::PanelTab(_)
             | C::SceneSelect(_)
             | C::SceneStep(_)
+            | C::TempoTap
             | C::SettingsScroll
             | C::ListSelect(_)
             | C::SessionMenu
@@ -595,6 +604,15 @@ impl ViewState {
             }
             C::SceneSelect(i) => self.settings.scene = Some(i),
             C::ListSelect(i) => self.settings.list = Some(i),
+            C::TempoTap => {
+                if let Some(bpm) = self.tap.tap(std::time::Instant::now()) {
+                    // Console shows it with two decimals and applies it at once (0x1811a05d0).
+                    if let Some(e) = self.text_edit.as_mut().filter(|e| e.target == TextTarget::Tempo) {
+                        e.text = format!("{bpm:.2}");
+                    }
+                    out.push(Effect::SetText(ControlId { strip: "global".into(), control: C::Tempo }, format!("{bpm}")));
+                }
+            }
             C::SceneStep(up) => {
                 let n = model.plugin_scenes().len() as u16;
                 if n > 0 {
@@ -713,6 +731,7 @@ impl ViewState {
             TextTarget::Rename(strip) => vec![Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)],
             TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
             TextTarget::Search => Vec::new(),
+            TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
             t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder) => self.commit_session_text(&t, edit.text, model),
         }
     }

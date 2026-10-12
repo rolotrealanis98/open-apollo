@@ -922,10 +922,15 @@ impl MixerModel for PreviewMixer {
             Some(InsertState::Loaded { name, .. }) => Some(name.clone()),
             _ => None,
         };
-        crate::menu::MenuModelState { can_undo: false, can_redo: false, post_fader_metering: Some(self.post_fader_metering), clipboard }
+        crate::menu::MenuModelState { can_undo: false, can_redo: false, post_fader_metering: Some(self.post_fader_metering), clipboard, recalled_scene: self.status.scene.as_ref().and_then(|n| self.scenes.iter().position(|s| s == n)).map(|i| i as u16) }
     }
     fn set_text(&mut self, id: &ControlId, text: &str) {
         match id.control {
+            Control::SceneName(i) => {
+                if let Some(n) = self.scenes.get_mut(i as usize) {
+                    *n = text.trim().to_uppercase();
+                }
+            }
             Control::Name => {
                 if let Some(m) = self.mains.get_mut(&id.strip) {
                     m.name = text.to_string();
@@ -998,6 +1003,20 @@ impl MixerModel for PreviewMixer {
                 Control::ClockSource(i) => return self.settings.clock_source = self.settings.clock_sources.get(*i as usize).cloned(),
                 Control::BufferSize(i) => return self.settings.buffer_size = self.settings.buffer_sizes.get(*i as usize).copied(),
                 Control::RecallScene(i) => return self.status.scene = self.scenes.get(*i as usize).cloned(),
+                Control::SceneCommand(op, i) => {
+                    use crate::menu::SceneOp;
+                    let i = *i as usize;
+                    if self.scenes.len() <= i {
+                        self.scenes.resize(i + 1, "EMPTY SCENE".into());
+                    }
+                    match op {
+                        SceneOp::Recall => self.status.scene = self.scenes.get(i).cloned(),
+                        SceneOp::Clear => self.scenes[i] = "EMPTY SCENE".into(),
+                        SceneOp::Save if crate::menu::scene_is_empty(&self.scenes[i]) => self.scenes[i] = format!("SCENE {}", i + 1),
+                        _ => {}
+                    }
+                    return;
+                }
                 Control::WritesEnabled => return self.settings.writes_enabled ^= true,
                 Control::Menu(cmd) => return self.apply_menu(&id.strip, cmd),
                 _ => {}

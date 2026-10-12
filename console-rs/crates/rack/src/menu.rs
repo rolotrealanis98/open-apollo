@@ -598,6 +598,8 @@ impl MenuCmd {
     pub fn is_view(&self) -> bool {
         match self {
             MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets | MenuCmd::AssignCancel | MenuCmd::Noop => true,
+            // Rename edits the row; Overwrite / Clear ask first (their OK sends the command).
+            MenuCmd::Scene(SceneOp::Rename | SceneOp::Overwrite | SceneOp::Clear, _) => true,
             MenuCmd::App(c) => c.scope() != CommandScope::Model,
             _ => false,
         }
@@ -628,6 +630,9 @@ pub struct MenuModelState {
     pub post_fader_metering: Option<bool>,
     /// The plug-in a slot Copy put on the clipboard (`Paste "<name>"`).
     pub clipboard: Option<String>,
+    /// `/pluginscenes/0/RecalledSceneIndex` (None: -1). The scene row menu's Overwrite is off on
+    /// the recalled scene (0x1811fb990).
+    pub recalled_scene: Option<u16>,
 }
 
 // MARK: open-menu state
@@ -1156,20 +1161,47 @@ pub fn scene_is_empty(name: &str) -> bool {
     n.is_empty() || n.eq_ignore_ascii_case("EMPTY SCENE")
 }
 
-/// A PLUG-IN SCENES row (captures browser-row / browser-hdr on empty scenes: only Save Scene
-/// is enabled). Rename / Overwrite / Clear / Recall Scene need a saved scene.
+/// A PLUG-IN SCENES row (`Rack_ScenesListBoxRow::mouseDown` 0x1811fb990; captures
+/// browser-row / browser-hdr). Rename, Clear and Recall Scene need a saved scene; Overwrite also
+/// needs it not to be the recalled one; Save Scene is always on.
 pub fn scene_row_menu(model: &dyn MixerModel, index: u16) -> PopupMenu {
     let scenes = model.plugin_scenes();
     let empty = scenes.get(index as usize).is_none_or(|n| scene_is_empty(n));
+    let recalled = model.menu_state().recalled_scene == Some(index);
     let g = |op: SceneOp| gid(MenuCmd::Scene(op, index));
+    let cmd = |op: SceneOp| ControlId { strip: "global".into(), control: Control::SceneCommand(op, index) };
     let mut m = PopupMenu::new();
     m.push(PopupItem::new("Rename", g(SceneOp::Rename)).enabled(!empty));
-    m.push(PopupItem::new("Overwrite", g(SceneOp::Overwrite)).enabled(!empty));
+    m.push(PopupItem::new("Overwrite", g(SceneOp::Overwrite)).enabled(!empty && !recalled));
     m.push(PopupItem::new("Clear", g(SceneOp::Clear)).enabled(!empty));
-    m.push(PopupItem::new("Save Scene", g(SceneOp::Save)).enabled(empty));
-    let recall = ControlId { strip: "global".into(), control: Control::RecallScene(index.min(u8::MAX as u16) as u8) };
-    m.push(PopupItem::new("Recall Scene", recall).enabled(!empty));
+    m.push(PopupItem::new("Save Scene", cmd(SceneOp::Save)));
+    m.push(PopupItem::new("Recall Scene", cmd(SceneOp::Recall)).enabled(!empty));
     m.finish()
+}
+
+/// Console's tap tempo (`Rack_MIDI` 0x180cea600, `Rack_Message_SetTempo` 0x180cea060,
+/// `Rack_Message_TapChanged` 0x180cea4b0): the last four taps; from the fourth on, BPM =
+/// 60 / ((t₃ − t₀) / 3). A tap more than 2 s after the previous one starts over.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TapTempo {
+    taps: Vec<std::time::Instant>,
+}
+
+impl TapTempo {
+    pub const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2000);
+
+    /// Records a tap at `now`; the tempo once four taps are in.
+    pub fn tap(&mut self, now: std::time::Instant) -> Option<f64> {
+        if self.taps.last().is_none_or(|t| now.saturating_duration_since(*t) > Self::TIMEOUT) {
+            self.taps.clear();
+        }
+        if self.taps.len() == 4 {
+            self.taps.remove(0);
+        }
+        self.taps.push(now);
+        let span = self.taps.last()?.saturating_duration_since(self.taps[0]).as_secs_f64();
+        (self.taps.len() == 4 && span > 0.0).then(|| 60.0 / (span / 3.0))
+    }
 }
 
 /// Preamp / input area (`Rack_Overview_Preamp` 0x180dd7a60): a preamp input gets Input Source
@@ -1628,6 +1660,23 @@ impl ViewState {
                 self.browser.tab = crate::surfaces::BrowserTab::Presets;
             }
             MenuCmd::AssignCancel => self.browser.assign_to = None,
+            MenuCmd::Scene(op, i) => {
+                let name = model.plugin_scenes().get(*i as usize).cloned().unwrap_or_default();
+                let anchor = ControlId { strip: "settings".into(), control: Control::SceneSelect(*i) };
+                match op {
+                    SceneOp::Rename => {
+                        self.settings.scene = Some(*i);
+                        self.text_edit = Some(TextEdit { target: TextTarget::SceneName(*i), text: name });
+                    }
+                    SceneOp::Overwrite | SceneOp::Clear => {
+                        let (title, verb) = if *op == SceneOp::Overwrite { ("Overwrite Scene", "overwrite") } else { ("Clear Scene", "clear") };
+                        let ok = ControlId { strip: "global".into(), control: Control::SceneCommand(*op, *i) };
+                        let message = format!("Are you sure you want to {verb} \"{name}\"?");
+                        self.popover = Some(PopoverState { kind: Popover::Confirm { title: title.into(), message, ok }, anchor });
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }

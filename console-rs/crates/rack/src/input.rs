@@ -171,6 +171,14 @@ pub enum Control {
     /// [view] PLUG-IN SCENES: select (prime) scene `.0`; step the selection up / down.
     SceneSelect(u16),
     SceneStep(bool),
+    /// [model] `post /SceneOperation {"<op>Scene": index}` (`MxClnt_*PluginScenesData`
+    /// 0x181903810 / 0x181904080 / 0x181b0ffd0 / 0x181b105b0): Save (StoreScene), Overwrite,
+    /// Clear, Recall. Overwrite and Clear reach this only from their confirmation.
+    SceneCommand(crate::menu::SceneOp, u16),
+    /// [model] `set_text` target: scene `.0`'s new name (`SetSceneName`, upper-cased).
+    SceneName(u16),
+    /// [view] TEMPO window TAP (`Rack_TempoPopover::buttonClicked` 0x1811a0680).
+    TempoTap,
     /// [view] Settings page scrollbar (drag; value = 1 − scroll fraction).
     SettingsScroll,
     /// [view] Select row `.0` of a panel list (ADD DEVICE, I/O PRESETS, source categories).

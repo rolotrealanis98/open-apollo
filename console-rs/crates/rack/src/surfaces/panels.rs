@@ -430,13 +430,18 @@ pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, boun
     ui.fill(recall, Rgba::rgb8(86, 90, 93));
     let bs = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(if can_recall { 0.85 } else { 0.3 }));
     ui.text("RECALL", bs.clone(), recall, Align::Center);
+    // RECALL / SAVE (`Rack_SceneSection::buttonClicked` 0x1811f7e80): RecallScene / StoreScene of
+    // the selected (primed) row.
+    let scene_cmd = |op, i: u16| ControlId { strip: "global".into(), control: Control::SceneCommand(op, i) };
     if let Some(i) = view.settings.scene {
-        ui.hit(recall, ControlId { strip: "global".into(), control: Control::RecallScene(i.min(255) as u8) }, HitKind::Tap);
+        ui.hit(recall, scene_cmd(crate::menu::SceneOp::Recall, i), HitKind::Tap);
     }
     let save = Rect::new(r.x + 120.0, by, 96.0, 20.0);
     ui.fill(save, Rgba::rgb8(86, 90, 93));
-    // SAVE: `SceneOperation {}` has no argument shape in the root `commands` node; disabled.
-    ui.text("SAVE", Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.3)), save, Align::Center);
+    ui.text("SAVE", bs.clone(), save, Align::Center);
+    if let Some(i) = view.settings.scene {
+        ui.hit(save, scene_cmd(crate::menu::SceneOp::Save, i), HitKind::Tap);
+    }
     for (i, up) in [true, false].into_iter().enumerate() {
         let b = Rect::new(r.x + 224.0 + i as f32 * 26.0, by, 18.0, 20.0);
         ui.fill(b, Rgba::rgb8(86, 90, 93));
@@ -463,7 +468,12 @@ pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, boun
             ui.fill(row, Rgba::WHITE.with_alpha(0.06));
         }
         ui.text(&format!("{}", i + 1), st.clone(), Rect::new(row.x + 14.0, y, 28.0, SCENE_ROW_H), Align::Center);
-        ui.text(n, st.clone(), Rect::new(row.x + 59.0, y, row.w - 62.0, SCENE_ROW_H), Align::Left);
+        // Rename edits the row in place (`Rack_ScenesListBoxRow::EditSceneName`).
+        let editing = view.text_edit.as_ref().filter(|e| e.target == TextTarget::SceneName(i as u16));
+        if editing.is_some() {
+            ui.fill(Rect::new(row.x + 56.0, y + 6.0, row.w - 60.0, SCENE_ROW_H - 12.0), Rgba::rgb8(78, 83, 88));
+        }
+        ui.text(editing.map_or(n.as_str(), |e| e.text.as_str()), st.clone(), Rect::new(row.x + 59.0, y, row.w - 62.0, SCENE_ROW_H), Align::Left);
         ui.hit(row, sid(Control::SceneSelect(i as u16)), HitKind::Tap);
     }
     ui.clip(None);
@@ -795,9 +805,8 @@ fn tempo(ui: &mut Ui, view: &ViewState, bounds: Rect) {
         ui.fill(Rect::new(fr.x + 8.0, fr.y + 6.5, w + 2.0, 11.0), Rgba::rgb8(43, 79, 119));
     }
     ui.text(&text, ts, Rect::new(fr.x + 8.5, fr.y + 2.0, fr.w - 10.0, fr.h), Align::Left);
-    // TAP (Switch-Large, 70 × 30 at (109.5, 36.5)): tap tempo needs event timing the UI does
-    // not keep yet, so it is drawn without a hit.
-    ui.toggle("Switch-Large", Some("TAP"), false, true, Rect::new(r.x + 108.5, r.y + 35.5, 71.0, 31.0), None, None);
+    // TAP (Switch-Large, 70 × 30 at (109.5, 36.5)): Console's tap tempo (`TapTempo`).
+    ui.toggle("Switch-Large", Some("TAP"), false, true, Rect::new(r.x + 108.5, r.y + 35.5, 71.0, 31.0), Some(pid(Control::TempoTap)), None);
     let button = |ui: &mut Ui, label: &str, fill: Rgba, b: Rect, id: ControlId| {
         ui.fill(b, fill);
         ui.text(label, Ui::plain_style("Helvetica", 10.5, true, Rgba::WHITE), b.offset(0.0, 1.25), Align::Center);
