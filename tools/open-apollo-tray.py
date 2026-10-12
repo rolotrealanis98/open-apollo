@@ -2,7 +2,8 @@
 """Open Apollo system tray indicator.
 
 Shows Apollo hardware status with quick actions for init, daemon
-management, and PipeWire profile reload.
+management, PipeWire profile reload, and opening the mixer console
+(native uaconsole when installed, the Windows Console under Wine otherwise).
 
 Dependencies: gir1.2-appindicator3-0.1 (Ubuntu) or libappindicator-gtk3 (Fedora)
 """
@@ -24,6 +25,8 @@ REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 ICON_DIR = os.path.join(SCRIPT_DIR, 'icons')
 DEVICE_PATH = '/dev/ua_apollo0'
 DAEMON_LOG = '/tmp/ua-mixer-daemon.log'
+CONSOLE_LAUNCHER = os.path.join(SCRIPT_DIR, 'open-apollo-console.sh')
+CONSOLE_LOG = os.path.join(os.path.expanduser('~'), '.cache', 'open-apollo', 'console.log')
 POLL_INTERVAL = 5  # seconds
 
 # Ioctl numbers for BAR0 register read
@@ -118,6 +121,28 @@ def poll_state():
     return state
 
 
+def console_choice():
+    """Console the launcher would start: ('native' | 'wine' | 'none', detail)."""
+    if not os.path.exists(CONSOLE_LAUNCHER):
+        return 'none', ''
+    try:
+        out = subprocess.run(
+            ['bash', CONSOLE_LAUNCHER, '--which'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return 'none', ''
+    kind, _, detail = out.partition(' ')
+    return (kind if kind in ('native', 'wine') else 'none'), detail
+
+
+CONSOLE_LABELS = {
+    'native': 'Open Console',
+    'wine': 'Open Console (Wine)',
+    'none': 'Open Console...',
+}
+
+
 class ApolloTray:
     """System tray indicator for Open Apollo."""
 
@@ -154,6 +179,10 @@ class ApolloTray:
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # Actions
+        self.item_console = Gtk.MenuItem(label=CONSOLE_LABELS['none'])
+        self.item_console.connect('activate', self.on_open_console)
+        self.menu.append(self.item_console)
+
         item_init = Gtk.MenuItem(label='Initialize Apollo...')
         item_init.connect('activate', self.on_init)
         self.menu.append(item_init)
@@ -217,6 +246,8 @@ class ApolloTray:
         else:
             self.lbl_daemon.set_label('Daemon: stopped')
 
+        self.item_console.set_label(CONSOLE_LABELS[console_choice()[0]])
+
         return True  # Keep timer alive
 
     def run_sudo(self, cmd):
@@ -228,8 +259,12 @@ class ApolloTray:
 
     def show_error(self, msg):
         """Show a simple error dialog."""
+        self.show_message(msg, Gtk.MessageType.ERROR)
+
+    def show_message(self, msg, kind=Gtk.MessageType.INFO):
+        """Show a simple message dialog."""
         dialog = Gtk.MessageDialog(
-            message_type=Gtk.MessageType.ERROR,
+            message_type=kind,
             buttons=Gtk.ButtonsType.OK,
             text=msg
         )
@@ -237,6 +272,29 @@ class ApolloTray:
         dialog.destroy()
 
     # --- Action handlers ---
+
+    def on_open_console(self, _):
+        """Native uaconsole when installed, else the Windows Console under Wine."""
+        kind, _ = console_choice()
+        if kind == 'none':
+            self.show_message(
+                'No mixer console is installed.\n\n'
+                'Install the native console (no root needed):\n'
+                f'  bash {os.path.join(REPO_ROOT, "scripts", "install-uaconsole.sh")}\n\n'
+                'It uses the art from your own UAD Console install; '
+                'see console-rs/README.md.'
+            )
+            return
+        try:
+            os.makedirs(os.path.dirname(CONSOLE_LOG), exist_ok=True)
+            with open(CONSOLE_LOG, 'ab') as log:
+                subprocess.Popen(
+                    ['bash', CONSOLE_LAUNCHER],
+                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+        except OSError as e:
+            self.show_error(f'Failed to open the console: {e}')
 
     def on_init(self, _):
         init_script = os.path.join(REPO_ROOT, 'tools', 'apollo-init.sh')
