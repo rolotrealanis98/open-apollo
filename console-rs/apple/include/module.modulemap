@@ -1,0 +1,4 @@
+module UAConsoleFFI {
+    header "uaconsole.h"
+    export *
+}
