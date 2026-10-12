@@ -417,6 +417,9 @@ pub struct UacContext {
     content: (f32, f32),
     interaction: Interaction,
     pan: Option<Pan>,
+    /// A tap-kind control pressed by the current pointer: it fires on release inside it (touch
+    /// convention), so a long press can still become a secondary click without opening it.
+    pending_tap: Option<Hit>,
     view: View,
     /// The mixer's UI-only state: navigator toggles, browser, popovers, pages, compact, window.
     mixer: ViewState,
@@ -458,6 +461,7 @@ impl UacContext {
             content: (0.0, 0.0),
             interaction: Interaction::default(),
             pan: None,
+            pending_tap: None,
             view: View::new(width, height, scale),
             mixer: ViewState::default(),
             window: None,
@@ -586,6 +590,7 @@ impl UacContext {
         self.source = source;
         self.interaction = Interaction::default();
         self.pan = None;
+        self.pending_tap = None;
         // Layout preferences stay; state that points into the old model goes.
         self.mixer.popover = None;
         self.mixer.text_edit = None;
@@ -694,11 +699,18 @@ impl UacContext {
         let actions = match kind {
             UAC_POINTER_DOWN => {
                 self.pan = None;
+                self.pending_tap = None;
                 let actions = self.interaction.pointer_down(&self.hits, cx, cy, flags & UAC_POINTER_DOUBLE != 0);
-                if !on_control {
-                    self.pan = Some(Pan { start: (x, y), origin: self.view.origin });
+                if let [Action::Tap(_)] = actions.as_slice() {
+                    // Taps (inserts, menu items, browser rows) fire on release.
+                    self.pending_tap = self.hits.iter().rev().find(|h| h.rect.contains(cx, cy)).cloned();
+                    Vec::new()
+                } else {
+                    if !on_control {
+                        self.pan = Some(Pan { start: (x, y), origin: self.view.origin });
+                    }
+                    actions
                 }
-                actions
             }
             UAC_POINTER_MOVE => match self.pan {
                 Some(p) => {
@@ -711,12 +723,24 @@ impl UacContext {
                 }
                 None => self.interaction.pointer_move(cx, cy, flags & UAC_POINTER_FINE != 0),
             },
-            UAC_POINTER_UP | UAC_POINTER_CANCEL => {
+            UAC_POINTER_UP => {
                 self.pan = None;
+                let mut actions = self.interaction.pointer_up();
+                if let Some(tap) = self.pending_tap.take()
+                    && tap.rect.contains(cx, cy)
+                {
+                    actions.push(Action::Tap(tap.id));
+                }
+                actions
+            }
+            UAC_POINTER_CANCEL => {
+                self.pan = None;
+                self.pending_tap = None;
                 self.interaction.pointer_up()
             }
             UAC_POINTER_SECONDARY => {
                 self.pan = None;
+                self.pending_tap = None;
                 let ended = self.interaction.pointer_up();
                 self.apply(ended);
                 let handled = self.mixer.context_click(&self.hits, cx, cy);
@@ -730,7 +754,7 @@ impl UacContext {
         };
         let acted = !actions.is_empty();
         self.apply(actions);
-        i32::from(on_control || self.interaction.is_dragging() || acted)
+        i32::from(on_control || self.interaction.is_dragging() || self.pending_tap.is_some() || acted)
     }
 
     /// Wheel / trackpad scroll in view points (AppKit's `scrollingDelta`: positive reveals
@@ -1446,11 +1470,20 @@ mod tests {
             assert_eq!(CStr::from_ptr(req.slot_path).to_bytes(), b"");
             assert!(!uac_take_plugin_request(ctx, &mut req));
 
-            // Secondary click on an insert opens its context menu (a popover); Escape closes it.
+            // A tap released outside its control does nothing.
             let s = stats(ctx);
             let hit = c.hits.iter().find(|h| &*h.id.strip == "in1" && h.id.control == Control::Insert(0)).cloned().unwrap();
             let (x, y) = to_view(&s, hit.rect.x + 2.0, hit.rect.y + 2.0);
+            assert_eq!(uac_pointer(ctx, UAC_POINTER_DOWN, x, y, 0), 1);
+            assert!(uac_pointer(ctx, UAC_POINTER_UP, x, y - 200.0, 0) >= 0);
+            assert!(!uac_take_plugin_request(ctx, &mut req));
+
+            // A long press (DOWN, the recognizer's CANCEL, SECONDARY) on an insert opens its
+            // context menu (a popover) without opening the plug-in; Escape closes it.
+            assert_eq!(uac_pointer(ctx, UAC_POINTER_DOWN, x, y, 0), 1);
+            assert_eq!(uac_pointer(ctx, UAC_POINTER_CANCEL, x, y, 0), 1);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_SECONDARY, x, y, 0), 1);
+            assert!(!uac_take_plugin_request(ctx, &mut req));
             assert!(c.mixer.popover.is_some());
             assert_eq!(uac_key(ctx, UAC_KEY_ESCAPE), 1);
             assert!(c.mixer.popover.is_none());

@@ -151,7 +151,9 @@ int32_t uac_frame(UacContext *ctx);
  * the mixer's ViewState (navigator, browser, popovers, modifiers, then the model); drags off
  * controls pan a zoomed view; SECONDARY opens context menus. Returns 1 if it hit or is
  * driving a control, 0 if it panned the view or missed, or a negative error. Track one
- * touch; send CANCEL when a gesture recognizer takes over. A tap on a loaded insert queues a
+ * touch; send CANCEL when a gesture recognizer takes over. Tap-kind controls (inserts, menu
+ * items, browser rows) fire on UP inside them, so a long press (DOWN, CANCEL, SECONDARY)
+ * opens the context menu without opening the plug-in. A tap on a loaded insert queues a
  * plug-in request (uac_take_plugin_request). */
 int32_t uac_pointer(UacContext *ctx, int32_t kind, float x_pt, float y_pt, uint32_t flags);
 
