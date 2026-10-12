@@ -263,7 +263,7 @@ fn settings_tabs_combos_and_text_fields() {
     let mut view = ViewState::default();
     assert!(view.open_named("settings"));
     let (hits, _) = build(&assets, &model, &view);
-    for t in [SettingsTab::Hardware, SettingsTab::IoMatrix, SettingsTab::PlugIns, SettingsTab::Options, SettingsTab::Midi] {
+    for t in [SettingsTab::Hardware, SettingsTab::IoMatrix, SettingsTab::Options, SettingsTab::Midi, SettingsTab::Network] {
         assert!(find(&hits, "settings", &Control::SettingsTab(t)).is_some(), "tab {t:?}");
     }
     // SAMPLE RATE: open the dropdown, pick 96 kHz; the dropdown closes and the model follows.

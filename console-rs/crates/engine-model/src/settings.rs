@@ -48,7 +48,8 @@ impl PropertySource for EngineMixer {
                     let value = to_prop(&Value::from_json(o.get("value")?), integral)?;
                     let label = o.get("string").and_then(Json::as_str).map(str::to_owned).unwrap_or_else(|| value.display());
                     let enabled = o.get("enabled").and_then(Json::as_bool).unwrap_or(true);
-                    Some(Choice { value, label, enabled })
+                    let labeled = o.get("string").is_some();
+                    Some(Choice { value, label, enabled, labeled })
                 }
                 other => to_prop(&Value::from_json(other), integral).map(Choice::new),
             })
@@ -66,6 +67,11 @@ impl PropertySource for EngineMixer {
 
     fn readonly(&self, path: &str) -> bool {
         self.store.meta(path).is_some_and(|m| m.readonly)
+    }
+
+    fn default_value(&self, path: &str) -> Option<PropValue> {
+        let m = self.store.meta(path)?;
+        m.default.as_ref().and_then(|v| to_prop(v, m.is_integral()))
     }
 }
 
@@ -112,7 +118,9 @@ mod tests {
         let src = m.properties().expect("properties");
         let f = settings::fields(src, SettingsGroup::Hardware);
         let labels: Vec<&str> = f.iter().map(|f| f.label.as_str()).collect();
-        assert!(labels.starts_with(&["SAMPLE RATE", "CLOCK SOURCE", "BUFFER SIZE"]), "{labels:?}");
+        assert!(labels.starts_with(&["SAMPLE RATE", "CLOCK SOURCE"]), "{labels:?}");
+        // The Mac engine has no `/BufferSize`: no BUFFER SIZE, no PT MODE (capture s11).
+        assert!(!labels.contains(&"BUFFER SIZE") && !labels.contains(&"PT MODE"));
         // The rate combo carries the engine's labels ("48 kHz").
         let sr = &f[0];
         assert!(sr.value_text().ends_with("kHz"), "{}", sr.value_text());
@@ -131,7 +139,7 @@ mod tests {
         // Read-only store: the value moves locally (the writer suppresses the wire write).
         assert!(m.properties().unwrap().prop("/SampleRate").unwrap().same(&want));
         // Preferences stay in the client.
-        m.apply_setting("pref:modifiers_timeout", &SettingOp::Choose(1));
-        assert_eq!(m.properties().unwrap().prop("pref:modifiers_timeout").unwrap().as_str(), Some("5 SEC"));
+        m.apply_setting("pref:modifiers_timeout", &SettingOp::Text("10".into()));
+        assert_eq!(m.properties().unwrap().prop("pref:modifiers_timeout").unwrap().as_str(), Some("10"));
     }
 }

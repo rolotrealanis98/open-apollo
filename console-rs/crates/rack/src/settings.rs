@@ -99,15 +99,18 @@ pub struct Choice {
     pub value: PropValue,
     pub label: String,
     pub enabled: bool,
+    /// The engine gave the label (`values[].string`, e.g. "48 kHz"); Console shows other
+    /// string values in upper case ("Internal" → INTERNAL).
+    pub labeled: bool,
 }
 
 impl Choice {
     pub fn new(value: PropValue) -> Self {
         let label = value.display();
-        Self { value, label, enabled: true }
+        Self { value, label, enabled: true, labeled: false }
     }
     pub fn labeled(value: PropValue, label: impl Into<String>) -> Self {
-        Self { value, label: label.into(), enabled: true }
+        Self { value, label: label.into(), enabled: true, labeled: true }
     }
 }
 
@@ -129,6 +132,11 @@ pub trait PropertySource {
     }
     fn readonly(&self, _path: &str) -> bool {
         false
+    }
+    /// The property's factory value (`<property>/default`: `Name/default` is the channel's
+    /// default name).
+    fn default_value(&self, _path: &str) -> Option<PropValue> {
+        None
     }
 }
 
@@ -271,6 +279,8 @@ pub enum SettingsGroup {
     HeadphoneCorrection { device: u8, hp: u8 },
     /// DANTE DEVICES (read-only Dante identity of each Dante-capable device).
     Dante,
+    /// NETWORK: interface, Dante controller / patents / discovery (`Rack_NetworkSettings`).
+    Network,
 }
 
 /// How a field draws and edits.
@@ -288,6 +298,9 @@ pub enum FieldKind {
     Action(String),
     /// A static value.
     Readout(String),
+    /// A segmented slider (CHANNEL DSP PAIRING): `segments` cells, `lit` of them lit, with
+    /// the numbers on both ends and their captions.
+    Slider { segments: u8, lit: u8, left: String, right: String, left_label: String, right_label: String },
 }
 
 /// One labelled control of a settings group.
@@ -300,24 +313,49 @@ pub struct SettingField {
     pub enabled: bool,
     /// Grid row in Console's layout (HARDWARE rows 0/1/2; CUE OUTPUTS: the cue).
     pub row: u8,
+    /// Cell width (`Rack_SilkScreen` box); 160 by default (I/O MATRIX: 90 / 210).
+    pub width: f32,
+    /// Explicit cell offset in the grid (MIDI's second row starts in the second column).
+    pub at: Option<(f32, f32)>,
+    /// A second control in the same cell, right of the first (I/O PRESETS › SAVE, TAP TEMPO
+    /// EVENT › note number, DEVICE NAME › IDENTIFY).
+    pub inline: Option<Box<SettingField>>,
+    /// Text the control shows instead of the selected option (# INPUTS shows the live count).
+    pub display: Option<String>,
 }
 
 impl SettingField {
     fn new(key: impl Into<Arc<str>>, label: impl Into<String>, kind: FieldKind, row: u8) -> Self {
-        Self { key: key.into(), label: label.into(), kind, enabled: true, row }
+        Self { key: key.into(), label: label.into(), kind, enabled: true, row, width: 160.0, at: None, inline: None, display: None }
     }
     fn disabled(mut self, off: bool) -> Self {
         self.enabled = !off;
         self
     }
+    fn width(mut self, w: f32) -> Self {
+        self.width = w;
+        self
+    }
+    fn at(mut self, x: f32, y: f32) -> Self {
+        self.at = Some((x, y));
+        self
+    }
+    fn with_inline(mut self, f: SettingField) -> Self {
+        self.inline = Some(Box::new(f));
+        self
+    }
     /// The selected option's label (choices), or the text / readout.
     pub fn value_text(&self) -> String {
+        if let Some(d) = &self.display {
+            return d.clone();
+        }
         match &self.kind {
             FieldKind::Choice { options, selected, .. } => selected.and_then(|i| options.get(i)).cloned().unwrap_or_default(),
             FieldKind::Toggle { on } => if *on { "ON" } else { "OFF" }.into(),
             FieldKind::Text(t) | FieldKind::Readout(t) => t.clone(),
             FieldKind::Button => self.label.clone(),
             FieldKind::Action(b) => b.clone(),
+            FieldKind::Slider { left, .. } => left.clone(),
         }
     }
 }
@@ -354,6 +392,8 @@ pub struct IoRoute {
     /// `ChannelIndex` (1-based driver channel).
     pub channel: i64,
     pub name: String,
+    /// The driver channel's own name (`Name/default`: "MIC/LINE/HIZ 1", "VIRTUAL 1").
+    pub default_name: String,
     /// `IOType` (`MicLineHiZ`, `CtrlRoom`, …).
     pub io_type: String,
     pub active: bool,
@@ -368,13 +408,15 @@ pub struct Prefs(pub BTreeMap<String, PropValue>);
 impl Default for Prefs {
     fn default() -> Self {
         let mut m = BTreeMap::new();
-        m.insert("modifiers_timeout".into(), PropValue::Str("NONE".into()));
-        m.insert("language".into(), PropValue::Str("English".into()));
+        // Seconds a navigator modifier stays armed (OPTIONS › MODIFIERS TIMEOUT, a text field).
+        m.insert("modifiers_timeout".into(), PropValue::Str("6".into()));
         m.insert("monitor_level_display".into(), PropValue::Str("dB".into()));
-        m.insert("tap_tempo_channel".into(), PropValue::Str("OMNI".into()));
-        m.insert("tap_tempo_event".into(), PropValue::Str("NONE".into()));
-        m.insert("scenes_channel".into(), PropValue::Str("OMNI".into()));
-        m.insert("scenes_event".into(), PropValue::Str("NONE".into()));
+        m.insert("tap_tempo_channel".into(), PropValue::Str("1".into()));
+        m.insert("tap_tempo_event".into(), PropValue::Str("NOTE".into()));
+        m.insert("tap_tempo_number".into(), PropValue::Str("64".into()));
+        m.insert("scenes_channel".into(), PropValue::Str("1".into()));
+        m.insert("scenes_event".into(), PropValue::Str("PROGRAM CHANGE".into()));
+        m.insert("network_interface".into(), PropValue::Str(String::new()));
         m.insert("short_names".into(), PropValue::Bool(false));
         Self(m)
     }
@@ -391,13 +433,11 @@ impl Prefs {
     pub fn choices(name: &str) -> Vec<Choice> {
         let s = |v: &str| Choice::new(PropValue::Str(v.into()));
         match name {
-            // `Rack_DisplaySettings` MODIFIERS TIMEOUT (seconds a navigator modifier stays armed).
-            "modifiers_timeout" => ["NONE", "5 SEC", "10 SEC", "30 SEC", "60 SEC"].iter().map(|v| s(v)).collect(),
-            "language" => vec![s("English")],
             // `Rack_SpeakerUtilities` MONITOR LEVEL DISPLAY.
             "monitor_level_display" => vec![s("dB"), s("dB SPL")],
-            "tap_tempo_channel" | "scenes_channel" => std::iter::once("OMNI".to_string()).chain((1..=16).map(|c| c.to_string())).map(|v| Choice::new(PropValue::Str(v))).collect(),
-            "tap_tempo_event" | "scenes_event" => vec![s("NONE"), s("NOTE"), s("CC"), s("PROGRAM CHANGE")],
+            // MIDI event types (1.3.1 captures s27 / s28).
+            "tap_tempo_event" => vec![s("NOTE"), s("CONTROLLER")],
+            "scenes_event" => vec![s("PROGRAM CHANGE"), s("NOTE")],
             _ => Vec::new(),
         }
     }
@@ -431,13 +471,22 @@ pub fn monitor_output(src: &dyn PropertySource, dev: &str) -> Option<String> {
     outputs_of(src, dev, "Monitor").into_iter().next()
 }
 
-/// A choice field from the engine enum at `path` (labels from `values[].string`).
+/// A choice field from the engine enum at `path`: labels from `values[].string`, other string
+/// values upper-cased as Console shows them (INTERNAL, LONG, LINEAR).
 fn engine_choice(src: &dyn PropertySource, path: &str, label: &str, row: u8) -> Option<SettingField> {
+    engine_choice_with(src, path, label, row, true, |_| true)
+}
+
+fn engine_choice_with(src: &dyn PropertySource, path: &str, label: &str, row: u8, upper: bool, keep: impl Fn(&Choice) -> bool) -> Option<SettingField> {
     let cur = src.prop(path)?;
-    let choices = src.choices(path);
+    let choices: Vec<Choice> = src.choices(path).into_iter().filter(|c| keep(c)).collect();
     let selected = choices.iter().position(|c| c.value.same(&cur));
-    let (options, enabled) = choices.iter().map(|c| (c.label.clone(), c.enabled)).unzip();
-    Some(SettingField::new(path, label, FieldKind::Choice { options, enabled, selected }, row).disabled(src.readonly(path)))
+    let (options, enabled) = choices.iter().map(|c| (if upper && !c.labeled { c.label.to_uppercase() } else { c.label.clone() }, c.enabled)).unzip();
+    let mut f = SettingField::new(path, label, FieldKind::Choice { options, enabled, selected }, row).disabled(src.readonly(path));
+    if selected.is_none() {
+        f.display = Some(if upper { cur.display().to_uppercase() } else { cur.display() });
+    }
+    Some(f)
 }
 
 /// A bool property shown as Console's OFF/ON combo (DIGITAL MIRROR, PT MODE).
@@ -474,16 +523,26 @@ fn map_table(name: &str) -> Vec<(&'static str, PropValue)> {
         "dante_latency" => vec![("Manual", PropValue::Int(0)), ("1 msec", PropValue::Int(1000)), ("2 msec", PropValue::Int(2000)), ("5 msec", PropValue::Int(5000))],
         // DISPLAY › METERING (`PostFaderMetering`).
         "metering" => vec![("PRE-FADER", PropValue::Bool(false)), ("POST-FADER", PropValue::Bool(true))],
-        // Line output / MON reference level (`Pad`: -10 dBV consumer level). [I]
-        "ref_level" => vec![("+4 dBu", PropValue::Bool(false)), ("-10 dBV", PropValue::Bool(true))],
-        // I/O MATRIX › MODE (`IOMapUsingDefault`). [I]
-        "io_mode" => vec![("DEFAULT", PropValue::Bool(true)), ("CUSTOM", PropValue::Bool(false))],
+        // OUTPUT REFERENCE LEVELS (`Pad`: the −10 dBV consumer level); Rack's order
+        // (0x180e5a9d0, capture s24). [I] Pad ↔ −10 dBV.
+        "ref_level" => vec![("-10 dBV", PropValue::Bool(true)), ("+4 dBu", PropValue::Bool(false))],
+        // MON LEVEL (monitor output `Pad`): "14 dBu" / "20 dBu" (0x180e5a9d0). [I] Pad ↔ 14 dBu.
+        "mon_level" => vec![("14 dBu", PropValue::Bool(true)), ("20 dBu", PropValue::Bool(false))],
+        // I/O MATRIX › MODE (`IOMapUsingDefault`; capture s39). [I] the binding.
+        "io_mode" => vec![("Default", PropValue::Bool(true)), ("Custom", PropValue::Bool(false))],
+        // I/O MATRIX › # INPUTS / # OUTPUTS (captures s36 / s37). [I] the binding.
+        "io_count" => vec![("8", PropValue::Int(8)), ("16", PropValue::Int(16)), ("32", PropValue::Int(32)), ("64 (PT Mode)", PropValue::Int(64)), ("128", PropValue::Int(128))],
         // CUE OUTPUTS SOURCE (`MixInSource`): MIX = the cue's own mix, MON = the monitor mix.
         "cue_source" => vec![("MIX", PropValue::Str("cue".into())), ("MON", PropValue::Str("mon".into()))],
         // MONITOR CONTROLLER MON OUTPUT GAIN (`ControlRoomPGABypass`). [I]
         "pga_bypass" => vec![("VARIABLE", PropValue::Bool(false)), ("FIXED", PropValue::Bool(true))],
         _ => Vec::new(),
     }
+}
+
+fn pref_text(src: &dyn PropertySource, name: &str, label: &str, row: u8) -> SettingField {
+    let cur = src.prop(&format!("pref:{name}")).map(|v| v.display()).unwrap_or_default();
+    SettingField::new(format!("pref:{name}"), label, FieldKind::Text(cur), row)
 }
 
 fn pref_choice(src: &dyn PropertySource, name: &str, label: &str, row: u8) -> SettingField {
@@ -504,20 +563,18 @@ fn supports_headroom(type_id: &str) -> bool {
 
 /// The tabs Console shows for this engine (`Rack_SettingsHeader::UpdateTabs`, Apollo type).
 pub fn tabs(src: &dyn PropertySource) -> Vec<SettingsTab> {
-    let devs = device_paths(src);
+    // Console 1.3.1 on an Apollo (captures s11…s17): HARDWARE, I/O MATRIX, OPTIONS, MIDI,
+    // NETWORK. PLUG-INS, CONTROLLERS and DANTE DEVICES are LUNA's.
     let mut t = vec![SettingsTab::Hardware];
     // I/O MATRIX when the mixer supports I/O mapping (`IOMapPreset`).
     if src.prop("/IOMapPreset").is_some() || src.prop("/TotalDriverInputRoutes").is_some() {
         t.push(SettingsTab::IoMatrix);
     }
-    t.push(SettingsTab::PlugIns);
     t.push(SettingsTab::Options);
     if src.prop("/MidiInputDevice").is_some() {
         t.push(SettingsTab::Midi);
     }
-    if devs.iter().any(|d| bool_at(src, &format!("{d}/SupportsDante")) == Some(true)) {
-        t.push(SettingsTab::DanteDevices);
-    }
+    t.push(SettingsTab::Network);
     t
 }
 
@@ -555,6 +612,7 @@ pub fn io_routes(src: &dyn PropertySource, outputs: bool) -> Vec<IoRoute> {
                 index: i,
                 channel: src.prop(&format!("{p}/ChannelIndex")).and_then(|v| v.as_i64()).unwrap_or(i as i64 + 1),
                 name: str_at(src, &format!("{p}/Name")).unwrap_or_default(),
+                default_name: src.default_value(&format!("{p}/Name")).map(|v| v.display()).or_else(|| str_at(src, &format!("{p}/Name"))).unwrap_or_default(),
                 io_type: str_at(src, &format!("{p}/IOType")).unwrap_or_default(),
                 active: bool_at(src, &format!("{p}/Active")).unwrap_or(true),
             }
@@ -578,12 +636,16 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
     match group {
         SettingsGroup::Hardware => {
             let any = |prop: &str| devs.iter().any(|d| bool_at(src, &format!("{d}/{prop}")) == Some(true));
+            // Windows engines carry `/BufferSize`; the Mac 1.3.1 window (capture s11) shows
+            // neither BUFFER SIZE nor PT MODE. [I] PT MODE follows `/BufferSize`.
+            let windows = src.prop("/BufferSize").is_some();
             // Row 0 (y 10): SAMPLE RATE, CLOCK SOURCE, BUFFER SIZE, USB SAFEGUARD, DIGITAL
             // MIRROR, DANTE LATENCY CONTROL.
             f.extend(engine_choice(src, "/SampleRate", "SAMPLE RATE", 0));
             f.extend(engine_choice(src, "/ClockSource", "CLOCK SOURCE", 0));
-            // BUFFER SIZE is placed unconditionally; the Mac engine has no `/BufferSize`.
-            f.push(engine_choice(src, "/BufferSize", "BUFFER SIZE", 0).unwrap_or_else(|| SettingField::new("/BufferSize", "BUFFER SIZE", FieldKind::Choice { options: Vec::new(), enabled: Vec::new(), selected: None }, 0).disabled(true)));
+            if windows {
+                f.extend(engine_choice(src, "/BufferSize", "BUFFER SIZE", 0));
+            }
             f.extend(engine_choice(src, "/USBStreamingMode", "USB SAFEGUARD", 0));
             if let Some(mon) = devs.iter().find_map(|d| monitor_output(src, d)) {
                 if bool_at(src, &format!("{mon}/DigitalMirrorAvailable")) == Some(true) {
@@ -595,13 +657,16 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             }
             // Row 1 (y 78): INPUT DELAY COMPENSATION, PT MODE, CUE BUS COUNT, ALT COUNT, FCN.
             f.extend(engine_choice(src, "/MaxDelayComp", "INPUT DELAY COMPENSATION", 1));
-            f.extend(bool_choice(src, "/PTMode", "PT MODE", ["OFF", "ON"], 1));
-            f.extend(engine_choice(src, "/CueBusCount", "CUE BUS COUNT", 1));
+            if windows {
+                f.extend(bool_choice(src, "/PTMode", "PT MODE", ["OFF", "ON"], 1));
+            }
+            // CUE BUS COUNT offers 2…4 (capture s20).
+            f.extend(engine_choice_with(src, "/CueBusCount", "CUE BUS COUNT", 1, true, |c| c.value.as_i64().is_some_and(|n| n >= 2)));
             let max_alt = devs.iter().filter_map(|d| src.prop(&format!("{d}/MaxAltMons")).and_then(|v| v.as_i64())).max().unwrap_or(0);
             if max_alt > 0 {
                 if let Some(d) = devs.first() {
                     let n = alt_count(src, d);
-                    let options: Vec<String> = (0..=max_alt).map(|k| if k == 0 { "NONE".to_string() } else { k.to_string() }).collect();
+                    let options: Vec<String> = (0..=max_alt).map(|k| k.to_string()).collect();
                     let enabled = vec![true; options.len()];
                     f.push(SettingField::new(format!("alt:{d}"), "ALT COUNT", FieldKind::Choice { options, enabled, selected: Some(n.min(max_alt as usize)) }, 1));
                 }
@@ -615,7 +680,9 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
                 f.extend(mapped(src, "headroom", "/Enable24dBMode", "HEADROOM", 2));
             }
             for d in &devs {
-                f.extend(engine_choice(src, &format!("{d}/SurroundMonitorMode"), "MONITOR MODE", 2));
+                if any("SupportsBassManagement") && str_at(src, &format!("{d}/DeviceTypeID")).is_some_and(|t| t.contains("x16") || t.contains("x8")) {
+                    f.extend(engine_choice(src, &format!("{d}/SurroundMonitorMode"), "MONITOR MODE", 2));
+                }
             }
             let madi = ["/inputroutes", "/outputroutes"].iter().any(|n| src.indices(n).into_iter().any(|i| str_at(src, &format!("{n}/{i}/IOType")).as_deref() == Some("MADI")));
             if madi {
@@ -623,102 +690,123 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             }
         }
         SettingsGroup::Device(d) => {
+            // `Rack_DeviceOptions` (layout: 0x180e5c400). Rows: 0 name, 1 digital / MON LEVEL,
+            // 2 OUTPUT REFERENCE LEVELS, 3 LINE INPUT GAIN, 4 CHANNEL DSP PAIRING, 5 Dante.
             let p = dev(d);
             if src.prop(&format!("{p}/DeviceName")).is_none() {
                 return f;
             }
             let name = str_at(src, &format!("{p}/DeviceName")).unwrap_or_default();
-            f.push(SettingField::new(format!("{p}/DeviceName"), "DEVICE NAME", FieldKind::Text(name), 0));
-            f.push(SettingField::new(format!("post:Identify:{p}"), "IDENTIFY", FieldKind::Button, 0));
             let online = bool_at(src, &format!("{p}/DeviceOnline")).unwrap_or(true);
-            // REMOVE takes an offline unit out of the session.
-            f.push(SettingField::new(format!("post:RemoveDevice:{p}"), "REMOVE", FieldKind::Button, 0).disabled(online));
+            // IDENTIFY for a connected unit, REMOVE for an offline one.
+            let button = if online {
+                SettingField::new(format!("post:Identify:{p}"), "IDENTIFY", FieldKind::Button, 0)
+            } else {
+                SettingField::new(format!("post:RemoveDevice:{p}"), "REMOVE", FieldKind::Button, 0)
+            };
+            f.push(SettingField::new(format!("{p}/DeviceName"), "DEVICE NAME", FieldKind::Text(name), 0).with_inline(button));
             f.extend(engine_choice(src, &format!("{p}/TOSLink"), "DIGITAL INPUT", 1));
             f.extend(engine_choice(src, &format!("{p}/TOSLinkOutput"), "DIGITAL OUTPUT", 1));
-            // OUTPUT REFERENCE LEVELS: line outputs with a `Pad` (−10 dBV) switch. [I]
-            for o in outputs_of(src, &p, "Line") {
-                if src.prop(&format!("{o}/Pad")).is_some() {
-                    let label = str_at(src, &format!("{o}/Name")).unwrap_or_default();
-                    f.extend(mapped(src, "ref_level", &format!("{o}/Pad"), &label, 2));
-                }
-            }
             if let Some(mon) = monitor_output(src, &p) {
                 if src.prop(&format!("{mon}/Pad")).is_some() {
-                    f.extend(mapped(src, "ref_level", &format!("{mon}/Pad"), "MON LEVEL", 3));
+                    f.extend(mapped(src, "mon_level", &format!("{mon}/Pad"), "MON LEVEL", 1));
                 }
-                if src.prop(&format!("{mon}/ControlRoomPGABypass")).is_some() {
-                    f.extend(mapped(src, "pga_bypass", &format!("{mon}/ControlRoomPGABypass"), "MON OUTPUT GAIN", 3));
-                }
+            }
+            // OUTPUT REFERENCE LEVELS, one combo per line-output pair ("1-2", "3-4").
+            let lines: Vec<String> = outputs_of(src, &p, "Line").into_iter().filter(|o| src.prop(&format!("{o}/Pad")).is_some()).collect();
+            for (k, pair) in lines.chunks(2).enumerate() {
+                let label = format!("{}-{}", 2 * k + 1, 2 * k + 2);
+                let cur = src.prop(&format!("{}/Pad", pair[0]));
+                let table = map_table("ref_level");
+                let selected = cur.and_then(|c| table.iter().position(|(_, v)| v.same(&c)));
+                let options: Vec<String> = table.iter().map(|(l, _)| l.to_string()).collect();
+                let paths: Vec<String> = pair.iter().map(|o| format!("{o}/Pad")).collect();
+                f.push(SettingField::new(format!("pair:ref_level:{}", paths.join(",")), label, FieldKind::Choice { enabled: vec![true; options.len()], options, selected }, 2));
             }
             // LINE INPUT GAIN: line inputs (no preamp) with a `Pad`. [I]
             for i in src.indices(&format!("{p}/inputs")) {
                 let ip = format!("{p}/inputs/{i}");
                 if str_at(src, &format!("{ip}/IOType")).as_deref() == Some("Line") && src.prop(&format!("{ip}/Pad")).is_some() {
-                    let label = format!("LINE INPUT GAIN {}", str_at(src, &format!("{ip}/Name")).unwrap_or_default());
+                    let label = str_at(src, &format!("{ip}/Name")).unwrap_or_default();
                     f.extend(mapped(src, "ref_level", &format!("{ip}/Pad"), &label, 3));
                 }
             }
-            // CHANNEL DSP PAIRING (`DSPSpanning`, pairs `ActiveSpans`/`MaxSpans`).
-            if let Some(on) = bool_at(src, &format!("{p}/DSPSpanning")) {
-                f.push(SettingField::new(format!("toggle:{p}/DSPSpanning"), "CHANNEL DSP PAIRING", FieldKind::Toggle { on }, 4));
-                let spans = src.prop(&format!("{p}/ActiveSpans")).and_then(|v| v.as_i64()).unwrap_or(0);
-                let max = src.prop(&format!("{p}/MaxSpans")).and_then(|v| v.as_i64()).unwrap_or(0);
-                f.push(SettingField::new(format!("{p}/ActiveSpans"), "DSP PAIRS", FieldKind::Readout(format!("{spans} / {max}")), 4));
+            // CHANNEL DSP PAIRING: DSP PAIRS ↔ VIRTUAL CHANNELS (`MaxSpans`, `ActiveSpans`).
+            // [I] left = MaxSpans − ActiveSpans, right = ActiveSpans; one cell per position.
+            if bool_at(src, &format!("{p}/DSPSpanning")).is_some() {
+                let spans = src.prop(&format!("{p}/ActiveSpans")).and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+                let max = src.prop(&format!("{p}/MaxSpans")).and_then(|v| v.as_i64()).unwrap_or(4).max(1);
+                f.push(SettingField::new(
+                    format!("{p}/ActiveSpans"),
+                    "CHANNEL DSP PAIRING",
+                    FieldKind::Slider { segments: (max + 1) as u8, lit: spans.min(max) as u8, left: (max - spans.min(max)).to_string(), right: spans.to_string(), left_label: "DSP PAIRS".into(), right_label: "VIRTUAL CHANNELS".into() },
+                    4,
+                ));
             }
             if bool_at(src, &format!("{p}/SupportsDante")) == Some(true) {
                 let dn = str_at(src, &format!("{p}/DanteDeviceName")).unwrap_or_default();
                 f.push(SettingField::new(format!("{p}/DanteDeviceName"), "DANTE DEVICE NAME", FieldKind::Readout(dn), 5));
-                f.push(SettingField::new("launch:dante_controller", "DANTE ROUTING (DANTE CONTROLLER)", FieldKind::Action("LAUNCH".into()), 5));
             }
         }
         SettingsGroup::IoMatrix => {
-            f.extend(mapped(src, "io_mode", "/IOMapUsingDefault", "MODE", 0));
-            if let Some(mut preset) = engine_choice(src, "/IOMapPreset", "I/O PRESETS", 0) {
-                if let FieldKind::Choice { selected: None, options, enabled } = &mut preset.kind {
-                    // An unsaved map (`IOMapPresetDirty`): Console shows "<Empty>" / no item.
-                    options.insert(0, "<Empty>".into());
-                    enabled.insert(0, false);
-                    preset.kind = FieldKind::Choice { options: options.clone(), enabled: enabled.clone(), selected: Some(0) };
-                    preset.key = "iopreset:/IOMapPreset".into();
-                } else {
-                    preset.key = "iopreset:/IOMapPreset".into();
+            // `Rack_ApolloIOMatrixSettings` (capture s12): MODE 90, I/O PRESETS 210 (+ SAVE),
+            // # INPUTS 90, # OUTPUTS 90, EDIT 90 (CASCADE).
+            f.extend(mapped(src, "io_mode", "/IOMapUsingDefault", "MODE", 0).map(|x| x.width(90.0)));
+            if let Some(mut preset) = engine_choice_with(src, "/IOMapPreset", "I/O PRESETS", 0, false, |_| true) {
+                preset.key = "iopreset:/IOMapPreset".into();
+                if str_at(src, "/IOMapPreset").is_none_or(|v| v.is_empty()) {
+                    preset.display = Some("Automatic".into());
                 }
-                f.push(preset);
+                let name = str_at(src, "/IOMapPreset").filter(|s| !s.is_empty()).unwrap_or_else(|| "Custom".into());
+                f.push(preset.width(210.0).with_inline(SettingField::new(format!("post:SaveIOMapPreset:{name}"), "SAVE", FieldKind::Button, 0)));
             }
-            let name = str_at(src, "/IOMapPreset").filter(|s| !s.is_empty()).unwrap_or_else(|| "Custom".into());
-            f.push(SettingField::new(format!("post:SaveIOMapPreset:{name}"), "SAVE", FieldKind::Button, 0));
-            let n = |p: &str| src.prop(p).and_then(|v| v.as_i64()).map(|v| v.to_string()).unwrap_or_else(|| "—".into());
-            f.push(SettingField::new("/TotalDriverInputRoutes", "# INPUTS", FieldKind::Readout(n("/TotalDriverInputRoutes")), 0));
-            f.push(SettingField::new("/TotalDriverOutputRoutes", "# OUTPUTS", FieldKind::Readout(n("/TotalDriverOutputRoutes")), 0));
+            for (path, label) in [("/TotalDriverInputRoutes", "# INPUTS"), ("/TotalDriverOutputRoutes", "# OUTPUTS")] {
+                if let Some(mut c) = mapped(src, "io_count", path, label, 0) {
+                    c.display = src.prop(path).map(|v| v.display());
+                    f.push(c.width(90.0));
+                }
+            }
+            f.push(SettingField::new("launch:io_cascade", "EDIT", FieldKind::Action("CASCADE".into()), 0).width(90.0));
         }
         SettingsGroup::Display => {
+            // `Rack_DisplaySettings` (capture s15).
             f.extend(mapped(src, "metering", "/PostFaderMetering", "METERING", 0));
             f.extend(engine_choice(src, "/ClipHold", "CLIP HOLD", 0));
             f.extend(engine_choice(src, "/PeakHold", "PEAK HOLD", 0));
-            f.push(pref_choice(src, "modifiers_timeout", "MODIFIERS TIMEOUT", 0));
-            f.push(pref_choice(src, "language", "LANGUAGE", 1));
-            f.push(SettingField::new("pref-reset:dont_show_again", "\"DON'T SHOW AGAIN\" DIALOGS", FieldKind::Action("RESET".into()), 1));
+            f.push(SettingField::new("pref-reset:dont_show_again", "\"DON'T SHOW AGAIN\" DIALOGS", FieldKind::Action("RESET".into()), 0));
+            f.push(pref_text(src, "modifiers_timeout", "MODIFIERS TIMEOUT", 1));
         }
         SettingsGroup::Editing => {
             f.extend(engine_choice(src, "/ControlsMode", "CONTROLS MODE", 0));
         }
         SettingsGroup::Midi => {
-            let mut dev = engine_choice(src, "/MidiInputDevice", "DEVICE", 0);
+            // `Rack_MIDISettings_Apollo` (capture s16): DEVICE; TAP TEMPO CHANNEL / EVENT (+ note
+            // number); PLUG-IN SCENES CHANNEL / EVENT under them.
+            let mut dev = engine_choice_with(src, "/MidiInputDevice", "DEVICE", 0, false, |_| true);
             if let Some(d) = &mut dev {
-                if let FieldKind::Choice { options, enabled, selected } = &mut d.kind {
-                    // An empty value is "no device".
-                    options.insert(0, "NONE".into());
-                    enabled.insert(0, true);
-                    let none = str_at(src, "/MidiInputDevice").is_none_or(|s| s.is_empty());
-                    *selected = if none { Some(0) } else { selected.map(|i| i + 1) };
-                }
                 d.key = "midi:/MidiInputDevice".into();
+                if str_at(src, "/MidiInputDevice").is_none_or(|s| s.is_empty()) {
+                    d.display = Some(String::new());
+                }
             }
-            f.extend(dev);
-            f.push(pref_choice(src, "tap_tempo_channel", "TAP TEMPO CHANNEL", 1));
-            f.push(pref_choice(src, "tap_tempo_event", "TAP TEMPO EVENT", 1));
-            f.push(pref_choice(src, "scenes_channel", "PLUG-IN SCENES CHANNEL", 2));
-            f.push(pref_choice(src, "scenes_event", "PLUG-IN SCENES EVENT", 2));
+            f.extend(dev.map(|d| d.at(0.0, 0.0)));
+            f.push(pref_text(src, "tap_tempo_channel", "TAP TEMPO CHANNEL", 0).at(170.0, 0.0));
+            let number = pref_text(src, "tap_tempo_number", "", 0);
+            f.push(pref_choice(src, "tap_tempo_event", "TAP TEMPO EVENT", 0).at(340.0, 0.0).with_inline(number));
+            f.push(pref_text(src, "scenes_channel", "PLUG-IN SCENES CHANNEL", 1).at(170.0, 68.0));
+            f.push(pref_choice(src, "scenes_event", "PLUG-IN SCENES EVENT", 1).at(340.0, 68.0));
+        }
+        SettingsGroup::Network => {
+            // `Rack_NetworkSettings` / Dante (capture s17).
+            let cur = src.prop("pref:network_interface").map(|v| v.display()).unwrap_or_default();
+            let mut nic = pref_choice(src, "network_interface", "NETWORK INTERFACE", 0);
+            if !cur.is_empty() {
+                nic.display = Some(cur);
+            }
+            f.push(nic);
+            f.push(SettingField::new("launch:dante_controller", "DANTE CONTROLLER", FieldKind::Action("LAUNCH".into()), 0));
+            f.push(SettingField::new("launch:dante_patents", "DANTE PATENT INFORMATION", FieldKind::Action("MORE INFO".into()), 0));
+            f.push(SettingField::new("launch:dante_discovery", "DANTE DISCOVERY", FieldKind::Action("REFRESH".into()), 0));
         }
         SettingsGroup::PlugIns => {
             let plugins = src.indices("/plugins");
@@ -869,13 +957,7 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             let pairs: Vec<Vec<String>> = alt_capable(src, rest).chunks(2).map(|c| c.to_vec()).collect();
             pairs.iter().enumerate().flat_map(|(k, pair)| pair.iter().map(move |o| Write::Set(format!("{o}/AltMonEnabled"), PropValue::Bool(k < *n)))).collect()
         }
-        ("iopreset", SettingOp::Choose(i)) => {
-            // Item 0 is "<Empty>" when the current map is unsaved.
-            let choices = src.choices(rest);
-            let unsaved = !choices.iter().any(|c| src.prop(rest).is_some_and(|cur| c.value.same(&cur)));
-            let k = if unsaved { i.checked_sub(1) } else { Some(*i) };
-            k.and_then(|k| choices.get(k)).map(|c| set(rest, c.value.clone())).unwrap_or_default()
-        }
+        ("iopreset", SettingOp::Choose(i)) => src.choices(rest).get(*i).map(|c| set(rest, c.value.clone())).unwrap_or_default(),
         ("midi", SettingOp::Choose(i)) => {
             if *i == 0 {
                 set(rest, PropValue::Str(String::new()))
@@ -884,6 +966,12 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             }
         }
         ("pref", SettingOp::Choose(i)) => Prefs::choices(rest).get(*i).map(|c| vec![Write::Pref(rest.to_string(), c.value.clone())]).unwrap_or_default(),
+        ("pref", SettingOp::Text(t)) => vec![Write::Pref(rest.to_string(), PropValue::Str(t.trim().to_string()))],
+        ("pair", SettingOp::Choose(i)) => {
+            // pair:<table>:<path>,<path>: the same value to every path.
+            let (name, paths) = rest.split_once(':').unwrap_or((rest, ""));
+            map_table(name).get(*i).map(|(_, v)| paths.split(',').filter(|p| !p.is_empty()).map(|p| Write::Set(p.to_string(), v.clone())).collect()).unwrap_or_default()
+        }
         ("pref-toggle", SettingOp::Press) => {
             let on = bool_at(src, &format!("pref:{rest}")).unwrap_or(false);
             vec![Write::Pref(rest.to_string(), PropValue::Bool(!on))]
@@ -922,7 +1010,7 @@ fn json_str(s: &str) -> String {
 /// Finds a field by key among every group a settings page or panel can show (the text editor
 /// needs a field's current text from its key alone).
 pub fn find_field(src: &dyn PropertySource, key: &str) -> Option<SettingField> {
-    let mut groups = vec![SettingsGroup::Hardware, SettingsGroup::IoMatrix, SettingsGroup::Display, SettingsGroup::Editing, SettingsGroup::Midi, SettingsGroup::PlugIns, SettingsGroup::Dante];
+    let mut groups = vec![SettingsGroup::Hardware, SettingsGroup::IoMatrix, SettingsGroup::Display, SettingsGroup::Editing, SettingsGroup::Midi, SettingsGroup::PlugIns, SettingsGroup::Dante, SettingsGroup::Network];
     for d in src.indices("/devices").into_iter().map(|d| d as u8) {
         groups.extend([
             SettingsGroup::Device(d),
@@ -935,7 +1023,10 @@ pub fn find_field(src: &dyn PropertySource, key: &str) -> Option<SettingField> {
             SettingsGroup::HeadphoneCorrection { device: d, hp: 1 },
         ]);
     }
-    groups.into_iter().flat_map(|g| fields(src, g)).find(|f| &*f.key == key)
+    groups.into_iter().flat_map(|g| fields(src, g)).flat_map(|f| {
+        let inline = f.inline.as_deref().cloned();
+        std::iter::once(f).chain(inline)
+    }).find(|f| &*f.key == key)
 }
 
 // ---- In-memory properties (preview model, tests) ----
@@ -1044,7 +1135,7 @@ impl MemoryProperties {
             m.insert(&format!("{o}/Pad"), B(false), Vec::new());
             m.insert(&format!("{o}/AltMonEnabled"), B(false), Vec::new());
         }
-        let dests: Vec<Choice> = ["None", "Line 1-2", "Line 3-4", "ADAT 1-2", "ADAT 3-4"].iter().enumerate().map(|(i, v)| Choice { value: S(v.to_string()), label: v.to_string(), enabled: i < 3 }).collect();
+        let dests: Vec<Choice> = ["None", "Line 1-2", "Line 3-4", "ADAT 1-2", "ADAT 3-4"].iter().enumerate().map(|(i, v)| Choice { value: S(v.to_string()), label: v.to_string(), enabled: i < 3, labeled: false }).collect();
         for (k, n) in [14, 15, 16, 17].iter().enumerate() {
             let o = format!("/devices/0/outputs/{n}");
             m.insert(&format!("{o}/Name"), S(format!("CUE {}", k + 1)), Vec::new());
@@ -1132,14 +1223,20 @@ mod tests {
     fn hardware_fields_follow_console_for_an_x4() {
         let m = MemoryProperties::demo_x4();
         let f = fields(&m, SettingsGroup::Hardware);
-        // No USB SAFEGUARD (no `/USBStreamingMode`), no Dante, no HEADROOM (x4), no MADI.
-        assert_eq!(labels(&f), ["SAMPLE RATE", "CLOCK SOURCE", "BUFFER SIZE", "DIGITAL MIRROR", "INPUT DELAY COMPENSATION", "PT MODE", "CUE BUS COUNT", "ALT COUNT"]);
-        let sr = &f[0];
-        assert_eq!(sr.value_text(), "48 kHz");
-        assert!(!f[2].enabled, "BUFFER SIZE without /BufferSize is disabled");
-        assert_eq!(f[3].value_text(), "OFF");
-        assert_eq!(f.iter().map(|f| f.row).collect::<Vec<_>>(), [0, 0, 0, 0, 1, 1, 1, 1]);
-        assert_eq!(tabs(&m), [SettingsTab::Hardware, SettingsTab::IoMatrix, SettingsTab::PlugIns, SettingsTab::Options, SettingsTab::Midi]);
+        // Capture s11 (Mac, Apollo x4): no BUFFER SIZE / PT MODE (no `/BufferSize`), no USB
+        // SAFEGUARD, Dante, HEADROOM or MADI.
+        assert_eq!(labels(&f), ["SAMPLE RATE", "CLOCK SOURCE", "DIGITAL MIRROR", "INPUT DELAY COMPENSATION", "CUE BUS COUNT", "ALT COUNT"]);
+        assert_eq!(f[0].value_text(), "48 kHz");
+        assert_eq!(f[1].value_text(), "INTERNAL");
+        assert_eq!(f[2].value_text(), "OFF");
+        assert_eq!(f[3].value_text(), "MEDIUM");
+        assert_eq!(f.iter().map(|f| f.row).collect::<Vec<_>>(), [0, 0, 0, 1, 1, 1]);
+        // CUE BUS COUNT offers 2…4, ALT COUNT 0…2 (captures s19 / s20).
+        let FieldKind::Choice { options, .. } = &f[4].kind else { panic!() };
+        assert_eq!(options, &["2", "3", "4"]);
+        let FieldKind::Choice { options, .. } = &f[5].kind else { panic!() };
+        assert_eq!(options, &["0", "1", "2"]);
+        assert_eq!(tabs(&m), [SettingsTab::Hardware, SettingsTab::IoMatrix, SettingsTab::Options, SettingsTab::Midi, SettingsTab::Network]);
     }
 
     #[test]
@@ -1170,12 +1267,12 @@ mod tests {
     #[test]
     fn preferences_live_in_the_client() {
         let mut m = MemoryProperties::demo_x4();
-        let w = resolve(&m, "pref:modifiers_timeout", &SettingOp::Choose(2));
-        assert_eq!(w, vec![Write::Pref("modifiers_timeout".into(), PropValue::Str("10 SEC".into()))]);
+        let w = resolve(&m, "pref:modifiers_timeout", &SettingOp::Text(" 10 ".into()));
+        assert_eq!(w, vec![Write::Pref("modifiers_timeout".into(), PropValue::Str("10".into()))]);
         m.apply(&w[0]);
         let f = fields(&m, SettingsGroup::Display);
-        assert_eq!(labels(&f), ["METERING", "CLIP HOLD", "PEAK HOLD", "MODIFIERS TIMEOUT", "LANGUAGE", "\"DON'T SHOW AGAIN\" DIALOGS"]);
-        assert_eq!(f[3].value_text(), "10 SEC");
+        assert_eq!(labels(&f), ["METERING", "CLIP HOLD", "PEAK HOLD", "\"DON'T SHOW AGAIN\" DIALOGS", "MODIFIERS TIMEOUT"]);
+        assert_eq!(f[4].value_text(), "10");
         assert_eq!(f[0].value_text(), "PRE-FADER");
     }
 
@@ -1192,10 +1289,15 @@ mod tests {
         assert_eq!(d.len(), 1);
         assert_eq!((d[0].letter(), d[0].icon_key().as_str()), ('A', "Device-Icon-Apollo-x4"));
         assert_eq!(io_routes(&m, true)[0].name, "MON L");
-        // I/O PRESETS with an unsaved map shows "<Empty>" first; item 1 is the first preset.
+        // I/O PRESETS without a preset shows "Automatic" (capture s12).
         let io = fields(&m, SettingsGroup::IoMatrix);
         let presets = io.iter().find(|f| f.label == "I/O PRESETS").unwrap();
-        assert_eq!(presets.value_text(), "<Empty>");
-        assert_eq!(resolve(&m, &presets.key, &SettingOp::Choose(1)), vec![Write::Set("/IOMapPreset".into(), PropValue::Str("Multi-A16 Legacy".into()))]);
+        assert_eq!(presets.value_text(), "Automatic");
+        assert_eq!(io.iter().map(|f| f.width).collect::<Vec<_>>(), [90.0, 210.0, 90.0, 90.0, 90.0]);
+        assert_eq!(io[2].value_text(), "22");
+        // OUTPUT REFERENCE LEVELS 1-2 writes both outputs of the pair.
+        let dev = fields(&m, SettingsGroup::Device(0));
+        let pair = dev.iter().find(|f| f.label == "1-2").unwrap();
+        assert_eq!(resolve(&m, &pair.key, &SettingOp::Choose(0)).len(), 2);
     }
 }
