@@ -9,3 +9,6 @@ repository.workspace = true
 [dependencies]
 rack = { version = "0.1.0", path = "../rack" }
 ua-engine = { version = "0.1.0", path = "../ua-engine" }
+
+[dev-dependencies]
+serde_json = "1"

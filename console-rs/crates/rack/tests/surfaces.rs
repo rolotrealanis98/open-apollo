@@ -23,10 +23,15 @@ const FIXTURE: &str = r#"{
 }"#;
 
 fn assets() -> Assets {
-    let dir = std::env::temp_dir().join(format!("rack-surfaces-fixture-{}", std::process::id()));
-    std::fs::create_dir_all(dir.join("appearance")).unwrap();
-    std::fs::write(dir.join("appearance/Appearance.json"), FIXTURE).unwrap();
-    let res = Resources::at(&PathBuf::from(&dir)).expect("fixture resources");
+    // Tests run in parallel threads: write the fixture once, then only read it.
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("rack-surfaces-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("appearance")).unwrap();
+        std::fs::write(dir.join("appearance/Appearance.json"), FIXTURE).unwrap();
+        dir
+    });
+    let res = Resources::at(dir).expect("fixture resources");
     Assets::load(res).expect("fixture appearance")
 }
 
@@ -160,4 +165,37 @@ fn session_navigator_scrolls_many_strips() {
     let (hits, _) = build(&assets, &model, &view);
     assert!(find(&hits, "x9", &Control::Name).is_some());
     assert!(find(&hits, "in0", &Control::Name).is_none());
+}
+
+/// Browser geometry of Console 1.3.1 (Rack_PluginsBrowser and friends; refpairs/p1): the
+/// browser starts below the 26 pt title bar.
+#[test]
+fn browser_matches_console_geometry() {
+    let assets = assets();
+    let model = PreviewMixer::default();
+    let view = ViewState::default();
+    let (hits, scrolls) = build(&assets, &model, &view);
+    let rect = |c: Control| {
+        let r = find(&hits, "browser", &c).unwrap_or_else(|| panic!("{c:?}")).rect;
+        (r.x, r.y, r.w, r.h)
+    };
+    use rack::surfaces::BrowserTab;
+    assert_eq!(rect(Control::BrowserTab(BrowserTab::Plugins)), (5.0, 32.0, 167.0, 26.0));
+    assert_eq!(rect(Control::BrowserTab(BrowserTab::Presets)), (172.0, 32.0, 168.0, 26.0));
+    assert_eq!(rect(Control::BrowserSearch), (5.0, 63.0, 335.0, 28.0));
+    // Category cells: (w − 5) / 3 − 4 wide, the last column to w − 6; 23 tall, 27 apart.
+    assert_eq!(rect(Control::BrowserCategory(0)), (10.0, 126.0, 106.0, 23.0));
+    assert_eq!(rect(Control::BrowserCategory(5)), (230.0, 153.0, 104.0, 23.0));
+    assert_eq!(rect(Control::BrowserCategory(9)), (10.0, 207.0, 106.0, 23.0));
+    assert_eq!(rect(Control::BrowserLargeRows), (7.0, 241.0, 24.0, 23.0));
+    assert_eq!(rect(Control::BrowserHintClose), (315.0, 271.0, 20.0, 20.0));
+    // List viewport below the hint, 5 pt inside the well; groups and 48 pt rows.
+    let list = scrolls.iter().find(|s| s.target == ScrollTarget::Browser).expect("list");
+    assert_eq!((list.rect.x, list.rect.y, list.rect.w, list.rect.h), (5.0, 330.0, 335.0, 670.0));
+    assert_eq!(rect(Control::BrowserGroupReveal), (5.0, 330.0, 317.0, 30.0));
+    let first = model.plugin_catalog().iter().position(|p| p.enabled).expect("an active plug-in");
+    assert_eq!(rect(Control::BrowserItem(first as u16)), (5.0, 360.0, 317.0, 48.0));
+    assert!(find(&hits, "browser", &Control::BrowserInactiveReveal).is_some());
+    let thumb = rect(Control::BrowserScroll);
+    assert_eq!((thumb.0, thumb.1, thumb.2), (322.0, 330.0, 18.0));
 }

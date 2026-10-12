@@ -446,3 +446,42 @@ fn surface_actions_move_local_values() {
     m.apply(&Action::Toggle(ControlId { strip: "settings".into(), control: Control::WritesEnabled }));
     assert!(m.engine_settings().writes_enabled);
 }
+
+/// `/plugins/P`: engine (numeric) order, every category, active vs. inactive and the badge of
+/// inactive entries.
+#[test]
+fn plugin_catalog_maps_licence_states() {
+    let plugin = |name: &str, cats: &str, auth: bool, demo_available: bool, extra: &str| {
+        format!(
+            r#"{{"properties":{{"Name":{{"type":"string","value":"{name}"}},"Categories":{{"type":"string","value":"{cats}"}},"Authorized":{{"type":"bool","value":{auth}}},"Demoing":{{"type":"bool","value":false}},"DemoAvailable":{{"type":"bool","value":{demo_available}}},"AuthHardware":{{"type":"bool","value":true}},"AuthUpdateRequired":{{"type":"bool","value":false}}{extra}}}}}"#
+        )
+    };
+    let mut entries = vec![
+        plugin("UAD A", "Delay,Modulation", true, false, ""),
+        plugin("UAD B", "Equalization", false, true, ""),
+        plugin("UAD C", "Equalization", false, false, ""),
+        plugin("UAD D", "Delay", false, true, r#","AuthUpdateRequired":{"type":"bool","value":true}"#),
+    ];
+    for i in entries.len()..11 {
+        entries.push(plugin(&format!("UAD P{i}"), "Delay", true, false, ""));
+    }
+    let children: Vec<String> = entries.iter().enumerate().map(|(i, e)| format!(r#""{i}":{e}"#)).collect();
+    let json = format!(
+        r#"{{"format":"consolelab-engine-snapshot","info":{{}},"tree":{{"children":{{"plugins":{{"children":{{{}}}}}}}}},"version":1}}"#,
+        children.join(",")
+    );
+    let path = std::env::temp_dir().join(format!("engine-model-catalog-{}.json", std::process::id()));
+    std::fs::write(&path, json).unwrap();
+    let m = EngineMixer::from_snapshot(&path).expect("snapshot");
+    std::fs::remove_file(&path).ok();
+    let cat = m.plugin_catalog();
+    let names: Vec<&str> = cat.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(&names[..5], ["UAD A", "UAD B", "UAD C", "UAD D", "UAD P4"]);
+    assert_eq!(names[10], "UAD P10");
+    assert_eq!(cat[0].categories, ["Delay", "Modulation"]);
+    assert!(cat[0].in_category("Modulation") && cat[0].enabled && cat[0].badge.is_none());
+    use rack::PluginBadge;
+    assert_eq!((cat[1].enabled, cat[1].badge), (false, Some(PluginBadge::Demo)));
+    assert_eq!((cat[2].enabled, cat[2].badge), (false, Some(PluginBadge::Buy)));
+    assert_eq!((cat[3].enabled, cat[3].badge), (false, Some(PluginBadge::Activate)));
+}

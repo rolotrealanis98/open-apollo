@@ -79,6 +79,8 @@ pub enum Control {
     BrowserLargeRows,
     BrowserHintClose,
     BrowserGroupReveal,
+    /// The "Universal Audio (Inactive)" group's reveal toggle.
+    BrowserInactiveReveal,
     /// [view] Browser scrollbar thumb (drag; value = 1 − scroll fraction).
     BrowserScroll,
     /// [view] Select a catalog entry (index into `plugin_catalog`); the next insert tap assigns it.
