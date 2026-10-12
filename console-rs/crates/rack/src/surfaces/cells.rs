@@ -102,12 +102,17 @@ fn small_slot(ui: &mut Ui, state: &InsertState, r: Rect, id: Option<ControlId>) 
     }
     match state {
         InsertState::Empty => {
-            let style = TextStyle { family: "Helvetica".into(), size: 12.0, bold: true, italic: false, color: Rgba::WHITE.with_alpha(0.3) };
-            ui.text("+", style, plate, Align::Center);
+            if let Some(plus) = ui.skin("inserts", "Small-Normal").and_then(|k| k.image("image-plus")) {
+                let plus = plus.to_string();
+                ui.image_centered(&plus, plate, 1.0);
+            }
         }
         InsertState::Loaded { name, power } => {
             let short = name.strip_prefix("UAD ").unwrap_or(name);
-            let style = TextStyle { family: "Helvetica".into(), size: 8.5, bold: false, italic: true, color: Rgba::WHITE.with_alpha(if *power { 0.85 } else { 0.4 }) };
+            let mut style = ui.style("inserts", "Small-Normal");
+            if !*power {
+                style.color.a *= 0.6;
+            }
             let inner = plate.inset(3.0, 0.0, 3.0, 0.0);
             let fits = short.chars().count() <= 15;
             ui.clip(Some(inner));
@@ -179,7 +184,7 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
     if let Some(c) = ui.skin("fonts", "Flex-Route-Value-Font").and_then(|k| k.color("color-text-off")) {
         label.color = c;
     }
-    ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 1.0), Align::Center);
+    ui.text(&send.name, label, Rect::new(plate.x, plate.y + 0.5, plate.w, plate.h - 0.5), Align::Center);
     ui.background("Send-Lower-State-Plate", Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, SEND_H - top - 1.0));
     let knob = Rect::new(7.0, sy + top - 4.0, 41.0, 49.0);
     ui.film("meters", "Knob-Meter", "image-film", 0.0, knob);

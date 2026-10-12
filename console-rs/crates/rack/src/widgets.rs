@@ -206,7 +206,8 @@ impl Ui<'_> {
             let mcolor = mskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::rgb8(93, 101, 105));
             let content = mskin.and_then(|s| s.rect("bounds-content")).unwrap_or(Rect::new(0.0, 14.0, 16.0, 372.0));
             let (top, bottom) = (g.left_meter.y + content.y / ART_SCALE, g.left_meter.max_y() - (392.0 - content.max_y()) / ART_SCALE);
-            let style = Ui::plain_style("Helvetica", 9.5, false, mcolor);
+            let mut style = ui.style("meters", "Mono-Input-Meter");
+            style.color = mcolor;
             let n = scales::METER_MARKS.len() as f32 - 1.0;
             let step = (bottom - top) / n;
             for (i, db) in scales::METER_MARKS.iter().enumerate() {
@@ -224,7 +225,8 @@ impl Ui<'_> {
             let fcolor = fskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::BLACK);
             let m = FaderMetrics::from_skin(fskin);
             let (t, b) = m.travel(g.fader.h);
-            let fstyle = Ui::plain_style("Helvetica", 9.5, false, fcolor);
+            let mut fstyle = ui.style("faders", fader_key);
+            fstyle.color = fcolor;
             for (label, db) in scales::FADER_MARKS {
                 let y = (g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32).floor();
                 ui.fill(Rect::new(g.fader_marks.x, y, 4.0, 1.0), fcolor);
