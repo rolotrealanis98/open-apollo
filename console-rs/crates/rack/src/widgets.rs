@@ -39,6 +39,10 @@ impl Ui<'_> {
                     let img = self.assets.images.get(&path)?;
                     Some(Insets::thirds(img.width, img.height))
                 });
+                // Corners larger than half the destination are cropped, not scaled: the 23-pt
+                // preamp gain display (display_bg1 thirds = 29 px a side) keeps its frame 2 pt
+                // inside, as in p1.
+                let slice = slice.map(|s| clamp_corners(s, dst));
                 self.image(&path, dst, slice, None, 1.0);
             }
         }
@@ -333,4 +337,13 @@ impl Ui<'_> {
 pub(crate) fn snap_centered(r: Rect, w: f32, h: f32) -> Rect {
     let snap = |v: f32| (v * 2.0).floor() / 2.0;
     Rect::new(snap(r.x + (r.w - w) / 2.0), snap(r.y + (r.h - h) / 2.0), w, h)
+}
+
+/// 9-slice insets (image px) limited to half the destination (pt × ART_SCALE) per axis.
+fn clamp_corners(s: Insets, dst: Rect) -> Insets {
+    let (hw, hh) = (dst.w * ART_SCALE / 2.0, dst.h * ART_SCALE / 2.0);
+    let fit = |a: f32, b: f32, half: f32| if a + b > 2.0 * half { (a.min(half), b.min(half)) } else { (a, b) };
+    let (l, r) = fit(s.l, s.r, hw);
+    let (t, b) = fit(s.t, s.b, hh);
+    Insets { l, t, r, b }
 }
