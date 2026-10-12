@@ -89,6 +89,25 @@ fn dialog_frame(ui: &mut Ui, r: Rect, title: &str, light: bool) -> Rect {
     body
 }
 
+/// `Rack_Popover::paint` 0x181164400 / `::resized` 0x1811647e0: `Popover-Header` over
+/// (0, 0, w, 27) and `Popover-Content` below it; the close X (`Popover-Close-Old`, 12 × 12)
+/// centred in (8, 1, 20, 27); the title (`Rack_CalloutBoxHeader`, `Button-Popover-Header`)
+/// centred in (0, 0, w, 26). Swallows taps on the body.
+fn popover_frame(ui: &mut Ui, r: Rect, title: &str) {
+    ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
+    ui.background("Popover-Header", Rect::new(r.x, r.y, r.w, 27.0));
+    ui.background("Popover-Content", Rect::new(r.x, r.y + 27.0, r.w, r.h - 27.0));
+    if !title.is_empty() {
+        let style = ui.style("views", "Button-Popover-Header");
+        ui.text(title, style, Rect::new(r.x, r.y, r.w, 26.0), Align::Center);
+    }
+    if let Some(x) = ui.skin("views", "Popover-Close-Old").and_then(|s| s.image("image")) {
+        let x = x.to_string();
+        ui.image(&x, Rect::new(r.x + 12.0, r.y + 8.5, 12.0, 12.0), None, None, 1.0);
+    }
+    ui.hit(Rect::new(r.x + 8.0, r.y + 1.0, 20.0, 27.0), sid(Control::PanelClose), HitKind::Tap);
+}
+
 /// A flat dialog button (CANCEL grey, ADD / OK blue); without an id it draws disabled.
 fn dialog_button(ui: &mut Ui, label: &str, primary: bool, r: Rect, id: Option<ControlId>) {
     ui.fill(r, if primary { BLUE } else { BUTTON_GREY });
@@ -555,60 +574,52 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
         }
         None => centred(bounds, size),
     };
-    let c = dialog_frame(ui, r, &title, false);
-    // ‹ › step through the auxes, or through the input strips (send-cell shows them on an
-    // input's window too).
+    popover_frame(ui, r, &title);
+    // Each channel (`Rack_SendChannelStrip`) at (1 + 96k, 31, 96, h − 36) over its
+    // `Sends-Popover-Channel` background (the first `-Left`, the last `-Right`) at
+    // (x, 27, 96, h − 28) (`Rack_SendsPopover::resized` 0x181173220, `::paint` 0x181173030).
+    let n = sends.len();
+    for (k, (node, name)) in sends.iter().enumerate() {
+        let x = r.x + 1.0 + k as f32 * col;
+        let key = if k == 0 { "Sends-Popover-Channel-Left" } else if k + 1 == n { "Sends-Popover-Channel-Right" } else { "Sends-Popover-Channel" };
+        ui.background(key, Rect::new(x, r.y + 27.0, col, r.h - 28.0));
+        let muted = bool_at(src, &format!("{node}/Bypass")).unwrap_or(false);
+        let level = src.prop(&format!("{node}/GainTapered")).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let db = src.prop(&format!("{node}/Gain")).and_then(|v| v.as_f64()).unwrap_or(-144.0);
+        // Mono input sends carry their pan (send-cell); bus and talkback sends do not (s50/s51).
+        let mono_input = matches!(of, SendsOf::Input(_)) && src.prop(&format!("{node}/Pan")).is_some();
+        let pan = mono_input.then(|| ((src.prop(&format!("{node}/Pan")).and_then(|v| v.as_f64()).unwrap_or(0.0) + 1.0) / 2.0, None));
+        let ids = crate::surfaces::cells::FullSendIds {
+            bus: !matches!(of, SendsOf::Input(_)),
+            pan,
+            mute: Some(sid(Control::SettingPress(format!("toggle:{node}/Bypass").into()))),
+            level: Some(sid(Control::SettingSet(format!("fader:{node}/GainTapered").into()))),
+        };
+        let send = crate::model::SendState { name: name.clone(), level, muted };
+        ui.at(x, r.y + 31.0, |ui| crate::surfaces::cells::full_send_strip(ui, "Sends-Input-Fader", &send, &db_readout(db), 0.0, r.h - 36.0, ids));
+    }
+    // ‹ › step through the auxes, or through the input strips: `Popover-Left` / `-Right`
+    // (12 × 12 chevrons) centred in (w − 58, 1, 20, 27) and (w − 28, 1, 20, 27), dimmed at
+    // the ends.
     let step: Option<(u8, &str, fn(u8) -> SendsOf)> = match of {
         SendsOf::Aux(k) => Some((k, "auxs", SendsOf::Aux)),
         SendsOf::Input(k) => Some((k, "inputs", SendsOf::Input)),
         SendsOf::Talkback => None,
     };
     if let Some((k, kind, make)) = step {
-        let st = Ui::plain_style("Helvetica", 12.0, true, Rgba::WHITE.with_alpha(0.5));
         let exists = |t: u8| src.prop(&format!("/devices/0/{kind}/{t}/Name")).is_some();
         let prev = (0..k).rev().find(|t| exists(*t));
         let next = (k.saturating_add(1)..=u8::MAX).take(64).find(|t| exists(*t));
-        for (i, (label, to)) in [("‹", prev), ("›", next)].into_iter().enumerate() {
-            let b = Rect::new(r.max_x() - 50.0 + i as f32 * 22.0, r.y + 3.0, 20.0, 20.0);
-            ui.text(label, st.clone(), b, Align::Center);
+        for (i, (key, to)) in [("Popover-Left", prev), ("Popover-Right", next)].into_iter().enumerate() {
+            let b = Rect::new(r.max_x() - 58.0 + i as f32 * 30.0, r.y + 1.0, 20.0, 27.0);
+            if let Some(img) = ui.skin("views", key).and_then(|s| s.image("image")) {
+                let img = img.to_string();
+                ui.image(&img, Rect::new(b.x + 4.0, b.y + 7.5, 12.0, 12.0), None, None, if to.is_some() { 1.0 } else { 0.3 });
+            }
             if let Some(to) = to {
                 ui.hit(b, sid(Control::ShowPanel(Panel::Sends(make(to)))), HitKind::Tap);
             }
         }
-    }
-    for (k, (node, name)) in sends.iter().enumerate() {
-        let x = c.x + k as f32 * col;
-        ui.fill(Rect::new(x, c.y, col - 1.0, c.h), Rgba::rgb8(66, 70, 73));
-        ui.fill(Rect::new(x + col - 1.0, c.y, 1.0, c.h), Rgba::rgb8(20, 22, 24));
-        // Name tab with the destination's colour rule (AUX 1 orange, AUX 2 blue).
-        let tab = Rect::new(x + 6.0, c.y + 6.0, col - 13.0, 26.0);
-        ui.fill(tab, Rgba::rgb8(30, 32, 34));
-        ui.text(name, Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.8)), tab, Align::Center);
-        let rule = match name.as_str() {
-            "AUX 1" => Some(Rgba::rgb8(224, 128, 32)),
-            "AUX 2" => Some(Rgba::rgb8(48, 120, 220)),
-            _ => None,
-        };
-        if let Some(rc) = rule {
-            ui.fill(Rect::new(tab.x + 6.0, tab.max_y() - 4.0, tab.w - 12.0, 2.0), rc);
-        }
-        // Input sends carry their pan (send-cell: a knob with L / R over the M button).
-        let pan_h = if matches!(of, SendsOf::Input(_)) {
-            let pan = src.prop(&format!("{node}/Pan")).and_then(|v| v.as_f64()).unwrap_or(0.0);
-            // The send pan knob of the strips' sends cells (`Pan-White`, 40 × 46).
-            ui.knob("Pan-White", (pan + 1.0) / 2.0, Rect::new(x + 28.0, c.y + 35.0, 40.0, 46.0), None, Some(0.5));
-            50.0
-        } else {
-            0.0
-        };
-        let muted = bool_at(src, &format!("{node}/Bypass")).unwrap_or(false);
-        let mr = Rect::new(x + (col - 26.0) / 2.0, c.y + 42.0 + pan_h, 24.0, 18.0);
-        ui.toggle("Switch-Small", Some("M"), muted, true, mr, None, None);
-        ui.hit(mr, sid(Control::SettingPress(format!("toggle:{node}/Bypass").into())), HitKind::Toggle);
-        let v = src.prop(&format!("{node}/GainTapered")).and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let db = src.prop(&format!("{node}/Gain")).and_then(|v| v.as_f64()).unwrap_or(-144.0);
-        let fm = Rect::new(x + 6.0, c.y + 64.0 + pan_h, col - 13.0, c.h - 70.0 - pan_h);
-        ui.fader_and_meters("Main-Bus-Fader", false, v, MeterFrame::default(), &db_readout(db), fm, Some(sid(Control::SettingSet(format!("fader:{node}/GainTapered").into()))));
     }
 }
 
