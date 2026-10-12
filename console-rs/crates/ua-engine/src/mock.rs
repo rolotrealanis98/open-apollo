@@ -606,3 +606,325 @@ fn change(s: &mut State, prop: &str, v: Value) {
         deliver(c, &items);
     }
 }
+
+// MARK: - Mock UA Mixer Helper (4720)
+
+/// A loopback stand-in for the UA Mixer Helper, serving a helper-format tree (`children` as
+/// arrays of `{"path": name, …}`) with the behaviour verified against helper 1.3.1.1152: `get`
+/// (nodes, recursive or with `{"path"}` stubs; properties, `/value`, `/values`), `subscribe`
+/// acknowledged with the current value (`null` for nodes), `get /ping`, errors
+/// `uasrv.invalid_object` with the echoed `parameters`. Value pushes after [`MockHelper::push`]
+/// use `{"path":"<property>/value","data":…}` (an assumption: no change was observed live).
+/// `set`/`post` are recorded and answered with `uasrv.read_only`; nothing changes.
+pub struct MockHelper {
+    port: u16,
+    state: Arc<Mutex<HelperState>>,
+    shutdown: Option<oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+struct HelperClient {
+    tx: mpsc::UnboundedSender<Vec<u8>>,
+    subs: HashSet<String>,
+    aborts: Vec<AbortHandle>,
+}
+
+#[derive(Default)]
+struct HelperState {
+    root: Json,
+    clients: HashMap<u64, HelperClient>,
+    next_client: u64,
+    received: Vec<String>,
+}
+
+fn hlock(s: &Arc<Mutex<HelperState>>) -> std::sync::MutexGuard<'_, HelperState> {
+    s.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl MockHelper {
+    /// Serves `root` (a helper root node) on 127.0.0.1 (`port` 0 picks a free port).
+    pub fn start(root: Json, port: u16) -> std::io::Result<MockHelper> {
+        let std_listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+        std_listener.set_nonblocking(true)?;
+        let port = std_listener.local_addr()?.port();
+        let state = Arc::new(Mutex::new(HelperState {
+            root,
+            ..Default::default()
+        }));
+        let (stx, srx) = oneshot::channel();
+        let st = state.clone();
+        let thread = std::thread::Builder::new()
+            .name(format!("mock-helper :{port}"))
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio runtime");
+                rt.block_on(async move {
+                    let listener = TcpListener::from_std(std_listener).expect("listener");
+                    tokio::select! {
+                        _ = helper_accept(listener, st) => {}
+                        _ = srx => {}
+                    }
+                });
+            })?;
+        Ok(MockHelper {
+            port,
+            state,
+            shutdown: Some(stx),
+            thread: Some(thread),
+        })
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn endpoint(&self) -> Endpoint {
+        Endpoint::new("127.0.0.1", self.port)
+    }
+
+    pub fn received_commands(&self) -> Vec<String> {
+        hlock(&self.state).received.clone()
+    }
+
+    /// Changes a property and pushes it to its subscribers.
+    pub fn push(&self, path: &str, value: Json) {
+        let mut s = hlock(&self.state);
+        let prop = path::property_path(path).to_owned();
+        let (node, name) = path::split(&prop);
+        if let Some(n) = helper_node_mut(&mut s.root, node) {
+            let props = n
+                .as_object_mut()
+                .expect("node object")
+                .entry("properties")
+                .or_insert_with(|| Json::Object(Default::default()));
+            if let Some(p) = props.as_object_mut() {
+                let entry = p
+                    .entry(name.to_owned())
+                    .or_insert_with(|| serde_json::json!({}));
+                if let Some(e) = entry.as_object_mut() {
+                    e.insert("value".into(), value.clone());
+                }
+            }
+        }
+        let msg = serde_json::json!({"path": format!("{prop}/value"), "data": value});
+        for c in s.clients.values().filter(|c| c.subs.contains(&prop)) {
+            let _ = c.tx.send(NulFramer::encode(&msg.to_string()));
+        }
+    }
+
+    /// Replaces (or adds) the child node `name` of `parent` (structural change; nothing is
+    /// pushed, as on the real helper's value subscriptions).
+    pub fn set_child(&self, parent: &str, name: &str, mut node: Json) {
+        let mut s = hlock(&self.state);
+        if let Some(o) = node.as_object_mut() {
+            o.insert("path".into(), Json::String(name.to_owned()));
+        }
+        if let Some(n) = helper_node_mut(&mut s.root, parent) {
+            let kids = n
+                .as_object_mut()
+                .expect("node object")
+                .entry("children")
+                .or_insert_with(|| Json::Array(Vec::new()));
+            if let Some(list) = kids.as_array_mut() {
+                list.retain(|c| c.get("path").and_then(Json::as_str) != Some(name));
+                list.push(node);
+            }
+        }
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(());
+        }
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        hlock(&self.state).clients.clear();
+    }
+}
+
+impl Drop for MockHelper {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn helper_child<'a>(node: &'a Json, name: &str) -> Option<&'a Json> {
+    node.get("children")?
+        .as_array()?
+        .iter()
+        .find(|c| c.get("path").and_then(Json::as_str) == Some(name))
+}
+
+/// The helper node at `path` (`/` is the root).
+fn helper_node<'a>(root: &'a Json, path: &str) -> Option<&'a Json> {
+    path.split('/')
+        .filter(|c| !c.is_empty())
+        .try_fold(root, helper_child)
+}
+
+fn helper_node_mut<'a>(root: &'a mut Json, path: &str) -> Option<&'a mut Json> {
+    let mut n = root;
+    for comp in path.split('/').filter(|c| !c.is_empty()) {
+        n = n
+            .get_mut("children")?
+            .as_array_mut()?
+            .iter_mut()
+            .find(|c| c.get("path").and_then(Json::as_str) == Some(comp))?;
+    }
+    Some(n)
+}
+
+fn helper_property<'a>(root: &'a Json, path: &str) -> Option<&'a Json> {
+    let (node, name) = path::split(path);
+    helper_node(root, node)?.get("properties")?.get(name)
+}
+
+/// A node as a non-recursive `get` returns it: children reduced to `{"path"}`.
+fn helper_shallow(node: &Json) -> Json {
+    let mut n = node.clone();
+    if let Some(Json::Array(kids)) = n.get_mut("children") {
+        for k in kids.iter_mut() {
+            let name = k.get("path").cloned().unwrap_or(Json::Null);
+            *k = serde_json::json!({ "path": name });
+        }
+    }
+    if let Some(o) = n.as_object_mut() {
+        o.remove("path");
+    }
+    n
+}
+
+async fn helper_accept(listener: TcpListener, state: Arc<Mutex<HelperState>>) {
+    while let Ok((stream, _)) = listener.accept().await {
+        let _ = stream.set_nodelay(true);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let id = {
+            let mut s = hlock(&state);
+            s.next_client += 1;
+            let id = s.next_client;
+            s.clients.insert(
+                id,
+                HelperClient {
+                    tx,
+                    subs: HashSet::new(),
+                    aborts: Vec::new(),
+                },
+            );
+            id
+        };
+        let (mut rd, wr) = stream.into_split();
+        let w = tokio::spawn(write_loop(wr, rx));
+        let st = state.clone();
+        let r = tokio::spawn(async move {
+            let mut framer = NulFramer::new();
+            let mut buf = vec![0u8; 1 << 16];
+            loop {
+                let n = match rd.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                let frames = framer.push_text(&buf[..n]);
+                let mut s = hlock(&st);
+                for f in frames {
+                    helper_handle(&mut s, id, f);
+                }
+            }
+            hlock(&st).clients.remove(&id);
+        });
+        if let Some(c) = hlock(&state).clients.get_mut(&id) {
+            c.aborts = vec![w.abort_handle(), r.abort_handle()];
+        }
+    }
+}
+
+fn helper_reply(s: &HelperState, id: u64, json: Json) {
+    if let Some(c) = s.clients.get(&id) {
+        let _ = c.tx.send(NulFramer::encode(&json.to_string()));
+    }
+}
+
+fn helper_handle(s: &mut HelperState, id: u64, text: String) {
+    s.received.push(text.clone());
+    if text.starts_with('{') {
+        return; // identity
+    }
+    let (verb, rest) = split_first(&text);
+    let (target, _) = split_first(rest);
+    let (raw, query) = split_query(target);
+    let params = Json::Object(echo_params(&query, false));
+    let with = |mut o: serde_json::Map<String, Json>| {
+        if params.as_object().is_some_and(|p| !p.is_empty()) {
+            o.insert("parameters".into(), params.clone());
+        }
+        Json::Object(o)
+    };
+    let mut out = serde_json::Map::new();
+    out.insert("path".into(), Json::String(raw.to_owned()));
+    match verb {
+        "get" if raw == "/ping" || raw == "ping" => {
+            out.insert("data".into(), Json::Bool(true));
+        }
+        "get" | "subscribe" => {
+            let recursive = query.iter().any(|(k, v)| k == "recursive" && v != "0");
+            let p = if raw.len() > 1 && raw.ends_with('/') {
+                &raw[..raw.len() - 1]
+            } else {
+                raw
+            };
+            let prop_path = path::property_path(p).to_owned();
+            let (node_part, selector) = path::split(p);
+            let data = if let Some(node) = helper_node(&s.root, p) {
+                if verb == "subscribe" {
+                    Some(Json::Null)
+                } else if recursive {
+                    let mut n = node.clone();
+                    if let Some(o) = n.as_object_mut() {
+                        o.remove("path");
+                    }
+                    Some(n)
+                } else {
+                    Some(helper_shallow(node))
+                }
+            } else if selector == "values" {
+                helper_property(&s.root, node_part)
+                    .map(|p| p.get("values").cloned().unwrap_or(Json::Array(Vec::new())))
+            } else {
+                helper_property(&s.root, &prop_path)
+                    .map(|p| p.get("value").cloned().unwrap_or(Json::Null))
+            };
+            match data {
+                Some(d) => {
+                    if verb == "subscribe" {
+                        let key = if helper_node(&s.root, p).is_some() {
+                            p.to_owned()
+                        } else {
+                            prop_path
+                        };
+                        if let Some(c) = s.clients.get_mut(&id) {
+                            c.subs.insert(key);
+                        }
+                    }
+                    out.insert("data".into(), d);
+                }
+                None => {
+                    out.insert("error".into(), Json::String("uasrv.invalid_object".into()));
+                }
+            }
+        }
+        "unsubscribe" => {
+            let prop = path::property_path(raw).to_owned();
+            if let Some(c) = s.clients.get_mut(&id) {
+                c.subs.remove(&prop);
+            }
+            return;
+        }
+        _ => {
+            out.insert("error".into(), Json::String("uasrv.read_only".into()));
+        }
+    }
+    let reply = with(out);
+    helper_reply(s, id, reply);
+}

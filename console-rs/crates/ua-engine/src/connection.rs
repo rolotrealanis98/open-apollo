@@ -716,8 +716,12 @@ impl Task {
         let mut framer = NulFramer::new();
         let mut buf = vec![0u8; 1 << 18];
         let mut tick = tokio::time::interval(Duration::from_millis(250));
-        let ping_every = self.options.ping_interval.unwrap_or(Duration::from_secs(3600));
-        let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + ping_every, ping_every);
+        let ping_every = self
+            .options
+            .ping_interval
+            .unwrap_or(Duration::from_secs(3600));
+        let mut ping =
+            tokio::time::interval_at(tokio::time::Instant::now() + ping_every, ping_every);
         loop {
             let mut out: Vec<u8> = Vec::new();
             tokio::select! {
