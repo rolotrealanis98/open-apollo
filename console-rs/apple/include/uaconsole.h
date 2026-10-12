@@ -155,6 +155,10 @@ int32_t uac_frame(UacContext *ctx);
  * plug-in request (uac_take_plugin_request). */
 int32_t uac_pointer(UacContext *ctx, int32_t kind, float x_pt, float y_pt, uint32_t flags);
 
+/* True while a pointer drag drives a control (fader, knob): keep a long-press recognizer from
+ * turning a held drag into a context click. */
+bool uac_dragging(UacContext *ctx);
+
 /* Wheel/trackpad scroll at a point; deltas in view points, AppKit's scrollingDelta convention
  * (positive reveals content above / to the left). Scrolls the browser list or the cells
  * column under the point (returns 1), else pans a zoomed view (returns 0). */

@@ -975,6 +975,16 @@ pub unsafe extern "C" fn uac_pointer(ctx: *mut UacContext, kind: i32, x_pt: f32,
     unsafe { with_ctx(ctx, |c| c.pointer(kind, x_pt, y_pt, flags)) }
 }
 
+/// True while a pointer drag is driving a control (fader, knob, pan): hosts use it to keep a
+/// long-press recognizer from turning a held drag into a context click.
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_dragging(ctx: *mut UacContext) -> bool {
+    guard(false, || unsafe { ctx_mut(ctx) }.is_some_and(|c| c.interaction.is_dragging()))
+}
+
 /// Wheel / trackpad scroll at a point, deltas in view points (AppKit `scrollingDelta`
 /// convention: positive reveals content above / to the left). Scrolls the plug-in browser list
 /// or the cells column under the point (returns 1), else pans a zoomed view (returns 0).
@@ -1499,8 +1509,10 @@ mod tests {
             let before = c.model.main(&strip).fader;
             let (x, y) = to_view(&s, fader.rect.x + fader.rect.w / 2.0, fader.rect.y + fader.rect.h / 2.0);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_DOWN, x, y, 0), 1);
+            assert!(uac_dragging(ctx));
             assert_eq!(uac_pointer(ctx, UAC_POINTER_MOVE, x, y - 40.0, 0), 1);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_UP, x, y - 40.0, 0), 1);
+            assert!(!uac_dragging(ctx));
             uac_needs_frame(ctx);
             assert_ne!(c.model.main(&strip).fader, before);
             std::thread::sleep(Duration::from_millis(100));
