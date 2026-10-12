@@ -551,3 +551,35 @@ fn name_plate(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, r: Rect) {
     }
     ui.hit(r, ControlId { strip: s.id.clone(), control: Control::Name }, HitKind::Tap);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn layout(window: (f32, f32), aux_scroll: bool) -> WindowLayout {
+        let view = ViewState { window: Some(window), ..ViewState::default() };
+        WindowLayout::new(&view, 7, 2).with_aux_scroll(aux_scroll)
+    }
+
+    #[test]
+    fn columns_follow_the_window_size() {
+        // p1 refpair, 1920 × 1050: the aux cells overflow, so the bus section has its scrollbar.
+        let l = layout((1920.0, 1050.0), true);
+        assert_eq!((l.nav_x(), l.side_x(), l.strips_x()), (345.0, 441.0, 487.5));
+        assert_eq!((l.aux_x(), l.monitor_x(), l.status_y()), (1613.5, 1824.0, 1010.0));
+        assert_eq!(l.size(), (1920.0, 1050.0));
+        // p2 refpair, 1470 × 1105: aux and monitor pack right after the strips.
+        let l = layout((1470.0, 1105.0), false);
+        assert_eq!((l.aux_x(), l.monitor_x(), l.status_y()), (1180.5, 1374.0, 1065.0));
+        assert_eq!(l.visible_inputs(), 7);
+        // Too small a window clamps to one strip and a cell header.
+        let l = layout((400.0, 300.0), true);
+        assert!(l.visible_inputs() >= 1 && l.size().0 > 400.0 && l.size().1 > 300.0);
+    }
+
+    #[test]
+    fn helvetica_bold_widths() {
+        // The title tab is the title's width + 26 (refpair p1: 122 pt for "Apollo: Session*").
+        assert_eq!(helvetica_bold_width("Apollo: Session*", 12.0).ceil() + 26.0, 122.0);
+    }
+}
