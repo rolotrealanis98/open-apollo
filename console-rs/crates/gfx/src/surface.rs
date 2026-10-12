@@ -7,6 +7,8 @@ use wgpu::{CurrentSurfaceTexture, PresentMode, SurfaceTexture, TextureFormat};
 pub struct SurfaceGpu {
     pub instance: wgpu::Instance,
     pub surface: wgpu::Surface<'static>,
+    /// Kept for more windows on the same device ([`WindowSurface`]).
+    pub adapter: wgpu::Adapter,
     pub adapter_info: wgpu::AdapterInfo,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -70,6 +72,7 @@ impl SurfaceGpu {
         Ok(Self {
             instance,
             surface,
+            adapter,
             adapter_info,
             device,
             queue,
@@ -101,9 +104,13 @@ impl SurfaceGpu {
         match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(t) => Some(t),
             CurrentSurfaceTexture::Suboptimal(t) => {
-                // Draw this one; reconfigure for the next.
+                // The frame must be dropped before reconfiguring (wgpu 30): take a fresh one.
+                drop(t);
                 self.surface.configure(&self.device, &self.config);
-                Some(t)
+                match self.surface.get_current_texture() {
+                    CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+                    _ => None,
+                }
             }
             CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
@@ -120,6 +127,70 @@ impl SurfaceGpu {
 
     pub fn present(&self, frame: SurfaceTexture) {
         self.queue.present(frame);
+    }
+}
+
+/// Another window drawn by the same GPU and renderer as a [`SurfaceGpu`] (Console's popup
+/// menus, Settings and panels as their own windows): same device, queue and format.
+pub struct WindowSurface {
+    pub surface: wgpu::Surface<'static>,
+    pub config: wgpu::SurfaceConfiguration,
+}
+
+impl WindowSurface {
+    /// `target` is the window, `size` its inner size in pixels. Fails when the window cannot
+    /// present `gpu`'s format (the renderer's pipeline is built for it).
+    pub fn new(gpu: &SurfaceGpu, target: impl Into<wgpu::SurfaceTarget<'static>>, size: (u32, u32)) -> Result<Self, String> {
+        let surface = gpu.instance.create_surface(target).map_err(|e| format!("create surface: {e}"))?;
+        let caps = surface.get_capabilities(&gpu.adapter);
+        if !caps.formats.contains(&gpu.config.format) {
+            return Err(format!("window surface cannot present {:?}", gpu.config.format));
+        }
+        let mut config = gpu.config.clone();
+        config.width = size.0.max(1);
+        config.height = size.1.max(1);
+        config.present_mode = pick_present_mode(&caps.present_modes);
+        if let Some(a) = caps.alpha_modes.first() {
+            config.alpha_mode = *a;
+        }
+        surface.configure(&gpu.device, &config);
+        Ok(Self { surface, config })
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    pub fn resize(&mut self, gpu: &SurfaceGpu, w: u32, h: u32) {
+        if w == 0 || h == 0 || (w, h) == self.size() {
+            return;
+        }
+        self.config.width = w;
+        self.config.height = h;
+        self.surface.configure(&gpu.device, &self.config);
+    }
+
+    /// Next frame, or None to skip (see [`SurfaceGpu::acquire`]).
+    pub fn acquire(&mut self, gpu: &SurfaceGpu) -> Option<SurfaceTexture> {
+        match self.surface.get_current_texture() {
+            CurrentSurfaceTexture::Success(t) => Some(t),
+            CurrentSurfaceTexture::Suboptimal(t) => {
+                drop(t);
+                self.surface.configure(&gpu.device, &self.config);
+                match self.surface.get_current_texture() {
+                    CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+                    _ => None,
+                }
+            }
+            CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
+                self.surface.configure(&gpu.device, &self.config);
+                match self.surface.get_current_texture() {
+                    CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 }
 

@@ -553,7 +553,7 @@ fn scrollbar_column(ui: &mut Ui, x: f32, main_y: f32, status_y: f32, visible: f3
     let track = Rect::new(x, top + 4.0, 18.0, main_y - top - 4.0);
     let bg = ui.assets.appearance.colors.get("mixer_scrollbar_background").copied().unwrap_or(Rgba::rgb8(35, 37, 40));
     ui.fill(track, bg);
-    let thumb_h = (track.h * visible / content.max(1.0)).clamp(30.0, track.h);
+    let thumb_h = (track.h * visible / content.max(1.0)).clamp(30.0f32.min(track.h.max(0.0)), track.h.max(0.0));
     let thumb = Rect::new(x, track.y + (track.h - thumb_h) * scroll.clamp(0.0, 1.0), 18.0, thumb_h);
     if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|k| k.image("image")) {
         ui.image(img, thumb, Some(houston::Insets::uniform(12.0)), None, 1.0);

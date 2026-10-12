@@ -7,6 +7,7 @@ mod frame;
 mod input;
 mod overlay;
 mod plugin;
+mod popups;
 mod settings;
 mod source;
 mod view;
@@ -119,6 +120,9 @@ fn main() -> ExitCode {
         open_plugin: args.open_plugin,
         open: args.open,
         view_spec: args.view_spec,
+        menu: args.menu,
+        windows: args.windows.unwrap_or(cli::WindowsMode::Separate),
+        x11: args.x11,
         settings,
     };
     match app::run(assets, opts) {
