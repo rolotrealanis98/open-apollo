@@ -293,7 +293,8 @@ fn correction_button(ui: &mut Ui, headphones: bool, power: bool, label: &str, y:
     if let Some(c) = ui.skin("inserts", "Medium-Normal").and_then(|s| s.color("color-text")) {
         style.color = c;
     }
-    ui.text(label, style, Rect::new(r.x + 4.0, r.y + 30.0, r.w - 8.0, 17.0), Align::Center);
+    // Name box (4, h − 19, w − 8, 17): its centre matches the 1.3.1 caps (±0.5 pt).
+    ui.text(label, style, Rect::new(r.x + 4.0, r.y + 31.0, r.w - 8.0, 17.0), Align::Center);
 }
 
 /// `gain_and_session` (0, G, 96, 96): `Monitor-Gain-Session` art, the `layouts/gain_and_session`
