@@ -173,6 +173,20 @@ impl EngineMixer {
             talkback: self.bool_at(&self.store.topology().talkback.on()),
             alt_count,
             alt_selection: self.store.value(&m.alt_mon_selection()).and_then(Value::as_i64).unwrap_or(0).clamp(0, 2) as u8,
+            // Rack's controller predicate is unresolved; Console 1.3.1 shows the button for an
+            // Apollo x4 with `RemoteMonitorController` false.
+            controller: true,
+            hp_correction: (self.bool_at(&format!("{dev}/SupportsHeadphoneCorrection")) == Some(true))
+                .then(|| self.bool_at(&format!("{dev}/HeadphoneCorrectionPower")).unwrap_or(true)),
+            speaker_correction: (self.bool_at(&format!("{dev}/SupportsSpeakerCorrection")) == Some(true))
+                .then(|| self.bool_at(&format!("{dev}/SpeakerCorrectionPower")).unwrap_or(true)),
+            // The front-panel knob drives the monitor unless an input (preamp) or another
+            // output is `SelectedOnFront` (p1: none → green dot; p2: inputs/0 → off).
+            knob_focus: !["inputs", "outputs"].iter().any(|kind| {
+                self.store.tree().indices(&format!("{dev}/{kind}")).into_iter().any(|n| {
+                    (*kind != "outputs" || n != m.index) && self.bool_at(&format!("{dev}/{kind}/{n}/SelectedOnFront")) == Some(true)
+                })
+            }),
         }
     }
 
