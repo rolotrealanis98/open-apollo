@@ -67,3 +67,7 @@ tools/testbench/
 
 usb-firmware
 driver/.*.cmd
+
+# console-rs
+console-rs/target/
+console-rs/shots/
