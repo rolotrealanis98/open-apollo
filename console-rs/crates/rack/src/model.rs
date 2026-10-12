@@ -487,6 +487,11 @@ pub trait MixerModel {
     fn insert_labels(&self, _s: &StripInfo) -> Vec<Option<InsertLabel>> {
         Vec::new()
     }
+    /// The catalogue's `/plugins/P/Unison` for plug-in `name`: whether it can sit in a Unison
+    /// slot (drag and drop, paste). None: unknown (allowed).
+    fn plugin_is_unison(&self, _name: &str) -> Option<bool> {
+        None
+    }
     /// Console's label for the Unison slot (None: from [`MixerModel::unison`]'s name).
     fn unison_label(&self, _s: &StripInfo) -> Option<InsertLabel> {
         None

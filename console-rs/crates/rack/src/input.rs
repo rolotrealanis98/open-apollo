@@ -67,6 +67,11 @@ pub enum Control {
     InsertRemove(u8),
     InsertCopy(u8),
     InsertSetDefault(u8),
+    /// [model] Drag and drop (`crate::dnd`): the loaded insert `from_slot` of strip `from`
+    /// dropped on slot `slot` of this strip (`post /MoveInsert`); `copy` with the copy modifier.
+    InsertMove { slot: u8, from: Arc<str>, from_slot: u8, copy: bool },
+    /// [model] Drag and drop: a channel preset (its path) dropped on this strip.
+    PresetDrop(Arc<str>),
     /// [model] Send pre/post (`PostFaderOverride`).
     SendPre(u8),
     /// [view] Strip name plate: rename popover, or Isolate with the ISOLATE modifier. As a

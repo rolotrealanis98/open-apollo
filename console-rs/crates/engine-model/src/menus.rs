@@ -20,6 +20,11 @@ impl EngineMixer {
             hidden: self.bool_at(&input.channel_hidden()).unwrap_or(false),
             hi_z: input.preamp.as_ref().filter(|p| p.has_hi_z).and_then(|p| self.bool_at(&p.hi_z())).unwrap_or(false),
             sr_convert: s.shows_sr_convert.then(|| self.bool_at(&input.sr_convert()).unwrap_or(false)),
+            unison_paste_settings: input
+                .preamp
+                .as_ref()
+                .and_then(|p| self.bool_at(&format!("{}/CanPastePluginBarSettings", p.unison.base)))
+                .unwrap_or(false),
         }
     }
 
@@ -145,10 +150,15 @@ impl EngineMixer {
             }
             MenuCmd::PostFaderMetering(post) => self.store.commit("/PostFaderMetering", *post),
             MenuCmd::InsertPaste(k) => {
-                let Some(name) = self.clipboard.clone() else { return };
                 let id = rack::ControlId { strip: strip.clone(), control: rack::Control::Insert(*k) };
                 if let Some(slot) = self.insert_slot(&id) {
-                    self.store.commit(&slot.effect_name(), name);
+                    self.paste_insert(&slot, *k);
+                }
+            }
+            MenuCmd::CopySettings(k) | MenuCmd::PasteSettings(k) => {
+                let id = rack::ControlId { strip: strip.clone(), control: rack::Control::Insert(*k) };
+                if let Some(slot) = self.insert_slot(&id) {
+                    self.plugin_bar_settings(&slot, matches!(cmd, MenuCmd::PasteSettings(_)));
                 }
             }
             MenuCmd::StripInserts(op) => {

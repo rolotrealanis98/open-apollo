@@ -187,10 +187,7 @@ fn show(w: &[Wire]) -> Vec<String> {
 }
 
 /// Scenario name → why it diverges today. Remove an entry when our side is fixed.
-const KNOWN_DIVERGENT: &[(&str, &str)] = &[
-    ("insert-assign", "Console sends the assign unbracketed (no /UndoRecording); we commit it inside a bracket"),
-    ("unison-assign", "Console sends the assign unbracketed (no /UndoRecording); we commit it inside a bracket"),
-];
+const KNOWN_DIVERGENT: &[(&str, &str)] = &[];
 
 /// Offline audit writes omit request queries (assigned by the live connection).
 /// The separate live wire-profile test checks those queries.

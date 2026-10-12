@@ -296,6 +296,10 @@ pub struct ViewState {
     /// Console's menus, Settings and panels as separate OS windows placed on the screen
     /// (`crate::layers`); None draws them inside the mixer window (iPad, plain `--render`).
     pub windowing: Option<crate::layers::Windowing>,
+    /// Drag and drop in progress (`crate::dnd`).
+    pub drag: Option<crate::dnd::DragState>,
+    /// A press on a drag source, not yet moved far enough to drag.
+    pub drag_pending: Option<crate::dnd::PendingDrag>,
 }
 
 impl Default for ViewState {
@@ -328,6 +332,8 @@ impl Default for ViewState {
             show_navigator: true,
             commands: Vec::new(),
             deferred: Vec::new(),
+            drag: None,
+            drag_pending: None,
             windowing: None,
         }
     }
