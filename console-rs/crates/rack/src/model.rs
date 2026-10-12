@@ -215,6 +215,11 @@ pub trait MixerModel {
     fn monitor(&self) -> MonitorState;
     fn monitor_meters(&self) -> MeterFrame;
     fn apply(&mut self, action: &Action);
+    /// Applies pending external updates (engine pushes); true if anything changed.
+    /// Called once per frame by the app.
+    fn pump(&mut self) -> bool {
+        false
+    }
 
     // ---- UI surfaces; every method has a default so existing models keep compiling. ----
 

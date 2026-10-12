@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Open Apollo Console
+GenericName=Audio Interface Mixer
+Comment=Native mixer console for Apollo interfaces on open-apollo
+Exec=uaconsole
+Icon=uaconsole
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;
+Keywords=apollo;mixer;console;uad;monitor;preamp;
+StartupWMClass=uaconsole

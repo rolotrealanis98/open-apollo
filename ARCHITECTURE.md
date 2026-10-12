@@ -19,6 +19,8 @@ open-apollo/
 │   ├── state_tree.py    # Hierarchical control tree (11K+ nodes)
 │   └── helper_tree.py   # Protocol helper tree
 │
+├── console-rs/          # Native mixer console, uaconsole (Rust; see console-rs/README.md)
+│
 ├── configs/             # System configs deployed by installer
 │   ├── wireplumber/     # WirePlumber rules (disable-mmap, etc.)
 │   ├── ucm2/            # ALSA UCM2 profile
@@ -29,10 +31,12 @@ open-apollo/
 │
 ├── scripts/
 │   ├── install.sh       # One-command installer
+│   ├── install-uaconsole.sh  # Per-user install of the native console
 │   └── check-deps.sh    # Dependency checker
 │
 └── tools/               # Utilities
     ├── apollo-init.sh   # Hardware initialization
+    ├── open-apollo-console.sh  # Opens uaconsole, or the Windows Console under Wine
     └── open-apollo-tray.py  # System tray indicator
 ```
 
@@ -67,4 +71,5 @@ Every register write was traced from the macOS kext via DTrace or Windows via BA
 - **New Apollo model?** → `driver/ua_apollo.h` (device_type, channel counts)
 - **PipeWire config issue?** → `configs/pipewire/setup-apollo-io.sh`
 - **Mixer protocol?** → `mixer-engine/ua_mixer_daemon.py`
+- **Mixer console UI?** → `console-rs/` ([README](console-rs/README.md), [architecture](console-rs/ARCHITECTURE.md))
 - **Install script?** → `scripts/install.sh`

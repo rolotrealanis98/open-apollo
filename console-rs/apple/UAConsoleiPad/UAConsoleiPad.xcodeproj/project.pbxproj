@@ -1,0 +1,289 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0B0000000000000000000014 /* UAConsoleFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0B0000000000000000000013 /* UAConsoleFFI.xcframework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0B0000000000000000000005 /* UAConsoleiPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UAConsoleiPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0B0000000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0B0000000000000000000013 /* UAConsoleFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = UAConsoleFFI.xcframework; path = ../build/UAConsoleFFI.xcframework; sourceTree = SOURCE_ROOT; };
+		0B0000000000000000000015 /* uaconsole.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = uaconsole.h; path = ../include/uaconsole.h; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		0B0000000000000000000004 /* App */ = {isa = PBXFileSystemSynchronizedRootGroup; path = App; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		0B0000000000000000000008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0B0000000000000000000014 /* UAConsoleFFI.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0B0000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				0B0000000000000000000004 /* App */,
+				0B0000000000000000000010 /* Config */,
+				0B0000000000000000000012 /* Rust */,
+				0B0000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		0B0000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0B0000000000000000000005 /* UAConsoleiPad.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		0B0000000000000000000010 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				0B0000000000000000000011 /* Info.plist */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		0B0000000000000000000012 /* Rust */ = {
+			isa = PBXGroup;
+			children = (
+				0B0000000000000000000015 /* uaconsole.h */,
+				0B0000000000000000000013 /* UAConsoleFFI.xcframework */,
+			);
+			name = Rust;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0B0000000000000000000006 /* UAConsoleiPad */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0B000000000000000000000D /* Build configuration list for PBXNativeTarget "UAConsoleiPad" */;
+			buildPhases = (
+				0B0000000000000000000007 /* Sources */,
+				0B0000000000000000000008 /* Frameworks */,
+				0B0000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0B0000000000000000000004 /* App */,
+			);
+			name = UAConsoleiPad;
+			packageProductDependencies = (
+			);
+			productName = UAConsoleiPad;
+			productReference = 0B0000000000000000000005 /* UAConsoleiPad.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0B0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2710;
+				LastUpgradeCheck = 2710;
+				TargetAttributes = {
+					0B0000000000000000000006 = {
+						CreatedOnToolsVersion = 27.1;
+					};
+				};
+			};
+			buildConfigurationList = 0B000000000000000000000A /* Build configuration list for PBXProject "UAConsoleiPad" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 0B0000000000000000000002;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0B0000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0B0000000000000000000006 /* UAConsoleiPad */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0B0000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0B0000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0B000000000000000000000B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		0B000000000000000000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		0B000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = uaconsole;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					Metal,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreFoundation,
+					"-lobjc",
+					"-liconv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.openapollo.uaconsole;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		0B000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = uaconsole;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					Metal,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreFoundation,
+					"-lobjc",
+					"-liconv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.openapollo.uaconsole;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0B000000000000000000000A /* Build configuration list for PBXProject "UAConsoleiPad" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0B000000000000000000000B /* Debug */,
+				0B000000000000000000000C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0B000000000000000000000D /* Build configuration list for PBXNativeTarget "UAConsoleiPad" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0B000000000000000000000E /* Debug */,
+				0B000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 0B0000000000000000000001 /* Project object */;
+}
