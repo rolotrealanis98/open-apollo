@@ -10,7 +10,7 @@ use crate::preamp::draw_preamp;
 use crate::surfaces::browser::draw_browser;
 use crate::surfaces::cells::{self, HEADER_H, INPUT_CELL_H, insert_list, send_list, visible_slots};
 use crate::surfaces::monitor::{draw_control_room, draw_monitor_column, monitor_rect};
-use crate::surfaces::navigator::{VisibleRows, draw_navigator};
+use crate::surfaces::navigator::{self, VisibleRows, draw_navigator};
 use crate::surfaces::popover::draw_popover;
 use crate::surfaces::session_nav::draw_session_navigator;
 use crate::surfaces::settings::draw_settings_sheet;
@@ -138,8 +138,8 @@ impl CellRows {
         let sec = view.sections;
         let slots = strips.iter().map(|s| visible_slots(&model.inserts(s), view.fixed_slots)).max().unwrap_or(4);
         let sends = strips.iter().map(|s| model.send_rows(s)).max().unwrap_or(0);
-        // A row is expanded when the navigator shows it and (inputs) its side chevron is open.
-        let open = |r: Section| sec.get(r) && (aux || view.open_rows.get(r));
+        // The bus section keeps its Sends row open (Console's default collapses only the inputs').
+        let open = |r: Section| sec.get(r) || (aux && r == Section::Sends);
         Self {
             input: (!aux).then_some(if open(Section::Inputs) { INPUT_CELL_H } else { HEADER_H }),
             inserts: if open(Section::Inserts) { cells::inserts_cell_h(slots, view.insert_size, !aux) } else { HEADER_H },
@@ -182,7 +182,8 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     // content that overflows scrolls, from the top.
     let rows = CellRows::new(model, view, &inputs, false);
     // The aux Sends cell keeps a row for every cue send the engine lists (1.3.1: two cues shown,
-    // four reserved, `MixerModel::send_rows`): 242 + 340 = 582 pt (p2: aux header at 84).
+    // four reserved, `MixerModel::send_rows`): 242 + 340 = 582 pt (p2: aux header at 84), open
+    // whatever the input Sends row does (p1 and p2 show that one collapsed).
     let aux_rows = CellRows::new(model, view, &auxes, true);
     let cells_h = col_h - rows.main - 5.0;
     let aux_cells_h = col_h - aux_rows.main - 5.0;
@@ -404,7 +405,7 @@ fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
                     ui.fill(Rect::new(icon.x + 1.0, icon.y + 1.0, 14.0, 6.0), ROW_ICON);
                     ui.fill(Rect::new(icon.x + 1.0, icon.y + 8.0, 14.0, 6.0), ROW_ICON);
                 }
-                ui.hit(Rect::new(0.0, y, r.w, HEADER_H), ControlId { strip: crate::surfaces::view::SIDE_ID.into(), control: Control::Section(sec) }, HitKind::Toggle);
+                ui.hit(Rect::new(0.0, y, r.w, HEADER_H), ControlId { strip: navigator::NAV_ID.into(), control: Control::Section(sec) }, HitKind::Toggle);
             }
         });
         ui.clip(None);

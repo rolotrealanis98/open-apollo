@@ -68,9 +68,6 @@ pub enum MonitorPage {
     ControlRoom,
 }
 
-/// Strip id of the side section's row chevrons (`Control::Section` there toggles `open_rows`).
-pub const SIDE_ID: &str = "side";
-
 /// Which cell rows are expanded (collapsed = header only) and whether faders are shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sections {
@@ -82,7 +79,8 @@ pub struct Sections {
 
 impl Default for Sections {
     fn default() -> Self {
-        Self { inputs: true, inserts: true, sends: true, fader: true }
+        // Console 1.3.1 opens with the input SENDS row collapsed (both reference pairs).
+        Self { inputs: true, inserts: true, sends: false, fader: true }
     }
 }
 
@@ -186,12 +184,7 @@ pub enum Sheet {
 pub struct ViewState {
     /// No browser / navigator; aux and monitor packed after the last strip.
     pub compact: bool,
-    /// Navigator rows (INPUTS / INSERTS / SENDS / FADER).
     pub sections: Sections,
-    /// The side section's chevrons: which rows of the input group are expanded. Console opens
-    /// with the input Sends row collapsed (refpairs p1 and p2); the bus section keeps its own
-    /// rows open.
-    pub open_rows: Sections,
     pub insert_size: InsertSize,
     pub fixed_slots: bool,
     pub sends_overview: bool,
@@ -215,7 +208,6 @@ impl Default for ViewState {
         Self {
             compact: false,
             sections: Sections::default(),
-            open_rows: Sections { sends: false, ..Sections::default() },
             insert_size: InsertSize::Large,
             fixed_slots: true,
             sends_overview: false,
@@ -361,15 +353,12 @@ impl ViewState {
             self.text_edit = self.text_edit.take().filter(|t| t.target == TextTarget::Search);
         }
         match id.control.clone() {
-            C::Section(s) if &*id.strip == SIDE_ID => self.open_rows.set(s, !self.open_rows.get(s)),
             C::Section(s) => self.sections.set(s, !self.sections.get(s)),
             C::SectionsOpenAll => {
-                self.sections = Sections { fader: self.sections.fader, ..Sections::default() };
-                self.open_rows = Sections { fader: self.open_rows.fader, ..Sections::default() };
+                self.sections = Sections { inputs: true, inserts: true, sends: true, fader: self.sections.fader };
             }
             C::SectionsCloseAll => {
                 self.sections = Sections { inputs: false, inserts: false, sends: false, fader: self.sections.fader };
-                self.open_rows = Sections { inputs: false, inserts: false, sends: false, fader: self.open_rows.fader };
                 self.cells_scroll = 0.0;
             }
             C::InsertSize(s) => self.insert_size = s,
