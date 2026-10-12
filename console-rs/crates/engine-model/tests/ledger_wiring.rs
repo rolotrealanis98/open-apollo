@@ -141,6 +141,8 @@ struct Audit {
     seen: u64,
     /// The last press changed the model: rebuild it before the next one.
     dirty: bool,
+    /// Control groups whose hit centre is covered by another hit (never pressed there).
+    occluded: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Audit {
@@ -168,15 +170,16 @@ impl Audit {
         recent[recent.len().saturating_sub(n)..].iter().map(|s| s.to_string()).collect()
     }
 
-    /// Presses `hit` in `view` (left button; drags move 20 pt up) and records the outcome.
-    fn press(&mut self, scenario: &str, base: &ViewState, hits: &[Hit], hit: &Hit, via_menu: Option<(String, String)>) -> ViewState {
+    /// One press of `hit` (drags move `dy` points); what it wrote, whether it reached the
+    /// shell, the resulting view, and whether model-only state changed.
+    fn one_press(&mut self, base: &ViewState, hits: &[Hit], hit: &Hit, dy: f32) -> (Vec<String>, bool, ViewState, bool) {
         self.fresh();
         let mut view = base.clone();
         let (cx, cy) = hit.rect.center();
         let mut i = Interaction::default();
         let mut actions = i.pointer_down(hits, cx, cy, false);
         if matches!(hit.kind, HitKind::Drag { .. }) {
-            actions.extend(i.pointer_move(cx, cy - 20.0, false));
+            actions.extend(i.pointer_move(cx, cy + dy, false));
         }
         actions.extend(i.pointer_up());
         let before = self.written().len();
@@ -188,9 +191,19 @@ impl Audit {
         }
         let cmds: Vec<String> = self.written().into_iter().filter(|c| !c.contains("/UndoRecording/")).collect();
         let shell = !self.model.take_taps().is_empty() | !view.take_commands().is_empty();
-        let changed = view != *base;
         let model_only = gate != self.model.store().writer().writes_enabled || revision != self.model.store().revision();
         self.dirty = model_only || !cmds.is_empty() || shell;
+        (cmds, shell, view, model_only)
+    }
+
+    /// Presses `hit` in `view` (drags move 20 pt up, then down when up did nothing: a thumb or
+    /// knob at its top) and records the outcome.
+    fn press(&mut self, scenario: &str, base: &ViewState, hits: &[Hit], hit: &Hit, via_menu: Option<(String, String)>) -> ViewState {
+        let (mut cmds, mut shell, mut view, mut model_only) = self.one_press(base, hits, hit, -20.0);
+        if matches!(hit.kind, HitKind::Drag { .. }) && cmds.is_empty() && !shell && !model_only && view == *base {
+            (cmds, shell, view, model_only) = self.one_press(base, hits, hit, 20.0);
+        }
+        let changed = view != *base;
         // Menu rows are keyed by their menu and label (`menu Insert(input) › Remove`).
         let (class, control) = match &via_menu {
             Some((menu, label)) => (format!("menu {menu}"), label.clone()),
@@ -226,6 +239,15 @@ impl Audit {
             *n += 1;
             if *n > 2 {
                 continue;
+            }
+            // A hit whose centre is covered by a later one cannot be pressed there: record it
+            // (overlaps are usually backgrounds; a covered control is a layout bug).
+            let (cx, cy) = hit.rect.center();
+            if let Some(top) = hits.iter().rev().find(|h| h.rect.contains(cx, cy)) {
+                if top.id != hit.id {
+                    self.occluded.entry(format!("{} {}", strip_class(&hit.id.strip), shape(&hit.id.control))).or_default().insert(format!("{name}: under {} {}", strip_class(&top.id.strip), shape(&top.id.control)));
+                    continue;
+                }
             }
             self.press(name, base, &hits, hit, None);
             // Right click: a context menu (or a Sends window) for this control?
@@ -303,13 +325,19 @@ const KNOWN_NOOPS: &[&str] = &[
     // CURRENT SESSION row menu › Load on the session that is already open: nothing sent. Check
     // what Console does (reload?). Gap.
     "menu SessionRow(session) Load 'Session'",
+    // Side section S / OL: S clears soloed inputs one by one (nothing to do with no solo; Console
+    // posts `/ClearSolos {}`), OL has no engine command (Console: `post /ClearClips {}`). Gap.
+    "global ClearClips",
+    "global ClearSolos",
+    // Benign: INSERT EFFECTS UAD MON when every input already records post-inserts; a session
+    // navigator slot for a strip that is already in view.
+    "nav AllRecordPreEffects(true)",
+    "session SessionNavigate(#)",
     // Benign without plug-in scenes (the x4 fixture has none): nothing to step through.
     "settings SceneStep(false)",
     "settings SceneStep(true)",
     // Benign with one device: selecting the device that is already selected.
     "settings SettingsDevice(#)",
-    // Benign when the I/O matrix fits: its scrollbar has nothing to scroll.
-    "settings SettingsScroll",
 ];
 
 #[test]
@@ -318,7 +346,7 @@ fn every_control_is_wired() {
     let snap = Snapshot::load(snapshot()).expect("snapshot");
     let model = EngineMixer::new(Store::from_snapshot(snap.clone()));
     let seen = model.store().writer().suppressed_count();
-    let mut audit = Audit { assets, snap, model, groups: BTreeMap::new(), seen, dirty: false };
+    let mut audit = Audit { assets, snap, model, groups: BTreeMap::new(), seen, dirty: false, occluded: BTreeMap::new() };
     let mut scenarios: Vec<(String, ViewState)> = Vec::new();
     let spec = |s: &str| {
         let mut v = ViewState::default();
@@ -378,7 +406,12 @@ fn every_control_is_wired() {
         "art": art, "snapshot": snapshot(), "scenarios": scenarios.iter().map(|(n, _)| n).collect::<Vec<_>>(),
         "groups": groups.len(), "engine": count("engine"), "view": count("view"), "shell": count("shell"), "model": count("model"), "disabled": count("disabled"), "noop": count("noop"),
     });
-    std::fs::write(out_dir().join("wiring.json"), serde_json::to_string_pretty(&serde_json::json!({ "summary": summary, "groups": report })).unwrap()).unwrap();
+    // Groups only ever seen covered (never pressed anywhere).
+    let covered: BTreeMap<&String, &BTreeSet<String>> = audit.occluded.iter().filter(|(k, _)| !groups.contains_key(*k)).collect();
+    std::fs::write(out_dir().join("wiring.json"), serde_json::to_string_pretty(&serde_json::json!({ "summary": summary, "groups": report, "only_occluded": covered })).unwrap()).unwrap();
+    for (k, why) in &covered {
+        eprintln!("OCCLUDED {k}: {}", why.iter().next().map(String::as_str).unwrap_or(""));
+    }
     eprintln!("wiring ({art}): {} groups — engine {}, view {}, shell {}, model {}, disabled {}, noop {}", groups.len(), count("engine"), count("view"), count("shell"), count("model"), count("disabled"), count("noop"));
 
     let noops: BTreeSet<&str> = groups.iter().filter(|(_, g)| g.outcome() == "noop").map(|(k, _)| k.as_str()).collect();
