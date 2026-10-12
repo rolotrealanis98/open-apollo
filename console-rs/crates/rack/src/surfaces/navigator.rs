@@ -9,7 +9,8 @@ use houston::{Rect, Rgba};
 use crate::draw::{Align, TextStyle};
 use crate::input::{Control, ControlId, HitKind};
 use crate::model::MixerModel;
-use crate::surfaces::view::{InsertSize, Modifier, Section, ViewState};
+use crate::settings::Panel;
+use crate::surfaces::view::{InsertSize, Modifier, Section, Sheet, ViewState};
 use crate::ui::Ui;
 
 pub const NAV_ID: &str = "nav";
@@ -248,11 +249,11 @@ pub fn draw_navigator(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: 
 
         // SHOW.
         label(ui, "SHOW", Rect::new(4.0, L::SHOW_Y + 0.5, WIDTH - 8.0, 16.0), Align::Center);
-        let scenes_open = matches!(&view.popover, Some(p) if p.anchor.control == Control::ShowPluginScenes);
+        let scenes_open = view.sheet == Some(Sheet::Panel(Panel::PluginScenes));
         let shows = [
             ("BROWSER", view.show_browser, Control::ShowBrowser),
             ("PLUG-IN\nSCENES", scenes_open, Control::ShowPluginScenes),
-            ("SETTINGS", view.sheet.is_some(), Control::ShowSettings),
+            ("SETTINGS", view.sheet == Some(Sheet::Settings), Control::ShowSettings),
         ];
         for (i, (label, on, c)) in shows.into_iter().enumerate() {
             let r = Rect::new(8.0, L::SHOW_Y + 16.0 + i as f32 * 40.0, 80.0, 40.0);

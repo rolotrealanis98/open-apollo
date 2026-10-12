@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use crate::input::{Action, Control, ControlId, Hit, ScrollRegion, ScrollTarget};
 use crate::model::{MixerModel, StripInfo};
+use crate::settings::{Panel, SettingOp, SettingsTab};
 
 /// Cell rows toggled by the navigator (and FADER, the main strip's fader area).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -165,6 +166,8 @@ pub enum TextTarget {
     Rename(Arc<str>),
     Search,
     Tempo,
+    /// A settings text field (DEVICE NAME), by field key.
+    Setting(Arc<str>),
 }
 
 /// A text field with keyboard focus.
@@ -177,6 +180,25 @@ pub struct TextEdit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sheet {
     Settings,
+    /// A secondary panel (CUE OUTPUTS, MONITOR CONTROLLER, …).
+    Panel(Panel),
+}
+
+/// Settings window and secondary-panel UI state.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SettingsView {
+    pub tab: SettingsTab,
+    /// HARDWARE › DEVICES selection (engine device index).
+    pub device: u8,
+    /// The settings combo whose dropdown is open (field key).
+    pub menu: Option<Arc<str>>,
+    /// The open panel's tab (MONITOR CONTROLLER: 0 BASS MANAGEMENT, 1 SPEAKER UTILITIES;
+    /// HEADPHONE CORRECTION: HP 1 / HP 2).
+    pub panel_tab: u8,
+    /// Page / list scroll, 0…1 of the overflow.
+    pub scroll: f32,
+    /// PLUG-IN SCENES: the selected (primed) scene.
+    pub scene: Option<u16>,
 }
 
 /// UI-only state: owned by the app shell, read by `build_window_with`, changed by `route`.
@@ -199,6 +221,7 @@ pub struct ViewState {
     pub popover: Option<PopoverState>,
     pub text_edit: Option<TextEdit>,
     pub sheet: Option<Sheet>,
+    pub settings: SettingsView,
     /// Window size in points; the full layout follows it (None: Console's 1920 × 1050).
     pub window: Option<(f32, f32)>,
 }
@@ -220,6 +243,7 @@ impl Default for ViewState {
             popover: None,
             text_edit: None,
             sheet: None,
+            settings: SettingsView::default(),
             window: None,
         }
     }
@@ -275,6 +299,16 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SettingsRate
             | C::SettingsClock
             | C::SettingsBuffer
+            | C::SettingsTab(_)
+            | C::SettingsDevice(_)
+            | C::SettingMenu(_)
+            | C::SettingEdit(_)
+            | C::ShowPanel(_)
+            | C::PanelClose
+            | C::PanelTab(_)
+            | C::SceneSelect(_)
+            | C::SceneStep(_)
+            | C::SettingsScroll
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
 }
 
@@ -308,6 +342,7 @@ impl ViewState {
                 match id.control {
                     C::BrowserScroll => self.browser.scroll = frac,
                     C::CellsScroll => self.cells_scroll = frac,
+                    C::SettingsScroll => self.settings.scroll = frac,
                     _ => {}
                 }
             }
@@ -315,6 +350,10 @@ impl ViewState {
         }
         if !press {
             return vec![Effect::Model(action)];
+        }
+        // Picking a settings option closes its dropdown.
+        if matches!(id.control, C::SettingChoose(..)) {
+            self.settings.menu = None;
         }
         // A tap on a menu item closes its popover; toggles inside panel popovers keep it open.
         let from_menu = matches!(action, Action::Tap(_)) && self.popover.is_some();
@@ -347,6 +386,9 @@ impl ViewState {
         use Control as C;
         let mut out = Vec::new();
         let keep_popover = matches!(id.control, C::PopoverDismiss | C::TextCommit | C::TextCancel);
+        if !matches!(id.control, C::SettingMenu(_) | C::PopoverDismiss) {
+            self.settings.menu = None;
+        }
         if !keep_popover && self.popover.is_some() {
             // Opening something else (or any view press) replaces the current popover.
             self.popover = None;
@@ -366,9 +408,38 @@ impl ViewState {
             C::SendsOverview => self.sends_overview ^= true,
             C::Modifier(m) => self.modifier = if self.modifier == Some(m) { None } else { Some(m) },
             C::ShowBrowser => self.show_browser ^= true,
-            C::ShowPluginScenes => self.open(Popover::Scenes, id),
-            C::ShowSettings => self.sheet = Some(Sheet::Settings),
-            C::SettingsClose => self.sheet = None,
+            C::ShowPluginScenes => self.toggle_panel(Panel::PluginScenes, model),
+            C::ShowSettings => {
+                self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) };
+                self.settings.scroll = 0.0;
+            }
+            C::SettingsClose | C::PanelClose => {
+                self.sheet = None;
+                self.text_edit = self.text_edit.take().filter(|t| !matches!(t.target, TextTarget::Setting(_)));
+            }
+            C::SettingsTab(t) => {
+                self.settings.tab = t;
+                self.settings.scroll = 0.0;
+            }
+            C::SettingsDevice(d) => self.settings.device = d,
+            C::SettingMenu(k) => self.settings.menu = if self.settings.menu.as_ref() == Some(&k) { None } else { Some(k) },
+            C::SettingEdit(k) => {
+                let text = model.properties().and_then(|p| crate::settings::find_field(p, &k)).map(|f| f.value_text()).unwrap_or_default();
+                self.text_edit = Some(TextEdit { target: TextTarget::Setting(k), text });
+            }
+            C::ShowPanel(p) => self.toggle_panel(p, model),
+            C::PanelTab(i) => {
+                self.settings.panel_tab = i;
+                self.settings.scroll = 0.0;
+            }
+            C::SceneSelect(i) => self.settings.scene = Some(i),
+            C::SceneStep(up) => {
+                let n = model.plugin_scenes().len() as u16;
+                if n > 0 {
+                    let cur = self.settings.scene.unwrap_or(0);
+                    self.settings.scene = Some(if up { cur.saturating_sub(1) } else { (cur + 1).min(n - 1) });
+                }
+            }
             C::Name => {
                 if self.modifier == Some(Modifier::Isolate) {
                     out.push(Effect::Model(Action::Toggle(ControlId { strip: id.strip.clone(), control: C::Isolate })));
@@ -408,11 +479,15 @@ impl ViewState {
             C::SettingsBuffer => self.open(Popover::BufferSize, id),
             C::StatusScene => self.open(Popover::Scenes, id),
             C::MonitorPage(p) => self.monitor_page = p,
-            C::CueOutputs => self.open(Popover::CueOutputs, id),
+            C::CueOutputs => self.toggle_panel(Panel::CueOutputs, model),
             C::HeadphoneMenu(o) => self.open(Popover::Headphone { output: o }, id),
             C::PopoverDismiss => {
                 self.popover = None;
                 self.text_edit = self.text_edit.take().filter(|t| t.target == TextTarget::Search);
+                // A tap outside closes an open settings dropdown first, then an anchored panel.
+                if self.settings.menu.take().is_none() && self.sheet == Some(Sheet::Panel(Panel::CueOutputs)) {
+                    self.sheet = None;
+                }
             }
             C::TextCommit => out.extend(self.commit_text()),
             C::TextCancel => {
@@ -430,7 +505,23 @@ impl ViewState {
         match edit.target {
             TextTarget::Rename(strip) => Some(Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)),
             TextTarget::Tempo => Some(Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)),
+            TextTarget::Setting(k) => Some(Effect::SetText(ControlId { strip: "settings".into(), control: Control::SettingEdit(k) }, edit.text)),
             TextTarget::Search => None,
+        }
+    }
+
+    /// Opens panel `p` (or closes it when it is already open).
+    fn toggle_panel(&mut self, p: Panel, model: &dyn MixerModel) {
+        if self.sheet == Some(Sheet::Panel(p)) {
+            self.sheet = None;
+            return;
+        }
+        self.sheet = Some(Sheet::Panel(p));
+        self.settings.panel_tab = 0;
+        self.settings.scroll = 0.0;
+        if p == Panel::PluginScenes {
+            let current = model.status().scene;
+            self.settings.scene = current.and_then(|c| model.plugin_scenes().iter().position(|n| *n == c)).map(|i| i as u16);
         }
     }
 
@@ -466,6 +557,7 @@ impl ViewState {
         let slot = match r.target {
             ScrollTarget::Browser => &mut self.browser.scroll,
             ScrollTarget::Cells => &mut self.cells_scroll,
+            ScrollTarget::Settings => &mut self.settings.scroll,
         };
         *slot = (*slot + dy / r.max).clamp(0.0, 1.0);
         true
@@ -496,6 +588,8 @@ impl ViewState {
         if self.popover.is_some() || self.text_edit.is_some() {
             self.popover = None;
             self.text_edit = None;
+        } else if self.settings.menu.is_some() {
+            self.settings.menu = None;
         } else if self.sheet.is_some() {
             self.sheet = None;
         } else {
@@ -514,6 +608,13 @@ impl ViewState {
 fn apply_effects(effects: Vec<Effect>, model: &mut dyn MixerModel) {
     for e in effects {
         match e {
+            Effect::Model(Action::Tap(ControlId { control: Control::SettingChoose(k, i), .. }) | Action::Toggle(ControlId { control: Control::SettingChoose(k, i), .. })) => {
+                model.apply_setting(&k, &SettingOp::Choose(i as usize))
+            }
+            Effect::Model(Action::Tap(ControlId { control: Control::SettingPress(k), .. }) | Action::Toggle(ControlId { control: Control::SettingPress(k), .. })) => {
+                model.apply_setting(&k, &SettingOp::Press)
+            }
+            Effect::SetText(ControlId { control: Control::SettingEdit(k), .. }, text) => model.apply_setting(&k, &SettingOp::Text(text)),
             Effect::Model(a) => model.apply(&a),
             Effect::SetText(id, text) => model.set_text(&id, &text),
         }

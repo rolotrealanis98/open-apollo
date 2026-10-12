@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use houston::Rect;
 
+use crate::settings::{Panel, SettingsTab};
 use crate::surfaces::{BrowserTab, InsertSize, Modifier, MonitorPage, Section};
 
 /// Which control of which strip ("in0", "aux1", "monitor", …).
@@ -138,6 +139,29 @@ pub enum Control {
     PluginStep(u16, u16),
     /// A button of the plug-in window's chrome (title bar, UAPW toolbar, footer): tap.
     PluginWindow(PluginWindowButton),
+    // Settings window and secondary panels (`surfaces::settings`, `surfaces::panels`); fields
+    // are named by their `settings::SettingField::key`. Append-only below.
+    /// [view] Settings window tab.
+    SettingsTab(SettingsTab),
+    /// [view] HARDWARE › DEVICES: show the OPTIONS of device `.0` (engine device index).
+    SettingsDevice(u8),
+    /// [view] Open the dropdown of a settings combo.
+    SettingMenu(Arc<str>),
+    /// [model] Choose option `.1` of a settings combo (or a segmented pair).
+    SettingChoose(Arc<str>, u16),
+    /// [model] Press a settings toggle or button.
+    SettingPress(Arc<str>),
+    /// [view] Focus a settings text field; as a `set_text` target, the field's new text.
+    SettingEdit(Arc<str>),
+    /// [view] Open a secondary panel; close the open one; select its tab.
+    ShowPanel(Panel),
+    PanelClose,
+    PanelTab(u8),
+    /// [view] PLUG-IN SCENES: select (prime) scene `.0`; step the selection up / down.
+    SceneSelect(u16),
+    SceneStep(bool),
+    /// [view] Settings page scrollbar (drag; value = 1 − scroll fraction).
+    SettingsScroll,
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the
@@ -206,6 +230,8 @@ pub struct Hit {
 pub enum ScrollTarget {
     Browser,
     Cells,
+    /// The settings page or panel list.
+    Settings,
 }
 
 /// A wheel/trackpad-scrollable area; `max` is the content overflow in points.

@@ -9,6 +9,7 @@ pub mod input;
 pub mod model;
 pub mod preamp;
 pub mod scales;
+pub mod settings;
 pub mod surfaces;
 pub mod ui;
 pub mod widgets;

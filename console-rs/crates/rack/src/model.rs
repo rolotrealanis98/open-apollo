@@ -523,6 +523,22 @@ pub trait MixerModel {
     /// Text edits committed by the UI: `Name` (channel name), `Insert(k)` (load plug-in by
     /// catalogue name), `Tempo`.
     fn set_text(&mut self, _id: &ControlId, _text: &str) {}
+    /// Properties behind the Settings window and secondary panels (engine paths and `pref:`
+    /// client preferences). None leaves those pages empty.
+    fn properties(&self) -> Option<&dyn crate::settings::PropertySource> {
+        None
+    }
+    /// Applies the writes of a settings control (`settings::resolve`): engine `set`s and
+    /// `post`s, client preferences. Ignored by default.
+    fn apply_setting_writes(&mut self, _writes: Vec<crate::settings::Write>) {}
+    /// A settings control operation on the field bound to `key`.
+    fn apply_setting(&mut self, key: &str, op: &crate::settings::SettingOp) {
+        let Some(src) = self.properties() else { return };
+        let writes = crate::settings::resolve(src, key, op);
+        if !writes.is_empty() {
+            self.apply_setting_writes(writes);
+        }
+    }
     /// The concrete model, for hosts that need more than this trait (plug-in windows reach the
     /// engine store through it). None by default.
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -554,6 +570,8 @@ pub struct PreviewMixer {
     pub headphones: Vec<HeadphoneOutput>,
     /// Insert copied with COPY, pasted by the next COPY on an empty slot.
     pub clipboard: Option<InsertState>,
+    /// Settings window and panel properties (an Apollo x4 like the p2 reference engine).
+    pub props: crate::settings::MemoryProperties,
 }
 
 fn demo_catalog() -> Vec<PluginEntry> {
@@ -727,6 +745,7 @@ impl Default for PreviewMixer {
                 HeadphoneOutput { name: "HP 2".into(), source: 2, options: vec!["MON".into(), "CUE 1".into(), "CUE 2".into()] },
             ],
             clipboard: None,
+            props: crate::settings::MemoryProperties::demo_x4(),
         }
     }
 }
@@ -828,7 +847,32 @@ impl MixerModel for PreviewMixer {
                     self.status.tempo = t.clamp(1.0, 999.0);
                 }
             }
+            Control::SettingEdit(ref k) => self.apply_setting(k, &crate::settings::SettingOp::Text(text.to_string())),
             _ => {}
+        }
+    }
+    fn properties(&self) -> Option<&dyn crate::settings::PropertySource> {
+        Some(&self.props)
+    }
+    fn apply_setting_writes(&mut self, writes: Vec<crate::settings::Write>) {
+        for w in &writes {
+            self.props.apply(w);
+            // Keep the status bar and the legacy settings sheet in step.
+            if let crate::settings::Write::Set(path, v) = w {
+                match path.as_str() {
+                    "/SampleRate" => {
+                        let hz = v.as_i64().map(|h| h as u32);
+                        self.settings.sample_rate = hz;
+                        self.status.sample_rate = hz;
+                    }
+                    "/ClockSource" => {
+                        let c = v.as_str().map(str::to_owned);
+                        self.settings.clock_source = c.clone();
+                        self.status.clock_source = c;
+                    }
+                    _ => {}
+                }
+            }
         }
     }
     fn apply(&mut self, action: &Action) {
@@ -837,6 +881,8 @@ impl MixerModel for PreviewMixer {
         // Controls that are not per-strip state.
         if press {
             match &id.control {
+                Control::SettingChoose(k, i) => return self.apply_setting(k, &crate::settings::SettingOp::Choose(*i as usize)),
+                Control::SettingPress(k) => return self.apply_setting(k, &crate::settings::SettingOp::Press),
                 Control::MonitorMono => return self.monitor.mono ^= true,
                 Control::MonitorMute => return self.monitor.mute ^= true,
                 Control::MonitorDim => return self.monitor_options.dim = self.monitor_options.dim.map(|d| !d),
