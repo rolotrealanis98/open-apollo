@@ -94,12 +94,20 @@ fn dialog_frame(ui: &mut Ui, r: Rect, title: &str, light: bool) -> Rect {
 /// centred in (8, 1, 20, 27); the title (`Rack_CalloutBoxHeader`, `Button-Popover-Header`)
 /// centred in (0, 0, w, 26). Swallows taps on the body.
 fn popover_frame(ui: &mut Ui, r: Rect, title: &str) {
+    popover_frame_with(ui, r, title, true);
+}
+
+/// [`popover_frame`], with or without the close X (dialogs such as ADD DEVICE have none).
+fn popover_frame_with(ui: &mut Ui, r: Rect, title: &str, close: bool) {
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
     ui.background("Popover-Header", Rect::new(r.x, r.y, r.w, 27.0));
     ui.background("Popover-Content", Rect::new(r.x, r.y + 27.0, r.w, r.h - 27.0));
     if !title.is_empty() {
         let style = ui.style("views", "Button-Popover-Header");
         ui.text(title, style, Rect::new(r.x, r.y, r.w, 26.0), Align::Center);
+    }
+    if !close {
+        return;
     }
     if let Some(x) = ui.skin("views", "Popover-Close-Old").and_then(|s| s.image("image")) {
         let x = x.to_string();
@@ -666,68 +674,110 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
 const DEVICE_TYPES: [&str; 14] = ["Apollo", "Apollo 16", "Apollo 8", "Apollo 8p", "Apollo 16 MkII", "Apollo x6", "Apollo x8", "Apollo x8p", "Apollo x16", "Apollo x16D", "Apollo x6 Gen 2", "Apollo x8 Gen 2", "Apollo x8p Gen 2", "Apollo x16 Gen 2"];
 
 fn add_device(ui: &mut Ui, view: &ViewState, bounds: Rect) {
-    // 220 × 315 (s26): a dark list inset 11 pt in the light body, CANCEL / ADD under it.
+    // `Rack_AddDeviceDialog::resized` 0x180a27e30 (capture set-adddev, 220 × 315): the list
+    // (12, 27 + 12, w − 24, h − 27 − 60), CANCEL (12, h − 36, (w − 36)/2, 24) and ADD beside it;
+    // a popover without a close X.
     let r = centred(bounds, (220.0, 315.0));
-    let c = dialog_frame(ui, r, "ADD DEVICE", true);
-    let list = Rect::new(c.x + 11.0, c.y + 11.0, c.w - 22.0, c.h - 58.0);
-    ui.fill(list, LIST_BG);
-    let row_h = 40.0;
-    let overflow = (DEVICE_TYPES.len() as f32 * row_h - list.h).max(0.0);
-    let off = (overflow * view.settings.scroll).round();
-    ui.clip(Some(list));
-    let ns = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.85));
-    for (i, t) in DEVICE_TYPES.iter().enumerate() {
-        let y = list.y + i as f32 * row_h - off;
-        let row = Rect::new(list.x, y, list.w - 14.0, row_h);
-        if view.settings.list == Some(i as u16) {
-            ui.fill(row.inset(2.0, 2.0, 2.0, 2.0), LIST_SEL);
-        }
-        ui.background(&format!("Device-Icon-{}", t.replace(' ', "-")), Rect::new(row.x + 8.0, y + 6.0, 39.0, 28.0));
-        ui.text(t, ns.clone(), Rect::new(row.x + 52.0, y, row.w - 56.0, row_h), Align::Left);
-        ui.hit(row, sid(Control::ListSelect(i as u16)), HitKind::Tap);
-    }
-    ui.clip(None);
-    ui.scroll_region(list, ScrollTarget::Settings, overflow);
-    let by = c.max_y() - 37.0;
-    let bw = ((c.w - 33.0) / 2.0).floor();
-    dialog_button(ui, "CANCEL", false, Rect::new(c.x + 11.0, by, bw, 24.0), Some(sid(Control::PanelClose)));
+    popover_frame_with(ui, r, "ADD DEVICE", false);
+    let list = Rect::new(r.x + 12.0, r.y + 39.0, r.w - 24.0, r.h - 87.0);
+    let items: Vec<(Option<String>, String)> = DEVICE_TYPES.iter().map(|t| (Some(format!("Device-Icon-{}", t.replace(' ', "-"))), t.to_string())).collect();
+    popover_list(ui, view, list, &items, 50.0, 11.0);
+    let bw = ((r.w - 36.0) / 2.0).floor();
+    let by = r.max_y() - 36.0;
+    popover_button(ui, "CANCEL", false, Rect::new(r.x + 12.0, by, bw, 24.0), Some(sid(Control::PanelClose)));
     let add = view.settings.list.and_then(|i| DEVICE_TYPES.get(i as usize)).map(|t| sid(Control::SettingPress(format!("post:AddDevice:{t}").into())));
-    dialog_button(ui, "ADD", true, Rect::new(c.max_x() - 11.0 - bw, by, bw, 24.0), add);
+    popover_button(ui, "ADD", true, Rect::new(r.x + 24.0 + bw, by, bw, 24.0), add);
 }
 
-// ---- I/O PRESETS ([cap] s38, 251 × 406) ----
-
-fn io_presets(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
-    // 205 × 360 (s38): the list, then OPEN / SAVE / SAVE AS... and LOAD / RENAME / DELETE.
-    let r = centred(bounds, (205.0, 360.0));
-    let c = dialog_frame(ui, r, "I/O PRESETS", true);
-    let Some(src) = model.properties() else { return };
-    let presets: Vec<String> = src.choices("/IOMapPreset").into_iter().map(|c| c.label).collect();
-    let list = Rect::new(c.x, c.y, c.w, c.h - 56.0);
-    ui.fill(list, LIST_BG);
+/// A popover list box (ADD DEVICE, I/O PRESETS; captures set-adddev / set-d-iopresets): a
+/// 1-pt dark frame round the (50, 55, 57) well, 40-pt rows, the selected row (67, 80, 86)
+/// inset 3 pt (21 on the right, by the scroll bar), the `Small-Vertical-Scroll-Bar` thumb in
+/// the right 18 pt. Rows are an optional `backgrounds` icon (fitted 32 wide, centred on
+/// x + 21.75) and a label `text_x` from the list's left edge (Helvetica `text_size`, white 0.85). The first row is
+/// selected until the user picks one, as in Console.
+fn popover_list(ui: &mut Ui, view: &ViewState, list: Rect, items: &[(Option<String>, String)], text_x: f32, text_size: f32) {
+    ui.fill(list, Rgba::rgb8(22, 25, 26));
+    let well = list.inset(1.0, 1.0, 1.0, 1.0);
+    ui.fill(well, Rgba::rgb8(50, 55, 57));
     let row_h = 40.0;
-    let overflow = (presets.len() as f32 * row_h - list.h).max(0.0);
+    let content = items.len() as f32 * row_h;
+    let overflow = (content - list.h).max(0.0);
     let off = (overflow * view.settings.scroll).round();
-    ui.clip(Some(list));
-    let ns = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.85));
-    for (i, p) in presets.iter().enumerate() {
+    let selected = view.settings.list.map(|i| i as usize).unwrap_or(0);
+    ui.clip(Some(well));
+    let ns = Ui::plain_style("Helvetica", text_size, false, Rgba::WHITE.with_alpha(0.85));
+    for (i, (icon, label)) in items.iter().enumerate() {
         let y = list.y + i as f32 * row_h - off;
-        let row = Rect::new(list.x, y, list.w - 14.0, row_h);
-        if view.settings.list == Some(i as u16) {
-            ui.fill(row.inset(2.0, 2.0, 2.0, 2.0), LIST_SEL);
+        if y > list.max_y() || y + row_h < list.y {
+            continue;
         }
-        ui.text(p, ns.clone(), Rect::new(row.x + 8.0, y, row.w - 12.0, row_h), Align::Left);
+        let row = Rect::new(list.x, y, list.w - 18.0, row_h);
+        if i == selected {
+            ui.fill(Rect::new(list.x + 3.0, y + 3.0, list.w - 24.0, row_h - 6.0), Rgba::rgb8(67, 80, 86));
+        }
+        if let Some(key) = icon {
+            let art = ui.skin("backgrounds", key).and_then(|s| Some((s.size()?, s.image("image")?.to_string())));
+            if let Some(((w, h), path)) = art {
+                let f = 32.0 / w;
+                ui.image(&path, Rect::new(list.x + 21.75 - 16.0, y + (row_h - h * f) / 2.0, 32.0, h * f), None, None, 1.0);
+            }
+        }
+        // The selected row's label is brighter than the rest (set-d-iopresets).
+        let mut st = ns.clone();
+        st.color = Rgba::WHITE.with_alpha(if i == selected { 0.9 } else { 0.72 });
+        ui.text(label, st, Rect::new(list.x + text_x, y, row.w - text_x - 4.0, row_h), Align::Left);
         ui.hit(row, sid(Control::ListSelect(i as u16)), HitKind::Tap);
     }
     ui.clip(None);
+    if overflow > 0.0 {
+        let track = Rect::new(list.max_x() - 18.0, list.y + 1.0, 18.0, list.h - 2.0);
+        let thumb_h = (track.h * list.h / content).round().max(18.0);
+        let ty = (track.y + (track.h - thumb_h) * view.settings.scroll.clamp(0.0, 1.0)).round();
+        if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|s| s.image("image")) {
+            let img = img.to_string();
+            ui.image_stretched(&img, Rect::new(track.x, ty, track.w, thumb_h), 1.0);
+        }
+    }
     ui.scroll_region(list, ScrollTarget::Settings, overflow);
-    let sel = view.settings.list.and_then(|i| presets.get(i as usize)).cloned();
+}
+
+/// `Popover-Button` (CANCEL, OPEN, …; `Popover-Button-Primed` for the default, ADD): the
+/// stretched plate with its Oxygen bold label; without an id it draws disabled.
+/// Console draws these lit whether or not they can act (set-d-iopresets).
+fn popover_button(ui: &mut Ui, label: &str, primed: bool, r: Rect, id: Option<ControlId>) {
+    let art = ui.skin("views", if primed { "Popover-Button-Primed" } else { "Popover-Button" }).and_then(|s| s.image(if primed { "image-overlay" } else { "image-off" }).map(str::to_string));
+    if let Some(path) = art {
+        ui.image_stretched(&path, r, 1.0);
+    }
+    let mut style = ui.style("views", "Popover-Button");
+    style.color = Rgba::WHITE;
+    ui.text(label, style, r, Align::Center);
+    if let Some(id) = id {
+        ui.hit(r, id, HitKind::Tap);
+    }
+}
+
+// ---- I/O PRESETS (`Rack_RoutePresetsPopover`; capture set-d-iopresets, 205 × 360) ----
+
+fn io_presets(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
+    // `Rack_RoutePresetsPopover::resized` 0x18116f5d0: the list (1, 28, w − 2, h − 80), then
+    // OPEN / SAVE / SAVE AS... at y = h − 51 and LOAD / RENAME / DELETE 26 below, each
+    // (w − 4)/3 wide, 1 pt apart.
+    let r = centred(bounds, (205.0, 360.0));
+    popover_frame(ui, r, "I/O PRESETS");
+    let Some(src) = model.properties() else { return };
+    let presets: Vec<String> = src.choices("/IOMapPreset").into_iter().map(|c| c.label).collect();
+    let list = Rect::new(r.x + 1.0, r.y + 28.0, r.w - 2.0, r.h - 80.0);
+    let items: Vec<(Option<String>, String)> = presets.iter().map(|p| (None, p.clone())).collect();
+    popover_list(ui, view, list, &items, 10.5, 11.0);
+    let sel_i = view.settings.list.unwrap_or(0);
+    let sel = presets.get(sel_i as usize).cloned();
     let current = str_at(src, "/IOMapPreset").filter(|s| !s.is_empty());
-    let bw = (c.w / 3.0).floor();
+    let bw = ((r.w - 4.0) / 3.0).floor();
     // OPEN / SAVE / SAVE AS... / LOAD / RENAME / DELETE: the engine's IOMapPreset commands
     // (`SaveIOMapPreset`, `RenameIOMapPreset`, `DeleteIOMapPreset`, `Import`).
     let buttons: [(&str, Option<Control>); 6] = [
-        ("OPEN", view.settings.list.filter(|_| sel.is_some()).map(|i| Control::SettingChoose("iopreset:/IOMapPreset".into(), i))),
+        ("OPEN", sel.as_ref().map(|_| Control::SettingChoose("iopreset:/IOMapPreset".into(), sel_i))),
         ("SAVE", current.as_ref().map(|n| Control::SettingPress(format!("post:SaveIOMapPreset:{n}").into()))),
         ("SAVE AS...", Some(Control::SettingEdit("post-text:SaveIOMapPreset".into()))),
         ("LOAD", Some(Control::SettingPress("post:Import:IOMapPreset".into()))),
@@ -735,15 +785,15 @@ fn io_presets(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rec
         ("DELETE", sel.as_ref().map(|n| Control::SettingPress(format!("post:DeleteIOMapPreset:{n}").into()))),
     ];
     for (k, (label, control)) in buttons.into_iter().enumerate() {
-        let r = Rect::new(c.x + (k % 3) as f32 * bw, c.max_y() - 54.0 + (k / 3) as f32 * 26.0, bw - 1.0, 25.0);
-        dialog_button(ui, label, false, r, control.map(sid));
+        let b = Rect::new(r.x + 1.0 + (k % 3) as f32 * (bw + 1.0), r.max_y() - 51.0 + (k / 3) as f32 * 26.0, bw, 24.0);
+        popover_button(ui, label, false, b, control.map(sid));
     }
     // SAVE AS / RENAME edit the name in a field over the buttons.
     if let Some(e) = view.text_edit.as_ref() {
         if let TextTarget::Setting(k) = &e.target {
             if k.starts_with("post-text:") {
                 let f = SettingField::new(k.clone(), "", FieldKind::Text(String::new()), 0);
-                text_box(ui, &f, "", Some(e), Rect::new(c.x + 4.0, c.max_y() - 98.0, c.w - 8.0, 40.0));
+                text_box(ui, &f, "", Some(e), Rect::new(r.x + 4.0, r.max_y() - 98.0, r.w - 8.0, 40.0));
             }
         }
     }
