@@ -46,6 +46,8 @@ pub struct WindowLayout {
     pub height: f32,
     /// The aux cells overflow, so the bus section carries its scrollbar.
     pub aux_scroll: bool,
+    /// The monitor column is shown (View > Section > Show Monitor).
+    pub monitor: bool,
 }
 
 const GAP: f32 = 18.0;
@@ -81,6 +83,7 @@ impl WindowLayout {
             width: w,
             height: h,
             aux_scroll: true,
+            monitor: view.show_monitor,
         };
         let (min_w, min_h) = l.min_size();
         l.width = l.width.max(min_w);
@@ -99,11 +102,15 @@ impl WindowLayout {
     /// Smallest window: one input strip, the bus section and the monitor; the main strip and a
     /// cell header above it.
     pub fn min_size(&self) -> (f32, f32) {
-        let w = self.strips_x() + STRIP_W + SCROLLBAR_W + self.bus_w() + BUS_MONITOR_GAP + self.ctrl_room_w() + STRIP_W;
+        let w = self.strips_x() + STRIP_W + SCROLLBAR_W + self.bus_w() + BUS_MONITOR_GAP + self.ctrl_room_w() + self.monitor_w();
         (w, W::COLUMN.0 + main_strip::HEIGHT + 5.0 + 22.0 + W::STATUS_BAR.1)
     }
     fn aux_w(&self) -> f32 {
         self.auxes as f32 * STRIP_W
+    }
+    /// The monitor column's width: hidden by View > Section > Show Monitor.
+    pub fn monitor_w(&self) -> f32 {
+        if self.monitor { STRIP_W } else { 0.0 }
     }
     fn ctrl_room_w(&self) -> f32 {
         if self.ctrl_room { STRIP_W } else { 0.0 }
@@ -147,11 +154,11 @@ impl WindowLayout {
         if self.compact {
             self.strips_x() + self.inputs as f32 * STRIP_W + GAP + self.aux_w() + GAP + self.ctrl_room_w()
         } else {
-            self.width - STRIP_W
+            self.width - self.monitor_w()
         }
     }
     pub fn size(&self) -> (f32, f32) {
-        if self.compact { (self.monitor_x() + STRIP_W + 4.0, self.height) } else { (self.width, self.height) }
+        if self.compact { (self.monitor_x() + self.monitor_w() + 4.0, self.height) } else { (self.width, self.height) }
     }
     /// Top of the status bar (and bottom of the monitor column).
     pub fn status_y(&self) -> f32 {
@@ -368,7 +375,9 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     if l.ctrl_room {
         draw_control_room(ui, model, Rect::new(l.ctrl_room_x(), W::COLUMN.0, STRIP_W, status_y - W::COLUMN.0));
     }
-    draw_monitor_column(ui, model, view, monitor_rect(l.monitor_x(), height));
+    if l.monitor {
+        draw_monitor_column(ui, model, view, monitor_rect(l.monitor_x(), height));
+    }
     draw_status_bar_with(ui, model, view.scene_info, Rect::new(0.0, status_y, width, W::STATUS_BAR.1));
     // Last of the chrome: its bottom line covers the first point of the columns below.
     title_bar(ui, model, view, width);
@@ -401,6 +410,10 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
             draw_panel(ui, model, view, p, pb, browser);
         }
         None => {}
+    }
+    if view.show_channels {
+        ui.layer_hint("channels", crate::layers::LayerKind::Window);
+        crate::surfaces::channels::draw(ui, model, pb);
     }
     ui.end_layers();
     ui.layer_hint("popover", crate::layers::LayerKind::Popover);
@@ -868,9 +881,11 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
         ui.toggle("Switch", Some("POST"), !st.pre, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::PrePost), None);
     }
     if let Some((talk, to_mons)) = g.talkback {
-        let on = model.monitor_options().talkback.unwrap_or(false);
+        let opts = model.monitor_options();
+        let on = opts.talkback.unwrap_or(false);
         ui.toggle("Switch-Large", Some("TALK"), on, true, talk, Some(ControlId { strip: "monitor".into(), control: Control::Talkback }), None);
-        ui.toggle("Switch-Large", Some("TALKBACK\nTO MONITOR"), false, true, to_mons, None, None);
+        let to_mon = ControlId { strip: "monitor".into(), control: Control::TalkbackToMonitor };
+        ui.toggle("Switch-Large", Some("TALKBACK\nTO MONITOR"), opts.talkback_to_monitor.unwrap_or(false), opts.talkback_to_monitor.is_some(), to_mons, Some(to_mon), None);
     }
     if let Some(r) = g.mono_mute {
         ui.toggle("Switch", Some("MONO"), st.mono, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::Mono), None);

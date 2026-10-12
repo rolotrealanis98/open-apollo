@@ -660,6 +660,31 @@ impl MixerModel for EngineMixer {
         self.surface_menu_state()
     }
 
+    fn devices(&self) -> Vec<rack::model::DeviceInfo> {
+        let tree = self.store.tree();
+        tree.indices("/devices")
+            .into_iter()
+            .map(|i| rack::model::DeviceInfo {
+                index: i,
+                name: self.str_at(&format!("/devices/{i}/DeviceName")).unwrap_or("").to_owned(),
+                online: self.bool_at(&format!("/devices/{i}/DeviceOnline")).unwrap_or(true),
+            })
+            .collect()
+    }
+
+    /// View > Show/Hide Channels: every real input of the shown device, hidden ones included
+    /// (`ChannelHidden`), in mixer order; not the talkback mic.
+    fn channel_list(&self) -> Vec<rack::model::ChannelEntry> {
+        use ua_engine::topology::InputKind;
+        self.store
+            .topology()
+            .all_inputs
+            .iter()
+            .filter(|s| s.is_active && s.enabled_by_user && s.kind != InputKind::None && s.kind != InputKind::Talkback)
+            .map(|s| rack::model::ChannelEntry { id: s.base.clone(), name: s.name.clone(), hidden: s.is_hidden })
+            .collect()
+    }
+
     fn set_background(&mut self, background: bool) {
         self.store.set_sleep(background);
     }

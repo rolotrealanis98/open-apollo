@@ -458,6 +458,28 @@ pub struct MonitorOptions {
     pub knob_focus: bool,
     /// Control-room SOURCE (`outputs/MON/MixInSource`): 0 = MONITOR, n = CUE n.
     pub cr_source: u8,
+    /// TALKBACK TO MONITOR (`Rack_Talkback` `talkback_to_mons`, 0x181497377):
+    /// `/TalkbackInPhysicalCR`; None hides the button's state (off).
+    pub talkback_to_monitor: Option<bool>,
+}
+
+/// A unit on the engine (`/devices/N`): Console's device tabs and offline-device list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceInfo {
+    pub index: usize,
+    /// `DeviceName` ("Apollo x4").
+    pub name: String,
+    /// `DeviceOnline`.
+    pub online: bool,
+}
+
+/// One channel in View > Show/Hide Channels: the input strip's path, its name and whether it
+/// is hidden (`ChannelHidden`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChannelEntry {
+    pub id: String,
+    pub name: String,
+    pub hidden: bool,
 }
 
 /// A cue output (`outputs/14..17`): what it plays and how.
@@ -618,6 +640,15 @@ pub trait MixerModel {
     /// Global menu state: undo / redo, metering, the plug-in clipboard.
     fn menu_state(&self) -> crate::menu::MenuModelState {
         crate::menu::MenuModelState::default()
+    }
+    /// The engine's units (`/devices/N`). Default: none known.
+    fn devices(&self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+    /// Every input channel that can be hidden or shown (View > Show/Hide Channels), hidden ones
+    /// included. Default: the visible inputs, none hidden.
+    fn channel_list(&self) -> Vec<ChannelEntry> {
+        self.inputs().into_iter().map(|s| ChannelEntry { id: s.id.to_string(), name: s.title.to_string(), hidden: false }).collect()
     }
     /// The concrete model, for hosts that need more than this trait (plug-in windows reach the
     /// engine store through it). None by default.
@@ -828,6 +859,7 @@ impl Default for PreviewMixer {
                 speaker_correction: Some(true),
                 knob_focus: true,
                 cr_source: 0,
+                talkback_to_monitor: Some(false),
             },
             cues: vec![
                 CueOutput { name: "CUE 1".into(), source_cue: true, mono: false, destination: "LINE 3/4".into() },
@@ -1031,6 +1063,10 @@ impl MixerModel for PreviewMixer {
                 Control::MonitorMute => return self.monitor.mute ^= true,
                 Control::MonitorDim => return self.monitor_options.dim = self.monitor_options.dim.map(|d| !d),
                 Control::Talkback => return self.monitor_options.talkback = self.monitor_options.talkback.map(|t| !t),
+                Control::TalkbackToMonitor => {
+                    return self.monitor_options.talkback_to_monitor = self.monitor_options.talkback_to_monitor.map(|t| !t);
+                }
+                Control::CrSource(k) => return self.monitor_options.cr_source = *k,
                 Control::MonitorAlt(k) => return self.monitor_options.alt_selection = *k,
                 Control::CueSource(k) => return if let Some(c) = self.cues.get_mut(*k as usize) { c.source_cue ^= true },
                 Control::CueMono(k) => return if let Some(c) = self.cues.get_mut(*k as usize) { c.mono ^= true },
