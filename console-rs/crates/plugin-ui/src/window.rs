@@ -274,6 +274,10 @@ pub struct PluginWindow {
     pub help_open: bool,
     /// Plug-in version for the help panel ("v1.0.0").
     pub version: Option<String>,
+    /// `build` draws the open popover too (default). Hosts that clip the window to its frame
+    /// turn this off and call [`PluginWindow::build_popover`] unclipped: Console's menus are
+    /// their own windows and may leave the plug-in window.
+    pub inline_popover: bool,
 }
 
 impl PluginWindow {
@@ -307,6 +311,7 @@ impl PluginWindow {
             scale: 100,
             help_open: false,
             version: None,
+            inline_popover: true,
         }
     }
 
@@ -387,10 +392,18 @@ impl PluginWindow {
         if let Some(f) = l.footer {
             self.footer(ui, &l, f);
         }
-        if let Some(which) = self.popover {
+        if let (Some(which), true) = (self.popover, self.inline_popover) {
             self.popover(ui, &l, which);
         }
         l
+    }
+
+    /// Draws the open popover (menus) for a window at `origin`; see `inline_popover`.
+    pub fn build_popover(&self, ui: &mut Ui, origin: (f32, f32), params: &dyn ParamSource) {
+        if let Some(which) = self.popover {
+            let l = self.layout(origin, self.editor_size(params));
+            self.popover(ui, &l, which);
+        }
     }
 
     fn title_bar(&self, ui: &mut Ui, l: &WindowLayout) {

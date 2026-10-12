@@ -308,3 +308,14 @@ fn menu_spec_opens_menus_for_renders() {
     let h = hits(&assets, &model, &view);
     assert!(h.iter().any(|x| matches!(&x.id.control, Control::Menu(MenuCmd::App(Command::RemoveAllPlugins)))));
 }
+
+#[test]
+fn plugin_window_insert_menu() {
+    let model = PreviewMixer::default();
+    let in0: std::sync::Arc<str> = "in0".into();
+    let m = menu::plugin_insert_menu(&model, &in0, 0);
+    let l = labels(&m);
+    assert_eq!(l[0], "[INSERT]");
+    assert_eq!(l[l.len() - 2..], ["[OPTIONS]".to_string(), "Assign...".to_string()]);
+    assert!(m.items().iter().any(|i| i.ticked), "the window's own plug-in is ticked");
+}

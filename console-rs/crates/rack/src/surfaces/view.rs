@@ -552,6 +552,8 @@ impl ViewState {
             self.text_edit = None;
         } else if self.sheet.is_some() {
             self.sheet = None;
+        } else if self.browser.assign_to.is_some() {
+            self.browser.assign_to = None;
         } else {
             self.modifier = None;
         }

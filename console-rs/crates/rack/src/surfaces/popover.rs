@@ -268,7 +268,8 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
                 m.push(PopupItem::new("OFFLINE", gid(Control::ClockSource(0))).enabled(false));
             }
             for (i, c) in st.clock_sources.iter().enumerate() {
-                m.push(PopupItem::new(c.clone(), gid(Control::ClockSource(i as u8))).ticked(Some(c) == st.clock_source.as_ref()));
+                // Console shows the clock sources in capitals (s03: INTERNAL, S/PDIF).
+                m.push(PopupItem::new(c.to_uppercase(), gid(Control::ClockSource(i as u8))).ticked(Some(c) == st.clock_source.as_ref()));
             }
             anchored_menu(ui, &m, MenuLook::Base, a, bounds);
         }

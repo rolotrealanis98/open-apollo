@@ -37,6 +37,16 @@ pub fn render_png(
     if let Some((strip, slot)) = open_plugin {
         overlays.on_open_plugin(strip, *slot, model);
     }
+    // `--menu plugin:assign|more|help` opens the plug-in window's menu instead.
+    let menu = match menu.and_then(|m| m.strip_prefix("plugin:")) {
+        Some(which) => {
+            if !overlays.open_menu(which) {
+                return Err(format!("--menu plugin:{which}: no plug-in window menu by that name (open one with --open-plugin)"));
+            }
+            None
+        }
+        None => menu,
+    };
     let mut view = ViewState {
         compact,
         window: size,

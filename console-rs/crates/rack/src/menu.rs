@@ -93,6 +93,8 @@ struct LookStyle {
     text_x: f32,
     /// Ticked rows: the console bullet, or the plug-in window's check mark.
     check: bool,
+    /// Item font relative to `Popup-Menu-Item` (s42's UAPW menu text is 0.9 of it).
+    font_scale: f32,
 }
 
 impl MenuLook {
@@ -108,6 +110,7 @@ impl MenuLook {
                 highlight_inset: 0.0,
                 text_x: TEXT_X,
                 check: false,
+                font_scale: 1.0,
             },
             // s42: 1-pt (70,80,86) border, a 0.5-pt (54,65,72) line, (50,62,68) body; rows of
             // white bold text 19 pt in (room for the check mark at 7 pt); highlight (108,117,121)
@@ -122,6 +125,7 @@ impl MenuLook {
                 highlight_inset: 1.0,
                 text_x: 19.0,
                 check: true,
+                font_scale: 0.9,
             },
         }
     }
@@ -1022,14 +1026,15 @@ fn measure(style: &crate::draw::TextStyle, look: MenuLook, e: &PopupEntry) -> (f
             let extra = i.shortcut.as_deref().map(|s| text_w(style, s) + 3.0 * font_h).unwrap_or(0.0);
             (item_w(&i.label) + extra, ITEM_H)
         }
-        PopupEntry::Submenu { label, .. } => (item_w(label) + 12.0, ITEM_H),
+        PopupEntry::Submenu { label, .. } => (item_w(label) + if look == MenuLook::Plugin { 6.0 } else { 12.0 }, ITEM_H),
     }
 }
 
 /// Lays out `menu` at `origin` (its window's top-left), at least `min_w` wide, kept inside
 /// `bounds` (flipped left / up like JUCE when it would overflow).
 pub fn layout_menu(ui: &Ui, menu: &PopupMenu, look: MenuLook, origin: (f32, f32), min_w: f32, bounds: Rect) -> MenuFrame {
-    let style = item_style(ui);
+    let mut style = item_style(ui);
+    style.size *= look.style().font_scale;
     let mut w: f32 = min_w - 2.0 * BORDER;
     let mut h = 0.0;
     let mut sizes = Vec::with_capacity(menu.entries.len());
@@ -1086,6 +1091,7 @@ impl Ui<'_> {
         self.hit(r, row_id(level, u16::MAX), HitKind::Tap);
         let mut style = item_style(self);
         style.color = st.text;
+        style.size *= st.font_scale;
         let lit_rect = |row: &Rect| Rect::new(row.x, row.y + st.highlight_inset, row.w, row.h - 2.0 * st.highlight_inset);
         for (i, (e, row)) in menu.entries.iter().zip(&f.rows).enumerate() {
             let i = i as u16;

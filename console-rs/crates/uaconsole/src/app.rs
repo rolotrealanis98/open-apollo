@@ -341,7 +341,12 @@ impl App {
     }
 
     fn route(&mut self, ev: PointerEvent) -> bool {
-        match self.overlays.pointer(ev, &mut *self.model) {
+        let routed = self.overlays.pointer(ev, &mut *self.model);
+        let forwarded = self.overlays.take_mixer_actions();
+        if !forwarded.is_empty() {
+            self.apply(forwarded);
+        }
+        match routed {
             Routed::ToMixer => false,
             Routed::Consumed => true,
             Routed::Changed => {
