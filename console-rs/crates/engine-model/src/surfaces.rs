@@ -376,6 +376,13 @@ impl EngineMixer {
             }
             // `Rack_Talkback` talkback_to_mons (0x181497377) → `/TalkbackInPhysicalCR` (registered
             // by MxClnt_UAD2MixerData 0x181b187ca; root on engine 12.0.0).
+            // View > Show/Hide Channels row (strip = the input's path): `ChannelHidden`.
+            Control::ChannelVisible => {
+                let p = format!("{}/ChannelHidden", id.strip);
+                if self.store.tree().has_property(&p) {
+                    self.toggle(&p, false);
+                }
+            }
             Control::TalkbackToMonitor => {
                 let p = self.store.topology().talkback.in_physical_cr();
                 self.toggle(&p, false);

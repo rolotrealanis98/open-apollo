@@ -443,6 +443,25 @@ pub struct MonitorOptions {
     pub talkback_to_monitor: Option<bool>,
 }
 
+/// A unit on the engine (`/devices/N`): Console's device tabs and offline-device list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceInfo {
+    pub index: usize,
+    /// `DeviceName` ("Apollo x4").
+    pub name: String,
+    /// `DeviceOnline`.
+    pub online: bool,
+}
+
+/// One channel in View > Show/Hide Channels: the input strip's path, its name and whether it
+/// is hidden (`ChannelHidden`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChannelEntry {
+    pub id: String,
+    pub name: String,
+    pub hidden: bool,
+}
+
 /// A cue output (`outputs/14..17`): what it plays and how.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CueOutput {
@@ -585,6 +604,15 @@ pub trait MixerModel {
     /// Global menu state: undo / redo, metering, the plug-in clipboard.
     fn menu_state(&self) -> crate::menu::MenuModelState {
         crate::menu::MenuModelState::default()
+    }
+    /// The engine's units (`/devices/N`). Default: none known.
+    fn devices(&self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+    /// Every input channel that can be hidden or shown (View > Show/Hide Channels), hidden ones
+    /// included. Default: the visible inputs, none hidden.
+    fn channel_list(&self) -> Vec<ChannelEntry> {
+        self.inputs().into_iter().map(|s| ChannelEntry { id: s.id.to_string(), name: s.title.to_string(), hidden: false }).collect()
     }
     /// The concrete model, for hosts that need more than this trait (plug-in windows reach the
     /// engine store through it). None by default.

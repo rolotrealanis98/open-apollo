@@ -66,3 +66,43 @@ fn talkback_to_monitor_toggles_talkback_in_physical_cr() {
     let w = writes_after(&server, 3);
     assert_eq!(sets(&w), ["set /TalkbackInPhysicalCR/value true"]);
 }
+
+#[test]
+fn show_hide_channels_lists_inputs_and_toggles_channel_hidden() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let list = m.channel_list();
+    assert!(!list.is_empty() && list.iter().all(|c| !c.hidden), "{list:?}");
+    assert!(list.iter().all(|c| !c.name.is_empty() && c.id.starts_with("/devices/0/inputs/")));
+    let first = list[0].id.clone();
+    let mut v = ViewState::default();
+    assert!(v.run_command_id("show_hide_channels", &mut m));
+    assert!(v.show_channels);
+    v.dispatch(Action::Tap(ControlId { strip: first.clone().into(), control: Control::ChannelVisible }), &mut m);
+    let w = writes_after(&server, 3);
+    assert_eq!(sets(&w), [format!("set {first}/ChannelHidden/value true")]);
+    v.dispatch(Action::Tap(ControlId { strip: "channels".into(), control: Control::ChannelsClose }), &mut m);
+    assert!(!v.show_channels);
+}
+
+#[test]
+fn view_menu_monitor_sections_toggle_the_layout() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let mut v = ViewState::default();
+    let full = rack::window::WindowLayout::for_model(&m, &v);
+    assert!(full.monitor && full.monitor_w() > 0.0);
+    assert!(v.run_command_id("show_monitor", &mut m));
+    let hidden = rack::window::WindowLayout::for_model(&m, &v);
+    assert_eq!(hidden.monitor_w(), 0.0);
+    assert_eq!(hidden.monitor_x(), hidden.width);
+    assert!(v.run_command_id("show_monitor_correction", &mut m));
+    assert!(!v.show_monitor_correction);
+    // Compact Monitor Faders is for the HB/Volt monitor fader; Apollo's monitor has a knob.
+    assert!(!v.run_command_id("toggle_compact_monitor_fader", &mut m));
+    // The fixture's one unit was captured offline (`DeviceOnline` false), so Show Offline
+    // Devices is enabled and ticks.
+    assert_eq!(m.devices(), [rack::model::DeviceInfo { index: 0, name: "Apollo x4".into(), online: false }]);
+    assert!(v.run_command_id("show_offline_devices", &mut m));
+    assert!(v.show_offline_devices);
+}
