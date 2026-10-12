@@ -571,6 +571,11 @@ pub enum MenuCmd {
     PostFaderMetering(bool),
     /// [model] Paste the copied plug-in into the slot (`Paste "<name>"`).
     InsertPaste(u8),
+    /// [model] Preamp menu Unison "Copy Settings" / "Paste Settings":
+    /// `post /PluginBarCopySettings` / `/PluginBarPasteSettings {"effectPath"}`
+    /// (`Rack_Overview_Preamp::HandleButtonPopup` 0x1815215c0).
+    CopySettings(u8),
+    PasteSettings(u8),
     /// [model] This strip's inserts: Remove All / Enable All / Disable All.
     StripInserts(PluginOp),
     /// [model] S/PDIF `SRConvert` (preamp menu "Sample Rate Convertsion").
@@ -620,6 +625,8 @@ pub struct StripMenuState {
     pub hi_z: bool,
     /// S/PDIF `SRConvert`; None when the strip has none.
     pub sr_convert: Option<bool>,
+    /// The Unison effect's `CanPastePluginBarSettings` (enables "Paste Settings").
+    pub unison_paste_settings: bool,
 }
 
 /// Global menu state ([`MixerModel::menu_state`]).
@@ -932,14 +939,16 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
     let Some(s) = find_strip(model, strip) else { return m };
     let st = model.menu_state();
     let paste_label = |name: &str| format!("Paste \"{}\"", name.strip_prefix("UAD ").unwrap_or(name));
+    // `MxClnt_PlugInClipboard` 0x181702160: the Unison slot only takes Unison plug-ins.
+    let can_paste = |name: &str| slot != 255 || model.plugin_is_unison(name) != Some(false);
     match insert_state(model, &s, slot) {
         InsertState::Empty => {
             // The Unison slot reads "INSERT 1" too (capture unison).
             m.header(format!("INSERT {} (EMPTY)", if slot == 255 { 1 } else { slot as u16 + 1 }));
             m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(slot))));
             match &st.clipboard {
-                Some(name) => m.push(PopupItem::new(paste_label(name), mid(strip, MenuCmd::InsertPaste(slot)))),
-                None => m.push(PopupItem::new("Paste", mid(strip, MenuCmd::InsertPaste(slot))).enabled(false)),
+                Some(name) if can_paste(name) => m.push(PopupItem::new(paste_label(name), mid(strip, MenuCmd::InsertPaste(slot)))),
+                _ => m.push(PopupItem::new("Paste", mid(strip, MenuCmd::InsertPaste(slot))).enabled(false)),
             };
         }
         InsertState::Loaded { name, power } => {
@@ -947,8 +956,8 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
             m.header(name.to_uppercase());
             m.push(PopupItem::new("Copy", sid(strip, Control::InsertCopy(slot))));
             match &st.clipboard {
-                Some(c) => m.push(PopupItem::new(paste_label(c), mid(strip, MenuCmd::InsertPaste(slot)))),
-                None => m.push(PopupItem::new("Paste", mid(strip, MenuCmd::InsertPaste(slot))).enabled(false)),
+                Some(c) if can_paste(c) => m.push(PopupItem::new(paste_label(c), mid(strip, MenuCmd::InsertPaste(slot)))),
+                _ => m.push(PopupItem::new("Paste", mid(strip, MenuCmd::InsertPaste(slot))).enabled(false)),
             };
             m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(slot))));
             m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets)));
@@ -1244,8 +1253,8 @@ pub fn preamp_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
                 m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(255))));
                 m.push(PopupItem::new("Power", sid(strip, Control::InsertPower(255))).ticked(power));
                 m.push(PopupItem::new("Remove", sid(strip, Control::InsertRemove(255))));
-                m.push(PopupItem::new("Copy Settings", sid(strip, Control::InsertCopy(255))));
-                m.push(PopupItem::new("Paste Settings", mid(strip, MenuCmd::InsertPaste(255))).enabled(model.menu_state().clipboard.is_some()));
+                m.push(PopupItem::new("Copy Settings", mid(strip, MenuCmd::CopySettings(255))));
+                m.push(PopupItem::new("Paste Settings", mid(strip, MenuCmd::PasteSettings(255))).enabled(st.unison_paste_settings));
             }
         }
     } else if let Some(on) = st.sr_convert {

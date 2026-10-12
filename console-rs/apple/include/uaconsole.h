@@ -52,7 +52,12 @@ extern "C" {
 
 /* uac_pointer flags. */
 #define UAC_POINTER_DOUBLE (1u << 0) /* double tap: reset a dragged control to its default */
-#define UAC_POINTER_FINE   (1u << 1) /* fine adjustment: motion / 10 */
+#define UAC_POINTER_FINE   (1u << 1) /* fine adjustment: motion / 10; while dragging an insert: copy (Option) */
+/* The pointer is a touch. UAC_POINTER_SECONDARY (long press) with this flag on a loaded insert or a
+ * browser plug-in row picks it up: send the long press's later positions as UAC_POINTER_MOVE and
+ * its end as UAC_POINTER_UP (with this flag) to drag and drop it; a long press released without
+ * moving opens the context menu. Mouse: press, move 4 pt and release drags; no flag needed. */
+#define UAC_POINTER_TOUCH  (1u << 2)
 
 /* uac_set_model_engine flags. */
 #define UAC_ENGINE_WRITES  (1u << 0) /* open both write gates (only after the user asked) */

@@ -509,6 +509,11 @@ pub trait MixerModel {
     fn insert_labels(&self, _s: &StripInfo) -> Vec<Option<InsertLabel>> {
         Vec::new()
     }
+    /// The catalogue's `/plugins/P/Unison` for plug-in `name`: whether it can sit in a Unison
+    /// slot (drag and drop, paste). None: unknown (allowed).
+    fn plugin_is_unison(&self, _name: &str) -> Option<bool> {
+        None
+    }
     /// Console's label for the Unison slot (None: from [`MixerModel::unison`]'s name).
     fn unison_label(&self, _s: &StripInfo) -> Option<InsertLabel> {
         None
@@ -1146,6 +1151,19 @@ impl MixerModel for PreviewMixer {
                                 }
                             }
                             _ => {}
+                        }
+                    }
+                    // Drag and drop (`crate::dnd`): the engine's `MoveInsert`, locally.
+                    Control::InsertMove { slot, from, from_slot, copy } => {
+                        let src = self.inserts.get(from).and_then(|v| v.get(*from_slot as usize)).cloned();
+                        let Some(src @ InsertState::Loaded { .. }) = src else { return };
+                        if let Some(dst) = self.inserts.get_mut(&strip).and_then(|v| v.get_mut(*slot as usize)) {
+                            *dst = src;
+                        }
+                        if !*copy && (*from != strip || from_slot != slot) {
+                            if let Some(old) = self.inserts.get_mut(from).and_then(|v| v.get_mut(*from_slot as usize)) {
+                                *old = InsertState::Empty;
+                            }
                         }
                     }
                     Control::Preamp(c) => {

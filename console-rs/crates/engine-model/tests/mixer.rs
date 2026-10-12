@@ -425,7 +425,10 @@ fn surface_actions_move_local_values() {
     let empty = 1 + m.inserts(&a1)[1..].iter().position(|s| *s == InsertState::Empty).expect("an empty slot");
     m.apply(&tap(Control::InsertCopy(0)));
     m.apply(&tap(Control::InsertCopy(empty as u8)));
-    assert!(matches!(&m.inserts(&a1)[empty], InsertState::Loaded { name, .. } if name == "UAD Pultec EQP-1A"));
+    // Copy / Paste are the engine's (`/CopyInsert`, `/PasteInsert`): offline nothing lands, the
+    // clipboard keeps the name for `Paste "<name>"` (tests/inserts.rs checks the wire).
+    assert_eq!(m.inserts(&a1)[empty], InsertState::Empty);
+    assert_eq!(m.menu_state().clipboard.as_deref(), Some("UAD Pultec EQP-1A"));
     m.apply(&tap(Control::InsertRemove(0)));
     assert_eq!(m.inserts(&a1)[0], InsertState::Empty);
     assert!(m.take_taps().is_empty(), "surface taps are not plug-in opens");

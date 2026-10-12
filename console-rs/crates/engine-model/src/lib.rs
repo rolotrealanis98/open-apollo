@@ -25,6 +25,7 @@
 //! [`EngineMixer::insert_slot`] resolves the slot, whose plug-in parameters are at
 //! [`InsertPaths::parameter`](ua_engine::InsertPaths::parameter)).
 
+mod inserts;
 mod settings;
 mod sessions;
 mod menus;
@@ -582,6 +583,9 @@ impl MixerModel for EngineMixer {
         self.surface_input_sources(strip)
     }
 
+    fn plugin_is_unison(&self, name: &str) -> Option<bool> {
+        self.surface_plugin_is_unison(name)
+    }
     fn plugin_catalog(&self) -> Vec<PluginEntry> {
         self.surface_catalog()
     }

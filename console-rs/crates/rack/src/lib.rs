@@ -3,6 +3,7 @@
 //! [`input::Interaction`] turns pointer events on hit regions into [`input::Action`]s that a
 //! [`model::MixerModel`] applies.
 
+pub mod dnd;
 pub mod draw;
 pub mod geometry;
 pub mod input;

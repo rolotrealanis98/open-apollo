@@ -56,8 +56,13 @@ pub const UAC_POINTER_HOVER: i32 = 5;
 
 /// Double tap / double click: resets a dragged control to its default.
 pub const UAC_POINTER_DOUBLE: u32 = 1 << 0;
-/// Fine adjustment (Console's modifier-drag): motion divided by 10.
+/// Fine adjustment (Console's modifier-drag): motion divided by 10. While dragging an insert
+/// (drag and drop) it is Console's copy modifier (Option): the drop copies instead of moving.
 pub const UAC_POINTER_FINE: u32 = 1 << 1;
+/// The pointer is a touch. With [`UAC_POINTER_SECONDARY`] (a long press) on a loaded insert or a
+/// browser row it picks the item up: following `UAC_POINTER_MOVE`s drag it, `UAC_POINTER_UP`
+/// drops it, and a long press released without moving opens the context menu instead.
+pub const UAC_POINTER_TOUCH: u32 = 1 << 2;
 
 /// `uac_set_model_engine` flag: open the write gates (both the connection and the writer).
 pub const UAC_ENGINE_WRITES: u32 = 1 << 0;
@@ -454,6 +459,9 @@ pub struct UacContext {
     /// A tap-kind control pressed by the current pointer: it fires on release inside it (touch
     /// convention), so a long press can still become a secondary click without opening it.
     pending_tap: Option<Hit>,
+    /// A touch long press on a drag source (Console point): becomes a drag on motion, or the
+    /// context menu on release.
+    long_press: Option<(f32, f32)>,
     view: View,
     /// The mixer's UI-only state: navigator toggles, browser, popovers, pages, compact, window.
     mixer: ViewState,
@@ -510,6 +518,7 @@ impl UacContext {
             interaction: Interaction::default(),
             pan: None,
             pending_tap: None,
+            long_press: None,
             view: View::new(width, height, scale),
             mixer: ViewState::default(),
             window: None,
@@ -762,6 +771,17 @@ impl UacContext {
         self.dirty = true;
     }
 
+    /// A drop's effects are model writes (no routing, no plug-in requests).
+    fn apply_effects(&mut self, effects: Vec<Effect>) {
+        for e in effects {
+            match e {
+                Effect::Model(a) => self.model.apply(&a),
+                Effect::SetText(id, text) => self.model.set_text(&id, &text),
+            }
+        }
+        self.dirty = true;
+    }
+
     fn find_strip(&self, id: &str) -> Option<StripInfo> {
         self.model.inputs().into_iter().chain(self.model.auxes()).find(|s| &*s.id == id)
     }
@@ -833,6 +853,12 @@ impl UacContext {
             UAC_POINTER_DOWN => {
                 self.pan = None;
                 self.pending_tap = None;
+                self.long_press = None;
+                // A loaded insert or a browser row arms a drag (`rack::dnd`); taps wait for the
+                // release anyway.
+                if flags & UAC_POINTER_TOUCH == 0 {
+                    self.mixer.drag_press(&self.hits, cx, cy, self.model.as_ref());
+                }
                 let actions = self.interaction.pointer_down(&self.hits, cx, cy, flags & UAC_POINTER_DOUBLE != 0);
                 if let [Action::Tap(_)] = actions.as_slice() {
                     // Taps (inserts, menu items, browser rows) fire on release.
@@ -844,6 +870,15 @@ impl UacContext {
                     }
                     actions
                 }
+            }
+            UAC_POINTER_MOVE if self.mixer.drag_pending.is_some() || self.mixer.dragging() => {
+                let copy = flags & UAC_POINTER_FINE != 0;
+                if self.mixer.drag_motion(&self.hits, cx, cy, copy, self.model.as_ref()) {
+                    self.pending_tap = None;
+                    self.long_press = None;
+                    self.dirty = true;
+                }
+                return 1;
             }
             UAC_POINTER_MOVE => match self.pan {
                 Some(p) => {
@@ -868,6 +903,18 @@ impl UacContext {
             }
             UAC_POINTER_UP => {
                 self.pan = None;
+                if let Some(effects) = self.mixer.drag_release(self.model.as_ref()) {
+                    self.pending_tap = None;
+                    self.long_press = None;
+                    self.apply_effects(effects);
+                    return 1;
+                }
+                // A touch long press released in place: the context menu after all.
+                if let Some((lx, ly)) = self.long_press.take() {
+                    let handled = self.mixer.context_click(&self.hits, lx, ly);
+                    self.dirty |= handled;
+                    return i32::from(handled);
+                }
                 let mut actions = self.interaction.pointer_up();
                 if let Some(tap) = self.pending_tap.take()
                     && tap.rect.contains(cx, cy)
@@ -879,6 +926,11 @@ impl UacContext {
             UAC_POINTER_CANCEL => {
                 self.pan = None;
                 self.pending_tap = None;
+                self.long_press = None;
+                if self.mixer.drag_pending.is_some() || self.mixer.dragging() {
+                    self.mixer.drag_cancel();
+                    self.dirty = true;
+                }
                 self.interaction.pointer_up()
             }
             UAC_POINTER_SECONDARY => {
@@ -886,6 +938,11 @@ impl UacContext {
                 self.pending_tap = None;
                 let ended = self.interaction.pointer_up();
                 self.apply(ended);
+                // Touch: a long press on a drag source picks it up (menu on release in place).
+                if flags & UAC_POINTER_TOUCH != 0 && self.mixer.drag_press(&self.hits, cx, cy, self.model.as_ref()) {
+                    self.long_press = Some((cx, cy));
+                    return 1;
+                }
                 let handled = self.mixer.context_click(&self.hits, cx, cy);
                 self.dirty |= handled;
                 return i32::from(handled);
@@ -1914,6 +1971,62 @@ mod tests {
             assert!(c.mixer.menu.is_some(), "Console's insert context menu");
             assert_eq!(uac_key(ctx, UAC_KEY_ESCAPE), 1);
             assert!(c.mixer.menu.is_none());
+            uac_destroy(ctx);
+        }
+    }
+
+    /// Drag and drop through the pointer API (`rack::dnd`): a mouse drag moves a loaded insert
+    /// onto an empty slot, Option (`FINE`) copies, and a touch long press picks one up (or opens
+    /// the context menu when released in place).
+    #[test]
+    fn pointer_drag_and_drop_moves_inserts() {
+        unsafe {
+            let Some((_gpu, ctx)) = offscreen(3840, 2100, 2.0) else { return };
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            let s = stats(ctx);
+            let c = &mut *ctx;
+            let centre = |c: &UacContext, strip: &str, k: u8| {
+                let h = c.hits.iter().find(|h| &*h.id.strip == strip && h.id.control == Control::Insert(k)).cloned().expect("slot");
+                to_view(&s, h.rect.x + h.rect.w / 2.0, h.rect.y + h.rect.h / 2.0)
+            };
+            let state = |c: &UacContext, strip: &str, k: u8| {
+                let st = c.model.inputs().into_iter().find(|i| &*i.id == strip).unwrap();
+                c.model.inserts(&st)[k as usize].clone()
+            };
+            let loaded = state(c, "in0", 0);
+            assert!(matches!(loaded, InsertState::Loaded { .. }));
+            let empty = (1..4u8).find(|k| state(c, "in0", *k) == InsertState::Empty).expect("an empty slot");
+            // Mouse: press, move, release on the empty slot → moved.
+            let (x0, y0) = centre(c, "in0", 0);
+            let (x1, y1) = centre(c, "in0", empty);
+            assert_eq!(c.pointer(UAC_POINTER_DOWN, x0, y0, 0), 1);
+            assert_eq!(c.pointer(UAC_POINTER_MOVE, x1, y1, 0), 1);
+            assert!(c.mixer.dragging());
+            assert_eq!(c.pointer(UAC_POINTER_UP, x1, y1, 0), 1);
+            assert!(!c.mixer.dragging());
+            assert_eq!(state(c, "in0", empty), loaded);
+            assert_eq!(state(c, "in0", 0), InsertState::Empty);
+            let mut req = std::mem::zeroed::<UacPluginRequest>();
+            assert!(!uac_take_plugin_request(ctx, &mut req), "a drop is no tap");
+            c.frame();
+            // Option-drag copies it back.
+            let (x0, y0) = centre(c, "in0", empty);
+            let (x1, y1) = centre(c, "in0", 0);
+            c.pointer(UAC_POINTER_DOWN, x0, y0, 0);
+            c.pointer(UAC_POINTER_MOVE, x1, y1, UAC_POINTER_FINE);
+            c.pointer(UAC_POINTER_UP, x1, y1, UAC_POINTER_FINE);
+            assert_eq!(state(c, "in0", 0), loaded);
+            assert_eq!(state(c, "in0", empty), loaded);
+            c.frame();
+            // Touch: a long press released in place is the context menu.
+            let (x, y) = centre(c, "in0", 0);
+            c.pointer(UAC_POINTER_DOWN, x, y, UAC_POINTER_TOUCH);
+            c.pointer(UAC_POINTER_CANCEL, x, y, UAC_POINTER_TOUCH);
+            assert_eq!(c.pointer(UAC_POINTER_SECONDARY, x, y, UAC_POINTER_TOUCH), 1);
+            assert!(c.mixer.menu.is_none(), "not yet: it may become a drag");
+            assert_eq!(c.pointer(UAC_POINTER_UP, x, y, UAC_POINTER_TOUCH), 1);
+            assert!(c.mixer.menu.is_some(), "Console's insert context menu");
+            assert_eq!(uac_key(ctx, UAC_KEY_ESCAPE), 1);
             uac_destroy(ctx);
         }
     }

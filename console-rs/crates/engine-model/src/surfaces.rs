@@ -246,7 +246,7 @@ impl EngineMixer {
             }
             Control::Insert(_) => {
                 if let Some(slot) = self.insert_slot(id) {
-                    self.store.commit(&slot.effect_name(), text.to_owned());
+                    self.assign_insert(&slot, text);
                 }
             }
             // `MxClnt_PluginScenesData::SetSceneName` (0x1819047b0): upper-cased, then set.
@@ -302,12 +302,9 @@ impl EngineMixer {
                 match (&id.control, loaded) {
                     (Control::InsertPower(_), Some(_)) => self.toggle(&slot.power(), true),
                     (Control::InsertRemove(_), Some(_)) => self.store.commit(&slot.effect_name(), String::new()),
-                    (Control::InsertCopy(_), Some(name)) => self.clipboard = Some(name),
-                    (Control::InsertCopy(_), None) => {
-                        if let Some(name) = self.clipboard.clone() {
-                            self.store.commit(&slot.effect_name(), name);
-                        }
-                    }
+                    // The COPY modifier: a loaded slot copies, an empty one pastes.
+                    (Control::InsertCopy(_), Some(name)) => self.copy_insert(&slot, name),
+                    (Control::InsertCopy(_), None) => self.paste_insert(&slot, k),
                     _ => {}
                 }
             }
@@ -425,6 +422,9 @@ impl EngineMixer {
             // No engine path known (clear clips is a helper command; set-default is a preset op).
             Control::ClearClips => self.store.post("/ClearClips", Some(&ua_engine::Json::Object(Default::default()))),
             Control::InsertSetDefault(_) => {}
+            Control::InsertMove { .. } | Control::PresetDrop(_) => {
+                self.apply_drop(id);
+            }
             _ => return false,
         }
         true
