@@ -494,7 +494,8 @@ fn io_matrix_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page:
     let outputs = settings::io_routes(src, true);
     let n = inputs.len().max(outputs.len()) as f32;
     let list_y = top + 29.0 + 26.0;
-    let list_h = (table.max_y() - list_y).max(0.0);
+    // The lists show whole rows (+ 2 pt), the page's grey under them (set-tab-io).
+    let list_h = (((table.max_y() - list_y) / row_h).floor() * row_h + 2.0).max(0.0);
     let overflow = (n * row_h - list_h).max(0.0);
     let off = (overflow * view.settings.scroll).round();
     for (k, (title, kind, routes)) in [("INPUTS", "INPUT", &inputs), ("OUTPUTS", "OUTPUT", &outputs)].into_iter().enumerate() {
