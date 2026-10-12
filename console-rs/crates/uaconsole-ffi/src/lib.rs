@@ -120,6 +120,38 @@ pub struct UacStats {
 /// `uac_destroy`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
+pub struct UacLayer {
+    /// Stable while the window is open (`menu:0`, `settings`, `panel:cue-outputs`, …); valid
+    /// until the next `uac_frame` / `uac_layer_info`.
+    pub id: *const c_char,
+    /// `UAC_LAYER_MENU` / `_WINDOW` / `_DIALOG` / `_POPOVER`.
+    pub kind: i32,
+    /// The window rect in view points (relative to the view's top-left; may lie outside it).
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    /// Console's drawn title bar height (view points): a press there moves the window.
+    pub title_height: f32,
+}
+
+/// [`UacLayer::kind`]: a popup menu level (borderless, non-activating, above everything).
+pub const UAC_LAYER_MENU: i32 = 0;
+/// A free window with Console's own title bar (Settings, Monitor, …): movable, remembered.
+pub const UAC_LAYER_WINDOW: i32 = 1;
+/// A dialog centred on the screen (ADD DEVICE).
+pub const UAC_LAYER_DIALOG: i32 = 2;
+/// A callout anchored to its control (TEMPO, Sends, Cues Assignments).
+pub const UAC_LAYER_POPOVER: i32 = 3;
+
+/// A popup window the host shows (`uac_attach_layer`): its own CAMetalLayer.
+struct LayerSurface {
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct UacPluginRequest {
     /// The strip id (an engine node path such as `/devices/0/inputs/1`, or `in1` in the preview).
     pub strip_id: *const c_char,
@@ -440,6 +472,17 @@ pub struct UacContext {
     dirty: bool,
     stats: UacStats,
     adapter_name: CString,
+    /// Separate windows (`uac_set_windowing`): the screen in view points; None draws menus,
+    /// Settings and panels inside the view (iPad).
+    screen: Option<(f32, f32, f32, f32)>,
+    /// Windows the user moved: their origin in Console points.
+    moved: std::collections::HashMap<String, (f32, f32)>,
+    /// The frame's separate windows (Console points) and their parts (lists offset like
+    /// `list`, hits in Console points), while `screen` is set.
+    layers: Vec<rack::Layer>,
+    layer_parts: Vec<rack::LayerPart>,
+    layer_ids: Vec<CString>,
+    layer_surfaces: std::collections::HashMap<String, LayerSurface>,
 }
 
 impl UacContext {
@@ -480,6 +523,12 @@ impl UacContext {
             dirty: true,
             stats: UacStats::default(),
             adapter_name,
+            screen: None,
+            moved: std::collections::HashMap::new(),
+            layers: Vec::new(),
+            layer_parts: Vec::new(),
+            layer_ids: Vec::new(),
+            layer_surfaces: std::collections::HashMap::new(),
         });
         ctx.build();
         Ok(ctx)
@@ -501,14 +550,38 @@ impl UacContext {
     fn build(&mut self) {
         let t = Instant::now();
         self.mixer.window = self.console_window();
+        self.mixer.windowing = self.screen.map(|(x, y, w, h)| {
+            let z = self.view.zoom(self.content);
+            let o = self.view.origin;
+            let mut win = rack::Windowing::new(houston::Rect::new(o.0 + x / z, o.1 + y / z, w / z, h / z));
+            win.positions.extend(self.moved.iter().map(|(k, v)| (k.clone(), *v)));
+            win
+        });
         let mut ui = Ui::new(&self.assets);
         let layout = build_window_with(&mut ui, self.model.as_ref(), &self.mixer);
         self.content = layout.size();
-        self.hits = std::mem::take(&mut ui.hits);
-        self.scrolls = std::mem::take(&mut ui.scrolls);
-        self.list = std::mem::take(&mut ui.list);
+        let layers = std::mem::take(&mut ui.layers);
+        if self.mixer.windowing.is_some() {
+            let mut parts = rack::layers::split(&ui.list, &ui.hits, &ui.scrolls, layers.len(), &ui.layer_marks);
+            let main = parts.remove(0);
+            (self.list, self.hits, self.scrolls) = (main.list, main.hits, main.scrolls);
+            self.layer_parts = parts;
+            self.layer_ids = layers.iter().map(|l| cstring(l.id.clone())).collect();
+            self.layers = layers;
+        } else {
+            self.hits = std::mem::take(&mut ui.hits);
+            self.scrolls = std::mem::take(&mut ui.scrolls);
+            self.list = std::mem::take(&mut ui.list);
+            self.layer_parts.clear();
+            self.layers.clear();
+            self.layer_ids.clear();
+        }
+        self.layer_surfaces.retain(|id, _| self.layers.iter().any(|l| &l.id == id));
         self.view.clamp(self.content);
         offset_list(&mut self.list, -self.view.origin.0, -self.view.origin.1);
+        for p in &mut self.layer_parts {
+            offset_list(&mut p.list, -self.view.origin.0, -self.view.origin.1);
+        }
         self.stats.build_ms = t.elapsed().as_secs_f64() * 1e3;
         self.stats.draws = self.list.len() as u32;
         self.stats.hits = self.hits.len() as u32;
@@ -565,6 +638,29 @@ impl UacContext {
             Target::Offscreen { view } => {
                 self.renderer.render(&hl.device, &hl.queue, &self.list, view, (w, h), scale, CLEAR);
             }
+        }
+        // Separate windows the host attached: each its part, its rect's corner at the origin.
+        let o = self.view.origin;
+        for (layer, part) in self.layers.iter().zip(&self.layer_parts) {
+            let Some(ls) = self.layer_surfaces.get_mut(&layer.id) else { continue };
+            let frame = match ls.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(f) => f,
+                wgpu::CurrentSurfaceTexture::Suboptimal(f) => {
+                    drop(f);
+                    ls.surface.configure(&self.gpu.hl.device, &ls.config);
+                    continue;
+                }
+                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                    ls.surface.configure(&self.gpu.hl.device, &ls.config);
+                    continue;
+                }
+                _ => continue,
+            };
+            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let off = (-(layer.rect.x - o.0) * scale, -(layer.rect.y - o.1) * scale);
+            let size = (frame.texture.width(), frame.texture.height());
+            self.renderer.render_at(&self.gpu.hl.device, &self.gpu.hl.queue, &part.list, &view, size, scale, off, CLEAR);
+            self.gpu.hl.queue.present(frame);
         }
         let s = self.renderer.stats;
         self.stats.render_ms = t.elapsed().as_secs_f64() * 1e3;
@@ -702,6 +798,36 @@ impl UacContext {
             self.build(); // hit values must match what the model holds now
         }
         let (cx, cy) = self.view.console_point(self.content, x, y);
+        self.pointer_at(kind, cx, cy, Some((x, y)), flags)
+    }
+
+    /// Pointer input in separate window `id` at (`x`, `y`) view points from its top-left: hit
+    /// tests that window's regions only; never pans the view.
+    fn layer_pointer(&mut self, id: &str, kind: i32, x: f32, y: f32, flags: u32) -> i32 {
+        if matches!(kind, UAC_POINTER_DOWN | UAC_POINTER_SECONDARY) && self.dirty {
+            self.build();
+        }
+        let Some(k) = self.layers.iter().position(|l| l.id == id) else {
+            set_error(format!("no separate window {id:?}"));
+            return UAC_ERR_ARG;
+        };
+        let z = self.view.zoom(self.content);
+        let r = self.layers[k].rect;
+        let (cx, cy) = (r.x + x / z, r.y + y / z);
+        let mine = std::mem::take(&mut self.layer_parts[k].hits);
+        let main = std::mem::replace(&mut self.hits, mine);
+        let out = self.pointer_at(kind, cx, cy, None, flags);
+        let mine = std::mem::replace(&mut self.hits, main);
+        if let Some(p) = self.layer_parts.get_mut(k) {
+            p.hits = mine;
+        }
+        out
+    }
+
+    /// Pointer input at Console point (`cx`, `cy`); `view` (view points) lets a drag on empty
+    /// space pan the view.
+    fn pointer_at(&mut self, kind: i32, cx: f32, cy: f32, view: Option<(f32, f32)>, flags: u32) -> i32 {
+        let (x, y) = view.unwrap_or((cx, cy));
         let on_control = self.hits.iter().any(|h| h.rect.contains(cx, cy));
         let actions = match kind {
             UAC_POINTER_DOWN => {
@@ -713,7 +839,7 @@ impl UacContext {
                     self.pending_tap = self.hits.iter().rev().find(|h| h.rect.contains(cx, cy)).cloned();
                     Vec::new()
                 } else {
-                    if !on_control {
+                    if !on_control && view.is_some() {
                         self.pan = Some(Pan { start: (x, y), origin: self.view.origin });
                     }
                     actions
@@ -1279,6 +1405,200 @@ pub unsafe extern "C" fn uac_take_command(ctx: *mut UacContext) -> *const c_char
     })
 }
 
+// MARK: separate windows (macOS child windows)
+
+/// Shows Console's popup menus, Settings window, panels and dialogs as separate windows the
+/// host opens (macOS child windows), placed on the screen like Console's. `x`, `y`, `width`,
+/// `height` is the screen's usable area (macOS: `NSScreen.visibleFrame`) in view points
+/// relative to the view's top-left, y down. A zero size turns it off: everything is drawn
+/// inside the view (the default, and the iPad's only mode).
+///
+/// Each frame, read the windows with `uac_layer_count` / `uac_layer_info`, keep one host
+/// window per id at `view origin + rect` (borderless; `UAC_LAYER_MENU` non-activating, above
+/// all), give it a CAMetalLayer with `uac_attach_layer`, and send its input with
+/// `uac_layer_pointer`. `uac_frame` draws the view and every attached window.
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_set_windowing(ctx: *mut UacContext, x: f32, y: f32, width: f32, height: f32) -> i32 {
+    unsafe {
+        with_ctx(ctx, |c| {
+            c.screen = (width > 0.0 && height > 0.0).then_some((x, y, width, height));
+            if c.screen.is_none() {
+                c.layer_surfaces.clear();
+            }
+            c.dirty = true;
+            UAC_OK
+        })
+    }
+}
+
+/// The number of separate windows the current frame has (0 unless `uac_set_windowing`).
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_layer_count(ctx: *mut UacContext) -> i32 {
+    unsafe {
+        with_ctx(ctx, |c| {
+            if c.dirty {
+                c.build();
+            }
+            c.layers.len() as i32
+        })
+    }
+}
+
+/// Fills `out` with separate window `index` (in stacking order, bottom first). False when out
+/// of range. `out->id` stays valid until the next frame.
+///
+/// # Safety
+/// `ctx` is null or a live context; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_layer_info(ctx: *mut UacContext, index: u32, out: *mut UacLayer) -> bool {
+    guard(false, || {
+        let Some(c) = (unsafe { ctx_mut(ctx) }) else { return false };
+        let (Some(l), Some(id)) = (c.layers.get(index as usize), c.layer_ids.get(index as usize)) else { return false };
+        if out.is_null() {
+            return false;
+        }
+        let z = c.view.zoom(c.content);
+        let o = c.view.origin;
+        let kind = match l.kind {
+            rack::LayerKind::Menu => UAC_LAYER_MENU,
+            rack::LayerKind::Window => UAC_LAYER_WINDOW,
+            rack::LayerKind::Dialog => UAC_LAYER_DIALOG,
+            rack::LayerKind::Popover => UAC_LAYER_POPOVER,
+        };
+        unsafe {
+            *out = UacLayer {
+                id: id.as_ptr(),
+                kind,
+                x: (l.rect.x - o.0) * z,
+                y: (l.rect.y - o.1) * z,
+                width: l.rect.w * z,
+                height: l.rect.h * z,
+                title_height: l.title_h * z,
+            };
+        }
+        true
+    })
+}
+
+/// Gives separate window `id` a CAMetalLayer of `width_px` × `height_px` to draw into (again
+/// after a resize). Apple targets only.
+///
+/// # Safety
+/// `ctx` is null or a live context; `id` a C string; `metal_layer` a live `CAMetalLayer *`
+/// that outlives the attachment (until `uac_detach_layer`, the window closing, or
+/// `uac_destroy`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_attach_layer(ctx: *mut UacContext, id: *const c_char, metal_layer: *mut c_void, width_px: u32, height_px: u32) -> i32 {
+    let id = unsafe { str_arg(id) };
+    unsafe {
+        with_ctx(ctx, |c| {
+            let Some(id) = id else {
+                set_error("null or empty layer id");
+                return UAC_ERR_ARG;
+            };
+            if let Some(ls) = c.layer_surfaces.get_mut(&id) {
+                if (ls.config.width, ls.config.height) != (width_px.max(1), height_px.max(1)) {
+                    ls.config.width = width_px.max(1);
+                    ls.config.height = height_px.max(1);
+                    ls.surface.configure(&c.gpu.hl.device, &ls.config);
+                }
+                c.dirty = true;
+                return UAC_OK;
+            }
+            if metal_layer.is_null() {
+                set_error("null CAMetalLayer");
+                return UAC_ERR_ARG;
+            }
+            // SAFETY: forwarded from this function's contract.
+            let surface = match layer_surface(&c.gpu._instance, metal_layer) {
+                Ok(s) => s,
+                Err(e) => {
+                    set_error(e);
+                    return UAC_ERR_SURFACE;
+                }
+            };
+            let config = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: c.gpu.format,
+                color_space: wgpu::SurfaceColorSpace::Auto,
+                width: width_px.max(1),
+                height: height_px.max(1),
+                present_mode: wgpu::PresentMode::Fifo,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                view_formats: vec![],
+            };
+            surface.configure(&c.gpu.hl.device, &config);
+            c.layer_surfaces.insert(id, LayerSurface { surface, config });
+            c.dirty = true;
+            UAC_OK
+        })
+    }
+}
+
+/// Stops drawing separate window `id` (its host window closed).
+///
+/// # Safety
+/// `ctx` is null or a live context; `id` a C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_detach_layer(ctx: *mut UacContext, id: *const c_char) {
+    let id = unsafe { str_arg(id) };
+    unsafe {
+        with_ctx(ctx, |c| {
+            if let Some(id) = id {
+                c.layer_surfaces.remove(&id);
+            }
+            UAC_OK
+        });
+    }
+}
+
+/// Pointer input in separate window `id`, at (`x_pt`, `y_pt`) view points from its top-left
+/// (same kinds and flags as `uac_pointer`). Returns what `uac_pointer` returns.
+///
+/// # Safety
+/// `ctx` is null or a live context; `id` a C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_layer_pointer(ctx: *mut UacContext, id: *const c_char, kind: i32, x_pt: f32, y_pt: f32, flags: u32) -> i32 {
+    let id = unsafe { str_arg(id) };
+    unsafe {
+        with_ctx(ctx, |c| match &id {
+            Some(id) => c.layer_pointer(id, kind, x_pt, y_pt, flags),
+            None => {
+                set_error("null or empty layer id");
+                UAC_ERR_ARG
+            }
+        })
+    }
+}
+
+/// The user moved separate window `id` (a `UAC_LAYER_WINDOW` / `_DIALOG` dragged by its title
+/// bar) to (`x_pt`, `y_pt`) view points: it stays there, like Console's windows.
+///
+/// # Safety
+/// `ctx` is null or a live context; `id` a C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_layer_moved(ctx: *mut UacContext, id: *const c_char, x_pt: f32, y_pt: f32) {
+    let id = unsafe { str_arg(id) };
+    unsafe {
+        with_ctx(ctx, |c| {
+            if let Some(id) = id {
+                let z = c.view.zoom(c.content);
+                let o = c.view.origin;
+                c.moved.insert(id, (o.0 + x_pt / z, o.1 + y_pt / z));
+                c.dirty = true;
+            }
+            UAC_OK
+        });
+    }
+}
+
 /// Draws Windows Console's menu bar in the renderer's title bar (hosts without a native menu
 /// bar: iPad without a keyboard menu, Linux). Off by default.
 ///
@@ -1579,6 +1899,47 @@ mod tests {
             assert!(c.mixer.menu.is_some(), "Console's insert context menu");
             assert_eq!(uac_key(ctx, UAC_KEY_ESCAPE), 1);
             assert!(c.mixer.menu.is_none());
+            uac_destroy(ctx);
+        }
+    }
+
+    /// Separate windows: a context menu becomes a layer the host shows at its rect (here under
+    /// the label, past the bottom of a short view), its rows answer `uac_layer_pointer`, and
+    /// turning windowing off draws it inside the view again.
+    #[test]
+    fn separate_windows() {
+        unsafe {
+            let Some((_gpu, ctx)) = offscreen(2940, 1400, 2.0) else { return };
+            let c = &mut *ctx;
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            assert_eq!(uac_set_windowing(ctx, -800.0, -300.0, 3200.0, 1770.0), UAC_OK);
+            assert_eq!(uac_layer_count(ctx), 0);
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            let s = stats(ctx);
+            let label = c.hits.iter().find(|h| &*h.id.strip == "in0" && h.id.control == Control::Name).cloned().expect("label");
+            let (x, y) = to_view(&s, label.rect.x + 4.0, label.rect.y + 4.0);
+            assert_eq!(uac_pointer(ctx, UAC_POINTER_SECONDARY, x, y, 0), 1);
+            assert!(c.mixer.menu.is_some());
+            assert_eq!(uac_layer_count(ctx), 1);
+            let mut l = std::mem::zeroed::<UacLayer>();
+            assert!(uac_layer_info(ctx, 0, &mut l));
+            assert!(!uac_layer_info(ctx, 1, &mut l) || l.kind == UAC_LAYER_MENU);
+            assert!(uac_layer_info(ctx, 0, &mut l));
+            assert_eq!(CStr::from_ptr(l.id).to_str().unwrap(), "menu:0");
+            assert_eq!(l.kind, UAC_LAYER_MENU);
+            let (lx, ly) = to_view(&s, label.rect.x, label.rect.max_y());
+            assert!((l.x - lx).abs() < 0.01 && (l.y - ly).abs() < 0.01, "under the label: {l:?} vs ({lx}, {ly})");
+            // The view's own hits no longer have the menu's rows; the layer's do.
+            assert!(!c.hits.iter().any(|h| matches!(h.id.control, Control::Menu(rack::MenuCmd::Row { index, .. }) if index != u16::MAX)));
+            let id = CString::new("menu:0").unwrap();
+            assert_eq!(uac_layer_pointer(ctx, id.as_ptr(), UAC_POINTER_HOVER, 10.0, l.height / 2.0, 0), 1, "hover a row");
+            // Not drawn without a host layer (offscreen): attaching needs a CAMetalLayer.
+            assert_ne!(uac_attach_layer(ctx, id.as_ptr(), std::ptr::null_mut(), 10, 10), UAC_OK);
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            // Off again: the menu is drawn inside the view, no layers reported.
+            assert_eq!(uac_set_windowing(ctx, 0.0, 0.0, 0.0, 0.0), UAC_OK);
+            assert_eq!(uac_layer_count(ctx), 0);
+            assert!(c.mixer.menu.is_some());
             uac_destroy(ctx);
         }
     }

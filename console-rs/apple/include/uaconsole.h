@@ -106,6 +106,21 @@ typedef struct UacPluginRequest {
     int32_t     slot;         /* 0-based insert slot, or UAC_UNISON_SLOT */
 } UacPluginRequest;
 
+/* One of Console's separate windows (uac_set_windowing): a popup menu level, the Settings
+ * window, a panel, a dialog. Rect in view points from the view's top-left (may lie outside
+ * the view). id: stable while the window is open; valid until the next frame. */
+typedef struct UacLayer {
+    const char *id;           /* "menu:0", "settings", "panel:cue-outputs", ... */
+    int32_t     kind;         /* UAC_LAYER_* */
+    float       x, y, width, height;
+    float       title_height; /* Console's drawn title bar: a press there moves the window */
+} UacLayer;
+
+#define UAC_LAYER_MENU    0   /* borderless, non-activating, above everything */
+#define UAC_LAYER_WINDOW  1   /* free window (Settings, Monitor, ...): movable, remembered */
+#define UAC_LAYER_DIALOG  2   /* dialog centred on the screen (ADD DEVICE) */
+#define UAC_LAYER_POPOVER 3   /* callout anchored to its control (TEMPO, Sends, Cues) */
+
 /* Library version (static string). */
 const char *uac_version(void);
 
@@ -243,6 +258,24 @@ const char *uac_adapter_name(UacContext *ctx);
 /* Renders the current view offscreen into an RGBA PNG plus <name>.draws.json (what was drawn
  * where, for console-rs/tools/align). Debugging, tests, alignment. */
 int32_t uac_write_png(UacContext *ctx, const char *path);
+
+/* Separate windows (macOS child windows). Console shows its popup menus, Settings window,
+ * panels and dialogs as windows of their own, placed on the screen (menus hang past the
+ * mixer window). uac_set_windowing turns that on with the screen's usable area
+ * (NSScreen.visibleFrame) in view points from the view's top-left, y down; a zero size turns
+ * it off and everything is drawn inside the view (the default; the iPad keeps it off).
+ * Each frame: uac_layer_count / uac_layer_info, keep one borderless host window per id at
+ * view origin + rect (UAC_LAYER_MENU non-activating, above all), give it a CAMetalLayer with
+ * uac_attach_layer, route its input through uac_layer_pointer (window-local view points),
+ * report title-bar moves with uac_layer_moved; uac_frame draws the view and every attached
+ * window. Close host windows whose id is gone (uac_detach_layer). */
+int32_t uac_set_windowing(UacContext *ctx, float x, float y, float width, float height);
+int32_t uac_layer_count(UacContext *ctx);
+bool uac_layer_info(UacContext *ctx, uint32_t index, UacLayer *out);
+int32_t uac_attach_layer(UacContext *ctx, const char *id, void *metal_layer, uint32_t width_px, uint32_t height_px);
+void uac_detach_layer(UacContext *ctx, const char *id);
+int32_t uac_layer_pointer(UacContext *ctx, const char *id, int32_t kind, float x_pt, float y_pt, uint32_t flags);
+void uac_layer_moved(UacContext *ctx, const char *id, float x_pt, float y_pt);
 
 /* Destroys a context (NULL is ignored) and closes its engine connection. The layer may be
  * released afterwards. */
