@@ -3565,10 +3565,12 @@ dependencies = [
 name = "uaconsole-ffi"
 version = "0.1.0"
 dependencies = [
+ "engine-model",
  "gfx",
  "houston",
  "pollster",
  "rack",
+ "ua-engine",
  "wgpu",
 ]
 
