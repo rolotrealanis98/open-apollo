@@ -745,6 +745,7 @@ name = "engine-model"
 version = "0.1.0"
 dependencies = [
  "rack",
+ "serde_json",
  "ua-engine",
 ]
 

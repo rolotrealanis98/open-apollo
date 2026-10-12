@@ -190,7 +190,7 @@ impl ImageCache {
             return hit.clone();
         }
         let path = match key.strip_prefix("plugin:") {
-            Some(name) => self.resources.plugin_icons_dir().join(format!("{name}.png")),
+            Some(name) => plugin_icon_path(&self.resources.plugin_icons_dir(), name),
             None => match self.rooted(key) {
                 Some(path) => path,
                 None => self.resources.images_dir().join(key),
@@ -246,4 +246,21 @@ mod tests {
         assert!(cache.get("spec:../etc/passwd").is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
+}
+
+/// `<dir>/<name>.png`, matched case-insensitively when the exact file is absent (UA's icon
+/// names differ in case from some catalogue names, e.g. "UAD AMS dmx 15-80 S"; macOS
+/// volumes are case-insensitive, Linux ones are not).
+fn plugin_icon_path(dir: &Path, name: &str) -> PathBuf {
+    let file = format!("{name}.png");
+    let exact = dir.join(&file);
+    if exact.is_file() {
+        return exact;
+    }
+    std::fs::read_dir(dir)
+        .ok()
+        .and_then(|entries| {
+            entries.flatten().map(|e| e.path()).find(|p| p.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.eq_ignore_ascii_case(&file)))
+        })
+        .unwrap_or(exact)
 }

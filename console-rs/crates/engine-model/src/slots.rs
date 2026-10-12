@@ -1,0 +1,214 @@
+//! Insert slots as Console draws them, merging UAD-2 inserts (engine, 4710) with native
+//! plug-ins from the UA Mixer Helper (4720), plus the helper connection itself.
+//!
+//! Console's slot labels (reference shots of Console 1.3.1 on macOS):
+//! - a UAD-2 plug-in with the Apollo online is labelled with the catalogue's first short name,
+//!   `/plugins/P/Name/values[0]` ("CL 1B mkII" for `UAD Tube-Tech CL 1B mk II`), upright;
+//! - with the Apollo offline (`/devices/0/DeviceOnline` false) the label is the engine name
+//!   without "UAD " ("Millennia NSEQ-2"), in italics;
+//! - a native plug-in shows its `plugin_name` (no live sample yet: see the ua-engine README).
+
+use rack::model::{InsertState, StripInfo};
+use ua_engine::{
+    DEFAULT_PORT, Endpoint, HELPER_PORT, HelperInfo, HelperStore, InsertPaths, Json, NativeInsert,
+    NativeOwner, Value,
+};
+
+use crate::{EngineMixer, INSERT_SLOTS};
+
+/// Where a slot's plug-in runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotSource {
+    Empty,
+    /// UAD-2 DSP, from the engine's `effects/K/EffectName` (4710).
+    Uad2,
+    /// Native (UADx), from the helper's supercore track `effects/effect_K` (4720).
+    Native,
+}
+
+/// One insert slot with everything Console uses to draw it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlotInfo {
+    /// What `MixerModel::inserts` returns (`name` stays the engine/catalogue name, the icon key).
+    pub state: InsertState,
+    pub source: SlotSource,
+    /// The text Console draws in the slot.
+    pub label: String,
+    /// Console draws the label in italics (UAD-2 plug-in with the Apollo offline).
+    pub italic: bool,
+    /// The helper's record, for native slots.
+    pub native: Option<NativeInsert>,
+}
+
+impl SlotInfo {
+    pub fn empty() -> SlotInfo {
+        SlotInfo {
+            state: InsertState::Empty,
+            source: SlotSource::Empty,
+            label: String::new(),
+            italic: false,
+            native: None,
+        }
+    }
+
+    pub fn is_native(&self) -> bool {
+        self.source == SlotSource::Native
+    }
+}
+
+impl EngineMixer {
+    /// Connects the read-only helper client (also done by [`EngineMixer::connect`] when the engine
+    /// is on the default port: the helper is then `host:4720`).
+    pub fn connect_helper(&mut self, endpoint: Endpoint) {
+        let mut h = HelperStore::new();
+        h.connect(endpoint);
+        self.helper = Some(h);
+    }
+
+    /// The helper endpoint that goes with an engine endpoint (`host:4720` for `host:4710`).
+    pub fn helper_endpoint(engine: &Endpoint) -> Option<Endpoint> {
+        (engine.port == DEFAULT_PORT).then(|| Endpoint::new(engine.host.clone(), HELPER_PORT))
+    }
+
+    /// Uses an existing helper store (e.g. offline, from a capture).
+    pub fn set_helper(&mut self, helper: HelperStore) {
+        self.helper = Some(helper);
+    }
+
+    pub fn helper(&self) -> Option<&HelperStore> {
+        self.helper.as_ref()
+    }
+
+    pub fn helper_mut(&mut self) -> Option<&mut HelperStore> {
+        self.helper.as_mut()
+    }
+
+    pub fn helper_info(&self) -> Option<HelperInfo> {
+        self.helper.as_ref().map(HelperStore::info)
+    }
+
+    fn device_online(&self) -> bool {
+        self.store
+            .value("/devices/0/DeviceOnline")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// The catalogue's first short name for an engine plug-in name (`Name/values[0]`).
+    pub fn short_name(&self, effect_name: &str) -> Option<String> {
+        let tree = self.store.tree();
+        tree.children("/plugins").iter().find_map(|p| {
+            let meta = tree.property(&format!("/plugins/{p}/Name"))?;
+            if meta.value.as_ref().and_then(Value::as_str) != Some(effect_name) {
+                return None;
+            }
+            match meta.meta.values.as_ref()?.as_array()?.first()? {
+                Json::Object(o) => o.get("value")?.as_str().map(str::to_owned),
+                Json::String(s) => Some(s.clone()),
+                _ => None,
+            }
+        })
+    }
+
+    /// Console's label and italics for a UAD-2 plug-in.
+    pub fn plugin_label(&self, effect_name: &str) -> (String, bool) {
+        let long = effect_name
+            .strip_prefix("UAD ")
+            .unwrap_or(effect_name)
+            .to_owned();
+        if !self.device_online() {
+            return (long, true);
+        }
+        (self.short_name(effect_name).unwrap_or(long), false)
+    }
+
+    /// Native plug-ins on the helper track that matches this strip (by name, case-insensitive:
+    /// the track ↔ Apollo input mapping has not been observed live).
+    pub fn native_inserts(&self, strip: &StripInfo) -> Vec<NativeInsert> {
+        let Some(h) = &self.helper else {
+            return Vec::new();
+        };
+        let Some(s) = self.input(&strip.id) else {
+            return Vec::new();
+        };
+        let display = self
+            .str_at(&s.display_name_path())
+            .unwrap_or(&s.name)
+            .to_owned();
+        let names: Vec<String> = [
+            Some(display),
+            Some(s.name.clone()),
+            s.default_name.clone(),
+            Some(strip.title.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|n| n.trim().to_lowercase())
+        .collect();
+        h.native_inserts()
+            .into_iter()
+            .filter(|n| {
+                n.owner == NativeOwner::Track
+                    && n.owner_name
+                        .as_deref()
+                        .is_some_and(|o| names.contains(&o.trim().to_lowercase()))
+            })
+            .collect()
+    }
+
+    fn uad2_slot(&self, slot: &InsertPaths) -> Option<SlotInfo> {
+        let name = self.str_at(&slot.effect_name()).filter(|n| !n.is_empty())?;
+        let (label, italic) = self.plugin_label(name);
+        Some(SlotInfo {
+            state: InsertState::Loaded {
+                name: name.to_owned(),
+                power: self.bool_at(&slot.power()) != Some(false),
+            },
+            source: SlotSource::Uad2,
+            label,
+            italic,
+            native: None,
+        })
+    }
+
+    /// The strip's insert slots (4), UAD-2 first and native plug-ins in slots the engine leaves
+    /// empty.
+    pub fn slots(&self, strip: &StripInfo) -> Vec<SlotInfo> {
+        let paths: &[InsertPaths] = match self.input(&strip.id) {
+            Some(s) => &s.inserts,
+            None => self
+                .aux(&strip.id)
+                .map(|a| a.inserts.as_slice())
+                .unwrap_or(&[]),
+        };
+        let native = self.native_inserts(strip);
+        (0..INSERT_SLOTS)
+            .map(|k| {
+                if let Some(slot) = paths.get(k).and_then(|p| self.uad2_slot(p)) {
+                    return slot;
+                }
+                match native.iter().find(|n| n.index == Some(k)) {
+                    Some(n) => SlotInfo {
+                        state: InsertState::Loaded {
+                            name: n.plugin_name.clone(),
+                            power: n.power && n.enabled,
+                        },
+                        source: SlotSource::Native,
+                        label: n.plugin_name.clone(),
+                        italic: false,
+                        native: Some(n.clone()),
+                    },
+                    None => SlotInfo::empty(),
+                }
+            })
+            .collect()
+    }
+
+    /// The Unison slot as Console draws it.
+    pub fn unison_slot(&self, strip: &StripInfo) -> SlotInfo {
+        self.input(&strip.id)
+            .and_then(|s| s.preamp.as_ref())
+            .and_then(|p| self.uad2_slot(&p.unison))
+            .unwrap_or_else(SlotInfo::empty)
+    }
+}
