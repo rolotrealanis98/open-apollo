@@ -48,22 +48,33 @@ const TEXT_MARGIN: f32 = 20.0;
 /// Current-value bullet (`dropdown_in_use_dot`, 4 pt): 3 pt into the row, centred (s04, s18).
 const BULLET_X: f32 = 3.0;
 const BULLET: f32 = 4.0;
-const SEP_DARK: Rgba = Rgba::rgb8(135, 145, 149);
-const SEP_LIGHT: Rgba = Rgba::rgb8(202, 212, 216);
-/// Highlighted row, the full row (s18: (224,228,231) over 44 × the window's inner width).
-const HIGHLIGHT: Rgba = Rgba::rgb8(224, 228, 231);
-const HEADER_BG: Rgba = Rgba::rgb8(166, 174, 179);
-const HEADER_TEXT: Rgba = Rgba::rgb8(31, 87, 126);
+// Colours from the colour-managed drive captures (`screencapture`, like refpairs p1/p2); the
+// earlier clipboard captures s01–s42 carry no display profile and read 8–10 levels lighter.
+/// Separator: a 1-pt dark line over a 1-pt light one (hov-pan).
+const SEP_DARK: Rgba = Rgba::rgb8(124, 134, 138);
+const SEP_LIGHT: Rgba = Rgba::rgb8(195, 206, 211);
+/// Highlighted row, the full row (hov-ins / hov-lbl / hov-rate: 22 pt × the inner width).
+const HIGHLIGHT: Rgba = Rgba::rgb8(223, 227, 230);
+const HEADER_BG: Rgba = Rgba::rgb8(156, 164, 170);
+const HEADER_TEXT: Rgba = Rgba::rgb8(29, 77, 115);
 /// Section header text: the item font, bold (s01/s02: header and item glyph widths match).
 const HEADER_FONT_SCALE: f32 = 1.0;
-/// Window edge, outside in (s04 / s01 at 2 px per pt): a 0.5-pt black outline outside the
-/// window, a 1-pt border, a 0.5-pt light line, then the body.
-const WINDOW_OUTLINE: Rgba = Rgba::rgb8(2, 3, 4);
-const WINDOW_BORDER: Rgba = Rgba::rgb8(156, 161, 165);
-const WINDOW_LIGHT: Rgba = Rgba::rgb8(186, 195, 200);
-const WINDOW_BODY: Rgba = Rgba::rgb8(185, 194, 199);
-/// Disabled text (s01 "Paste": (135,142,146) on the body = black at 0.27).
-const DISABLED_ALPHA: f32 = 0.27;
+/// Window edge, outside in (ins-in-empty at 2 px per pt): a 0.5-pt black outline outside the
+/// window (square), a 1-pt border with 2-pt rounded corners, a 1-pt light line, then the body.
+const WINDOW_OUTLINE: Rgba = Rgba::rgb8(4, 4, 4);
+const WINDOW_BORDER: Rgba = Rgba::rgb8(145, 151, 155);
+const WINDOW_LIGHT: Rgba = Rgba::rgb8(177, 187, 193);
+const WINDOW_BODY: Rgba = Rgba::rgb8(176, 186, 192);
+/// Rounded corner of the border, per half-point row from the top (and mirrored at the bottom):
+/// how far the row starts in from each side (ins-in-empty, 2 px per pt).
+const BORDER_CORNER: [f32; 3] = [1.5, 0.5, 0.5];
+/// The light line's first half-point row starts this much further in.
+const LIGHT_CORNER: [f32; 1] = [0.5];
+/// Disabled text (ins-in-empty "Paste": (124,131,135) on the body = black at 0.3).
+const DISABLED_ALPHA: f32 = 0.3;
+/// Console menus draw their text 1 pt below the row's centre (every row of lbl-mono and
+/// ins-in-empty: ink 6.0 pt from the row top vs 5.0 centred).
+const TEXT_DY: f32 = 1.0;
 /// Hover / open menu-bar title overlay (`Menu-Bar-Item-Win` `color-mouseover`).
 const BAR_HOVER: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.2 };
 
@@ -95,6 +106,12 @@ struct LookStyle {
     check: bool,
     /// Item font relative to `Popup-Menu-Item` (s42's UAPW menu text is 0.9 of it).
     font_scale: f32,
+    /// Text offset below the row's centre.
+    text_dy: f32,
+    /// Light line width inside the border (the body starts at 1 + this).
+    light_w: f32,
+    /// Rounded border corners (the console menus).
+    rounded: bool,
 }
 
 impl MenuLook {
@@ -111,6 +128,9 @@ impl MenuLook {
                 text_x: TEXT_X,
                 check: false,
                 font_scale: 1.0,
+                text_dy: TEXT_DY,
+                light_w: 1.0,
+                rounded: true,
             },
             // s42: 1-pt (70,80,86) border, a 0.5-pt (54,65,72) line, (50,62,68) body; rows of
             // white bold text 19 pt in (room for the check mark at 7 pt); highlight (108,117,121)
@@ -126,6 +146,9 @@ impl MenuLook {
                 text_x: 19.0,
                 check: true,
                 font_scale: 0.9,
+                text_dy: 0.0,
+                light_w: 0.5,
+                rounded: false,
             },
         }
     }
@@ -1074,6 +1097,22 @@ fn submenu_origin(parent: Rect, row: Rect, size_w: f32, bounds: Rect) -> (f32, f
 // MARK: drawing
 
 impl Ui<'_> {
+    /// `r` filled with stepped corners: `corner[k]` is how far half-point row `k` from the top
+    /// (and from the bottom) starts in from each side.
+    fn stepped_fill(&mut self, r: Rect, corner: &[f32], color: Rgba) {
+        let band = corner.len() as f32 * 0.5;
+        if band * 2.0 >= r.h {
+            self.fill(r, color);
+            return;
+        }
+        for (k, inset) in corner.iter().enumerate() {
+            let dy = k as f32 * 0.5;
+            self.fill(Rect::new(r.x + inset, r.y + dy, r.w - 2.0 * inset, 0.5), color);
+            self.fill(Rect::new(r.x + inset, r.max_y() - dy - 0.5, r.w - 2.0 * inset, 0.5), color);
+        }
+        self.fill(Rect::new(r.x, r.y + band, r.w, r.h - 2.0 * band), color);
+    }
+
     /// One menu window: background, rows, hits. `hover` / `open` are entry indices of this
     /// level; submenu rows get `MenuCmd::OpenSub { level, index }` hits.
     pub fn popup_menu(&mut self, menu: &PopupMenu, look: MenuLook, f: &MenuFrame, level: u8, hover: Option<u16>, open: Option<u16>) {
@@ -1084,9 +1123,12 @@ impl Ui<'_> {
         if let Some(o) = st.outline {
             self.fill(r.inset(-0.5, -0.5, -0.5, -0.5), o);
         }
-        self.fill(r, st.border);
-        self.fill(r.inset(1.0, 1.0, 1.0, 1.0), st.light);
-        self.fill(r.inset(1.5, 1.5, 1.5, 1.5), st.body);
+        let corner: &[f32] = if st.rounded { &BORDER_CORNER } else { &[] };
+        self.stepped_fill(r, corner, st.border);
+        let light_corner: &[f32] = if st.rounded { &LIGHT_CORNER } else { &[] };
+        self.stepped_fill(r.inset(1.0, 1.0, 1.0, 1.0), light_corner, st.light);
+        let b = 1.0 + st.light_w;
+        self.fill(r.inset(b, b, b, b), st.body);
         // The window swallows clicks between rows.
         self.hit(r, row_id(level, u16::MAX), HitKind::Tap);
         let mut style = item_style(self);
@@ -1111,7 +1153,7 @@ impl Ui<'_> {
                         MenuLook::Context | MenuLook::Plugin => self.fill(*row, HEADER_BG),
                         MenuLook::Base => hs.color = Rgba::BLACK,
                     }
-                    self.text(t, hs, Rect::new(row.x + 5.0, row.y, row.w - 10.0, row.h), Align::Left);
+                    self.text(t, hs, Rect::new(row.x + 5.0, row.y + st.text_dy, row.w - 10.0, row.h), Align::Left);
                 }
                 PopupEntry::Item(it) => {
                     if lit && it.enabled && it.id.is_some() {
@@ -1133,9 +1175,9 @@ impl Ui<'_> {
                             self.fill(dot, ts.color);
                         }
                     }
-                    self.text(&it.label, ts.clone(), Rect::new(row.x + st.text_x, row.y, row.w - st.text_x - TEXT_MARGIN / 2.0, row.h), Align::Left);
+                    self.text(&it.label, ts.clone(), Rect::new(row.x + st.text_x, row.y + st.text_dy, row.w - st.text_x - TEXT_MARGIN / 2.0, row.h), Align::Left);
                     if let Some(k) = &it.shortcut {
-                        self.text(k, ts, Rect::new(row.x, row.y, row.w - 8.0, row.h), Align::Right);
+                        self.text(k, ts, Rect::new(row.x, row.y + st.text_dy, row.w - 8.0, row.h), Align::Right);
                     }
                     if let (true, Some(id)) = (it.enabled, &it.id) {
                         self.hit(*row, id.clone(), if it.toggle { HitKind::Toggle } else { HitKind::Tap });
@@ -1149,7 +1191,7 @@ impl Ui<'_> {
                     if !*enabled {
                         ts.color = ts.color.with_alpha(DISABLED_ALPHA);
                     }
-                    self.text(label, ts.clone(), Rect::new(row.x + st.text_x, row.y, row.w - st.text_x - TEXT_MARGIN / 2.0, row.h), Align::Left);
+                    self.text(label, ts.clone(), Rect::new(row.x + st.text_x, row.y + st.text_dy, row.w - st.text_x - TEXT_MARGIN / 2.0, row.h), Align::Left);
                     let chevron = Rect::new(row.max_x() - 4.0 - 8.0, row.y + (row.h - 11.0) / 2.0, 8.0, 11.0);
                     if look == MenuLook::Plugin {
                         // s42: a white 4 × 6 pt chevron 5 pt from the right.

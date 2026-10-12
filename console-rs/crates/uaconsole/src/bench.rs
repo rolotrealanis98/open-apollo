@@ -86,6 +86,12 @@ pub fn render_png(
         None,
     );
     let build_ms = ms(t.elapsed());
+    // Dev: `UACONSOLE_DUMP_HITS=1` lists the frame's hit regions (alignment tools).
+    if std::env::var_os("UACONSOLE_DUMP_HITS").is_some() {
+        for h in &frame.hits {
+            eprintln!("hit {} {:?} [{},{},{},{}]", h.id.strip, h.id.control, h.rect.x, h.rect.y, h.rect.w, h.rect.h);
+        }
+    }
     let gpu = gpu()?;
     let mut renderer = gfx::Renderer::new(&gpu.device, &gpu.queue, FORMAT, assets.images.clone());
     let t = Instant::now();
