@@ -197,7 +197,7 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
         for (h, o) in hp.iter().enumerate() {
             if str_at(src, &format!("{o}/MixInSource")).unwrap_or_default() == format!("cue{}", k + 1) {
                 let mix = row.iter().find(|f| f.label == "SOURCE").map(|f| f.value_text()).unwrap_or_default();
-                let what = if mix == "MIX" { format!("CUE {} MIX", k + 1) } else { "MONITOR MIX".into() };
+                let what = if mix == "MIX" { "MONITOR MIX".to_string() } else { format!("CUE {} MIX", k + 1) };
                 let tile = Rect::new(cx + 1.0, dev_y + 2.0 + h as f32 * 42.0, col_w - 4.0, 39.0);
                 ui.fill(tile, BLUE);
                 let st = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.9));
@@ -260,24 +260,44 @@ fn monitor_controller(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bou
     if f.is_empty() {
         ui.text("N/A", Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.5)), Rect::new(area.x, y, area.w, 40.0), Align::Center);
     }
-    for (k, fl) in f.iter().enumerate() {
-        let x = area.x + 6.0 + (k % 3) as f32 * 86.0;
-        let yy = y + (k / 3) as f32 * 40.0;
-        static_label(ui, &fl.label, Rect::new(x, yy, 84.0, 12.0), Align::Left);
-        let r = Rect::new(x, yy + 12.0, 80.0, 24.0);
+    // `Rack_BassManagement` layout (capture s06): ENABLE (66 × 28) then LFE FILTER / SATELLITE
+    // FILTER (78 wide) on the first row; CHANNEL (66) and SATELLITE CROSSOVER (168) below.
+    let slots = [(6.0, 0.0, 66.0), (85.0, 0.0, 78.0), (175.0, 0.0, 78.0), (6.0, 36.0, 66.0), (85.0, 36.0, 168.0)];
+    for (fl, (dx, dy, w)) in f.iter().zip(slots).filter(|_| view.settings.panel_tab == 0) {
+        let (x, yy) = (area.x + dx, y + dy);
         match &fl.kind {
             FieldKind::Toggle { on } => {
-                ui.toggle("Switch-Large", Some(if *on { "ON" } else { "OFF" }), *on, true, r, None, None);
+                let r = Rect::new(x, yy + 4.0, w, 28.0);
+                ui.toggle("Switch-Large", Some(&fl.label), *on, true, r, None, None);
                 ui.hit(r, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
             }
-            FieldKind::Choice { .. } => {
-                choice_box(ui, fl, r);
+            _ => {
+                static_label(ui, &fl.label, Rect::new(x, yy, w, 12.0), Align::Left);
+                choice_box(ui, fl, Rect::new(x, yy + 12.0, w, 20.0));
                 drawn.push(Drawn { field: fl.clone() });
             }
-            _ => ui.text(&fl.value_text(), Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.75)), r, Align::Center),
         }
     }
-    y += f.len().div_ceil(3) as f32 * 40.0 + 8.0;
+    if view.settings.panel_tab == 1 {
+        for (k, fl) in f.iter().enumerate() {
+            let x = area.x + 6.0 + (k % 3) as f32 * 86.0;
+            let yy = y + (k / 3) as f32 * 40.0;
+            static_label(ui, &fl.label, Rect::new(x, yy, 84.0, 12.0), Align::Left);
+            let r = Rect::new(x, yy + 12.0, 80.0, 24.0);
+            match &fl.kind {
+                FieldKind::Toggle { on } => {
+                    ui.toggle("Switch-Large", Some(if *on { "ON" } else { "OFF" }), *on, true, r, None, None);
+                    ui.hit(r, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
+                }
+                FieldKind::Choice { .. } => {
+                    choice_box(ui, fl, r);
+                    drawn.push(Drawn { field: fl.clone() });
+                }
+                _ => ui.text(&fl.value_text(), Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.75)), r, Align::Center),
+            }
+        }
+    }
+    y += if view.settings.panel_tab == 0 { 76.0 } else { f.len().div_ceil(3) as f32 * 40.0 + 8.0 };
     // The speaker display (`Monitor-Surround-Speakers-Background`).
     let disp = Rect::new(area.x + 6.0, y, area.w - 12.0, (area.max_y() - y - 6.0).max(0.0));
     ui.fill(disp, Rgba::rgb8(20, 22, 24));
@@ -359,83 +379,87 @@ fn headphone_correction(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, b
 
 // ---- PLUG-IN SCENES ([cap] s10) ----
 
-const SCENE_ROW_H: f32 = 22.0;
+const SCENE_ROW_H: f32 = 31.75;
 
+/// `Rack_SceneSection` (capture s10, at 1470 × 1105): a 290-pt column under the title bar —
+/// header 30, the CURRENT / PRIMED inset (10…280, y 39…186) with RECALL / SAVE / ▲ ▼, then
+/// the scene list from y 195, 31.75 pt rows. [I] Console inserts the column left of the
+/// browser; here it covers the browser's left 290 pt.
 fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect, browser: Option<Rect>) {
-    let r = browser.unwrap_or_else(|| centred(bounds, (320.0, 560.0)));
+    let full = browser.unwrap_or_else(|| centred(bounds, (290.0, 560.0)));
+    let r = Rect::new(full.x, full.y, 290.0f32.min(full.w), full.h);
     // `Scenes-Main-Background` (72, 76, 78); swallows taps.
-    ui.fill(r, Rgba::rgb8(72, 76, 78));
+    ui.fill(r, Rgba::rgb8(44, 47, 50));
     ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
-    let header = Rect::new(r.x, r.y, r.w, 24.0);
-    ui.fill(header, Rgba::rgb8(58, 62, 65));
+    let header = Rect::new(r.x, r.y, r.w, 30.0);
+    ui.fill(header, Rgba::rgb8(52, 56, 59));
     let hs = ui.style("fonts", "Scenes-Header-Font");
     let tw = crate::window::helvetica_bold_width("PLUG-IN SCENES", hs.size);
     let tx = header.x + ((header.w - tw - 16.0) / 2.0).round();
-    ui.fill(Rect::new(tx, header.y + 7.0, 10.0, 10.0), Rgba::rgb8(224, 32, 208));
-    ui.text("PLUG-IN SCENES", hs, Rect::new(tx + 16.0, header.y, tw + 4.0, header.h), Align::Left);
+    ui.fill(Rect::new(tx, header.y + 10.0, 11.0, 11.0), Rgba::rgb8(224, 32, 208));
+    ui.text("PLUG-IN SCENES", hs, Rect::new(tx + 17.0, header.y, tw + 4.0, header.h), Align::Left);
     if let Some(x) = ui.skin("views", "Browser-Modal-Close-White").and_then(|s| s.image("image")) {
         let x = x.to_string();
-        ui.image(&x, Rect::new(header.max_x() - 22.0, header.y + 6.0, 12.0, 12.0), None, None, 0.9);
+        ui.image(&x, Rect::new(header.x + 262.0, header.y + 9.0, 12.0, 12.0), None, None, 0.9);
     }
-    ui.hit(Rect::new(header.max_x() - 28.0, header.y, 28.0, 24.0), sid(Control::PanelClose), HitKind::Tap);
+    ui.hit(Rect::new(header.x + 254.0, header.y, 36.0, 30.0), sid(Control::PanelClose), HitKind::Tap);
 
     let scenes = model.plugin_scenes();
     let current = model.status().scene;
     let primed = view.settings.scene.and_then(|i| scenes.get(i as usize).cloned());
-    // CURRENT / PRIMED.
-    let status = Rect::new(r.x + 6.0, header.max_y() + 4.0, r.w - 12.0, 100.0);
-    ui.fill(status, Rgba::rgb8(58, 62, 65));
+    // CURRENT / PRIMED (`Scenes-Inset-Background`).
+    let inset = Rect::new(r.x + 10.0, r.y + 39.0, 270.0, 147.0);
+    ui.fill(inset, Rgba::rgb8(72, 76, 78));
     let ls = ui.style("fonts", "Scenes-Current-Primed-Label-Text");
     let vs = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.85));
     for (k, (label, value)) in [("CURRENT", current.clone()), ("PRIMED", primed)].into_iter().enumerate() {
-        let y = status.y + 4.0 + k as f32 * 36.0;
-        ui.text(label, ls.clone(), Rect::new(status.x, y, status.w, 14.0), Align::Center);
-        let v = Rect::new(status.x + 4.0, y + 14.0, status.w - 8.0, 18.0);
-        ui.fill(v, Rgba::rgb8(27, 29, 32));
+        let y = inset.y + 3.0 + k as f32 * 58.0;
+        ui.text(label, ls.clone(), Rect::new(inset.x, y, inset.w, 16.0), Align::Center);
+        let v = Rect::new(r.x + 18.0, y + 22.0, 252.0, 28.0);
+        ui.fill(v, Rgba::rgb8(36, 38, 40));
         ui.text(value.as_deref().unwrap_or("(NONE)"), vs.clone(), v, Align::Center);
     }
     // RECALL, SAVE, ▲ ▼.
-    let by = status.y + 76.0;
-    let bw = ((status.w - 8.0 - 2.0 * 20.0 - 12.0) / 2.0).floor();
-    let recall = Rect::new(status.x + 4.0, by, bw, 18.0);
+    let by = r.y + 161.0;
+    let recall = Rect::new(r.x + 18.0, by, 94.0, 20.0);
     let can_recall = view.settings.scene.is_some();
-    ui.fill(recall, Rgba::rgb8(76, 80, 83));
+    ui.fill(recall, Rgba::rgb8(86, 90, 93));
     let bs = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(if can_recall { 0.85 } else { 0.3 }));
     ui.text("RECALL", bs.clone(), recall, Align::Center);
     if let Some(i) = view.settings.scene {
         ui.hit(recall, ControlId { strip: "global".into(), control: Control::RecallScene(i.min(255) as u8) }, HitKind::Tap);
     }
-    let save = Rect::new(recall.max_x() + 4.0, by, bw, 18.0);
-    ui.fill(save, Rgba::rgb8(76, 80, 83));
+    let save = Rect::new(r.x + 120.0, by, 96.0, 20.0);
+    ui.fill(save, Rgba::rgb8(86, 90, 93));
     // SAVE: `SceneOperation {}` has no argument shape in the root `commands` node; disabled.
     ui.text("SAVE", Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.3)), save, Align::Center);
     for (i, up) in [true, false].into_iter().enumerate() {
-        let b = Rect::new(save.max_x() + 4.0 + i as f32 * 22.0, by, 20.0, 18.0);
-        ui.fill(b, Rgba::rgb8(76, 80, 83));
+        let b = Rect::new(r.x + 224.0 + i as f32 * 26.0, by, 18.0, 20.0);
+        ui.fill(b, Rgba::rgb8(86, 90, 93));
         ui.text(if up { "▲" } else { "▼" }, bs.clone(), b, Align::Center);
         ui.hit(b, sid(Control::SceneStep(up)), HitKind::Tap);
     }
     // The scene list (`Rack_ScenesListBox`).
-    let list = Rect::new(r.x, status.max_y() + 6.0, r.w, (r.max_y() - status.max_y() - 6.0).max(0.0));
-    ui.fill(list, Rgba::rgb8(27, 29, 32));
+    let list = Rect::new(r.x, r.y + 195.0, r.w, (r.max_y() - r.y - 195.0).max(0.0));
+    ui.fill(list, Rgba::rgb8(29, 31, 33));
     let overflow = (scenes.len() as f32 * SCENE_ROW_H - list.h).max(0.0);
     let off = overflow * view.settings.scroll;
     ui.clip(Some(list));
     let mut st = ui.style("views", "Scenes-List-Box-Number");
     st.color = Rgba::WHITE.with_alpha(0.9);
     for (i, n) in scenes.iter().enumerate() {
-        let y = list.y + 4.0 + i as f32 * SCENE_ROW_H - off;
+        let y = list.y + i as f32 * SCENE_ROW_H - off;
         if y + SCENE_ROW_H < list.y || y > list.max_y() {
             continue;
         }
-        let row = Rect::new(list.x, y, list.w, SCENE_ROW_H);
+        let row = Rect::new(list.x, y, list.w - 14.0, SCENE_ROW_H);
         if view.settings.scene == Some(i as u16) {
             ui.fill(row, Rgba::rgb8(64, 58, 40));
         } else if Some(n) == current.as_ref() {
             ui.fill(row, Rgba::WHITE.with_alpha(0.06));
         }
-        ui.text(&format!("{}", i + 1), st.clone(), Rect::new(row.x + 4.0, y, 26.0, SCENE_ROW_H), Align::Center);
-        ui.text(n, st.clone(), Rect::new(row.x + 40.0, y, row.w - 46.0, SCENE_ROW_H), Align::Left);
+        ui.text(&format!("{}", i + 1), st.clone(), Rect::new(row.x + 14.0, y, 28.0, SCENE_ROW_H), Align::Center);
+        ui.text(n, st.clone(), Rect::new(row.x + 59.0, y, row.w - 62.0, SCENE_ROW_H), Align::Left);
         ui.hit(row, sid(Control::SceneSelect(i as u16)), HitKind::Tap);
     }
     ui.clip(None);

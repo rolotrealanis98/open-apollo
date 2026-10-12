@@ -317,7 +317,7 @@ fn monitor_buttons_open_their_panels() {
     press(&mut view, &mut model, &hits, "monitor", Control::CueOutputs);
     assert_eq!(view.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
     let (hits, _) = build(&assets, &model, &view);
-    press(&mut view, &mut model, &hits, "settings", Control::SettingChoose("map:cue_source:/devices/0/outputs/15/MixInSource".into(), 0));
+    press(&mut view, &mut model, &hits, "settings", Control::SettingChoose("map:cue_source:/devices/0/outputs/15/MixInSource".into(), 1));
     assert_eq!(model.props.prop("/devices/0/outputs/15/MixInSource").and_then(|v| v.as_str().map(str::to_owned)).as_deref(), Some("cue"));
     // A tap outside closes it.
     let (hits, _) = build(&assets, &model, &view);

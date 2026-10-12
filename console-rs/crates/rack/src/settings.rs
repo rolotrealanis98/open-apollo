@@ -562,8 +562,9 @@ fn map_table(name: &str) -> Vec<(&'static str, PropValue)> {
         "io_mode" => vec![("Default", PropValue::Bool(true)), ("Custom", PropValue::Bool(false))],
         // I/O MATRIX › # INPUTS / # OUTPUTS (captures s36 / s37). [I] the binding.
         "io_count" => vec![("8", PropValue::Int(8)), ("16", PropValue::Int(16)), ("32", PropValue::Int(32)), ("64 (PT Mode)", PropValue::Int(64)), ("128", PropValue::Int(128))],
-        // CUE OUTPUTS SOURCE (`MixInSource`): MIX = the cue's own mix, MON = the monitor mix.
-        "cue_source" => vec![("MIX", PropValue::Str("cue".into())), ("MON", PropValue::Str("mon".into()))],
+        // CUE OUTPUTS MIX (`MixInSource`): lit = the monitor mix ("mon"; capture s07 shows MIX lit
+        // with "MONITOR MIX to A HP n"), else the cue's own mix.
+        "cue_source" => vec![("MIX", PropValue::Str("mon".into())), ("CUE", PropValue::Str("cue".into()))],
         // MONITOR CONTROLLER MON OUTPUT GAIN (`ControlRoomPGABypass`). [I]
         "pga_bypass" => vec![("VARIABLE", PropValue::Bool(false)), ("FIXED", PropValue::Bool(true))],
         _ => Vec::new(),
@@ -875,23 +876,36 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             }
         }
         SettingsGroup::BassManagement(d) => {
+            // `Rack_BassManagement` (capture s06): ENABLE; LFE FILTER, SATELLITE FILTER; CHANNEL,
+            // SATELLITE CROSSOVER. In stereo MONITOR MODE every combo reads N/A.
             let p = dev(d);
             if bool_at(src, &format!("{p}/SupportsBassManagement")) != Some(true) {
                 return f;
             }
-            f.extend(toggle(src, &format!("{p}/BassMgrEnable"), "ENABLE", false, 0));
             let mon = monitor_output(src, &p);
-            if let Some(m) = &mon {
-                f.extend(engine_choice(src, &format!("{m}/BassMgrLFEFilterType"), "LFE FILTER", 0));
-            }
-            f.extend(engine_choice(src, &format!("{p}/BassMgrXOverFilterType"), "SATELLITE FILTER", 0));
-            if let Some(m) = &mon {
-                if let Some(freq) = src.prop(&format!("{m}/BassMgrXOverFreq")).and_then(|v| v.as_f64()) {
-                    f.push(SettingField::new(format!("{m}/BassMgrXOverFreq"), "CROSSOVER", FieldKind::Readout(format!("{freq:.0} Hz")), 1));
-                }
-                f.extend(toggle(src, &format!("{m}/BassMgrHPOn"), "SATELLITE HPF", false, 1));
-                f.extend(toggle(src, &format!("{m}/BassMgrLPOn"), "LFE LPF", false, 1));
-                f.extend(toggle(src, &format!("{m}/BassMgrLFEBoost"), "LFE +10 dB", false, 1));
+            let stereo = str_at(src, &format!("{p}/SurroundMonitorMode")).is_none_or(|m| m.to_lowercase().contains("stereo"));
+            let na = |key: String, label: &str, row: u8| {
+                let mut x = SettingField::new(key, label, FieldKind::Choice { options: Vec::new(), enabled: Vec::new(), selected: None }, row).disabled(true);
+                x.display = Some("N/A".into());
+                x
+            };
+            f.extend(toggle(src, &format!("{p}/BassMgrEnable"), "ENABLE", false, 0));
+            let lfe = mon.as_ref().map(|m| format!("{m}/BassMgrLFEFilterType")).unwrap_or_default();
+            let sat = format!("{p}/BassMgrXOverFilterType");
+            let freq = mon.as_ref().map(|m| format!("{m}/BassMgrXOverFreq")).unwrap_or_default();
+            if stereo {
+                f.push(na(lfe, "LFE FILTER", 0));
+                f.push(na(sat, "SATELLITE FILTER", 0));
+                f.push(na(format!("{p}/BassMgrChannel"), "CHANNEL", 1));
+                f.push(na(freq, "SATELLITE CROSSOVER", 1));
+            } else {
+                f.push(engine_choice(src, &lfe, "LFE FILTER", 0).unwrap_or_else(|| na(lfe.clone(), "LFE FILTER", 0)));
+                f.push(engine_choice(src, &sat, "SATELLITE FILTER", 0).unwrap_or_else(|| na(sat.clone(), "SATELLITE FILTER", 0)));
+                f.push(na(format!("{p}/BassMgrChannel"), "CHANNEL", 1));
+                let hz = src.prop(&freq).and_then(|v| v.as_f64()).map(|v| format!("{v:.0} Hz")).unwrap_or_else(|| "N/A".into());
+                let mut x = na(freq, "SATELLITE CROSSOVER", 1);
+                x.display = Some(hz);
+                f.push(x);
             }
         }
         SettingsGroup::SpeakerUtilities(d) => {
@@ -1365,8 +1379,8 @@ mod tests {
         // Two active cues × (name, SOURCE, MONO, MIRROR TO).
         assert_eq!(cues.len(), 8);
         assert_eq!(cues[0].label, "CUE 1");
-        assert_eq!(cues[1].value_text(), "MON");
-        assert_eq!(resolve(&m, &cues[1].key, &SettingOp::Choose(0)), vec![Write::Set("/devices/0/outputs/14/MixInSource".into(), PropValue::Str("cue".into()))]);
+        assert_eq!(cues[1].value_text(), "MIX");
+        assert_eq!(resolve(&m, &cues[1].key, &SettingOp::Choose(1)), vec![Write::Set("/devices/0/outputs/14/MixInSource".into(), PropValue::Str("cue".into()))]);
         let d = devices(&m);
         assert_eq!(d.len(), 1);
         assert_eq!((d[0].letter(), d[0].icon_key().as_str()), ('A', "Device-Icon-Apollo-x4"));
