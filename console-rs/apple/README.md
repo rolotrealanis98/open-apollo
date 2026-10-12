@@ -107,13 +107,20 @@ for i in 0..<max(0, uac_layer_count(ctx)) {
     // view points (y down) -> screen frame (y up)
     let origin = window.convertPoint(toScreen: view.convert(NSPoint(x: CGFloat(l.x), y: CGFloat(l.y + l.height)), to: nil))
     w.setFrame(NSRect(x: origin.x, y: origin.y, width: CGFloat(l.width), height: CGFloat(l.height)), display: false)
-    let px = w.backingScaleFactor
+    let px = window.backingScaleFactor // FFI layer rendering shares the main view's pixel scale
     uac_attach_layer(ctx, l.id, Unmanaged.passUnretained(w.metalLayer).toOpaque(),
                      UInt32(CGFloat(l.width) * px), UInt32(CGFloat(l.height) * px))
     if w.parent == nil { window.addChildWindow(w, ordered: .above) }
 }
 for (id, w) in children where !seen.contains(id) { uac_detach_layer(ctx, id); w.close(); children[id] = nil }
 ```
+
+Forward child wheel events through `uac_layer_scroll(ctx, id, x, y, dy)` in
+window-local view points. The main `uac_scroll` cannot see detached child scroll
+regions; the child call consumes its own list scrolling and never pans the mixer.
+Reattach a Metal layer only when its drawable size changes, since attaching
+marks a frame dirty. Mixed-DPI child windows currently share the main view's
+render scale.
 
 Each child's view forwards its mouse events with `uac_layer_pointer(ctx, id, kind, x, y,
 flags)` in window-local points (y down). A press on a `UAC_LAYER_WINDOW` / `_DIALOG`

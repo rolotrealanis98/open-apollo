@@ -332,3 +332,30 @@ regeneration. Build acceptance does not establish physical iPad touch/URL
 behavior; signed device install is still pending. No app or UA Console was
 launched and no real-engine writes or native plug-in loads were sent.
 Separate macOS layer windows remain the next P3 task.
+
+## P3 — separate Mac layer windows and child wheel input
+
+Dedicated ConsoleLink task b39a9b7 is merged with history into
+feat/console-1to1 at 23508f9; its worktree is clean and nothing was pushed.
+The host keeps stable borderless NSPanel/Metal surfaces per Rust layer ID,
+non-activating popup menus, key Settings/panel windows, top-left screen/view
+geometry and remembered title-drag positions. Missing layers detach before
+Metal objects are released; drawable changes reattach without forcing every
+unchanged display tick dirty. Child pointer, hover and keyboard events route
+through the shared Rust context.
+
+Integration exposed a missing child-wheel path: the main view cannot scroll
+regions removed into separate layers. The new backwards-compatible
+uac_layer_scroll API targets the child list and never pans the mixer. A
+synthetic 64-route Settings test verifies local-coordinate mapping, actual
+list movement, unrelated view-origin stability and invalid layer rejection.
+
+Validation: 285 workspace tests pass (10 ignored), locked release build,
+p1 158/158, p2 195/195, windows_check and live-snapshot ledger regeneration.
+All three Apple XCFramework slices rebuilt, macOS/simulator app builds pass.
+The committed preview-only Mac smoke harness attaches a separate Settings
+surface, verifies move persistence, and closes/detaches it, without connecting
+an engine or manipulating UA Console. Physical iPad install/interaction still
+requires the user's signing session. Mixed-DPI child rendering currently uses
+the main view scale; cross-display sharpness and HTML plugin/chrome ownership
+remain explicit limitations. No real Apollo writes or native plugin loads.
