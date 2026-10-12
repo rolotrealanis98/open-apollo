@@ -171,7 +171,13 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     // Cell rows. Content that fits is bottom-aligned on the main strips (1.3.1 at 1470 × 1105);
     // content that overflows scrolls, from the top.
     let rows = CellRows::new(model, view, &inputs, false);
-    let aux_rows = CellRows::new(model, view, &auxes, true);
+    let mut aux_rows = CellRows::new(model, view, &auxes, true);
+    // The aux sends cell keeps room for as many sends as an input strip has (1.3.1: two cues
+    // shown, four reserved; the p1 aux scrollbar thumb gives 583 pt of aux cells).
+    if view.sections.sends {
+        let in_sends = inputs.iter().map(|s| model.input_sends(s).len()).max().unwrap_or(0);
+        aux_rows.sends = aux_rows.sends.max(cells::sends_cell_h(in_sends, view.sends_overview));
+    }
     let cells_h = col_h - rows.main - 5.0;
     let aux_cells_h = col_h - aux_rows.main - 5.0;
     let aux_scroll = view.monitor_page == MonitorPage::Aux && aux_rows.total() > aux_cells_h;
@@ -305,34 +311,47 @@ fn scrollbar(ui: &mut Ui, track: Rect, content: f32, scroll: f32, id: ControlId)
     ui.hit(thumb.inset(-3.0, 0.0, -3.0, 0.0), id, HitKind::Drag { value: 1.0 - scroll as f64, span: track.h - thumb_h, reset: None });
 }
 
-/// `Rack_ChannelStripsSideSection` (46.5 pt): per-row collapse chevrons aligned with the
-/// cell headers, and S (clear solos) / OL (clear clips) by the faders.
+/// `Rack_ChannelStripsSideSection` (46.5 pt) and the reveal column (`console_reveal.json`):
+/// white swatch, per-row Mixer-Row-Header with the reveal chevron at (17, 5) and, on open
+/// rows, the yellow row icon at (15, 35); the main area's `fader_and_meters_bg` with
+/// S (clear solos) / OL (clear clips) at main + 63 / + 87, and the white label plate.
+/// Measured on Console 1.3.1 (p1 1920 × 1050, p2 1470 × 1105).
 fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
+    const ROW_ICON: Rgba = Rgba::rgb8(246, 201, 91);
+    const ROW_ICON_EDGE: Rgba = Rgba::rgb8(44, 46, 48);
     let main_y = r.h - rows.main;
     let nav = |c: Control| ControlId { strip: navigator::NAV_ID.into(), control: c };
     ui.at(r.x, r.y, |ui| {
+        ui.fill(Rect::new(0.5, 0.0, r.w - 1.0, 4.0), Rgba::WHITE);
         ui.clip(Some(Rect::new(0.0, 5.0, r.w, main_y - 5.0)));
         ui.at(0.0, 5.0 - off, |ui| {
-            for (sec, y, _) in rows.rows() {
+            for (sec, y, h) in rows.rows() {
                 ui.background("Mixer-Row-Header", Rect::new(0.0, y, r.w, HEADER_H));
                 let open = rows_open(rows, sec);
-                if let Some(skin) = ui.skin("views", "Browser-Reveal-Toggle") {
-                    if let Some(img) = if open { skin.image("image-on") } else { skin.image("image-off") } {
-                        let img = img.to_string();
-                        ui.image(&img, Rect::new((r.w - 14.0) / 2.0, y + 4.0, 14.0, 14.0), None, None, 0.7);
-                    }
+                if let Some(img) = ui.skin("views", "Browser-Reveal-Toggle").and_then(|k| k.image(if open { "image-on" } else { "image-off" })) {
+                    ui.image(img, Rect::new(17.0, y + 5.0, 12.0, 12.0), None, None, 1.0);
+                }
+                if open && h >= 50.0 {
+                    let icon = Rect::new(15.0, y + 35.0, 16.0, 15.0);
+                    ui.fill(icon, ROW_ICON_EDGE);
+                    ui.fill(Rect::new(icon.x + 1.0, icon.y + 1.0, 14.0, 6.0), ROW_ICON);
+                    ui.fill(Rect::new(icon.x + 1.0, icon.y + 8.0, 14.0, 6.0), ROW_ICON);
                 }
                 ui.hit(Rect::new(0.0, y, r.w, HEADER_H), nav(Control::Section(sec)), HitKind::Toggle);
             }
         });
         ui.clip(None);
+        let label_y = r.h - main_strip::LABEL_H;
         if rows.main > MAIN_HIDDEN_H {
+            ui.background("Channel-Bottom", Rect::new(0.0, main_y, r.w, label_y - main_y));
             for (i, (label, c)) in [("S", Control::ClearSolos), ("OL", Control::ClearClips)].into_iter().enumerate() {
-                let b = Rect::new(7.0, main_y + 62.0 + i as f32 * 25.0, 32.0, 19.0);
+                let b = Rect::new(7.0, main_y + 63.0 + i as f32 * 24.0, 32.0, 19.0);
                 ui.toggle("Switch-Small", Some(label), false, true, b, None, None);
                 ui.hit(b, ControlId { strip: "global".into(), control: c }, HitKind::Tap);
             }
         }
+        ui.fill(Rect::new(0.0, label_y - 1.0, r.w, 1.0), Rgba::BLACK);
+        ui.fill(Rect::new(0.0, label_y, r.w, main_strip::LABEL_H - 1.0), Rgba::WHITE);
     });
 }
 
