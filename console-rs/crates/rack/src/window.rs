@@ -9,13 +9,14 @@ use crate::model::{MixerModel, StripInfo};
 use crate::preamp::draw_preamp;
 use crate::surfaces::browser::draw_browser;
 use crate::surfaces::cells::{self, HEADER_H, INPUT_CELL_H, insert_list, send_list, visible_slots};
-use crate::surfaces::monitor::{draw_control_room, draw_monitor_column, monitor_rect};
+use crate::surfaces::monitor::{draw_monitor_column, monitor_rect};
+use crate::surfaces::control_room::draw_control_room;
 use crate::surfaces::navigator::{self, VisibleRows, draw_navigator};
 use crate::surfaces::popover::draw_popover;
 use crate::surfaces::session_nav::draw_session_navigator;
 use crate::surfaces::settings::draw_settings_sheet;
-use crate::surfaces::status::draw_status_bar;
-use crate::surfaces::{MonitorPage, Section, Sheet, ViewState};
+use crate::surfaces::status::draw_status_bar_with;
+use crate::surfaces::{InsertSize, Section, Sheet, ViewState};
 use crate::ui::Ui;
 
 /// Column placement (`Rack_WindowLayouts::resized` 0x18167bb40, checked on Console 1.3.1 at
@@ -30,8 +31,13 @@ use crate::ui::Ui;
 pub struct WindowLayout {
     pub compact: bool,
     pub inputs: usize,
+    /// Strips in the bus section: the auxes (SHOW AUX) and the talkback strip (SHOW CTRL ROOM).
     pub auxes: usize,
     pub browser: bool,
+    /// The PLUG-IN SCENES panel column, left of the browser.
+    pub scenes: bool,
+    /// The control-room column before the monitor column (SHOW CTRL ROOM).
+    pub ctrl_room: bool,
     /// Window size in points (the full layout; compact derives its width from the strips).
     pub width: f32,
     pub height: f32,
@@ -44,6 +50,14 @@ const GAP: f32 = 18.0;
 pub const SCROLLBAR_W: f32 = 17.0;
 /// Between the bus section and the monitor column (1.3.1).
 const BUS_MONITOR_GAP: f32 = 1.5;
+/// Between the bus section and the control-room column (user captures s45–s49: the bus ends
+/// on 1277, the column starts on 1278 in the 1470-pt window).
+const BUS_CTRL_ROOM_GAP: f32 = 1.0;
+/// `Rack_PluginScenes` panel column (s10: the browser moves right by 288).
+pub const SCENES_W: f32 = 288.0;
+/// Horizontal scrollbar under the input strips while they do not all fit (s10): the strip
+/// columns, the bus section included, end 18 pt higher.
+pub const HSCROLL_H: f32 = 18.0;
 const PANEL: Rgba = Rgba::rgb8(72, 76, 78);
 const SEPARATOR: Rgba = Rgba::rgb8(82, 87, 89);
 /// Main strip height with the fader hidden (F = 5, label 28).
@@ -52,11 +66,25 @@ const MAIN_HIDDEN_H: f32 = 5.0 + main_strip::LABEL_H;
 impl WindowLayout {
     pub fn new(view: &ViewState, inputs: usize, auxes: usize) -> Self {
         let (w, h) = view.window.unwrap_or(W::SIZE);
-        let mut l = Self { compact: view.compact, inputs, auxes, browser: view.show_browser && !view.compact, width: w, height: h, aux_scroll: true };
+        let mut l = Self {
+            compact: view.compact,
+            inputs,
+            auxes,
+            browser: view.show_browser && !view.compact,
+            scenes: view.show_scenes && !view.compact,
+            ctrl_room: view.show_ctrl_room,
+            width: w,
+            height: h,
+            aux_scroll: true,
+        };
         let (min_w, min_h) = l.min_size();
         l.width = l.width.max(min_w);
         l.height = l.height.max(min_h);
         l
+    }
+    /// The layout for `model`'s strips under `view` (bus strips per the SHOW toggles).
+    pub fn for_model(model: &dyn MixerModel, view: &ViewState) -> Self {
+        Self::new(view, model.inputs().len(), bus_strips(model, view).len())
     }
     /// With the aux scrollbar shown or not (it depends on the aux cells' height).
     pub fn with_aux_scroll(mut self, aux_scroll: bool) -> Self {
@@ -66,19 +94,30 @@ impl WindowLayout {
     /// Smallest window: one input strip, the bus section and the monitor; the main strip and a
     /// cell header above it.
     pub fn min_size(&self) -> (f32, f32) {
-        let w = self.strips_x() + STRIP_W + SCROLLBAR_W + self.bus_w() + BUS_MONITOR_GAP + STRIP_W;
+        let w = self.strips_x() + STRIP_W + SCROLLBAR_W + self.bus_w() + BUS_MONITOR_GAP + self.ctrl_room_w() + STRIP_W;
         (w, W::COLUMN.0 + main_strip::HEIGHT + 5.0 + 22.0 + W::STATUS_BAR.1)
     }
     fn aux_w(&self) -> f32 {
-        self.auxes.max(2) as f32 * STRIP_W
+        self.auxes as f32 * STRIP_W
+    }
+    fn ctrl_room_w(&self) -> f32 {
+        if self.ctrl_room { STRIP_W } else { 0.0 }
     }
     /// Aux strips plus the scrollbar column when it shows.
     pub fn bus_w(&self) -> f32 {
-        self.aux_w() + if self.aux_scroll { SCROLLBAR_W } else { 0.0 }
+        self.aux_w() + if self.aux_scroll && self.auxes > 0 { SCROLLBAR_W } else { 0.0 }
+    }
+    /// Scenes panel column x (full layout).
+    pub fn scenes_x(&self) -> f32 {
+        0.0
+    }
+    /// Browser column x (full layout).
+    pub fn browser_x(&self) -> f32 {
+        if self.scenes { SCENES_W } else { 0.0 }
     }
     /// Navigator column x (full layout).
     pub fn nav_x(&self) -> f32 {
-        if self.browser { W::BROWSER_W } else { 0.0 }
+        self.browser_x() + if self.browser { W::BROWSER_W } else { 0.0 }
     }
     pub fn side_x(&self) -> f32 {
         if self.compact { 0.0 } else { self.nav_x() + W::NAV_COLUMN.1 }
@@ -87,15 +126,29 @@ impl WindowLayout {
         self.side_x() + W::SIDE_SECTION.1
     }
     pub fn aux_x(&self) -> f32 {
-        if self.compact { self.strips_x() + self.inputs as f32 * STRIP_W + GAP } else { self.monitor_x() - BUS_MONITOR_GAP - self.bus_w() }
+        if self.compact {
+            self.strips_x() + self.inputs as f32 * STRIP_W + GAP
+        } else if self.ctrl_room {
+            self.ctrl_room_x() - BUS_CTRL_ROOM_GAP - self.bus_w()
+        } else {
+            self.monitor_x() - BUS_MONITOR_GAP - self.bus_w()
+        }
+    }
+    /// Control-room column x (with SHOW CTRL ROOM): flush against the monitor column.
+    pub fn ctrl_room_x(&self) -> f32 {
+        self.monitor_x() - STRIP_W
     }
     pub fn monitor_x(&self) -> f32 {
-        if self.compact { self.strips_x() + self.inputs as f32 * STRIP_W + GAP + self.aux_w() + GAP } else { self.width - STRIP_W }
+        if self.compact {
+            self.strips_x() + self.inputs as f32 * STRIP_W + GAP + self.aux_w() + GAP + self.ctrl_room_w()
+        } else {
+            self.width - STRIP_W
+        }
     }
     pub fn size(&self) -> (f32, f32) {
         if self.compact { (self.monitor_x() + STRIP_W + 4.0, self.height) } else { (self.width, self.height) }
     }
-    /// Top of the status bar (and bottom of the columns).
+    /// Top of the status bar (and bottom of the monitor column).
     pub fn status_y(&self) -> f32 {
         self.height - W::STATUS_BAR.1
     }
@@ -104,8 +157,28 @@ impl WindowLayout {
         if self.compact {
             return self.inputs;
         }
-        (((self.aux_x() - GAP - self.strips_x()) / STRIP_W).floor().max(1.0) as usize).min(self.inputs)
+        // Whole strips between the side section and the bus section (p2: 7 in 488…1163.5; s10
+        // with the scenes panel and CTRL ROOM: 2 in 776…972, the rest behind the hscroll).
+        (((self.aux_x() + 0.5 - self.strips_x()) / STRIP_W).floor().max(1.0) as usize).min(self.inputs)
     }
+    /// The input strips overflow sideways: a horizontal scrollbar runs under them.
+    pub fn hscroll(&self) -> bool {
+        !self.compact && self.visible_inputs() < self.inputs
+    }
+    /// Bottom of the strip columns (inputs and bus section).
+    pub fn strips_bottom(&self) -> f32 {
+        self.status_y() - if self.hscroll() { HSCROLL_H } else { 0.0 }
+    }
+}
+
+/// The bus section's strips: the auxes while SHOW AUX is on, then the talkback strip while
+/// SHOW CTRL ROOM is on.
+pub fn bus_strips(model: &dyn MixerModel, view: &ViewState) -> Vec<StripInfo> {
+    let mut v = if view.show_aux { model.auxes() } else { Vec::new() };
+    if view.show_ctrl_room {
+        v.extend(model.talkback());
+    }
+    v
 }
 
 /// Vertical offset of a cells stack: scrolled when it overflows the column; when it is shorter,
@@ -129,6 +202,10 @@ pub struct CellRows {
     pub sends: f32,
     /// Insert slots shown in every strip of the group.
     pub slots: usize,
+    /// Insert slot size of the group.
+    pub size: InsertSize,
+    /// The inserts cell has the UAD REC row (inputs, and a bus section with the talkback strip).
+    pub rec_row: bool,
     /// Main strip (fader area + label) height.
     pub main: f32,
 }
@@ -140,11 +217,18 @@ impl CellRows {
         let sends = strips.iter().map(|s| model.send_rows(s)).max().unwrap_or(0);
         // The bus section keeps its Sends row open (Console's default collapses only the inputs').
         let open = |r: Section| sec.get(r) || (aux && r == Section::Sends);
+        // LARGE / SMALL resize the input inserts only (s47: SMALL, the bus keeps 50-pt slots); the
+        // talkback strip has the UAD REC row, so the bus inserts row makes room for it.
+        let size = if aux { InsertSize::Large } else { view.insert_size };
+        let rec_row = !aux || strips.iter().any(|s| s.kind == StripKind::Talkback);
+        let style = cells::SendStyle::of(view.sends_overview, aux);
         Self {
             input: (!aux).then_some(if open(Section::Inputs) { INPUT_CELL_H } else { HEADER_H }),
-            inserts: if open(Section::Inserts) { cells::inserts_cell_h(slots, view.insert_size, !aux) } else { HEADER_H },
-            sends: if open(Section::Sends) { cells::sends_cell_h(sends, view.sends_overview) } else { HEADER_H },
+            inserts: if open(Section::Inserts) { cells::inserts_cell_h(slots, size, rec_row) } else { HEADER_H },
+            sends: if open(Section::Sends) { cells::sends_cell_h(sends, style) } else { HEADER_H },
             slots,
+            size,
+            rec_row,
             main: if sec.fader { main_strip::HEIGHT } else { MAIN_HIDDEN_H },
         }
     }
@@ -174,9 +258,10 @@ pub fn build_window(ui: &mut Ui, model: &dyn MixerModel, compact: bool) -> Windo
 /// Builds the window for `view` (navigator toggles, browser, popovers, sheet, pages).
 pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) -> WindowLayout {
     let inputs = model.inputs();
-    let auxes = model.auxes();
-    let base = WindowLayout::new(view, inputs.len(), auxes.len());
-    let col_h = base.status_y() - W::COLUMN.0;
+    let bus = bus_strips(model, view);
+    let base = WindowLayout::new(view, inputs.len(), bus.len());
+    let bottom = base.strips_bottom();
+    let col_h = bottom - W::COLUMN.0;
 
     // Cell rows. Content that fits is bottom-aligned on the main strips (1.3.1 at 1470 × 1105);
     // content that overflows scrolls, from the top.
@@ -184,11 +269,11 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     // The aux Sends cell keeps a row for every cue send the engine lists (1.3.1: two cues shown,
     // four reserved, `MixerModel::send_rows`): 242 + 340 = 582 pt (p2: aux header at 84), open
     // whatever the input Sends row does (p1 and p2 show that one collapsed).
-    let aux_rows = CellRows::new(model, view, &auxes, true);
+    let aux_rows = CellRows::new(model, view, &bus, true);
     let cells_h = col_h - rows.main - 5.0;
     let aux_cells_h = col_h - aux_rows.main - 5.0;
-    let aux_scroll = view.monitor_page == MonitorPage::Aux && aux_rows.total() > aux_cells_h;
-    let l = base.with_aux_scroll(aux_scroll);
+    let aux_overflow = (aux_rows.total() - aux_cells_h).max(0.0);
+    let l = base.with_aux_scroll(!bus.is_empty() && aux_overflow > 0.0);
     let (width, height) = l.size();
     let bounds = Rect::new(0.0, 0.0, width, height);
     let status_y = l.status_y();
@@ -203,8 +288,11 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     };
 
     if !l.compact {
+        if l.scenes {
+            draw_scenes_column(ui, model, view, Rect::new(l.scenes_x(), W::TITLE_BAR, SCENES_W, status_y - W::TITLE_BAR));
+        }
         if l.browser {
-            draw_browser(ui, model, view, Rect::new(0.0, W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR));
+            draw_browser(ui, model, view, Rect::new(l.browser_x(), W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR));
         }
         draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, status_y, visible_rows);
     }
@@ -225,31 +313,39 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let main_y = W::COLUMN.0 + col_h - rows.main;
     let scroll_x = l.aux_x() - SCROLLBAR_W - 0.5;
     let strips_end = l.strips_x() + inputs.len().saturating_sub(first).min(visible) as f32 * STRIP_W;
-    empty_columns(ui, strips_end, if overflow > 0.0 { scroll_x } else { l.aux_x() }, main_y, status_y);
+    empty_columns(ui, strips_end, if overflow > 0.0 { scroll_x } else { l.aux_x() }, main_y, bottom);
     let cells_area = Rect::new(l.side_x(), W::COLUMN.0 + 5.0, l.aux_x() - l.side_x(), cells_h);
     ui.scroll_region(cells_area, ScrollTarget::Cells, overflow);
     if overflow > 0.0 {
-        scrollbar_column(ui, scroll_x, main_y, status_y, cells_h, rows.total(), view.cells_scroll, Some(ControlId { strip: "view".into(), control: Control::CellsScroll }), false);
+        scrollbar_column(ui, scroll_x, main_y, bottom, cells_h, rows.total(), view.cells_scroll, Some(ControlId { strip: "view".into(), control: Control::CellsScroll }), false);
+    }
+    if l.hscroll() {
+        strips_hscroll(ui, &l, first, visible, Rect::new(l.side_x(), bottom, l.aux_x() - l.side_x(), status_y - bottom));
     }
 
-    let aux_w = auxes.len().max(2) as f32 * STRIP_W;
-    match view.monitor_page {
-        MonitorPage::Aux => {
-            let aux_off = cells_offset(&aux_rows, aux_cells_h, 0.0);
-            if l.aux_scroll {
-                let aux_main_y = W::COLUMN.0 + col_h - aux_rows.main;
-                scrollbar_column(ui, l.aux_x() + aux_w + 0.5, aux_main_y, status_y, aux_cells_h, aux_rows.total(), 0.0, None, true);
-            }
-            for (i, s) in auxes.iter().enumerate() {
-                let r = Rect::new(l.aux_x() + i as f32 * STRIP_W, W::COLUMN.0, STRIP_W, col_h);
-                ui.fill(r, PANEL);
-                strip_column(ui, model, view, s, &aux_rows, aux_off, GroupPos { index: i, last: i + 1 == auxes.len() }, r);
-            }
-        }
-        MonitorPage::ControlRoom => draw_control_room(ui, model, Rect::new(l.aux_x(), W::COLUMN.0, aux_w, col_h)),
+    // Bus section: aux strips, then the talkback strip, then their scrollbar column.
+    let aux_off = cells_offset(&aux_rows, aux_cells_h, view.aux_scroll);
+    let aux_w = bus.len() as f32 * STRIP_W;
+    if l.aux_scroll {
+        let aux_main_y = W::COLUMN.0 + col_h - aux_rows.main;
+        let id = ControlId { strip: "view".into(), control: Control::AuxCellsScroll };
+        scrollbar_column(ui, l.aux_x() + aux_w + 0.5, aux_main_y, bottom, aux_cells_h, aux_rows.total(), view.aux_scroll, Some(id), true);
+        ui.scroll_region(Rect::new(l.aux_x(), W::COLUMN.0 + 5.0, aux_w + SCROLLBAR_W, aux_cells_h), ScrollTarget::AuxCells, aux_overflow);
+    }
+    for (i, s) in bus.iter().enumerate() {
+        let r = Rect::new(l.aux_x() + i as f32 * STRIP_W, W::COLUMN.0, STRIP_W, col_h);
+        ui.fill(r, PANEL);
+        strip_column(ui, model, view, s, &aux_rows, aux_off, GroupPos { index: i, last: i + 1 == bus.len() }, r);
+    }
+    if l.hscroll() && !bus.is_empty() {
+        // Under the bus section the strips end with the inputs (s10).
+        ui.fill(Rect::new(l.aux_x(), bottom, l.bus_w() + 0.5, status_y - bottom), Rgba::rgb8(49, 54, 56));
+    }
+    if l.ctrl_room {
+        draw_control_room(ui, model, Rect::new(l.ctrl_room_x(), W::COLUMN.0, STRIP_W, status_y - W::COLUMN.0));
     }
     draw_monitor_column(ui, model, view, monitor_rect(l.monitor_x(), height));
-    draw_status_bar(ui, model, Rect::new(0.0, status_y, width, W::STATUS_BAR.1));
+    draw_status_bar_with(ui, model, view.scene_info, Rect::new(0.0, status_y, width, W::STATUS_BAR.1));
     // Last of the chrome: its bottom line covers the first point of the columns below.
     title_bar(ui, model, width);
 
@@ -259,6 +355,43 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     }
     draw_popover(ui, model, view, bounds);
     l
+}
+
+/// PLUG-IN SCENES panel column (`SCENES_W`, left of the browser; s10). The window makes the
+/// room; the panel's contents are the settings/panels work (`surfaces::settings`): until they
+/// land, the column shows its background, header and the scene list.
+fn draw_scenes_column(ui: &mut Ui, model: &dyn MixerModel, _view: &ViewState, r: Rect) {
+    ui.fill(r, Rgba::rgb8(72, 76, 79));
+    ui.fill(Rect::new(r.max_x(), r.y, 1.0, r.h), Rgba::BLACK);
+    ui.fill(Rect::new(r.x + 5.0, r.y + 5.0, r.w - 10.0, r.h - 10.0), Rgba::rgb8(28, 29, 32));
+    let head = Ui::plain_style("Helvetica", 11.0, true, Rgba::rgb8(226, 226, 227));
+    ui.text("PLUG-IN SCENES", head.clone(), Rect::new(r.x, r.y + 6.0, r.w, 24.0), Align::Center);
+    let row = Ui::plain_style("Helvetica", 11.0, true, Rgba::rgb8(230, 230, 230));
+    let names = model.plugin_scenes();
+    for i in 0..26usize {
+        let y = r.y + 207.0 + i as f32 * 32.0;
+        if y + 32.0 > r.max_y() {
+            break;
+        }
+        ui.text(&format!("{}", i + 1), row.clone(), Rect::new(r.x + 14.0, y, 24.0, 32.0), Align::Center);
+        let name = names.get(i).map(String::as_str).unwrap_or("EMPTY SCENE");
+        ui.text(name, row.clone(), Rect::new(r.x + 59.0, y, r.w - 70.0, 32.0), Align::Left);
+    }
+    ui.hit(Rect::new(r.max_x() - 30.0, r.y + 6.0, 24.0, 24.0), ControlId { strip: "view".into(), control: Control::ShowPluginScenes }, HitKind::Tap);
+}
+
+/// Horizontal scrollbar under the input strips (s10: track 1047…1065 after a black rule at 1046,
+/// thumb over the visible share), dragged or tapped to page the session navigator.
+fn strips_hscroll(ui: &mut Ui, l: &WindowLayout, first: usize, visible: usize, r: Rect) {
+    let bg = ui.assets.appearance.colors.get("mixer_scrollbar_background").copied().unwrap_or(Rgba::rgb8(35, 36, 40));
+    ui.fill(Rect::new(r.x, r.y - 1.0, r.w, 1.0), Rgba::BLACK);
+    ui.fill(r, bg);
+    let track = Rect::new(l.strips_x(), r.y, (l.aux_x() - l.strips_x()).max(1.0), r.h);
+    let n = l.inputs.max(1) as f32;
+    let thumb = Rect::new(track.x + track.w * first as f32 / n, track.y, (track.w * visible as f32 / n).max(30.0), track.h);
+    if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|k| k.image("image")) {
+        ui.image(img, thumb, Some(houston::Insets::uniform(12.0)), None, 1.0);
+    }
 }
 
 /// Approximate advance width of `text` in Helvetica Bold at `size` pt (Adobe AFM widths),
@@ -476,6 +609,8 @@ pub fn swatch_color(s: &StripInfo, index: usize) -> Rgba {
     match s.kind {
         StripKind::Input => Rgba::rgb8(40, 87, 126),
         StripKind::Aux => [Rgba::rgb8(186, 129, 43), Rgba::rgb8(46, 107, 191)][index % 2],
+        // s46 (clipboard capture, (189, 158, 0) there next to AUX 1 at (196, 126, 0)).
+        StripKind::Talkback => Rgba::rgb8(181, 157, 45),
     }
 }
 
@@ -503,7 +638,7 @@ fn strip_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &Strip
             if rows.main > MAIN_HIDDEN_H {
                 main_strip(ui, model, s, pos);
             } else {
-                ui.fill(Rect::new(0.0, 5.0, STRIP_W, main_strip::LABEL_H), if s.kind == StripKind::Aux { AUX_MAIN_BG } else { COLUMN_BG });
+                ui.fill(Rect::new(0.0, 5.0, STRIP_W, main_strip::LABEL_H), if s.kind.is_bus() { AUX_MAIN_BG } else { COLUMN_BG });
                 name_plate(ui, model, s, Rect::new(0.0, 5.0, STRIP_W, main_strip::LABEL_H));
             }
         });
@@ -541,7 +676,7 @@ fn cell_separators(ui: &mut Ui, y: f32, h: f32) {
 /// Input: input cell → inserts → sends; aux: inserts → sends. Collapsed rows are headers only.
 /// `visible_h`: cells-local bottom of the visible column (the sends well runs down to it).
 fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripInfo, rows: &CellRows, visible_h: f32) {
-    let bus = s.kind == StripKind::Aux;
+    let bus = s.kind.is_bus();
     let mut y = 0.0;
     if let Some(h) = rows.input {
         if h > HEADER_H {
@@ -559,9 +694,9 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
     ui.cell_header("INSERTS", true, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
     if rows.inserts > HEADER_H {
         let slots = model.inserts(s);
-        insert_list(ui, s, &slots, &model.insert_labels(s), rows.slots, view.insert_size, y + 26.0);
-        if !bus {
-            rec_mon(ui, model.records_pre_effects(s), s, y + 26.0 + cells::inserts_list_h(rows.slots, view.insert_size) + 4.0);
+        insert_list(ui, s, &slots, &model.insert_labels(s), rows.slots, rows.size, y + 26.0);
+        if s.kind != StripKind::Aux && rows.rec_row {
+            rec_mon(ui, model.records_pre_effects(s), s, y + 26.0 + cells::inserts_list_h(rows.slots, rows.size) + 4.0);
         }
     }
     y += rows.inserts;
@@ -570,7 +705,7 @@ fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripI
     }
     ui.cell_header("SENDS", false, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
     if rows.sends > HEADER_H {
-        let sends = if bus { model.sends(s) } else { model.input_sends(s) };
+        let sends = if s.kind == StripKind::Aux { model.sends(s) } else { model.input_sends(s) };
         let well_h = (visible_h - y - 26.0).max(rows.sends - 31.0);
         send_list(ui, s, &sends, &|k| model.send_pre(s, k), view, y + 26.0, well_h);
     }
@@ -633,7 +768,7 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
             ui.background("Channel-Bottom", Rect::new(0.0, 0.0, STRIP_W, g.label.y));
             ui.fill(Rect::new(0.0, g.label.y, STRIP_W, g.label.h), COLUMN_BG);
         }
-        StripKind::Aux => {
+        StripKind::Aux | StripKind::Talkback => {
             ui.fill(Rect::new(0.0, 0.0, STRIP_W, main_strip::HEIGHT), AUX_MAIN_BG);
             if let Some(bottom) = s.aux_bottom_skin() {
                 ui.background(bottom, Rect::new(0.0, 0.0, STRIP_W, g.label.y));
@@ -665,6 +800,11 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
         ui.toggle("Switch", Some("PRE"), st.pre, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::PrePost), None);
         ui.toggle("Switch", Some("POST"), !st.pre, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::PrePost), None);
     }
+    if let Some((talk, to_mons)) = g.talkback {
+        let on = model.monitor_options().talkback.unwrap_or(false);
+        ui.toggle("Switch-Large", Some("TALK"), on, true, talk, Some(ControlId { strip: "monitor".into(), control: Control::Talkback }), None);
+        ui.toggle("Switch-Large", Some("TALKBACK\nTO MONITOR"), false, true, to_mons, None, None);
+    }
     if let Some(r) = g.mono_mute {
         ui.toggle("Switch", Some("MONO"), st.mono, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::Mono), None);
         ui.toggle("Switch-Red", Some("MUTE"), st.mute, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::Mute), None);
@@ -678,15 +818,21 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
 /// auxes as a flat dark plate inset 0.5; "[ ISOLATE ]" (`Isolated-Static-Text`) under the name.
 fn name_plate(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, r: Rect) {
     let st = model.main(s);
-    let aux = s.kind == StripKind::Aux;
+    let aux = s.kind.is_bus();
     if aux {
         ui.fill(Rect::new(r.x + 0.5, r.y, r.w - 1.0, r.h - 1.0), AUX_PLATE);
     } else {
         ui.fill(Rect::new(r.x, r.y, r.w, r.h - 1.0), Rgba::WHITE);
         ui.fill(Rect::new(r.x - 1.0, r.y + 2.0, 1.0, r.h - 4.0), PLATE_SEPARATOR);
     }
-    ui.name_plate(if aux { "Channel-Aux-Name" } else { "Channel-Input-Name" }, &st.name, r);
-    if model.isolated(s) {
+    let key = match s.kind {
+        StripKind::Input => "Channel-Input-Name",
+        StripKind::Aux => "Channel-Aux-Name",
+        StripKind::Talkback => "Channel-Talkback-Name",
+    };
+    ui.name_plate(key, &st.name, r);
+    // The talkback strip carries `Isolate` in the engine but shows no ISOLATE line (s45).
+    if s.kind != StripKind::Talkback && model.isolated(s) {
         let mut style = ui.style("views", "Isolated-Static-Text");
         if aux {
             style.color = Rgba::WHITE.with_alpha(0.5);
@@ -705,9 +851,9 @@ mod tests {
     /// 22) sit on the fader area, header at 119; the aux stack (242 + 340) starts at 84.
     #[test]
     fn short_stacks_anchor_at_the_bottom() {
-        let inputs = CellRows { input: Some(INPUT_CELL_H), inserts: cells::inserts_cell_h(4, InsertSize::Large, true), sends: HEADER_H, slots: 4, main: main_strip::HEIGHT };
+        let inputs = CellRows { input: Some(INPUT_CELL_H), inserts: cells::inserts_cell_h(4, InsertSize::Large, true), size: InsertSize::Large, rec_row: true, sends: HEADER_H, slots: 4, main: main_strip::HEIGHT };
         assert_eq!(77.0 - cells_offset(&inputs, 589.0, 0.0), 119.0);
-        let aux = CellRows { input: None, inserts: cells::inserts_cell_h(4, InsertSize::Large, false), sends: cells::sends_cell_h(4, false), slots: 4, main: main_strip::HEIGHT };
+        let aux = CellRows { input: None, inserts: cells::inserts_cell_h(4, InsertSize::Large, false), size: InsertSize::Large, rec_row: false, sends: cells::sends_cell_h(4, cells::SendStyle::Medium), slots: 4, main: main_strip::HEIGHT };
         assert_eq!(77.0 - cells_offset(&aux, 589.0, 0.0), 84.0);
         // p1 (534): both overflow and scroll from the top.
         assert_eq!(cells_offset(&aux, 534.0, 0.0), 0.0);

@@ -12,11 +12,15 @@ uaconsole — a native UAD Console for open-apollo
 usage:
   uaconsole [--compact] [--fit|--1to1] [--engine host[:port]] [--mock snapshot.json]
             [--preview] [--writes] [--live-meters] [--stats] [--open-plugin STRIP:SLOT]
-  uaconsole --render out.png [--compact] [--scale N] [--size WxH]
+  uaconsole --render out.png [--compact] [--scale N] [--size WxH] [--view SPEC]
                                                          headless render (preview data);
                                                          --size is the window in points
   uaconsole --bench N [--compact] [--scale N]            render N frames headless, print timings
 
+  --view sets the mixer view at start (window and --render), comma-separated items:
+  inputs|inserts|sends|fader=0|1, small|large, fixed=0|1, overview=0|1, scroll=F, aux-scroll=F,
+  browser=0|1, tab=plugins|presets, hint=0|1, aux=0|1, ctrl=0|1, scenes=0|1, scene-info=0|1,
+  first=N, assign=STRIP:SLOT (e.g. --view ctrl=1,overview=1,small).
   --stats starts with the F1 overlay; --open-plugin in0:0 (or in0:unison) opens that insert's
   panel at start (window and --render).
 
@@ -100,6 +104,8 @@ pub struct Args {
     pub stats: bool,
     /// (strip id, slot) to open at start.
     pub open_plugin: Option<(String, u8)>,
+    /// Mixer view spec (`rack::ViewState::apply_spec`).
+    pub view_spec: Option<String>,
     pub help: bool,
 }
 
@@ -136,6 +142,11 @@ impl Args {
                 "--live-meters" => out.live_meters = true,
                 "--stats" => out.stats = true,
                 "--open-plugin" => out.open_plugin = Some(parse_slot(&value("--open-plugin")?)?),
+                "--view" => {
+                    let spec = value("--view")?;
+                    rack::ViewState::default().apply_spec(&spec)?;
+                    out.view_spec = Some(spec);
+                }
                 "-h" | "--help" => out.help = true,
                 other => return Err(format!("unknown argument {other:?}")),
             }
@@ -235,5 +246,7 @@ mod tests {
             Some(("in0".into(), 255))
         );
         assert!(parse("--open-plugin in0").is_err());
+        assert_eq!(parse("--view ctrl=1,overview=1").unwrap().view_spec.as_deref(), Some("ctrl=1,overview=1"));
+        assert!(parse("--view nope=1").is_err());
     }
 }

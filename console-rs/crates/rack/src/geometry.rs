@@ -43,6 +43,16 @@ pub mod main_strip {
 pub enum StripKind {
     Input,
     Aux,
+    /// The talkback mic strip (`Rack_TalkbackChannelStrip`, T = 7): shown in the bus section
+    /// after the auxes while SHOW CTRL ROOM is on.
+    Talkback,
+}
+
+impl StripKind {
+    /// Aux and talkback strips: the bus section's strips.
+    pub fn is_bus(self) -> bool {
+        matches!(self, StripKind::Aux | StripKind::Talkback)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,6 +61,8 @@ pub struct MainStripGeometry {
     pub solo_mute: Option<Rect>,
     pub pre_post: Option<Rect>,
     pub mono_mute: Option<Rect>,
+    /// Talkback strip: TALK, then TALKBACK TO MONITOR (`Rack_Talkback`, two 80 × 40 rows).
+    pub talkback: Option<(Rect, Rect)>,
     pub fader_meters: Rect,
     pub label: Rect,
 }
@@ -69,12 +81,15 @@ impl MainStripGeometry {
                 None,
             ),
             StripKind::Aux => (None, None, Some(Rect::new(0.0, y, w, 40.0)), Some(Rect::new(0.0, y + 40.0, w, 40.0))),
+            StripKind::Talkback => (None, None, None, None),
         };
+        let talkback = (kind == StripKind::Talkback).then(|| (Rect::new(8.0, y, 80.0, 40.0), Rect::new(8.0, y + 40.0, 80.0, 40.0)));
         Self {
             pans,
             solo_mute,
             pre_post,
             mono_mute,
+            talkback,
             fader_meters: Rect::new(0.0, 108.0 - k, w, f - 112.0 + k),
             label: Rect::new(0.0, h - main_strip::LABEL_H, w, main_strip::LABEL_H),
         }

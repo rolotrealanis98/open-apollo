@@ -87,6 +87,7 @@ fn main() -> ExitCode {
                 args.size,
                 scale,
                 args.open_plugin.as_ref(),
+                args.view_spec.as_deref(),
                 out,
             ),
             (None, Some(n)) => {
@@ -111,6 +112,7 @@ fn main() -> ExitCode {
         live_meters: args.live_meters,
         stats: args.stats,
         open_plugin: args.open_plugin,
+        view_spec: args.view_spec,
         settings,
     };
     match app::run(assets, opts) {

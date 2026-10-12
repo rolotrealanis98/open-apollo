@@ -178,8 +178,10 @@ impl EngineMixer {
 
     // MARK: lookups
 
+    /// A shown input strip, or the talkback mic strip.
     fn input(&self, id: &str) -> Option<&InputStrip> {
-        self.store.topology().inputs.iter().find(|s| s.base == id)
+        let t = self.store.topology();
+        t.inputs.iter().find(|s| s.base == id).or_else(|| t.talkback.strip.as_ref().filter(|s| s.base == id))
     }
 
     fn aux(&self, id: &str) -> Option<&AuxStrip> {
@@ -344,6 +346,19 @@ impl MixerModel for EngineMixer {
                 console_model: self.aux_console_model(a),
             })
             .collect()
+    }
+
+    fn talkback(&self) -> Option<StripInfo> {
+        let s = self.store.topology().talkback.strip.as_ref()?;
+        Some(StripInfo {
+            id: strip_id(&s.base),
+            title: "TALKBACK".into(),
+            kind: StripKind::Talkback,
+            stereo: false,
+            preamp_layout: None,
+            shows_sr_convert: false,
+            console_model: None,
+        })
     }
 
     fn main(&self, strip: &StripInfo) -> MainState {

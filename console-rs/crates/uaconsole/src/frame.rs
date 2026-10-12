@@ -19,7 +19,7 @@ pub struct Frame {
 
 /// The window layout `build_window_with` will produce for `view`, without building it.
 pub fn layout_for(model: &dyn MixerModel, view: &ViewState) -> WindowLayout {
-    WindowLayout::new(view, model.inputs().len(), model.auxes().len())
+    WindowLayout::for_model(model, view)
 }
 
 /// Stats text drawn at the top-left of the visible `area`, `px_per_pt` keeps it at a fixed

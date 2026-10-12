@@ -5,14 +5,14 @@ use std::path::PathBuf;
 
 use houston::Resources;
 use rack::input::{Action, Control, ControlId, Hit, Interaction, ScrollTarget};
-use rack::surfaces::{Modifier, MonitorPage, Popover, PopoverState, Section};
+use rack::surfaces::{Modifier, Popover, PopoverState, Section};
 use rack::{Assets, MixerModel, PreviewMixer, Ui, ViewState, build_window_with};
 
 const FIXTURE: &str = r#"{
     "file_format": "appearance",
     "views": {
         "Switch": {}, "Switch-Small": {}, "Switch-Small-Red": {}, "Switch-Red": {}, "Switch-Large": {},
-        "Switch-Tight-Kerning": {}, "Switch-Red-Tight-Kerning": {}, "Mini-Send-Mute": {}, "Mini-Send-Pre": {},
+        "Switch-Tight-Kerning": {}, "Switch-Red-Tight-Kerning": {}, "Mini-Send-Mute": {}, "Mini-Send-Pre": {}, "Send-Mute": {},
         "Console-Nav-Row-Button-Open": {}, "Console-Nav-Row-Button-Close": {}, "Console-Nav-Row-Button-Large": {},
         "Console-Nav-Row-Button-Small": {}, "Console-Nav-Row-Button-Fixed-Slots": {},
         "Switch-Power-Mode": {}, "Switch-Remove-Mode": {}, "Switch-Copy-Mode": {}, "Switch-Isolate-Mode": {},
@@ -77,8 +77,9 @@ fn every_surface_registers_its_controls() {
     assert!(find(&hits, "monitor", &Control::CueOutputs).is_some());
     // Console's monitor column has no DIM / TALK; they are on the CTRL ROOM page.
     assert!(find(&hits, "monitor", &Control::MonitorDim).is_none());
-    let (cr_hits, _) = build(&assets, &model, &ViewState { monitor_page: MonitorPage::ControlRoom, ..ViewState::default() });
+    let (cr_hits, _) = build(&assets, &model, &ViewState { show_ctrl_room: true, ..ViewState::default() });
     assert!(find(&cr_hits, "monitor", &Control::MonitorDim).is_some());
+    assert!(find(&cr_hits, "tb", &Control::Fader).is_some(), "CTRL ROOM adds the talkback strip");
     assert!(find(&hits, "in0", &Control::Name).is_some());
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Browser && s.max > 0.0));
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Cells && s.max > 0.0), "sends overflow the cells column");
@@ -102,9 +103,10 @@ fn section_toggle_collapses_the_input_row() {
     let slot = find(&hits, "in0", &Control::Insert(0)).unwrap().rect;
     // Collapsed = header only; with Sends open the stack still overflows and scrolls from the top.
     assert_eq!(slot.y, 72.0 + 5.0 + 22.0 + 26.0 + 6.0, "collapsed = header only");
-    // Input sends are reachable now (mini sends of the expanded Sends row).
+    // Input sends are reachable now: full send strips (route, pan, M, fader; 1.3.1 s45).
     assert!(find(&hits, "in0", &Control::SendMute(0)).is_some());
-    assert!(find(&hits, "in0", &Control::SendPre(0)).is_some());
+    assert!(find(&hits, "in0", &Control::SendPan(0)).is_some());
+    assert!(find(&hits, "in0", &Control::SendLevel(0)).is_some());
 }
 
 #[test]
@@ -133,9 +135,15 @@ fn monitor_page_and_settings_sheet() {
     let (hits, _) = build(&assets, &model, &view);
     let ctrl = find(&hits, "monitor", &Control::MonitorPage(rack::surfaces::MonitorPage::ControlRoom)).unwrap().clone();
     tap(&hits, &ctrl, &mut view, &mut model);
+    assert!(view.show_aux && view.show_ctrl_room, "SHOW AUX and CTRL ROOM are independent");
     let (hits, _) = build(&assets, &model, &view);
-    assert!(find(&hits, "monitor", &Control::HeadphoneMenu(1)).is_some());
-    assert!(find(&hits, "aux0", &Control::Fader).is_none(), "aux strips replaced by the control room");
+    assert!(find(&hits, "monitor", &Control::CrSource(0)).is_some());
+    assert!(find(&hits, "aux0", &Control::Fader).is_some(), "the aux strips stay");
+    assert!(find(&hits, "tb", &Control::Fader).is_some());
+    let aux = find(&hits, "monitor", &Control::MonitorPage(rack::surfaces::MonitorPage::Aux)).unwrap().clone();
+    tap(&hits, &aux, &mut view, &mut model);
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "aux0", &Control::Fader).is_none(), "SHOW AUX off hides the aux strips");
 
     view.dispatch(Action::Toggle(ControlId { strip: "nav".into(), control: Control::ShowSettings }), &mut model);
     let (hits, _) = build(&assets, &model, &view);
@@ -249,3 +257,4 @@ fn status_bar_loads_and_scene() {
     assert!(!t.iter().any(|s| s == "SCENE" || s == "(NONE)"));
     assert!(find(&hits, "status", &Control::StatusScene).is_none());
 }
+

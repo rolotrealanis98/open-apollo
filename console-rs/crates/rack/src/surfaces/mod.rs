@@ -6,6 +6,7 @@
 
 pub mod browser;
 pub mod cells;
+pub mod control_room;
 pub mod monitor;
 pub mod navigator;
 pub mod popover;

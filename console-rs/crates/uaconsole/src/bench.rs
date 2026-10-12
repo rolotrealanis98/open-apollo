@@ -29,6 +29,7 @@ pub fn render_png(
     size: Option<(f32, f32)>,
     scale: f32,
     open_plugin: Option<&(String, u8)>,
+    view_spec: Option<&str>,
     out: &Path,
 ) -> Result<(), String> {
     let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
@@ -40,6 +41,9 @@ pub fn render_png(
         window: size,
         ..ViewState::default()
     };
+    if let Some(spec) = view_spec {
+        view.apply_spec(spec)?;
+    }
     // Dev: render a session surface open (`UACONSOLE_RENDER_OPEN=session-menu|save-changes|save-as`).
     if let Ok(what) = std::env::var("UACONSOLE_RENDER_OPEN") {
         use rack::surfaces::SessionOp;

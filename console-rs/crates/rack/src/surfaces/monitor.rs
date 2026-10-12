@@ -22,7 +22,6 @@ use crate::ui::{ART_SCALE, Ui};
 
 pub const MONITOR_ID: &str = "monitor";
 /// Control-room panel fill.
-const PANEL: Rgba = Rgba::rgb8(72, 76, 78);
 /// `Rack_MonitorSection_UAD2::paint` fill (0x47, 0x4c, 0x4f); also the section separators.
 const SECTION_BG: Rgba = Rgba::rgb8(71, 76, 79);
 
@@ -184,9 +183,8 @@ pub fn draw_monitor_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState
         ui.background("Silk-Screen", Rect::new(4.0, st.silk, STRIP_W - 8.0, st.gain - 4.0 - st.silk));
 
         ui.font_text("CR-Label", "SHOW", Rect::new(4.0, st.show_label, 88.0, 16.0), Align::Center);
-        let aux = view.monitor_page == MonitorPage::Aux;
-        button(ui, "Switch", "AUX", aux, Rect::new(8.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::Aux), HitKind::Tap);
-        button(ui, "Switch-Tight-Kerning", "CTRL\nROOM", !aux, Rect::new(48.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::ControlRoom), HitKind::Tap);
+        button(ui, "Switch", "AUX", view.show_aux, Rect::new(8.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::Aux), HitKind::Tap);
+        button(ui, "Switch-Tight-Kerning", "CTRL\nROOM", view.show_ctrl_room, Rect::new(48.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::ControlRoom), HitKind::Tap);
         let cue_open = matches!(&view.popover, Some(p) if p.kind == Popover::CueOutputs);
         popover_button(ui, "Switch-Popover-Left", "CUE\nOUTPUTS", cue_open, Rect::new(8.0, st.cue_outputs, 80.0, 40.0), Control::CueOutputs);
         if let Some(y) = st.controller {
@@ -344,66 +342,6 @@ fn gain_and_session(ui: &mut Ui, m: &crate::model::MonitorState, opts: &crate::m
     }
     let focus = if opts.knob_focus { "Knob-Focus-Green-Old" } else { "Knob-Focus-Off-Old" };
     ui.background(focus, Rect::new(STRIP_W - 16.0, g + 6.0, 6.0, 6.0));
-}
-
-/// CTRL ROOM page: cue outputs, headphone sources, talkback and dim, in the aux area `r`.
-pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
-    ui.fill(r, PANEL);
-    let opts = model.monitor_options();
-    let cues = model.cue_outputs();
-    let hps = model.headphone_outputs();
-    let name = crate::draw::TextStyle { color: Rgba::rgb8(226, 226, 227), ..ui.style("fonts", "Channel-Strip-Section-Header") };
-    let small = Ui::plain_style("Helvetica", 9.0, false, Rgba::WHITE.with_alpha(0.5));
-    ui.at(r.x, r.y, |ui| {
-        let w = r.w;
-        ui.cell_header("CONTROL ROOM", false, true, Rect::new(0.0, 5.0, w, 22.0));
-        let mut y = 33.0;
-        ui.font_text("CR-Label", "CUE OUTPUTS", Rect::new(0.0, y, w, 14.0), Align::Center);
-        y += 16.0;
-        if cues.is_empty() {
-            ui.text("none", small.clone(), Rect::new(0.0, y, w, 20.0), Align::Center);
-            y += 24.0;
-        }
-        for (i, c) in cues.iter().enumerate() {
-            let k = i as u8;
-            ui.background("Send-Route-Background", Rect::new(4.0, y, w - 8.0, 64.0));
-            ui.fill(Rect::new(10.0, y + 22.0, w - 20.0, 2.0), crate::surfaces::cells::send_color(&c.name, 2 + i).with_alpha(0.85));
-            ui.text(&c.name, name.clone(), Rect::new(10.0, y + 3.0, 70.0, 18.0), Align::Left);
-            ui.text(&format!("→ {}", c.destination), small.clone(), Rect::new(80.0, y + 3.0, w - 90.0, 18.0), Align::Right);
-            let cue_id = |on: bool| if on { None } else { Some(mid(Control::CueSource(k))) };
-            ui.toggle("Switch-Small", Some("CUE"), c.source_cue, true, Rect::new(10.0, y + 32.0, 40.0, 19.0), cue_id(c.source_cue), None);
-            ui.toggle("Switch-Small", Some("MON"), !c.source_cue, true, Rect::new(52.0, y + 32.0, 40.0, 19.0), cue_id(!c.source_cue), None);
-            ui.toggle("Switch-Small", Some("MONO"), c.mono, true, Rect::new(w - 58.0, y + 32.0, 48.0, 19.0), Some(mid(Control::CueMono(k))), None);
-            y += 70.0;
-        }
-        y += 6.0;
-        ui.font_text("CR-Label", "HEADPHONES", Rect::new(0.0, y, w, 14.0), Align::Center);
-        y += 16.0;
-        if hps.is_empty() {
-            ui.text("none", small.clone(), Rect::new(0.0, y, w, 20.0), Align::Center);
-            y += 24.0;
-        }
-        for (i, h) in hps.iter().enumerate() {
-            ui.text(&h.name, name.clone(), Rect::new(10.0, y, 50.0, 26.0), Align::Left);
-            let combo = Rect::new(60.0, y + 1.0, w - 70.0, 24.0);
-            combo_box(ui, h.options.get(h.source).map(String::as_str).unwrap_or("—"), combo);
-            ui.hit(combo, mid(Control::HeadphoneMenu(i as u8)), HitKind::Tap);
-            y += 30.0;
-        }
-        y += 6.0;
-        if opts.talkback.is_some() || opts.dim.is_some() {
-            ui.font_text("CR-Label", "TALKBACK / DIM", Rect::new(0.0, y, w, 14.0), Align::Center);
-            y += 16.0;
-            if let Some(t) = opts.talkback {
-                ui.toggle("Switch-Large", Some("TALK"), t, true, Rect::new(8.0, y, 80.0, 40.0), Some(mid(Control::Talkback)), None);
-            }
-            if let Some(d) = opts.dim {
-                ui.toggle("Switch", Some("DIM"), d, true, Rect::new(96.0, y, 40.0, 40.0), Some(mid(Control::MonitorDim)), None);
-                ui.knob("Mini-Send-Level", opts.dim_level, Rect::new(138.0, y - 5.0, 41.0, 49.0), Some(mid(Control::DimLevel)), None);
-                ui.text(&opts.dim_readout, small, Rect::new(130.0, y + 42.0, 56.0, 12.0), Align::Center);
-            }
-        }
-    });
 }
 
 /// `Combo-Box`: stretched `display_sml` plate, value text and the dropdown arrow.

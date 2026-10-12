@@ -16,9 +16,44 @@ pub const HEADER_H: f32 = 22.0;
 pub const INPUT_CELL_H: f32 = 237.0;
 /// `Rack_UADRecord` row under the input inserts list (`(0, listH + 30, w, 42)`).
 pub const REC_ROW_H: f32 = 42.0;
-/// Send heights: medium (mini send) 75, compact (overview) 35; pitch +3 (0x1814c0400).
+/// Send heights: medium (mini send) 75, compact 35, full (`Rack_SendChannelStrip`) 322; pitch
+/// +3 (0x1814c0400).
 pub const SEND_H: f32 = 75.0;
 pub const SEND_H_COMPACT: f32 = 35.0;
+pub const SEND_H_FULL: f32 = 322.0;
+/// SENDS OVERVIEW: one birds-eye panel of mini send faders (`Rack_Overview_Sends`), 77 pt
+/// (user capture s47: 583.5…660.5).
+pub const OVERVIEW_H: f32 = 77.0;
+
+/// How a Sends cell draws its sends (Console 1.3.1, user captures s45/s46): SENDS OVERVIEW
+/// shows the birds-eye panel on every strip; otherwise input strips show full send strips
+/// (route, pan, mute, fader and meter) and bus strips mini sends (knob and M).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendStyle {
+    Overview,
+    Medium,
+    Full,
+}
+
+impl SendStyle {
+    pub fn of(overview: bool, bus: bool) -> Self {
+        if overview {
+            SendStyle::Overview
+        } else if bus {
+            SendStyle::Medium
+        } else {
+            SendStyle::Full
+        }
+    }
+    /// One send's height (stacked styles).
+    pub fn send_h(self) -> f32 {
+        match self {
+            SendStyle::Overview => OVERVIEW_H,
+            SendStyle::Medium => SEND_H,
+            SendStyle::Full => SEND_H_FULL,
+        }
+    }
+}
 /// Sends cell height when there are no sends (0x1814c01f0).
 pub const SENDS_DEFAULT_H: f32 = 87.0;
 
@@ -58,13 +93,14 @@ pub fn inserts_cell_h(slots: usize, size: InsertSize, rec_row: bool) -> f32 {
 }
 
 /// Sends cell: header 22 + `CalcNeededContentHeight` (0x1814c01f0: 4 + Σ(H + 3) − 3 + 5), or 87
-/// without sends. p2: an aux with CUE 1–4 rows is 22 + 4 + 3·78 + 75 + 5 = 340.
-pub fn sends_cell_h(sends: usize, overview: bool) -> f32 {
+/// without sends. p2: an aux with CUE 1–4 rows is 22 + 4 + 3·78 + 75 + 5 = 340. The overview is
+/// one panel whatever the send count.
+pub fn sends_cell_h(sends: usize, style: SendStyle) -> f32 {
     if sends == 0 {
         return SENDS_DEFAULT_H;
     }
-    let h = if overview { SEND_H_COMPACT } else { SEND_H };
-    HEADER_H + 4.0 + sends as f32 * (h + 3.0) - 3.0 + 5.0
+    let n = if style == SendStyle::Overview { 1 } else { sends };
+    HEADER_H + 4.0 + n as f32 * (style.send_h() + 3.0) - 3.0 + 5.0
 }
 
 fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
@@ -134,15 +170,22 @@ pub fn send_list(ui: &mut Ui, s: &StripInfo, sends: &[SendState], pre: &dyn Fn(u
         ui.text("NO SENDS", TextStyle { color: style.color.with_alpha(0.35), ..style }, Rect::new(0.0, y + 4.0, STRIP_W, 40.0), Align::Center);
         return;
     }
-    ui.fill(Rect::new(4.0, y, STRIP_W - 8.0, well_h), SENDS_WELL);
-    if view.sends_overview {
-        for (k, send) in sends.iter().enumerate() {
-            overview_send(ui, s, k, send, y + k as f32 * (SEND_H_COMPACT + 3.0));
-        }
-        return;
+    let style = SendStyle::of(view.sends_overview, s.kind.is_bus());
+    if style != SendStyle::Overview {
+        ui.fill(Rect::new(4.0, y, STRIP_W - 8.0, well_h), SENDS_WELL);
     }
-    for (k, send) in sends.iter().enumerate() {
-        mini_send(ui, s, k, send, pre(k), y + k as f32 * (SEND_H + 3.0));
+    match style {
+        SendStyle::Overview => overview_panel(ui, s, sends, y),
+        SendStyle::Medium => {
+            for (k, send) in sends.iter().enumerate() {
+                mini_send(ui, s, k, send, pre(k), y + k as f32 * (SEND_H + 3.0));
+            }
+        }
+        SendStyle::Full => {
+            for (k, send) in sends.iter().enumerate() {
+                full_send(ui, s, k, send, y + k as f32 * (SEND_H_FULL + 3.0));
+            }
+        }
     }
 }
 
@@ -200,19 +243,68 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
     }
 }
 
-/// SENDS OVERVIEW row (35 pt): name, level bar, M.
-fn overview_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, sy: f32) {
-    ui.background("Send-Route-Background", Rect::new(4.0, sy, 88.0, SEND_H_COMPACT - 2.0));
-    let label = ui.style("fonts", "Send-Label");
-    ui.text(&send.name, label.clone(), Rect::new(8.0, sy + 2.0, 50.0, 14.0), Align::Left);
-    let db = crate::scales::format_db(crate::scales::fader_db(send.level));
-    ui.text(&db, label, Rect::new(40.0, sy + 2.0, 46.0, 14.0), Align::Right);
-    let bar = Rect::new(9.0, sy + 20.0, 54.0, 6.0);
-    ui.fill(bar, Rgba::rgb8(18, 19, 20));
-    let c = send_color(&send.name, k);
-    ui.fill(Rect::new(bar.x, bar.y, bar.w * send.level.clamp(0.0, 1.0) as f32, bar.h), if send.muted { c.with_alpha(0.3) } else { c });
-    ui.hit(bar.inset(0.0, -6.0, 0.0, -6.0), ControlId { strip: s.id.clone(), control: Control::SendLevel(k as u8) }, crate::input::HitKind::Drag { value: send.level, span: 120.0, reset: Some(crate::scales::UNITY) });
-    ui.toggle("Mini-Send-Mute", Some("M"), send.muted, true, Rect::new(68.0, sy + 13.0, 18.0, 18.0), cid(s, Control::SendMute(k as u8)), None);
+/// Full send strip (`Rack_SendChannelStrip`, id `fullsend_<k>`, 322 pt): the route plate as on
+/// a mini send, then the strip body (`Secondary-Send-Background`) with the pan knob, M and a
+/// fader with its meters. Positions measured on user capture s45 (input sends, OVERVIEW off).
+fn full_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, sy: f32) {
+    let top = 35.0;
+    let plate = Rect::new(7.0, sy + 3.5, STRIP_W - 14.0, 29.0);
+    if let Some(img) = ui.skin("views", "Flex-Route-Focus").and_then(|k| k.image("image")) {
+        let img = img.to_string();
+        ui.image_stretched(&img, plate, 1.0);
+    }
+    ui.fill(Rect::new(plate.x + 3.5, plate.max_y() - 6.5, plate.w - 7.0, 3.0), route_bar(&send.name));
+    let mut label = ui.style("fonts", "Flex-Route-Value-Font");
+    if let Some(c) = ui.skin("fonts", "Flex-Route-Value-Font").and_then(|k| k.color("color-text-off")) {
+        label.color = c;
+    }
+    ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 6.0), Align::Center);
+    let body = Rect::new(4.0, sy + top, STRIP_W - 8.0, SEND_H_FULL - top);
+    ui.background("Secondary-Send-Background", body);
+    ui.knob(s.pan_skin(), 0.5, Rect::new(28.0, sy + top + 4.0, 40.0, 46.0), cid(s, Control::SendPan(k as u8)), Some(0.5));
+    ui.toggle("Send-Mute", Some("M"), send.muted, true, Rect::new(32.0, sy + top + 56.0, 32.0, 18.0), cid(s, Control::SendMute(k as u8)), None);
+    let fm = Rect::new(0.0, sy + top + 80.0, STRIP_W, SEND_H_FULL - top - 84.0);
+    let readout = crate::scales::format_db(crate::scales::fader_db(send.level));
+    ui.fader_and_meters(s.fader_skin(), false, send.level, Default::default(), &readout, fm, cid(s, Control::SendLevel(k as u8)));
+}
+
+/// SENDS OVERVIEW panel (`Rack_Overview_Sends`, one per strip): `Birds-Eye-Send-Background`
+/// `(6, y, w−12, 77)` holding one column per send, spread evenly (6-pt items, equal gaps;
+/// user capture s47: centres 20.5/38.5/56.5/74.5 for four sends, 32.3/62.3 for two): the
+/// `Signal-Present` LED (not on aux strips), the `Send-Overview-Fader`, a state square, the
+/// route colour bar and the short name (A1, A2, C1, C2) in `Send-Label`.
+fn overview_panel(ui: &mut Ui, s: &StripInfo, sends: &[SendState], y: f32) {
+    let panel = Rect::new(6.0, y, STRIP_W - 12.0, OVERVIEW_H);
+    ui.background("Birds-Eye-Send-Background", panel);
+    let n = sends.len() as f32;
+    let iw = 6.0;
+    let gap = (panel.w - n * iw) / (n + 1.0);
+    let aux = s.kind == crate::geometry::StripKind::Aux;
+    for (k, send) in sends.iter().enumerate() {
+        let cx = panel.x + gap * (k as f32 + 1.0) + iw * k as f32 + iw / 2.0;
+        if !aux {
+            ui.film("meters", "Signal-Present", "image-film", 0.0, Rect::new(cx - 2.5, y + 12.0, 5.0, 5.0));
+        }
+        ui.fader("Send-Overview-Fader", send.level, Rect::new(cx - 3.5, y + 18.5, 7.0, 28.0), cid(s, Control::SendLevel(k as u8)));
+        let cue = send.name.starts_with("CUE");
+        ui.fill(Rect::new(cx - 3.0, y + 47.5, 6.0, 6.0), if cue { Rgba::rgb8(44, 43, 41) } else { Rgba::rgb8(41, 35, 28) });
+        ui.fill(Rect::new(cx - 3.5, y + 56.0, 7.0, 1.5), route_bar(&send.name));
+        let mut style = ui.style("fonts", "Send-Label");
+        style.bold = true;
+        if cue {
+            style.color = style.color.with_alpha(style.color.a * 0.5);
+        }
+        ui.text(&short_send_name(&send.name), style, Rect::new(cx - 12.0, y + 59.0, 24.0, 12.0), Align::Center);
+    }
+}
+
+/// "AUX 1" → "A1", "CUE 2" → "C2".
+fn short_send_name(name: &str) -> String {
+    let mut parts = name.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (Some(a), Some(n)) => format!("{}{n}", &a[..1]),
+        _ => name.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -226,8 +318,9 @@ mod tests {
         assert_eq!(inserts_cell_h(4, InsertSize::Large, false), 242.0);
         assert_eq!(inserts_cell_h(4, InsertSize::Small, true), 22.0 + 92.0 + 11.0 + 55.0);
         // p2: the aux Sends cell (CUE 1–4 rows) runs 326 → 666.
-        assert_eq!(sends_cell_h(4, false), 340.0);
-        assert_eq!(sends_cell_h(0, false), SENDS_DEFAULT_H);
+        assert_eq!(sends_cell_h(4, SendStyle::Medium), 340.0);
+        assert_eq!(sends_cell_h(0, SendStyle::Medium), SENDS_DEFAULT_H);
+        assert_eq!(sends_cell_h(4, SendStyle::Overview), 22.0 + 4.0 + 77.0 + 5.0);
     }
 
     #[test]

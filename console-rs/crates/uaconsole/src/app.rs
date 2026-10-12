@@ -38,6 +38,8 @@ pub struct Options {
     /// Start with the stats overlay.
     pub stats: bool,
     pub open_plugin: Option<(String, u8)>,
+    /// `--view` spec applied to the mixer view at start.
+    pub view_spec: Option<String>,
     pub settings: Settings,
 }
 
@@ -108,10 +110,15 @@ impl App {
         }
         overlays.sync(&mut *model);
         let area = houston::Rect::new(0.0, 0.0, 1.0, 1.0);
-        let mixer = ViewState {
+        let mut mixer = ViewState {
             compact: opts.compact,
             ..ViewState::default()
         };
+        if let Some(spec) = &opts.view_spec {
+            if let Err(e) = mixer.apply_spec(spec) {
+                eprintln!("uaconsole: --view: {e}");
+            }
+        }
         let frame = build_frame(&assets, &*model, &mixer, &mut overlays, area, None);
         Self {
             assets,
