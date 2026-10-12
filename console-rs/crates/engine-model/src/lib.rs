@@ -33,6 +33,7 @@ mod presets;
 mod slots;
 mod surfaces;
 mod midi;
+mod correction;
 
 pub use slots::{SlotInfo, SlotSource};
 
@@ -75,6 +76,7 @@ pub struct EngineMixer {
     /// The engine's Sessions folder on this computer (Show In Finder), when the engine is local.
     local_sessions_dir: Option<String>,
     midi: midi::MidiState,
+    correction: correction::CorrectionState,
 }
 
 impl EngineMixer {
@@ -90,6 +92,7 @@ impl EngineMixer {
             prefs_path: None,
             local_sessions_dir: None,
             midi: midi::MidiState::default(),
+            correction: correction::CorrectionState::default(),
         }
     }
 
@@ -142,7 +145,8 @@ impl EngineMixer {
         let engine = self.store.drain();
         let helper = self.helper.as_mut().is_some_and(|h| h.drain());
         let midi = self.poll_midi();
-        engine || helper || midi
+        let correction = self.poll_correction();
+        engine || helper || midi || correction
     }
 
     /// Alias of [`EngineMixer::pump`].
@@ -153,7 +157,7 @@ impl EngineMixer {
     /// When [`EngineMixer::pump`] next has timed work (to schedule a wake-up).
     pub fn next_deadline(&self) -> Option<Instant> {
         let helper = self.helper.as_ref().and_then(|h| h.next_deadline());
-        self.store.next_deadline().into_iter().chain(helper).chain(self.midi_deadline()).min()
+        self.store.next_deadline().into_iter().chain(helper).chain(self.midi_deadline()).chain(self.correction_deadline()).min()
     }
 
     /// Moves on every meter push: redraw meters when it changes.
@@ -311,6 +315,9 @@ fn strip_id(base: &str) -> Arc<str> {
 }
 
 impl MixerModel for EngineMixer {
+    fn correction_image(&self,device:usize,slot:&str)->Option<&str> {
+        self.correction_svg(device,slot)
+    }
     fn pump(&mut self) -> bool {
         EngineMixer::pump(self)
     }

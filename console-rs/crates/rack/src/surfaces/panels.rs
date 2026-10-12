@@ -363,7 +363,16 @@ fn monitor_controller(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bou
     ui.fill(Rect::new(pbox.max_x() - 97.0, pbox.y + 8.0, 7.0, 5.0), Rgba::rgb8(24, 25, 27));
     ui.text("OPEN SoundID", Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.95)), Rect::new(pbox.max_x() - 84.0, pbox.y, 77.0, pbox.h), Align::Right);
     ui.hit(Rect::new(pbox.max_x() - 100.0, pbox.y, 100.0, pbox.h), sid(Control::SettingPress("post:ShowSoundIDReference:speaker".into())), HitKind::Tap);
-    correction_graph(ui, Rect::new(right.x, right.y + 113.0, right.w, 296.0), None);
+    let graph=Rect::new(right.x, right.y + 113.0, right.w, 296.0);
+    let image=model.correction_image(d as usize,"speaker").and_then(|svg|
+        ui.assets.images.correction_svg("speaker",svg,((graph.w*2.0).round() as u32,592)));
+    if let Some(key)=image {
+        ui.fill(graph,Rgba::BLACK);
+        ui.image(&key,graph,None,None,1.0);
+    } else {
+        correction_graph(ui,graph,None);
+        ui.text("NO PROFILE IMAGE AVAILABLE",Ui::plain_style("Helvetica",10.0,true,Rgba::WHITE.with_alpha(0.6)),graph,Align::Center);
+    }
     // SAFE HEADROOM, BYPASS; MAIN MONITOR CORRECTION ENABLE (70 × 30 at y 455).
     let by = y0 + 455.0;
     let head = rc.iter().find(|f| f.label == "HEADROOM").map(|f| f.value_text()).unwrap_or_default();
@@ -389,7 +398,8 @@ fn monitor_controller(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bou
 /// apart with 0 dB at y + 150.5 (the 6-dB ones run under the labels), the ±6/12/18 labels
 /// right-aligned at x + 516 just under their lines, the frequency labels 5.5 pt right of the
 /// 100 Hz / 1 kHz / 10 kHz lines. `curve` (dB at evenly spaced log frequencies, 20 Hz…20 kHz) is
-/// drawn green when the engine gives one (`GetCorrectionImage`); without it a flat 0 dB line.
+/// Local placeholder samples only; GetCorrectionImage supplies an SVG and is rendered
+/// separately above. Without a local curve this draws the reference grid/baseline.
 pub(crate) fn correction_graph(ui: &mut Ui, r: Rect, curve: Option<&[f32]>) {
     ui.fill(r, Rgba::BLACK);
     let x_of = |hz: f32| r.x + 120.0 + 161.5 * (hz / 100.0).log10();

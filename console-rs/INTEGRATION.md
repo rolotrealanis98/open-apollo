@@ -240,3 +240,38 @@ bus-assignment failure and detected no NHI or Apollo. No PCI remove, bridge
 reset, bus-number rewriting, network-adapter reset, firmware change or reboot
 was attempted. The bounded fader test aborted without Apollo writes;
 its exact bounded plan remains `/tmp/apollo-supervised-test-plan.md`.
+
+## P1 — monitor correction image
+
+Task branch `codex/p1-correction-image` decodes GetCorrectionImage as standard
+base64 UTF-8 SVG, with payload limits, empty-profile handling and retry backoff.
+Native provenance: Rack response 0x1811685c0, decoder 0x181c02a30, SVG wrapper
+0x18116b9e0; protocol/v131/MAP.md specifies the type argument and update counter.
+The primary device's speaker/headphone capability flags control retrieval;
+image-update counters and transport/device changes invalidate cached results.
+The root RPC has no device argument, so a primary image is never attributed to
+a different selected device. Every request uses the typed read RPC, without
+opening the writer gate.
+
+The main monitor graph renders the received SVG at 2x into an in-memory image.
+Three stable image keys replace prior data and GPU textures, including resized
+texture invalidation. Bounds and external image-reference refusal prevent an
+engine image from following file/network URLs. The native curve CSS variable families use one Rust theme green, matching
+the native wrapper's shared curveColor binding; tickmarks use a 10px fallback.
+Exact calibrated-profile
+pixel/color parity is not claimed. Missing/invalid images explicitly report
+NO PROFILE IMAGE AVAILABLE. No numeric response curve is invented.
+
+Headphone images are decoded/cached and exposed through the model, but the
+current headphone panel has no verified graph region; placing that graph is
+still open rather than inventing new window dimensions.
+
+Verification: synthetic standard-base64/UTF-8/image rejection tests, loopback
+initial load/cache/update-count refresh under a closed writer gate, and SVG
+pixel/alpha/bounds/cache replacement checks. The explicit headless GPU test
+`correction_refresh_reuses_gpu_slot_and_invalidates_resampling` passes with
+red/green/red output pixels and a single reused full/resampled texture slot.
+284 workspace tests pass (10 ignored, including the explicitly passed GPU
+test above); locked release build, p1 158/158, p2 195/195, windows_check and
+live-snapshot ledger/scorecard pass. No UA assets or native correction profiles were committed,
+and no real-engine correction RPC or hardware write was sent.

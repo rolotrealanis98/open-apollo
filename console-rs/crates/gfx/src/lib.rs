@@ -88,6 +88,7 @@ pub struct Renderer {
     images: Arc<ImageCache>,
     textures: HashMap<(Arc<str>, Option<Frame>), Option<u32>>,
     gpu_textures: Vec<GpuTexture>,
+    runtime_versions: HashMap<Arc<str>,u64>,
     resampled: HashMap<ResampleKey, (u32, u64)>,
     resampled_slots: Vec<Option<GpuTexture>>,
     frame_no: u64,
@@ -210,6 +211,7 @@ impl Renderer {
             images,
             textures: HashMap::new(),
             gpu_textures: Vec::new(),
+            runtime_versions: HashMap::new(),
             resampled: HashMap::new(),
             resampled_slots: Vec::new(),
             frame_no: 0,
@@ -222,6 +224,21 @@ impl Renderer {
     /// Texture for an image (or one filmstrip frame when the strip exceeds the GPU limit).
     fn texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, key: &Arc<str>, frame: Option<Frame>) -> Option<u32> {
         let whole = (key.clone(), None);
+        let version=self.images.runtime_revision(key);
+        if version!=0 && self.runtime_versions.get(key)!=Some(&version) {
+            self.runtime_versions.insert(key.clone(),version);
+            // Reuse the whole-image GPU slot, so profile changes do not leak textures.
+            if let Some(Some(id))=self.textures.get(&whole).copied() {
+                if let Some(img)=self.images.get(key) {
+                    let data=premultiply(&img.rgba);
+                    let tex=upload_rgba(device,queue,img.width,img.height,&data);
+                    let bind=bind_texture(device,&self.tex_layout,&tex,&self.sampler,self.text.atlas_view());
+                    self.gpu_textures[id as usize]=GpuTexture{bind,size:(img.width,img.height),frame_rows:None};
+                } else { self.textures.insert(whole.clone(),None); }
+            } else { self.textures.remove(&whole); }
+            let stale:Vec<_>=self.resampled.keys().filter(|k|k.key==*key).cloned().collect();
+            for rk in stale { if let Some((slot,_))=self.resampled.remove(&rk) { self.resampled_slots[slot as usize]=None; } }
+        }
         if let Some(Some(id)) = self.textures.get(&whole) {
             return Some(*id);
         }
@@ -609,6 +626,34 @@ pub struct Headless {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub adapter_info: wgpu::AdapterInfo,
+}
+
+#[cfg(test)]
+mod correction_gpu_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires a headless GPU; run explicitly when changing runtime image handling"]
+    fn correction_refresh_reuses_gpu_slot_and_invalidates_resampling() {
+        let gpu=Headless::new().expect("headless GPU");
+        let images=Arc::new(ImageCache::new(houston::Resources{root:"/nonexistent".into(),console_version:None}));
+        let mut renderer=Renderer::new(&gpu.device,&gpu.queue,wgpu::TextureFormat::Rgba8Unorm,images.clone());
+        let dir=std::env::temp_dir().join(format!("apollo-correction-gpu-{}",std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (i,color) in ["red","lime","red"].iter().enumerate() {
+            let svg=format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="{color}"/></svg>"#);
+            let key=images.correction_svg("speaker",&svg,(8,8)).unwrap();
+            let mut draws=DrawList::default();
+            draws.push(Draw::Image{key:key.into(),frame:None,dst:Rect::new(0.0,0.0,4.0,4.0),slice:None,tint:Rgba::WHITE});
+            let path=dir.join(format!("frame-{i}.png"));
+            gpu.render_png(&mut renderer,&draws,(4.0,4.0),1.0,&path).unwrap();
+            let image=houston::ImageData::decode_png(&path).unwrap();
+            let p=&image.rgba[(2*4+2)*4..][..4];
+            assert_eq!(p,if *color=="red" {&[255,0,0,255]} else {&[0,255,0,255]});
+            assert_eq!(renderer.gpu_textures.len(),1);
+            assert_eq!(renderer.resampled.len(),1);
+            assert_eq!(renderer.resampled_slots.len(),1);
+        }
+    }
 }
 
 impl Headless {
