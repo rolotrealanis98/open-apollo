@@ -35,13 +35,27 @@ impl Ui<'_> {
         self.image(path, r.centered(w, h), None, Some(Frame { height: fh, index }), 1.0);
     }
 
-    /// `Rack_Knob`: optional background image plus the filmstrip; vertical drag.
+    /// Filmstrip frame for `value` drawn at `size` (pt), centred in `r`.
+    pub fn film_sized(&mut self, section: &str, key: &str, prop: &str, value: f64, r: Rect, size: (f32, f32)) {
+        let Some(skin) = self.skin(section, key) else { return };
+        let (Some(path), Some(fh)) = (skin.image(prop), skin.frame_height()) else { return };
+        let Some(img) = self.assets.images.get(path) else { return };
+        let count = (img.height / fh).max(1);
+        let index = ((value.clamp(0.0, 1.0) * (count - 1) as f64).round()) as u32;
+        self.image(path, snap_centered(r, size.0, size.1), None, Some(Frame { height: fh, index }), 1.0);
+    }
+
+    /// `Rack_Knob`: optional background image plus the filmstrip, drawn at the skin's
+    /// width × height (e.g. `Small-Green-Input` scales its 41×46 art to 36×40); vertical drag.
     pub fn knob(&mut self, key: &str, value: f64, r: Rect, id: Option<ControlId>, reset: Option<f64>) {
         if let Some(bg) = self.skin("knobs", key).and_then(|s| s.image("image-background")) {
             let bg = bg.to_string();
             self.image_centered(&bg, r, 1.0);
         }
-        self.film("knobs", key, "image-film", value, r);
+        match self.skin("knobs", key).and_then(|s| s.size()) {
+            Some(size) => self.film_sized("knobs", key, "image-film", value, r, size),
+            None => self.film("knobs", key, "image-film", value, r),
+        }
         if let Some(id) = id {
             let sens = self.skin("knobs", key).and_then(|s| s.number("sensitivity")).unwrap_or(1.0) as f32;
             self.hit(r, id, HitKind::Drag { value, span: 250.0 / sens.max(0.1), reset });
@@ -68,8 +82,8 @@ impl Ui<'_> {
                 if let Some((w, h)) = self.image_size(ov) {
                     self.image(ov, Rect::new(r.x + 6.0, r.max_y() - 6.0 - h, w, h), None, None, opacity);
                 }
-            } else {
-                self.image_centered(ov, r, opacity);
+            } else if let Some((w, h)) = self.image_size(ov) {
+                self.image(ov, snap_centered(r, w, h), None, None, opacity);
             }
         }
         if let Some(label) = label {
@@ -102,7 +116,8 @@ impl Ui<'_> {
         }
         if let Some(cap) = skin.and_then(|s| s.image("image-cap")) {
             let cap = cap.to_string();
-            let cy = r.y + m.cap_center_y(value, r.h);
+            // Rack_Fader positions the cap on whole points (p1: 0 dB−0.01 → top 736, not 736.7).
+            let cy = r.y + m.cap_center_y(value, r.h).floor();
             self.image(&cap, Rect::new(r.x + (r.w - m.cap.0) / 2.0, cy - m.cap.1 / 2.0, m.cap.0, m.cap.1), None, None, 1.0);
         }
         if let Some(id) = id {
@@ -181,18 +196,17 @@ impl Ui<'_> {
         });
     }
 
-    /// Channel name plate. Inputs: flat white fill (Console 1.3.1); auxes: the dark plate image.
+    /// Channel name text (`views:Channel-Input-Name` / `Channel-Aux-Name`): bounds-text inset
+    /// by inset-text, 3 pt above the 40-pt art's frame. The plate itself is painted by the caller.
     pub fn name_plate(&mut self, key: &str, name: &str, r: Rect) {
         let Some(skin) = self.skin("views", key) else { return };
-        if key == "Channel-Input-Name" {
-            self.fill(Rect::new(r.x, r.y, r.w, 27.0), Rgba::WHITE);
-        } else if let Some(img) = skin.image("image-off") {
-            let size = skin.size().unwrap_or((97.0, 40.0));
-            self.image(img, Rect::new(r.x, r.y, size.0, size.1), None, None, 1.0);
-        }
         let text = skin.rect("bounds-text").unwrap_or(Rect::new(0.0, 3.0, 97.0, 36.0));
         let inset = skin.insets("inset-text").unwrap_or_default();
-        let style = self.style("views", key);
+        let mut style = self.style("views", key);
+        if key == "Channel-Aux-Name" {
+            // 1.3.1 draws the aux name brighter than the skin's 0.4 (measured 0.5 on the flat plate).
+            style.color = Rgba::WHITE.with_alpha(0.5);
+        }
         let rect = Rect::new(r.x + text.x + inset.l, r.y + text.y + inset.t - 3.0, text.w - inset.l - inset.r, text.h - inset.t - inset.b);
         self.text(name, style, rect, Align::Center);
     }
@@ -249,4 +263,10 @@ impl Ui<'_> {
             self.text(title, style, r, Align::Center);
         }
     }
+}
+
+/// `w × h` centred in `r`, snapped down to the 2× pixel grid (JUCE's integer placement at 2×).
+pub(crate) fn snap_centered(r: Rect, w: f32, h: f32) -> Rect {
+    let snap = |v: f32| (v * 2.0).floor() / 2.0;
+    Rect::new(snap(r.x + (r.w - w) / 2.0), snap(r.y + (r.h - h) / 2.0), w, h)
 }

@@ -248,3 +248,220 @@ fn rows_open(rows: &CellRows, sec: Section) -> bool {
     }
 }
 
+
+/// Where a strip sits in its group (inputs or auxes): the group's outer edges get a black
+/// border and an inner shade, and aux strips after the first get a separator in the fader area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupPos {
+    pub index: usize,
+    pub last: bool,
+}
+
+/// Channel colour band (`Rack_Swatch`, `(1, 0, w−2, 4)`). Console 1.3.1 defaults, measured in
+/// `refpairs/p1`: inputs blue, AUX 1 amber, AUX 2 blue (`GetChannelColor` palette is [unk]).
+pub fn swatch_color(s: &StripInfo, index: usize) -> Rgba {
+    match s.kind {
+        StripKind::Input => Rgba::rgb8(40, 87, 126),
+        StripKind::Aux => [Rgba::rgb8(186, 129, 43), Rgba::rgb8(46, 107, 191)][index % 2],
+    }
+}
+
+/// Black behind the swatch row and under the name plate (the column shows through).
+const COLUMN_BG: Rgba = Rgba::BLACK;
+/// `colors:uad2_channel_separator`, between input name plates.
+const PLATE_SEPARATOR: Rgba = Rgba::rgb8(72, 72, 72);
+/// Aux fader-area background and its 2-pt top line / separator (measured).
+const AUX_MAIN_BG: Rgba = Rgba::rgb8(72, 76, 79);
+/// Aux name plate (Console 1.3.1 draws a flat plate, not `show_fader_aux_label_bg.png`).
+const AUX_PLATE: Rgba = Rgba::rgb8(50, 53, 55);
+
+fn strip_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripInfo, rows: &CellRows, off: f32, pos: GroupPos, r: Rect) {
+    let main_y = r.h - rows.main;
+    let cells_h = main_y - 5.0;
+    // Rack lays strips out on whole points: 488 and 1614 in the 1920-pt window.
+    ui.at(r.x.ceil(), r.y, |ui| {
+        ui.fill(Rect::new(0.0, 0.0, STRIP_W, 5.0), COLUMN_BG);
+        ui.fill(Rect::new(1.0, 0.0, STRIP_W - 2.0, 4.0), swatch_color(s, pos.index));
+        ui.clip(Some(Rect::new(0.0, 5.0, STRIP_W, cells_h)));
+        ui.at(0.0, 5.0 - off, |ui| strip_cells(ui, model, view, s, rows, cells_h + off));
+        ui.clip(None);
+        group_edges(ui, pos, Rect::new(0.0, 5.0, STRIP_W, cells_h));
+        ui.at(0.0, main_y, |ui| {
+            if rows.main > MAIN_HIDDEN_H {
+                main_strip(ui, model, s, pos);
+            } else {
+                ui.fill(Rect::new(0.0, 5.0, STRIP_W, main_strip::LABEL_H), if s.kind == StripKind::Aux { AUX_MAIN_BG } else { COLUMN_BG });
+                name_plate(ui, model, s, Rect::new(0.0, 5.0, STRIP_W, main_strip::LABEL_H));
+            }
+        });
+    });
+}
+
+/// Outer edges of a strip group over the cells: a 1-pt black line and a soft inner shade.
+fn group_edges(ui: &mut Ui, pos: GroupPos, r: Rect) {
+    const LIGHT: [f32; 4] = [0.055, 0.044, 0.027, 0.005];
+    const DARK: [f32; 3] = [0.07, 0.055, 0.028];
+    if pos.index == 0 {
+        ui.fill(Rect::new(r.x, r.y, 1.0, r.h), Rgba::BLACK);
+        for (i, a) in LIGHT.iter().enumerate() {
+            ui.fill(Rect::new(r.x + 1.0 + i as f32 * 0.5, r.y, 0.5, r.h), Rgba::WHITE.with_alpha(*a));
+        }
+    }
+    if pos.last {
+        let x = r.max_x() - 1.0;
+        ui.fill(Rect::new(x, r.y, 1.0, r.h), Rgba::BLACK);
+        for (i, a) in DARK.iter().enumerate() {
+            ui.fill(Rect::new(x - 0.5 - i as f32 * 0.5, r.y, 0.5, r.h), Rgba::BLACK.with_alpha(*a));
+        }
+    }
+}
+
+/// `channel_strip_separator_line` at x = 0 and w−1 of a cell, from y+27 to the bottom − 5
+/// (`Rack_ChannelStripCells::paint` 0x181402830). Input strips only; the aux section has none.
+fn cell_separators(ui: &mut Ui, y: f32, h: f32) {
+    if h > 32.0 {
+        ui.fill(Rect::new(0.0, y + 27.0, 1.0, h - 32.0), SEPARATOR);
+        ui.fill(Rect::new(STRIP_W - 1.0, y + 27.0, 1.0, h - 32.0), SEPARATOR);
+    }
+}
+
+/// Input: input cell → inserts → sends; aux: inserts → sends. Collapsed rows are headers only.
+/// `visible_h`: cells-local bottom of the visible column (the sends well runs down to it).
+fn strip_cells(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, s: &StripInfo, rows: &CellRows, visible_h: f32) {
+    let bus = s.kind == StripKind::Aux;
+    let mut y = 0.0;
+    if let Some(h) = rows.input {
+        if h > HEADER_H {
+            cell_separators(ui, y, h);
+        }
+        ui.cell_header(&s.title, false, false, Rect::new(0.0, 0.0, STRIP_W, HEADER_H));
+        if h > HEADER_H {
+            input_cell(ui, model, s);
+        }
+        y += h;
+    }
+    if rows.inserts > HEADER_H && !bus {
+        cell_separators(ui, y, rows.inserts);
+    }
+    ui.cell_header("INSERTS", true, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
+    if rows.inserts > HEADER_H {
+        let slots = model.inserts(s);
+        insert_list(ui, s, &slots, rows.slots, view.insert_size, y + 26.0);
+        if !bus {
+            rec_mon(ui, model.records_pre_effects(s), s, y + 26.0 + cells::inserts_list_h(rows.slots, view.insert_size) + 4.0);
+        }
+    }
+    y += rows.inserts;
+    if rows.sends > HEADER_H && !bus {
+        cell_separators(ui, y, rows.sends);
+    }
+    ui.cell_header("SENDS", false, bus, Rect::new(0.0, y, STRIP_W, HEADER_H));
+    if rows.sends > HEADER_H {
+        let sends = if bus { model.sends(s) } else { model.input_sends(s) };
+        let well_h = (visible_h - y - 26.0).max(rows.sends - 31.0);
+        send_list(ui, s, &sends, &|k| model.send_pre(s, k), view, y + 26.0, well_h);
+    }
+}
+
+/// Input cell (`Rack_ChannelStripCell_Input::resized` 0x1814b90a0): Unison slot from y = 25,
+/// then the preamp overview at 101 (measured in p1; `Resized_InputOrInstrument` 0x1814aeb80).
+fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo) {
+    if let Some(layout) = &s.preamp_layout {
+        unison(ui, &model.unison(s), s, Rect::new(0.0, 25.0, STRIP_W, 77.0));
+        if let Some(state) = model.preamp(s) {
+            draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0, STRIP_W, 129.0));
+        }
+    } else if s.shows_sr_convert {
+        ui.background("Secondary-Display-Background", Rect::new(8.0, 174.0, 80.0, 48.0));
+        ui.font_text("Send-Label", "SR CONVERT", Rect::new(8.0, 178.0, 80.0, 14.0), Align::Center);
+        ui.toggle("Switch-Small", Some("OFF"), false, true, Rect::new(14.0, 196.0, 32.0, 19.0), None, None);
+        ui.toggle("Switch-Small", Some("ON"), true, true, Rect::new(50.0, 196.0, 32.0, 19.0), None, None);
+    }
+}
+
+/// `Rack_Inserts_Unison`: a one-slot `Rack_Inserts` with its header row. Background
+/// `(4, 0, w−8, h)`, "UNISON" label `(0, 5, w, 16)` (Silk-Screen), slot `(0, 5+16+1, w, 48)`;
+/// height = RequiredHeight(LARGE, 1, header) = 50 + 11 + 16 (0x18143b330).
+fn unison(ui: &mut Ui, state: &crate::model::InsertState, s: &StripInfo, r: Rect) {
+    ui.background("Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, r.h));
+    ui.font_text("Silk-Screen", "UNISON", Rect::new(r.x, r.y + 5.0, r.w, 16.0), Align::Center);
+    ui.insert_slot(state, Rect::new(r.x, r.y + 22.0, r.w, 48.0), cid(s, Control::Insert(255)));
+}
+
+/// `Rack_UADRecord` (resized 0x18149a990) at `(0, y, w, 42)`: the REC/MON LED art
+/// (`views:UAD-Record-LEDs`, off = MON lit, on = REC lit) at `(6, −2, 43, h)` and the INS
+/// switch (`views:Switch`) at `(w/2, −2, 40, h)`.
+fn rec_mon(ui: &mut Ui, monitor_only: bool, s: &StripInfo, y: f32) {
+    let h = 42.0;
+    ui.toggle("UAD-Record-LEDs", None, !monitor_only, true, Rect::new(6.0, y - 2.0, 43.0, h), cid(s, Control::RecMon), None);
+    ui.toggle("Switch", Some("INS"), false, true, Rect::new(STRIP_W / 2.0, y - 2.0, 40.0, h), None, None);
+}
+
+fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos) {
+    let g = MainStripGeometry::new(s.kind);
+    let st = model.main(s);
+    let meters = model.meters(s);
+    match s.kind {
+        StripKind::Input => {
+            ui.background("Channel-Bottom", Rect::new(0.0, 0.0, STRIP_W, g.label.y));
+            ui.fill(Rect::new(0.0, g.label.y, STRIP_W, g.label.h), COLUMN_BG);
+        }
+        StripKind::Aux => {
+            ui.fill(Rect::new(0.0, 0.0, STRIP_W, main_strip::HEIGHT), AUX_MAIN_BG);
+            ui.fill(Rect::new(0.0, 0.0, STRIP_W, 2.0), SEPARATOR);
+            if pos.index > 0 {
+                ui.fill(Rect::new(0.0, 5.0, 2.0, g.label.y - 10.0), SEPARATOR);
+            }
+        }
+    }
+    if let Some(p) = g.pans {
+        let half = (p.w / 2.0).floor();
+        if s.stereo {
+            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x, p.y, half, p.h), cid(s, Control::PanL), Some(0.0));
+            ui.knob("Pan-Black", st.pan_r, Rect::new(p.x + half, p.y, half, p.h), cid(s, Control::PanR), Some(1.0));
+        } else {
+            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x + (half / 2.0).floor(), p.y, half, p.h), cid(s, Control::PanL), Some(0.5));
+        }
+    }
+    if let Some(r) = g.solo_mute {
+        let (bw, bh) = ui.skin("views", "Switch-Small").and_then(|k| k.size()).unwrap_or((32.0, 19.0));
+        let y = r.y + ((r.h - bh) / 2.0).floor();
+        let mid = (r.w / 2.0).floor();
+        ui.toggle("Switch-Small", Some("S"), st.solo, true, Rect::new(mid - bw - 3.0, y, bw, bh), cid(s, Control::Solo), None);
+        ui.toggle("Switch-Small-Red", Some("M"), st.mute, true, Rect::new(mid + 3.0, y, bw, bh), cid(s, Control::Mute), None);
+    }
+    if let Some(r) = g.pre_post {
+        ui.toggle("Switch", Some("PRE"), st.pre, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::PrePost), None);
+        ui.toggle("Switch", Some("POST"), !st.pre, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::PrePost), None);
+    }
+    if let Some(r) = g.mono_mute {
+        ui.toggle("Switch", Some("MONO"), st.mono, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::Mono), None);
+        ui.toggle("Switch-Red", Some("MUTE"), st.mute, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::Mute), None);
+    }
+    let fader_key = if s.kind == StripKind::Aux { "Main-Bus-Fader" } else { "Main-Input-Fader" };
+    ui.fader_and_meters(fader_key, s.stereo, st.fader, meters, &st.readout, g.fader_meters, cid(s, Control::Fader));
+    name_plate(ui, model, s, g.label);
+}
+
+/// `Rack_ChannelStripLabel` (0x18140b7c0): the name button fills `(0, 0, w, 28)`. Console 1.3.1
+/// paints inputs as a flat white plate 27 tall with a `uad2_channel_separator` line at x = −1,
+/// auxes as a flat dark plate inset 0.5; "[ ISOLATE ]" (`Isolated-Static-Text`) under the name.
+fn name_plate(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, r: Rect) {
+    let st = model.main(s);
+    let aux = s.kind == StripKind::Aux;
+    if aux {
+        ui.fill(Rect::new(r.x + 0.5, r.y, r.w - 1.0, r.h - 1.0), AUX_PLATE);
+    } else {
+        ui.fill(Rect::new(r.x, r.y, r.w, r.h - 1.0), Rgba::WHITE);
+        ui.fill(Rect::new(r.x - 1.0, r.y + 2.0, 1.0, r.h - 4.0), PLATE_SEPARATOR);
+    }
+    ui.name_plate(if aux { "Channel-Aux-Name" } else { "Channel-Input-Name" }, &st.name, r);
+    if model.isolated(s) {
+        let mut style = ui.style("views", "Isolated-Static-Text");
+        if aux {
+            style.color = Rgba::WHITE.with_alpha(0.5);
+        }
+        ui.text("[ ISOLATE ]", style, Rect::new(r.x, r.y + 17.0, r.w, 9.0), Align::Center);
+    }
+    ui.hit(r, ControlId { strip: s.id.clone(), control: Control::Name }, HitKind::Tap);
+}
