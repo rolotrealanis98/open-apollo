@@ -343,12 +343,7 @@ impl EngineMixer {
                 }
             }
             Control::ClearSolos => {
-                let paths: Vec<String> = self.store.topology().inputs.iter().map(InputStrip::solo).collect();
-                for p in paths {
-                    if self.bool_at(&p) == Some(true) {
-                        self.store.commit(&p, false);
-                    }
-                }
+                self.store.post("/ClearSolos", Some(&ua_engine::Json::Object(Default::default())));
             }
             Control::SampleRate(i) | Control::BufferSize(i) => {
                 let path = if matches!(id.control, Control::SampleRate(_)) { "/SampleRate" } else { "/BufferSize" };
@@ -402,7 +397,8 @@ impl EngineMixer {
                 self.store.set_writes_enabled(!on);
             }
             // No engine path known (clear clips is a helper command; set-default is a preset op).
-            Control::ClearClips | Control::InsertSetDefault(_) => {}
+            Control::ClearClips => self.store.post("/ClearClips", Some(&ua_engine::Json::Object(Default::default()))),
+            Control::InsertSetDefault(_) => {}
             _ => return false,
         }
         true

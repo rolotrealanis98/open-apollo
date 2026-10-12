@@ -29,7 +29,7 @@ fn out_dir() -> std::path::PathBuf {
 }
 
 /// Console patterns we do not subscribe today (ratchet: lower it when the plan grows).
-const MAX_MISSING: usize = 300;
+const MAX_MISSING: usize = 0;
 
 #[test]
 fn console_subscriptions_vs_ours() {

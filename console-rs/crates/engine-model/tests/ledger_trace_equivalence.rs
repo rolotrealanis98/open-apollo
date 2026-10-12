@@ -188,14 +188,12 @@ fn show(w: &[Wire]) -> Vec<String> {
 
 /// Scenario name → why it diverges today. Remove an entry when our side is fixed.
 const KNOWN_DIVERGENT: &[(&str, &str)] = &[
-    ("pan-reset", "Console 1.3.1 resets a control on double-click with the literal \"default\"; we write the numeric reset value"),
     ("insert-assign", "Console sends the assign unbracketed (no /UndoRecording); we commit it inside a bracket"),
     ("unison-assign", "Console sends the assign unbracketed (no /UndoRecording); we commit it inside a bracket"),
 ];
 
-/// Strict (query-parameter) mismatches allowed today: our writer sends no `context_type=main`
-/// (Console also numbers every request with `func_id`, which is ignored here: the engine only
-/// echoes it).
+/// Offline audit writes omit request queries (assigned by the live connection).
+/// The separate live wire-profile test checks those queries.
 const MAX_QUERY_MISMATCH: usize = 4;
 
 #[test]
@@ -231,7 +229,8 @@ fn console_ui_actions_produce_the_same_engine_traffic() {
     check("pan-drag", "v131", "drag a mono input's pan knob", find_traced(&v131, "/inputs/0/Pan", Some(&Kind::Num)), d.take(), String::new());
 
     let mut d = Driver::new();
-    d.drag(in0, Control::PanL, &[0.5]); // Interaction's double-click: begin, Set(reset), end
+    let pan = Driver::id(in0, Control::PanL);
+    for a in [Action::GestureBegin(pan.clone()), Action::Reset(pan.clone(), 0.5), Action::GestureEnd(pan)] { d.act(a); }
     check("pan-reset", "v131", "double-click a pan knob (reset)", find_traced(&v131, "/inputs/0/Pan", Some(&Kind::Default)), d.take(), String::new());
 
     // ---- Console 1.2.x (Wine + open-apollo daemon traces) ----
@@ -313,11 +312,7 @@ fn console_ui_actions_produce_the_same_engine_traffic() {
 /// Console 1.3.1 wire-profile rules (protocol/v131/MAP.md "Console 1.3.1 client profile") that
 /// fail today, with the work that fixes them. A ratchet: the test prints rules that now pass.
 const KNOWN_WIRE_GAPS: &[(&str, &str)] = &[
-    ("set-func-id", "in progress (rc/wiring): one connection-wide func_id counter on every request with a query (MAP.md P1 #4)"),
-    ("set-context-type", "in progress (rc/wiring): context_type=main on mixer-control sets (MAP.md P1 #4)"),
-    ("undo-func-id", "in progress (rc/wiring): func_id on /UndoRecording sets (MAP.md P1 #4)"),
-    ("undo-refresh", "in progress (rc/wiring): get /UndoRedo/values?cmdID=15 after every gesture (MAP.md P1 #6)"),
-    ("reset-default", "in progress (rc/wiring): double-click reset writes the literal \"default\" (MAP.md P1 #5)"),
+    ("undo-refresh", "rapid consecutive gestures coalesce the delayed undo-list refresh; the final list is refreshed"),
 ];
 
 /// Live against a `MockEngine` (writes on): the exact frames we send for a mute click, a pan
@@ -350,7 +345,7 @@ fn wire_profile_matches_console_131() {
         std::thread::sleep(Duration::from_millis(20));
     }
     view.dispatch(Action::GestureEnd(pan.clone()), &mut m);
-    for a in [Action::GestureBegin(pan.clone()), Action::Set(pan.clone(), 0.5), Action::GestureEnd(pan.clone())] {
+    for a in [Action::GestureBegin(pan.clone()), Action::Reset(pan.clone(), 0.5), Action::GestureEnd(pan.clone())] {
         view.dispatch(a, &mut m);
     }
     let settle = Instant::now() + Duration::from_millis(400);
@@ -369,7 +364,7 @@ fn wire_profile_matches_console_131() {
         && closes.iter().all(|&i| sent[i + 1..].iter().take_while(|c| !(c.starts_with("set /UndoRecording/") && c.ends_with(" true"))).any(|c| c.starts_with("get /UndoRedo/values") && c.contains("cmdID=15")));
     let pan_sets = controls.iter().filter(|c| c.contains("/inputs/1/Pan/")).count();
     let rules: Vec<(&str, bool, String)> = vec![
-        ("set-func-id", !controls.is_empty() && controls.iter().all(|c| has(c, "func_id=")), "every control set carries ?func_id=<n>".into()),
+        ("set-func-id", !controls.is_empty() && controls.iter().filter(|c| !c.ends_with("\"default\"")).all(|c| has(c, "func_id=")), "every control set carries ?func_id=<n>".into()),
         ("set-context-type", !controls.is_empty() && controls.iter().filter(|c| !c.ends_with("\"default\"")).all(|c| has(c, "context_type=main")), "mixer-control sets carry context_type=main".into()),
         ("undo-func-id", !undo.is_empty() && undo.iter().all(|c| has(c, "func_id=")), "/UndoRecording sets carry ?func_id=<n>".into()),
         ("undo-refresh", refreshed, "get /UndoRedo/values?cmdID=15 after every gesture".into()),

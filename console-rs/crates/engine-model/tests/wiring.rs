@@ -139,6 +139,26 @@ fn meter_clear_posts_clear_clips() {
 }
 
 #[test]
+fn global_clear_and_settings_posts_use_the_writer_gate() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    for c in [Control::ClearSolos, Control::ClearClips] {
+        m.apply(&Action::Tap(global(c)));
+    }
+    m.apply_setting("post:Identify:/devices/0", &rack::settings::SettingOp::Press);
+    assert_eq!(writes_after(&server, 3), ["post /ClearSolos {}", "post /ClearClips {}", r#"post /Identify {"path":"/devices/0"}"#]);
+    m.store_mut().set_writes_enabled(false);
+    let before = m.store().writer().suppressed_count();
+    for c in [Control::ClearSolos, Control::ClearClips] {
+        m.apply(&Action::Tap(global(c)));
+    }
+    m.apply_setting("post:Identify:/devices/0", &rack::settings::SettingOp::Press);
+    assert_eq!(m.store().writer().suppressed_count(), before + 3);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(server.write_commands().len(), 3);
+}
+
+#[test]
 fn tap_tempo_sets_the_tempo_from_four_taps() {
     let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
     let mut m = live(&server);

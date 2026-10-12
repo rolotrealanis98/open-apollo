@@ -306,15 +306,6 @@ const KNOWN_NOOPS: &[&str] = &[
     "settings SettingPress(\"launch:dante_discovery\")",
     "settings SettingPress(\"launch:dante_patents\")",
     "settings SettingPress(\"launch:io_cascade\")",
-    // Settings `post:` buttons: `write_settings` sends them on the connection directly, outside
-    // the writer gate, and drops them silently while read-only — so offline they do nothing
-    // visible. Gap: route them through `Store::post` (counted, gated, dev-panel visible).
-    "settings SettingPress(\"post:Identify:/devices/#\")",
-    "settings SettingPress(\"post:RemoveDevice:/devices/#\")",
-    "settings SettingPress(\"post:Import:IOMapPreset\")",
-    "settings SettingPress(\"post:SaveIOMapPreset:Custom\")",
-    "settings SettingPress(\"post:ShowSoundIDReference:headphone\")",
-    "settings SettingPress(\"post:ShowSoundIDReference:speaker\")",
     // Insert menu Paste is enabled with an empty clipboard; Console greys it out (s01). Gap.
     "menu Insert(aux) Paste",
     "menu Insert(input) Paste",
@@ -334,8 +325,6 @@ const KNOWN_NOOPS: &[&str] = &[
     "menu SessionRow(session) Load 'Session'",
     // Side section S / OL: S clears soloed inputs one by one (nothing to do with no solo; Console
     // posts `/ClearSolos {}`), OL has no engine command (Console: `post /ClearClips {}`). Gap.
-    "global ClearClips",
-    "global ClearSolos",
     // Benign: INSERT EFFECTS UAD MON when every input already records post-inserts; a session
     // navigator slot for a strip that is already in view.
     "nav AllRecordPreEffects(true)",

@@ -11,7 +11,10 @@ use rack::MixerModel;
 use rack::settings::{self, SettingOp, SettingsGroup};
 
 fn connect(addr: &str, writes: bool) -> EngineMixer {
-    let mut m = EngineMixer::connect(ua_engine::Endpoint::parse(addr), writes);
+    let endpoint = ua_engine::Endpoint::parse(addr);
+    assert_eq!(endpoint.host, "127.0.0.1", "sandbox tests require loopback");
+    assert_ne!(endpoint.port, 4710, "never write to the hardware daemon");
+    let mut m = EngineMixer::connect(endpoint, writes);
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         m.pump();
