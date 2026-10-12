@@ -87,8 +87,13 @@ impl EngineMixer {
                 }
                 true
             }
-            // Loading a channel preset belongs to the presets layer (rc/presets-plugwin).
-            Control::PresetDrop(_) => true,
+            // A channel preset dropped on a strip loads there, as a tap in a targeted PRESETS
+            // tab does: `set <strip>/Preset/value "[folder/]name"`.
+            Control::PresetDrop(path) => {
+                let load = ControlId { strip: id.strip.clone(), control: Control::Preset(rack::presets::PresetScope::Channel) };
+                self.preset_set_text(&load, path);
+                true
+            }
             _ => false,
         }
     }

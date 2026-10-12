@@ -106,6 +106,12 @@ impl ViewState {
                 let p = model.plugin_catalog().into_iter().nth(i as usize)?;
                 p.enabled.then(|| (DragPayload::Plugin { name: p.name }, hit.rect))
             }
+            // A PRESETS file row with no assign target (`Rack_PresetDropTargetHelper`): drags
+            // its "[folder/]name" onto a strip.
+            Control::BrowserPresetFile(top, child) if self.browser.preset_target.is_none() => {
+                let path = crate::presets::PresetRow::decode(top, child).value(&self.preset_tree(model))?;
+                Some((DragPayload::Preset { path }, hit.rect))
+            }
             _ => None,
         }
     }

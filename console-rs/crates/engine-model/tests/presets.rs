@@ -165,3 +165,21 @@ fn read_only_sends_nothing() {
     let sent: Vec<_> = server.write_commands().into_iter().filter(|c| c.contains("Preset")).collect();
     assert!(sent.is_empty(), "read-only connection sent {sent:?}");
 }
+
+#[test]
+fn a_preset_row_drags_onto_a_strip_and_loads_there() {
+    use rack::dnd::DragPayload;
+    use rack::{Hit, HitKind, Rect};
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let mut v = ViewState::default();
+    v.browser.tab = rack::surfaces::BrowserTab::Presets;
+    // An untargeted PRESETS file row is a drag source carrying "[folder/]name".
+    let row = Hit { rect: Rect::new(0.0, 0.0, 200.0, 20.0), id: ControlId { strip: "browser".into(), control: Control::BrowserPresetFile(2, 0) }, kind: HitKind::Tap };
+    let (payload, _) = v.drag_source(&[row], 10.0, 10.0, &m).expect("preset rows drag");
+    assert!(matches!(&payload, DragPayload::Preset { path } if path == "Mine/Vox Chain"), "{payload:?}");
+    // The drop on input 1 loads it there: `set <strip>/Preset/value "Mine/Vox Chain"`.
+    v.dispatch(Action::Tap(ControlId { strip: "/devices/0/inputs/1".into(), control: Control::PresetDrop("Mine/Vox Chain".into()) }), &mut m);
+    let w = writes_with(&server, "/inputs/1/Preset/value", 1);
+    assert!(w[0].contains("\"Mine/Vox Chain\""), "{w:?}");
+}
