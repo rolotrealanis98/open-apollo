@@ -193,7 +193,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
             ui.hit(close, bid(Control::BrowserHintClose), HitKind::Tap);
             y = hr.max_y() + MARGIN;
         }
-        plugin_list(ui, model, view, Rect::new(list.x, y, list.w, list.max_y() - 1.0 - y));
+        plugin_list(ui, model, view, Rect::new(list.x, y, list.w, list.max_y() - MARGIN - y));
     });
 }
 
