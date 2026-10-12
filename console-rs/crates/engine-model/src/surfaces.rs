@@ -157,6 +157,14 @@ impl EngineMixer {
             talkback: self.bool_at(&self.store.topology().talkback.on()),
             alt_count,
             alt_selection: self.store.value(&m.alt_mon_selection()).and_then(Value::as_i64).unwrap_or(0).clamp(0, 2) as u8,
+            // Rack's controller predicate is unresolved; Console 1.3.1 shows the button for an
+            // Apollo x4 with `RemoteMonitorController` false.
+            controller: true,
+            hp_correction: (self.bool_at(&format!("{dev}/SupportsHeadphoneCorrection")) == Some(true))
+                .then(|| self.bool_at(&format!("{dev}/HeadphoneCorrectionPower")).unwrap_or(true)),
+            speaker_correction: (self.bool_at(&format!("{dev}/SupportsSpeakerCorrection")) == Some(true))
+                .then(|| self.bool_at(&format!("{dev}/SpeakerCorrectionPower")).unwrap_or(true)),
+            knob_focus: true,
         }
     }
 
