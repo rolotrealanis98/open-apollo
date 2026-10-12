@@ -132,6 +132,13 @@ impl Command {
         }
     }
 
+    /// `set /Sleep <bool>`: a per-socket client hint, not mixer state (`UASrv_Server::SetSleepMode`:
+    /// `true` slows that socket's pushes to 100 ms and stops counting it as a meter consumer;
+    /// default `false`). Read-only connections may send it.
+    pub fn is_socket_hint(&self) -> bool {
+        matches!(self, Command::Set { path, .. } if path::property_path(path.split('?').next().unwrap_or(path)) == "/Sleep")
+    }
+
     /// `set` and `post` change engine state; everything else is read-only.
     pub fn is_write(&self) -> bool {
         matches!(self, Command::Set { .. } | Command::Post { .. })

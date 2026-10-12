@@ -192,3 +192,36 @@ fn double_click_reset_sends_default() {
     assert_eq!(w, ["set /UndoRecording/value true", r#"set /devices/0/inputs/0/Pan/value "default""#, "set /UndoRecording/value false"]);
     assert!(server.raw_write_commands()[1].starts_with(r#"set /devices/0/inputs/0/Pan/value "default""#));
 }
+
+/// Against a private open-apollo daemon (`ua_mixer_daemon.py --no-hardware --port 28710 …`):
+/// `UA_SANDBOX_ENGINE=127.0.0.1:28710 cargo test -p engine-model --test wiring -- --ignored`.
+/// Console's wire forms (query params, scene / meter / undo posts, the sleep hint) keep the
+/// connection live and mixer sets land. Refuses port 4710.
+#[test]
+#[ignore]
+fn sandbox_daemon_accepts_console_wire_forms() {
+    let Ok(ep) = std::env::var("UA_SANDBOX_ENGINE") else { return };
+    let ep = ua_engine::Endpoint::parse(&ep);
+    assert_ne!(ep.port, 4710, "never point this test at a real engine");
+    let mut m = EngineMixer::connect(ep, true);
+    pump_until(&mut m, "live", |m| *m.store().status() == Status::Live);
+    let s = m.inputs()[0].clone();
+    let mute = |m: &EngineMixer| m.main(&s).mute;
+    let was = mute(&m);
+    let mut v = ViewState::default();
+    v.dispatch(Action::Toggle(ControlId { strip: s.id.clone(), control: Control::Mute }), &mut m);
+    v.dispatch(Action::Tap(global(Control::SceneCommand(SceneOp::Recall, 0))), &mut m);
+    v.dispatch(Action::Tap(ControlId { strip: s.id.clone(), control: Control::Menu(MenuCmd::ClearAllMeters) }), &mut m);
+    m.set_background(true);
+    m.set_background(false);
+    std::thread::sleep(Duration::from_millis(300));
+    // Reconnect and read back: the daemon kept the mute (sent with ?context_type=main&func_id).
+    let mut r = EngineMixer::connect(ua_engine::Endpoint::parse(&std::env::var("UA_SANDBOX_ENGINE").unwrap()), false);
+    pump_until(&mut r, "live (reader)", |r| *r.store().status() == Status::Live);
+    assert_eq!(r.main(&r.inputs()[0].clone()).mute, !was);
+    // Put it back.
+    v.dispatch(Action::Toggle(ControlId { strip: s.id.clone(), control: Control::Mute }), &mut m);
+    std::thread::sleep(Duration::from_millis(200));
+    m.pump();
+    assert_eq!(*m.store().status(), Status::Live);
+}

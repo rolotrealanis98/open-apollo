@@ -137,6 +137,10 @@ void uac_resize(UacContext *ctx, uint32_t width_px, uint32_t height_px, float sc
  * zoomed; the layout never goes below its minimum size. */
 void uac_set_window_size(UacContext *ctx, float width_pt, float height_pt);
 
+/* The host went to the background (true) or came back (false): the engine connection sends
+ * Console's per-socket `set /Sleep <bool>`. */
+void uac_set_background(UacContext *ctx, bool background);
+
 /* Call every display refresh: applies queued engine updates and returns true when a frame is
  * due (model, view or input changed, or live meters moved; meters redraw at <= 30 Hz). */
 bool uac_needs_frame(UacContext *ctx);

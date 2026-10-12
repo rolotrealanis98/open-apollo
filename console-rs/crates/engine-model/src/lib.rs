@@ -653,6 +653,10 @@ impl MixerModel for EngineMixer {
         self.surface_menu_state()
     }
 
+    fn set_background(&mut self, background: bool) {
+        self.store.set_sleep(background);
+    }
+
     fn apply(&mut self, action: &Action) {
         // A double-click reset: the same control → path mapping as a drag, written as Console's
         // `set <prop>/value "default"` (MAP.md: CMxNtwk_Server::setObjectValue).

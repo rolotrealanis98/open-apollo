@@ -737,6 +737,9 @@ impl App {
                 self.changed();
             }
             WindowEvent::Occluded(occluded) => {
+                if self.occluded != occluded {
+                    self.model.set_background(occluded);
+                }
                 self.occluded = occluded;
                 if !occluded {
                     self.changed();

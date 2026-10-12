@@ -46,17 +46,23 @@ fn store_goes_live_read_only() {
         &cmds[..2]
     );
     assert_eq!(cmds[1], r#"{"path":"client_id","data":"uaconsole"}"#);
+    // Console's hello (`Options::console_hello`), then the tree.
+    assert_eq!(cmds[2], "set /Sleep false");
+    assert_eq!(cmds[3], "subscribe /MixerState/value");
+    assert!(cmds[4].starts_with("subscribe /errors?func_id=") && cmds[4].ends_with("&recursive=1"), "{}", cmds[4]);
+    assert_eq!(cmds[5], "get /errors");
     assert!(
-        cmds[2].starts_with("get /?func_id=") && cmds[2].ends_with("&recursive=1"),
+        cmds[6].starts_with("get /?func_id=") && cmds[6].ends_with("&recursive=1"),
         "{}",
-        cmds[2]
+        cmds[6]
     );
-    assert_eq!(cmds[3], "subscribe mode=multi");
+    assert!(cmds.iter().position(|c| c == "subscribe mode=multi").is_some_and(|i| i > 6));
     assert!(store.subscribed_paths().len() > 3000);
+    // Read-only: no write but the per-socket sleep hint.
     assert!(
         !cmds
             .iter()
-            .any(|c| c.starts_with("set ") || c.starts_with("post "))
+            .any(|c| (c.starts_with("set ") || c.starts_with("post ")) && c != "set /Sleep false")
     );
 
     // An engine-side change arrives in a multi envelope and lands in the store.
@@ -279,6 +285,8 @@ fn requests_correlate_by_func_id() {
         server.endpoint(),
         Options {
             load_tree: false,
+            // No hello: its /MixerState subscription reply would be an update.
+            console_hello: false,
             ..Options::default()
         },
     );
@@ -516,4 +524,23 @@ fn endpoint_parsing() {
         Endpoint::parse("studio.local").to_string(),
         "studio.local:4710"
     );
+}
+
+/// Console's opening (1.2.x traces): after the identity, `set /Sleep false`, `/MixerState` and
+/// `/errors` subscriptions; `set /Sleep` is a per-socket hint that read-only connections send.
+/// The MIDI input list is polled every second while live.
+#[test]
+fn console_hello_sleep_hint_and_midi_poll() {
+    let server = mock(MockOptions::default());
+    let mut store = live_store(&server, Options::default());
+    let cmds = server.received_commands();
+    let pos = |p: &str| cmds.iter().position(|c| c.starts_with(p)).unwrap_or_else(|| panic!("{p} not in {cmds:?}"));
+    assert!(pos("set /Sleep false") < pos("subscribe /MixerState/value"));
+    assert!(pos("subscribe /errors?func_id=") < pos("get /?func_id="));
+    pos("get /errors");
+    store.set_sleep(true);
+    wait_until("sleep", T, || server.received_commands().iter().any(|c| c == "set /Sleep true"));
+    assert!(server.write_commands().is_empty(), "no mixer writes from a read-only store: {:?}", server.write_commands());
+    let polls = || server.received_commands().iter().filter(|c| c.starts_with("get /MidiInputDevice/values?func_id=")).count();
+    drain_until(&mut store, "two MIDI polls", Duration::from_secs(5), |_| polls() >= 2);
 }

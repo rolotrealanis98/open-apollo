@@ -138,13 +138,14 @@ impl MockEngine {
         lock(&self.state).received.clone()
     }
 
-    /// Received `set` commands only, without Console's per-request query (`func_id`,
+    /// Received `set` commands only (not the per-socket `set /Sleep` hint, which
+    /// [`received_commands`](Self::received_commands) keeps), without Console's per-request query (`func_id`,
     /// `context_type`; [`Command::strip_request_query`](crate::Command::strip_request_query)).
     pub fn set_commands(&self) -> Vec<String> {
         lock(&self.state)
             .received
             .iter()
-            .filter(|c| c.starts_with("set "))
+            .filter(|c| c.starts_with("set ") && !is_sleep_hint(c))
             .map(|c| crate::Command::strip_request_query(c))
             .collect()
     }
@@ -154,17 +155,18 @@ impl MockEngine {
         lock(&self.state)
             .received
             .iter()
-            .filter(|c| c.starts_with("set ") || c.starts_with("post "))
+            .filter(|c| (c.starts_with("set ") || c.starts_with("post ")) && !is_sleep_hint(c))
             .map(|c| crate::Command::strip_request_query(c))
             .collect()
     }
 
-    /// Received `set` and `post` commands exactly as sent (with `func_id` / `context_type`).
+    /// Received `set` and `post` commands exactly as sent (with `func_id` / `context_type`), but
+    /// not the `set /Sleep` socket hint.
     pub fn raw_write_commands(&self) -> Vec<String> {
         lock(&self.state)
             .received
             .iter()
-            .filter(|c| c.starts_with("set ") || c.starts_with("post "))
+            .filter(|c| (c.starts_with("set ") || c.starts_with("post ")) && !is_sleep_hint(c))
             .cloned()
             .collect()
     }
@@ -1016,4 +1018,9 @@ fn helper_handle(s: &mut HelperState, id: u64, text: String) {
     }
     let reply = with(out);
     helper_reply(s, id, reply);
+}
+
+/// `set /Sleep …` / `set /sleep …`: a per-socket hint, not a mixer write.
+fn is_sleep_hint(c: &str) -> bool {
+    c.starts_with("set /Sleep ") || c.starts_with("set /sleep ") || c.starts_with("set /Sleep?") || c.starts_with("set /sleep?")
 }

@@ -105,7 +105,8 @@ pub struct InsertPaths {
 
 impl InsertPaths {
     /// The 11 properties Console subscribes per slot, in its order.
-    pub const SUBSCRIBED: [&'static str; 11] = [
+    pub const SUBSCRIBED: [&'static str; 12] = [
+        "Latency",
         "EffectName",
         "Power",
         "EffectInstance",

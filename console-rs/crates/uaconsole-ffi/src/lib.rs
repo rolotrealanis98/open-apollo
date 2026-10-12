@@ -951,6 +951,21 @@ pub unsafe extern "C" fn uac_resize(ctx: *mut UacContext, width_px: u32, height_
     })
 }
 
+/// The host app went to the background (`true`: window hidden, iPad app inactive) or came back
+/// (`false`). An engine connection sends Console's per-socket `set /Sleep <bool>` (pushes slow
+/// to 100 ms and the engine stops metering for this client while asleep).
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_set_background(ctx: *mut UacContext, background: bool) {
+    guard((), || {
+        if let Some(c) = unsafe { ctx_mut(ctx) } {
+            c.model.set_background(background);
+        }
+    })
+}
+
 /// Pins the Console window size in Console points (e.g. 1920 × 1050, Console's default);
 /// `width_pt` or `height_pt` <= 0 returns to following the view (the default). The layout is
 /// never smaller than its minimum size. The view fits the window unless zoomed.

@@ -503,6 +503,9 @@ pub trait MixerModel {
     fn pump(&mut self) -> bool {
         false
     }
+    /// The app went to the background (window hidden, iPad app inactive) or came back. An
+    /// engine model tells the engine (`set /Sleep true|false`); default: nothing.
+    fn set_background(&mut self, _background: bool) {}
 
     // ---- UI surfaces; every method has a default so existing models keep compiling. ----
 

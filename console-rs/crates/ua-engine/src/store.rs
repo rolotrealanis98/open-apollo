@@ -86,6 +86,8 @@ const LOG_CAP: usize = 16_384;
 const REFRESH_DELAY: Duration = Duration::from_millis(100);
 /// `/UndoRedo`: an int whose `values` are `[{type:"undo"…},{type:"current"…},{type:"redo"…}]`.
 pub const UNDO_REDO: &str = "/UndoRedo";
+const MIDI_INPUT_DEVICE: &str = "/MidiInputDevice";
+const MIDI_POLL: Duration = Duration::from_secs(1);
 /// How long after a gesture the undo list is re-read (Console: 30–90 ms).
 const UNDO_VALUES_DELAY: Duration = Duration::from_millis(40);
 
@@ -214,6 +216,8 @@ pub struct Store {
     values_inflight: Vec<(String, PendingReply)>,
     /// When to re-read `/UndoRedo/values` after a gesture.
     undo_values_due: Option<Instant>,
+    /// Next `/MidiInputDevice/values` poll.
+    midi_poll_due: Option<Instant>,
     last_error: Option<String>,
     waker: Option<Waker>,
     simulation: Option<Simulation>,
@@ -284,6 +288,7 @@ impl Store {
             refresh_inflight: Vec::new(),
             values_inflight: Vec::new(),
             undo_values_due: None,
+            midi_poll_due: None,
             last_error: None,
             waker: None,
             simulation: None,
@@ -423,6 +428,7 @@ impl Store {
         holds
             .chain(refresh)
             .chain(self.undo_values_due)
+            .chain(self.midi_poll_due)
             .chain(self.writer.deadline())
             .chain(inflight)
             .min()
@@ -884,6 +890,15 @@ impl Store {
         self.end_gesture();
     }
 
+    /// Tells the engine this client is in the background (`set /Sleep true`: pushes every
+    /// 100 ms, no metering for this socket) or back (`false`). A per-socket hint, so it goes out
+    /// on read-only connections too.
+    pub fn set_sleep(&mut self, asleep: bool) {
+        if let Some(h) = &self.handle {
+            let _ = h.send(Command::set_raw("/Sleep", if asleep { "true" } else { "false" }));
+        }
+    }
+
     /// A `set` sent at once with no undo bracket: for properties that are not edits themselves
     /// (`/UndoRedo`, which an open `/UndoRecording` group would record).
     pub fn set_now(&mut self, path: &str, value: impl Into<Value>) {
@@ -996,6 +1011,17 @@ impl Store {
             for p in session::LIST_PATHS {
                 self.refresh_values(p);
             }
+        }
+        // Console polls the MIDI input list every second (1.3.1 pcap:
+        // `get /MidiInputDevice/values?func_id=n` at exactly 1.000 s).
+        let now = Instant::now();
+        if self.status == Status::Live && self.model.tree.has_property(MIDI_INPUT_DEVICE) {
+            if self.midi_poll_due.is_none_or(|t| now >= t) {
+                self.midi_poll_due = Some(now + MIDI_POLL);
+                self.refresh_values(MIDI_INPUT_DEVICE);
+            }
+        } else {
+            self.midi_poll_due = None;
         }
         let undo_due = self.undo_values_due.is_some_and(|t| Instant::now() >= t);
         if undo_due || std::mem::take(&mut self.model.undo_values_wanted) {
