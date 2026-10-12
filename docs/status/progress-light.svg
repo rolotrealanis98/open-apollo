@@ -2,7 +2,7 @@
 <title>open-apollo status map (2026-10-11)</title>
 <style>.lbl{font-size:11px;fill:#1f2328;paint-order:stroke;stroke:#ffffff;stroke-width:3px;stroke-linejoin:round}.h{font-size:14px;fill:#1f2328}.m{font-size:11px;fill:#59636e}.verified{fill:#1a7f37}.done{fill:#7ccf8e}.partial{fill:#d4a72c}.re{fill:#8250df}.todo{fill:#c8d1da}.plugin{fill:#54aeff}.blocked{fill:#cf222e}</style>
 <rect width="1280" height="492" rx="6" fill="#ffffff"/>
-<text class="h" x="12" y="36">UA driver behaviour: 72.6% done (737/1015)</text>
+<text class="h" x="12" y="36">UA driver behaviour: 72.8% done (739/1015)</text>
 <rect class="done" x="11" y="47" width="14.9" height="15.7"><title>Kext classes: com_uaudio_driv… 1 lifecycle (done in code)</title></rect>
 <rect class="done" x="26.9" y="47" width="14.9" height="15.7"><title>Kext classes: CPcieDevice 1 lifecycle (done in code)</title></rect>
 <rect class="done" x="42.8" y="47" width="14.9" height="15.7"><title>Kext classes: CPcieIntrManager 1 lifecycle (done in code)</title></rect>
@@ -81,44 +81,44 @@
 <rect class="re" x="58.8" y="147" width="14.9" height="15.7"><title>Kext classes: EnableCLI / Sen… ARM-MCU command channel (still to figure out (RE))</title></rect>
 <rect class="re" x="74.7" y="147" width="14.9" height="15.7"><title>Kext classes: ResetDSP, _erro… DSP reset and error events (still to figure out (RE))</title></rect>
 <rect class="re" x="90.6" y="147" width="14.9" height="15.7"><title>Kext classes: 2 CPcieDevice::HardResetDSPs / CPcieDSP::ResetDSP / CPcieIntrManager::Res… (still to figure out (RE))</title></rect>
-<rect class="plugin" x="106.5" y="147" width="14.9" height="15.7"><title>Kext classes: CAllocator 7 plugin/DSP resources (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="122.5" y="147" width="14.9" height="15.7"><title>Kext classes: CDSPResourceMan… PLUGIN-HOST (triage 2026-10-11, was MISSING: DSP resource manager) — MI… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="138.4" y="147" width="14.9" height="15.7"><title>Kext classes: CPluginInstance PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin instance) — MISSING (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="154.3" y="147" width="14.9" height="15.7"><title>Kext classes: CChain PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin chain) — MISSING (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="170.2" y="147" width="14.9" height="15.7"><title>Kext classes: CResourcePool PLUGIN-HOST (triage 2026-10-11, was MISSING: resource pool) — MISSING (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="186.1" y="147" width="14.9" height="15.7"><title>Kext classes: CResource PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin resource) — MISSING (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="11" y="163.7" width="14.9" height="15.7"><title>Kext classes: CSharedResource PLUGIN-HOST (triage 2026-10-11, was MISSING: shared plugin resources) —… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="26.9" y="163.7" width="14.9" height="15.7"><title>Kext classes: CSession 8 session (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="42.8" y="163.7" width="14.9" height="15.7"><title>Kext classes: ClockSourceIsAv… bus bandwidth bookkeeping for plugin streaming (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="58.8" y="163.7" width="14.9" height="15.7"><title>Kext classes: SetAllocationEn… allow/forbid plugin allocation (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="74.7" y="163.7" width="14.9" height="15.7"><title>Kext classes: ReadMessages, N… response messages and DSP properties (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="90.6" y="163.7" width="14.9" height="15.7"><title>Kext classes: Set/GetPluginFo… synchronous plugin to bus map (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="106.5" y="163.7" width="14.9" height="15.7"><title>Kext classes: SetMaximumUsabl… bus bandwidth caps for plugin streaming (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="122.5" y="163.7" width="14.9" height="15.7"><title>Kext classes: AllocatePluginB… bandwidth budget for plugin DMA (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="138.4" y="163.7" width="14.9" height="15.7"><title>Kext classes: AddSession / Re… sessions (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="154.3" y="163.7" width="14.9" height="15.7"><title>Kext classes: CreatePluginIns… placement and rebalance (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="170.2" y="163.7" width="14.9" height="15.7"><title>Kext classes: SetLoadLimit /… policy knobs (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="186.1" y="163.7" width="14.9" height="15.7"><title>Kext classes: RegisterSharedR… shared resource registry (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="11" y="180.3" width="14.9" height="15.7"><title>Kext classes: SendSystemMessa… system messages and latency broadcast (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="26.9" y="180.3" width="14.9" height="15.7"><title>Kext classes: Initialize / Re… lifecycle and service loop (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="42.8" y="180.3" width="14.9" height="15.7"><title>Kext classes: ComputeCost / C… load model (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="58.8" y="180.3" width="14.9" height="15.7"><title>Kext classes: LoadPlugin / Un… plugin image load/unload (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="74.7" y="180.3" width="14.9" height="15.7"><title>Kext classes: QueueDescriptor… DMA command queue, memory map (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="90.6" y="180.3" width="14.9" height="15.7"><title>Kext classes: SetSampleRate,… rate, sync mode, events (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="106.5" y="180.3" width="14.9" height="15.7"><title>Kext classes: Initialize / Se… placement (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="122.5" y="180.3" width="14.9" height="15.7"><title>Kext classes: _allocDescripto… descriptor/buffer plumbing (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="138.4" y="180.3" width="14.9" height="15.7"><title>Kext classes: Process, Proces… run a processing block (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="154.3" y="180.3" width="14.9" height="15.7"><title>Kext classes: QueueMessage /… plugin messages (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="170.2" y="180.3" width="14.9" height="15.7"><title>Kext classes: AdjustLoad, Unl… load and rebalance (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="186.1" y="180.3" width="14.9" height="15.7"><title>Kext classes: Initialize / Se… session identity and format (rate change = format change) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="11" y="197" width="14.9" height="15.7"><title>Kext classes: AddChain / Remo… owned objects (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="26.9" y="197" width="14.9" height="15.7"><title>Kext classes: AllocSharedDMAB… per-session DMA buffers (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="42.8" y="197" width="14.9" height="15.7"><title>Kext classes: Plugin and DSP… plugin host interface (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="58.8" y="197" width="14.9" height="15.7"><title>Kext classes: Bus: GetBusInfo… bus caps (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="74.7" y="197" width="14.9" height="15.7"><title>Kext classes: Session: SetSes… session (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="90.6" y="197" width="14.9" height="15.7"><title>Kext classes: 9 Talkback audio and virtual/loopback channels (CUAD2DeviceMixer other-pa… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="106.5" y="197" width="14.9" height="15.7"><title>Kext classes: 11 Plugin host: CAllocator, CDSPResourceManager, CPluginInstance, CChain,… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="122.5" y="197" width="14.9" height="15.7"><title>Kext classes: 13 Plugin-chain replay still ships UA-derived data (ua_plugin_chain.h): re… (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="106.5" y="147" width="14.9" height="15.7"><title>Kext classes: CAllocator 7 plugin/DSP resources (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="122.5" y="147" width="14.9" height="15.7"><title>Kext classes: CDSPResourceMan… PLUGIN-HOST (triage 2026-10-11, was MISSING: DSP resource manager) — MI… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="138.4" y="147" width="14.9" height="15.7"><title>Kext classes: CPluginInstance PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin instance) — MISSING (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="154.3" y="147" width="14.9" height="15.7"><title>Kext classes: CChain PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin chain) — MISSING (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="170.2" y="147" width="14.9" height="15.7"><title>Kext classes: CResourcePool PLUGIN-HOST (triage 2026-10-11, was MISSING: resource pool) — MISSING (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="186.1" y="147" width="14.9" height="15.7"><title>Kext classes: CResource PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin resource) — MISSING (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="11" y="163.7" width="14.9" height="15.7"><title>Kext classes: CSharedResource PLUGIN-HOST (triage 2026-10-11, was MISSING: shared plugin resources) —… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="26.9" y="163.7" width="14.9" height="15.7"><title>Kext classes: CSession 8 session (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="42.8" y="163.7" width="14.9" height="15.7"><title>Kext classes: ClockSourceIsAv… bus bandwidth bookkeeping for plugin streaming (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="58.8" y="163.7" width="14.9" height="15.7"><title>Kext classes: SetAllocationEn… allow/forbid plugin allocation (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="74.7" y="163.7" width="14.9" height="15.7"><title>Kext classes: ReadMessages, N… response messages and DSP properties (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="90.6" y="163.7" width="14.9" height="15.7"><title>Kext classes: Set/GetPluginFo… synchronous plugin to bus map (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="106.5" y="163.7" width="14.9" height="15.7"><title>Kext classes: SetMaximumUsabl… bus bandwidth caps for plugin streaming (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="122.5" y="163.7" width="14.9" height="15.7"><title>Kext classes: AllocatePluginB… bandwidth budget for plugin DMA (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="138.4" y="163.7" width="14.9" height="15.7"><title>Kext classes: AddSession / Re… sessions (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="154.3" y="163.7" width="14.9" height="15.7"><title>Kext classes: CreatePluginIns… placement and rebalance (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="170.2" y="163.7" width="14.9" height="15.7"><title>Kext classes: SetLoadLimit /… policy knobs (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="186.1" y="163.7" width="14.9" height="15.7"><title>Kext classes: RegisterSharedR… shared resource registry (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="11" y="180.3" width="14.9" height="15.7"><title>Kext classes: SendSystemMessa… system messages and latency broadcast (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="26.9" y="180.3" width="14.9" height="15.7"><title>Kext classes: Initialize / Re… lifecycle and service loop (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="42.8" y="180.3" width="14.9" height="15.7"><title>Kext classes: ComputeCost / C… load model (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="58.8" y="180.3" width="14.9" height="15.7"><title>Kext classes: LoadPlugin / Un… plugin image load/unload (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="74.7" y="180.3" width="14.9" height="15.7"><title>Kext classes: QueueDescriptor… DMA command queue, memory map (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="90.6" y="180.3" width="14.9" height="15.7"><title>Kext classes: SetSampleRate,… rate, sync mode, events (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="106.5" y="180.3" width="14.9" height="15.7"><title>Kext classes: Initialize / Se… placement (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="122.5" y="180.3" width="14.9" height="15.7"><title>Kext classes: _allocDescripto… descriptor/buffer plumbing (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="138.4" y="180.3" width="14.9" height="15.7"><title>Kext classes: Process, Proces… run a processing block (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="154.3" y="180.3" width="14.9" height="15.7"><title>Kext classes: QueueMessage /… plugin messages (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="170.2" y="180.3" width="14.9" height="15.7"><title>Kext classes: AdjustLoad, Unl… load and rebalance (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="186.1" y="180.3" width="14.9" height="15.7"><title>Kext classes: Initialize / Se… session identity and format (rate change = format change) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="11" y="197" width="14.9" height="15.7"><title>Kext classes: AddChain / Remo… owned objects (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="26.9" y="197" width="14.9" height="15.7"><title>Kext classes: AllocSharedDMAB… per-session DMA buffers (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="42.8" y="197" width="14.9" height="15.7"><title>Kext classes: Plugin and DSP… plugin host interface (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="58.8" y="197" width="14.9" height="15.7"><title>Kext classes: Bus: GetBusInfo… bus caps (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="74.7" y="197" width="14.9" height="15.7"><title>Kext classes: Session: SetSes… session (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="90.6" y="197" width="14.9" height="15.7"><title>Kext classes: 9 Talkback audio and virtual/loopback channels (CUAD2DeviceMixer other-pa… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="106.5" y="197" width="14.9" height="15.7"><title>Kext classes: 11 Plugin host: CAllocator, CDSPResourceManager, CPluginInstance, CChain,… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="122.5" y="197" width="14.9" height="15.7"><title>Kext classes: 13 Plugin-chain replay still ships UA-derived data (ua_plugin_chain.h): re… (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="138.4" y="197" width="14.9" height="15.7"><title>Kext classes: CPcieAudioExten… 3 transport/clock (needs hardware)</title></rect>
 <rect class="blocked" x="154.3" y="197" width="14.9" height="15.7"><title>Kext classes: CUAD2DeviceMixer 5 mixer (needs hardware)</title></rect>
 <rect class="blocked" x="170.2" y="197" width="14.9" height="15.7"><title>Kext classes: CDeviceManager… 6 manager (needs hardware)</title></rect>
@@ -276,13 +276,13 @@
 <rect class="done" x="122.5" y="415.7" width="14.9" height="15.7"><title>Mixer params: 19-20 aux 1 and aux 2 returns L/R (12-bit) (done in code)</title></rect>
 <rect class="done" x="138.4" y="415.7" width="14.9" height="15.7"><title>Mixer params: 22-25 virtual 1-8 meters (done in code)</title></rect>
 <rect class="done" x="154.3" y="415.7" width="14.9" height="15.7"><title>Mixer params: 38, 39 validity guards ( = skip the snapshot) (done in code)</title></rect>
-<rect class="plugin" x="170.2" y="415.7" width="14.9" height="15.7"><title>Mixer params: B5 Spanned/linked buses (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="186.1" y="415.7" width="14.9" height="15.7"><title>Mixer params: 21 custom-preamp input meter, 2 bits per synch channel (0, 1 = -27 dB, 2 =… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="11" y="432.3" width="14.9" height="15.7"><title>Mixer params: 26 / 29 custom-preamp input knob positions, channels 0-3 / 4-7 (6-bit lanes) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="26.9" y="432.3" width="14.9" height="15.7"><title>Mixer params: 27 / 30 custom-preamp output-level knob 1 (0..3 / 4..7) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="42.8" y="432.3" width="14.9" height="15.7"><title>Mixer params: 28 / 31 custom-preamp output-level knob 2 (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="58.8" y="432.3" width="14.9" height="15.7"><title>Mixer params: 32 custom-preamp Ex8 (cached at 0x1b9c) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="74.7" y="432.3" width="14.9" height="15.7"><title>Mixer params: 33 custom-preamp Ex8; [28:26] analog board id (kPropAnalogBoardID 0x13c) (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="170.2" y="415.7" width="14.9" height="15.7"><title>Mixer params: B5 Spanned/linked buses (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="186.1" y="415.7" width="14.9" height="15.7"><title>Mixer params: 21 custom-preamp input meter, 2 bits per synch channel (0, 1 = -27 dB, 2 =… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="11" y="432.3" width="14.9" height="15.7"><title>Mixer params: 26 / 29 custom-preamp input knob positions, channels 0-3 / 4-7 (6-bit lanes) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="26.9" y="432.3" width="14.9" height="15.7"><title>Mixer params: 27 / 30 custom-preamp output-level knob 1 (0..3 / 4..7) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="42.8" y="432.3" width="14.9" height="15.7"><title>Mixer params: 28 / 31 custom-preamp output-level knob 2 (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="58.8" y="432.3" width="14.9" height="15.7"><title>Mixer params: 32 custom-preamp Ex8 (cached at 0x1b9c) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="74.7" y="432.3" width="14.9" height="15.7"><title>Mixer params: 33 custom-preamp Ex8; [28:26] analog board id (kPropAnalogBoardID 0x13c) (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="90.6" y="432.3" width="14.9" height="15.7"><title>Mixer params: B7 param 0 (needs hardware)</title></rect>
 <rect class="blocked" x="106.5" y="432.3" width="14.9" height="15.7"><title>Mixer params: B8 param 1 (needs hardware)</title></rect>
 <rect class="blocked" x="122.5" y="432.3" width="14.9" height="15.7"><title>Mixer params: B9 param 2 (needs hardware)</title></rect>
@@ -298,103 +298,103 @@
 <rect class="done" x="298.4" y="47" width="14.7" height="15.3"><title>HW interface: A06 BAR0+0x30, +0x34 (done in code)</title></rect>
 <rect class="done" x="314.1" y="47" width="14.7" height="15.3"><title>HW interface: A07 W+0x40 and W+0x44 + n*0x14 (n 0-15) (done in code)</title></rect>
 <rect class="done" x="329.8" y="47" width="14.7" height="15.3"><title>HW interface: A08 W+0x184, +0x188, +0x18C, +0x190; W+0x194, +0x198, +0x19C (done in code)</title></rect>
-<rect class="done" x="204.1" y="63.3" width="14.7" height="15.3"><title>HW interface: A10 W+0x1A4 (done in code)</title></rect>
-<rect class="done" x="219.8" y="63.3" width="14.7" height="15.3"><title>HW interface: B01 0x2200 (reset pulse) (done in code)</title></rect>
-<rect class="done" x="235.5" y="63.3" width="14.7" height="15.3"><title>HW interface: B02 0x2200 (bit n+1) (done in code)</title></rect>
-<rect class="done" x="251.2" y="63.3" width="14.7" height="15.3"><title>HW interface: B03 0x2200 (bit n+9) (done in code)</title></rect>
-<rect class="done" x="266.9" y="63.3" width="14.7" height="15.3"><title>HW interface: B04 EnableVector 9ecc, DisableVector a088, EnableInterrupts a1fc, DisableIn… (done in code)</title></rect>
-<rect class="done" x="282.6" y="63.3" width="14.7" height="15.3"><title>HW interface: B05 R/W1C (done in code)</title></rect>
-<rect class="done" x="298.4" y="63.3" width="14.7" height="15.3"><title>HW interface: B07 CPcieDevice::Name 5332, GetCapabilities, GetDeviceInfo, ProgramRegister… (done in code)</title></rect>
-<rect class="done" x="314.1" y="63.3" width="14.7" height="15.3"><title>HW interface: B09 CPcieDevice::ProgramRegisters 5d66, MapHardware 72ca (via the const-pro… (done in code)</title></rect>
-<rect class="done" x="329.8" y="63.3" width="14.7" height="15.3"><title>HW interface: B10 CPcieIntrManager::MapHardware, CPcieDevice::GetCapabilities, Name, _all… (done in code)</title></rect>
-<rect class="done" x="204.1" y="79.7" width="14.7" height="15.3"><title>HW interface: B11 CPcieDevice::GetDeviceInfo 4f44 (done in code)</title></rect>
-<rect class="done" x="219.8" y="79.7" width="14.7" height="15.3"><title>HW interface: B12 CPcieAudioExtension::PrepareTransport 34ee8 (done in code)</title></rect>
-<rect class="done" x="235.5" y="79.7" width="14.7" height="15.3"><title>HW interface: B13 PrepareTransport (write 0 twice), ProgramRegisters 33f4a, TransportPosi… (done in code)</title></rect>
-<rect class="done" x="251.2" y="79.7" width="14.7" height="15.3"><title>HW interface: B14 PrepareTransport (0, then 1), StartTransport 3535a, StopTransport 35444… (done in code)</title></rect>
-<rect class="done" x="266.9" y="79.7" width="14.7" height="15.3"><title>HW interface: B15 PrepareTransport 34ee8 (done in code)</title></rect>
-<rect class="done" x="282.6" y="79.7" width="14.7" height="15.3"><title>HW interface: B16 PrepareTransport (done in code)</title></rect>
-<rect class="done" x="298.4" y="79.7" width="14.7" height="15.3"><title>HW interface: B17 PrepareTransport (after 1 ms sleep, up to 3 tries) (done in code)</title></rect>
-<rect class="done" x="314.1" y="79.7" width="14.7" height="15.3"><title>HW interface: B18 PrepareTransport (done in code)</title></rect>
-<rect class="done" x="329.8" y="79.7" width="14.7" height="15.3"><title>HW interface: B19 PrepareTransport (done in code)</title></rect>
-<rect class="done" x="204.1" y="96" width="14.7" height="15.3"><title>HW interface: B20 0x2260 (values 1, 4, 0x10) (done in code)</title></rect>
-<rect class="done" x="219.8" y="96" width="14.7" height="15.3"><title>HW interface: B22 R/W1C (done in code)</title></rect>
-<rect class="done" x="235.5" y="96" width="14.7" height="15.3"><title>HW interface: B23 EnableVector, DisableVector, EnableInterrupts, DisableInterrupts, MapHa… (done in code)</title></rect>
-<rect class="done" x="251.2" y="96" width="14.7" height="15.3"><title>HW interface: B24 PrepareTransport (done in code)</title></rect>
-<rect class="done" x="266.9" y="96" width="14.7" height="15.3"><title>HW interface: B25 PrepareTransport (only when an interval was set by SetPeriodicTimerInte… (done in code)</title></rect>
-<rect class="done" x="282.6" y="96" width="14.7" height="15.3"><title>HW interface: B27 PrepareTransport (fence), TransportPosition (done in code)</title></rect>
-<rect class="done" x="298.4" y="96" width="14.7" height="15.3"><title>HW interface: B28 Shutdown 34cb8 (0), ClearPeerToPeerAudioRoutings 368e2 (0), EnablePeerT… (done in code)</title></rect>
-<rect class="done" x="314.1" y="96" width="14.7" height="15.3"><title>HW interface: C01 CPcieDeviceMixer::_flushCachedSettings 32e6c, WriteSetting 33130 (done in code)</title></rect>
-<rect class="done" x="329.8" y="96" width="14.7" height="15.3"><title>HW interface: C02 Initialize 32c38, _flushCachedSettings, WriteSetting (done in code)</title></rect>
-<rect class="done" x="204.1" y="112.4" width="14.7" height="15.3"><title>HW interface: C03 CPcieDeviceMixer::GetReadback 32d64 (done in code)</title></rect>
-<rect class="done" x="219.8" y="112.4" width="14.7" height="15.3"><title>HW interface: C04 0x3814..0x38B0 (40 dwords) (done in code)</title></rect>
-<rect class="done" x="235.5" y="112.4" width="14.7" height="15.3"><title>HW interface: C05 0x38B4..0x39EC (38 settings x 2 dwords, three ranges) (done in code)</title></rect>
-<rect class="done" x="251.2" y="112.4" width="14.7" height="15.3"><title>HW interface: D01 block + 0x00..0x1C (done in code)</title></rect>
-<rect class="done" x="266.9" y="112.4" width="14.7" height="15.3"><title>HW interface: D02 block + 0x20 (done in code)</title></rect>
-<rect class="done" x="282.6" y="112.4" width="14.7" height="15.3"><title>HW interface: D03 block + 0x24 (done in code)</title></rect>
-<rect class="done" x="298.4" y="112.4" width="14.7" height="15.3"><title>HW interface: D04 block + 0x28 (done in code)</title></rect>
-<rect class="done" x="314.1" y="112.4" width="14.7" height="15.3"><title>HW interface: E01 0x8000 + 8*i (i &lt; 1024) (done in code)</title></rect>
-<rect class="done" x="329.8" y="112.4" width="14.7" height="15.3"><title>HW interface: E02 0xA000 + 8*i (i &lt; 1024) (done in code)</title></rect>
-<rect class="done" x="204.1" y="128.7" width="14.7" height="15.3"><title>HW interface: F01 0xC000..0xC024 (10 dwords) (done in code)</title></rect>
-<rect class="done" x="219.8" y="128.7" width="14.7" height="15.3"><title>HW interface: F02 0xC028.. (95 dwords, to 0xC1A3) (done in code)</title></rect>
-<rect class="done" x="235.5" y="128.7" width="14.7" height="15.3"><title>HW interface: F03 0xC02C (bank + 0x04) (done in code)</title></rect>
-<rect class="done" x="251.2" y="128.7" width="14.7" height="15.3"><title>HW interface: F04 0xC030 (bank + 0x08) (done in code)</title></rect>
-<rect class="done" x="266.9" y="128.7" width="14.7" height="15.3"><title>HW interface: F05 0xC074 (bank + 0x4C) (done in code)</title></rect>
-<rect class="done" x="282.6" y="128.7" width="14.7" height="15.3"><title>HW interface: F06 0xC07C (bank + 0x54) (done in code)</title></rect>
-<rect class="done" x="298.4" y="128.7" width="14.7" height="15.3"><title>HW interface: F07 0xC080 (bank + 0x58) (done in code)</title></rect>
-<rect class="done" x="314.1" y="128.7" width="14.7" height="15.3"><title>HW interface: F08 0xC084 (bank + 0x5C) (done in code)</title></rect>
-<rect class="done" x="329.8" y="128.7" width="14.7" height="15.3"><title>HW interface: F09 0xC08C (high half = 0xC08E) (done in code)</title></rect>
-<rect class="done" x="204.1" y="145.1" width="14.7" height="15.3"><title>HW interface: F10 0xC090..0xC18F (256 bytes) (done in code)</title></rect>
-<rect class="done" x="219.8" y="145.1" width="14.7" height="15.3"><title>HW interface: F11 0xC1A4 (72 dwords) (done in code)</title></rect>
-<rect class="done" x="235.5" y="145.1" width="14.7" height="15.3"><title>HW interface: F12 0xC2C4 (72 dwords) (done in code)</title></rect>
-<rect class="done" x="251.2" y="145.1" width="14.7" height="15.3"><title>HW interface: O08 Zero-fill (SRAM_CFG) (done in code)</title></rect>
-<rect class="done" x="266.9" y="145.1" width="14.7" height="15.3"><title>HW interface: O12 Connect finalize (date) (done in code)</title></rect>
-<rect class="done" x="282.6" y="145.1" width="14.7" height="15.3"><title>HW interface: O13 0x0012nnnn + (done in code)</title></rect>
-<rect class="done" x="298.4" y="145.1" width="14.7" height="15.3"><title>HW interface: O18 Sample-rate ack (done in code)</title></rect>
-<rect class="done" x="314.1" y="145.1" width="14.7" height="15.3"><title>HW interface: O19 Bus enable (done in code)</title></rect>
-<rect class="done" x="329.8" y="145.1" width="14.7" height="15.3"><title>HW interface: O20 Bus coefficient (done in code)</title></rect>
-<rect class="done" x="204.1" y="161.4" width="14.7" height="15.3"><title>HW interface: O21 DSP input param (done in code)</title></rect>
-<rect class="done" x="219.8" y="161.4" width="14.7" height="15.3"><title>HW interface: O23 (w1 = 1) (done in code)</title></rect>
-<rect class="done" x="235.5" y="161.4" width="14.7" height="15.3"><title>HW interface: O25 Ring DMA reference entry (done in code)</title></rect>
-<rect class="done" x="251.2" y="161.4" width="14.7" height="15.3"><title>HW interface: N01 Output IO descriptor republished (done in code)</title></rect>
-<rect class="done" x="266.9" y="161.4" width="14.7" height="15.3"><title>HW interface: N02 Input IO descriptor republished (done in code)</title></rect>
-<rect class="done" x="282.6" y="161.4" width="14.7" height="15.3"><title>HW interface: N03 Transport/rate info changed (done in code)</title></rect>
-<rect class="done" x="298.4" y="161.4" width="14.7" height="15.3"><title>HW interface: N07 Connect accepted (done in code)</title></rect>
-<rect class="done" x="314.1" y="161.4" width="14.7" height="15.3"><title>HW interface: N08 Sample rate changed (done in code)</title></rect>
-<rect class="done" x="329.8" y="161.4" width="14.7" height="15.3"><title>HW interface: N10 (acknowledge) (done in code)</title></rect>
-<rect class="done" x="204.1" y="177.7" width="14.7" height="15.3"><title>HW interface: I03 DSP n: 5n+2 (done in code)</title></rect>
-<rect class="done" x="219.8" y="177.7" width="14.7" height="15.3"><title>HW interface: I04 DSP n: 5n+3 (done in code)</title></rect>
-<rect class="done" x="235.5" y="177.7" width="14.7" height="15.3"><title>HW interface: I05 DSP n: 5n+4 (done in code)</title></rect>
-<rect class="done" x="251.2" y="177.7" width="14.7" height="15.3"><title>HW interface: I06 0x28 (hw bit 32) (done in code)</title></rect>
-<rect class="done" x="266.9" y="177.7" width="14.7" height="15.3"><title>HW interface: I07 0x46 (hw bit 62) (done in code)</title></rect>
-<rect class="done" x="282.6" y="177.7" width="14.7" height="15.3"><title>HW interface: I08 0x47 (hw bit 63) (done in code)</title></rect>
-<rect class="done" x="298.4" y="177.7" width="14.7" height="15.3"><title>HW interface: I09 logical -&gt; hw bit map (done in code)</title></rect>
-<rect class="done" x="314.1" y="177.7" width="14.7" height="15.3"><title>HW interface: I10 one-shot auto-mask (done in code)</title></rect>
-<rect class="done" x="329.8" y="177.7" width="14.7" height="15.3"><title>HW interface: I11 64-vector mode (done in code)</title></rect>
-<rect class="done" x="204.1" y="194.1" width="14.7" height="15.3"><title>HW interface: I12 EnableVector semantics (done in code)</title></rect>
-<rect class="done" x="219.8" y="194.1" width="14.7" height="15.3"><title>HW interface: I13 MSI vs INTx (done in code)</title></rect>
-<rect class="done" x="235.5" y="194.1" width="14.7" height="15.3"><title>HW interface: P01 0x02 (16-bit) (done in code)</title></rect>
-<rect class="done" x="251.2" y="194.1" width="14.7" height="15.3"><title>HW interface: P02 0x2E (16-bit) (done in code)</title></rect>
-<rect class="done" x="266.9" y="194.1" width="14.7" height="15.3"><title>HW interface: P05 0x10 (32-bit) (done in code)</title></rect>
-<rect class="done" x="282.6" y="194.1" width="14.7" height="15.3"><title>HW interface: P06 0x04 (implicit) (done in code)</title></rect>
-<rect class="done" x="298.4" y="194.1" width="14.7" height="15.3"><title>HW interface: P07 any other offset (done in code)</title></rect>
-<rect class="re" x="314.1" y="194.1" width="14.7" height="15.3"><title>HW interface: A09 W+0x1A0 (still to figure out (RE))</title></rect>
-<rect class="todo" x="329.8" y="194.1" width="14.7" height="15.3"><title>HW interface: A13 W+0x3C8 (understood, not done)</title></rect>
-<rect class="plugin" x="204.1" y="210.4" width="14.7" height="15.3"><title>HW interface: F13 W (R) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="219.8" y="210.4" width="14.7" height="15.3"><title>HW interface: F14 0xC3F8, 0xC3FC, 0xC400.., 0xC480 (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="235.5" y="210.4" width="14.7" height="15.3"><title>HW interface: O01 0x0001nnnn (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="251.2" y="210.4" width="14.7" height="15.3"><title>HW interface: O02 0x0004nnnn (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="266.9" y="210.4" width="14.7" height="15.3"><title>HW interface: O03 Pool compaction marker (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="282.6" y="210.4" width="14.7" height="15.3"><title>HW interface: O04 Release shared resource (pool 0) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="298.4" y="210.4" width="14.7" height="15.3"><title>HW interface: O05 Move shared resource (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="314.1" y="210.4" width="14.7" height="15.3"><title>HW interface: O06 Release shared resource (pool != 0) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="329.8" y="210.4" width="14.7" height="15.3"><title>HW interface: O07 0x0007nnnn (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="204.1" y="226.8" width="14.7" height="15.3"><title>HW interface: O09 Move private block (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="219.8" y="226.8" width="14.7" height="15.3"><title>HW interface: O10 Readback descriptor (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="235.5" y="226.8" width="14.7" height="15.3"><title>HW interface: O11 0x0018nnnn / 0x0019nnnn, or 0x000Ann / 0x000Bnn (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="251.2" y="226.8" width="14.7" height="15.3"><title>HW interface: O15 0x0014nnnn (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="266.9" y="226.8" width="14.7" height="15.3"><title>HW interface: O16 0x0015nnnn (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="282.6" y="226.8" width="14.7" height="15.3"><title>HW interface: O22 Synch enable (start or stop a strip) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="298.4" y="226.8" width="14.7" height="15.3"><title>HW interface: O24 (w1 = 0) (plugin hosting (decision))</title></rect>
+<rect class="done" x="204.1" y="63.3" width="14.7" height="15.3"><title>HW interface: A09 W+0x1A0 (done in code)</title></rect>
+<rect class="done" x="219.8" y="63.3" width="14.7" height="15.3"><title>HW interface: A10 W+0x1A4 (done in code)</title></rect>
+<rect class="done" x="235.5" y="63.3" width="14.7" height="15.3"><title>HW interface: A13 W+0x3C8 (done in code)</title></rect>
+<rect class="done" x="251.2" y="63.3" width="14.7" height="15.3"><title>HW interface: B01 0x2200 (reset pulse) (done in code)</title></rect>
+<rect class="done" x="266.9" y="63.3" width="14.7" height="15.3"><title>HW interface: B02 0x2200 (bit n+1) (done in code)</title></rect>
+<rect class="done" x="282.6" y="63.3" width="14.7" height="15.3"><title>HW interface: B03 0x2200 (bit n+9) (done in code)</title></rect>
+<rect class="done" x="298.4" y="63.3" width="14.7" height="15.3"><title>HW interface: B04 EnableVector 9ecc, DisableVector a088, EnableInterrupts a1fc, DisableIn… (done in code)</title></rect>
+<rect class="done" x="314.1" y="63.3" width="14.7" height="15.3"><title>HW interface: B05 R/W1C (done in code)</title></rect>
+<rect class="done" x="329.8" y="63.3" width="14.7" height="15.3"><title>HW interface: B07 CPcieDevice::Name 5332, GetCapabilities, GetDeviceInfo, ProgramRegister… (done in code)</title></rect>
+<rect class="done" x="204.1" y="79.7" width="14.7" height="15.3"><title>HW interface: B09 CPcieDevice::ProgramRegisters 5d66, MapHardware 72ca (via the const-pro… (done in code)</title></rect>
+<rect class="done" x="219.8" y="79.7" width="14.7" height="15.3"><title>HW interface: B10 CPcieIntrManager::MapHardware, CPcieDevice::GetCapabilities, Name, _all… (done in code)</title></rect>
+<rect class="done" x="235.5" y="79.7" width="14.7" height="15.3"><title>HW interface: B11 CPcieDevice::GetDeviceInfo 4f44 (done in code)</title></rect>
+<rect class="done" x="251.2" y="79.7" width="14.7" height="15.3"><title>HW interface: B12 CPcieAudioExtension::PrepareTransport 34ee8 (done in code)</title></rect>
+<rect class="done" x="266.9" y="79.7" width="14.7" height="15.3"><title>HW interface: B13 PrepareTransport (write 0 twice), ProgramRegisters 33f4a, TransportPosi… (done in code)</title></rect>
+<rect class="done" x="282.6" y="79.7" width="14.7" height="15.3"><title>HW interface: B14 PrepareTransport (0, then 1), StartTransport 3535a, StopTransport 35444… (done in code)</title></rect>
+<rect class="done" x="298.4" y="79.7" width="14.7" height="15.3"><title>HW interface: B15 PrepareTransport 34ee8 (done in code)</title></rect>
+<rect class="done" x="314.1" y="79.7" width="14.7" height="15.3"><title>HW interface: B16 PrepareTransport (done in code)</title></rect>
+<rect class="done" x="329.8" y="79.7" width="14.7" height="15.3"><title>HW interface: B17 PrepareTransport (after 1 ms sleep, up to 3 tries) (done in code)</title></rect>
+<rect class="done" x="204.1" y="96" width="14.7" height="15.3"><title>HW interface: B18 PrepareTransport (done in code)</title></rect>
+<rect class="done" x="219.8" y="96" width="14.7" height="15.3"><title>HW interface: B19 PrepareTransport (done in code)</title></rect>
+<rect class="done" x="235.5" y="96" width="14.7" height="15.3"><title>HW interface: B20 0x2260 (values 1, 4, 0x10) (done in code)</title></rect>
+<rect class="done" x="251.2" y="96" width="14.7" height="15.3"><title>HW interface: B22 R/W1C (done in code)</title></rect>
+<rect class="done" x="266.9" y="96" width="14.7" height="15.3"><title>HW interface: B23 EnableVector, DisableVector, EnableInterrupts, DisableInterrupts, MapHa… (done in code)</title></rect>
+<rect class="done" x="282.6" y="96" width="14.7" height="15.3"><title>HW interface: B24 PrepareTransport (done in code)</title></rect>
+<rect class="done" x="298.4" y="96" width="14.7" height="15.3"><title>HW interface: B25 PrepareTransport (only when an interval was set by SetPeriodicTimerInte… (done in code)</title></rect>
+<rect class="done" x="314.1" y="96" width="14.7" height="15.3"><title>HW interface: B27 PrepareTransport (fence), TransportPosition (done in code)</title></rect>
+<rect class="done" x="329.8" y="96" width="14.7" height="15.3"><title>HW interface: B28 Shutdown 34cb8 (0), ClearPeerToPeerAudioRoutings 368e2 (0), EnablePeerT… (done in code)</title></rect>
+<rect class="done" x="204.1" y="112.4" width="14.7" height="15.3"><title>HW interface: C01 CPcieDeviceMixer::_flushCachedSettings 32e6c, WriteSetting 33130 (done in code)</title></rect>
+<rect class="done" x="219.8" y="112.4" width="14.7" height="15.3"><title>HW interface: C02 Initialize 32c38, _flushCachedSettings, WriteSetting (done in code)</title></rect>
+<rect class="done" x="235.5" y="112.4" width="14.7" height="15.3"><title>HW interface: C03 CPcieDeviceMixer::GetReadback 32d64 (done in code)</title></rect>
+<rect class="done" x="251.2" y="112.4" width="14.7" height="15.3"><title>HW interface: C04 0x3814..0x38B0 (40 dwords) (done in code)</title></rect>
+<rect class="done" x="266.9" y="112.4" width="14.7" height="15.3"><title>HW interface: C05 0x38B4..0x39EC (38 settings x 2 dwords, three ranges) (done in code)</title></rect>
+<rect class="done" x="282.6" y="112.4" width="14.7" height="15.3"><title>HW interface: D01 block + 0x00..0x1C (done in code)</title></rect>
+<rect class="done" x="298.4" y="112.4" width="14.7" height="15.3"><title>HW interface: D02 block + 0x20 (done in code)</title></rect>
+<rect class="done" x="314.1" y="112.4" width="14.7" height="15.3"><title>HW interface: D03 block + 0x24 (done in code)</title></rect>
+<rect class="done" x="329.8" y="112.4" width="14.7" height="15.3"><title>HW interface: D04 block + 0x28 (done in code)</title></rect>
+<rect class="done" x="204.1" y="128.7" width="14.7" height="15.3"><title>HW interface: E01 0x8000 + 8*i (i &lt; 1024) (done in code)</title></rect>
+<rect class="done" x="219.8" y="128.7" width="14.7" height="15.3"><title>HW interface: E02 0xA000 + 8*i (i &lt; 1024) (done in code)</title></rect>
+<rect class="done" x="235.5" y="128.7" width="14.7" height="15.3"><title>HW interface: F01 0xC000..0xC024 (10 dwords) (done in code)</title></rect>
+<rect class="done" x="251.2" y="128.7" width="14.7" height="15.3"><title>HW interface: F02 0xC028.. (95 dwords, to 0xC1A3) (done in code)</title></rect>
+<rect class="done" x="266.9" y="128.7" width="14.7" height="15.3"><title>HW interface: F03 0xC02C (bank + 0x04) (done in code)</title></rect>
+<rect class="done" x="282.6" y="128.7" width="14.7" height="15.3"><title>HW interface: F04 0xC030 (bank + 0x08) (done in code)</title></rect>
+<rect class="done" x="298.4" y="128.7" width="14.7" height="15.3"><title>HW interface: F05 0xC074 (bank + 0x4C) (done in code)</title></rect>
+<rect class="done" x="314.1" y="128.7" width="14.7" height="15.3"><title>HW interface: F06 0xC07C (bank + 0x54) (done in code)</title></rect>
+<rect class="done" x="329.8" y="128.7" width="14.7" height="15.3"><title>HW interface: F07 0xC080 (bank + 0x58) (done in code)</title></rect>
+<rect class="done" x="204.1" y="145.1" width="14.7" height="15.3"><title>HW interface: F08 0xC084 (bank + 0x5C) (done in code)</title></rect>
+<rect class="done" x="219.8" y="145.1" width="14.7" height="15.3"><title>HW interface: F09 0xC08C (high half = 0xC08E) (done in code)</title></rect>
+<rect class="done" x="235.5" y="145.1" width="14.7" height="15.3"><title>HW interface: F10 0xC090..0xC18F (256 bytes) (done in code)</title></rect>
+<rect class="done" x="251.2" y="145.1" width="14.7" height="15.3"><title>HW interface: F11 0xC1A4 (72 dwords) (done in code)</title></rect>
+<rect class="done" x="266.9" y="145.1" width="14.7" height="15.3"><title>HW interface: F12 0xC2C4 (72 dwords) (done in code)</title></rect>
+<rect class="done" x="282.6" y="145.1" width="14.7" height="15.3"><title>HW interface: O08 Zero-fill (SRAM_CFG) (done in code)</title></rect>
+<rect class="done" x="298.4" y="145.1" width="14.7" height="15.3"><title>HW interface: O12 Connect finalize (date) (done in code)</title></rect>
+<rect class="done" x="314.1" y="145.1" width="14.7" height="15.3"><title>HW interface: O13 0x0012nnnn + (done in code)</title></rect>
+<rect class="done" x="329.8" y="145.1" width="14.7" height="15.3"><title>HW interface: O18 Sample-rate ack (done in code)</title></rect>
+<rect class="done" x="204.1" y="161.4" width="14.7" height="15.3"><title>HW interface: O19 Bus enable (done in code)</title></rect>
+<rect class="done" x="219.8" y="161.4" width="14.7" height="15.3"><title>HW interface: O20 Bus coefficient (done in code)</title></rect>
+<rect class="done" x="235.5" y="161.4" width="14.7" height="15.3"><title>HW interface: O21 DSP input param (done in code)</title></rect>
+<rect class="done" x="251.2" y="161.4" width="14.7" height="15.3"><title>HW interface: O23 (w1 = 1) (done in code)</title></rect>
+<rect class="done" x="266.9" y="161.4" width="14.7" height="15.3"><title>HW interface: O25 Ring DMA reference entry (done in code)</title></rect>
+<rect class="done" x="282.6" y="161.4" width="14.7" height="15.3"><title>HW interface: N01 Output IO descriptor republished (done in code)</title></rect>
+<rect class="done" x="298.4" y="161.4" width="14.7" height="15.3"><title>HW interface: N02 Input IO descriptor republished (done in code)</title></rect>
+<rect class="done" x="314.1" y="161.4" width="14.7" height="15.3"><title>HW interface: N03 Transport/rate info changed (done in code)</title></rect>
+<rect class="done" x="329.8" y="161.4" width="14.7" height="15.3"><title>HW interface: N07 Connect accepted (done in code)</title></rect>
+<rect class="done" x="204.1" y="177.7" width="14.7" height="15.3"><title>HW interface: N08 Sample rate changed (done in code)</title></rect>
+<rect class="done" x="219.8" y="177.7" width="14.7" height="15.3"><title>HW interface: N10 (acknowledge) (done in code)</title></rect>
+<rect class="done" x="235.5" y="177.7" width="14.7" height="15.3"><title>HW interface: I03 DSP n: 5n+2 (done in code)</title></rect>
+<rect class="done" x="251.2" y="177.7" width="14.7" height="15.3"><title>HW interface: I04 DSP n: 5n+3 (done in code)</title></rect>
+<rect class="done" x="266.9" y="177.7" width="14.7" height="15.3"><title>HW interface: I05 DSP n: 5n+4 (done in code)</title></rect>
+<rect class="done" x="282.6" y="177.7" width="14.7" height="15.3"><title>HW interface: I06 0x28 (hw bit 32) (done in code)</title></rect>
+<rect class="done" x="298.4" y="177.7" width="14.7" height="15.3"><title>HW interface: I07 0x46 (hw bit 62) (done in code)</title></rect>
+<rect class="done" x="314.1" y="177.7" width="14.7" height="15.3"><title>HW interface: I08 0x47 (hw bit 63) (done in code)</title></rect>
+<rect class="done" x="329.8" y="177.7" width="14.7" height="15.3"><title>HW interface: I09 logical -&gt; hw bit map (done in code)</title></rect>
+<rect class="done" x="204.1" y="194.1" width="14.7" height="15.3"><title>HW interface: I10 one-shot auto-mask (done in code)</title></rect>
+<rect class="done" x="219.8" y="194.1" width="14.7" height="15.3"><title>HW interface: I11 64-vector mode (done in code)</title></rect>
+<rect class="done" x="235.5" y="194.1" width="14.7" height="15.3"><title>HW interface: I12 EnableVector semantics (done in code)</title></rect>
+<rect class="done" x="251.2" y="194.1" width="14.7" height="15.3"><title>HW interface: I13 MSI vs INTx (done in code)</title></rect>
+<rect class="done" x="266.9" y="194.1" width="14.7" height="15.3"><title>HW interface: P01 0x02 (16-bit) (done in code)</title></rect>
+<rect class="done" x="282.6" y="194.1" width="14.7" height="15.3"><title>HW interface: P02 0x2E (16-bit) (done in code)</title></rect>
+<rect class="done" x="298.4" y="194.1" width="14.7" height="15.3"><title>HW interface: P05 0x10 (32-bit) (done in code)</title></rect>
+<rect class="done" x="314.1" y="194.1" width="14.7" height="15.3"><title>HW interface: P06 0x04 (implicit) (done in code)</title></rect>
+<rect class="done" x="329.8" y="194.1" width="14.7" height="15.3"><title>HW interface: P07 any other offset (done in code)</title></rect>
+<rect class="plugin" x="204.1" y="210.4" width="14.7" height="15.3"><title>HW interface: F13 W (R) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="219.8" y="210.4" width="14.7" height="15.3"><title>HW interface: F14 0xC3F8, 0xC3FC, 0xC400.., 0xC480 (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="235.5" y="210.4" width="14.7" height="15.3"><title>HW interface: O01 0x0001nnnn (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="251.2" y="210.4" width="14.7" height="15.3"><title>HW interface: O02 0x0004nnnn (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="266.9" y="210.4" width="14.7" height="15.3"><title>HW interface: O03 Pool compaction marker (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="282.6" y="210.4" width="14.7" height="15.3"><title>HW interface: O04 Release shared resource (pool 0) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="298.4" y="210.4" width="14.7" height="15.3"><title>HW interface: O05 Move shared resource (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="314.1" y="210.4" width="14.7" height="15.3"><title>HW interface: O06 Release shared resource (pool != 0) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="329.8" y="210.4" width="14.7" height="15.3"><title>HW interface: O07 0x0007nnnn (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="204.1" y="226.8" width="14.7" height="15.3"><title>HW interface: O09 Move private block (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="219.8" y="226.8" width="14.7" height="15.3"><title>HW interface: O10 Readback descriptor (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="235.5" y="226.8" width="14.7" height="15.3"><title>HW interface: O11 0x0018nnnn / 0x0019nnnn, or 0x000Ann / 0x000Bnn (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="251.2" y="226.8" width="14.7" height="15.3"><title>HW interface: O15 0x0014nnnn (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="266.9" y="226.8" width="14.7" height="15.3"><title>HW interface: O16 0x0015nnnn (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="282.6" y="226.8" width="14.7" height="15.3"><title>HW interface: O22 Synch enable (start or stop a strip) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="298.4" y="226.8" width="14.7" height="15.3"><title>HW interface: O24 (w1 = 0) (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="314.1" y="226.8" width="14.7" height="15.3"><title>HW interface: B21 0x2260 (value 0x20) (needs hardware)</title></rect>
 <rect class="blocked" x="329.8" y="226.8" width="14.7" height="15.3"><title>HW interface: B26 0x2280 + 8*s, 0x2284 + 8*s (needs hardware)</title></rect>
 <rect class="blocked" x="204.1" y="243.1" width="14.7" height="15.3"><title>HW interface: B29 0x22C8, 0x22CC, 0x22D0 + 4*s (needs hardware)</title></rect>
@@ -489,15 +489,15 @@
 <rect class="done" x="251.2" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: H11 Bonjour announcement (done in code)</title></rect>
 <rect class="re" x="266.9" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: I18 Volt 876 ADAT preamps (AdatPreamp*, x8p) (still to figure out (RE))</title></rect>
 <rect class="re" x="282.6" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: O17 Surround (SurroundMonitorMode, SurroundTrimLevel, SurroundMute/Solo, St… (still to figure out (RE))</title></rect>
-<rect class="plugin" x="298.4" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: I17 Unison / custom integrated preamp (CustomIntegratedPreamp*, readback wo… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="314.1" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: O18 Bass management (BassMgr*, SupportsBassManagement true on x4) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="329.8" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: O19 Speaker correction / HP correction (SupportsSpeakerCorrection, ...Headp… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="204.1" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: D17 DSP spanning (/devices/0/DSPSpanning, MaxSpans, ActiveSpans) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="219.8" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: T5 Talkback audio (strip on the DSP, record slots 20/21) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="235.5" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P1 Plugin inserts (inputs/N/effects/N/*: 192 + 4 preamp + 8 aux entries) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="251.2" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P2 Unison (kPropUnison, custom preamp) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="266.9" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P3 Plugin scenes (/pluginscenes/*, 128 scenes, SceneOperation) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="282.6" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P4 LLM disk / Virtual Sound Check (LLMDisk*, VirtualSoundCheck) (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="298.4" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: I17 Unison / custom integrated preamp (CustomIntegratedPreamp*, readback wo… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="314.1" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: O18 Bass management (BassMgr*, SupportsBassManagement true on x4) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="329.8" y="414.9" width="14.7" height="16.1"><title>Mixer Engine: O19 Speaker correction / HP correction (SupportsSpeakerCorrection, ...Headp… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="204.1" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: D17 DSP spanning (/devices/0/DSPSpanning, MaxSpans, ActiveSpans) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="219.8" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: T5 Talkback audio (strip on the DSP, record slots 20/21) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="235.5" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P1 Plugin inserts (inputs/N/effects/N/*: 192 + 4 preamp + 8 aux entries) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="251.2" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P2 Unison (kPropUnison, custom preamp) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="266.9" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P3 Plugin scenes (/pluginscenes/*, 128 scenes, SceneOperation) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="282.6" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: P4 LLM disk / Virtual Sound Check (LLMDisk*, VirtualSoundCheck) (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="298.4" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: S4 Send pan (aux sends) (needs hardware)</title></rect>
 <rect class="blocked" x="314.1" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: D9 Clock master, multi-unit order, peer-to-peer latency (ClockMasterHwId,… (needs hardware)</title></rect>
 <rect class="blocked" x="329.8" y="431.9" width="14.7" height="16.1"><title>Mixer Engine: H8 Front-panel to hardware write-back (needs hardware)</title></rect>
@@ -538,37 +538,37 @@
 <rect class="done" x="445.7" y="94.4" width="15.4" height="14.8"><title>Plugin Support: 9 USB link-speed check (speed in sysfs) with a clear warning, matching th… (done in code)</title></rect>
 <rect class="done" x="462.1" y="94.4" width="15.4" height="14.8"><title>Plugin Support: 10 FlashLED (SEL122) and system-message plumbing for identify-device (done in code)</title></rect>
 <rect class="re" x="478.4" y="94.4" width="15.4" height="14.8"><title>Plugin Support: Notifications (… Interrupt notifications are what the kext turns into SEL165 events on P… (still to figure out (RE))</title></rect>
-<rect class="plugin" x="347.5" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Plugin allocati… Host-side DSP resource scheduling. SetCompatibilityMode writes the Stri… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="363.9" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Shared resource… Upload Bill code/data blobs (SEL127), release (100), clear cache (192);… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="380.2" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Allocate/Deallo… Public plugin lifecycle and audio transfer; Allocate reads AssumeMaxLoad (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="396.6" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Chain* (SetIntV… Parameter plumbing from the plugin UI thread into DSP memory (_writeArr… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="413" y="110.2" width="15.4" height="14.8"><title>Plugin Support: _resendParamete… Re-send parameters when the allocator moves a plugin to another DSP, de… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="429.3" y="110.2" width="15.4" height="14.8"><title>Plugin Support: SendAllParamete… Readback pacing, span configuration, strip-type queries (Console insert… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="445.7" y="110.2" width="15.4" height="14.8"><title>Plugin Support: CUAD2PlugInProx… Wrapper used by the chain node to forward calls to the real plugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="462.1" y="110.2" width="15.4" height="14.8"><title>Plugin Support: OpenUAD2ChainMa… create the singleton chain manager (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="478.4" y="110.2" width="15.4" height="14.8"><title>Plugin Support: CreateUAD2PlugI… create a CUAD2PlugIn bound to a driver (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="347.5" y="126" width="15.4" height="14.8"><title>Plugin Support: 100 UnregisterSharedResource (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="363.9" y="126" width="15.4" height="14.8"><title>Plugin Support: 113 AllocatePlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="380.2" y="126" width="15.4" height="14.8"><title>Plugin Support: 114 GetPluginInfo (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="396.6" y="126" width="15.4" height="14.8"><title>Plugin Support: 115 AllocateSharedDMABuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="413" y="126" width="15.4" height="14.8"><title>Plugin Support: 116 FreeSharedDMABuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="429.3" y="126" width="15.4" height="14.8"><title>Plugin Support: 117 FreePlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="445.7" y="126" width="15.4" height="14.8"><title>Plugin Support: 118 AdjustPluginLoad (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="462.1" y="126" width="15.4" height="14.8"><title>Plugin Support: 119 ProcessPlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="478.4" y="126" width="15.4" height="14.8"><title>Plugin Support: 120 ReadPluginMessage (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="347.5" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 123 SendSystemMessage (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="363.9" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 124 SetLoadLimit (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="380.2" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 125 AdjustAllocation (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="396.6" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 126 SetAllocationEnabled (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="413" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 127 RegisterSharedResourceDMA (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="429.3" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 128 AllocateChain (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="445.7" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 129 AddSubPluginToChain (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="462.1" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 132 PluginEnableSynchProcessing (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="478.4" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 133 SetAllocationWeighting (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="347.5" y="157.6" width="15.4" height="14.8"><title>Plugin Support: 143 IsSessionStillLoading (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="363.9" y="157.6" width="15.4" height="14.8"><title>Plugin Support: 192 ClearSharedResourceCache (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="380.2" y="157.6" width="15.4" height="14.8"><title>Plugin Support: UAD-2 Satellite… PLUGIN-HOST (triage 2026-10-11, was MISSING: UAD-2 Satellite is a plugi… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="396.6" y="157.6" width="15.4" height="14.8"><title>Plugin Support: 13 Plugin hosting / strip engine (selectors 113-133, chain manager model,… (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="347.5" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Plugin allocati… Host-side DSP resource scheduling. SetCompatibilityMode writes the Stri… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="363.9" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Shared resource… Upload Bill code/data blobs (SEL127), release (100), clear cache (192);… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="380.2" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Allocate/Deallo… Public plugin lifecycle and audio transfer; Allocate reads AssumeMaxLoad (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="396.6" y="110.2" width="15.4" height="14.8"><title>Plugin Support: Chain* (SetIntV… Parameter plumbing from the plugin UI thread into DSP memory (_writeArr… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="413" y="110.2" width="15.4" height="14.8"><title>Plugin Support: _resendParamete… Re-send parameters when the allocator moves a plugin to another DSP, de… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="429.3" y="110.2" width="15.4" height="14.8"><title>Plugin Support: SendAllParamete… Readback pacing, span configuration, strip-type queries (Console insert… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="445.7" y="110.2" width="15.4" height="14.8"><title>Plugin Support: CUAD2PlugInProx… Wrapper used by the chain node to forward calls to the real plugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="462.1" y="110.2" width="15.4" height="14.8"><title>Plugin Support: OpenUAD2ChainMa… create the singleton chain manager (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="478.4" y="110.2" width="15.4" height="14.8"><title>Plugin Support: CreateUAD2PlugI… create a CUAD2PlugIn bound to a driver (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="347.5" y="126" width="15.4" height="14.8"><title>Plugin Support: 100 UnregisterSharedResource (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="363.9" y="126" width="15.4" height="14.8"><title>Plugin Support: 113 AllocatePlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="380.2" y="126" width="15.4" height="14.8"><title>Plugin Support: 114 GetPluginInfo (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="396.6" y="126" width="15.4" height="14.8"><title>Plugin Support: 115 AllocateSharedDMABuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="413" y="126" width="15.4" height="14.8"><title>Plugin Support: 116 FreeSharedDMABuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="429.3" y="126" width="15.4" height="14.8"><title>Plugin Support: 117 FreePlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="445.7" y="126" width="15.4" height="14.8"><title>Plugin Support: 118 AdjustPluginLoad (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="462.1" y="126" width="15.4" height="14.8"><title>Plugin Support: 119 ProcessPlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="478.4" y="126" width="15.4" height="14.8"><title>Plugin Support: 120 ReadPluginMessage (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="347.5" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 123 SendSystemMessage (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="363.9" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 124 SetLoadLimit (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="380.2" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 125 AdjustAllocation (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="396.6" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 126 SetAllocationEnabled (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="413" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 127 RegisterSharedResourceDMA (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="429.3" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 128 AllocateChain (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="445.7" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 129 AddSubPluginToChain (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="462.1" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 132 PluginEnableSynchProcessing (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="478.4" y="141.8" width="15.4" height="14.8"><title>Plugin Support: 133 SetAllocationWeighting (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="347.5" y="157.6" width="15.4" height="14.8"><title>Plugin Support: 143 IsSessionStillLoading (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="363.9" y="157.6" width="15.4" height="14.8"><title>Plugin Support: 192 ClearSharedResourceCache (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="380.2" y="157.6" width="15.4" height="14.8"><title>Plugin Support: UAD-2 Satellite… PLUGIN-HOST (triage 2026-10-11, was MISSING: UAD-2 Satellite is a plugi… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="396.6" y="157.6" width="15.4" height="14.8"><title>Plugin Support: 13 Plugin hosting / strip engine (selectors 113-133, chain manager model,… (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="413" y="157.6" width="15.4" height="14.8"><title>Plugin Support: Sample rate and… Rate/clock-source/latency control; rate change is SetSessionFormat(0) t… (needs hardware)</title></rect>
 <rect class="blocked" x="429.3" y="157.6" width="15.4" height="14.8"><title>Plugin Support: Driver IO routi… Which DSP channels appear as driver (DAW) channels (needs hardware)</title></rect>
 <rect class="blocked" x="445.7" y="157.6" width="15.4" height="14.8"><title>Plugin Support: 162 SetAudioClockMaster (needs hardware)</title></rect>
@@ -620,33 +620,33 @@
 <rect class="done" x="587.7" y="99.7" width="14.2" height="16.6"><title>User client: 1 WriteRegister (done in code)</title></rect>
 <rect class="done" x="496.8" y="117.2" width="14.2" height="16.6"><title>User client: 13 GetDeviceInfo (done in code)</title></rect>
 <rect class="re" x="512" y="117.2" width="14.2" height="16.6"><title>User client: 11 DSPAction (still to figure out (RE))</title></rect>
-<rect class="plugin" x="527.1" y="117.2" width="14.2" height="16.6"><title>User client: 100 UnregisterSharedResource (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="542.3" y="117.2" width="14.2" height="16.6"><title>User client: 113 AllocatePlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="557.4" y="117.2" width="14.2" height="16.6"><title>User client: 114 GetPluginInfo (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="572.6" y="117.2" width="14.2" height="16.6"><title>User client: 115 AllocateSharedDMABuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="587.7" y="117.2" width="14.2" height="16.6"><title>User client: 116 FreeSharedDMABuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="496.8" y="134.8" width="14.2" height="16.6"><title>User client: 117 FreePlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="512" y="134.8" width="14.2" height="16.6"><title>User client: 118 AdjustPluginLoad (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="527.1" y="134.8" width="14.2" height="16.6"><title>User client: 119 ProcessPlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="542.3" y="134.8" width="14.2" height="16.6"><title>User client: 120 ReadPluginMessage (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="557.4" y="134.8" width="14.2" height="16.6"><title>User client: 124 SetLoadLimit (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="572.6" y="134.8" width="14.2" height="16.6"><title>User client: 125 AdjustAllocation (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="587.7" y="134.8" width="14.2" height="16.6"><title>User client: 126 SetAllocationEnabled (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="496.8" y="152.4" width="14.2" height="16.6"><title>User client: 127 RegisterSharedResourceDMA (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="512" y="152.4" width="14.2" height="16.6"><title>User client: 128 AllocateChain (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="527.1" y="152.4" width="14.2" height="16.6"><title>User client: 129 AddSubPluginToChain (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="542.3" y="152.4" width="14.2" height="16.6"><title>User client: 131 SetMixerParam (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="557.4" y="152.4" width="14.2" height="16.6"><title>User client: 132 PluginEnableSynchProcessing (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="572.6" y="152.4" width="14.2" height="16.6"><title>User client: 133 SetAllocationWeighting (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="587.7" y="152.4" width="14.2" height="16.6"><title>User client: 192 ClearSharedResourceCache (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="496.8" y="169.9" width="14.2" height="16.6"><title>User client: 2 CreateBuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="512" y="169.9" width="14.2" height="16.6"><title>User client: 3 WriteBuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="527.1" y="169.9" width="14.2" height="16.6"><title>User client: 4 ReadBuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="542.3" y="169.9" width="14.2" height="16.6"><title>User client: 5 DestroyBuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="557.4" y="169.9" width="14.2" height="16.6"><title>User client: 7 BufferRangeOp A (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="572.6" y="169.9" width="14.2" height="16.6"><title>User client: 8 BufferRangeOp B (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="587.7" y="169.9" width="14.2" height="16.6"><title>User client: 9 GetBufferBusAddress (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="496.8" y="187.5" width="14.2" height="16.6"><title>User client: 10 GetBufferSize (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="527.1" y="117.2" width="14.2" height="16.6"><title>User client: 100 UnregisterSharedResource (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="542.3" y="117.2" width="14.2" height="16.6"><title>User client: 113 AllocatePlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="557.4" y="117.2" width="14.2" height="16.6"><title>User client: 114 GetPluginInfo (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="572.6" y="117.2" width="14.2" height="16.6"><title>User client: 115 AllocateSharedDMABuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="587.7" y="117.2" width="14.2" height="16.6"><title>User client: 116 FreeSharedDMABuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="496.8" y="134.8" width="14.2" height="16.6"><title>User client: 117 FreePlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="512" y="134.8" width="14.2" height="16.6"><title>User client: 118 AdjustPluginLoad (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="527.1" y="134.8" width="14.2" height="16.6"><title>User client: 119 ProcessPlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="542.3" y="134.8" width="14.2" height="16.6"><title>User client: 120 ReadPluginMessage (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="557.4" y="134.8" width="14.2" height="16.6"><title>User client: 124 SetLoadLimit (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="572.6" y="134.8" width="14.2" height="16.6"><title>User client: 125 AdjustAllocation (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="587.7" y="134.8" width="14.2" height="16.6"><title>User client: 126 SetAllocationEnabled (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="496.8" y="152.4" width="14.2" height="16.6"><title>User client: 127 RegisterSharedResourceDMA (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="512" y="152.4" width="14.2" height="16.6"><title>User client: 128 AllocateChain (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="527.1" y="152.4" width="14.2" height="16.6"><title>User client: 129 AddSubPluginToChain (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="542.3" y="152.4" width="14.2" height="16.6"><title>User client: 131 SetMixerParam (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="557.4" y="152.4" width="14.2" height="16.6"><title>User client: 132 PluginEnableSynchProcessing (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="572.6" y="152.4" width="14.2" height="16.6"><title>User client: 133 SetAllocationWeighting (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="587.7" y="152.4" width="14.2" height="16.6"><title>User client: 192 ClearSharedResourceCache (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="496.8" y="169.9" width="14.2" height="16.6"><title>User client: 2 CreateBuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="512" y="169.9" width="14.2" height="16.6"><title>User client: 3 WriteBuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="527.1" y="169.9" width="14.2" height="16.6"><title>User client: 4 ReadBuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="542.3" y="169.9" width="14.2" height="16.6"><title>User client: 5 DestroyBuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="557.4" y="169.9" width="14.2" height="16.6"><title>User client: 7 BufferRangeOp A (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="572.6" y="169.9" width="14.2" height="16.6"><title>User client: 8 BufferRangeOp B (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="587.7" y="169.9" width="14.2" height="16.6"><title>User client: 9 GetBufferBusAddress (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="496.8" y="187.5" width="14.2" height="16.6"><title>User client: 10 GetBufferSize (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="512" y="187.5" width="14.2" height="16.6"><title>User client: 162 SetAudioClockMaster (needs hardware)</title></rect>
 <rect class="blocked" x="527.1" y="187.5" width="14.2" height="16.6"><title>User client: 173 EnableCLI (needs hardware)</title></rect>
 <rect class="blocked" x="542.3" y="187.5" width="14.2" height="16.6"><title>User client: 174 SendCLICommand (needs hardware)</title></rect>
@@ -687,26 +687,26 @@
 <rect class="done" x="604.9" y="126" width="14.7" height="14.8"><title>Windows+USB: F19 Serial-prefix table (22 entries) (done in code)</title></rect>
 <rect class="done" x="620.6" y="126" width="14.7" height="14.8"><title>Windows+USB: F20 PCI subsystem naming for Twin/silver families (done in code)</title></rect>
 <rect class="re" x="636.3" y="126" width="14.7" height="14.8"><title>Windows+USB: 123 SendSystemMessage (still to figure out (RE))</title></rect>
-<rect class="plugin" x="652" y="126" width="14.7" height="14.8"><title>Windows+USB: 100 UnregisterSharedResource (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="667.6" y="126" width="14.7" height="14.8"><title>Windows+USB: 101 RegisterSharedResource (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="683.3" y="126" width="14.7" height="14.8"><title>Windows+USB: 102 SetSessionFormat (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="604.9" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 113 AllocatePlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="620.6" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 114 GetPluginInfo (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="636.3" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 115 AllocateSharedDMABuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="652" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 116 FreeSharedDMABuffer (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="667.6" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 117 FreePlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="683.3" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 118 AdjustPluginLoad (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="604.9" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 119 ProcessPlugin (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="620.6" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 120 ReadPluginMessage (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="636.3" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 124 SetLoadLimit (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="652" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 125 AdjustAllocation (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="667.6" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 126 SetAllocationEnabled (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="683.3" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 127 RegisterSharedResourceDMA (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="604.9" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 128 AllocateChain (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="620.6" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 129 AddSubPluginToChain (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="636.3" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 132 PluginEnableSynchProcessing (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="652" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 133 SetAllocationWeighting (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="667.6" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 192 ClearSharedResourceCache (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="652" y="126" width="14.7" height="14.8"><title>Windows+USB: 100 UnregisterSharedResource (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="667.6" y="126" width="14.7" height="14.8"><title>Windows+USB: 101 RegisterSharedResource (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="683.3" y="126" width="14.7" height="14.8"><title>Windows+USB: 102 SetSessionFormat (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="604.9" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 113 AllocatePlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="620.6" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 114 GetPluginInfo (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="636.3" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 115 AllocateSharedDMABuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="652" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 116 FreeSharedDMABuffer (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="667.6" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 117 FreePlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="683.3" y="141.8" width="14.7" height="14.8"><title>Windows+USB: 118 AdjustPluginLoad (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="604.9" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 119 ProcessPlugin (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="620.6" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 120 ReadPluginMessage (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="636.3" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 124 SetLoadLimit (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="652" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 125 AdjustAllocation (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="667.6" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 126 SetAllocationEnabled (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="683.3" y="157.6" width="14.7" height="14.8"><title>Windows+USB: 127 RegisterSharedResourceDMA (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="604.9" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 128 AllocateChain (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="620.6" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 129 AddSubPluginToChain (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="636.3" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 132 PluginEnableSynchProcessing (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="652" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 133 SetAllocationWeighting (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="667.6" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 192 ClearSharedResourceCache (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="683.3" y="173.4" width="14.7" height="14.8"><title>Windows+USB: 162 SetAudioClockMaster (needs hardware)</title></rect>
 <rect class="blocked" x="604.9" y="189.2" width="14.7" height="14.8"><title>Windows+USB: 193 GetDanteInfoForHwID (needs hardware)</title></rect>
 <rect class="blocked" x="620.6" y="189.2" width="14.7" height="14.8"><title>Windows+USB: F11 Twin / Twin X bring-up (needs hardware)</title></rect>
@@ -813,8 +813,8 @@
 <rect class="done" x="391.5" y="416" width="13.7" height="15.5"><title>DSP+firmware: K07 ACEFACE before ring connect (done in code)</title></rect>
 <rect class="done" x="406.2" y="416" width="13.7" height="15.5"><title>DSP+firmware: K08 Connect command (done in code)</title></rect>
 <rect class="done" x="420.8" y="416" width="13.7" height="15.5"><title>DSP+firmware: K10 DSP status check (done in code)</title></rect>
-<rect class="plugin" x="435.5" y="416" width="13.7" height="15.5"><title>DSP+firmware: R96 Pool totals and free (window registers + resource manager) (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="450.2" y="416" width="13.7" height="15.5"><title>DSP+firmware: K09 Plugin-chain replay (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="435.5" y="416" width="13.7" height="15.5"><title>DSP+firmware: R96 Pool totals and free (window registers + resource manager) (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="450.2" y="416" width="13.7" height="15.5"><title>DSP+firmware: K09 Plugin-chain replay (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="347.5" y="432.5" width="13.7" height="15.5"><title>DSP+firmware: R84 StartTransport re-notification {, 0} + date (needs hardware)</title></rect>
 <rect class="blocked" x="362.2" y="432.5" width="13.7" height="15.5"><title>DSP+firmware: H04 w1 = 0 (needs hardware)</title></rect>
 <rect class="blocked" x="376.8" y="432.5" width="13.7" height="15.5"><title>DSP+firmware: K06 DSP interrupt vectors (needs hardware)</title></rect>
@@ -862,7 +862,7 @@
 <rect class="done" x="466.8" y="284.4" width="14.6" height="14.5"><title>Model types: F46 PCIe device-type identification (done in code)</title></rect>
 <rect class="done" x="482.5" y="284.4" width="14.6" height="14.5"><title>Model types: F47 DSP count per model (done in code)</title></rect>
 <rect class="done" x="498.1" y="284.4" width="14.6" height="14.5"><title>Model types: F49 24 dB mode (done in code)</title></rect>
-<rect class="plugin" x="513.7" y="284.4" width="14.6" height="14.5"><title>Model types: F32 Output DSP: speaker correction, HP correction, bass management, stereo… (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="513.7" y="284.4" width="14.6" height="14.5"><title>Model types: F32 Output DSP: speaker correction, HP correction, bass management, stereo… (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="529.4" y="284.4" width="14.6" height="14.5"><title>Model types: Apollo x4 Gen 2… BLOCKED-HW (triage 2026-10-11, was PARTIAL: Gen 2 x4 unverified, needs… (needs hardware)</title></rect>
 <rect class="blocked" x="545" y="284.4" width="14.6" height="14.5"><title>Model types: Apollo x16D BLOCKED-HW (triage 2026-10-11, was PARTIAL: Dante / FPGA-gated ids need… (needs hardware)</title></rect>
 <rect class="blocked" x="560.6" y="284.4" width="14.6" height="14.5"><title>Model types: F33 Surround monitoring and Atmos (needs hardware)</title></rect>
@@ -887,9 +887,9 @@
 <rect class="done" x="684" y="222.5" width="14" height="14.5"><title>Device mgr: SetNotification… per-client async notification, 32-slot ring (done in code)</title></rect>
 <rect class="done" x="593.9" y="238" width="14" height="14.5"><title>Device mgr: _openUserClient… session create/destroy, cleanup on crash (done in code)</title></rect>
 <rect class="re" x="608.9" y="238" width="14" height="14.5"><title>Device mgr: SetPllPhase () 0xC5BC + doorbell 0x20 + bit 7 wait (still to figure out (RE))</title></rect>
-<rect class="plugin" x="623.9" y="238" width="14" height="14.5"><title>Device mgr: EnableCLI, Send… per-unit CLI (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="638.9" y="238" width="14" height="14.5"><title>Device mgr: UAD2PcieUserCli… legacy per-device client (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="653.9" y="238" width="14" height="14.5"><title>Device mgr: CSession::Add/R… resource ownership (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="623.9" y="238" width="14" height="14.5"><title>Device mgr: EnableCLI, Send… per-unit CLI (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="638.9" y="238" width="14" height="14.5"><title>Device mgr: UAD2PcieUserCli… legacy per-device client (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="653.9" y="238" width="14" height="14.5"><title>Device mgr: CSession::Add/R… resource ownership (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="669" y="238" width="14" height="14.5"><title>Device mgr: CDeviceManager:… mutex, 8 slot events, 3 timers, defaults rate 1 / src 0xC / mode 0 (needs hardware)</title></rect>
 <rect class="blocked" x="684" y="238" width="14" height="14.5"><title>Device mgr: AddDevice () slot, bus grouping, DSP registration, master callbacks, notify 1 (needs hardware)</title></rect>
 <rect class="blocked" x="593.9" y="253.4" width="14" height="14.5"><title>Device mgr: _addAudioDevice… ext + AudioDevInfo arrays, master wiring (needs hardware)</title></rect>
@@ -994,7 +994,7 @@
 <rect class="done" x="598.7" y="416.1" width="14.2" height="15.5"><title>Services: G2 LaunchAgent, RunAtLoad, no KeepAlive, -silent (Mixer Engine) (done in code)</title></rect>
 <rect class="done" x="614" y="416.1" width="14.2" height="15.5"><title>Services: G3 Start order: kext first, then engine (done in code)</title></rect>
 <rect class="done" x="553.1" y="432.5" width="14.2" height="15.5"><title>Services: G5 Status UI (done in code)</title></rect>
-<rect class="plugin" x="568.3" y="432.5" width="14.2" height="15.5"><title>Services: H2 Services reads kext state through the same user client as the engine (I… (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="568.3" y="432.5" width="14.2" height="15.5"><title>Services: H2 Services reads kext state through the same user client as the engine (I… (plugin hosting (in progress))</title></rect>
 <rect class="blocked" x="583.5" y="432.5" width="14.2" height="15.5"><title>Services: H1 UA Services Device_MH* connect as a client to the Mixer Helper (4720);… (needs hardware)</title></rect>
 <text class="lbl" x="556.1" y="329.3">Services</text>
 <rect class="done" x="631.2" y="317.3" width="16" height="13.6"><title>Windows PCIe: B02 EvtDeviceAdd: device-init type and I/O-type settings (irrelevant, there… (done in code)</title></rect>
@@ -1032,7 +1032,7 @@
 <rect class="blocked" x="631.2" y="434.4" width="16" height="13.6"><title>Windows PCIe: C07 /1840/1930 (needs hardware)</title></rect>
 <rect class="blocked" x="648.1" y="434.4" width="16" height="13.6"><title>Windows PCIe: C08 CLI pass-through: EnableCLI (0xC3F4 = en, 0xC3F8 = 0, 0xC3FC = 0), Send… (needs hardware)</title></rect>
 <text class="lbl" x="634.2" y="329.3">Windows P</text>
-<text class="h" x="722" y="36">Work plan: 89.4% done (152/170)</text>
+<text class="h" x="722" y="36">Work plan: 90% done (153/170)</text>
 <rect class="verified" x="721" y="47" width="26.7" height="33.3"><title>Audit gaps: N3 Error/underrun/fault counters in dsp_state, the report tool and an event (verified on hardware)</title></rect>
 <rect class="verified" x="748.7" y="47" width="26.7" height="33.3"><title>Audit gaps: N4 PCIe link speed/width, clock-source mask and firmware rate mask in GET_… (verified on hardware)</title></rect>
 <rect class="verified" x="776.4" y="47" width="26.7" height="33.3"><title>Audit gaps: N10 Daemon /ClockSource value list from the device, list-changed push (verified on hardware)</title></rect>
@@ -1101,8 +1101,8 @@
 <rect class="done" x="954.8" y="123.4" width="31.8" height="24.5"><title>Mixer params: M13 Coefficient cache for SEL130 (bus, param, side) so a DSP restart can re… (done in code)</title></rect>
 <rect class="done" x="889.2" y="148.9" width="31.8" height="24.5"><title>Mixer params: M14 Surround / HP-correction / Dante param families (other 0x4d-0x52, 0x55-… (done in code)</title></rect>
 <rect class="partial" x="922" y="148.9" width="31.8" height="24.5"><title>Mixer params: M11 Value widths: 0x1d identify 3 bits; 0x21 multi-unit role/order bits [7:… (partial / in progress)</title></rect>
-<rect class="plugin" x="954.8" y="148.9" width="31.8" height="24.5"><title>Mixer params: M15 Multi-DSP bus-param routing: per-bus hosting DSP, also send to DSP 0, s… (plugin hosting (decision))</title></rect>
-<rect class="plugin" x="889.2" y="174.4" width="31.8" height="24.5"><title>Mixer params: M16 Unison custom-preamp lanes (inputs 8-0x12 settings; readback words 21,… (plugin hosting (decision))</title></rect>
+<rect class="plugin" x="954.8" y="148.9" width="31.8" height="24.5"><title>Mixer params: M15 Multi-DSP bus-param routing: per-bus hosting DSP, also send to DSP 0, s… (plugin hosting (in progress))</title></rect>
+<rect class="plugin" x="889.2" y="174.4" width="31.8" height="24.5"><title>Mixer params: M16 Unison custom-preamp lanes (inputs 8-0x12 settings; readback words 21,… (plugin hosting (in progress))</title></rect>
 <text class="lbl" x="892.2" y="59">Mixer params</text>
 <rect class="verified" x="889.2" y="201.8" width="31.8" height="27.6"><title>Every Apollo: O14 Converter latency per class (GetInputDelay/GetOutputDelay, DSPToFPGADel… (verified on hardware)</title></rect>
 <rect class="done" x="922" y="201.8" width="31.8" height="27.6"><title>Every Apollo: O1 Connect by the kext rule: after ACEFACE, every v2 Apollo whose public t… (done in code)</title></rect>
@@ -1155,7 +1155,7 @@
 <rect class="done" x="989.5" y="188.2" width="34.9" height="24.8"><title>HW interface: E5 Header fixes: UA_REG_CLOCK_SRC0/1 are peer-to-peer slot registers (done in code)</title></rect>
 <rect class="done" x="1025.4" y="188.2" width="34.9" height="24.8"><title>HW interface: E6 Read DSP window status/pool registers for diagnostics (report tool) (done in code)</title></rect>
 <rect class="done" x="989.5" y="214" width="34.9" height="24.8"><title>HW interface: E7 64-bit DMA for the two 4 MiB audio buffers (Windows and macOS never lim… (done in code)</title></rect>
-<rect class="todo" x="1025.4" y="214" width="34.9" height="24.8"><title>HW interface: E8 Read-only diagnostics for RE: DSP window +0x1A0 at probe and in dsp_sta… (understood, not done)</title></rect>
+<rect class="done" x="1025.4" y="214" width="34.9" height="24.8"><title>HW interface: E8 Read-only diagnostics for RE: DSP window +0x1A0 at probe and in dsp_sta… (done in code)</title></rect>
 <text class="lbl" x="992.5" y="148.7">HW interf</text>
 <rect class="verified" x="989.5" y="241.8" width="34.9" height="24.8"><title>Other models: H4 Model-neutral daemon router: monitor/HP/CUE output indices and the inpu… (verified on hardware)</title></rect>
 <rect class="done" x="1025.4" y="241.8" width="34.9" height="24.8"><title>Other models: H2 Device ID tables from the Windows INFs into the model data: no PCI id m… (done in code)</title></rect>
@@ -1258,8 +1258,8 @@
 <rect class="todo" x="659" y="469" width="12" height="12"/>
 <text class="m" x="676" y="479">understood, not done</text>
 <rect class="plugin" x="826" y="469" width="12" height="12"/>
-<text class="m" x="843" y="479">plugin hosting (decision)</text>
-<rect class="blocked" x="1026" y="469" width="12" height="12"/>
-<text class="m" x="1043" y="479">needs hardware</text>
-<text class="m" x="1268" y="479" text-anchor="end">as of 2026-10-11</text>
+<text class="m" x="843" y="479">plugin hosting (in progress)</text>
+<rect class="blocked" x="1045" y="469" width="12" height="12"/>
+<text class="m" x="1062" y="479">needs hardware</text>
+<text class="m" x="1268" y="18" text-anchor="end">as of 2026-10-11</text>
 </svg>

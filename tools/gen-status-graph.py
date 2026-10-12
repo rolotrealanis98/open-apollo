@@ -10,8 +10,8 @@ plan, or one Apollo model), coloured by how sure we are of it:
   partial   partly done, done differently, or in progress
   re        still to figure out: needs reverse engineering
   todo      understood, not done yet
-  plugin    part of plugin hosting / the DSP strip engine, which waits on
-            a separate decision
+  plugin    part of plugin hosting / the DSP strip engine, which is being
+            built
   blocked   needs hardware (or a test on it) or another decision
 
 Inputs:
@@ -55,7 +55,7 @@ LEGEND = {
     "partial": "partial / in progress",
     "re": "still to figure out (RE)",
     "todo": "understood, not done",
-    "plugin": "plugin hosting (decision)",
+    "plugin": "plugin hosting (in progress)",
     "blocked": "needs hardware",
 }
 THEMES = {
@@ -379,7 +379,7 @@ def render(data, theme):
         out.append('<text class="m" x="%d" y="479">%s</text>'
                    % (lx + 17, escape(LEGEND[st])))
         lx += 17 + int(len(LEGEND[st]) * 6.6) + 18
-    out.append('<text class="m" x="%d" y="479" text-anchor="end">as of %s</text>'
+    out.append('<text class="m" x="%d" y="18" text-anchor="end">as of %s</text>'
                % (W - 12, escape(data["exported"])))
     out.append("</svg>")
     return "\n".join(out) + "\n"
@@ -447,7 +447,7 @@ def readme(data):
         "Linux status. Things Linux does not need (N/A) and UA's licensing "
         "(out of scope, never analysed) are not counted.",
         "- **Work plan**: one square per task of the master implementation "
-        "plan. Plugin hosting needs a separate decision and is not shown.",
+        "plan. The plugin-hosting tasks are tracked separately and not shown.",
         "- **Apollo models**: one square per model in `devices/`; green ones "
         "have per-model support in the code but no owner has tested them yet.",
         "",
@@ -457,7 +457,7 @@ def readme(data):
         "out** = needs reverse engineering; **understood, not done** = we "
         "know what UA's driver does, Linux does not do it yet; **plugin "
         "hosting** = part of hosting UA's DSP plugins and Console strips, "
-        "which waits on a separate decision; **needs hardware** = needs a "
+        "which is being built; **needs hardware** = needs a "
         "test on an Apollo or hardware the project does not have (a second "
         "Apollo, other models, cables, USB units, an S3-capable host).",
         "",
@@ -472,7 +472,7 @@ def readme(data):
     lines += ["", "## Work plan", ""]
     lines += area_table(data["plan"])
     for st, title in (("re", "Still to figure out"), ("partial", "In progress"),
-                      ("plugin", "Plugin hosting (waits on a decision)"),
+                      ("plugin", "Plugin hosting (in progress)"),
                       ("blocked", "Needs hardware"),
                       ("todo", "Understood, not done")):
         open_items = [(g["name"], it) for g in data["plan"]

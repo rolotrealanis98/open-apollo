@@ -1083,7 +1083,7 @@
     [
      "A09",
      "W+0x1A0",
-     "re"
+     "done"
     ],
     [
      "A10",
@@ -1098,7 +1098,7 @@
     [
      "A13",
      "W+0x3C8",
-     "todo"
+     "done"
     ],
     [
      "B01",
@@ -5420,7 +5420,7 @@
     [
      "E8",
      "Read-only diagnostics for RE: DSP window +0x1A0 at probe and in dsp_sta…",
-     "todo"
+     "done"
     ]
    ]
   },
