@@ -35,11 +35,25 @@ pub fn render_png(
     if let Some((strip, slot)) = open_plugin {
         overlays.on_open_plugin(strip, *slot, model);
     }
-    let view = ViewState {
+    let mut view = ViewState {
         compact,
         window: size,
         ..ViewState::default()
     };
+    // Dev: render a session surface open (`UACONSOLE_RENDER_OPEN=session-menu|save-changes|save-as`).
+    if let Ok(what) = std::env::var("UACONSOLE_RENDER_OPEN") {
+        use rack::surfaces::SessionOp;
+        let tap = |c: Control| Action::Tap(ControlId { strip: "session".into(), control: c });
+        let taps: &[Control] = match what.as_str() {
+            "session-menu" => &[Control::SessionMenu],
+            "save-changes" => &[Control::SessionMenu, Control::Session(SessionOp::New)],
+            "save-as" => &[Control::SessionMenu, Control::Session(SessionOp::SaveAs)],
+            _ => &[],
+        };
+        for c in taps {
+            let _ = view.route(tap(c.clone()), model);
+        }
+    }
     let (w, h) = layout_for(model, &view).size();
     let t = Instant::now();
     let frame = build_frame(

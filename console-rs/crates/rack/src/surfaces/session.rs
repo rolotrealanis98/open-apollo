@@ -217,7 +217,9 @@ pub(crate) fn draw_session_popover(ui: &mut Ui, model: &dyn MixerModel, kind: &P
         Popover::Session => {
             let info = model.session();
             let items = session_menu_items(&info);
-            let width = items.iter().map(|i| i.label.chars().count()).max().unwrap_or(10).clamp(14, 48) as f32 * 6.4 + 40.0;
+            // Rows are 11-pt bold Helvetica after a 22-pt tick column.
+            let widest = items.iter().map(|i| crate::window::helvetica_bold_width(&i.label, 11.0)).fold(0.0, f32::max);
+            let width = (widest + 40.0).clamp(140.0, 420.0).ceil();
             ui.popover_menu(anchor, Placement::Below, bounds, None, &items, width);
             true
         }

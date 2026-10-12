@@ -88,3 +88,40 @@ fn read_only_menu_sends_nothing() {
     let suppressed: Vec<String> = m.store().writer().recent_suppressed().map(str::to_owned).collect();
     assert_eq!(suppressed, ["post /NewSession {}", "post /SaveSession {}"]);
 }
+
+/// Against a private open-apollo daemon (`ua_mixer_daemon.py --no-hardware --port 24710 …`):
+/// `UA_SANDBOX_ENGINE=127.0.0.1:24710 cargo test -p engine-model --test sessions -- --ignored`.
+/// Refuses port 4710 (a real engine or the hardware daemon).
+#[test]
+#[ignore]
+fn sandbox_daemon_session_menu() {
+    let Ok(ep) = std::env::var("UA_SANDBOX_ENGINE") else { return };
+    let ep = ua_engine::Endpoint::parse(&ep);
+    assert_ne!(ep.port, 4710, "never point this test at a real engine");
+    let mut m = EngineMixer::connect(ep, true);
+    pump_until(&mut m, "live", |m| *m.store().status() == Status::Live);
+    eprintln!("sandbox session: {:?}", m.session());
+    let mut v = ViewState::default();
+    let tap = |v: &mut ViewState, m: &mut EngineMixer, c: Control| v.dispatch(Action::Tap(sid(c)), m);
+    tap(&mut v, &mut m, Control::Session(SessionOp::SaveAs));
+    while v.text_edit.as_ref().is_some_and(|t| !t.text.is_empty()) {
+        v.key_backspace();
+    }
+    v.key_text("Sandbox Test");
+    v.key_enter(&mut m);
+    tap(&mut v, &mut m, Control::Session(SessionOp::Save));
+    tap(&mut v, &mut m, Control::Session(SessionOp::Load(0)));
+    tap(&mut v, &mut m, Control::SessionSaveChoice(SaveChoice::DontSave));
+    tap(&mut v, &mut m, Control::Session(SessionOp::New));
+    tap(&mut v, &mut m, Control::SessionSaveChoice(SaveChoice::DontSave));
+    tap(&mut v, &mut m, Control::Session(SessionOp::Open));
+    v.key_text("/tmp/none.uadmix");
+    v.key_enter(&mut m);
+    let end = Instant::now() + Duration::from_millis(800);
+    while Instant::now() < end {
+        m.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    eprintln!("sent {}, suppressed {}", m.store().writer().sent_count(), m.store().writer().suppressed_count());
+    eprintln!("after: {:?}", m.session());
+}
