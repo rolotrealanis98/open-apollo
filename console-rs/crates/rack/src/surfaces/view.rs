@@ -134,11 +134,16 @@ pub struct BrowserView {
     /// PRESETS tab: open preset folders (by name) and the list scroll (0…1 of the overflow).
     pub presets_open: Vec<String>,
     pub presets_scroll: f32,
+    /// "Channel Presets..." / an insert's "Presets...": the strip and scope the PRESETS tab
+    /// loads into and saves from (Rack's `channel_preset_assign_browser`).
+    pub preset_target: Option<(Arc<str>, crate::presets::PresetScope)>,
+    /// The selected PRESETS row `(top, child)` (`u16::MAX` child = top-level).
+    pub preset_selected: Option<(u16, u16)>,
 }
 
 impl Default for BrowserView {
     fn default() -> Self {
-        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None, presets_open: Vec::new(), presets_scroll: 0.0 }
+        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None, presets_open: Vec::new(), presets_scroll: 0.0, preset_target: None, preset_selected: None }
     }
 }
 
@@ -199,6 +204,8 @@ pub enum TextTarget {
     SessionNewFolder,
     /// A PLUG-IN SCENES row's Rename (`Rack_ScenesListBoxRow::EditSceneName`), by scene index.
     SceneName(u16),
+    /// A preset name for SAVE AS / RENAME / NEW FOLDER on the PRESETS target's strip.
+    Preset(Arc<str>, crate::presets::PresetScope, crate::presets::PresetCmd),
 }
 
 /// A text field with keyboard focus.
@@ -386,6 +393,8 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::BrowserHintClose
             | C::BrowserAssignClose
             | C::BrowserPresetFolder(_)
+            | C::BrowserPresetFile(..)
+            | C::PresetCmd(..)
             | C::BrowserGroupReveal
             | C::BrowserInactiveReveal
             | C::BrowserScroll
@@ -687,8 +696,10 @@ impl ViewState {
             C::BrowserLargeRows => self.browser.large_rows ^= true,
             C::BrowserHintClose => self.browser.hint = false,
             C::BrowserAssignClose => self.browser.assign_to = None,
+            C::BrowserPresetFile(top, child) => out.extend(self.press_preset_file(top, child, model)),
+            C::PresetCmd(scope, ref cmd) => out.extend(self.press_preset_cmd(&id.strip, scope, cmd.clone(), model)),
             C::BrowserPresetFolder(k) => {
-                if let Some(f) = model.channel_presets().get(k as usize) {
+                if let Some(f) = self.preset_tree(model).get(k as usize) {
                     if let Some(i) = self.browser.presets_open.iter().position(|n| *n == f.name) {
                         self.browser.presets_open.remove(i);
                     } else {
@@ -772,6 +783,7 @@ impl ViewState {
             TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
             TextTarget::Search => Vec::new(),
             TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
+            TextTarget::Preset(strip, scope, cmd) => self.commit_preset_text(strip, scope, cmd, edit.text),
             t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder) => self.commit_session_text(&t, edit.text, model),
         }
     }

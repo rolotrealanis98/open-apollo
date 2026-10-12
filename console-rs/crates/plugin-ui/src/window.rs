@@ -268,8 +268,15 @@ pub struct PluginWindow {
     /// The ⋮ menu (`rack::menu::plugin_insert_menu`, s41), refreshed by the host from the
     /// mixer; its rows are mixer controls the host routes (they are not this window's).
     pub insert_menu: Option<rack::menu::PopupMenu>,
-    /// "Resize Plug-In" scale (percent); the window does not scale yet.
+    /// "Resize Plug-In" scale (percent): spec panels and UA's HTML GUIs draw at this size.
     pub scale: u16,
+    /// The insert's presets (the host fills them from the model): the tree the presets field's
+    /// menu shows, and the same files flattened in list order (`PresetItem` indexes these; ‹ ›
+    /// step through them).
+    pub preset_tree: Vec<rack::PresetNode>,
+    pub presets: Vec<String>,
+    /// PASTE enabled (`CanPastePluginBarSettings`).
+    pub paste_enabled: bool,
     /// The "Help & Video" panel of the more menu (s43).
     pub help_open: bool,
     /// Plug-in version for the help panel ("v1.0.0").
@@ -309,17 +316,23 @@ impl PluginWindow {
             popover: None,
             insert_menu: None,
             scale: 100,
+            preset_tree: Vec::new(),
+            presets: Vec::new(),
+            paste_enabled: false,
             help_open: false,
             version: None,
             inline_popover: true,
         }
     }
 
-    /// The editor's size in points (pw × ph).
+    /// The editor's size in points (pw × ph), at the Resize Plug-In scale (the generic list
+    /// does not scale).
     pub fn editor_size(&self, params: &dyn ParamSource) -> (f32, f32) {
+        let k = self.scale.clamp(25, 400) as f32 / 100.0;
+        let scaled = |(w, h): (f32, f32)| ((w * k).round(), (h * k).round());
         match &self.content {
-            Content::Web(c) => (c.window.width, c.window.height),
-            Content::Spec(p) => p.size(),
+            Content::Web(c) => scaled((c.window.width, c.window.height)),
+            Content::Spec(p) => scaled(p.size()),
             Content::Generic(g) => {
                 let (w, h) = g.size(params);
                 (w, h.min(600.0))
@@ -473,7 +486,13 @@ impl PluginWindow {
                 B::CompareA => text(ui, "A", on(b)),
                 B::CompareB => text(ui, "B", on(b)),
                 B::Copy => text(ui, "COPY", false),
-                B::Paste => text(ui, "PASTE", false),
+                B::Paste => {
+                    let style = TextStyle { color: LABEL.with_alpha(if self.paste_enabled { LABEL.a } else { 0.35 }), ..label.clone() };
+                    ui.text("PASTE", style, r, Align::Center);
+                    if !self.paste_enabled {
+                        continue;
+                    }
+                }
                 B::Mixer => text(ui, "MULTI-OUT MIXER", false),
                 B::More => self.more_button(ui, r, on(b)),
                 _ => {}
@@ -578,13 +597,60 @@ impl PluginWindow {
                     }
                 }
             }
-            _ => {
-                let style = Ui::plain_style("Helvetica", 11.0, true, LABEL);
-                ui.fill(l.editor, Rgba::BLACK.with_alpha(0.8));
-                ui.text("Preset browser (not implemented)", style, l.editor, Align::Center);
-                ui.hit(l.editor, self.id(Control::PluginWindow(which)), HitKind::Tap);
+            B::Presets => {
+                // The presets field's menu (`UAPW::PresetFileOperations`; not captured): the
+                // plug-in's presets in the dark plug-in menu, folders as section headers, the
+                // current one ticked; then Save Preset and Preset Browser... (the mixer's
+                // PRESETS tab on this insert: SAVE AS, RENAME, DELETE, NEW FOLDER).
+                let menu = self.preset_menu();
+                let anchor = l.button(B::Presets).unwrap_or(l.header);
+                let f = layout_menu(ui, &menu, MenuLook::Plugin, (anchor.x, anchor.max_y()), 0.0, bounds);
+                ui.popup_menu(&menu, MenuLook::Plugin, &f, 0, None, None);
+            }
+            _ => {}
+        }
+    }
+
+    /// The presets field's menu rows (see [`popover`](Self::popover)).
+    pub fn preset_menu(&self) -> rack::menu::PopupMenu {
+        use rack::menu::{PopupItem, PopupMenu};
+        let mut m = PopupMenu::new();
+        let current = self.chrome.preset.trim_start_matches('/');
+        let mut index = 0u16;
+        let mut item = |m: &mut PopupMenu, label: &str| {
+            let value = self.presets.get(index as usize).cloned().unwrap_or_default();
+            m.push(PopupItem::new(label.to_string(), self.id(Control::PluginWindow(B::PresetItem(index)))).ticked(value == current));
+            index += 1;
+        };
+        if self.preset_tree.is_empty() {
+            m.push(PopupItem::new("No Presets", self.id(Control::PluginWindow(B::Presets))).enabled(false));
+        }
+        for node in &self.preset_tree {
+            match &node.children {
+                None => item(&mut m, &node.name),
+                Some(kids) => {
+                    m.header(node.name.clone());
+                    for k in kids.iter().filter(|k| k.children.is_none()) {
+                        item(&mut m, &k.name);
+                    }
+                }
             }
         }
+        m.separator();
+        let user = !current.is_empty() && self.preset_locked(current) == Some(false);
+        m.push(PopupItem::new("Save Preset", self.id(Control::PluginWindow(B::PresetSave))).enabled(user));
+        m.push(PopupItem::new("Preset Browser...", self.id(Control::PluginWindow(B::PresetBrowser))));
+        m.finish()
+    }
+
+    /// Whether `[folder/]name` is a locked (factory) preset; None when it is not in the tree.
+    fn preset_locked(&self, value: &str) -> Option<bool> {
+        let (folder, name) = value.rsplit_once('/').map(|(f, n)| (Some(f), n)).unwrap_or((None, value));
+        let list = match folder {
+            Some(f) => self.preset_tree.iter().find(|n| n.name == f)?.children.as_ref()?,
+            None => &self.preset_tree,
+        };
+        list.iter().find(|n| n.name == name && n.children.is_none()).map(|n| n.locked)
     }
 
     /// The Help & Video panel (s43): Documentation (a link) and the version, a rule, and the
@@ -684,6 +750,34 @@ mod tests {
         assert_eq!(x(B::More), Some((239.0, 297.0)));
         assert_eq!(overflow, vec![B::Copy, B::Paste]);
         assert!(items.iter().all(|(_, r)| r.y == 5.0 && r.h == 22.0));
+    }
+
+    #[test]
+    fn preset_menu_lists_ticks_and_gates_save() {
+        use rack::PresetNode;
+        use rack::menu::PopupEntry;
+        let mut w = PluginWindow::open("/devices/0/inputs/0/effects/0", "UAD Pultec EQP-1A", "SM7B, Insert 1", None, None, false);
+        w.preset_tree = vec![PresetNode::file("Bright").locked(true), PresetNode::folder("Mine", vec![PresetNode::file("Air")])];
+        w.presets = rack::presets::flatten(&w.preset_tree);
+        let rows = |w: &PluginWindow| {
+            w.preset_menu()
+                .entries
+                .iter()
+                .filter_map(|e| match e {
+                    PopupEntry::Item(i) => Some((i.label.clone(), i.ticked, i.enabled)),
+                    PopupEntry::Header(h) => Some((format!("[{h}]"), false, true)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        w.chrome.preset = "Bright".into();
+        let r = rows(&w);
+        assert_eq!(r.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["Bright", "[Mine]", "Air", "Save Preset", "Preset Browser..."]);
+        assert!(r[0].1 && !r[2].1, "the current preset is ticked");
+        assert!(!r[3].2, "a factory preset cannot be saved over");
+        w.chrome.preset = "Mine/Air".into();
+        let r = rows(&w);
+        assert!(r[2].1 && r[3].2, "a user preset is ticked and Save Preset is enabled");
     }
 
     #[test]

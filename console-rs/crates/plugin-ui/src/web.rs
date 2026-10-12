@@ -72,6 +72,9 @@ struct AlgoManifest {
     plugin_id: String,
     #[serde(default)]
     short_names: Vec<String>,
+    /// The plug-in's version (`"1.0.5"`), shown in the Help & Video panel.
+    #[serde(default)]
+    version: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +92,8 @@ pub struct LunaComponent {
     /// The GUI's natural size in points (`manifest.json` `window`).
     pub window: WindowSize,
     pub client_interface_version: Option<String>,
+    /// The algo manifest's `version` ("1.0.5"): the Help & Video panel's "v1.0.5".
+    pub version: Option<String>,
     /// False when `html/images` is missing (the GUI then cannot draw its art).
     pub has_images: bool,
     /// `manifest.json` `appearance.colors` ("window-background", "scrollbar-thumbnail", …):
@@ -117,6 +122,7 @@ impl LunaComponent {
             html_dir,
             name,
             short_names: algo.short_names,
+            version: algo.version.filter(|v| !v.is_empty()),
             window: gui.window.unwrap_or(WindowSize { width: 300.0, height: 600.0 }),
             client_interface_version: gui.client_interface_support_version,
             colors: gui.appearance.colors.iter().filter_map(|(k, v)| Some((k.clone(), Rgba::parse(v)?))).collect(),
@@ -377,6 +383,7 @@ mod tests {
             short_names: short.iter().map(|s| s.to_string()).collect(),
             window: WindowSize { width: 300.0, height: 621.0 },
             client_interface_version: None,
+            version: None,
             has_images: true,
             colors: BTreeMap::new(),
         }

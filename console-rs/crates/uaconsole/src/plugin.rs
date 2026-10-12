@@ -13,11 +13,14 @@
 //! top-level windows, so the GUI window is placed by the compositor; the chrome's editor area
 //! says where the GUI is. Without the feature, those plug-ins show their spec panel.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use engine_model::EngineMixer;
 use houston::{ImageCache, Rect};
-use plugin_ui::{Content, EngineSlot, LunaLibrary, MockParams, ParamSnapshot, PluginSpecLibrary, PluginWindow, WindowEvent};
+use plugin_ui::{Content, EngineSlot, LunaLibrary, MockParams, ParamSnapshot, PluginScales, PluginSpecLibrary, PluginWindow, WindowEvent};
+use rack::presets::{PresetCmd, PresetScope};
 use rack::model::{InsertState, StripInfo};
 use rack::{Action, Control, ControlId, Hit, Interaction, MixerModel, PluginWindowButton as B, Ui};
 use ua_engine::InsertPaths;
@@ -29,6 +32,20 @@ pub struct PluginUiHook {
     luna: Arc<LunaLibrary>,
     /// Host UA's HTML GUIs when one matches (needs the webview; off until the app embeds it).
     pub prefer_web: bool,
+    /// Resize Plug-In scales, per plug-in and Apply To All (persisted).
+    scales: Rc<RefCell<PluginScales>>,
+}
+
+/// The plug-in window's Documentation link (Help & Video). Console links each plug-in's own
+/// manual; the bundles do not carry that address, so this is UA's Apollo / UAD-2 documentation
+/// section (a Rack.dll string).
+const PLUGIN_DOCS_URL: &str = "https://help.uaudio.com/hc/en-us/sections/12262368930324-Apollo-UAD-2-Documentation";
+
+fn open_url(url: &str) {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    if let Err(e) = std::process::Command::new(opener).arg(url).spawn() {
+        log_line(&format!("{opener} {url}: {e}"));
+    }
 }
 
 impl PluginUiHook {
@@ -43,7 +60,7 @@ impl PluginUiHook {
             }
             None => log_line("plug-in specs: none found (generic parameter lists only)"),
         }
-        Self { specs, luna: Arc::new(LunaLibrary::locate()), prefer_web: cfg!(feature = "webview") }
+        Self { specs, luna: Arc::new(LunaLibrary::locate()), prefer_web: cfg!(feature = "webview"), scales: Rc::new(RefCell::new(PluginScales::load())) }
     }
 }
 
@@ -87,6 +104,8 @@ impl PluginHook for PluginUiHook {
         let slot_path = paths.as_ref().map(|p| p.base.clone()).unwrap_or_else(|| format!("{}/effects/{slot}", strip.id));
         let mut window = PluginWindow::open(slot_path, &name, &format!("{channel}, {which}"), self.specs.as_deref(), Some(&self.luna), self.prefer_web);
         window.chrome.power = power;
+        window.scale = self.scales.borrow().get(&name);
+        window.version = self.luna.component_for_effect(&name).and_then(|c| c.version.clone());
         window.insert_menu = Some(rack::menu::plugin_insert_menu(model, &strip.id, slot));
         if !self.prefer_web {
             if let Some(gui) = self.luna.component_for_effect(&name) {
@@ -118,6 +137,8 @@ impl PluginHook for PluginUiHook {
             interaction: Interaction::default(),
             origin: (0.0, 0.0),
             specs: self.specs.clone(),
+            scales: self.scales.clone(),
+            plugin_path: None,
             #[cfg(feature = "webview")]
             web: None,
         }))
@@ -146,6 +167,9 @@ pub struct WindowPanel {
     origin: (f32, f32),
     #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     specs: Option<Arc<PluginSpecLibrary>>,
+    scales: Rc<RefCell<PluginScales>>,
+    /// The plug-in's catalogue entry (`/plugins/N`), for the footer's START DEMO.
+    plugin_path: Option<String>,
     /// UA's HTML GUI, its window and bridge (web content only).
     #[cfg(feature = "webview")]
     web: Option<web::WebHost>,
@@ -154,6 +178,16 @@ pub struct WindowPanel {
 impl WindowPanel {
     fn refresh(&mut self, model: &mut dyn MixerModel) {
         self.window.insert_menu = Some(rack::menu::plugin_insert_menu(&*model, &self.strip, self.slot));
+        if let Some(s) = resolve_strip(&*model, &self.strip) {
+            self.window.preset_tree = model.plugin_presets(&s, self.slot);
+            self.window.presets = rack::presets::flatten(&self.window.preset_tree);
+            self.window.paste_enabled = model.can_paste_plugin_settings(&s, self.slot);
+        }
+        let footer = model.plugin_footer(&self.window.effect_name);
+        self.window.chrome.status = footer.as_ref().map(|f| f.status.clone());
+        self.window.chrome.status_state = footer.as_ref().map(|f| f.state).unwrap_or(0);
+        self.window.chrome.action = footer.as_ref().and_then(|f| f.action.clone());
+        self.plugin_path = footer.and_then(|f| f.plugin_path);
         if let Some(e) = engine_mut(model) {
             let store = e.store_mut();
             if self.engine.is_none() {
@@ -223,7 +257,61 @@ impl WindowPanel {
                     _ => self.window.chrome.power = on,
                 }
             }
+            B::PresetItem(i) => {
+                if let Some(v) = self.window.presets.get(i as usize).cloned() {
+                    self.load_preset(&v, model);
+                }
+            }
+            B::PresetPrev | B::PresetNext => {
+                let delta = if b == B::PresetNext { 1 } else { -1 };
+                if let Some(v) = rack::presets::step(&self.window.presets, &self.window.chrome.preset, delta) {
+                    self.load_preset(&v, model);
+                }
+            }
+            B::PresetSave => model.apply(&Action::Tap(self.preset_id(PresetCmd::Save))),
+            // Preset Browser...: the mixer's PRESETS tab on this insert (SAVE AS, RENAME, …).
+            B::PresetBrowser => self.mixer_actions.push(Action::Tap(ControlId {
+                strip: self.strip.clone(),
+                control: Control::Menu(rack::menu::MenuCmd::Presets(PresetScope::Insert(self.slot))),
+            })),
+            B::Copy => model.apply(&Action::Tap(self.preset_id(PresetCmd::CopySettings))),
+            B::Paste => model.apply(&Action::Tap(self.preset_id(PresetCmd::PasteSettings))),
+            B::Scale(pct) => {
+                self.scales.borrow_mut().set(&self.window.effect_name, pct);
+                self.window.scale = pct;
+                self.rescale_web();
+            }
+            B::ApplyToAll => {
+                self.scales.borrow_mut().apply_to_all(self.window.scale);
+                self.window.popover = None;
+            }
+            // Help & Video › Documentation.
+            B::Help => open_url(PLUGIN_DOCS_URL),
+            // `Rack_PlugInFooter::DoStateClicked` → StartDemo; BUY opens UA's store.
+            B::FooterState | B::FooterAction => match (self.window.chrome.action.as_deref(), &self.plugin_path, engine_mut(model)) {
+                (Some("START DEMO"), Some(path), Some(e)) => e.start_plugin_demo(path),
+                (Some("BUY"), ..) => open_url("https://www.uaudio.com/"),
+                _ => {}
+            },
             other => log_line(&format!("plug-in window: {other:?} is not implemented yet")),
+        }
+    }
+
+    fn preset_id(&self, cmd: PresetCmd) -> ControlId {
+        ControlId { strip: self.strip.clone(), control: Control::PresetCmd(PresetScope::Insert(self.slot), cmd) }
+    }
+
+    /// Loads `[folder/]name` into the slot (`set <effect>/Preset/value`, one undo step).
+    fn load_preset(&mut self, value: &str, model: &mut dyn MixerModel) {
+        model.set_text(&ControlId { strip: self.strip.clone(), control: Control::Preset(PresetScope::Insert(self.slot)) }, value);
+        self.window.chrome.preset = value.to_string();
+    }
+
+    /// UA's HTML GUI follows the window's scale.
+    fn rescale_web(&mut self) {
+        #[cfg(feature = "webview")]
+        if let Some(host) = &mut self.web {
+            host.set_scale(self.window.scale as f64 / 100.0);
         }
     }
 
@@ -367,7 +455,14 @@ mod web {
             uanet.effect.preset_name = window.chrome.preset.clone();
             uanet.effect.power = window.chrome.power;
             let gui = WebPanelWindow::open(component, &query, &window.chrome.title, false)?;
+            if window.scale != 100 {
+                gui.set_scale(window.scale as f64 / 100.0);
+            }
             Ok(Self { window: gui, server, uanet })
+        }
+
+        pub fn set_scale(&mut self, scale: f64) {
+            self.window.set_scale(scale);
         }
 
         /// Pumps GTK, answers the GUI's frames and pushes value changes.
@@ -409,6 +504,85 @@ mod tests {
     fn fixture() -> EngineMixer {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
         EngineMixer::from_snapshot(path).expect("fixture")
+    }
+
+    /// The fixture with presets on in0's insert 2 (the Vitalizer): a factory file and a user
+    /// folder.
+    fn with_presets() -> EngineMixer {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
+        let mut snap = ua_engine::Snapshot::load(path).expect("fixture");
+        snap.tree.set_property(
+            "/devices/0/inputs/0/effects/1/Preset",
+            ua_engine::Property::from_json(
+                &r#"{"type": "string", "value": "", "values": [
+                    {"type": "file", "value": "Bright", "locked": true},
+                    {"type": "folder", "value": "Mine", "children": [{"type": "file", "value": "Air"}]}]}"#
+                    .parse::<ua_engine::Json>()
+                    .unwrap(),
+            ),
+        );
+        EngineMixer::new(ua_engine::Store::from_snapshot(snap))
+    }
+
+    fn press(panel: &mut Box<dyn Panel>, assets: &Assets, model: &mut EngineMixer, b: B) {
+        let (w, h) = panel.size();
+        let mut ui = Ui::new(assets);
+        panel.build(&mut ui, Rect::new(0.0, 0.0, w, h));
+        panel.build_popups(&mut ui, Rect::new(0.0, 0.0, w, h));
+        let r = ui.hits.iter().rev().find(|h| h.id.control == Control::PluginWindow(b)).unwrap_or_else(|| panic!("no {b:?} hit")).rect;
+        let (x, y) = r.center();
+        panel.pointer(PointerEvent::Down { x, y, double: false }, model);
+        panel.pointer(PointerEvent::Up { x, y }, model);
+    }
+
+    #[test]
+    fn toolbar_presets_step_load_and_open_the_browser() {
+        let assets = assets();
+        let mut hook = PluginUiHook::new(&assets.images);
+        hook.scales = Rc::new(RefCell::new(PluginScales::default()));
+        let mut model = with_presets();
+        let mut panel = hook.on_open_plugin("in0", 1, &model).unwrap();
+        panel.sync(&mut model);
+        let preset = |m: &EngineMixer| m.store().value("/devices/0/inputs/0/effects/1/Preset").and_then(|v| v.as_str().map(str::to_owned));
+        // › steps from no preset to the first, then on (`set <effect>/Preset/value`, local while
+        // read-only).
+        press(&mut panel, &assets, &mut model, B::PresetNext);
+        assert_eq!(preset(&model).as_deref(), Some("Bright"));
+        press(&mut panel, &assets, &mut model, B::PresetNext);
+        assert_eq!(preset(&model).as_deref(), Some("Mine/Air"));
+        press(&mut panel, &assets, &mut model, B::PresetPrev);
+        assert_eq!(preset(&model).as_deref(), Some("Bright"));
+        // The presets field's menu lists them; a row loads it.
+        press(&mut panel, &assets, &mut model, B::Presets);
+        press(&mut panel, &assets, &mut model, B::PresetItem(1));
+        assert_eq!(preset(&model).as_deref(), Some("Mine/Air"));
+        // Preset Browser... hands the mixer the insert's PRESETS tab.
+        press(&mut panel, &assets, &mut model, B::Presets);
+        press(&mut panel, &assets, &mut model, B::PresetBrowser);
+        let forwarded = panel.take_mixer_actions();
+        assert!(matches!(&forwarded[..], [Action::Tap(id)] if id.control == Control::Menu(rack::menu::MenuCmd::Presets(PresetScope::Insert(1)))), "{forwarded:?}");
+        assert_eq!(model.store().writer().sent_count(), 0, "read-only by default");
+    }
+
+    #[test]
+    fn resize_scales_the_window_and_is_remembered() {
+        let assets = assets();
+        let mut hook = PluginUiHook::new(&assets.images);
+        hook.scales = Rc::new(RefCell::new(PluginScales::default()));
+        let mut model = with_presets();
+        let mut panel = hook.on_open_plugin("in0", 1, &model).unwrap();
+        panel.sync(&mut model);
+        let (w0, h0) = panel.size();
+        press(&mut panel, &assets, &mut model, B::More);
+        press(&mut panel, &assets, &mut model, B::Scale(150));
+        let (w1, h1) = panel.size();
+        assert!(w1 > w0 && h1 > h0, "{w0}×{h0} → {w1}×{h1}");
+        // A reopened window keeps it; Apply To All makes it everyone's.
+        let again = hook.on_open_plugin("in0", 1, &model).unwrap();
+        assert_eq!(again.size(), (w1, h1));
+        press(&mut panel, &assets, &mut model, B::More);
+        press(&mut panel, &assets, &mut model, B::ApplyToAll);
+        assert_eq!(hook.scales.borrow().default, 150);
     }
 
     #[test]

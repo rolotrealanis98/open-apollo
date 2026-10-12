@@ -556,8 +556,8 @@ pub enum MenuCmd {
     /// [view] Insert "Assign..." → the plug-in browser assigns to this slot (255 = Unison).
     Assign(u8),
     /// [view] Insert / strip "Presets..." and label "Channel Presets..." → the browser's
-    /// PRESETS tab.
-    Presets,
+    /// PRESETS tab, targeted at the strip (Channel Strip presets) or the insert (its plug-in's).
+    Presets(crate::presets::PresetScope),
     /// [view] The assign-mode browser's close button: leave assign mode.
     AssignCancel,
     /// [model] Strip `SoloSafe`, `Stereo` (link, left channel) and `ChannelHidden` toggles.
@@ -603,7 +603,7 @@ impl MenuCmd {
     /// Consumed by `ViewState` (never reaches the model).
     pub fn is_view(&self) -> bool {
         match self {
-            MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets | MenuCmd::AssignCancel | MenuCmd::Noop => true,
+            MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets(_) | MenuCmd::AssignCancel | MenuCmd::Noop => true,
             // Rename edits the row; Overwrite / Clear ask first (their OK sends the command).
             MenuCmd::Scene(SceneOp::Rename | SceneOp::Overwrite | SceneOp::Clear, _) => true,
             MenuCmd::App(c) => c.scope() != CommandScope::Model,
@@ -960,7 +960,7 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
                 _ => m.push(PopupItem::new("Paste", mid(strip, MenuCmd::InsertPaste(slot))).enabled(false)),
             };
             m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(slot))));
-            m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets)));
+            m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets(crate::presets::PresetScope::Insert(slot)))));
             m.push(PopupItem::new("Remove", sid(strip, Control::InsertRemove(slot))));
             m.push(PopupItem::new(if power { "Disable" } else { "Enable" }, sid(strip, Control::InsertPower(slot))));
         }
@@ -971,7 +971,7 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
         // Presets... alone on an empty strip).
         let loaded = model.inserts(&s).iter().any(|i| matches!(i, InsertState::Loaded { .. }));
         m.header(model.main(&s).name);
-        m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets)));
+        m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets(crate::presets::PresetScope::Channel))));
         if loaded {
             m.push(PopupItem::new("Remove All", mid(strip, MenuCmd::StripInserts(PluginOp::Remove))));
             m.push(PopupItem::new("Disable All", mid(strip, MenuCmd::StripInserts(PluginOp::Disable))));
@@ -1019,7 +1019,7 @@ pub fn label_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
     }
     m.push(PopupItem::new("Hide", mid(strip, MenuCmd::Hide)).ticked(st.hidden));
     m.push(PopupItem::new("Isolate", sid(strip, Control::Isolate)).ticked(model.isolated(&s)).toggle());
-    m.push(PopupItem::new("Channel Presets...", mid(strip, MenuCmd::Presets)));
+    m.push(PopupItem::new("Channel Presets...", mid(strip, MenuCmd::Presets(crate::presets::PresetScope::Channel))));
     m.finish()
 }
 
@@ -1675,13 +1675,11 @@ impl ViewState {
                 self.browser.tab = crate::surfaces::BrowserTab::Plugins;
                 self.browser.assign_to = Some(ControlId { strip: id.strip.clone(), control: Control::Insert(*slot) });
             }
-            MenuCmd::Presets => {
-                self.show_browser = true;
-                self.compact = false;
+            MenuCmd::Presets(scope) => self.begin_preset_assign(id.strip.clone(), *scope),
+            MenuCmd::AssignCancel => {
                 self.browser.assign_to = None;
-                self.browser.tab = crate::surfaces::BrowserTab::Presets;
+                self.browser.preset_target = None;
             }
-            MenuCmd::AssignCancel => self.browser.assign_to = None,
             MenuCmd::Scene(op, i) => {
                 let name = model.plugin_scenes().get(*i as usize).cloned().unwrap_or_default();
                 let anchor = ControlId { strip: "settings".into(), control: Control::SceneSelect(*i) };
