@@ -824,7 +824,8 @@ mod tests {
             let mut s = UacStats::default();
             assert_eq!(uac_get_stats(ctx, &mut s), UAC_OK);
             assert!(s.quads > 500 && s.hits > 50, "{s:?}");
-            assert!((s.content_width_pt - 950.5).abs() < 0.01, "{s:?}");
+            // Compact width from the 47-pt side section, the strips, the auxes and the monitor.
+            assert!((s.content_width_pt - 951.0).abs() < 0.01, "{s:?}");
 
             // Tap the first strip's solo button: find it through the hit list.
             let c = &mut *ctx;

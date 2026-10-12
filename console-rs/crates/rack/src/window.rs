@@ -338,12 +338,13 @@ fn empty_columns(ui: &mut Ui, x0: f32, x1: f32, main_y: f32, status_y: f32) {
     ui.fill(Rect::new(x0, main_y + 4.0, w, 1.0), CELLS);
     ui.fill(Rect::new(x0, label_y - 1.0, w, 1.0), CELLS);
     ui.fill(Rect::new(x0, label_y, w, status_y - label_y), LABEL);
+    // Column edges: the last point of each 96-pt column (p1: 1159, 1255, … after strips ending at 1160).
     let mut x = x0;
     while x < x1 {
-        ui.fill(Rect::new(x - 0.5, top, 1.0, 4.0), Rgba::BLACK);
+        ui.fill(Rect::new(x - 1.0, top, 1.0, 4.0), Rgba::BLACK);
         if x > x0 {
-            ui.fill(Rect::new(x - 0.5, top + 10.0, 1.0, main_y - top - 15.0), MAIN);
-            ui.fill(Rect::new(x - 0.5, main_y, 1.0, status_y - main_y), CELLS);
+            ui.fill(Rect::new(x - 1.0, top + 10.0, 1.0, main_y - top - 15.0), MAIN);
+            ui.fill(Rect::new(x - 1.0, main_y, 1.0, status_y - main_y), CELLS);
         }
         x += STRIP_W;
     }
@@ -383,7 +384,7 @@ fn scrollbar_column(ui: &mut Ui, x: f32, main_y: f32, status_y: f32, visible: f3
     }
 }
 
-/// `Rack_ChannelStripsSideSection` (46.5 pt) and the reveal column (`console_reveal.json`):
+/// `Rack_ChannelStripsSideSection` (47 pt) and the reveal column (`console_reveal.json`):
 /// white swatch, per-row Mixer-Row-Header with the reveal chevron at (17, 5) and, on open
 /// rows, the yellow row icon at (15, 35); the main area's `fader_and_meters_bg` with
 /// S (clear solos) / OL (clear clips) at main + 63 / + 87, and the white label plate.
@@ -393,8 +394,18 @@ fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
     const ROW_ICON_EDGE: Rgba = Rgba::rgb8(44, 46, 48);
     let main_y = r.h - rows.main;
     let nav = |c: Control| ControlId { strip: navigator::NAV_ID.into(), control: c };
+    // Measured on p1 and the 1470-pt user shot: the cells column is (76, 80, 83) between a 1-pt
+    // channel_strip_separator_line and a black right edge (x 487, against the first strip's own
+    // black edge) with a half-point shade before it.
+    const SIDE_BG: Rgba = Rgba::rgb8(76, 80, 83);
     ui.at(r.x, r.y, |ui| {
-        ui.fill(Rect::new(0.5, 0.0, r.w - 1.0, 4.0), Rgba::WHITE);
+        // Swatch row as on a strip: black, white swatch 1 pt in.
+        ui.fill(Rect::new(0.0, 0.0, r.w, 5.0), Rgba::BLACK);
+        ui.fill(Rect::new(1.0, 0.0, r.w - 2.0, 4.0), Rgba::WHITE);
+        ui.fill(Rect::new(0.0, 5.0, r.w, main_y - 5.0), SIDE_BG);
+        ui.fill(Rect::new(0.0, 5.0, 1.0, main_y - 5.0), SEPARATOR);
+        ui.fill(Rect::new(r.w - 1.5, 5.0, 0.5, main_y - 5.0), Rgba::rgb8(71, 75, 79));
+        ui.fill(Rect::new(r.w - 1.0, 5.0, 1.0, main_y - 5.0), Rgba::BLACK);
         ui.clip(Some(Rect::new(0.0, 5.0, r.w, main_y - 5.0)));
         ui.at(0.0, 5.0 - off, |ui| {
             for (sec, y, h) in rows.rows() {
@@ -423,7 +434,12 @@ fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
             }
         }
         ui.fill(Rect::new(0.0, label_y - 1.0, r.w, 1.0), Rgba::BLACK);
-        ui.fill(Rect::new(0.0, label_y, r.w, main_strip::LABEL_H - 1.0), Rgba::WHITE);
+        // Label plate 1 pt in from a black left edge, black below (the first strip's plate
+        // separator falls on its last point); measured on p1.
+        let plate_h = main_strip::LABEL_H - 1.0;
+        ui.fill(Rect::new(0.0, label_y, 1.0, plate_h + 1.0), Rgba::BLACK);
+        ui.fill(Rect::new(1.0, label_y, r.w - 1.0, plate_h), Rgba::WHITE);
+        ui.fill(Rect::new(0.0, label_y + plate_h, r.w, 1.0), Rgba::BLACK);
     });
 }
 
@@ -694,7 +710,7 @@ mod tests {
     fn columns_follow_the_window_size() {
         // p1 refpair, 1920 × 1050: the aux cells overflow, so the bus section has its scrollbar.
         let l = layout((1920.0, 1050.0), true);
-        assert_eq!((l.nav_x(), l.side_x(), l.strips_x()), (345.0, 441.0, 487.5));
+        assert_eq!((l.nav_x(), l.side_x(), l.strips_x()), (345.0, 441.0, 488.0));
         assert_eq!((l.aux_x(), l.monitor_x(), l.status_y()), (1613.5, 1824.0, 1010.0));
         assert_eq!(l.size(), (1920.0, 1050.0));
         // p2 refpair, 1470 × 1105: aux and monitor pack right after the strips.

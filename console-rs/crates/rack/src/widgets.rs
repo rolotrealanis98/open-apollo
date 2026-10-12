@@ -35,14 +35,17 @@ impl Ui<'_> {
             }
             _ => {
                 let dst = r.inset(ib.l, ib.t, ib.r, ib.b);
-                let slice = skin.insets("inset-9-slice-background").or_else(|| {
-                    let img = self.assets.images.get(&path)?;
-                    Some(Insets::thirds(img.width, img.height))
-                });
-                // Corners larger than half the destination are cropped, not scaled: the 23-pt
-                // preamp gain display (display_bg1 thirds = 29 px a side) keeps its frame 2 pt
-                // inside, as in p1.
-                let slice = slice.map(|s| clamp_corners(s, dst));
+                // Without inset-9-slice-background the corners are a third of the image or of
+                // the destination, whichever is smaller, per axis (0x181c237c0: `min(dst px,
+                // image px) / 3`). The 47-pt side section's Channel-Bottom (194 px art) has
+                // 31-px corners, the 23-pt preamp gain display (88 px display_bg1) 15-px ones.
+                let slice = match skin.insets("inset-9-slice-background") {
+                    Some(s) => Some(clamp_corners(s, dst)),
+                    None => self.assets.images.get(&path).map(|img| {
+                        let px = |pt: f32, img: u32| ((pt * ART_SCALE).round().max(0.0) as u32).min(img);
+                        Insets::thirds(px(dst.w, img.width), px(dst.h, img.height))
+                    }),
+                };
                 self.image(&path, dst, slice, None, 1.0);
             }
         }

@@ -15,7 +15,9 @@ pub mod window {
     pub const NAV_STRIP: (f32, f32) = (27.0, 71.0);
     pub const BROWSER_W: f32 = 345.0;
     pub const NAV_COLUMN: (f32, f32) = (345.0, 96.0);
-    pub const SIDE_SECTION: (f32, f32) = (441.0, 46.5);
+    /// `Rack_ChannelStripsSideSection`: 47 pt, so the strips start on the whole point 488 and its
+    /// Channel-Bottom's black right edge lands on 487 (p1).
+    pub const SIDE_SECTION: (f32, f32) = (441.0, 47.0);
     pub const AUX_X: f32 = 1613.5;
     /// Console 1.3.1 draws the monitor column flush right (1920 − 96): every UA image in it
     /// matches at x0 = 1824 (p1 refpair), half a point right of the 18-pt gap after the auxes.
