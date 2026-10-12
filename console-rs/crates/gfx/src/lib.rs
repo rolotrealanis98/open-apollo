@@ -14,7 +14,7 @@ use rack::{Draw, DrawList, Frame};
 use wgpu::util::DeviceExt;
 
 pub use surface::SurfaceGpu;
-pub use text::TextSystem;
+pub use text::{TextStats, TextSystem};
 pub use wgpu;
 pub use wgpu::TextureFormat;
 
@@ -356,6 +356,7 @@ impl Renderer {
             }
         }
         queue.submit([encoder.finish()]);
+        self.text.end_frame();
         self.stats = FrameStats { quads, batches: batches.len(), textures: self.gpu_textures.len(), texture_bytes: self.stats.texture_bytes, glyphs };
     }
 }
