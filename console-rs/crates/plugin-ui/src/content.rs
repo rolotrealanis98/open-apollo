@@ -228,6 +228,7 @@ mod tests {
             short_names: vec![],
             window: WindowSize { width: 950.0, height: 175.0 },
             client_interface_version: None,
+            version: None,
             has_images: true,
             colors: BTreeMap::new(),
         }

@@ -64,6 +64,8 @@ pub struct WebPanelWindow {
     pub webview: wry::WebView,
     pub size: (i32, i32),
     loaded: Rc<Cell<bool>>,
+    /// The zoom that makes 1 CSS px = 1 pt; Resize Plug-In multiplies it.
+    base_zoom: f64,
 }
 
 impl WebPanelWindow {
@@ -103,7 +105,8 @@ impl WebPanelWindow {
         // The GUI is laid out for its manifest size. WebKitGTK scales pages by the desktop font
         // DPI (gtk-xft-dpi / 96); undo that so 1 CSS px = 1 pt.
         let dpi = gtk::Settings::default().map(|s| s.gtk_xft_dpi()).filter(|d| *d > 0).map(|d| d as f64 / 1024.0);
-        wk.set_zoom_level(dpi.map(|d| 96.0 / d).unwrap_or(1.0));
+        let base_zoom = dpi.map(|d| 96.0 / d).unwrap_or(1.0);
+        wk.set_zoom_level(base_zoom);
         let loaded = Rc::new(Cell::new(false));
         let flag = loaded.clone();
         wk.connect_load_changed(move |_, ev| {
@@ -112,7 +115,16 @@ impl WebPanelWindow {
             }
         });
         window.show_all();
-        Ok(Self { window, webview, size, loaded })
+        Ok(Self { window, webview, size, loaded, base_zoom })
+    }
+
+    /// Resize Plug-In: the page zoomed by `scale` and the window sized to match.
+    pub fn set_scale(&self, scale: f64) {
+        let wk = self.webview.webview();
+        wk.set_zoom_level(self.base_zoom * scale);
+        let (w, h) = ((self.size.0 as f64 * scale).round() as i32, (self.size.1 as f64 * scale).round() as i32);
+        self.window.set_size_request(w, h);
+        self.window.resize(w, h);
     }
 
     pub fn is_loaded(&self) -> bool {

@@ -230,6 +230,8 @@ pub enum PluginWindowButton {
     PresetItem(u16),
     /// The preset menu's "Preset Browser...": the mixer's PRESETS tab targeted at this insert.
     PresetBrowser,
+    /// The preset menu's "Save Preset": over the current preset (`SaveAsPreset`).
+    PresetSave,
     /// `prev_preset`.
     PresetPrev,
     /// `next_preset`.
