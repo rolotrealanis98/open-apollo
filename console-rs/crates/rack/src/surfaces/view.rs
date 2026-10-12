@@ -168,6 +168,9 @@ pub enum Popover {
     SessionSaveAs,
     /// Session file path field (Open...; uses `ViewState::text_edit`).
     SessionOpen,
+    /// Rename / New Folder name fields (CURRENT SESSION panel menus).
+    SessionRename,
+    SessionNewFolder,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -187,6 +190,10 @@ pub enum TextTarget {
     /// Save As; `then` is the session op waiting on the save (from the save-changes question).
     SessionSaveAs { then: Option<SessionOp> },
     SessionOpen,
+    /// A session file's new name (panel row menu Rename), by file index.
+    SessionRename(u16),
+    /// The CURRENT SESSION panel's New Folder.
+    SessionNewFolder,
 }
 
 /// A text field with keyboard focus.
@@ -240,6 +247,8 @@ pub struct ViewState {
     pub show_ctrl_room: bool,
     /// The PLUG-IN SCENES panel column, left of the browser (user capture s10).
     pub show_scenes: bool,
+    /// The CURRENT SESSION panel in the browser column (the SESSION box; capture sess-panel).
+    pub session_panel: crate::surfaces::session::SessionPanel,
     /// The status bar has its SCENE field. Console creates it lazily: the 08:27 captures show
     /// it only after the PLUG-IN SCENES panel was opened (s08 without, s10 with), p1 with, p2
     /// without.
@@ -283,6 +292,7 @@ impl Default for ViewState {
             show_aux: true,
             show_ctrl_room: false,
             show_scenes: false,
+            session_panel: Default::default(),
             scene_info: true,
             cells_scroll: 0.0,
             aux_scroll: 0.0,
@@ -366,6 +376,8 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SettingsScroll
             | C::ListSelect(_)
             | C::SessionMenu
+            | C::SessionPanelRow(_)
+            | C::SessionPanelDots
             | C::SessionSaveChoice(_)
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
         || matches!(c, C::Menu(m) if m.is_view())
@@ -669,6 +681,11 @@ impl ViewState {
                 }
             }
             C::SessionMenu => self.open_session_menu(id),
+            C::SessionPanelRow(i) => self.session_panel.selected = Some(i),
+            C::SessionPanelDots => {
+                self.popover = None;
+                self.menu = Some(crate::menu::MenuState::below_control(crate::menu::MenuTarget::SessionDots, id));
+            }
             C::SessionSaveChoice(c) => {
                 // press_view closed the question; reopen it so the answer sees `then`.
                 if let Some(p) = closed.take() {
@@ -696,7 +713,7 @@ impl ViewState {
             TextTarget::Rename(strip) => vec![Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)],
             TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
             TextTarget::Search => Vec::new(),
-            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen) => self.commit_session_text(&t, edit.text, model),
+            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder) => self.commit_session_text(&t, edit.text, model),
         }
     }
 

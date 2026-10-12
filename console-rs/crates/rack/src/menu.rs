@@ -579,6 +579,8 @@ pub enum MenuCmd {
     CopyMixTo(u8),
     /// [model] A PLUG-IN SCENES row's menu (capture browser-row).
     Scene(SceneOp, u16),
+    /// [view] A row with no action (Show In Finder): closes the menu.
+    Noop,
 }
 
 /// The PLUG-IN SCENES row menu's operations.
@@ -595,7 +597,7 @@ impl MenuCmd {
     /// Consumed by `ViewState` (never reaches the model).
     pub fn is_view(&self) -> bool {
         match self {
-            MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets | MenuCmd::AssignCancel => true,
+            MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets | MenuCmd::AssignCancel | MenuCmd::Noop => true,
             MenuCmd::App(c) => c.scope() != CommandScope::Model,
             _ => false,
         }
@@ -659,6 +661,10 @@ pub enum MenuTarget {
     SceneRow(u16),
     /// A Settings combo's dropdown (captures set-d-*), by field key.
     Setting(Arc<str>),
+    /// The CURRENT SESSION panel's ••• button (sess-dots) and a tree row (sess-row, a file;
+    /// browser-cat2, a folder), by panel row index.
+    SessionDots,
+    SessionRow(u16),
     /// Status bar RATE / CLOCK and the buffer size (`Rack_*Info`; sb-rate, sb-clock).
     SampleRate,
     ClockSource,
@@ -893,6 +899,8 @@ pub fn build_menu(model: &dyn MixerModel, view: &ViewState, target: &MenuTarget,
         MenuTarget::MonitorMeter => (monitor_meter_menu(), MenuLook::Context),
         MenuTarget::SceneRow(i) => (scene_row_menu(model, *i), MenuLook::Context),
         MenuTarget::Setting(key) => (setting_menu(model, key), MenuLook::Base),
+        MenuTarget::SessionDots => (session_dots_menu(), MenuLook::Context),
+        MenuTarget::SessionRow(i) => (session_row_menu(model, *i), MenuLook::Context),
         MenuTarget::SampleRate => (crate::surfaces::popover::sample_rate_menu(model), MenuLook::Base),
         MenuTarget::ClockSource => (crate::surfaces::popover::clock_source_menu(model), MenuLook::Base),
         MenuTarget::BufferSize => (crate::surfaces::popover::buffer_size_menu(model), MenuLook::Base),
@@ -1081,6 +1089,54 @@ pub fn setting_menu(model: &dyn MixerModel, key: &str) -> PopupMenu {
     for (i, o) in options.iter().enumerate() {
         m.push(PopupItem::new(o.clone(), id(i + midi as usize)).ticked(selected == Some(i)).enabled(enabled.get(i).copied().unwrap_or(true)));
     }
+    m.finish()
+}
+
+/// The CURRENT SESSION panel's ••• (sess-dots): New Folder, Show In Finder.
+pub fn session_dots_menu() -> PopupMenu {
+    use crate::surfaces::session::SessionOp;
+    let mut m = PopupMenu::new();
+    m.push(PopupItem::new("New Folder", session_id(Control::Session(SessionOp::NewFolder))));
+    m.push(show_in_finder());
+    m.finish()
+}
+
+/// "Show In Finder" (the Sessions folder on the engine's host): no engine command is known, so
+/// the row is drawn like Console's but does nothing.
+fn show_in_finder() -> PopupItem {
+    PopupItem::new("Show In Finder", gid(MenuCmd::Noop))
+}
+
+fn session_id(control: Control) -> ControlId {
+    ControlId { strip: crate::surfaces::session::SESSION_STRIP.into(), control }
+}
+
+/// A CURRENT SESSION tree row: a file (sess-row: its name, Load '<name>' (disabled for the
+/// open session), separator, Delete, Rename, Show In Finder) or a folder (browser-cat2: its
+/// name, Delete, Rename (both disabled for the root "User"), New Folder, Show In Finder).
+pub fn session_row_menu(model: &dyn MixerModel, row: u16) -> PopupMenu {
+    use crate::surfaces::session::{PanelRowKind, SessionOp, panel_rows};
+    let info = model.session();
+    let rows = panel_rows(&info);
+    let mut m = PopupMenu::new();
+    let Some(r) = rows.get(row as usize) else { return m };
+    m.header(r.label.clone());
+    match &r.kind {
+        PanelRowKind::File(i) => {
+            let open = info.files.get(*i as usize).is_some_and(|f| f.path == info.current);
+            m.push(PopupItem::new(format!("Load '{}'", r.label), session_id(Control::Session(SessionOp::Load(*i)))).enabled(!open));
+            m.separator();
+            m.push(PopupItem::new("Delete", session_id(Control::Session(SessionOp::Delete(*i)))));
+            m.push(PopupItem::new("Rename", session_id(Control::Session(SessionOp::Rename(*i)))));
+        }
+        PanelRowKind::Folder { root, .. } => {
+            // Folder delete / rename have engine commands but no folder index in the model yet.
+            m.push(PopupItem::new("Delete", gid(MenuCmd::Noop)).enabled(!root));
+            m.push(PopupItem::new("Rename", gid(MenuCmd::Noop)).enabled(!root));
+            m.push(PopupItem::new("New Folder", session_id(Control::Session(SessionOp::NewFolder))));
+        }
+    }
+    m.push(show_in_finder());
     m.finish()
 }
 
@@ -1708,6 +1764,16 @@ impl ViewState {
                 rect(None, &|c| *c == Control::SceneSelect(i))?.center()
             }
             ["monitor-meter"] => rect(None, &|c| *c == Control::ShowPanel(crate::settings::Panel::MeterWindow))?.center(),
+            ["session-row", n] => {
+                let i: u16 = n.parse().map_err(|_| format!("--menu {spec}: bad row"))?;
+                rect(None, &|c| *c == Control::SessionPanelRow(i))?.center()
+            }
+            ["session-dots"] => {
+                rect(None, &|c| *c == Control::SessionPanelDots)?;
+                let id = ControlId { strip: crate::surfaces::session::SESSION_STRIP.into(), control: Control::SessionPanelDots };
+                self.menu = Some(MenuState::below_control(MenuTarget::SessionDots, id));
+                (f32::NAN, f32::NAN)
+            }
             [kind, strip, rest @ ..] => {
                 let s = Some(*strip);
                 match (*kind, rest) {
@@ -1768,6 +1834,11 @@ pub fn context_menu_at(hits: &[Hit], x: f32, y: f32) -> Option<MenuState> {
             Control::Fader | Control::PanL | Control::PanR if channel(&strip) => Some(MenuState::pointer(MenuTarget::CopyMix { strip }, x, y)),
             Control::ShowPanel(crate::settings::Panel::MeterWindow) => Some(MenuState::pointer(MenuTarget::MonitorMeter, x, y)),
             Control::SceneSelect(i) => Some(MenuState::at(MenuTarget::SceneRow(*i), hit.rect.x + SCENE_MENU_DX, hit.rect.y + SCENE_MENU_DY)),
+            Control::SessionPanelRow(i) => {
+                // Under the row from x 33 in the column (the row's hit starts 5 pt in).
+                let dx = crate::surfaces::session::ROW_MENU_X - 5.0;
+                Some(MenuState::under(MenuTarget::SessionRow(*i), Rect::new(hit.rect.x + dx, hit.rect.y, hit.rect.w - dx, hit.rect.h)))
+            }
             Control::BrowserItem(i) => Some(MenuState::pointer(MenuTarget::BrowserItem(*i), x, y)),
             _ => None,
         };

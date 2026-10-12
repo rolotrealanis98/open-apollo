@@ -39,6 +39,12 @@ pub enum SessionOp {
     Load(u16),
     /// A [`SessionInfo::modified`] entry by index.
     Restore(u16),
+    /// Delete a file of [`SessionInfo::files`] (panel row menu).
+    Delete(u16),
+    /// Opens the name field for a file (model: [`Control::SessionRenameTo`] via `set_text`).
+    Rename(u16),
+    /// Opens the folder name field (model: [`Control::SessionNewFolderName`] via `set_text`).
+    NewFolder,
 }
 
 impl SessionOp {
@@ -102,10 +108,20 @@ fn choice_id(c: SaveChoice) -> ControlId {
 /// Strip id of session controls.
 pub const SESSION_STRIP: &str = "session";
 
+/// The CURRENT SESSION panel's view state.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SessionPanel {
+    pub open: bool,
+    /// The selected tree row (panel row index).
+    pub selected: Option<u16>,
+}
+
 impl ViewState {
-    /// Opens the session menu anchored at `anchor` (the SESSION box).
-    pub fn open_session_menu(&mut self, anchor: ControlId) {
-        self.popover = Some(PopoverState { kind: Popover::Session, anchor });
+    /// The SESSION box: Console 1.3.1 shows the CURRENT SESSION panel in the browser column
+    /// (capture sess-panel; 1.2.9 opened a popup menu); a second click closes it.
+    pub fn open_session_menu(&mut self, _anchor: ControlId) {
+        self.popover = None;
+        self.session_panel.open ^= true;
     }
 
     /// A session request from the menu (or a shortcut): asks about unsaved changes, opens the
@@ -130,6 +146,17 @@ impl ViewState {
                 Vec::new()
             }
             SessionOp::SaveAs => self.ask_save_as(info, None, anchor),
+            SessionOp::Rename(i) => {
+                let name = info.files.get(i as usize).map(|f| f.path.rsplit('/').next().unwrap_or(&f.path).to_owned()).unwrap_or_default();
+                self.text_edit = Some(TextEdit { target: TextTarget::SessionRename(i), text: name });
+                self.popover = Some(PopoverState { kind: Popover::SessionRename, anchor });
+                Vec::new()
+            }
+            SessionOp::NewFolder => {
+                self.text_edit = Some(TextEdit { target: TextTarget::SessionNewFolder, text: String::new() });
+                self.popover = Some(PopoverState { kind: Popover::SessionNewFolder, anchor });
+                Vec::new()
+            }
             SessionOp::Save if !info.has_file => self.ask_save_as(info, None, anchor),
             op => vec![model_tap(op)],
         }
@@ -168,6 +195,8 @@ impl ViewState {
         let set = |control| Effect::SetText(ControlId { strip: SESSION_STRIP.into(), control }, text.clone());
         match target {
             TextTarget::SessionOpen => vec![set(Control::SessionOpenPath)],
+            TextTarget::SessionRename(i) => vec![set(Control::SessionRenameTo(*i))],
+            TextTarget::SessionNewFolder => vec![set(Control::SessionNewFolderName)],
             TextTarget::SessionSaveAs { then } => {
                 let mut out = vec![set(Control::SessionSaveAsName)];
                 if let Some(op) = then {
@@ -265,6 +294,170 @@ pub fn session_box_hit(ui: &mut Ui, r: Rect) {
     ui.hit(r, ControlId { strip: Arc::from(SESSION_STRIP), control: Control::SessionMenu }, HitKind::Tap);
 }
 
+// MARK: CURRENT SESSION panel
+
+/// A row of the CURRENT SESSION tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PanelRowKind {
+    /// The Sessions folder ("User", the root) or a sub-folder (its path).
+    Folder { path: String, root: bool },
+    /// A file of [`SessionInfo::files`].
+    File(u16),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanelRow {
+    pub label: String,
+    pub kind: PanelRowKind,
+    /// Tree depth (the root folder 0).
+    pub depth: u8,
+}
+
+/// The tree: the Sessions folder as "User" (capture sess-panel: `User` › `Session` for the
+/// engine's root file `Session`), its files, then each sub-folder and its files.
+pub fn panel_rows(info: &SessionInfo) -> Vec<PanelRow> {
+    let mut rows = vec![PanelRow { label: "User".into(), kind: PanelRowKind::Folder { path: String::new(), root: true }, depth: 0 }];
+    let mut folders: Vec<&str> = Vec::new();
+    for (i, f) in info.files.iter().enumerate() {
+        match f.path.rsplit_once('/') {
+            None => rows.push(PanelRow { label: f.path.clone(), kind: PanelRowKind::File(i as u16), depth: 1 }),
+            Some((dir, _)) if !folders.contains(&dir) => folders.push(dir),
+            _ => {}
+        }
+    }
+    for dir in folders {
+        rows.push(PanelRow { label: dir.rsplit('/').next().unwrap_or(dir).into(), kind: PanelRowKind::Folder { path: dir.into(), root: false }, depth: 1 });
+        for (i, f) in info.files.iter().enumerate() {
+            if let Some((d, name)) = f.path.rsplit_once('/') {
+                if d == dir {
+                    rows.push(PanelRow { label: name.into(), kind: PanelRowKind::File(i as u16), depth: 2 });
+                }
+            }
+        }
+    }
+    rows
+}
+
+// Geometry and colours measured on capture sess-panel (2 px per pt), relative to the column.
+const PANEL_BG: Rgba = Rgba::rgb8(105, 113, 118);
+const PANEL_TITLE_H: f32 = 34.0;
+const SEARCH: Rect = Rect { x: 4.0, y: 34.0, w: 337.0, h: 28.0 };
+const SEARCH_EDGE: Rgba = Rgba::rgb8(18, 20, 20);
+const SEARCH_FILL: Rgba = Rgba::rgb8(32, 34, 37);
+const BOX: Rect = Rect { x: 5.0, y: 66.0, w: 335.0, h: 66.0 };
+const BOX_EDGE: Rgba = Rgba::rgb8(33, 36, 38);
+const BOX_FILL: Rgba = Rgba::rgb8(42, 45, 47);
+const CARD: Rect = Rect { x: 10.0, y: 71.0, w: 325.0, h: 56.0 };
+const CARD_EDGE: Rgba = Rgba::rgb8(71, 74, 76);
+const CARD_FILL: Rgba = Rgba::rgb8(60, 62, 64);
+/// The ••• button: its menu opens at (10, 117) in the window (sess-dots), i.e. under a
+/// component at the card's left edge, 20 pt high.
+const DOTS: Rect = Rect { x: 10.0, y: 71.0, w: 30.0, h: 20.0 };
+const BUTTON_Y: f32 = 99.0;
+const BUTTON_H: f32 = 23.0;
+const BUTTON_W: f32 = 102.0;
+const BUTTON_X: [f32; 3] = [15.0, 121.0, 227.0];
+const BUTTON_FILL: Rgba = Rgba::rgb8(80, 82, 83);
+const BUTTON_EDGE: Rgba = Rgba::rgb8(97, 99, 101);
+const TREE_Y: f32 = 132.0;
+const TREE_ROW_H: f32 = 32.0;
+const FOLDER_FILL: Rgba = Rgba::rgb8(59, 70, 76);
+const ROW_SELECTED: Rgba = Rgba::rgb8(82, 82, 82);
+const TREE_LINE: Rgba = Rgba::rgb8(69, 70, 70);
+/// A tree row's menu opens under the row at x 33 in the column (sess-row, browser-cat2).
+pub const ROW_MENU_X: f32 = 33.0;
+
+fn panel_id(control: Control) -> ControlId {
+    ControlId { strip: Arc::from(SESSION_STRIP), control }
+}
+
+/// The CURRENT SESSION panel over the browser column `r` (`Rack_MixerPresets` view; capture
+/// sess-panel): title and close, search, the open session's card (•••, name, NEW / OPEN... /
+/// SAVE) and the Sessions tree, the open session selected.
+pub fn draw_session_panel(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
+    let info = model.session();
+    let rows = panel_rows(&info);
+    ui.fill(r, PANEL_BG);
+    ui.at(r.x, r.y, |ui| {
+        let w = r.w;
+        let title = Ui::plain_style("Helvetica", 11.0, true, Rgba::rgb8(226, 239, 250));
+        ui.text("CURRENT SESSION", title, Rect::new(0.0, 2.5, w, PANEL_TITLE_H - 1.0), Align::Center);
+        let close = Rect::new(w - 33.0, 5.0, 24.0, 24.0);
+        if let Some(x) = ui.skin("views", "Browser-Modal-Close-White").and_then(|s| s.image("image")) {
+            let x = x.to_string();
+            ui.image(&x, Rect::new(w - 27.0, 12.0, 13.0, 13.0), None, None, 1.0);
+        }
+        ui.hit(close, panel_id(Control::SessionMenu), HitKind::Tap);
+
+        ui.fill(SEARCH, SEARCH_EDGE);
+        ui.fill(SEARCH.inset(1.0, 1.0, 1.0, 1.0), SEARCH_FILL);
+        if let Some(icon) = ui.skin("views", "Browser-Search-Icon").and_then(|s| s.image("image")) {
+            let icon = icon.to_string();
+            ui.image(&icon, Rect::new(SEARCH.x + 9.0, SEARCH.y + 6.0, 16.0, 16.0), None, None, 1.0);
+        }
+
+        ui.fill(BOX, BOX_EDGE);
+        ui.fill(BOX.inset(1.0, 1.0, 1.0, 1.0), BOX_FILL);
+        ui.fill(CARD, CARD_EDGE);
+        ui.fill(CARD.inset(1.0, 1.0, 1.0, 1.0), CARD_FILL);
+        // Three 4-pt dots 5 pt apart from x 18 (sess-panel).
+        let dots = Ui::plain_style("Helvetica", 14.0, true, Rgba::rgb8(216, 217, 217));
+        for k in 0..3 {
+            ui.text("•", dots.clone(), Rect::new(16.0 + k as f32 * 5.0, DOTS.y + 2.0, 8.0, DOTS.h), Align::Center);
+        }
+        ui.hit(DOTS, panel_id(Control::SessionPanelDots), HitKind::Tap);
+        let name = if info.progress.is_empty() { info.name.clone() } else { info.progress.clone() };
+        let name_style = Ui::plain_style("Helvetica", 12.0, true, Rgba::rgb8(227, 228, 228));
+        ui.text(&name, name_style, Rect::new(CARD.x + 34.0, CARD.y, CARD.w - 68.0, 26.0), Align::Center);
+        let label = Ui::plain_style("Helvetica", 11.0, true, Rgba::rgb8(230, 231, 231));
+        for (x, (text, op)) in BUTTON_X.iter().zip([("NEW", SessionOp::New), ("OPEN...", SessionOp::Open), ("SAVE", SessionOp::Save)]) {
+            let b = Rect::new(*x, BUTTON_Y, BUTTON_W, BUTTON_H);
+            ui.fill(b, BUTTON_EDGE);
+            ui.fill(b.inset(1.0, 1.0, 1.0, 1.0), BUTTON_FILL);
+            ui.text(text, label.clone(), b, Align::Center);
+            ui.hit(b, sid(op), HitKind::Tap);
+        }
+
+        let tree = Rect::new(BOX.x, TREE_Y, BOX.w, r.h - TREE_Y);
+        ui.fill(tree, BOX_EDGE);
+        ui.fill(tree.inset(1.0, 0.0, 1.0, 0.0), BOX_FILL);
+        ui.clip(Some(tree));
+        let folder_text = Ui::plain_style("Helvetica", 11.0, true, Rgba::rgb8(147, 153, 157));
+        let file_text = Ui::plain_style("Helvetica", 11.0, true, Rgba::rgb8(238, 238, 238));
+        let current = info.files.iter().position(|f| f.path == info.current).map(|i| i as u16);
+        for (k, row) in rows.iter().enumerate() {
+            let y = TREE_Y + k as f32 * TREE_ROW_H;
+            let rr = Rect::new(tree.x, y, tree.w, TREE_ROW_H);
+            let indent = row.depth as f32 * 24.0;
+            match &row.kind {
+                PanelRowKind::Folder { .. } => {
+                    ui.fill(rr, FOLDER_FILL);
+                    // The open folder's reveal chevron (`Browser-Reveal-Toggle`), as the
+                    // browser's preset tree draws it.
+                    if let Some(img) = ui.skin("views", "Browser-Reveal-Toggle").and_then(|s| s.image("image-on")) {
+                        let img = img.to_string();
+                        ui.image(&img, Rect::new(rr.x + 8.0 + indent, y + 10.0, 12.0, 12.0), None, None, 1.0);
+                    }
+                    ui.text(&row.label, folder_text.clone(), Rect::new(rr.x + 33.0 + indent, y + 1.25, rr.w - 38.0 - indent, 30.0), Align::Left);
+                }
+                PanelRowKind::File(i) => {
+                    let sel = view.session_panel.selected.map(|s| s as usize == k).unwrap_or(current == Some(*i));
+                    if sel {
+                        ui.fill(rr, ROW_SELECTED);
+                    }
+                    // Tree connector: down from the folder above, across to the label.
+                    let lx = rr.x + 14.0 + (row.depth as f32 - 1.0) * 24.0;
+                    ui.fill(Rect::new(lx, y - (TREE_ROW_H / 2.0) * 0.0, 1.0, TREE_ROW_H / 2.0), TREE_LINE);
+                    ui.fill(Rect::new(lx, y + TREE_ROW_H / 2.0, 14.0, 1.0), TREE_LINE);
+                    ui.text(&row.label, file_text.clone(), Rect::new(rr.x + 33.0 + indent - 24.0, y + 1.25, rr.w - 38.0, 30.0), Align::Left);
+                }
+            }
+            ui.hit(rr, panel_id(Control::SessionPanelRow(k as u16)), HitKind::Tap);
+        }
+        ui.clip(None);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,11 +547,42 @@ mod tests {
     fn clean_session_loads_at_once() {
         let mut m = Rec::new(false, true);
         let mut v = ViewState::default();
+        // The SESSION box toggles the CURRENT SESSION panel (Console 1.3.1, capture sess-panel).
         tap(&mut v, &mut m, Control::SessionMenu);
-        assert_eq!(v.popover.as_ref().map(|p| &p.kind), Some(&Popover::Session));
+        assert!(v.session_panel.open);
         tap(&mut v, &mut m, Control::Session(SessionOp::Load(1)));
         assert!(v.popover.is_none());
         assert_eq!(m.got, ["Load(1)"]);
+        tap(&mut v, &mut m, Control::SessionMenu);
+        assert!(!v.session_panel.open);
+    }
+
+    #[test]
+    fn panel_tree_and_row_menus() {
+        let info = PreviewMixer::default().session();
+        let rows = panel_rows(&info);
+        let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
+        // User › Session, Tracking; Mix › Rough Mix, Vocal Comp.
+        assert_eq!(labels, ["User", "Session", "Tracking", "Mix", "Rough Mix", "Vocal Comp"]);
+        let model = PreviewMixer::default();
+        let file = crate::menu::session_row_menu(&model, 1);
+        let items: Vec<String> = file.entries.iter().map(|e| match e {
+            crate::menu::PopupEntry::Item(i) => format!("{}{}", i.label, if i.enabled { "" } else { " (off)" }),
+            crate::menu::PopupEntry::Header(h) => format!("[{h}]"),
+            crate::menu::PopupEntry::Separator => "-".into(),
+            crate::menu::PopupEntry::Submenu { label, .. } => label.clone(),
+        }).collect();
+        // sess-row: the open session's Load is disabled.
+        assert_eq!(items, ["[Session]", "Load 'Session' (off)", "-", "Delete", "Rename", "Show In Finder"]);
+        let root = crate::menu::session_row_menu(&model, 0);
+        assert!(root.find("Delete").is_some_and(|i| !i.enabled), "the root folder cannot be deleted (browser-cat2)");
+        // Rename opens the name field; its commit renames inside the folder.
+        let mut m = Rec::new(false, true);
+        let mut v = ViewState::default();
+        tap(&mut v, &mut m, Control::Session(SessionOp::Rename(1)));
+        assert_eq!(v.popover.as_ref().map(|p| &p.kind), Some(&Popover::SessionRename));
+        tap(&mut v, &mut m, Control::Session(SessionOp::Delete(1)));
+        assert_eq!(m.got.last().map(String::as_str), Some("Delete(1)"));
     }
 
     #[test]

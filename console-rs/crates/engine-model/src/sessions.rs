@@ -51,8 +51,9 @@ impl EngineMixer {
             SessionOp::Save => st.has_file().then_some(SessionCommand::Save),
             SessionOp::Load(i) => files(&st).get(i as usize).map(|f| SessionCommand::Load(f.path.clone())),
             SessionOp::Restore(i) => st.modified.get(i as usize).map(|m| SessionCommand::RestoreModified(m.value.clone())),
+            SessionOp::Delete(i) => files(&st).get(i as usize).map(|f| SessionCommand::Delete { name: f.path.clone() }),
             // The view turns these into the name / path fields (`set_text` below).
-            SessionOp::Open | SessionOp::SaveAs => None,
+            SessionOp::Open | SessionOp::SaveAs | SessionOp::Rename(_) | SessionOp::NewFolder => None,
         };
         if let Some(c) = command {
             self.session_command(&c);
@@ -65,6 +66,17 @@ impl EngineMixer {
         let command = match id.control {
             Control::SessionSaveAsName => SessionCommand::save_as(text),
             Control::SessionOpenPath => SessionCommand::Open { path: text.trim().to_owned() },
+            // Rename keeps the file in its folder (`RenameSession {origName, newName}`).
+            Control::SessionRenameTo(i) => {
+                let st = self.store.session_state();
+                let Some(f) = files(&st).get(i as usize).map(|f| f.path.clone()) else { return true };
+                let to = match f.rsplit_once('/') {
+                    Some((dir, _)) => format!("{dir}/{}", text.trim()),
+                    None => text.trim().to_owned(),
+                };
+                SessionCommand::Rename { from: f, to }
+            }
+            Control::SessionNewFolderName => SessionCommand::NewFolder { folder: text.trim().to_owned() },
             _ => return false,
         };
         self.session_command(&command);

@@ -73,7 +73,8 @@ impl WindowLayout {
             compact: view.compact,
             inputs,
             auxes,
-            browser: view.show_browser && !view.compact,
+            // The SESSION box's CURRENT SESSION panel takes the browser column (sess-panel).
+            browser: (view.show_browser || view.session_panel.open) && !view.compact,
             navigator: view.show_navigator,
             scenes: view.show_scenes && !view.compact,
             ctrl_room: view.show_ctrl_room,
@@ -302,7 +303,12 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
             draw_scenes_column(ui, model, view, Rect::new(l.scenes_x(), W::TITLE_BAR, SCENES_W, status_y - W::TITLE_BAR));
         }
         if l.browser {
-            draw_browser(ui, model, view, Rect::new(l.browser_x(), W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR));
+            let col = Rect::new(l.browser_x(), W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR);
+            if view.session_panel.open {
+                crate::surfaces::session::draw_session_panel(ui, model, view, col);
+            } else {
+                draw_browser(ui, model, view, col);
+            }
         }
         if l.navigator {
             draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, status_y, visible_rows);

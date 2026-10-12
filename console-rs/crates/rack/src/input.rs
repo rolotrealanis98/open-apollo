@@ -188,6 +188,13 @@ pub enum Control {
     /// [model] `set_text` targets: Save As name, Open path (engine host).
     SessionSaveAsName,
     SessionOpenPath,
+    /// [model] `set_text` targets: a session file's new name, a new folder's name.
+    SessionRenameTo(u16),
+    SessionNewFolderName,
+    /// [view] CURRENT SESSION panel: a tree row (folder or file, by panel row index) and the
+    /// ••• button.
+    SessionPanelRow(u16),
+    SessionPanelDots,
     /// A popup-menu row or menu-bar title (`menu`): view commands (`MenuCmd::is_view`) are
     /// consumed by `ViewState`, the rest reach `MixerModel::apply` as `Action::Tap`.
     Menu(crate::menu::MenuCmd),

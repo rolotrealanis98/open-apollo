@@ -223,6 +223,8 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
         }
         Popover::SessionSaveAs => text_popover(ui, a, bounds, "SAVE SESSION AS", view.text_edit.as_ref()),
         Popover::SessionOpen => text_popover(ui, a, bounds, "OPEN SESSION", view.text_edit.as_ref()),
+        Popover::SessionRename => text_popover(ui, a, bounds, "RENAME SESSION", view.text_edit.as_ref()),
+        Popover::SessionNewFolder => text_popover(ui, a, bounds, "NEW FOLDER", view.text_edit.as_ref()),
         Popover::Tempo => text_popover(ui, a, bounds, "TEMPO", view.text_edit.as_ref()),
         Popover::CueOutputs => cue_outputs_popover(ui, model, a, bounds),
         Popover::Headphone { output } => {
