@@ -195,7 +195,7 @@ impl Ui<'_> {
             }
             ui.background("Fader-Ref-Mark-Dark", g.ref_mark);
             // Fader scale (`Rack_FaderMarks`, 0x1809b1c60), placed with the taper: a 4×1 tick at the
-            // scale's left edge and the number 8 pt right of it.
+            // scale's left edge and the number 6 pt right of it.
             let fskin = ui.skin("faders", fader_key);
             let fcolor = fskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::BLACK);
             let m = FaderMetrics::from_skin(fskin);
@@ -204,7 +204,7 @@ impl Ui<'_> {
             for (label, db) in scales::FADER_MARKS {
                 let y = (g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32).floor();
                 ui.fill(Rect::new(g.fader_marks.x, y, 4.0, 1.0), fcolor);
-                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 8.0, y - 4.75, 20.0, 10.0), Align::Left);
+                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 6.0, y - 4.75, 20.0, 10.0), Align::Left);
             }
             // Gain button separator (0x18141ea20, no polarity toggle): a dotted 1-pt line at
             // (value.x + 6, value.y − 3), value = (well.x, well.bottom − 20); white 0.15 dots every 2 pt.
@@ -244,7 +244,7 @@ impl Ui<'_> {
     /// Insert slot with an explicit label (`Rack_InsertButtonPainter::PaintInsertContent`
     /// 0x18142c290, measured on p1's "CL 1B mkII", a native UADx insert): icon fitted in
     /// `(16, 4, 64, 25)` (icons are 400×160 px → 62.5 × 25), label in the `inserts:Small-Normal` font
-    /// (Helvetica bold 9 dyn, white 0.7) centred on y + 37. Native and running UAD-2 plug-ins use
+    /// (Helvetica bold 9 dyn, white 0.7) centred on y + 38. Native and running UAD-2 plug-ins use
     /// the upright face; `italic` is Console's offline (Apollo not running) form.
     pub fn insert_slot_labeled(&mut self, state: &InsertState, label: Option<&str>, italic: bool, r: Rect, id: Option<ControlId>) {
         let Some(skin) = self.skin("inserts", "Small-Normal") else { return };
@@ -275,7 +275,7 @@ impl Ui<'_> {
                     if !*power {
                         style.color.a *= 0.6;
                     }
-                    let name_r = Rect::new(r.x + 11.0, r.y + 30.0, r.w - 22.0, 14.0);
+                    let name_r = Rect::new(r.x + 11.0, r.y + 31.0, r.w - 22.0, 14.0);
                     // Long labels are clipped to the plate (Console elides with "…").
                     let fits = label.chars().count() <= 14;
                     self.clip(Some(name_r));

@@ -472,7 +472,7 @@ fn name_plate(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, r: Rect) {
         if aux {
             style.color = Rgba::WHITE.with_alpha(0.5);
         }
-        ui.text("[ ISOLATE ]", style, Rect::new(r.x, r.y + 17.0, r.w, 9.0), Align::Center);
+        ui.text("[ ISOLATE ]", style, Rect::new(r.x, r.y + 18.0, r.w, 9.0), Align::Center);
     }
     ui.hit(r, ControlId { strip: s.id.clone(), control: Control::Name }, HitKind::Tap);
 }

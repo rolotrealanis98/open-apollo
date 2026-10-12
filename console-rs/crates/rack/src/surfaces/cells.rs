@@ -178,7 +178,7 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
     if let Some(c) = ui.skin("fonts", "Flex-Route-Value-Font").and_then(|k| k.color("color-text-off")) {
         label.color = c;
     }
-    ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 4.0), Align::Center);
+    ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 1.0), Align::Center);
     ui.background("Send-Lower-State-Plate", Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, SEND_H - top - 1.0));
     let knob = Rect::new(7.0, sy + top - 4.0, 41.0, 49.0);
     ui.film("meters", "Knob-Meter", "image-film", 0.0, knob);
