@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use houston::Resources;
 use rack::input::{Action, Control, ControlId, Hit, Interaction, ScrollTarget};
-use rack::surfaces::{Modifier, Popover, PopoverState, Section};
+use rack::surfaces::{Modifier, MonitorPage, Popover, PopoverState, Section};
 use rack::{Assets, MixerModel, PreviewMixer, Ui, ViewState, build_window_with};
 
 const FIXTURE: &str = r#"{
@@ -75,7 +75,10 @@ fn every_surface_registers_its_controls() {
     assert!(find(&hits, "status", &Control::StatusRate).is_some());
     assert!(find(&hits, "session", &Control::SessionNavigate(0)).is_some());
     assert!(find(&hits, "monitor", &Control::CueOutputs).is_some());
-    assert!(find(&hits, "monitor", &Control::MonitorDim).is_some());
+    // Console's monitor column has no DIM / TALK; they are on the CTRL ROOM page.
+    assert!(find(&hits, "monitor", &Control::MonitorDim).is_none());
+    let (cr_hits, _) = build(&assets, &model, &ViewState { monitor_page: MonitorPage::ControlRoom, ..ViewState::default() });
+    assert!(find(&cr_hits, "monitor", &Control::MonitorDim).is_some());
     assert!(find(&hits, "in0", &Control::Name).is_some());
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Browser && s.max > 0.0));
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Cells && s.max > 0.0), "sends overflow the cells column");
