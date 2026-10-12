@@ -2,7 +2,7 @@
 
 use houston::{Insets, Rect, Rgba};
 
-use crate::draw::{Align, Frame, TextStyle};
+use crate::draw::{Align, Frame};
 use crate::geometry::{FaderAndMetersGeometry, FaderMetrics};
 use crate::input::{ControlId, HitKind};
 use crate::model::{InsertState, MeterFrame};
@@ -39,6 +39,10 @@ impl Ui<'_> {
                     let img = self.assets.images.get(&path)?;
                     Some(Insets::thirds(img.width, img.height))
                 });
+                // Corners larger than half the destination are cropped, not scaled: the 23-pt
+                // preamp gain display (display_bg1 thirds = 29 px a side) keeps its frame 2 pt
+                // inside, as in p1.
+                let slice = slice.map(|s| clamp_corners(s, dst));
                 self.image(&path, dst, slice, None, 1.0);
             }
         }
@@ -55,13 +59,27 @@ impl Ui<'_> {
         self.image(path, r.centered(w, h), None, Some(Frame { height: fh, index }), 1.0);
     }
 
-    /// `Rack_Knob`: optional background image plus the filmstrip; vertical drag.
+    /// Filmstrip frame for `value` drawn at `size` (pt), centred in `r`.
+    pub fn film_sized(&mut self, section: &str, key: &str, prop: &str, value: f64, r: Rect, size: (f32, f32)) {
+        let Some(skin) = self.skin(section, key) else { return };
+        let (Some(path), Some(fh)) = (skin.image(prop), skin.frame_height()) else { return };
+        let Some(img) = self.assets.images.get(path) else { return };
+        let count = (img.height / fh).max(1);
+        let index = ((value.clamp(0.0, 1.0) * (count - 1) as f64).round()) as u32;
+        self.image(path, snap_centered(r, size.0, size.1), None, Some(Frame { height: fh, index }), 1.0);
+    }
+
+    /// `Rack_Knob`: optional background image plus the filmstrip, drawn at the skin's
+    /// width × height (e.g. `Small-Green-Input` scales its 41×46 art to 36×40); vertical drag.
     pub fn knob(&mut self, key: &str, value: f64, r: Rect, id: Option<ControlId>, reset: Option<f64>) {
         if let Some(bg) = self.skin("knobs", key).and_then(|s| s.image("image-background")) {
             let bg = bg.to_string();
             self.image_centered(&bg, r, 1.0);
         }
-        self.film("knobs", key, "image-film", value, r);
+        match self.skin("knobs", key).and_then(|s| s.size()) {
+            Some(size) => self.film_sized("knobs", key, "image-film", value, r, size),
+            None => self.film("knobs", key, "image-film", value, r),
+        }
         if let Some(id) = id {
             let sens = self.skin("knobs", key).and_then(|s| s.number("sensitivity")).unwrap_or(1.0) as f32;
             self.hit(r, id, HitKind::Drag { value, span: 250.0 / sens.max(0.1), reset });
@@ -88,8 +106,12 @@ impl Ui<'_> {
                 if let Some((w, h)) = self.image_size(ov) {
                     self.image(ov, Rect::new(r.x + 6.0, r.max_y() - 6.0 - h, w, h), None, None, opacity);
                 }
-            } else {
-                self.image_centered(ov, r, opacity);
+            } else if let Some((iw, ih)) = self.image_size(ov) {
+                // The overlay box is width-overlay × height-overlay (else the art size), centred
+                // on whole points, and the art is stretched into it.
+                let (w, h) = (skin.number("width-overlay").map_or(iw, |v| v as f32), skin.number("height-overlay").map_or(ih, |v| v as f32));
+                let b = Rect::new(r.x + ((r.w - w) / 2.0).floor(), r.y + ((r.h - h) / 2.0).floor(), w, h);
+                self.image(ov, b, None, None, opacity);
             }
         }
         if let Some(label) = label {
@@ -122,7 +144,8 @@ impl Ui<'_> {
         }
         if let Some(cap) = skin.and_then(|s| s.image("image-cap")) {
             let cap = cap.to_string();
-            let cy = r.y + m.cap_center_y(value, r.h);
+            // Rack_Fader positions the cap on whole points (p1: 0 dB−0.01 → top 736, not 736.7).
+            let cy = r.y + m.cap_center_y(value, r.h).floor();
             self.image(&cap, Rect::new(r.x + (r.w - m.cap.0) / 2.0, cy - m.cap.1 / 2.0, m.cap.0, m.cap.1), None, None, 1.0);
         }
         if let Some(id) = id {
@@ -169,56 +192,87 @@ impl Ui<'_> {
         let meter_w = self.skin("meters", left_key).and_then(|s| s.size()).map(|s| s.0).unwrap_or(if stereo { 4.0 } else { 8.0 });
         let g = FaderAndMetersGeometry::new(r.w, r.h, stereo, meter_w);
         self.at(r.x, r.y, |ui| {
+            // secondary_meter_well then meter_well, same rect (0x18141ea20).
+            ui.background("Secondary-Display-Background", g.meter_well);
             ui.background("Display-Background", g.meter_well);
             ui.bar_meter(left_key, meters.left, meters.clip_left, g.left_meter);
             if let Some(right) = g.right_meter {
                 ui.bar_meter("Right-Input-Meter", meters.right, meters.clip_right, right);
             }
             ui.font_text("Small-Label-Font", readout, g.value_label, Align::Center);
-            // Meter scale: labels span the lit well.
+            // Meter scale (`Rack_MeterMarks`, labels 0x1809d1470): a 3×1 tick at the scale's left
+            // edge per label, a 1×1 dot halfway, the number 7 pt right of the tick (measured).
             let mskin = ui.skin("meters", "Mono-Input-Meter");
             let mcolor = mskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::rgb8(93, 101, 105));
             let content = mskin.and_then(|s| s.rect("bounds-content")).unwrap_or(Rect::new(0.0, 14.0, 16.0, 372.0));
             let (top, bottom) = (g.left_meter.y + content.y / ART_SCALE, g.left_meter.max_y() - (392.0 - content.max_y()) / ART_SCALE);
-            let style = Ui::plain_style("Helvetica", 9.5, false, mcolor);
+            let mut style = ui.style("meters", "Mono-Input-Meter");
+            style.color = mcolor;
             let n = scales::METER_MARKS.len() as f32 - 1.0;
+            let step = (bottom - top) / n;
             for (i, db) in scales::METER_MARKS.iter().enumerate() {
-                let y = top + (bottom - top) * i as f32 / n;
-                ui.text(&format!("- {}", -db as i32), style.clone(), Rect::new(g.meter_marks.x, y - 5.0, g.meter_marks.w, 10.0), Align::Left);
+                let y = (top + step * i as f32).floor();
+                ui.fill(Rect::new(g.meter_marks.x, y, 3.0, 1.0), mcolor);
+                if i + 1 < scales::METER_MARKS.len() {
+                    ui.fill(Rect::new(g.meter_marks.x, y + (step / 2.0).ceil(), 1.0, 1.0), mcolor);
+                }
+                ui.text(&format!("{}", -db as i32), style.clone(), Rect::new(g.meter_marks.x + 7.0, y - 4.75, 20.0, 10.0), Align::Left);
             }
             ui.background("Fader-Ref-Mark-Dark", g.ref_mark);
-            // Fader scale, placed with the taper.
+            // Fader scale (`Rack_FaderMarks`, 0x1809b1c60), placed with the taper: a 4×1 tick at the
+            // scale's left edge and the number 6 pt right of it.
             let fskin = ui.skin("faders", fader_key);
             let fcolor = fskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::BLACK);
             let m = FaderMetrics::from_skin(fskin);
             let (t, b) = m.travel(g.fader.h);
-            let fstyle = Ui::plain_style("Helvetica", 9.5, false, fcolor);
+            let mut fstyle = ui.style("faders", fader_key);
+            fstyle.color = fcolor;
             for (label, db) in scales::FADER_MARKS {
-                let y = g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32;
-                ui.text(&format!("- {label}"), fstyle.clone(), Rect::new(g.fader_marks.x, y - 5.0, 30.0, 10.0), Align::Left);
+                let y = (g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32).floor();
+                ui.fill(Rect::new(g.fader_marks.x, y, 4.0, 1.0), fcolor);
+                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 6.0, y - 4.75, 20.0, 10.0), Align::Left);
+            }
+            // Gain button separator (0x18141ea20, no polarity toggle): a dotted 1-pt line at
+            // (value.x + 6, value.y − 3), value = (well.x, well.bottom − 20); white 0.15 dots every 2 pt.
+            let dots = Rect::new(g.meter_well.x + 6.0, g.meter_well.max_y() - 23.0, g.meter_well.w - 12.0, 1.0);
+            for k in 0..((dots.w as i32 + 3) / 2) {
+                ui.fill(Rect::new(dots.x + 2.0 * k as f32, dots.y, 1.0, 1.0), Rgba::WHITE.with_alpha(0.15));
             }
             ui.fader(fader_key, fader, g.fader, id);
         });
     }
 
-    /// Channel name plate. Inputs: flat white fill (Console 1.3.1); auxes: the dark plate image.
+    /// Channel name text (`views:Channel-Input-Name` / `Channel-Aux-Name`): bounds-text inset
+    /// by inset-text, 3 pt above the 40-pt art's frame. The plate itself is painted by the caller.
     pub fn name_plate(&mut self, key: &str, name: &str, r: Rect) {
         let Some(skin) = self.skin("views", key) else { return };
-        if key == "Channel-Input-Name" {
-            self.fill(Rect::new(r.x, r.y, r.w, 27.0), Rgba::WHITE);
-        } else if let Some(img) = skin.image("image-off") {
-            let size = skin.size().unwrap_or((97.0, 40.0));
-            self.image(img, Rect::new(r.x, r.y, size.0, size.1), None, None, 1.0);
-        }
         let text = skin.rect("bounds-text").unwrap_or(Rect::new(0.0, 3.0, 97.0, 36.0));
         let inset = skin.insets("inset-text").unwrap_or_default();
-        let style = self.style("views", key);
+        let mut style = self.style("views", key);
+        if key == "Channel-Aux-Name" {
+            // 1.3.1 draws the aux name brighter than the skin's 0.4 (measured 0.5 on the flat plate).
+            style.color = Rgba::WHITE.with_alpha(0.5);
+        }
         let rect = Rect::new(r.x + text.x + inset.l, r.y + text.y + inset.t - 3.0, text.w - inset.l - inset.r, text.h - inset.t - inset.b);
         self.text(name, style, rect, Align::Center);
     }
 
-    /// Insert slot: `inserts:Small-Normal` art; "+" when empty, plug-in icon + italic name when loaded.
+    /// Insert slot (`Rack_InsertsButton`, LARGE): `inserts:Small-Normal` art; "+" when empty;
+    /// when loaded, the plug-in icon and Console's label (the name without "UAD ").
     pub fn insert_slot(&mut self, state: &InsertState, r: Rect, id: Option<ControlId>) {
+        let label = match state {
+            InsertState::Loaded { name, .. } => Some(name.strip_prefix("UAD ").unwrap_or(name).to_owned()),
+            InsertState::Empty => None,
+        };
+        self.insert_slot_labeled(state, label.as_deref(), false, r, id);
+    }
+
+    /// Insert slot with an explicit label (`Rack_InsertButtonPainter::PaintInsertContent`
+    /// 0x18142c290, measured on p1's "CL 1B mkII", a native UADx insert): icon fitted in
+    /// `(16, 4, 64, 25)` (icons are 400×160 px → 62.5 × 25), label in the `inserts:Small-Normal` font
+    /// (Helvetica bold 9 dyn, white 0.7) centred on y + 38. Native and running UAD-2 plug-ins use
+    /// the upright face; `italic` is Console's offline (Apollo not running) form.
+    pub fn insert_slot_labeled(&mut self, state: &InsertState, label: Option<&str>, italic: bool, r: Rect, id: Option<ControlId>) {
         let Some(skin) = self.skin("inserts", "Small-Normal") else { return };
         let img = match state {
             InsertState::Empty => skin.image("image-empty"),
@@ -237,19 +291,23 @@ impl Ui<'_> {
             InsertState::Loaded { name, power } => {
                 let key = format!("plugin:{name}");
                 if let Some((w, h)) = self.image_size(&key) {
-                    let (fw, fh) = (66.0f32, 27.0f32);
-                    let s = (fw / w).min(fh / h);
-                    let (dw, dh) = (w * s, h * s);
-                    self.image(&key, Rect::new(r.x + (r.w - dw) / 2.0, r.y + 4.0 + (fh - dh) / 2.0, dw, dh), None, None, 1.0);
+                    let b = Rect::new(r.x + 16.0, r.y + 4.0, 64.0, 25.0);
+                    let s = (b.w / w).min(b.h / h);
+                    self.image(&key, snap_centered(b, w * s, h * s), None, None, if *power { 1.0 } else { 0.5 });
                 }
-                let short = name.strip_prefix("UAD ").unwrap_or(name);
-                let style = TextStyle { family: "Helvetica".into(), size: 9.0, bold: false, italic: true, color: Rgba::WHITE.with_alpha(if *power { 0.85 } else { 0.45 }) };
-                let name_r = Rect::new(r.x + 13.0, r.y + 31.0, r.w - 26.0, 12.0);
-                // Long names are clipped to the plate (Console elides with "…").
-                let fits = short.chars().count() <= 16;
-                self.clip(Some(name_r));
-                self.text(short, style, if fits { name_r } else { Rect::new(name_r.x + 1.0, name_r.y, 200.0, name_r.h) }, if fits { Align::Center } else { Align::Left });
-                self.clip(None);
+                if let Some(label) = label {
+                    let mut style = self.style("inserts", "Small-Normal");
+                    style.italic = italic;
+                    if !*power {
+                        style.color.a *= 0.6;
+                    }
+                    let name_r = Rect::new(r.x + 11.0, r.y + 31.0, r.w - 22.0, 14.0);
+                    // Long labels are clipped to the plate (Console elides with "…").
+                    let fits = label.chars().count() <= 14;
+                    self.clip(Some(name_r));
+                    self.text(label, style, if fits { name_r } else { Rect::new(name_r.x + 1.0, name_r.y, 200.0, name_r.h) }, if fits { Align::Center } else { Align::Left });
+                    self.clip(None);
+                }
             }
         }
         if let Some(id) = id {
@@ -257,16 +315,37 @@ impl Ui<'_> {
         }
     }
 
-    /// `Rack_ChannelStripCell` header: `Mixer-Row-Header` with a centred title.
+    /// `Rack_ChannelStripCell` header (`(0, 0, w, 22)`, paint 0x18149f850): `Mixer-Row-Header`
+    /// (bus cells: `-Bus`) with the title centred on the whole header. `plus` adds the inserts
+    /// header's "+" (a 2-pt cross, 8 × 8, at x 8 / y 7; white 0.6, measured). Bus titles draw at
+    /// 0.62 of the header colour (measured on the dark header).
     pub fn cell_header(&mut self, title: &str, plus: bool, bus: bool, r: Rect) {
         self.background(if bus { "Mixer-Row-Header-Bus" } else { "Mixer-Row-Header" }, r);
-        let style = self.style("fonts", "Channel-Strip-Section-Header");
-        if plus {
-            let big = TextStyle { size: 15.0, ..style.clone() };
-            self.text("+", big, Rect::new(r.x + 14.0, r.y, 14.0, r.h), Align::Center);
-            self.text(title, style, Rect::new(r.x + 24.0, r.y, r.w - 30.0, r.h), Align::Center);
-        } else {
-            self.text(title, style, r, Align::Center);
+        let mut style = self.style("fonts", "Channel-Strip-Section-Header");
+        if bus {
+            style.color.a *= 0.62;
         }
+        if plus {
+            let c = Rgba::WHITE.with_alpha(0.59);
+            self.fill(Rect::new(r.x + 8.0, r.y + 10.0, 8.0, 2.0), c);
+            self.fill(Rect::new(r.x + 11.0, r.y + 7.0, 2.0, 3.0), c);
+            self.fill(Rect::new(r.x + 11.0, r.y + 12.0, 2.0, 3.0), c);
+        }
+        self.text(title, style, r, Align::Center);
     }
+}
+
+/// `w × h` centred in `r`, snapped down to the 2× pixel grid (JUCE's integer placement at 2×).
+pub(crate) fn snap_centered(r: Rect, w: f32, h: f32) -> Rect {
+    let snap = |v: f32| (v * 2.0).floor() / 2.0;
+    Rect::new(snap(r.x + (r.w - w) / 2.0), snap(r.y + (r.h - h) / 2.0), w, h)
+}
+
+/// 9-slice insets (image px) limited to half the destination (pt × ART_SCALE) per axis.
+fn clamp_corners(s: Insets, dst: Rect) -> Insets {
+    let (hw, hh) = (dst.w * ART_SCALE / 2.0, dst.h * ART_SCALE / 2.0);
+    let fit = |a: f32, b: f32, half: f32| if a + b > 2.0 * half { (a.min(half), b.min(half)) } else { (a, b) };
+    let (l, r) = fit(s.l, s.r, hw);
+    let (t, b) = fit(s.t, s.b, hh);
+    Insets { l, t, r, b }
 }

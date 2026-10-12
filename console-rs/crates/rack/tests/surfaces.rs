@@ -91,14 +91,14 @@ fn section_toggle_collapses_the_input_row() {
     let mut view = ViewState::default();
     let (hits, _) = build(&assets, &model, &view);
     let slot = find(&hits, "in0", &Control::Insert(0)).expect("insert slot").rect;
-    // Inputs row 237 + header 26 + 3 under the column top (72) + swatch (5).
-    assert_eq!(slot.y, 72.0 + 5.0 + 237.0 + 26.0 + 3.0);
+    // Inputs row 237 + list top 26 + 5 + 1 under the column top (72) + swatch (5).
+    assert_eq!(slot.y, 72.0 + 5.0 + 237.0 + 26.0 + 6.0);
     let toggle = find(&hits, "nav", &Control::Section(Section::Inputs)).unwrap().clone();
     tap(&hits, &toggle, &mut view, &mut model);
     assert!(!view.sections.inputs);
     let (hits, _) = build(&assets, &model, &view);
     let slot = find(&hits, "in0", &Control::Insert(0)).unwrap().rect;
-    assert_eq!(slot.y, 72.0 + 5.0 + 22.0 + 26.0 + 3.0, "collapsed = header only");
+    assert_eq!(slot.y, 72.0 + 5.0 + 22.0 + 26.0 + 6.0, "collapsed = header only");
     // Input sends are reachable now (mini sends of the expanded Sends row).
     assert!(find(&hits, "in0", &Control::SendMute(0)).is_some());
     assert!(find(&hits, "in0", &Control::SendPre(0)).is_some());

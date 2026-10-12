@@ -453,6 +453,14 @@ impl MixerModel for EngineMixer {
             .collect()
     }
 
+    /// Console reserves a row for every cue send the engine lists on an aux (p2: CUE 1–4), shown or not.
+    fn send_rows(&self, strip: &StripInfo) -> usize {
+        match self.aux(&strip.id) {
+            Some(a) => a.sends.iter().filter(|s| s.is_cue()).count(),
+            None => self.input_sends(strip).len(),
+        }
+    }
+
     fn records_pre_effects(&self, strip: &StripInfo) -> bool {
         self.input(&strip.id)
             .and_then(|s| self.bool_at(&s.record_pre_effects()))
