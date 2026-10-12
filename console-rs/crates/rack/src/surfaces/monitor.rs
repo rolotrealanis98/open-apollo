@@ -17,7 +17,8 @@ use crate::geometry::STRIP_W;
 use crate::input::{Control, ControlId, HitKind};
 use crate::model::{MeterFrame, MixerModel};
 use crate::scales;
-use crate::surfaces::view::{MonitorPage, Popover, ViewState};
+use crate::settings::Panel;
+use crate::surfaces::view::{MonitorPage, Sheet, ViewState};
 use crate::ui::{ART_SCALE, Ui};
 
 pub const MONITOR_ID: &str = "monitor";
@@ -187,20 +188,27 @@ pub fn draw_monitor_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState
         let aux = view.monitor_page == MonitorPage::Aux;
         button(ui, "Switch", "AUX", aux, Rect::new(8.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::Aux), HitKind::Tap);
         button(ui, "Switch-Tight-Kerning", "CTRL\nROOM", !aux, Rect::new(48.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::ControlRoom), HitKind::Tap);
-        let cue_open = matches!(&view.popover, Some(p) if p.kind == Popover::CueOutputs);
+        let cue_open = view.sheet == Some(Sheet::Panel(Panel::CueOutputs));
         popover_button(ui, "Switch-Popover-Left", "CUE\nOUTPUTS", cue_open, Rect::new(8.0, st.cue_outputs, 80.0, 40.0), Control::CueOutputs);
         if let Some(y) = st.controller {
-            ui.toggle("Switch-Large-Tight-Kerning", Some("MONITOR\nCONTROLLER"), false, true, Rect::new(8.0, y, 80.0, 40.0), None, None);
+            let open = view.sheet == Some(Sheet::Panel(Panel::MonitorController));
+            let r = Rect::new(8.0, y, 80.0, 40.0);
+            ui.toggle("Switch-Large-Tight-Kerning", Some("MONITOR\nCONTROLLER"), open, true, r, None, None);
+            ui.hit(r, mid(Control::ShowPanel(Panel::MonitorController)), HitKind::Tap);
         }
         if let Some(y) = st.correction_label {
             separator(ui, y);
             ui.font_text("CR-Label", "MONITOR\nCORRECTION", Rect::new(0.0, y, STRIP_W, 28.0), Align::Center);
         }
+        // The correction buttons open their windows (HEADPHONE CORRECTION; MAIN MON: the
+        // MONITOR CONTROLLER sub-window's MAIN MONITOR CORRECTION section).
         if let (Some(y), Some(power)) = (st.headphones, opts.hp_correction) {
             correction_button(ui, true, power, "HEADPHONES", y);
+            ui.hit(Rect::new(10.0, y, STRIP_W - 20.0, 50.0), mid(Control::ShowPanel(Panel::HeadphoneCorrection)), HitKind::Tap);
         }
         if let (Some(y), Some(power)) = (st.main_mon, opts.speaker_correction) {
             correction_button(ui, false, power, "MAIN MON", y);
+            ui.hit(Rect::new(10.0, y, STRIP_W - 20.0, 50.0), mid(Control::ShowPanel(Panel::MonitorController)), HitKind::Tap);
         }
         separator(ui, st.output_label);
         ui.font_text("CR-Label", "OUTPUT", Rect::new(4.0, st.output_label, 88.0, 16.0), Align::Center);

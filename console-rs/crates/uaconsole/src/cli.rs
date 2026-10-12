@@ -12,11 +12,14 @@ uaconsole — a native UAD Console for open-apollo
 usage:
   uaconsole [--compact] [--fit|--1to1] [--engine host[:port]] [--mock snapshot.json]
             [--preview] [--writes] [--live-meters] [--stats] [--open-plugin STRIP:SLOT]
+            [--open SHEET]
   uaconsole --render out.png [--compact] [--scale N] [--size WxH]
                                                          headless render (preview data);
                                                          --size is the window in points
   uaconsole --bench N [--compact] [--scale N]            render N frames headless, print timings
 
+  --open settings[:hardware|io-matrix|plug-ins|options|midi|dante], cue-outputs,
+  monitor-controller[:1], headphone-correction, plugin-scenes or about opens that window.
   --stats starts with the F1 overlay; --open-plugin in0:0 (or in0:unison) opens that insert's
   panel at start (window and --render).
 
@@ -100,6 +103,8 @@ pub struct Args {
     pub stats: bool,
     /// (strip id, slot) to open at start.
     pub open_plugin: Option<(String, u8)>,
+    /// Settings window / panel to open at start (`ViewState::open_named`).
+    pub open: Option<String>,
     pub help: bool,
 }
 
@@ -136,6 +141,13 @@ impl Args {
                 "--live-meters" => out.live_meters = true,
                 "--stats" => out.stats = true,
                 "--open-plugin" => out.open_plugin = Some(parse_slot(&value("--open-plugin")?)?),
+                "--open" => {
+                    let v = value("--open")?;
+                    if !rack::ViewState::default().open_named(&v) {
+                        return Err(format!("unknown --open {v:?}"));
+                    }
+                    out.open = Some(v);
+                }
                 "-h" | "--help" => out.help = true,
                 other => return Err(format!("unknown argument {other:?}")),
             }

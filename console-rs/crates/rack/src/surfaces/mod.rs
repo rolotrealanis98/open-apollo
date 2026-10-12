@@ -8,6 +8,7 @@ pub mod browser;
 pub mod cells;
 pub mod monitor;
 pub mod navigator;
+pub mod panels;
 pub mod popover;
 pub mod session_nav;
 pub mod settings;
@@ -16,6 +17,6 @@ pub mod view;
 
 pub use popover::{MenuItem, Placement};
 pub use view::{
-    BrowserTab, BrowserView, Effect, InsertSize, Modifier, MonitorPage, Popover, PopoverState, Section, Sections, Sheet, TextEdit, TextTarget, ViewState,
+    BrowserTab, BrowserView, Effect, InsertSize, Modifier, MonitorPage, Popover, PopoverState, Section, Sections, SettingsView, Sheet, TextEdit, TextTarget, ViewState,
     is_view_control,
 };

@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+log = "0.4"
 rack = { version = "0.1.0", path = "../rack" }
 ua-engine = { version = "0.1.0", path = "../ua-engine" }
 

@@ -510,6 +510,37 @@ impl ViewState {
         }
     }
 
+    /// Opens a sheet by name (`settings[:tab]`, `cue-outputs`, `monitor-controller`,
+    /// `headphone-correction`, `plugin-scenes`, `about`) for `--open` and tests. Tabs:
+    /// `hardware`, `io-matrix`, `plug-ins`, `options`, `midi`, `dante`. False if unknown.
+    pub fn open_named(&mut self, name: &str) -> bool {
+        let (what, tab) = name.split_once(':').unwrap_or((name, ""));
+        let panel = match what {
+            "settings" => {
+                self.sheet = Some(Sheet::Settings);
+                self.settings.tab = match tab {
+                    "" | "hardware" => SettingsTab::Hardware,
+                    "io-matrix" => SettingsTab::IoMatrix,
+                    "plug-ins" | "plugins" => SettingsTab::PlugIns,
+                    "options" => SettingsTab::Options,
+                    "midi" => SettingsTab::Midi,
+                    "dante" => SettingsTab::DanteDevices,
+                    _ => return false,
+                };
+                return true;
+            }
+            "cue-outputs" => Panel::CueOutputs,
+            "monitor-controller" => Panel::MonitorController,
+            "headphone-correction" => Panel::HeadphoneCorrection,
+            "plugin-scenes" => Panel::PluginScenes,
+            "about" => Panel::About,
+            _ => return false,
+        };
+        self.sheet = Some(Sheet::Panel(panel));
+        self.settings.panel_tab = tab.parse().unwrap_or(0);
+        true
+    }
+
     /// Opens panel `p` (or closes it when it is already open).
     fn toggle_panel(&mut self, p: Panel, model: &dyn MixerModel) {
         if self.sheet == Some(Sheet::Panel(p)) {

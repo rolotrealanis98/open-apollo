@@ -25,6 +25,7 @@
 //! [`EngineMixer::insert_slot`] resolves the slot, whose plug-in parameters are at
 //! [`InsertPaths::parameter`](ua_engine::InsertPaths::parameter)).
 
+mod settings;
 mod slots;
 mod surfaces;
 
@@ -62,6 +63,8 @@ pub struct EngineMixer {
     clipboard: Option<String>,
     /// The read-only UA Mixer Helper (4720): native inserts and helper state.
     helper: Option<ua_engine::HelperStore>,
+    /// Console's client-side preferences (Settings › OPTIONS / MIDI), kept in memory.
+    prefs: rack::settings::Prefs,
 }
 
 impl EngineMixer {
@@ -73,6 +76,7 @@ impl EngineMixer {
             taps: Vec::new(),
             clipboard: None,
             helper: None,
+            prefs: rack::settings::Prefs::default(),
         }
     }
 
@@ -581,10 +585,28 @@ impl MixerModel for EngineMixer {
     }
 
     fn set_text(&mut self, id: &ControlId, text: &str) {
+        if let Control::SettingEdit(k) = &id.control {
+            return self.apply_setting(k, &rack::settings::SettingOp::Text(text.to_string()));
+        }
         self.surface_set_text(id, text);
     }
 
+    fn properties(&self) -> Option<&dyn rack::settings::PropertySource> {
+        Some(self)
+    }
+
+    fn apply_setting_writes(&mut self, writes: Vec<rack::settings::Write>) {
+        self.write_settings(writes);
+    }
+
     fn apply(&mut self, action: &Action) {
+        if let Action::Tap(id) | Action::Toggle(id) = action {
+            match &id.control {
+                Control::SettingChoose(k, i) => return self.apply_setting(k, &rack::settings::SettingOp::Choose(*i as usize)),
+                Control::SettingPress(k) => return self.apply_setting(k, &rack::settings::SettingOp::Press),
+                _ => {}
+            }
+        }
         if self.apply_surface(action) {
             return;
         }

@@ -13,6 +13,7 @@ use crate::surfaces::monitor::{draw_control_room, draw_monitor_column, monitor_r
 use crate::surfaces::navigator::{self, VisibleRows, draw_navigator};
 use crate::surfaces::popover::draw_popover;
 use crate::surfaces::session_nav::draw_session_navigator;
+use crate::surfaces::panels::draw_panel;
 use crate::surfaces::settings::draw_settings_sheet;
 use crate::surfaces::status::draw_status_bar;
 use crate::surfaces::{MonitorPage, Section, Sheet, ViewState};
@@ -254,8 +255,13 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     title_bar(ui, model, width);
 
     // Overlays.
-    if view.sheet == Some(Sheet::Settings) {
-        draw_settings_sheet(ui, model, bounds);
+    match view.sheet {
+        Some(Sheet::Settings) => draw_settings_sheet(ui, model, view, bounds),
+        Some(Sheet::Panel(p)) => {
+            let browser = (l.browser && !l.compact).then(|| Rect::new(0.0, W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR));
+            draw_panel(ui, model, view, p, bounds, browser);
+        }
+        None => {}
     }
     draw_popover(ui, model, view, bounds);
     l

@@ -38,6 +38,8 @@ pub struct Options {
     /// Start with the stats overlay.
     pub stats: bool,
     pub open_plugin: Option<(String, u8)>,
+    /// Settings window / panel to open at start (`--open`).
+    pub open: Option<String>,
     pub settings: Settings,
 }
 
@@ -108,10 +110,13 @@ impl App {
         }
         overlays.sync(&mut *model);
         let area = houston::Rect::new(0.0, 0.0, 1.0, 1.0);
-        let mixer = ViewState {
+        let mut mixer = ViewState {
             compact: opts.compact,
             ..ViewState::default()
         };
+        if let Some(name) = &opts.open {
+            mixer.open_named(name);
+        }
         let frame = build_frame(&assets, &*model, &mixer, &mut overlays, area, None);
         Self {
             assets,

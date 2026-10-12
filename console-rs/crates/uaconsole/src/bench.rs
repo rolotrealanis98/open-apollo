@@ -29,17 +29,21 @@ pub fn render_png(
     size: Option<(f32, f32)>,
     scale: f32,
     open_plugin: Option<&(String, u8)>,
+    open: Option<&str>,
     out: &Path,
 ) -> Result<(), String> {
     let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
     if let Some((strip, slot)) = open_plugin {
         overlays.on_open_plugin(strip, *slot, model);
     }
-    let view = ViewState {
+    let mut view = ViewState {
         compact,
         window: size,
         ..ViewState::default()
     };
+    if let Some(name) = open {
+        view.open_named(name);
+    }
     let (w, h) = layout_for(model, &view).size();
     let t = Instant::now();
     let frame = build_frame(

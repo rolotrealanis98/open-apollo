@@ -282,8 +282,10 @@ pub enum FieldKind {
     Toggle { on: bool },
     /// A text field (DEVICE NAME).
     Text(String),
-    /// An action button (IDENTIFY, SAVE, RESCAN).
+    /// An action button labelled with the field label (IDENTIFY, SAVE, RESCAN).
     Button,
+    /// A captioned cell with one button (`"DON'T SHOW AGAIN" DIALOGS` › RESET).
+    Action(String),
     /// A static value.
     Readout(String),
 }
@@ -315,6 +317,7 @@ impl SettingField {
             FieldKind::Toggle { on } => if *on { "ON" } else { "OFF" }.into(),
             FieldKind::Text(t) | FieldKind::Readout(t) => t.clone(),
             FieldKind::Button => self.label.clone(),
+            FieldKind::Action(b) => b.clone(),
         }
     }
 }
@@ -665,7 +668,7 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             if bool_at(src, &format!("{p}/SupportsDante")) == Some(true) {
                 let dn = str_at(src, &format!("{p}/DanteDeviceName")).unwrap_or_default();
                 f.push(SettingField::new(format!("{p}/DanteDeviceName"), "DANTE DEVICE NAME", FieldKind::Readout(dn), 5));
-                f.push(SettingField::new("launch:dante_controller", "DANTE ROUTING (DANTE CONTROLLER)", FieldKind::Button, 5));
+                f.push(SettingField::new("launch:dante_controller", "DANTE ROUTING (DANTE CONTROLLER)", FieldKind::Action("LAUNCH".into()), 5));
             }
         }
         SettingsGroup::IoMatrix => {
@@ -694,7 +697,7 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             f.extend(engine_choice(src, "/PeakHold", "PEAK HOLD", 0));
             f.push(pref_choice(src, "modifiers_timeout", "MODIFIERS TIMEOUT", 0));
             f.push(pref_choice(src, "language", "LANGUAGE", 1));
-            f.push(SettingField::new("pref-reset:dont_show_again", "\"DON'T SHOW AGAIN\" DIALOGS", FieldKind::Button, 1));
+            f.push(SettingField::new("pref-reset:dont_show_again", "\"DON'T SHOW AGAIN\" DIALOGS", FieldKind::Action("RESET".into()), 1));
         }
         SettingsGroup::Editing => {
             f.extend(engine_choice(src, "/ControlsMode", "CONTROLS MODE", 0));
@@ -793,7 +796,7 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             if let Some(h) = src.prop(&format!("{p}/SpeakerCorrectionSafeHeadroom")).and_then(|v| v.as_f64()) {
                 f.push(SettingField::new(format!("{p}/SpeakerCorrectionSafeHeadroom"), "HEADROOM", FieldKind::Readout(format!("{h:.1} dB")), 1));
             }
-            f.push(SettingField::new(format!("post:ShowSoundIDReference:speaker"), "SOUNDID REFERENCE", FieldKind::Button, 2));
+            f.push(SettingField::new("post:ShowSoundIDReference:speaker", "SOUNDID REFERENCE", FieldKind::Action("OPEN".into()), 2));
         }
         SettingsGroup::HeadphoneCorrection { device, hp } => {
             let p = dev(device);
@@ -807,7 +810,7 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             f.extend(toggle(src, &format!("{p}/{pre}CorrectionPower"), "BYPASS", true, 1));
             f.extend(toggle(src, &format!("{p}/Use{pre}CorrectionSafeHeadroom"), "SAFE HEADROOM", false, 1));
             let ty = if hp == 0 { "headphone" } else { "headphone2" };
-            f.push(SettingField::new(format!("post:ShowSoundIDReference:{ty}"), "SOUNDID REFERENCE", FieldKind::Button, 2));
+            f.push(SettingField::new(format!("post:ShowSoundIDReference:{ty}"), "SOUNDID REFERENCE", FieldKind::Action("OPEN".into()), 2));
         }
         SettingsGroup::Dante => {
             for (k, d) in devs.iter().enumerate() {
