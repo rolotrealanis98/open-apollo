@@ -49,7 +49,7 @@ pub fn draw_panel(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, panel: 
         Panel::AddDevice => add_device(ui, view, bounds),
         Panel::IoPresets => io_presets(ui, model, view, bounds),
         Panel::RouteSource { route, outputs } => route_source(ui, model, view, route, outputs, bounds),
-        Panel::Tempo => tempo(ui, view, bounds),
+        Panel::Tempo => tempo(ui, model, view, bounds),
     }
     choice_menu(ui, view, &drawn, bounds);
 }
@@ -900,29 +900,19 @@ fn legacy_popover_frame(ui: &mut Ui, r: Rect, title: &str, title_right: f32) {
 /// The TEMPO window opens above the status bar's TEMPO field at the field's x, its bottom
 /// 0.5 pt above the field (sb-tempo: (9, 963) over the (9, 1074.5) field); centred when the
 /// field is not on screen.
-fn tempo(ui: &mut Ui, view: &ViewState, bounds: Rect) {
+fn tempo(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
     let size = (196.0, 111.0);
     let field = ui.hit_rect(&ControlId { strip: crate::surfaces::status::STATUS_ID.into(), control: Control::StatusTempo });
     let r = match field {
         Some(f) => Rect::new(f.x, (f.y - size.1 - 0.5).max(bounds.y), size.0, size.1),
         None => centred(bounds, size),
     };
-    // sb-tempo (2 px per pt): a 0.5-pt black outline, a 1-pt (147,153,157) border, a 26-pt dark
-    // title bar (close X at the left, TEMPO centred), a light body.
-    ui.fill(r.inset(-0.5, -0.5, -0.5, -0.5), Rgba::rgb8(3, 4, 4));
-    ui.fill(r, Rgba::rgb8(147, 153, 157));
-    let bar = Rect::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, 26.0);
-    ui.fill(bar, Rgba::rgb8(31, 34, 35));
-    ui.fill(Rect::new(r.x + 1.0, bar.max_y(), r.w - 2.0, r.h - 28.0), Rgba::rgb8(176, 186, 192));
-    ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
-    ui.text("TEMPO", Ui::plain_style("Helvetica", 11.5, true, Rgba::rgb8(187, 188, 188)), bar.offset(0.0, 1.5), Align::Center);
-    if let Some(x) = ui.skin("views", "Browser-Modal-Close-White").and_then(|s| s.image("image")) {
-        let x = x.to_string();
-        ui.image(&x, Rect::new(r.x + 12.5, r.y + 8.5, 10.0, 10.5), None, None, 1.0);
-    }
-    ui.hit(Rect::new(r.x + 1.0, r.y + 1.0, 30.0, 26.0), sid(Control::PanelClose), HitKind::Tap);
+    // `Rack_TempoPopover` (sb-tempo): Rack_Popover's chrome (`Popover-Header` / `-Content`,
+    // the close X, the title).
+    popover_frame(ui, r, "TEMPO");
     // The tempo field (80 × 24 at (12, 39)): the value selected when the window opens.
-    let text = view.text_edit.as_ref().filter(|e| matches!(e.target, TextTarget::Tempo)).map(|e| e.text.clone()).unwrap_or_default();
+    // (Opened without the status bar, `--open tempo`, it shows the session tempo the same way.)
+    let text = view.text_edit.as_ref().filter(|e| matches!(e.target, TextTarget::Tempo)).map(|e| e.text.clone()).unwrap_or_else(|| format!("{:.2}", model.status().tempo));
     let fr = Rect::new(r.x + 12.0, r.y + 39.0, 80.0, 24.0);
     ui.fill(fr, Rgba::rgb8(78, 83, 88));
     let ts = Ui::plain_style("Helvetica", 11.0, false, Rgba::rgb8(191, 202, 214));
@@ -934,13 +924,8 @@ fn tempo(ui: &mut Ui, view: &ViewState, bounds: Rect) {
     // TAP (Switch-Large, 70 × 30 at (109.5, 36.5)): tap tempo needs event timing the UI does
     // not keep yet, so it is drawn without a hit.
     ui.toggle("Switch-Large", Some("TAP"), false, true, Rect::new(r.x + 108.5, r.y + 35.5, 71.0, 31.0), None, None);
-    let button = |ui: &mut Ui, label: &str, fill: Rgba, b: Rect, id: ControlId| {
-        ui.fill(b, fill);
-        ui.text(label, Ui::plain_style("Helvetica", 10.5, true, Rgba::WHITE), b.offset(0.0, 1.25), Align::Center);
-        ui.hit(b, id, HitKind::Tap);
-    };
-    button(ui, "CANCEL", Rgba::rgb8(54, 70, 82), Rect::new(r.x + 12.0, r.y + 75.0, 80.0, 24.0), pid(Control::TextCancel));
-    button(ui, "OK", Rgba::rgb8(0, 84, 140), Rect::new(r.x + 104.0, r.y + 75.0, 80.0, 24.0), pid(Control::TextCommit));
+    popover_button(ui, "CANCEL", false, Rect::new(r.x + 12.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCancel)));
+    popover_button(ui, "OK", true, Rect::new(r.x + 104.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCommit)));
 }
 
 // ---- About ----
