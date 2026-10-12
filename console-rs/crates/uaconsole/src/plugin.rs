@@ -248,7 +248,25 @@ mod tests {
         assert!(hook.on_open_plugin("in0", 1, &model).is_some(), "Vitalizer on in0 insert 2");
         assert!(hook.on_open_plugin("/devices/0/inputs/1/effects/0", 0, &model).is_none(), "not a strip id");
         assert!(hook.on_open_plugin("/devices/0/inputs/1", 0, &model).is_some(), "Curve Bender");
-        assert!(hook.on_open_plugin("in0", 1, &PreviewMixer::default()).is_none(), "preview inserts are empty");
+        // Preview data: loaded slots open offline (local values), empty ones don't.
+        let preview = PreviewMixer::default();
+        assert!(hook.on_open_plugin("in0", 1, &preview).is_some(), "preview Vitalizer");
+        assert!(hook.on_open_plugin("in0", 3, &preview).is_none(), "preview empty slot");
+    }
+
+    #[test]
+    fn offline_panel_edits_local_values() {
+        let assets = assets();
+        let mut hook = PluginUiHook::new(&assets.images);
+        let mut model = PreviewMixer::default();
+        let mut panel = hook.on_open_plugin("in2", 1, &model).expect("preview dbx 160");
+        panel.sync(&mut model);
+        let (w, h) = panel.size();
+        let mut ui = Ui::new(&assets);
+        panel.build(&mut ui, Rect::new(0.0, 0.0, w, h));
+        let power = ui.hits.iter().find(|h| h.id.control == Control::PluginWindow(B::Power)).expect("power button").rect;
+        let (x, y) = power.center();
+        assert_eq!(panel.pointer(PointerEvent::Down { x, y, double: false }, &mut model), PanelResponse::Handled);
     }
 
     #[test]

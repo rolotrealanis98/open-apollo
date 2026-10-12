@@ -25,13 +25,16 @@
 //! [`EngineMixer::insert_slot`] resolves the slot, whose plug-in parameters are at
 //! [`InsertPaths::parameter`](ua_engine::InsertPaths::parameter)).
 
+mod surfaces;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
 use rack::geometry::StripKind;
 use rack::model::{
-    InsertState, MainState, MeterFrame, MixerModel, MonitorState, PreampState, SendState, StripInfo,
+    CueOutput, EngineSettings, HeadphoneOutput, InsertState, MainState, MeterFrame, MixerModel,
+    MonitorOptions, MonitorState, PluginEntry, PreampState, SendState, StatusInfo, StripInfo,
 };
 use rack::{Action, Control, ControlId, scales};
 use ua_engine::{
@@ -51,6 +54,8 @@ pub struct EngineMixer {
     store: Store,
     live_meters: bool,
     taps: Vec<ControlId>,
+    /// Plug-in name copied with the COPY modifier / insert menu, pasted into an empty slot.
+    clipboard: Option<String>,
 }
 
 impl EngineMixer {
@@ -60,6 +65,7 @@ impl EngineMixer {
             store,
             live_meters: true,
             taps: Vec::new(),
+            clipboard: None,
         }
     }
 
@@ -371,9 +377,9 @@ impl MixerModel for EngineMixer {
                 self.f64_at(&p.gain_db()).unwrap_or(10.0).round() as i64
             ),
         };
-        let source = match io.to_lowercase().as_str() {
-            "line" => "LINE",
-            "hiz" | "hi-z" | "instrument" => "HI-Z",
+        let source = match surfaces::source_label(&io).as_str() {
+            "LINE" => "LINE",
+            "HI-Z" => "HI-Z",
             _ => "MIC",
         };
         let input_led = match &s.preamp_meter {
@@ -486,7 +492,60 @@ impl MixerModel for EngineMixer {
         }
     }
 
+    fn input_sends(&self, strip: &StripInfo) -> Vec<SendState> {
+        self.surface_input_sends(strip)
+    }
+
+    fn send_pre(&self, strip: &StripInfo, k: usize) -> Option<bool> {
+        self.surface_send_pre(strip, k)
+    }
+
+    fn isolated(&self, strip: &StripInfo) -> bool {
+        self.input(&strip.id)
+            .and_then(|s| self.bool_at(&s.isolate()))
+            .unwrap_or(false)
+    }
+
+    fn input_sources(&self, strip: &StripInfo) -> Vec<String> {
+        self.surface_input_sources(strip)
+    }
+
+    fn plugin_catalog(&self) -> Vec<PluginEntry> {
+        self.surface_catalog()
+    }
+
+    fn plugin_scenes(&self) -> Vec<String> {
+        self.surface_scenes()
+    }
+
+    fn status(&self) -> StatusInfo {
+        self.surface_status()
+    }
+
+    fn engine_settings(&self) -> EngineSettings {
+        self.surface_settings()
+    }
+
+    fn monitor_options(&self) -> MonitorOptions {
+        self.surface_monitor_options()
+    }
+
+    fn cue_outputs(&self) -> Vec<CueOutput> {
+        self.surface_cues()
+    }
+
+    fn headphone_outputs(&self) -> Vec<HeadphoneOutput> {
+        self.surface_headphones()
+    }
+
+    fn set_text(&mut self, id: &ControlId, text: &str) {
+        self.surface_set_text(id, text);
+    }
+
     fn apply(&mut self, action: &Action) {
+        if self.apply_surface(action) {
+            return;
+        }
         match action {
             Action::GestureBegin(_) => self.store.begin_gesture(),
             Action::GestureEnd(_) => self.store.end_gesture(),

@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use houston::Rect;
 
+use crate::surfaces::{BrowserTab, InsertSize, Modifier, MonitorPage, Section};
+
 /// Which control of which strip ("in0", "aux1", "monitor", …).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ControlId {
@@ -29,6 +31,102 @@ pub enum Control {
     MonitorLevel,
     MonitorMono,
     MonitorMute,
+
+    // ---- UI surfaces (`surfaces/`). [view] = UI-only, consumed by `ViewState::route`;
+    // [model] = forwarded to `MixerModel::apply` (or `set_text`). ----
+    /// [view] Navigator INPUTS/INSERTS/SENDS/FADER and the side-section chevrons: collapse a cell row.
+    Section(Section),
+    /// [view] Navigator OPEN (expand every row) / CLOSE (collapse every row).
+    SectionsOpenAll,
+    SectionsCloseAll,
+    /// [view] Navigator LARGE / SMALL insert slots.
+    InsertSize(InsertSize),
+    /// [view] Navigator FIXED SLOTS (show every insert slot vs. loaded + one empty).
+    FixedSlots,
+    /// [view] Navigator SENDS OVERVIEW (compact 35-pt sends).
+    SendsOverview,
+    /// [model] Navigator INSERT EFFECTS: every input's `RecordPreEffects` (false = UAD REC, true = UAD MON).
+    AllRecordPreEffects(bool),
+    /// [view] Navigator MODIFIERS (exclusive; tapping the active one clears it).
+    Modifier(Modifier),
+    /// [view] Navigator SHOW: BROWSER / PLUG-IN SCENES (popover) / SETTINGS (sheet).
+    ShowBrowser,
+    ShowPluginScenes,
+    ShowSettings,
+    /// [model] Side section S (clear every solo) and OL (clear clip/overload indicators).
+    ClearSolos,
+    ClearClips,
+    /// [model] Insert operations (context menu or modifier + tap). Any press toggles power.
+    InsertPower(u8),
+    InsertRemove(u8),
+    InsertCopy(u8),
+    InsertSetDefault(u8),
+    /// [model] Send pre/post (`PostFaderOverride`).
+    SendPre(u8),
+    /// [view] Strip name plate: rename popover, or Isolate with the ISOLATE modifier. As a
+    /// `set_text` target: the new channel name.
+    Name,
+    /// [model] Strip `Isolate`.
+    Isolate,
+    /// [model] Input source: index into `MixerModel::input_sources` (`IOType`).
+    InputSource(u8),
+    /// [view] Plug-in browser.
+    BrowserTab(BrowserTab),
+    BrowserSearch,
+    BrowserCategoriesReveal,
+    BrowserCategory(u8),
+    BrowserFavorites,
+    BrowserLargeRows,
+    BrowserHintClose,
+    BrowserGroupReveal,
+    /// [view] Browser scrollbar thumb (drag; value = 1 − scroll fraction).
+    BrowserScroll,
+    /// [view] Select a catalog entry (index into `plugin_catalog`); the next insert tap assigns it.
+    BrowserItem(u16),
+    /// [view] Session navigator: make this input the first visible strip.
+    SessionNavigate(u16),
+    /// [view] Cells scrollbar thumb (drag; value = 1 − scroll fraction).
+    CellsScroll,
+    /// [view] Status bar fields: open the tempo editor / rate / clock / scene popovers.
+    StatusTempo,
+    StatusRate,
+    StatusClock,
+    StatusScene,
+    /// [model] Choices from `engine_settings()` / `plugin_scenes()` (indices into those lists).
+    SampleRate(u8),
+    ClockSource(u8),
+    BufferSize(u8),
+    RecallScene(u8),
+    /// [view] Monitor column SHOW: AUX / CTRL ROOM.
+    MonitorPage(MonitorPage),
+    /// [view] Monitor column CUE OUTPUTS popover.
+    CueOutputs,
+    /// [view] Headphone output source popover (index into `headphone_outputs`).
+    HeadphoneMenu(u8),
+    /// [model] Monitor DIM / talkback, and the speaker set (0 = main MONITOR, 1 = ALT 1, 2 = ALT 2).
+    MonitorDim,
+    Talkback,
+    MonitorAlt(u8),
+    /// [model] Dim attenuation knob (drag 0…1).
+    DimLevel,
+    /// [model] Cue output `MixInSource` (cue mix ↔ monitor mix) and `MixToMono`.
+    CueSource(u8),
+    CueMono(u8),
+    /// [model] Headphone output source (`MixInSource`): option index into `HeadphoneOutput::options`.
+    HeadphoneSource { output: u8, option: u8 },
+    /// [view] Popover backdrop (tap outside), text-edit OK / CANCEL.
+    PopoverDismiss,
+    TextCommit,
+    TextCancel,
+    /// [view] Settings sheet: close, and the rate / clock / buffer pickers.
+    SettingsClose,
+    SettingsRate,
+    SettingsClock,
+    SettingsBuffer,
+    /// [model] Settings "Writes enabled" (the connection's write gate).
+    WritesEnabled,
+    /// [model] `set_text` target for the session tempo (`/Tempo`).
+    Tempo,
     // Plug-in windows (`plugin-ui`); the strip is the window's slot id. Append-only below.
     /// A plug-in parameter by ordinal (`<slot>/parameters/<k>`): knob and bar drags.
     PluginParam(u16),
@@ -101,6 +199,21 @@ pub struct Hit {
     pub kind: HitKind,
 }
 
+/// What a [`ScrollRegion`] scrolls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ScrollTarget {
+    Browser,
+    Cells,
+}
+
+/// A wheel/trackpad-scrollable area; `max` is the content overflow in points.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScrollRegion {
+    pub rect: Rect,
+    pub target: ScrollTarget,
+    pub max: f32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     GestureBegin(ControlId),
@@ -108,6 +221,14 @@ pub enum Action {
     GestureEnd(ControlId),
     Toggle(ControlId),
     Tap(ControlId),
+}
+
+impl Action {
+    pub fn id(&self) -> &ControlId {
+        match self {
+            Action::GestureBegin(id) | Action::Set(id, _) | Action::GestureEnd(id) | Action::Toggle(id) | Action::Tap(id) => id,
+        }
+    }
 }
 
 struct Active {

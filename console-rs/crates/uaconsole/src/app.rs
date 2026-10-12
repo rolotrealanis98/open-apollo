@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use houston::Rgba;
-use rack::{Action, Assets, Control, ControlId, Interaction, MixerModel};
+use rack::{Action, Assets, Control, ControlId, Effect, Interaction, MixerModel, ViewState};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::frame::{Frame, FrameTimes, Hud, build_frame, layout_for};
@@ -26,6 +26,8 @@ pub const METER_PERIOD: Duration = Duration::from_nanos(33_333_333);
 pub const LETTERBOX: Rgba = Rgba::rgb8(18, 19, 21);
 /// Pan distance per wheel line, in pixels.
 const PAN_PER_LINE: f32 = 60.0;
+/// Scroll distance per wheel line in the browser list and cells column, in points.
+const SCROLL_PER_LINE: f32 = 40.0;
 
 pub struct Options {
     pub source: ModelSource,
@@ -53,7 +55,8 @@ pub struct App {
     live_meters: bool,
     settings: Settings,
     view: View,
-    compact: bool,
+    /// The mixer's UI-only state (navigator toggles, browser, popovers, pages, compact).
+    mixer: ViewState,
     gpu: Option<Gpu>,
     frame: Frame,
     dirty: bool,
@@ -105,7 +108,11 @@ impl App {
         }
         overlays.sync(&mut *model);
         let area = houston::Rect::new(0.0, 0.0, 1.0, 1.0);
-        let frame = build_frame(&assets, &*model, opts.compact, &mut overlays, area, None);
+        let mixer = ViewState {
+            compact: opts.compact,
+            ..ViewState::default()
+        };
+        let frame = build_frame(&assets, &*model, &mixer, &mut overlays, area, None);
         Self {
             assets,
             source: opts.source,
@@ -114,7 +121,7 @@ impl App {
             live_meters: live_meters || opts.live_meters,
             settings: opts.settings,
             view: opts.view,
-            compact: opts.compact,
+            mixer,
             gpu: None,
             frame,
             dirty: true,
@@ -173,7 +180,7 @@ impl App {
     fn rebuild(&mut self) {
         let t = Instant::now();
         let surface = self.surface_size();
-        let logical = layout_for(&*self.model, self.compact).size();
+        let logical = layout_for(&*self.model, &self.mixer).size();
         let tf = self.view.transform(logical, surface, self.scale_factor);
         let area = tf.visible(logical, surface);
         let stats = self.show_stats.then(|| self.stats_text(tf));
@@ -185,7 +192,7 @@ impl App {
         self.frame = build_frame(
             &self.assets,
             &*self.model,
-            self.compact,
+            &self.mixer,
             &mut self.overlays,
             area,
             hud,
@@ -270,23 +277,58 @@ impl App {
         self.times.rendered(Instant::now(), t.elapsed());
     }
 
-    /// Applies actions to the model; insert taps open plug-in panels instead.
+    /// Routes actions through the mixer UI state (navigator, browser, popovers, modifiers),
+    /// then to the model; insert taps that reach the model open plug-in panels instead.
     fn apply(&mut self, actions: Vec<Action>) {
         if actions.is_empty() {
             return;
         }
-        for a in &actions {
-            if let Action::Tap(ControlId {
-                strip,
-                control: Control::Insert(slot),
-            }) = a
-            {
-                self.overlays.on_open_plugin(strip, *slot, &*self.model);
-                continue;
+        for a in actions {
+            for effect in self.mixer.route(a, &*self.model) {
+                match effect {
+                    Effect::Model(Action::Tap(ControlId {
+                        strip,
+                        control: Control::Insert(slot),
+                    })) => {
+                        self.overlays.on_open_plugin(&strip, slot, &*self.model);
+                    }
+                    Effect::Model(a) => self.model.apply(&a),
+                    Effect::SetText(id, text) => self.model.set_text(&id, &text),
+                }
             }
-            self.model.apply(a);
         }
         self.changed();
+    }
+
+    /// Right click / long press: insert context menu, browser assign mode.
+    fn context_click(&mut self) {
+        let (x, y) = self.cursor_pt();
+        if self.dirty {
+            self.rebuild();
+        }
+        if self.mixer.context_click(&self.frame.hits, x, y) {
+            self.changed();
+        }
+    }
+
+    /// Keys for a focused text field (rename, tempo, browser search). True if consumed.
+    fn text_key(&mut self, event: &KeyEvent) -> bool {
+        if !self.mixer.editing() || self.mods.control_key() || self.mods.super_key() {
+            return false;
+        }
+        match &event.logical_key {
+            Key::Named(NamedKey::Enter) => self.mixer.key_enter(&mut *self.model),
+            Key::Named(NamedKey::Backspace) => self.mixer.key_backspace(),
+            Key::Named(NamedKey::Escape) => self.mixer.key_escape(),
+            _ => match &event.text {
+                Some(t) if !t.is_empty() && !t.chars().any(char::is_control) => {
+                    self.mixer.key_text(t)
+                }
+                _ => return false,
+            },
+        }
+        self.changed();
+        true
     }
 
     fn route(&mut self, ev: PointerEvent) -> bool {
@@ -373,6 +415,15 @@ impl App {
                 self.apply(actions);
                 return;
             }
+            if self.mixer.wheel(
+                &self.frame.scrolls,
+                x,
+                y,
+                -(lines.1 as f32) * SCROLL_PER_LINE,
+            ) {
+                self.changed();
+                return;
+            }
         }
         // Shift+wheel pans horizontally.
         let (dx, dy) = if self.mods.shift_key() && px.0 == 0.0 {
@@ -445,7 +496,7 @@ impl App {
                 self.changed();
             }
             Command::ToggleCompact => {
-                self.compact = !self.compact;
+                self.mixer.compact = !self.mixer.compact;
                 self.rebuild();
                 self.request_redraw();
             }
@@ -456,6 +507,13 @@ impl App {
             Command::Escape => {
                 if self.overlays.dismiss_top() {
                     self.changed();
+                } else if self.mixer.popover.is_some()
+                    || self.mixer.sheet.is_some()
+                    || self.mixer.modifier.is_some()
+                    || self.mixer.editing()
+                {
+                    self.mixer.key_escape();
+                    self.changed();
                 }
             }
         }
@@ -465,7 +523,7 @@ impl App {
     fn save_settings(&mut self) {
         let mut next = self.settings.clone();
         next.zoom = self.view.zoom;
-        next.compact = self.compact;
+        next.compact = self.mixer.compact;
         next.view = self.view.mode;
         if let ModelSource::Engine { addr, .. } = &self.source {
             next.engine = Some(addr.clone());
@@ -606,6 +664,9 @@ impl ApplicationHandler for App {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
+                if self.text_key(&event) {
+                    return;
+                }
                 if let Some(cmd) = shortcut(&event.logical_key, event.physical_key, self.mods) {
                     self.command(cmd, event.repeat, event_loop);
                 }
@@ -616,6 +677,7 @@ impl ApplicationHandler for App {
             WindowEvent::MouseInput { state, button, .. } => match (button, state) {
                 (MouseButton::Left, ElementState::Pressed) => self.pointer_down(),
                 (MouseButton::Left, ElementState::Released) => self.pointer_up(),
+                (MouseButton::Right, ElementState::Pressed) => self.context_click(),
                 (MouseButton::Middle, ElementState::Pressed) => self.panning = true,
                 (MouseButton::Middle, ElementState::Released) => self.panning = false,
                 _ => {}

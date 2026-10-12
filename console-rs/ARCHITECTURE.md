@@ -28,6 +28,14 @@ Plug-in icons come from `Resources/Plug-In Icons` (Windows) or
 | `uaconsole` | Binary: winit window, engine connection, `MixerModel` adapter over `ua-engine`, input routing. CLI: `uaconsole --render out.png [--snapshot f.json]` for headless renders. | all |
 | `uaconsole-ffi` | C ABI (`apple/include/uaconsole.h`) over houston + rack + gfx for native Apple hosts: a context renders into a host-owned `CAMetalLayer` (or offscreen), takes pointer events in view points and owns zoom/pan. Built as a staticlib into `UAConsoleFFI.xcframework`; see `apple/README.md`. | `houston`, `rack`, `gfx` |
 
+UI surfaces (`rack::surfaces`): the side navigator, plug-in browser, session navigator,
+status bar, monitor pages, cells (inserts, sends), popovers and the settings sheet. Their
+UI-only state is a `rack::ViewState` that the app owns and passes to
+`build_window_with`; `ViewState::route` / `dispatch` consume UI controls (section toggles,
+browser filters, popovers, modifiers) and hand the rest to the `MixerModel` (`apply`, or
+`set_text` for names, plug-in loads and tempo). New `MixerModel` methods all have defaults.
+`cargo run -p rack --example surfaces -- shots` renders the surfaces in several states.
+
 Frame pipeline: engine pushes → `ua-engine::Store` (main-thread owned) and `MeterStore`
 (atomics, written by the network task) → `rack` builds the whole window's `DrawList`
 (≈2–3k quads, microseconds) → `gfx` draws it in a few draw calls. Redraw happens on engine

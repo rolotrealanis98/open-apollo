@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use gfx::wgpu;
 use houston::Rect;
-use rack::{Action, Assets, Control, ControlId, MixerModel};
+use rack::{Action, Assets, Control, ControlId, MixerModel, ViewState};
 
 use crate::app::LETTERBOX;
 use crate::frame::{build_frame, layout_for, ms, summary};
@@ -34,12 +34,16 @@ pub fn render_png(
     if let Some((strip, slot)) = open_plugin {
         overlays.on_open_plugin(strip, *slot, model);
     }
-    let (w, h) = layout_for(model, compact).size();
+    let view = ViewState {
+        compact,
+        ..ViewState::default()
+    };
+    let (w, h) = layout_for(model, &view).size();
     let t = Instant::now();
     let frame = build_frame(
         assets,
         model,
-        compact,
+        &view,
         &mut overlays,
         Rect::new(0.0, 0.0, w, h),
         None,
@@ -77,7 +81,11 @@ pub fn bench(
     frames: usize,
 ) -> Result<(), String> {
     let gpu = gpu()?;
-    let layout = layout_for(model, compact);
+    let mixer_view = ViewState {
+        compact,
+        ..ViewState::default()
+    };
+    let layout = layout_for(model, &mixer_view);
     let (lw, lh) = layout.size();
     let (w, h) = ((lw * scale).ceil() as u32, (lh * scale).ceil() as u32);
     let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -109,7 +117,7 @@ pub fn bench(
             model.apply(&Action::Set(id.clone(), (i % 97) as f64 / 96.0));
         }
         let t = Instant::now();
-        let frame = build_frame(assets, model, compact, &mut overlays, area, None);
+        let frame = build_frame(assets, model, &mixer_view, &mut overlays, area, None);
         let b = ms(t.elapsed());
         let t = Instant::now();
         renderer.render(

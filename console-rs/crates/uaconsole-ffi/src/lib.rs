@@ -838,8 +838,9 @@ mod tests {
 
             // Off the window (letterbox) pans nothing in fit mode and reports a miss.
             assert_eq!(uac_pointer(ctx, UAC_POINTER_DOWN, 1.0, 1.0, 0), 0);
-            assert_eq!(uac_pointer(ctx, UAC_POINTER_MOVE, 40.0, 40.0, 0), 0);
-            assert_eq!(uac_pointer(ctx, UAC_POINTER_UP, 40.0, 40.0, 0), 0);
+            // (y 10 = title bar: the session navigator strip below it has hit regions.)
+            assert_eq!(uac_pointer(ctx, UAC_POINTER_MOVE, 40.0, 10.0, 0), 0);
+            assert_eq!(uac_pointer(ctx, UAC_POINTER_UP, 40.0, 10.0, 0), 0);
 
             uac_set_zoom(ctx, 2.0, 0.0, 0.0);
             assert_eq!(uac_get_stats(ctx, &mut s), UAC_OK);

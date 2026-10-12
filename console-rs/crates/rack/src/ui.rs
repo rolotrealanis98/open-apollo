@@ -7,7 +7,7 @@ use houston::{Appearance, ImageCache, Insets, Layout, Rect, Resources, Rgba, Ski
 use parking_lot::Mutex;
 
 use crate::draw::{Align, Draw, DrawList, Frame, TextStyle};
-use crate::input::{ControlId, Hit, HitKind};
+use crate::input::{ControlId, Hit, HitKind, ScrollRegion};
 
 /// Everything loaded from the user's Console install, shared by frames.
 pub struct Assets {
@@ -40,12 +40,15 @@ pub struct Ui<'a> {
     pub assets: &'a Assets,
     pub list: DrawList,
     pub hits: Vec<Hit>,
+    /// Wheel-scrollable areas (see `ViewState::wheel`).
+    pub scrolls: Vec<ScrollRegion>,
     origin: (f32, f32),
+    clips: Vec<Rect>,
 }
 
 impl<'a> Ui<'a> {
     pub fn new(assets: &'a Assets) -> Self {
-        Self { assets, list: DrawList::default(), hits: Vec::new(), origin: (0.0, 0.0) }
+        Self { assets, list: DrawList::default(), hits: Vec::new(), scrolls: Vec::new(), origin: (0.0, 0.0), clips: Vec::new() }
     }
 
     /// Runs `f` with local coordinates offset by (dx, dy).
@@ -105,14 +108,50 @@ impl<'a> Ui<'a> {
         self.list.push(Draw::Text { text: text.to_string(), style, rect, align });
     }
 
+    /// `Some(r)` pushes a clip (intersected with the enclosing one); `None` pops back to the
+    /// enclosing clip. Calls must pair.
     pub fn clip(&mut self, r: Option<Rect>) {
-        let r = r.map(|r| self.abs(r));
-        self.list.push(Draw::Clip(r));
+        match r {
+            Some(r) => {
+                let mut r = self.abs(r);
+                if let Some(top) = self.clips.last() {
+                    r = intersect(*top, r);
+                }
+                self.clips.push(r);
+                self.list.push(Draw::Clip(Some(r)));
+            }
+            None => {
+                self.clips.pop();
+                self.list.push(Draw::Clip(self.clips.last().copied()));
+            }
+        }
     }
 
+    /// The current clip in window points, if any.
+    pub fn current_clip(&self) -> Option<Rect> {
+        self.clips.last().copied()
+    }
+
+    /// The rect of the most recent hit registered for `id` (popover anchors).
+    pub fn hit_rect(&self, id: &ControlId) -> Option<Rect> {
+        self.hits.iter().rev().find(|h| &h.id == id).map(|h| h.rect)
+    }
+
+    /// Registers a hit region, limited to the current clip (fully clipped hits are dropped).
     pub fn hit(&mut self, r: Rect, id: ControlId, kind: HitKind) {
-        let rect = self.abs(r);
+        let mut rect = self.abs(r);
+        if let Some(c) = self.clips.last() {
+            rect = intersect(*c, rect);
+            if rect.w <= 0.0 || rect.h <= 0.0 {
+                return;
+            }
+        }
         self.hits.push(Hit { rect, id, kind });
+    }
+
+    pub fn scroll_region(&mut self, r: Rect, region: crate::input::ScrollTarget, max: f32) {
+        let rect = self.abs(r);
+        self.scrolls.push(ScrollRegion { rect, target: region, max });
     }
 
     // MARK: skin helpers
@@ -132,4 +171,12 @@ impl<'a> Ui<'a> {
     pub fn plain_style(family: &str, size: f32, bold: bool, color: Rgba) -> TextStyle {
         TextStyle { family: family.into(), size, bold, italic: false, color }
     }
+}
+
+fn intersect(a: Rect, b: Rect) -> Rect {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = a.max_x().min(b.max_x());
+    let y1 = a.max_y().min(b.max_y());
+    Rect::new(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
 }

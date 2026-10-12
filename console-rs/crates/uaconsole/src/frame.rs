@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use houston::{Rect, Rgba};
-use rack::{Align, Assets, DrawList, Hit, MixerModel, Ui, WindowLayout, build_window};
+use rack::{Align, Assets, DrawList, Hit, MixerModel, ScrollRegion, Ui, ViewState, WindowLayout, build_window_with};
 
 use crate::overlay::OverlayStack;
 
@@ -12,16 +12,14 @@ pub struct Frame {
     pub list: DrawList,
     /// The mixer's hit regions (overlay panels hit-test their own events).
     pub hits: Vec<Hit>,
+    /// Wheel-scrollable areas of the mixer (browser list, cells column).
+    pub scrolls: Vec<ScrollRegion>,
     pub layout: WindowLayout,
 }
 
-/// The window layout `build_window` will produce, without building it.
-pub fn layout_for(model: &dyn MixerModel, compact: bool) -> WindowLayout {
-    WindowLayout {
-        compact,
-        inputs: model.inputs().len(),
-        auxes: model.auxes().len(),
-    }
+/// The window layout `build_window_with` will produce for `view`, without building it.
+pub fn layout_for(model: &dyn MixerModel, view: &ViewState) -> WindowLayout {
+    WindowLayout::new(view, model.inputs().len(), model.auxes().len())
 }
 
 /// Stats text drawn at the top-left of the visible `area`, `px_per_pt` keeps it at a fixed
@@ -36,13 +34,13 @@ pub struct Hud<'a> {
 pub fn build_frame(
     assets: &Assets,
     model: &dyn MixerModel,
-    compact: bool,
+    view: &ViewState,
     overlays: &mut OverlayStack,
     area: Rect,
     hud: Option<Hud>,
 ) -> Frame {
     let mut ui = Ui::new(assets);
-    let layout = build_window(&mut ui, model, compact);
+    let layout = build_window_with(&mut ui, model, view);
     overlays.build(&mut ui, area);
     if let Some(hud) = hud {
         draw_hud(&mut ui, hud, area);
@@ -50,6 +48,7 @@ pub fn build_frame(
     Frame {
         list: ui.list,
         hits: ui.hits,
+        scrolls: ui.scrolls,
         layout,
     }
 }
