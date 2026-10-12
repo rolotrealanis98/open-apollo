@@ -28,6 +28,9 @@ PARITY = """# 03 hardware interface
 | A07 | 0x2278 | write \\| read | DONE | untestable on titan |
 | A08 | 0x227c | sends | WRONG | wrong target |
 | A09 | 0x2280 | echo | CACHE-ONLY | stored only |
+| A10 | 0x2284 | slot | **PLUGIN-HOST** (triage) — MISSING | allocator |
+| A11 | 0x2288 | peer | **BLOCKED-HW** (triage) — MISSING | second unit |
+| A12 | 0x228c | msg | BLOCKED-HW | payload undecoded |
 """
 
 PLAN = """# plan
@@ -44,6 +47,7 @@ PLAN = """# plan
 | A6 | Param images | x | M | RE | todo |
 | A7 | Wire it | x | S | code | todo |
 | A8 | Plugin license check | x | S | code | blocked: decision |
+| A9 | Unison lanes | x | M | strip engine | not now (strip engine deferred) |
 
 ## P. Plugin hosting
 
@@ -71,7 +75,8 @@ def main():
         # legend table skipped, N/A and out-of-scope not counted
         assert got == {"A01": "partial", "A02": "verified", "A03": "re",
                        "A04": "todo", "A07": "done", "A08": "partial",
-                       "A09": "todo"}, got
+                       "A09": "todo", "A10": "plugin", "A11": "blocked",
+                       "A12": "re"}, got
         labels = {it[0]: it[1] for it in par[0]["items"]}
         assert labels["A07"] == "write | read", labels
 
@@ -80,7 +85,7 @@ def main():
         got = {it[0]: it[2] for it in plan[0]["items"]}
         assert got == {"A1": "verified", "A2": "done", "A4": "partial",
                        "A5": "blocked", "A6": "re", "A7": "todo",
-                       "A8": "blocked"}, got
+                       "A8": "blocked", "A9": "plugin"}, got
         labels = {it[0]: it[1] for it in plan[0]["items"]}
         assert labels["A8"] == "(not listed)", labels
 
@@ -90,7 +95,7 @@ def main():
                  if r.getAttribute("class") in gen.ORDER and
                  r.getElementsByTagName("title")]
         n_models = sum(len(g["items"]) for g in gen.load_models())
-        assert len(cells) == 7 + 7 + n_models, len(cells)
+        assert len(cells) == 10 + 8 + n_models, len(cells)
         assert gen.render(data, "dark") == svg       # deterministic
         for name, text in gen.outputs(data).items():
             if name.endswith(".svg"):

@@ -13,57 +13,65 @@ Each square is one item. Open `progress-light.svg` on its own to see each square
 - **Work plan**: one square per task of the master implementation plan. Plugin hosting needs a separate decision and is not shown.
 - **Apollo models**: one square per model in `devices/`; green ones have per-model support in the code but no owner has tested them yet.
 
-Colours: **verified** = done and seen working on real hardware (the note cites a hardware run); **done** = done in code; **partial** = partly done, done differently or in progress; **still to figure out** = needs reverse engineering; **understood, not done** = we know what UA's driver does, Linux does not do it yet; **blocked** = needs a decision or hardware the project does not have (a second Apollo, other models, cables, USB units).
+Colours: **verified** = done and seen working on real hardware (the note cites a hardware run); **done** = done in code; **partial** = partly done, done differently or in progress; **still to figure out** = needs reverse engineering; **understood, not done** = we know what UA's driver does, Linux does not do it yet; **plugin hosting** = part of hosting UA's DSP plugins and Console strips, which waits on a separate decision; **needs hardware** = needs a test on an Apollo or hardware the project does not have (a second Apollo, other models, cables, USB units, an S3-capable host).
+
+The parity map was triaged against the code on 2026-10-11: rows the code already covers were marked done, rows Linux does not need N/A, and every remaining row says what it waits on.
 
 ## UA driver behaviour (parity map)
 
-| Area | verified on hardware | done in code | partial / in progress | still to figure out (RE) | understood, not done | blocked (decision or hardware) | Total | Done |
-|---|---|---|---|---|---|---|---|---|
-| Kext classes | 0 | 55 | 47 | 0 | 52 | 0 | 154 | 35.7% |
-| Mixer params | 0 | 79 | 39 | 6 | 18 | 0 | 142 | 55.6% |
-| HW interface | 2 | 68 | 13 | 3 | 33 | 0 | 119 | 58.8% |
-| Mixer Engine | 0 | 40 | 5 | 4 | 54 | 0 | 103 | 38.8% |
-| Plugin Support | 0 | 17 | 30 | 0 | 54 | 0 | 101 | 16.8% |
-| Windows+USB | 0 | 20 | 23 | 1 | 28 | 0 | 72 | 27.8% |
-| User client | 0 | 13 | 19 | 3 | 35 | 0 | 70 | 18.6% |
-| DSP+firmware | 0 | 19 | 24 | 0 | 18 | 0 | 61 | 31.1% |
-| Lifecycle | 0 | 30 | 23 | 2 | 5 | 0 | 60 | 50% |
-| Model types | 0 | 14 | 20 | 2 | 15 | 0 | 51 | 27.5% |
-| Transport+clock | 0 | 23 | 17 | 0 | 9 | 0 | 49 | 46.9% |
-| Device mgr | 0 | 2 | 27 | 1 | 16 | 0 | 46 | 4.3% |
-| Services | 0 | 20 | 12 | 2 | 9 | 0 | 43 | 46.5% |
-| Windows PCIe | 0 | 18 | 17 | 0 | 2 | 0 | 37 | 48.6% |
-| **All** | **2** | **418** | **316** | **24** | **348** | **0** | **1108** | **37.9%** |
+| Area | verified on hardware | done in code | partial / in progress | still to figure out (RE) | understood, not done | plugin hosting (decision) | needs hardware | Total | Done |
+|---|---|---|---|---|---|---|---|---|---|
+| Kext classes | 0 | 75 | 0 | 3 | 0 | 38 | 26 | 142 | 52.8% |
+| Mixer params | 0 | 130 | 0 | 0 | 0 | 7 | 5 | 142 | 91.5% |
+| HW interface | 2 | 86 | 0 | 1 | 1 | 16 | 6 | 112 | 78.6% |
+| Mixer Engine | 0 | 85 | 0 | 2 | 0 | 9 | 3 | 99 | 85.9% |
+| Plugin Support | 1 | 34 | 0 | 1 | 0 | 31 | 20 | 87 | 40.2% |
+| User client | 0 | 29 | 0 | 1 | 0 | 27 | 6 | 63 | 46% |
+| Windows+USB | 1 | 31 | 0 | 1 | 0 | 20 | 3 | 56 | 57.1% |
+| Lifecycle | 3 | 49 | 0 | 0 | 0 | 0 | 3 | 55 | 94.5% |
+| DSP+firmware | 0 | 46 | 0 | 0 | 0 | 2 | 3 | 51 | 90.2% |
+| Model types | 1 | 42 | 0 | 0 | 0 | 1 | 7 | 51 | 84.3% |
+| Device mgr | 0 | 15 | 0 | 1 | 0 | 3 | 24 | 43 | 34.9% |
+| Transport+clock | 6 | 34 | 0 | 0 | 0 | 0 | 2 | 42 | 95.2% |
+| Services | 0 | 36 | 0 | 0 | 0 | 1 | 1 | 38 | 94.7% |
+| Windows PCIe | 0 | 31 | 0 | 0 | 0 | 0 | 3 | 34 | 91.2% |
+| **All** | **14** | **723** | **0** | **10** | **1** | **155** | **112** | **1015** | **72.6%** |
 
 ## Work plan
 
-| Area | verified on hardware | done in code | partial / in progress | still to figure out (RE) | understood, not done | blocked (decision or hardware) | Total | Done |
-|---|---|---|---|---|---|---|---|---|
-| Audit gaps | 8 | 28 | 0 | 0 | 0 | 0 | 36 | 100% |
-| Transport+clock | 7 | 8 | 1 | 0 | 0 | 0 | 16 | 93.8% |
-| Mixer params | 4 | 9 | 1 | 0 | 0 | 2 | 16 | 81.2% |
-| Every Apollo | 1 | 14 | 0 | 0 | 0 | 0 | 15 | 100% |
-| Daemon | 5 | 9 | 0 | 0 | 0 | 0 | 14 | 100% |
-| Lifecycle | 5 | 6 | 0 | 0 | 0 | 1 | 12 | 91.7% |
-| Other models | 1 | 6 | 0 | 0 | 0 | 1 | 8 | 87.5% |
-| HW interface | 2 | 5 | 0 | 0 | 0 | 0 | 7 | 100% |
-| DSP firmware | 1 | 6 | 0 | 0 | 0 | 0 | 7 | 100% |
-| USB | 0 | 6 | 0 | 0 | 0 | 1 | 7 | 85.7% |
-| Multi-unit | 1 | 1 | 0 | 0 | 0 | 5 | 7 | 28.6% |
-| Daemon lifecycle | 2 | 4 | 0 | 0 | 0 | 0 | 6 | 100% |
-| Installer | 1 | 5 | 0 | 0 | 0 | 0 | 6 | 100% |
-| Driver API | 3 | 2 | 0 | 0 | 0 | 0 | 5 | 100% |
-| Input strips | 2 | 0 | 1 | 0 | 1 | 1 | 5 | 40% |
-| Digital I/O | 0 | 1 | 0 | 0 | 0 | 1 | 2 | 50% |
-| **All** | **43** | **110** | **3** | **0** | **1** | **12** | **169** | **90.5%** |
+| Area | verified on hardware | done in code | partial / in progress | still to figure out (RE) | understood, not done | plugin hosting (decision) | needs hardware | Total | Done |
+|---|---|---|---|---|---|---|---|---|---|
+| Audit gaps | 8 | 28 | 0 | 0 | 0 | 0 | 0 | 36 | 100% |
+| Transport+clock | 7 | 8 | 1 | 0 | 0 | 0 | 0 | 16 | 93.8% |
+| Mixer params | 4 | 9 | 1 | 0 | 0 | 2 | 0 | 16 | 81.2% |
+| Every Apollo | 1 | 14 | 0 | 0 | 0 | 0 | 0 | 15 | 100% |
+| Daemon | 5 | 9 | 0 | 0 | 0 | 0 | 0 | 14 | 100% |
+| Lifecycle | 5 | 6 | 0 | 0 | 0 | 0 | 1 | 12 | 91.7% |
+| HW interface | 2 | 5 | 0 | 0 | 1 | 0 | 0 | 8 | 87.5% |
+| Other models | 1 | 6 | 0 | 0 | 0 | 0 | 1 | 8 | 87.5% |
+| DSP firmware | 1 | 5 | 1 | 0 | 0 | 0 | 0 | 7 | 85.7% |
+| USB | 0 | 6 | 0 | 0 | 0 | 0 | 1 | 7 | 85.7% |
+| Multi-unit | 1 | 1 | 0 | 0 | 0 | 0 | 5 | 7 | 28.6% |
+| Daemon lifecycle | 2 | 4 | 0 | 0 | 0 | 0 | 0 | 6 | 100% |
+| Installer | 1 | 5 | 0 | 0 | 0 | 0 | 0 | 6 | 100% |
+| Driver API | 3 | 2 | 0 | 0 | 0 | 0 | 0 | 5 | 100% |
+| Input strips | 2 | 0 | 1 | 0 | 1 | 0 | 1 | 5 | 40% |
+| Digital I/O | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 | 50% |
+| **All** | **43** | **109** | **4** | **0** | **2** | **2** | **10** | **170** | **89.4%** |
 
-### In progress (3)
+### In progress (4)
 
 - **D2** Root cause of the Hi-band record failure (kext sequence fails 7-9/14 on… (Transport+clock)
+- **G7** Property-0xC gating in connect; StartTransport {, 0} + date word, date-… (DSP firmware)
 - **M11** Value widths: 0x1d identify 3 bits; 0x21 multi-unit role/order bits [7:… (Mixer params)
 - **S1** Native Mic/Input strip creation per analog input (A6 recipe: pool state… (Input strips)
 
-### Blocked (12)
+### Plugin hosting (waits on a decision) (2)
+
+- **M15** Multi-DSP bus-param routing: per-bus hosting DSP, also send to DSP 0, s… (Mixer params)
+- **M16** Unison custom-preamp lanes (inputs 8-0x12 settings; readback words 21,… (Mixer params)
+
+### Needs hardware (10)
 
 - **F2** Suspend/resume validation (Lifecycle)
 - **H3** Tests on other models (tools/apollo-report.sh + apollo-selftest.sh) (Other models)
@@ -74,12 +82,11 @@ Colours: **verified** = done and seen working on real hardware (the note cites a
 - **K4** PLL phase state machine (3.5 s, 0x22C8-0x22D0 latency, 0xC5BC + AX_CONN… (Multi-unit)
 - **K5** Group start order (prepare 0..n-1, start n-1..0) and per-role AX_CONTRO… (Multi-unit)
 - **K7** One-clock PipeWire/UCM view with slave route tables (Multi-unit)
-- **M15** Multi-DSP bus-param routing: per-bus hosting DSP, also send to DSP 0, s… (Mixer params)
-- **M16** Unison custom-preamp lanes (inputs 8-0x12 settings; readback words 21,… (Mixer params)
 - **S2** Talkback and Virtual/S/PDIF Input strips (0x8a5, 0x83e) (Input strips)
 
-### Understood, not done (1)
+### Understood, not done (2)
 
+- **E8** Read-only diagnostics for RE: DSP window +0x1A0 at probe and in dsp_sta… (HW interface)
 - **S4** Inherited strips across a Linux sample-rate change: macOS unloads and r… (Input strips)
 
 ## Apollo models

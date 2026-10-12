@@ -18,7 +18,7 @@
     [
      "100",
      "UnregisterSharedResource",
-     "todo"
+     "plugin"
     ],
     [
      "105",
@@ -26,24 +26,19 @@
      "done"
     ],
     [
-     "106",
-     "LoadFPGAImage",
-     "todo"
-    ],
-    [
      "109",
      "GetSystemInfo",
-     "partial"
+     "done"
     ],
     [
      "110",
      "GetSessionInfo",
-     "partial"
+     "done"
     ],
     [
      "111",
      "GetDeviceInfo",
-     "partial"
+     "done"
     ],
     [
      "112",
@@ -53,92 +48,92 @@
     [
      "113",
      "AllocatePlugin",
-     "todo"
+     "plugin"
     ],
     [
      "114",
      "GetPluginInfo",
-     "todo"
+     "plugin"
     ],
     [
      "115",
      "AllocateSharedDMABuffer",
-     "todo"
+     "plugin"
     ],
     [
      "116",
      "FreeSharedDMABuffer",
-     "todo"
+     "plugin"
     ],
     [
      "117",
      "FreePlugin",
-     "todo"
+     "plugin"
     ],
     [
      "118",
      "AdjustPluginLoad",
-     "todo"
+     "plugin"
     ],
     [
      "119",
      "ProcessPlugin",
-     "todo"
+     "plugin"
     ],
     [
      "120",
      "ReadPluginMessage",
-     "todo"
+     "plugin"
     ],
     [
      "124",
      "SetLoadLimit",
-     "todo"
+     "plugin"
     ],
     [
      "125",
      "AdjustAllocation",
-     "todo"
+     "plugin"
     ],
     [
      "126",
      "SetAllocationEnabled",
-     "todo"
+     "plugin"
     ],
     [
      "127",
      "RegisterSharedResourceDMA",
-     "todo"
+     "plugin"
     ],
     [
      "128",
      "AllocateChain",
-     "todo"
+     "plugin"
     ],
     [
      "129",
      "AddSubPluginToChain",
-     "todo"
+     "plugin"
     ],
     [
      "130",
      "SetMixerBusParam",
-     "partial"
+     "done"
     ],
     [
      "131",
      "SetMixerParam",
-     "partial"
+     "plugin"
     ],
     [
      "132",
      "PluginEnableSynchProcessing",
-     "todo"
+     "plugin"
     ],
     [
      "133",
      "SetAllocationWeighting",
-     "todo"
+     "plugin"
     ],
     [
      "136",
@@ -148,32 +143,17 @@
     [
      "137",
      "GetBusInfo",
-     "todo"
-    ],
-    [
-     "139",
-     "ReinitializeTransport",
-     "partial"
-    ],
-    [
-     "144",
-     "DeviceRequest",
-     "partial"
-    ],
-    [
-     "157",
-     "GetDeviceInfoForHwID",
-     "partial"
+     "done"
     ],
     [
      "158",
      "GetAudioDeviceInfo",
-     "partial"
+     "done"
     ],
     [
      "159",
      "GetAudioClockSourceInfo",
-     "partial"
+     "done"
     ],
     [
      "160",
@@ -188,7 +168,7 @@
     [
      "162",
      "SetAudioClockMaster",
-     "todo"
+     "blocked"
     ],
     [
      "163",
@@ -198,7 +178,7 @@
     [
      "165",
      "SetNotificationParams",
-     "todo"
+     "done"
     ],
     [
      "166",
@@ -211,11 +191,6 @@
      "done"
     ],
     [
-     "170",
-     "GetMixerParam",
-     "todo"
-    ],
-    [
      "172",
      "GetDriverIoRoutings",
      "done"
@@ -223,72 +198,67 @@
     [
      "173",
      "EnableCLI",
-     "todo"
+     "blocked"
     ],
     [
      "174",
      "SendCLICommand",
-     "todo"
+     "blocked"
     ],
     [
      "175",
      "GetCLIResponse",
-     "todo"
+     "blocked"
     ],
     [
      "189",
      "SetDeviceOutputDelayComp",
-     "todo"
+     "blocked"
     ],
     [
      "192",
      "ClearSharedResourceCache",
-     "todo"
-    ],
-    [
-     "194",
-     "LockSampleRateAndClock",
-     "todo"
+     "plugin"
     ],
     [
      "0x01",
      "Device added",
-     "partial"
+     "done"
     ],
     [
      "0x02",
      "Device removed",
-     "partial"
+     "done"
     ],
     [
      "0x64",
      "Rate info / lock update",
-     "partial"
+     "done"
     ],
     [
      "0x65",
      "Input IO descriptor changed",
-     "partial"
+     "done"
     ],
     [
      "0x66",
      "Output IO descriptor changed",
-     "partial"
+     "done"
     ],
     [
      "0x67",
      "Sample rate changed",
-     "partial"
+     "done"
     ],
     [
      "0x68",
      "Clock source changed",
-     "partial"
+     "done"
     ],
     [
      "0x6f",
      "Clock master changed",
-     "todo"
+     "blocked"
     ],
     [
      "0",
@@ -303,47 +273,42 @@
     [
      "2",
      "CreateBuffer",
-     "todo"
+     "plugin"
     ],
     [
      "3",
      "WriteBuffer",
-     "todo"
+     "plugin"
     ],
     [
      "4",
      "ReadBuffer",
-     "todo"
+     "plugin"
     ],
     [
      "5",
      "DestroyBuffer",
-     "todo"
-    ],
-    [
-     "6",
-     "SubmitDescriptor",
-     "partial"
+     "plugin"
     ],
     [
      "7",
      "BufferRangeOp A",
-     "re"
+     "plugin"
     ],
     [
      "8",
      "BufferRangeOp B",
-     "re"
+     "plugin"
     ],
     [
      "9",
      "GetBufferBusAddress",
-     "todo"
+     "plugin"
     ],
     [
      "10",
      "GetBufferSize",
-     "todo"
+     "plugin"
     ],
     [
      "11",
@@ -353,18 +318,13 @@
     [
      "13",
      "GetDeviceInfo",
-     "partial"
+     "done"
     ]
    ]
   },
   {
    "name": "Kext classes",
    "items": [
-    [
-     "com_uaudio_driv…",
-     "1 lifecycle",
-     "partial"
-    ],
     [
      "com_uaudio_driv…",
      "1 lifecycle",
@@ -378,22 +338,22 @@
     [
      "CPcieIntrManager",
      "1 lifecycle",
-     "partial"
+     "done"
     ],
     [
      "CUAD2Device",
      "1 lifecycle / 4 DSP",
-     "partial"
+     "done"
     ],
     [
      "CPcieAudioExten…",
      "3 transport/clock",
-     "partial"
+     "blocked"
     ],
     [
      "CPcieDSP",
      "4 DSP",
-     "partial"
+     "done"
     ],
     [
      "CPcieRingBuffer",
@@ -413,72 +373,57 @@
     [
      "CUAD2DeviceMixer",
      "5 mixer",
-     "partial"
+     "blocked"
     ],
     [
      "CDeviceManager…",
      "6 manager",
-     "partial"
+     "blocked"
     ],
     [
      "CDeviceBus",
      "6 manager",
-     "todo"
+     "blocked"
     ],
     [
      "CAllocator",
      "7 plugin/DSP resources",
-     "todo"
+     "plugin"
     ],
     [
      "CDSPResourceMan…",
-     "MISSING",
-     "todo"
+     "PLUGIN-HOST (triage 2026-10-11, was MISSING: DSP resource manager) — MI…",
+     "plugin"
     ],
     [
      "CPluginInstance",
-     "MISSING",
-     "todo"
+     "PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin instance) — MISSING",
+     "plugin"
     ],
     [
      "CChain",
-     "MISSING",
-     "todo"
+     "PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin chain) — MISSING",
+     "plugin"
     ],
     [
      "CResourcePool",
-     "MISSING",
-     "todo"
+     "PLUGIN-HOST (triage 2026-10-11, was MISSING: resource pool) — MISSING",
+     "plugin"
     ],
     [
      "CResource",
-     "MISSING",
-     "todo"
+     "PLUGIN-HOST (triage 2026-10-11, was MISSING: plugin resource) — MISSING",
+     "plugin"
     ],
     [
      "CSharedResource",
-     "MISSING",
-     "todo"
+     "PLUGIN-HOST (triage 2026-10-11, was MISSING: shared plugin resources) —…",
+     "plugin"
     ],
     [
      "CSession",
      "8 session",
-     "todo"
-    ],
-    [
-     "CMessenger",
-     "9 messenger / user client",
-     "partial"
-    ],
-    [
-     "com_uaudio_driv…",
-     "PARTIAL (different ABI)",
-     "partial"
-    ],
-    [
-     "com_uaudio_driv…",
-     "PARTIAL (different ABI)",
-     "partial"
+     "plugin"
     ],
     [
      "probe / start /…",
@@ -503,7 +448,7 @@
     [
      "_startPowerGate…",
      "power-state callbacks",
-     "partial"
+     "blocked"
     ],
     [
      "_connectTimerFi…",
@@ -523,12 +468,12 @@
     [
      "performPowerSta…",
      "system sleep/wake across all devices",
-     "partial"
+     "blocked"
     ],
     [
      "_handleNotifica…",
      "route device notifications (clock change, device add/remove) to the eng…",
-     "partial"
+     "blocked"
     ],
     [
      "Initialize / Ma…",
@@ -568,17 +513,12 @@
     [
      "ClockSourceIsAv…",
      "bus bandwidth bookkeeping for plugin streaming",
-     "todo"
+     "plugin"
     ],
     [
      "GetDeviceInfo /…",
      "info queries",
      "done"
-    ],
-    [
-     "DumpStateToLog…",
-     "diagnostics, EEPROM event",
-     "partial"
     ],
     [
      "Initialize / Ma…",
@@ -598,7 +538,7 @@
     [
      "ResetDMAEngine…",
      "per-engine DMA reset",
-     "partial"
+     "done"
     ],
     [
      "_deviceTypeFrom…",
@@ -608,7 +548,7 @@
     [
      "LoadFirmware, _…",
      "DSP firmware block stream",
-     "partial"
+     "done"
     ],
     [
      "_connectToDsps,…",
@@ -618,12 +558,12 @@
     [
      "testInterrupt",
      "IRQ self-test",
-     "todo"
+     "done"
     ],
     [
      "SetAllocationEn…",
      "allow/forbid plugin allocation",
-     "todo"
+     "plugin"
     ],
     [
      "ClockSourceIsAv…",
@@ -668,7 +608,7 @@
     [
      "GetLatency, app…",
      "latency report and output delay comp",
-     "partial"
+     "done"
     ],
     [
      "Start/StopTrans…",
@@ -698,12 +638,12 @@
     [
      "_endBufferCallb…",
      "period timing from the end-of-buffer interrupt",
-     "partial"
+     "done"
     ],
     [
      "SetSampleClock…",
      "clock source and rate, firmware rate poll",
-     "partial"
+     "blocked"
     ],
     [
      "SetNotification…",
@@ -713,27 +653,22 @@
     [
      "EnableCLI / Sen…",
      "ARM-MCU command channel",
-     "partial"
+     "re"
     ],
     [
      "GetOutputDelayC…",
      "per-output delay comp",
-     "todo"
-    ],
-    [
-     "SetDiagnosticFl…",
-     "diagnostics",
-     "todo"
+     "done"
     ],
     [
      "RouteAudioToPee…",
      "multi-unit peer audio (BAR0 0x2280/0x2284/0x22c4/0x22c8-0x22d0)",
-     "todo"
+     "blocked"
     ],
     [
      "SetPllPhase",
      "multi-unit phase alignment (0xc5bc / 0x2260)",
-     "todo"
+     "blocked"
     ],
     [
      "HWID / Type / A…",
@@ -748,7 +683,7 @@
     [
      "_waitFor469ToSt…",
      "DSP-ready wait (word at window +0x1a4 not 0 and not ; 100 tries DSP0, 1…",
-     "partial"
+     "done"
     ],
     [
      "QueueDescriptor…",
@@ -758,12 +693,12 @@
     [
      "ReadMessages, N…",
      "response messages and DSP properties",
-     "partial"
+     "plugin"
     ],
     [
      "ResetDSP, _erro…",
      "DSP reset and error events",
-     "partial"
+     "re"
     ],
     [
      "Initialize / Un…",
@@ -793,27 +728,27 @@
     [
      "SetInputParam,…",
      "input param routing ARM vs DSP; scale; direct output route",
-     "partial"
+     "blocked"
     ],
     [
      "isSpannedFrom/T…",
      "spanning inputs across DSPs",
-     "partial"
+     "blocked"
     ],
     [
      "SetOtherParam /…",
      "named non-bus params",
-     "partial"
+     "done"
     ],
     [
      "Set/GetPluginFo…",
      "synchronous plugin to bus map",
-     "todo"
+     "plugin"
     ],
     [
      "AckSampleRateCh…",
      "tell DSPs the new rate ({, Hz, 0})",
-     "partial"
+     "blocked"
     ],
     [
      "Initialize / Ty…",
@@ -823,7 +758,7 @@
     [
      "Initialize / Ad…",
      "device registry",
-     "partial"
+     "done"
     ],
     [
      "LockDevice / Lo…",
@@ -838,27 +773,22 @@
     [
      "StartAudio / St…",
      "multi-device transport start/stop and restart on layout change",
-     "partial"
+     "blocked"
     ],
     [
      "SetAudioSampleR…",
      "rate change across units with ack wait",
-     "partial"
+     "blocked"
     ],
     [
      "SetAudioClock /…",
      "clock source and master selection",
-     "partial"
+     "blocked"
     ],
     [
      "_calculatePllPh…",
      "multi-unit phase and P2P audio",
-     "todo"
-    ],
-    [
-     "_populateRoutin…",
-     "per-device routing tables, user-set IO routing",
-     "partial"
+     "blocked"
     ],
     [
      "GetAudioDeviceI…",
@@ -868,22 +798,17 @@
     [
      "SetOutputDelayC…",
      "latency knobs",
-     "todo"
+     "done"
     ],
     [
      "SetMaximumUsabl…",
      "bus bandwidth caps for plugin streaming",
-     "todo"
-    ],
-    [
-     "Get/SetDriverPa…",
-     "driver tuning parameters",
-     "partial"
+     "plugin"
     ],
     [
      "EnableCLI / Sen…",
-     "PARTIAL (see extension)",
-     "partial"
+     "BLOCKED-HW (triage 2026-10-11, was PARTIAL: CLI blocked on purpose (see…",
+     "blocked"
     ],
     [
      "_handleNotifica…",
@@ -891,129 +816,109 @@
      "done"
     ],
     [
-     "Initialize / Ad…",
-     "topology",
-     "todo"
-    ],
-    [
      "AllocatePluginB…",
      "bandwidth budget for plugin DMA",
-     "todo"
+     "plugin"
     ],
     [
      "StartTransports…",
      "start units on one bus together",
-     "todo"
+     "blocked"
     ],
     [
      "AddDSP / Remove…",
      "DSP inventory and power",
-     "partial"
+     "done"
     ],
     [
      "AddSession / Re…",
      "sessions",
-     "todo"
+     "plugin"
     ],
     [
      "CreatePluginIns…",
      "placement and rebalance",
-     "todo"
+     "plugin"
     ],
     [
      "SetLoadLimit /…",
      "policy knobs",
-     "todo"
+     "plugin"
     ],
     [
      "RegisterSharedR…",
      "shared resource registry",
-     "todo"
+     "plugin"
     ],
     [
      "SendSystemMessa…",
      "system messages and latency broadcast",
-     "todo"
+     "plugin"
     ],
     [
      "Initialize / Re…",
      "lifecycle and service loop",
-     "todo"
+     "plugin"
     ],
     [
      "ComputeCost / C…",
      "load model",
-     "todo"
+     "plugin"
     ],
     [
      "LoadPlugin / Un…",
      "plugin image load/unload",
-     "todo"
+     "plugin"
     ],
     [
      "QueueDescriptor…",
      "DMA command queue, memory map",
-     "todo"
+     "plugin"
     ],
     [
      "SetSampleRate,…",
      "rate, sync mode, events",
-     "todo"
+     "plugin"
     ],
     [
      "Initialize / Se…",
      "placement",
-     "todo"
+     "plugin"
     ],
     [
      "_allocDescripto…",
      "descriptor/buffer plumbing",
-     "todo"
+     "plugin"
     ],
     [
      "Process, Proces…",
      "run a processing block",
-     "todo"
+     "plugin"
     ],
     [
      "QueueMessage /…",
      "plugin messages",
-     "todo"
+     "plugin"
     ],
     [
      "AdjustLoad, Unl…",
      "load and rebalance",
-     "todo"
-    ],
-    [
-     "Set/ClearErrorS…",
-     "status, debug",
-     "todo"
+     "plugin"
     ],
     [
      "Initialize / Se…",
      "session identity and format (rate change = format change)",
-     "todo"
+     "plugin"
     ],
     [
      "AddChain / Remo…",
      "owned objects",
-     "todo"
+     "plugin"
     ],
     [
      "AllocSharedDMAB…",
      "per-session DMA buffers",
-     "todo"
-    ],
-    [
-     "RegisterNotific…",
-     "notify client",
-     "todo"
-    ],
-    [
-     "Firmware / FPGA…",
-     "device information and loading",
-     "partial"
+     "plugin"
     ],
     [
      "Mixer: SetMixer…",
@@ -1023,22 +928,22 @@
     [
      "Plugin and DSP…",
      "plugin host interface",
-     "todo"
+     "plugin"
     ],
     [
      "Bus: GetBusInfo…",
      "bus caps",
-     "todo"
+     "plugin"
     ],
     [
      "Session: SetSes…",
      "session",
-     "todo"
+     "plugin"
     ],
     [
      "CLI: EnableCLI,…",
      "ARM CLI",
-     "partial"
+     "blocked"
     ],
     [
      "open / close /…",
@@ -1048,7 +953,7 @@
     [
      "registerNotific…",
      "async notification to user",
-     "partial"
+     "done"
     ],
     [
      "_ioctl, open/cl…",
@@ -1058,77 +963,77 @@
     [
      "1",
      "CPcieAudioExtension / CDeviceManager sample-rate change: the kext seque…",
-     "partial"
+     "blocked"
     ],
     [
      "2",
      "CPcieDevice::HardResetDSPs / CPcieDSP::ResetDSP / CPcieIntrManager::Res…",
-     "todo"
+     "re"
     ],
     [
      "3",
      "CUAD2Device::LoadFirmware / _sendBlock fan-out to DSPs 1-3 (x8/x8p/x16…",
-     "partial"
+     "done"
     ],
     [
      "4",
      "Non-x4 models: CUAD2DeviceMixer DSP-side input params, spanning across…",
-     "partial"
+     "blocked"
     ],
     [
      "5",
      "UAD2Pcie2 power-state callbacks / UAD2System::performPowerStateChange:…",
-     "partial"
+     "blocked"
     ],
     [
      "6",
      "CPcieAudioExtension end-of-buffer interrupt timing (1 ms soft-hrtimer p…",
-     "partial"
+     "done"
     ],
     [
      "7",
      "CPcieAudioExtension S/PDIF, ADAT, Word Clock lock and digital I/O: cloc…",
-     "partial"
+     "blocked"
     ],
     [
      "8",
      "CPcieDSP::_waitFor469ToStart and connect retry: implemented behind dsp_…",
-     "partial"
+     "done"
     ],
     [
      "9",
      "Talkback audio and virtual/loopback channels (CUAD2DeviceMixer other-pa…",
-     "todo"
+     "plugin"
     ],
     [
      "10",
      "Multi-unit: CDeviceManager (daisy chain, clock master/slave, _calculate…",
-     "todo"
+     "blocked"
     ],
     [
      "11",
      "Plugin host: CAllocator, CDSPResourceManager, CPluginInstance, CChain,…",
-     "todo"
+     "plugin"
     ],
     [
      "12",
      "Output delay compensation and latency knobs (CPcieAudioExtension::GetOu…",
-     "todo"
+     "done"
     ],
     [
      "13",
      "Plugin-chain replay still ships UA-derived data (ua_plugin_chain.h): re…",
-     "partial"
+     "plugin"
     ],
     [
      "14",
      "CUAD2Device::testInterrupt and CPcieAudioExtension diagnostics (SetDiag…",
-     "todo"
+     "done"
     ],
     [
      "15",
      "CPcieAudioExtension::EnableCLI/SendCLICommand: CLI (ARM MCU) is blocked…",
-     "partial"
+     "blocked"
     ]
    ]
   },
@@ -1138,7 +1043,7 @@
     [
      "A01",
      "W+0x00",
-     "partial"
+     "done"
     ],
     [
      "A02",
@@ -1163,12 +1068,12 @@
     [
      "A06",
      "BAR0+0x30, +0x34",
-     "todo"
+     "done"
     ],
     [
      "A07",
      "W+0x40 and W+0x44 + n*0x14 (n 0-15)",
-     "todo"
+     "done"
     ],
     [
      "A08",
@@ -1184,11 +1089,6 @@
      "A10",
      "W+0x1A4",
      "done"
-    ],
-    [
-     "A11",
-     "BAR0+0x1A8",
-     "todo"
     ],
     [
      "A12",
@@ -1208,12 +1108,12 @@
     [
      "B02",
      "0x2200 (bit n+1)",
-     "partial"
+     "done"
     ],
     [
      "B03",
      "0x2200 (bit n+9)",
-     "todo"
+     "done"
     ],
     [
      "B04",
@@ -1229,11 +1129,6 @@
      "B07",
      "CPcieDevice::Name 5332, GetCapabilities, GetDeviceInfo, ProgramRegister…",
      "done"
-    ],
-    [
-     "B08",
-     "CPcieDevice::HardResetDSPs 44f2",
-     "todo"
     ],
     [
      "B09",
@@ -1263,7 +1158,7 @@
     [
      "B14",
      "PrepareTransport (0, then 1), StartTransport 3535a, StopTransport 35444…",
-     "partial"
+     "done"
     ],
     [
      "B15",
@@ -1298,7 +1193,7 @@
     [
      "B21",
      "0x2260 (value 0x20)",
-     "todo"
+     "blocked"
     ],
     [
      "B22",
@@ -1323,7 +1218,7 @@
     [
      "B26",
      "0x2280 + 8*s, 0x2284 + 8*s",
-     "todo"
+     "blocked"
     ],
     [
      "B27",
@@ -1338,7 +1233,7 @@
     [
      "B29",
      "0x22C8, 0x22CC, 0x22D0 + 4*s",
-     "todo"
+     "blocked"
     ],
     [
      "C01",
@@ -1368,7 +1263,7 @@
     [
      "C06",
      "0x39FC; 0x3A00..0x3A48 (19 dwords)",
-     "todo"
+     "blocked"
     ],
     [
      "D01",
@@ -1448,7 +1343,7 @@
     [
      "F10",
      "0xC090..0xC18F (256 bytes)",
-     "todo"
+     "done"
     ],
     [
      "F11",
@@ -1463,52 +1358,52 @@
     [
      "F13",
      "W (R)",
-     "todo"
+     "plugin"
     ],
     [
      "F14",
      "0xC3F8, 0xC3FC, 0xC400.., 0xC480",
-     "partial"
+     "plugin"
     ],
     [
      "F15",
      "SetPllPhase 36c10",
-     "todo"
+     "blocked"
     ],
     [
      "O01",
      "0x0001nnnn",
-     "todo"
+     "plugin"
     ],
     [
      "O02",
      "0x0004nnnn",
-     "todo"
+     "plugin"
     ],
     [
      "O03",
      "Pool compaction marker",
-     "re"
+     "plugin"
     ],
     [
      "O04",
      "Release shared resource (pool 0)",
-     "partial"
+     "plugin"
     ],
     [
      "O05",
      "Move shared resource",
-     "todo"
+     "plugin"
     ],
     [
      "O06",
      "Release shared resource (pool != 0)",
-     "todo"
+     "plugin"
     ],
     [
      "O07",
      "0x0007nnnn",
-     "todo"
+     "plugin"
     ],
     [
      "O08",
@@ -1518,17 +1413,17 @@
     [
      "O09",
      "Move private block",
-     "todo"
+     "plugin"
     ],
     [
      "O10",
      "Readback descriptor",
-     "todo"
+     "plugin"
     ],
     [
      "O11",
      "0x0018nnnn / 0x0019nnnn, or 0x000Ann / 0x000Bnn",
-     "re"
+     "plugin"
     ],
     [
      "O12",
@@ -1541,19 +1436,14 @@
      "done"
     ],
     [
-     "O14",
-     "Device request passthrough",
-     "todo"
-    ],
-    [
      "O15",
      "0x0014nnnn",
-     "todo"
+     "plugin"
     ],
     [
      "O16",
      "0x0015nnnn",
-     "todo"
+     "plugin"
     ],
     [
      "O18",
@@ -1568,17 +1458,17 @@
     [
      "O20",
      "Bus coefficient",
-     "partial"
+     "done"
     ],
     [
      "O21",
      "DSP input param",
-     "todo"
+     "done"
     ],
     [
      "O22",
      "Synch enable (start or stop a strip)",
-     "todo"
+     "plugin"
     ],
     [
      "O23",
@@ -1588,7 +1478,7 @@
     [
      "O24",
      "(w1 = 0)",
-     "todo"
+     "plugin"
     ],
     [
      "O25",
@@ -1608,17 +1498,12 @@
     [
      "N03",
      "Transport/rate info changed",
-     "partial"
-    ],
-    [
-     "N04",
-     "Clock-change event",
-     "partial"
+     "done"
     ],
     [
      "N06",
      "PLL-phase ack",
-     "todo"
+     "blocked"
     ],
     [
      "N07",
@@ -1628,7 +1513,7 @@
     [
      "N08",
      "Sample rate changed",
-     "partial"
+     "done"
     ],
     [
      "N10",
@@ -1636,34 +1521,24 @@
      "done"
     ],
     [
-     "I01",
-     "DSP n: 5n+0 (n = 0-7)",
-     "todo"
-    ],
-    [
-     "I02",
-     "DSP n: 5n+1",
-     "todo"
-    ],
-    [
      "I03",
      "DSP n: 5n+2",
-     "todo"
+     "done"
     ],
     [
      "I04",
      "DSP n: 5n+3",
-     "todo"
+     "done"
     ],
     [
      "I05",
      "DSP n: 5n+4",
-     "todo"
+     "done"
     ],
     [
      "I06",
      "0x28 (hw bit 32)",
-     "partial"
+     "done"
     ],
     [
      "I07",
@@ -1678,17 +1553,17 @@
     [
      "I09",
      "logical -> hw bit map",
-     "partial"
+     "done"
     ],
     [
      "I10",
      "one-shot auto-mask",
-     "todo"
+     "done"
     ],
     [
      "I11",
      "64-vector mode",
-     "partial"
+     "done"
     ],
     [
      "I12",
@@ -1699,11 +1574,6 @@
      "I13",
      "MSI vs INTx",
      "done"
-    ],
-    [
-     "I14",
-     "Where it runs",
-     "partial"
     ],
     [
      "P01",
@@ -1768,7 +1638,7 @@
     [
      "I7",
      "Link / stereo pair (inputs/N/Stereo)",
-     "todo"
+     "done"
     ],
     [
      "I8",
@@ -1778,12 +1648,12 @@
     [
      "I9",
      "HiZ client override",
-     "re"
+     "done"
     ],
     [
      "I11",
      "Knob position / selected param (PreampInputKnobSteps, PreampGainCustomD…",
-     "todo"
+     "done"
     ],
     [
      "I12",
@@ -1793,37 +1663,37 @@
     [
      "I13",
      "Direct-out monitor mix (OutputMonitorMixEnable, x8p)",
-     "todo"
+     "done"
     ],
     [
      "I14",
      "PGA disabled in line mode (x8p)",
-     "todo"
+     "done"
     ],
     [
      "I15",
      "24 dB mode (/Enable24dBMode, root)",
-     "todo"
+     "done"
     ],
     [
      "I17",
      "Unison / custom integrated preamp (CustomIntegratedPreamp*, readback wo…",
-     "todo"
+     "plugin"
     ],
     [
      "I18",
      "Volt 876 ADAT preamps (AdatPreamp*, x8p)",
-     "todo"
+     "re"
     ],
     [
      "I19",
      "Front-panel selection (SelectedOnFront, word 0 bits 26-27)",
-     "re"
+     "done"
     ],
     [
      "I20",
      "Low-noise preamps (word 2 bit 30), temperature (word 17 bits 15:8), ana…",
-     "re"
+     "done"
     ],
     [
      "M1",
@@ -1848,12 +1718,12 @@
     [
      "M5",
      "SoloSafe / Isolate / RemoteSolo / SoloClear",
-     "todo"
+     "done"
     ],
     [
      "M6",
      "Stereo-linked input drive",
-     "todo"
+     "done"
     ],
     [
      "M8",
@@ -1868,7 +1738,7 @@
     [
      "M10",
      "Peak/Clip hold, clear (/ClipHold, /PeakHold, ClearPeak...)",
-     "todo"
+     "done"
     ],
     [
      "M11",
@@ -1888,22 +1758,22 @@
     [
      "S3",
      "Input → CUE3/CUE4 send gain (sends/4,5, in the x4 map; active only when…",
-     "todo"
+     "done"
     ],
     [
      "S4",
      "Send pan (aux sends)",
-     "todo"
+     "blocked"
     ],
     [
      "S5",
      "Send Bypass (Bypass, HPnBypass, AuxnBypass)",
-     "re"
+     "done"
     ],
     [
      "S6",
      "Pre/post fader (SendPostFader, HPnSendPostFader, PostFaderOverride)",
-     "todo"
+     "done"
     ],
     [
      "S7",
@@ -1913,22 +1783,22 @@
     [
      "S8",
      "AUX bus MixToMono, effects, LLM",
-     "todo"
+     "done"
     ],
     [
      "S9",
      "AUX → CUE sends (auxs/N/sends/M/Gain)",
-     "partial"
+     "done"
     ],
     [
      "S10",
      "Aux→CUE send Bypass",
-     "todo"
+     "done"
     ],
     [
      "S11",
      "Cue bus count (/CueBusCount)",
-     "todo"
+     "done"
     ],
     [
      "O1",
@@ -1958,7 +1828,7 @@
     [
      "O6",
      "Line-out pads (outputs/0-3/Pad)",
-     "todo"
+     "done"
     ],
     [
      "O7",
@@ -1968,12 +1838,12 @@
     [
      "O8",
      "CR PGA bypass (kPropCRPGABypass)",
-     "todo"
+     "done"
     ],
     [
      "O9",
      "Headphone level (outputs/19,20/CRMonitorLevel)",
-     "partial"
+     "done"
     ],
     [
      "O10",
@@ -1983,47 +1853,47 @@
     [
      "O12",
      "CUE mono (outputs/14,15/MixToMono)",
-     "partial"
+     "done"
     ],
     [
      "O13",
      "CUE mix on/off (MixInSource cue/mon)",
-     "partial"
+     "done"
     ],
     [
      "O14",
      "CUE mirror (OutputDestination → 0x2e..0x31 + enables 0x3b/0x3c)",
-     "partial"
+     "done"
     ],
     [
      "O15",
      "Alt monitors (AltMonEnabled, AltMonTrim on 4 outputs, AltMonSelection,…",
-     "todo"
+     "done"
     ],
     [
      "O16",
      "Remote monitor controller",
-     "todo"
+     "done"
     ],
     [
      "O17",
      "Surround (SurroundMonitorMode, SurroundTrimLevel, SurroundMute/Solo, St…",
-     "todo"
+     "re"
     ],
     [
      "O18",
      "Bass management (BassMgr*, SupportsBassManagement true on x4)",
-     "todo"
+     "plugin"
     ],
     [
      "O19",
      "Speaker correction / HP correction (SupportsSpeakerCorrection, ...Headp…",
-     "todo"
+     "plugin"
     ],
     [
      "O20",
      "Identify (LED blink)",
-     "todo"
+     "done"
     ],
     [
      "D1",
@@ -2033,12 +1903,12 @@
     [
      "D2",
      "TOSLINK input type (/devices/0/TOSLink)",
-     "todo"
+     "done"
     ],
     [
      "D3",
      "Converter mode (0x20/0x28/0x30), multi-unit role bits [2:0], order [7:6…",
-     "todo"
+     "done"
     ],
     [
      "D4",
@@ -2058,7 +1928,7 @@
     [
      "D7",
      "Clock-source list and names (ClockSourceListChanged, device-advertised…",
-     "todo"
+     "done"
     ],
     [
      "D8",
@@ -2068,37 +1938,32 @@
     [
      "D9",
      "Clock master, multi-unit order, peer-to-peer latency (ClockMasterHwId,…",
-     "todo"
+     "blocked"
     ],
     [
      "D10",
      "Buffer size (/BufferSize)",
-     "todo"
-    ],
-    [
-     "D11",
-     "Lock rate and clock (LockSampleRateAndClock, SEL194)",
-     "todo"
+     "done"
     ],
     [
      "D14",
      "IO routes and IO map presets (IOMapPreset, inputroutes/*, outputroutes/…",
-     "todo"
+     "done"
     ],
     [
      "D15",
      "Delay compensation (MaxDelayComp, ADC OP 0x6a, DAC SetDeviceOutputDelay…",
-     "todo"
+     "done"
     ],
     [
      "D16",
      "Func switch modes (FuncSwitchMode, x8p)",
-     "todo"
+     "done"
     ],
     [
      "D17",
      "DSP spanning (/devices/0/DSPSpanning, MaxSpans, ActiveSpans)",
-     "todo"
+     "plugin"
     ],
     [
      "T1",
@@ -2113,17 +1978,17 @@
     [
      "T3",
      "TalkbackInPhysicalCR, TalkbackMicSelect, TalkbackMaster",
-     "todo"
+     "done"
     ],
     [
      "T4",
      "Talkback level (trim)",
-     "todo"
+     "done"
     ],
     [
      "T5",
      "Talkback audio (strip on the DSP, record slots 20/21)",
-     "todo"
+     "plugin"
     ],
     [
      "E1",
@@ -2138,57 +2003,52 @@
     [
      "E3",
      "DSP load (TotalDSPLoad, TotalPGMLoad, TotalMEMLoad)",
-     "todo"
+     "done"
     ],
     [
      "E4",
      "Device online, name, serial, versions, DeviceTypeID, analog board",
-     "todo"
+     "done"
     ],
     [
      "P1",
      "Plugin inserts (inputs/N/effects/N/*: 192 + 4 preamp + 8 aux entries)",
-     "todo"
+     "plugin"
     ],
     [
      "P2",
      "Unison (kPropUnison, custom preamp)",
-     "todo"
+     "plugin"
     ],
     [
      "P3",
      "Plugin scenes (/pluginscenes/*, 128 scenes, SceneOperation)",
-     "todo"
+     "plugin"
     ],
     [
      "P4",
      "LLM disk / Virtual Sound Check (LLMDisk*, VirtualSoundCheck)",
-     "todo"
+     "plugin"
     ],
     [
      "P6",
      "Sessions (/Session, kPropSessionFile, ModifiedSessions, new/open/save/s…",
-     "todo"
+     "done"
     ],
     [
      "P7",
      "Snapshots (kPropSnapshot, PrimedSnapshot, save/move/delete/import/expor…",
-     "todo"
+     "done"
     ],
     [
      "P8",
      "Channel/insert presets and copy/paste (CMxSaveAsPreset, CMxCopyChannel,…",
-     "todo"
+     "done"
     ],
     [
      "P9",
      "Undo/redo (kPropUndoRedo, UndoRecording)",
-     "todo"
-    ],
-    [
-     "P10",
-     "Import/export (CMxImport, CMxExport, CMxToXML, CMxFromXML)",
-     "todo"
+     "done"
     ],
     [
      "H1",
@@ -2208,17 +2068,17 @@
     [
      "H4",
      "DSP load reporting",
-     "todo"
+     "done"
     ],
     [
      "H5",
      "Mute-until-settle",
-     "todo"
+     "done"
     ],
     [
      "H6",
      "Sleep/wake",
-     "todo"
+     "done"
     ],
     [
      "H7",
@@ -2228,7 +2088,7 @@
     [
      "H8",
      "Front-panel to hardware write-back",
-     "todo"
+     "blocked"
     ],
     [
      "H9",
@@ -2236,19 +2096,9 @@
      "done"
     ],
     [
-     "H10",
-     "Local pipe server",
-     "todo"
-    ],
-    [
      "H11",
      "Bonjour announcement",
      "done"
-    ],
-    [
-     "H12",
-     "Helper-side tree (/devices/<uuid>, sessions, workspace, presets, plugin…",
-     "todo"
     ]
    ]
   },
@@ -2258,27 +2108,22 @@
     [
      "100",
      "UnregisterSharedResource",
-     "todo"
+     "plugin"
     ],
     [
      "101",
      "RegisterSharedResource",
-     "partial"
+     "plugin"
     ],
     [
      "102",
      "SetSessionFormat",
-     "partial"
+     "plugin"
     ],
     [
      "105",
      "LoadFirmware",
      "done"
-    ],
-    [
-     "106",
-     "LoadFPGAImage",
-     "todo"
     ],
     [
      "111",
@@ -2293,47 +2138,47 @@
     [
      "113",
      "AllocatePlugin",
-     "todo"
+     "plugin"
     ],
     [
      "114",
      "GetPluginInfo",
-     "todo"
+     "plugin"
     ],
     [
      "115",
      "AllocateSharedDMABuffer",
-     "todo"
+     "plugin"
     ],
     [
      "116",
      "FreeSharedDMABuffer",
-     "todo"
+     "plugin"
     ],
     [
      "117",
      "FreePlugin",
-     "todo"
+     "plugin"
     ],
     [
      "118",
      "AdjustPluginLoad",
-     "todo"
+     "plugin"
     ],
     [
      "119",
      "ProcessPlugin",
-     "todo"
+     "plugin"
     ],
     [
      "120",
      "ReadPluginMessage",
-     "todo"
+     "plugin"
     ],
     [
      "122",
      "FlashLED",
-     "todo"
+     "verified"
     ],
     [
      "123",
@@ -2343,32 +2188,32 @@
     [
      "124",
      "SetLoadLimit",
-     "todo"
+     "plugin"
     ],
     [
      "125",
      "AdjustAllocation",
-     "todo"
+     "plugin"
     ],
     [
      "126",
      "SetAllocationEnabled",
-     "todo"
+     "plugin"
     ],
     [
      "127",
      "RegisterSharedResourceDMA",
-     "todo"
+     "plugin"
     ],
     [
      "128",
      "AllocateChain",
-     "partial"
+     "plugin"
     ],
     [
      "129",
      "AddSubPluginToChain",
-     "partial"
+     "plugin"
     ],
     [
      "130",
@@ -2383,12 +2228,12 @@
     [
      "132",
      "PluginEnableSynchProcessing",
-     "partial"
+     "plugin"
     ],
     [
      "133",
      "SetAllocationWeighting",
-     "todo"
+     "plugin"
     ],
     [
      "136",
@@ -2398,42 +2243,7 @@
     [
      "137",
      "GetBusInfo",
-     "partial"
-    ],
-    [
-     "139",
-     "ReinitializeTransport",
-     "partial"
-    ],
-    [
-     "144",
-     "DeviceRequest",
-     "partial"
-    ],
-    [
-     "156",
-     "SetTransportLatency",
-     "partial"
-    ],
-    [
-     "157",
-     "GetDeviceInfoForHwID",
-     "partial"
-    ],
-    [
-     "158",
-     "GetAudioDeviceInfo",
-     "partial"
-    ],
-    [
-     "159",
-     "GetAudioClockSourceInfo",
-     "partial"
-    ],
-    [
-     "160",
-     "GetAudioChannelInfo",
-     "partial"
+     "done"
     ],
     [
      "161",
@@ -2443,17 +2253,7 @@
     [
      "162",
      "SetAudioClockMaster",
-     "partial"
-    ],
-    [
-     "163",
-     "SetAudioClock",
-     "partial"
-    ],
-    [
-     "164",
-     "SetAudioAdditionalLatency",
-     "todo"
+     "blocked"
     ],
     [
      "166",
@@ -2471,16 +2271,6 @@
      "done"
     ],
     [
-     "171",
-     "SetDriverIoRoutings",
-     "partial"
-    ],
-    [
-     "172",
-     "GetDriverIoRoutings",
-     "partial"
-    ],
-    [
      "173",
      "EnableCLI",
      "done"
@@ -2496,29 +2286,24 @@
      "done"
     ],
     [
-     "176",
-     "SetDriverIoRoutingCount",
-     "partial"
-    ],
-    [
      "189",
      "SetDeviceOutputDelayComp",
-     "todo"
+     "done"
     ],
     [
      "192",
      "ClearSharedResourceCache",
-     "todo"
+     "plugin"
     ],
     [
      "193",
      "GetDanteInfoForHwID",
-     "todo"
+     "blocked"
     ],
     [
      "194",
      "LockSampleRateAndClock",
-     "partial"
+     "done"
     ],
     [
      "F1",
@@ -2533,32 +2318,22 @@
     [
      "F3",
      "PID 0003 (Twin, updating state)",
-     "todo"
-    ],
-    [
-     "F5",
-     "Bulk command framing (<HBB 0xDC>)",
-     "partial"
-    ],
-    [
-     "F6",
-     "Interrupt pipe reader (EP6)",
-     "partial"
+     "done"
     ],
     [
      "F7",
      "Settings batch + SEQ handshake",
-     "partial"
+     "done"
     ],
     [
      "F8",
      "Readback block (0x0604 + req 0x10)",
-     "todo"
+     "done"
     ],
     [
      "F9",
      "Generated DSP bring-up",
-     "todo"
+     "done"
     ],
     [
      "F10",
@@ -2568,7 +2343,7 @@
     [
      "F11",
      "Twin / Twin X bring-up",
-     "todo"
+     "blocked"
     ],
     [
      "F12",
@@ -2581,24 +2356,19 @@
      "done"
     ],
     [
-     "F14",
-     "DFU / firmware update",
-     "todo"
-    ],
-    [
      "F15",
      "FX3/info reads (0x00 0x06 0x08 0x0E 0x0F)",
-     "todo"
+     "done"
     ],
     [
      "F16",
      "PCIe v12 ring-connect mask",
-     "partial"
+     "done"
     ],
     [
      "F17",
      "DSP-ready poll ()",
-     "todo"
+     "done"
     ],
     [
      "F18",
@@ -2613,7 +2383,7 @@
     [
      "F20",
      "PCI subsystem naming for Twin/silver families",
-     "todo"
+     "done"
     ]
    ]
   },
@@ -2621,24 +2391,19 @@
    "name": "Plugin Support",
    "items": [
     [
-     "Open/AddRef/Rel…",
-     "Connection lifetime; refcounted singleton",
-     "partial"
-    ],
-    [
      "Enumeration: Ge…",
      "Device/DSP/bus/channel/clock topology, keyed by index or 64-bit HwID",
-     "partial"
+     "done"
     ],
     [
      "Sample rate and…",
      "Rate/clock-source/latency control; rate change is SetSessionFormat(0) t…",
-     "partial"
+     "blocked"
     ],
     [
      "Transport contr…",
      "Quiesce DMA across sleep/rate change",
-     "partial"
+     "done"
     ],
     [
      "Mixer: SetMixer…",
@@ -2648,7 +2413,7 @@
     [
      "Driver IO routi…",
      "Which DSP channels appear as driver (DAW) channels",
-     "partial"
+     "blocked"
     ],
     [
      "Driver paramete…",
@@ -2663,47 +2428,42 @@
     [
      "Plugin allocati…",
      "Host-side DSP resource scheduling. SetCompatibilityMode writes the Stri…",
-     "todo"
+     "plugin"
     ],
     [
      "Shared resource…",
      "Upload Bill code/data blobs (SEL127), release (100), clear cache (192);…",
-     "partial"
+     "plugin"
     ],
     [
      "Notifications:…",
      "A mach port set via IOConnectSetNotificationPort (SEL165 SetNotificatio…",
-     "todo"
-    ],
-    [
-     "(not listed)",
-     "SetLEDState = FlashLED (SEL122, {device, state}); LoadFirmware (SEL105)…",
-     "todo"
+     "done"
     ],
     [
      "Allocate/Deallo…",
      "Public plugin lifecycle and audio transfer; Allocate reads AssumeMaxLoad",
-     "todo"
+     "plugin"
     ],
     [
      "Chain* (SetIntV…",
      "Parameter plumbing from the plugin UI thread into DSP memory (_writeArr…",
-     "todo"
+     "plugin"
     ],
     [
      "_resendParamete…",
      "Re-send parameters when the allocator moves a plugin to another DSP, de…",
-     "todo"
+     "plugin"
     ],
     [
      "SendAllParamete…",
      "Readback pacing, span configuration, strip-type queries (Console insert…",
-     "todo"
+     "plugin"
     ],
     [
      "CUAD2PlugInProx…",
      "Wrapper used by the chain node to forward calls to the real plugin",
-     "todo"
+     "plugin"
     ],
     [
      "OpenUAD2SystemD…",
@@ -2718,42 +2478,27 @@
     [
      "OpenUAD2ChainMa…",
      "create the singleton chain manager",
-     "todo"
+     "plugin"
     ],
     [
      "CreateUAD2PlugI…",
      "create a CUAD2PlugIn bound to a driver",
-     "todo"
+     "plugin"
     ],
     [
      "100",
      "UnregisterSharedResource",
-     "todo"
-    ],
-    [
-     "102",
-     "SetSessionFormat",
-     "partial"
-    ],
-    [
-     "105",
-     "LoadFirmware",
-     "todo"
-    ],
-    [
-     "106",
-     "LoadFPGAImage",
-     "todo"
+     "plugin"
     ],
     [
      "109",
      "GetSystemInfo",
-     "partial"
+     "done"
     ],
     [
      "110",
      "GetSessionInfo",
-     "todo"
+     "done"
     ],
     [
      "111",
@@ -2763,87 +2508,87 @@
     [
      "112",
      "GetDSPInfo",
-     "partial"
+     "done"
     ],
     [
      "113",
      "AllocatePlugin",
-     "todo"
+     "plugin"
     ],
     [
      "114",
      "GetPluginInfo",
-     "todo"
+     "plugin"
     ],
     [
      "115",
      "AllocateSharedDMABuffer",
-     "todo"
+     "plugin"
     ],
     [
      "116",
      "FreeSharedDMABuffer",
-     "todo"
+     "plugin"
     ],
     [
      "117",
      "FreePlugin",
-     "todo"
+     "plugin"
     ],
     [
      "118",
      "AdjustPluginLoad",
-     "todo"
+     "plugin"
     ],
     [
      "119",
      "ProcessPlugin",
-     "todo"
+     "plugin"
     ],
     [
      "120",
      "ReadPluginMessage",
-     "todo"
+     "plugin"
     ],
     [
      "122",
      "FlashLED",
-     "todo"
+     "done"
     ],
     [
      "123",
      "SendSystemMessage",
-     "todo"
+     "plugin"
     ],
     [
      "124",
      "SetLoadLimit",
-     "todo"
+     "plugin"
     ],
     [
      "125",
      "AdjustAllocation",
-     "todo"
+     "plugin"
     ],
     [
      "126",
      "SetAllocationEnabled",
-     "todo"
+     "plugin"
     ],
     [
      "127",
      "RegisterSharedResourceDMA",
-     "partial"
+     "plugin"
     ],
     [
      "128",
      "AllocateChain",
-     "todo"
+     "plugin"
     ],
     [
      "129",
      "AddSubPluginToChain",
-     "todo"
+     "plugin"
     ],
     [
      "130",
@@ -2858,12 +2603,12 @@
     [
      "132",
      "PluginEnableSynchProcessing",
-     "partial"
+     "plugin"
     ],
     [
      "133",
      "SetAllocationWeighting",
-     "todo"
+     "plugin"
     ],
     [
      "136",
@@ -2871,49 +2616,29 @@
      "done"
     ],
     [
-     "139",
-     "ReinitializeTransport",
-     "partial"
-    ],
-    [
-     "142",
-     "SetSessionName",
-     "todo"
-    ],
-    [
      "143",
      "IsSessionStillLoading",
-     "todo"
-    ],
-    [
-     "144",
-     "DeviceRequest",
-     "partial"
+     "plugin"
     ],
     [
      "156",
      "SetTransportLatency",
-     "partial"
-    ],
-    [
-     "157",
-     "GetDeviceInfoForHwID",
-     "todo"
+     "done"
     ],
     [
      "158",
      "GetAudioDeviceInfo",
-     "partial"
+     "done"
     ],
     [
      "159",
      "GetAudioClockSourceInfo",
-     "partial"
+     "done"
     ],
     [
      "160",
      "GetAudioChannelInfo",
-     "partial"
+     "done"
     ],
     [
      "161",
@@ -2923,7 +2648,7 @@
     [
      "162",
      "SetAudioClockMaster",
-     "todo"
+     "blocked"
     ],
     [
      "163",
@@ -2933,12 +2658,12 @@
     [
      "164",
      "SetAudioAdditionalLatency",
-     "partial"
+     "done"
     ],
     [
      "165",
      "SetNotificationParams",
-     "todo"
+     "done"
     ],
     [
      "166/167",
@@ -2953,7 +2678,7 @@
     [
      "171/172/176",
      "Set/GetDriverIoRoutings, SetDriverIoRoutingCount",
-     "partial"
+     "blocked"
     ],
     [
      "173/174/175",
@@ -2963,32 +2688,22 @@
     [
      "189",
      "SetDeviceOutputDelayComp",
-     "todo"
+     "blocked"
     ],
     [
      "192",
      "ClearSharedResourceCache",
-     "todo"
-    ],
-    [
-     "194",
-     "LockSampleRateAndClock",
-     "todo"
+     "plugin"
     ],
     [
      "195/196",
      "Pause/ResumeAudioStreaming",
-     "partial"
+     "done"
     ],
     [
      "197/198/199",
      "CLI ByHwID",
-     "todo"
-    ],
-    [
-     "IOUSB calls / c…",
-     "None in Plugin Support or the kext. Hidden in the missing USB driver",
-     "partial"
+     "blocked"
     ],
     [
      "FX3 firmware lo…",
@@ -2998,27 +2713,27 @@
     [
      "DSP program loa…",
      "Console modules = Bill blobs from the four hidden header plugins (macos…",
-     "partial"
+     "blocked"
     ],
     [
      "Mixer setting p…",
      "Host merges {value, mask} into the setting cache and writes settings wi…",
-     "partial"
+     "blocked"
     ],
     [
      "Metering / read…",
      "macOS PCIe: GetMixerReadback (SEL136) snapshot read from BAR0 0x3814 (4…",
-     "todo"
+     "blocked"
     ],
     [
      "Clock",
      "PCIe: SetSessionFormat(0) then rate; DSP ack op 0x1A {, rate}; clock so…",
-     "partial"
+     "blocked"
     ],
     [
      "Notifications (…",
      "Interrupt notifications are what the kext turns into SEL165 events on P…",
-     "partial"
+     "re"
     ],
     [
      "Audio streaming",
@@ -3031,99 +2746,84 @@
      "done"
     ],
     [
-     "FX3 version que…",
-     "MISSING (not required)",
-     "todo"
-    ],
-    [
-     "FX3 reset (Rese…",
-     "MISSING (device re-enumeration after fx3-load is handled by udev)",
-     "todo"
-    ],
-    [
-     "EEPROM write",
-     "MISSING (deliberate: bricking risk)",
-     "todo"
-    ],
-    [
      "Arrow (0x000C l…",
-     "PARTIAL: loader PID known in fx3-load.py; shares the Solo image; untest…",
-     "partial"
+     "BLOCKED-HW (triage 2026-10-11, was PARTIAL: Arrow USB unit) — PARTIAL:…",
+     "blocked"
     ],
     [
      "UAD-2 Satellite…",
-     "MISSING: no Linux support; plugin-DSP accelerator, not an audio interfa…",
-     "todo"
+     "PLUGIN-HOST (triage 2026-10-11, was MISSING: UAD-2 Satellite is a plugi…",
+     "plugin"
     ],
     [
      "Bus-speed check…",
-     "MISSING: the installer asks for a USB 3 port but nothing checks the neg…",
-     "todo"
+     "DONE (triage 2026-10-11, was MISSING: tools/usb-dsp-init.py:warn_if_not…",
+     "done"
     ],
     [
      "1",
      "Generate the USB DSP init from the macOS spec instead of replaying capt…",
-     "partial"
+     "blocked"
     ],
     [
      "2",
      "USB state-snapshot request for readback/meters and the knob/mute write-…",
-     "todo"
+     "blocked"
     ],
     [
      "3",
      "A DSP-ready signal for USB to replace the fixed 2 s pause before routin…",
-     "todo"
+     "blocked"
     ],
     [
      "4",
      "Obtain and diff the macOS USB driver package (the transport that is not…",
-     "todo"
+     "blocked"
     ],
     [
      "5",
      "One backend API for USB and PCIe (move HardwareUSB behind the same daem…",
-     "partial"
+     "blocked"
     ],
     [
      "6",
      "Notification delivery (SEL165 equivalent): poll()/eventfd on rate chang…",
-     "todo"
+     "verified"
     ],
     [
      "7",
      "Re-init on rate or interface change for USB, and rates other than 48 kHz",
-     "partial"
+     "blocked"
     ],
     [
      "8",
      "Twin USB, Twin X USB, Arrow validation (same code path assumed)",
-     "partial"
+     "blocked"
     ],
     [
      "9",
      "USB link-speed check (speed in sysfs) with a clear warning, matching th…",
-     "todo"
+     "done"
     ],
     [
      "10",
      "FlashLED (SEL122) and system-message plumbing for identify-device",
-     "todo"
+     "done"
     ],
     [
      "11",
      "Multi-device parity: SetAudioClockMaster (162), LockSampleRateAndClock…",
-     "todo"
+     "blocked"
     ],
     [
      "12",
      "FX3 maintenance calls (version readout, reset) for diagnostics; flash/E…",
-     "todo"
+     "blocked"
     ],
     [
      "13",
      "Plugin hosting / strip engine (selectors 113-133, chain manager model,…",
-     "todo"
+     "plugin"
     ]
    ]
   },
@@ -3153,17 +2853,17 @@
     [
      "A9",
      "_configurePcieDevice, steps 4-8",
-     "partial"
+     "blocked"
     ],
     [
      "B1",
      "CPcieDevice::MapHardware 0x72ca, first action",
-     "partial"
+     "done"
     ],
     [
      "B2",
      "CPcieIntrManager::MapHardware 0x97da",
-     "partial"
+     "done"
     ],
     [
      "B3",
@@ -3173,17 +2873,12 @@
     [
      "B4",
      "GetCapabilities 0x464c",
-     "re"
+     "done"
     ],
     [
      "B5",
      "GetCapabilities, type decode",
-     "partial"
-    ],
-    [
-     "B6",
-     "MapHardware, extension and mixer creation",
-     "todo"
+     "verified"
     ],
     [
      "B7",
@@ -3198,7 +2893,7 @@
     [
      "B9",
      "CPcieDevice::_allocateDSPs 0x7678",
-     "partial"
+     "done"
     ],
     [
      "C1",
@@ -3226,19 +2921,9 @@
      "done"
     ],
     [
-     "C6",
-     "DispatchInterrupt 0xa571",
-     "partial"
-    ],
-    [
-     "D1",
-     "CPcieDevice::ProgramRegisters 0x5d67",
-     "partial"
-    ],
-    [
      "D2",
      "CPcieDSP::ProgramRegisters 0x8258",
-     "partial"
+     "done"
     ],
     [
      "E1",
@@ -3248,17 +2933,17 @@
     [
      "E2",
      "CPcieDSP::_waitFor469ToStart 0x8526",
-     "partial"
+     "done"
     ],
     [
      "E3",
      "CPcieDevice::_checkDSPs 0x61bc",
-     "partial"
+     "done"
     ],
     [
      "E4",
      "_allocateDSPs BAR0+0 gate",
-     "todo"
+     "verified"
     ],
     [
      "F1",
@@ -3268,12 +2953,12 @@
     [
      "F2",
      "ResetDMAEngine(idx) 0x9a98",
-     "todo"
+     "done"
     ],
     [
      "F3",
      "EnableDMA(idx) 0x9d5d / DisableDMA(idx) 0x9e15",
-     "partial"
+     "done"
     ],
     [
      "G1",
@@ -3283,12 +2968,12 @@
     [
      "G2",
      "CPcieDevice::GetDeviceInfo 0x4f44",
-     "partial"
+     "done"
     ],
     [
      "H1",
      "CPcieDevice::Connect(int) 0x5f84",
-     "partial"
+     "done"
     ],
     [
      "H2",
@@ -3298,32 +2983,27 @@
     [
      "H3",
      "CUAD2Device::_connectToDsps",
-     "partial"
+     "done"
     ],
     [
      "H4",
      "ring-connect gating",
-     "partial"
+     "done"
     ],
     [
      "H5",
      "SetOutputMute 0x6140",
-     "partial"
+     "done"
     ],
     [
      "H6",
      "connect retry",
-     "partial"
+     "done"
     ],
     [
      "I1",
      "UAD2Pcie2::stop 0xc414",
      "done"
-    ],
-    [
-     "I2",
-     "CPcieDevice::Shutdown 0x62b6",
-     "partial"
     ],
     [
      "I3",
@@ -3368,12 +3048,12 @@
     [
      "K3",
      "_startPowerGated 0xcb7d",
-     "partial"
+     "blocked"
     ],
     [
      "K4",
      "CDeviceManager::PauseDevice / ResumeDevice",
-     "todo"
+     "blocked"
     ],
     [
      "K5",
@@ -3383,12 +3063,12 @@
     [
      "K6",
      "_rebootHandler, CapabilityChange (, IOPMSystemCapabilityChangeParameter…",
-     "todo"
+     "done"
     ],
     [
      "L1",
      "offline detection points [H]",
-     "partial"
+     "done"
     ],
     [
      "L2",
@@ -3398,7 +3078,7 @@
     [
      "L3",
      "DSP error vectors",
-     "re"
+     "done"
     ],
     [
      "M3",
@@ -3406,14 +3086,9 @@
      "done"
     ],
     [
-     "M4",
-     "_setSampleClock",
-     "partial"
-    ],
-    [
      "M5",
      "_waitFor469ToStart",
-     "partial"
+     "done"
     ],
     [
      "M6",
@@ -3428,7 +3103,7 @@
     [
      "M8",
      "CUAD2Device::_sendBlock",
-     "partial"
+     "verified"
     ]
    ]
   },
@@ -3463,27 +3138,22 @@
     [
      "T06",
      "PrepareTransport (FRAME_CTR gate)",
-     "partial"
+     "done"
     ],
     [
      "T07",
      "PrepareTransport (P2P reg)",
-     "partial"
+     "blocked"
     ],
     [
      "T08",
      "PrepareTransport (TIMER_CFG)",
-     "partial"
+     "done"
     ],
     [
      "T09",
      "StartTransport",
-     "partial"
-    ],
-    [
-     "T10",
-     "StartTransport / performAudioEngineStart (post-start reads)",
-     "partial"
+     "verified"
     ],
     [
      "T11",
@@ -3493,7 +3163,7 @@
     [
      "T12",
      "TransportPosition",
-     "todo"
+     "done"
     ],
     [
      "T13",
@@ -3508,7 +3178,7 @@
     [
      "T16",
      "performAudioEngineStart / performAudioEngineStop",
-     "todo"
+     "done"
     ],
     [
      "B01",
@@ -3526,24 +3196,14 @@
      "done"
     ],
     [
-     "B04",
-     "_endBufferCallback / ServiceInterrupt 0xa2fa",
-     "partial"
-    ],
-    [
      "B05",
      "ResetPeriodicTimerInterrupt / ServiceInterrupt 0xa2fa",
-     "partial"
-    ],
-    [
-     "B06",
-     "TransportPosition / getCurrentSampleFrame",
-     "partial"
+     "verified"
     ],
     [
      "B07",
      "_handleNotificationInterrupt / _notifyIntrCallback",
-     "partial"
+     "done"
     ],
     [
      "B08",
@@ -3571,19 +3231,9 @@
      "done"
     ],
     [
-     "N04",
-     "_handleNotificationInterrupt (no wait)",
-     "partial"
-    ],
-    [
      "N05",
      "GetAudioDeviceInfo / GetClockSourceInfo / GetChannelInfo",
      "done"
-    ],
-    [
-     "C01",
-     "SetSampleClock",
-     "partial"
     ],
     [
      "C02",
@@ -3591,14 +3241,9 @@
      "done"
     ],
     [
-     "C03",
-     "_handleNotificationInterrupt (bit 5)",
-     "partial"
-    ],
-    [
      "C04",
      "Connect",
-     "partial"
+     "done"
     ],
     [
      "C05",
@@ -3608,22 +3253,17 @@
     [
      "C06",
      "GetAudioDeviceInfo (lock) / UAD2PcieInterface::GetLockedState (Mixer En…",
-     "todo"
+     "done"
     ],
     [
      "C07",
      "CPcieAudioExtension::_handleNotificationInterrupt (bits 21 / 22 parse)",
-     "partial"
+     "verified"
     ],
     [
      "C08",
      "_handleNotificationInterrupt (bits 4 / 22 / ack)",
-     "partial"
-    ],
-    [
-     "C09",
-     "CDeviceManager::SetAudioSampleRate and the rate-change chain",
-     "partial"
+     "verified"
     ],
     [
      "C10",
@@ -3638,37 +3278,37 @@
     [
      "C13",
      "StartTransport / _setSampleClock (external clock)",
-     "partial"
+     "verified"
     ],
     [
      "C14",
      "CDeviceManager::_setSampleClock , _calculatePllPhase , SetPllPhase",
-     "todo"
+     "blocked"
     ],
     [
      "L01",
      "initHardware / _setSafetyOffset",
-     "todo"
+     "done"
     ],
     [
      "L02",
      "CDeviceManager::SetAudioAdditionalLatency (SEL164)",
-     "todo"
+     "done"
     ],
     [
      "L03",
      "GetTransportInfo / CUAD2AudioMixer::GetLatency",
-     "todo"
+     "verified"
     ],
     [
      "L04",
      "SetOutputDelayComp / WriteAudioOutputData / GetOutputDelayComp",
-     "todo"
+     "done"
     ],
     [
      "L05",
      "Mixer Engine: MixerTypeBase::GetAsioLatencyForDelayComp , MixerTypeFreu…",
-     "todo"
+     "done"
     ],
     [
      "D01",
@@ -3688,17 +3328,17 @@
     [
      "R01",
      "Initialize(index, intr, device) 0x7e56",
-     "partial"
+     "done"
     ],
     [
      "R02",
      "ProgramRegisters(bar) 0x8258",
-     "partial"
+     "done"
     ],
     [
      "R03",
      "_waitFor469ToStart() 0x8526",
-     "partial"
+     "done"
     ],
     [
      "R04",
@@ -3716,39 +3356,24 @@
      "done"
     ],
     [
-     "R07",
-     "ServiceQueues() 0x87d2",
-     "todo"
-    ],
-    [
-     "R08",
-     "_commandRingBufferIntr 0x816a, _responseRingBufferIntr 0x81cc",
-     "todo"
-    ],
-    [
      "R09",
      "_intrCallback 0x7d9c -> _serviceMessageFIFO 0x93de",
-     "todo"
+     "done"
     ],
     [
      "R10",
      "_errorCallback 0x804e -> _dispatchErrorEvent 0x9526",
-     "todo"
-    ],
-    [
-     "R11",
-     "NumPendingMessages() 0x8834, ReadMessages(out, max) 0x8840",
-     "todo"
+     "done"
     ],
     [
      "R12",
      "GetProperty(prop, buf, size) 0x8a1c, PropertySize(prop) 0x9384",
-     "partial"
+     "done"
     ],
     [
      "R13",
      "ResetDSP() 0x93b8",
-     "todo"
+     "done"
     ],
     [
      "R20",
@@ -3776,19 +3401,14 @@
      "done"
     ],
     [
-     "R40",
-     "LoadFirmware(buf, off, len)",
-     "partial"
-    ],
-    [
      "R41",
      "_sendBlock",
-     "partial"
+     "done"
     ],
     [
      "R45",
      "_connectToDsps(connect, flag)",
-     "partial"
+     "done"
     ],
     [
      "R46",
@@ -3808,52 +3428,37 @@
     [
      "R60",
      "Validate response high half against the expected value",
-     "partial"
+     "done"
     ],
     [
      "R61",
      "Map status word 1 to error codes (table above)",
-     "todo"
+     "done"
     ],
     [
      "R62",
      "Timeouts 150 s / 5 s / 2 s",
-     "partial"
-    ],
-    [
-     "R63",
-     "Large header form (total >= )",
-     "partial"
+     "done"
     ],
     [
      "R64",
      "4 KB physical-piece chunking",
-     "partial"
-    ],
-    [
-     "R65",
-     "Response area of 4 dwords",
-     "partial"
+     "done"
     ],
     [
      "R66",
      "Command-buffer send with a consumed-wait (6 s)",
-     "partial"
+     "done"
     ],
     [
      "R70",
      "Message FIFO drain",
-     "todo"
+     "done"
     ],
     [
      "R71",
      "Error vectors A/B -> events",
-     "todo"
-    ],
-    [
-     "R72",
-     "Status class -> UAD2Status mapping",
-     "todo"
+     "done"
     ],
     [
      "R80",
@@ -3863,7 +3468,7 @@
     [
      "R81",
      "Gate on property 0xC and on the alternate-configuration flag",
-     "partial"
+     "done"
     ],
     [
      "R82",
@@ -3873,32 +3478,32 @@
     [
      "R83",
      "Disconnect sends the date word only",
-     "todo"
+     "done"
     ],
     [
      "R84",
      "StartTransport re-notification {, 0} + date",
-     "todo"
+     "blocked"
     ],
     [
      "R85",
      "Connect retry after ResetDMAEngine(0) + DSP 0 ProgramRegisters",
-     "partial"
+     "done"
     ],
     [
      "R86",
      "v12 connect set (types 0x27, 0x28, 0x29 added)",
-     "partial"
+     "done"
     ],
     [
      "H04",
      "w1 = 0",
-     "todo"
+     "blocked"
     ],
     [
      "H05",
      "Date word; also the only command of a disconnect and of the StartTransp…",
-     "partial"
+     "done"
     ],
     [
      "H07",
@@ -3908,7 +3513,7 @@
     [
      "H08",
      "DSP status/message classes 0xF001xxxx, 0xF002xxxx",
-     "todo"
+     "done"
     ],
     [
      "R90",
@@ -3918,12 +3523,7 @@
     [
      "R91",
      "v1 count from FPGA_REV[31:28] table {1,2,4,1}",
-     "partial"
-    ],
-    [
-     "R92",
-     "Extended DSP vector map and 8-engine masks above 4 DSPs",
-     "partial"
+     "done"
     ],
     [
      "R93",
@@ -3938,22 +3538,17 @@
     [
      "R96",
      "Pool totals and free (window registers + resource manager)",
-     "todo"
+     "plugin"
     ],
     [
      "R97",
      "Load figure (base + overhead + plugin sum)",
-     "todo"
-    ],
-    [
-     "K01",
-     "Host-side firmware upload at start",
-     "partial"
+     "done"
     ],
     [
      "K03",
      "Boot-word wait",
-     "partial"
+     "done"
     ],
     [
      "K04",
@@ -3963,12 +3558,12 @@
     [
      "K06",
      "DSP interrupt vectors",
-     "todo"
+     "blocked"
     ],
     [
      "K07",
      "ACEFACE before ring connect",
-     "partial"
+     "done"
     ],
     [
      "K08",
@@ -3978,17 +3573,12 @@
     [
      "K09",
      "Plugin-chain replay",
-     "partial"
+     "plugin"
     ],
     [
      "K10",
      "DSP status check",
-     "partial"
-    ],
-    [
-     "K12",
-     "Shutdown: flag at +0xC38 selects the 0x1A8 write in HardResetDSPs",
-     "todo"
+     "done"
     ]
    ]
   },
@@ -3998,17 +3588,17 @@
     [
      "A1",
      "SetBusEnable(a=bus, b=enable) (+0x20)",
-     "partial"
+     "done"
     ],
     [
      "A2",
      "SetInputParam(ch=a, param=b, value=c) (+0x30)",
-     "partial"
+     "done"
     ],
     [
      "A3",
      "SetOtherParam(param=b, value=c) (+0x38); a is ignored",
-     "partial"
+     "done"
     ],
     [
      "A4",
@@ -4023,7 +3613,7 @@
     [
      "A6",
      "GetMixerParam (SEL1xx, )",
-     "todo"
+     "done"
     ],
     [
      "0x00",
@@ -4038,7 +3628,7 @@
     [
      "0x02",
      "kPropStereo (0x45), pair leader only (H)",
-     "partial"
+     "done"
     ],
     [
      "0x03",
@@ -4053,7 +3643,7 @@
     [
      "0x05",
      "kPropPhaseInvert (0xd): +1.0f normal, -1.0f invert (H)",
-     "partial"
+     "done"
     ],
     [
      "0x06",
@@ -4063,12 +3653,12 @@
     [
      "0x07",
      "kPropImpedance (0xa) via ConvertImpedanceToHWCode (H)",
-     "partial"
+     "done"
     ],
     [
      "0x08",
      "kPropCustomIntegratedPreamp (0xb1/0xb4): custom (Unison) preamp on (M)",
-     "partial"
+     "done"
     ],
     [
      "0x09",
@@ -4108,37 +3698,37 @@
     [
      "0x10",
      "kPropPreampInputKnobSteps (0xbc), value & 0xf (M)",
-     "partial"
+     "done"
     ],
     [
      "0x11",
      "kPropHiZImpedance (0xbb) via ConvertHiZImpedanceToHWCode (H)",
-     "partial"
+     "done"
     ],
     [
      "0x12",
      "kPropPreampSelectedParam (0xbe) (M)",
-     "partial"
+     "done"
     ],
     [
      "0x13",
      "direct-output route (kPropDirectOutputMonitorMixEnable 0xcd path, Clear…",
-     "todo"
+     "done"
     ],
     [
      "0x14",
      "kPropHiZ (0xb), host write only when kPropInputJackSensingDisabled (0x1…",
-     "partial"
+     "done"
     ],
     [
      "0x16",
      "span info (kPropDSPSpanning) (H)",
-     "todo"
+     "done"
     ],
     [
      "0x17",
      "kPropRawRecordEnable (0x186) (H)",
-     "partial"
+     "done"
     ],
     [
      "0x01",
@@ -4168,7 +3758,7 @@
     [
      "0x06",
      "kPropMixToMono, output synch 2: value bit 0 = mono (H)",
-     "partial"
+     "done"
     ],
     [
      "0x07",
@@ -4178,7 +3768,7 @@
     [
      "0x08",
      "kPropMixToMono, output synch 4 (H)",
-     "partial"
+     "done"
     ],
     [
      "0x09",
@@ -4188,7 +3778,7 @@
     [
      "0x0a",
      "CMxAuxBus MixToMono, aux bus 1 (M)",
-     "partial"
+     "done"
     ],
     [
      "0x0b-0x0d",
@@ -4203,7 +3793,7 @@
     [
      "0x0f",
      "CMxAuxBus MixToMono, aux bus 2 (M)",
-     "partial"
+     "done"
     ],
     [
      "0x10-0x12",
@@ -4243,7 +3833,7 @@
     [
      "0x1d",
      "IdentifyDevice::Do (H)",
-     "partial"
+     "done"
     ],
     [
      "0x1e",
@@ -4263,7 +3853,7 @@
     [
      "0x21",
      "device mode word: PushDeviceMode (kPropMultiUnitOrder 0x80, TOSLINKType…",
-     "partial"
+     "done"
     ],
     [
      "0x22",
@@ -4273,7 +3863,7 @@
     [
      "0x23",
      "kPropMixToMono, output synch 0x18 (H)",
-     "partial"
+     "done"
     ],
     [
      "0x24",
@@ -4283,7 +3873,7 @@
     [
      "0x25",
      "kPropMixToMono, output synch 0x1a (H)",
-     "partial"
+     "done"
     ],
     [
      "0x26-0x29",
@@ -4293,7 +3883,7 @@
     [
      "0x2a-0x2d",
      "kPropPad (0x9) on outputs synch 16/17, 18/19, 20/21, 22/23 (H)",
-     "partial"
+     "done"
     ],
     [
      "0x2e",
@@ -4323,12 +3913,12 @@
     [
      "0x33-0x35",
      "root-level per-mixer-type properties (props 0x99/0x57 loop, H for the p…",
-     "partial"
+     "done"
     ],
     [
      "0x36",
      "root (CMxRoot::UpdateHardwareState ) (M)",
-     "partial"
+     "done"
     ],
     [
      "0x38",
@@ -4383,7 +3973,7 @@
     [
      "0x42",
      "kPropFuncSwitchMode (0xf9), mode <= 5 (H)",
-     "partial"
+     "done"
     ],
     [
      "0x43",
@@ -4418,7 +4008,7 @@
     [
      "0x49",
      "kPropEnable24dBMode (0x114) (H)",
-     "partial"
+     "done"
     ],
     [
      "0x4a",
@@ -4433,12 +4023,12 @@
     [
      "0x4d-0x4e",
      "surround trim, channels 2/3 (M)",
-     "todo"
+     "done"
     ],
     [
      "0x4f-0x52",
      "surround trim, channels 4-7 area (M)",
-     "todo"
+     "done"
     ],
     [
      "0x53-0x54",
@@ -4448,7 +4038,7 @@
     [
      "0x55-0x5a",
      "same family",
-     "todo"
+     "done"
     ],
     [
      "0x5b-0x5c",
@@ -4458,7 +4048,7 @@
     [
      "0x5d-0x62",
      "same family",
-     "todo"
+     "done"
     ],
     [
      "0x63",
@@ -4473,7 +4063,7 @@
     [
      "0x65",
      "root-level per-mixer property (0x1eb8) (L)",
-     "todo"
+     "done"
     ],
     [
      "0x66",
@@ -4493,7 +4083,7 @@
     [
      "0x69",
      "kPropHP2CorrectionEnable (0x145) (M)",
-     "todo"
+     "done"
     ],
     [
      "0x6a",
@@ -4503,22 +4093,22 @@
     [
      "0x6b-0x6e",
      "surround trim bytes (M)",
-     "todo"
+     "done"
     ],
     [
      "0x6f-0x72",
      "surround trim bytes (M)",
-     "todo"
+     "done"
     ],
     [
      "0x73-0x7a",
      "per-channel flags (M)",
-     "todo"
+     "done"
     ],
     [
      "0x7b-0x82",
      "per-channel flags (M)",
-     "todo"
+     "done"
     ],
     [
      "0x87",
@@ -4528,12 +4118,12 @@
     [
      "0x88",
      "surround LFE/sub trim (M)",
-     "todo"
+     "done"
     ],
     [
      "0x89, 0x8a",
      "surround channel flags (M)",
-     "todo"
+     "done"
     ],
     [
      "> 0x8a",
@@ -4548,22 +4138,22 @@
     [
      "B2",
      "DSP command",
-     "partial"
+     "done"
     ],
     [
      "B3",
      "Coefficient cache",
-     "todo"
+     "done"
     ],
     [
      "B4",
      "Target DSP",
-     "partial"
+     "done"
     ],
     [
      "B5",
      "Spanned/linked buses",
-     "todo"
+     "plugin"
     ],
     [
      "B6",
@@ -4573,62 +4163,62 @@
     [
      "B7",
      "param 0",
-     "partial"
+     "blocked"
     ],
     [
      "B8",
      "param 1",
-     "partial"
+     "blocked"
     ],
     [
      "B9",
      "param 2",
-     "partial"
+     "blocked"
     ],
     [
      "B10",
      "param 3",
-     "partial"
+     "blocked"
     ],
     [
      "B11",
      "param 4",
-     "partial"
+     "blocked"
     ],
     [
      "B12",
      "param 5, 6",
-     "todo"
+     "done"
     ],
     [
      "B13",
      "Value encoding",
-     "partial"
+     "done"
     ],
     [
      "B14",
      "DSP bus enable",
-     "partial"
+     "done"
     ],
     [
      "0",
      "per input 0-3, 6-bit lanes: 0 line, 1 pad, 2 link, 3 48V, 4 lowcut, 5 p…",
-     "partial"
+     "done"
     ],
     [
      "2",
      "[7:0] monitor level (dB = raw*0.5 - 96); [15:8] HP1 level; 16 mute; 17…",
-     "partial"
+     "done"
     ],
     [
      "3",
      "GainC lanes 0/6/16/22 (dB = raw+9, raw >= 0x39 -> 65, raw 0 -> 0 dB rep…",
-     "partial"
+     "done"
     ],
     [
      "6",
      "8 talkback button; [29:28] alt-monitor selection (if remote-monitor con…",
-     "partial"
+     "done"
     ],
     [
      "7",
@@ -4653,7 +4243,7 @@
     [
      "17",
      "[31:16] talkback meter; [15:8] temperature byte (kPropTemperature 0x6c,…",
-     "partial"
+     "done"
     ],
     [
      "18",
@@ -4668,7 +4258,7 @@
     [
      "21",
      "custom-preamp input meter, 2 bits per synch channel (0, 1 = -27 dB, 2 =…",
-     "re"
+     "plugin"
     ],
     [
      "22-25",
@@ -4678,27 +4268,27 @@
     [
      "26 / 29",
      "custom-preamp input knob positions, channels 0-3 / 4-7 (6-bit lanes)",
-     "re"
+     "plugin"
     ],
     [
      "27 / 30",
      "custom-preamp output-level knob 1 (0..3 / 4..7)",
-     "re"
+     "plugin"
     ],
     [
      "28 / 31",
      "custom-preamp output-level knob 2",
-     "re"
+     "plugin"
     ],
     [
      "32",
      "custom-preamp Ex8 (cached at 0x1b9c)",
-     "re"
+     "plugin"
     ],
     [
      "33",
      "custom-preamp Ex8; [28:26] analog board id (kPropAnalogBoardID 0x13c)",
-     "re"
+     "plugin"
     ],
     [
      "38, 39",
@@ -4713,37 +4303,27 @@
     [
      "CDeviceManager:…",
      "mutex, 8 slot events, 3 timers, defaults rate 1 / src 0xC / mode 0",
-     "todo"
+     "blocked"
     ],
     [
      "AddDevice ()",
      "slot, bus grouping, DSP registration, master callbacks, notify 1",
-     "partial"
+     "blocked"
     ],
     [
      "_addAudioDevice…",
      "ext + AudioDevInfo arrays, master wiring",
-     "todo"
-    ],
-    [
-     "_desktopUnitCon…",
-     "at most one desktop-class unit",
-     "todo"
+     "blocked"
     ],
     [
      "RemoveDevice ()",
      "wait for in-flight ioctls, compact masks, notify 2",
-     "partial"
+     "done"
     ],
     [
      "_removeAudioDev…",
      "master promotion, P2P reconfig",
-     "todo"
-    ],
-    [
-     "NumAudioDevices…",
-     "enumeration / lookup",
-     "partial"
+     "blocked"
     ],
     [
      "LockDevice, Loc…",
@@ -4751,94 +4331,89 @@
      "done"
     ],
     [
-     "GetAudioDeviceI…",
-     "aggregate and per-HWID info",
-     "partial"
-    ],
-    [
      "GetAudioChannel…",
      "concatenated <=192-channel view across units",
-     "partial"
+     "blocked"
     ],
     [
      "_setSampleClock…",
      "write master source, derive and write slave sources",
-     "partial"
+     "blocked"
     ],
     [
      "SetAudioClock ()",
      "source/mode change with lock check and deferral",
-     "partial"
+     "blocked"
     ],
     [
      "SetAudioClockMa…",
      "swap master, rebuild P2P",
-     "todo"
+     "blocked"
     ],
     [
      "ClockSourceIsAv…",
      "availability = AND over units, master info",
-     "partial"
+     "blocked"
     ],
     [
      "LockSampleRateA…",
      "rate/clock lock against non-Console clients",
-     "todo"
+     "done"
     ],
     [
      "SetAudioSampleR…",
      "rate change across units",
-     "partial"
+     "blocked"
     ],
     [
      "_altSetSampleRa…",
      "pending list, firmware-rate wait (160 x 25 ms)",
-     "partial"
+     "blocked"
     ],
     [
      "SetSampleRateTo…",
      "force re-apply to all",
-     "todo"
+     "blocked"
     ],
     [
      "AckRateChangeCa…",
      "ack gating, 3.5 s / 1.5 s timers",
-     "partial"
+     "blocked"
     ],
     [
      "_calculatePllPh…",
      "latency to phase",
-     "todo"
+     "blocked"
     ],
     [
      "_updatePeerToPe…",
      "reset phases, arm 3.5 s timer",
-     "todo"
+     "blocked"
     ],
     [
      "_finishPhaseCor…",
      "measure, compute, write phases",
-     "todo"
+     "blocked"
     ],
     [
      "_configurePeerT…",
      "star-topology P2P setup",
-     "todo"
+     "blocked"
     ],
     [
      "CPcieAudioExten…",
      "write peer window address",
-     "todo"
+     "blocked"
     ],
     [
      "ClearPeerToPeer…",
      "mask register 0x22C4",
-     "partial"
+     "blocked"
     ],
     [
      "GetPeerLatency…",
      "0x22c8/0x22cc/0x22d0 handshake",
-     "todo"
+     "blocked"
     ],
     [
      "SetPllPhase ()",
@@ -4848,82 +4423,82 @@
     [
      "StartTransport…",
      "0x20F for derived-clock slaves, 0xF otherwise",
-     "partial"
+     "done"
     ],
     [
      "CanAudioStream…",
      "pause-reason mask",
-     "partial"
+     "done"
     ],
     [
      "PauseAudioStrea…",
      "client pause + 0x264/0x265",
-     "partial"
+     "done"
     ],
     [
      "StartAudio, Sto…",
      "ordered group start (slaves first, master last)",
-     "partial"
+     "blocked"
     ],
     [
      "PauseDevice, Re…",
      "group P2P teardown/rebuild, notify",
-     "partial"
+     "blocked"
     ],
     [
      "SetSleeping, Cl…",
      "sleep masks, wake notify",
-     "partial"
+     "done"
     ],
     [
      "_notifyClients,…",
      "fan-out of the codes in §7",
-     "partial"
+     "done"
     ],
     [
      "SetOutputDelayC…",
      "latency knobs",
-     "todo"
+     "done"
     ],
     [
      "DeviceErrors, C…",
      "error words (only unit 0 is actually queried; loop index is not used)",
-     "partial"
+     "done"
     ],
     [
      "Get/SetDriverPa…",
      "five tuning words",
-     "partial"
+     "done"
     ],
     [
      "EnableCLI, Send…",
      "per-unit CLI",
-     "partial"
+     "plugin"
     ],
     [
      "CPcieDevice::Ge…",
      "Dante info block at 0x3a00",
-     "todo"
+     "blocked"
     ],
     [
      "UAD2Pcie2::star…",
      "per-unit registration and power",
-     "partial"
+     "blocked"
     ],
     [
      "Info / device d…",
      "info, request, LED",
-     "partial"
+     "done"
     ],
     [
      "Audio-engine di…",
      "rate, clock, master, latency, lock, pause",
-     "partial"
+     "done"
     ],
     [
      "SetNotification…",
      "per-client async notification, 32-slot ring",
-     "partial"
+     "done"
     ],
     [
      "_openUserClient…",
@@ -4933,12 +4508,12 @@
     [
      "UAD2PcieUserCli…",
      "legacy per-device client",
-     "partial"
+     "plugin"
     ],
     [
      "CSession::Add/R…",
      "resource ownership",
-     "todo"
+     "plugin"
     ]
    ]
   },
@@ -4952,28 +4527,28 @@
     ],
     [
      "Apollo x4 Gen 2…",
-     "PARTIAL",
-     "partial"
+     "BLOCKED-HW (triage 2026-10-11, was PARTIAL: Gen 2 x4 unverified, needs…",
+     "blocked"
     ],
     [
      "Apollo x8p",
-     "PARTIAL",
-     "partial"
+     "DONE (triage 2026-10-11, was PARTIAL: plan H4 224de41 + O5 1c1d3c5 (pre…",
+     "verified"
     ],
     [
      "Apollo x16D",
-     "PARTIAL",
-     "partial"
+     "BLOCKED-HW (triage 2026-10-11, was PARTIAL: Dante / FPGA-gated ids need…",
+     "blocked"
     ],
     [
      "Apollo Solo USB",
-     "PARTIAL",
-     "partial"
+     "DONE (triage 2026-10-11, was PARTIAL: mixer-engine/hardware_usb.py (pla…",
+     "done"
     ],
     [
      "Apollo (silver)…",
-     "MISSING",
-     "todo"
+     "DONE (triage 2026-10-11, was MISSING: plan H8/O4 5daaecf/29204e7: publi…",
+     "done"
     ],
     [
      "F01",
@@ -4988,7 +4563,7 @@
     [
      "F03",
      "HiZ-capable inputs",
-     "partial"
+     "done"
     ],
     [
      "F04",
@@ -4998,12 +4573,12 @@
     [
      "F05",
      "Talkback synch-in channel",
-     "partial"
+     "done"
     ],
     [
      "F06",
      "Cue bus default and max",
-     "partial"
+     "done"
     ],
     [
      "F07",
@@ -5028,7 +4603,7 @@
     [
      "F11",
      "ADAT channel count at 176.4/192 kHz and the output side",
-     "partial"
+     "done"
     ],
     [
      "F12",
@@ -5038,12 +4613,12 @@
     [
      "F13",
      "Digital mirror availability",
-     "partial"
+     "done"
     ],
     [
      "F14",
      "Clock-source set and default",
-     "partial"
+     "done"
     ],
     [
      "F15",
@@ -5058,127 +4633,127 @@
     [
      "F17",
      "Monitor/HP/cue hardware routing by model",
-     "partial"
+     "done"
     ],
     [
      "F18",
      "Preamp controls past input 4",
-     "partial"
+     "done"
     ],
     [
      "F19",
      "Input index to DSP bus map",
-     "partial"
+     "done"
     ],
     [
      "F20",
      "Alternate monitors (MaxAltMons, selection, trim)",
-     "todo"
+     "done"
     ],
     [
      "F21",
      "Monitor knob taper, LED steps",
-     "partial"
+     "done"
     ],
     [
      "F22",
      "Output reference level (Pad)",
-     "partial"
+     "done"
     ],
     [
      "F23",
      "Line-input reference level",
-     "todo"
+     "done"
     ],
     [
      "F24",
      "HiZ impedance",
-     "todo"
+     "done"
     ],
     [
      "F25",
      "Line PGA disable",
-     "todo"
+     "done"
     ],
     [
      "F26",
      "Control-room PGA relay",
-     "todo"
+     "done"
     ],
     [
      "F27",
      "Autogain",
-     "todo"
+     "done"
     ],
     [
      "F28",
      "ES9028 Pro DAC flag",
-     "re"
+     "done"
     ],
     [
      "F29",
      "Front-panel Function switch and soft Func switch",
-     "todo"
+     "done"
     ],
     [
      "F30",
      "Mon/HP switch, Mon/Preamp switch, HP monitor level",
-     "partial"
+     "done"
     ],
     [
      "F31",
      "RemoteMonitorController gate",
-     "partial"
+     "done"
     ],
     [
      "F32",
      "Output DSP: speaker correction, HP correction, bass management, stereo…",
-     "todo"
+     "plugin"
     ],
     [
      "F33",
      "Surround monitoring and Atmos",
-     "todo"
+     "blocked"
     ],
     [
      "F34",
      "Direct outputs / flex routing",
-     "todo"
+     "done"
     ],
     [
      "F35",
      "Volt 876 over ADAT preamp combo",
-     "todo"
+     "blocked"
     ],
     [
      "F36",
      "Dante",
-     "todo"
+     "blocked"
     ],
     [
      "F37",
      "MADI",
-     "todo"
+     "blocked"
     ],
     [
      "F38",
      "Multi-unit cascade (slave tables, MultiUnitOrder, flex sort)",
-     "partial"
+     "blocked"
     ],
     [
      "F39",
      "Delay compensation and latency reporting",
-     "todo"
+     "done"
     ],
     [
      "F41",
      "LLM disk channel count",
-     "partial"
+     "done"
     ],
     [
      "F42",
      "/devices/0 capability flags per model",
-     "partial"
+     "done"
     ],
     [
      "F43",
@@ -5198,7 +4773,7 @@
     [
      "F49",
      "24 dB mode",
-     "re"
+     "done"
     ]
    ]
   },
@@ -5228,7 +4803,7 @@
     [
      "A5",
      "Kext approval / SIP / boot collection",
-     "partial"
+     "done"
     ],
     [
      "A9",
@@ -5236,14 +4811,9 @@
      "done"
     ],
     [
-     "A10",
-     "Rollback to a previous driver version",
-     "todo"
-    ],
-    [
      "A11",
      "Host-library to kext version check (OpenUAD2Driver2 version check, chec…",
-     "todo"
+     "done"
     ],
     [
      "B1",
@@ -5258,7 +4828,7 @@
     [
      "B3",
      "(not listed)",
-     "todo"
+     "done"
     ],
     [
      "B4",
@@ -5268,22 +4838,22 @@
     [
      "B5",
      "Both Apollo PCI ids (pci1a00,1 and pci1a00,2) are matched by the kext",
-     "partial"
+     "done"
     ],
     [
      "B6",
      "Departure: CoreAudio AudioDeviceRemoved, user client terminates, Mixer…",
-     "partial"
+     "done"
     ],
     [
      "B7",
      "Daemon follows the device: the Mixer Engine is a login-time agent that…",
-     "todo"
+     "done"
     ],
     [
      "B8",
      "Multiple Apollos",
-     "partial"
+     "done"
     ],
     [
      "B9",
@@ -5303,17 +4873,7 @@
     [
      "C2",
      "Expose firmware_version(2), expected_firmware_version(2), firmware_comp…",
-     "todo"
-    ],
-    [
-     "C3",
-     "firmware_compatibility verdict (0 = ok) drives the \"update firmware\" pr…",
-     "partial"
-    ],
-    [
-     "C4",
-     "Firmware update push (LoadBinFile, LoadFirmware 105, LoadFPGAImage 106)…",
-     "todo"
+     "done"
     ],
     [
      "C5",
@@ -5333,17 +4893,12 @@
     [
      "D2",
      "Persistent network id (nework_uid.json, UA Network ID.ini) so clients r…",
-     "partial"
-    ],
-    [
-     "D3",
-     "Persistent device uid (device_uid.json)",
-     "re"
+     "done"
     ],
     [
      "D4",
      "User-visible device name (rename)",
-     "partial"
+     "done"
     ],
     [
      "D6",
@@ -5353,22 +4908,17 @@
     [
      "E1",
      "Mixer Engine advertises _uamixer._tcp. on 4710, empty TXT",
-     "partial"
+     "done"
     ],
     [
      "E2",
      "_uamixerhelper._tcp. (port 4720)",
-     "todo"
-    ],
-    [
-     "E3",
-     "Mixer Helper also listens on 4748",
-     "re"
+     "done"
     ],
     [
      "E5",
      "Host firewall / mDNS responder",
-     "todo"
+     "done"
     ],
     [
      "E6",
@@ -5378,7 +4928,7 @@
     [
      "F1",
      "Kext ring log with facility levels, read and set by ualogger (selectors…",
-     "partial"
+     "done"
     ],
     [
      "F2",
@@ -5388,7 +4938,7 @@
     [
      "F3",
      "Live crash log capture",
-     "partial"
+     "done"
     ],
     [
      "F4",
@@ -5403,7 +4953,7 @@
     [
      "G3",
      "Start order: kext first, then engine",
-     "partial"
+     "done"
     ],
     [
      "G5",
@@ -5413,12 +4963,12 @@
     [
      "H1",
      "UA Services Device_MH* connect as a client to the Mixer Helper (4720);…",
-     "partial"
+     "blocked"
     ],
     [
      "H2",
      "Services reads kext state through the same user client as the engine (I…",
-     "todo"
+     "plugin"
     ]
    ]
   },
@@ -5443,12 +4993,12 @@
     [
      "B06",
      "MapHardware: first write TRANSPORT (0x2220) = 0 (through ); IntrMgr map…",
-     "partial"
+     "done"
     ],
     [
      "B07",
      "GetCapabilities: v2 = FPGA_REV bit 31; ~0 in FPGA_REV or ext_caps -> ty…",
-     "partial"
+     "done"
     ],
     [
      "B08",
@@ -5463,7 +5013,7 @@
     [
      "B10",
      "> ->",
-     "partial"
+     "done"
     ],
     [
      "B11",
@@ -5473,17 +5023,12 @@
     [
      "B12",
      "UAD2Pcie.inf",
-     "partial"
-    ],
-    [
-     "B13",
-     "D0Entry (previous state ignored; always the same work, no warm/cold bra…",
-     "partial"
+     "done"
     ],
     [
      "B14",
      "ResetDMAEngines: cache &= | (8-engine) or &= ...e1 | 0x1e00, write, wri…",
-     "partial"
+     "done"
     ],
     [
      "B15",
@@ -5493,12 +5038,12 @@
     [
      "B16",
      "_waitFor469ToStart: tries = 100 for DSP 0, 10 for DSPs 1+ (edi = (idx =…",
-     "partial"
+     "done"
     ],
     [
      "B17",
      "_allocateDSPs: count from ext_caps[15:8] (v2) or a FPGA_REV nibble tabl…",
-     "partial"
+     "done"
     ],
     [
      "B18",
@@ -5508,7 +5053,7 @@
     [
      "B19",
      "D0EntryPostInterruptsEnabled runs Connect(1): EnableInterrupts(1); conn…",
-     "partial"
+     "done"
     ],
     [
      "B20",
@@ -5516,14 +5061,9 @@
      "done"
     ],
     [
-     "B21",
-     "Teardown order on D0 exit: D0ExitPreInterruptsDisabled cancels the cont…",
-     "partial"
-    ],
-    [
      "B23",
      "SetOutputMute(m): types {0x13, 0x1C, 0x27} only (, limit 0x27); vcall o…",
-     "partial"
+     "done"
     ],
     [
      "B24",
@@ -5541,11 +5081,6 @@
      "done"
     ],
     [
-     "B27",
-     "AllocDMABuffer(size, flags): MmAllocatePagesForMdl(0, ~0, 0, size round…",
-     "partial"
-    ],
-    [
      "B28",
      "WriteReg = 32-bit store then lock or dword [rsp],0 (full barrier); Read…",
      "done"
@@ -5553,12 +5088,12 @@
     [
      "B30",
      "Error returns identical to the kext: -0x5c () not connected / offline,…",
-     "partial"
+     "done"
     ],
     [
      "C01",
      "PrepareTransport (refuses while state +0x2878 == 2, returns -0x75): BUF…",
-     "partial"
+     "done"
     ],
     [
      "C02",
@@ -5568,7 +5103,7 @@
     [
      "C03",
      "TransportPosition: reads SAMPLE_POS and AX_CONTROL (and 0x22C0 when +0x…",
-     "todo"
+     "done"
     ],
     [
      "C04",
@@ -5578,7 +5113,7 @@
     [
      "C05",
      "_setSampleClock(src, rate): rate 1..6 else assert; cache FRAME_CFG (C01…",
-     "partial"
+     "blocked"
     ],
     [
      "C06",
@@ -5588,12 +5123,12 @@
     [
      "C07",
      "/1840/1930",
-     "todo"
+     "blocked"
     ],
     [
      "C08",
      "CLI pass-through: EnableCLI (0xC3F4 = en, 0xC3F8 = 0, 0xC3FC = 0), Send…",
-     "partial"
+     "blocked"
     ],
     [
      "S02",
@@ -5608,7 +5143,7 @@
     [
      "A10",
      "Latency is whatever System's block size is (selectors 179/180 Set/GetAu…",
-     "partial"
+     "done"
     ]
    ]
   }
@@ -5881,6 +5416,11 @@
      "E7",
      "64-bit DMA for the two 4 MiB audio buffers (Windows and macOS never lim…",
      "done"
+    ],
+    [
+     "E8",
+     "Read-only diagnostics for RE: DSP window +0x1A0 at probe and in dsp_sta…",
+     "todo"
     ]
    ]
   },
@@ -5985,7 +5525,7 @@
     [
      "G7",
      "Property-0xC gating in connect; StartTransport {, 0} + date word, date-…",
-     "done"
+     "partial"
     ]
    ]
   },
@@ -6235,12 +5775,12 @@
     [
      "M15",
      "Multi-DSP bus-param routing: per-bus hosting DSP, also send to DSP 0, s…",
-     "blocked"
+     "plugin"
     ],
     [
      "M16",
      "Unison custom-preamp lanes (inputs 8-0x12 settings; readback words 21,…",
-     "blocked"
+     "plugin"
     ]
    ]
   },

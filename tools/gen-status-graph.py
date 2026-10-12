@@ -10,7 +10,9 @@ plan, or one Apollo model), coloured by how sure we are of it:
   partial   partly done, done differently, or in progress
   re        still to figure out: needs reverse engineering
   todo      understood, not done yet
-  blocked   needs a decision or hardware the project does not have
+  plugin    part of plugin hosting / the DSP strip engine, which waits on
+            a separate decision
+  blocked   needs hardware (or a test on it) or another decision
 
 Inputs:
   docs/status/status.json  the parity map (each behaviour of UA's macOS kext,
@@ -46,24 +48,25 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "docs", "status")
 STATUS_JSON = os.path.join(OUT, "status.json")
 
-ORDER = ("verified", "done", "partial", "re", "todo", "blocked")
+ORDER = ("verified", "done", "partial", "re", "todo", "plugin", "blocked")
 LEGEND = {
     "verified": "verified on hardware",
     "done": "done in code",
     "partial": "partial / in progress",
     "re": "still to figure out (RE)",
     "todo": "understood, not done",
-    "blocked": "blocked (decision or hardware)",
+    "plugin": "plugin hosting (decision)",
+    "blocked": "needs hardware",
 }
 THEMES = {
     "dark": {"bg": "#0d1117", "fg": "#e6edf3", "muted": "#8b949e",
              "verified": "#3fb950", "done": "#1f6f3a",
              "partial": "#d29922", "re": "#a371f7", "todo": "#484f58",
-             "blocked": "#f85149"},
+             "plugin": "#2f81f7", "blocked": "#f85149"},
     "light": {"bg": "#ffffff", "fg": "#1f2328", "muted": "#59636e",
               "verified": "#1a7f37", "done": "#7ccf8e",
               "partial": "#d4a72c", "re": "#8250df", "todo": "#c8d1da",
-              "blocked": "#cf222e"},
+              "plugin": "#54aeff", "blocked": "#cf222e"},
 }
 
 # --------------------------------------------------------------------------
@@ -97,7 +100,7 @@ NEEDS_RE = re.compile(r"\[L\]|\bunknown\b|needs (?:mac |windows )?RE\b|"
 NEEDS_GEAR = re.compile(r"user hw|second apollo|usb unit|cable|other model",
                         re.I)
 TOKEN = re.compile(r"\b(DONE|PARTIAL|DIFFERENT|WRONG|CACHE-ONLY|MISSING|N/A|"
-                   r"OUT-OF-SCOPE)\b")
+                   r"OUT-OF-SCOPE|PLUGIN-HOST|BLOCKED-HW)\b")
 
 
 def md_cells(line):
@@ -141,6 +144,10 @@ def parity_status(tok, text):
         return "verified" if hw_checked(text) else "done"
     if tok in ("PARTIAL", "DIFFERENT", "WRONG"):
         return "partial"
+    if tok == "PLUGIN-HOST":
+        return "plugin"
+    if tok == "BLOCKED-HW":
+        return "re" if NEEDS_RE.search(text) else "blocked"
     if tok in ("MISSING", "CACHE-ONLY"):    # CACHE-ONLY: nothing is sent
         return "re" if NEEDS_RE.search(text) else "todo"
     return None                     # N/A, OUT-OF-SCOPE: not counted
@@ -181,7 +188,8 @@ def plan_status(needs, state):
     if s.startswith(("in progress", "narrowed")):
         return "partial"
     if s.startswith(("blocked", "not now")):
-        return "blocked"
+        return "plugin" if re.search(r"strip|plugin", needs + " " + s,
+                                     re.I) else "blocked"
     if s.startswith(("done", "closed", "answered", "decided", "checked",
                      "works", "not reproduced")):
         return "verified" if hw_checked(state) else "done"
@@ -447,9 +455,15 @@ def readme(data):
         "note cites a hardware run); **done** = done in code; **partial** = "
         "partly done, done differently or in progress; **still to figure "
         "out** = needs reverse engineering; **understood, not done** = we "
-        "know what UA's driver does, Linux does not do it yet; **blocked** = "
-        "needs a decision or hardware the project does not have (a second "
-        "Apollo, other models, cables, USB units).",
+        "know what UA's driver does, Linux does not do it yet; **plugin "
+        "hosting** = part of hosting UA's DSP plugins and Console strips, "
+        "which waits on a separate decision; **needs hardware** = needs a "
+        "test on an Apollo or hardware the project does not have (a second "
+        "Apollo, other models, cables, USB units, an S3-capable host).",
+        "",
+        "The parity map was triaged against the code on 2026-10-11: rows the "
+        "code already covers were marked done, rows Linux does not need N/A, "
+        "and every remaining row says what it waits on.",
         "",
         "## UA driver behaviour (parity map)",
         "",
@@ -458,7 +472,9 @@ def readme(data):
     lines += ["", "## Work plan", ""]
     lines += area_table(data["plan"])
     for st, title in (("re", "Still to figure out"), ("partial", "In progress"),
-                      ("blocked", "Blocked"), ("todo", "Understood, not done")):
+                      ("plugin", "Plugin hosting (waits on a decision)"),
+                      ("blocked", "Needs hardware"),
+                      ("todo", "Understood, not done")):
         open_items = [(g["name"], it) for g in data["plan"]
                       for it in g["items"] if it[2] == st]
         if not open_items:

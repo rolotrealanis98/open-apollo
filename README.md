@@ -30,7 +30,7 @@ stack for USB models, along with a mixer daemon and system tray indicator.
   <img alt="Status map: one square per behaviour of UA's drivers, task of the work plan or Apollo model, coloured by status" src="docs/status/progress-light.svg">
 </picture>
 
-Each square is one thing UA's own drivers do (left), one task of the work plan (right) or one Apollo model (bottom right). The legend under the map gives the colours: verified on real hardware, done in code, partial, still to figure out (needs reverse engineering), understood but not done, and blocked (on a decision or on hardware the project doesn't have). The numbers per area and the open tasks are in [docs/status](docs/status/).
+Each square is one thing UA's own drivers do (left), one task of the work plan (right) or one Apollo model (bottom right). The legend under the map gives the colours: verified on real hardware, done in code, partial, still to figure out (needs reverse engineering), understood but not done, plugin hosting (waits on a separate decision), and needs hardware (a test on an Apollo, or hardware the project doesn't have). The numbers per area and the open tasks are in [docs/status](docs/status/).
 
 ## What Works (Apollo x4 — Thunderbolt, Ubuntu 24.04)
 
