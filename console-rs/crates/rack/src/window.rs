@@ -213,15 +213,25 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
         let x = l.strips_x() + (i - first) as f32 * STRIP_W;
         strip_column(ui, model, view, s, &rows, off, Rect::new(x, W::COLUMN.0, STRIP_W, col_h));
     }
-    // Cells scrolling: wheel region and scrollbar in the gap before the aux section.
+    // Empty columns after the last strip, then the cells scrollbar column while they overflow.
+    let main_y = W::COLUMN.0 + col_h - rows.main;
+    let scroll_x = l.aux_x() - SCROLLBAR_W - 0.5;
+    let strips_end = l.strips_x() + inputs.len().saturating_sub(first).min(visible) as f32 * STRIP_W;
+    empty_columns(ui, strips_end, if overflow > 0.0 { scroll_x } else { l.aux_x() }, main_y, status_y);
     let cells_area = Rect::new(l.side_x(), W::COLUMN.0 + 5.0, l.aux_x() - l.side_x(), cells_h);
     ui.scroll_region(cells_area, ScrollTarget::Cells, overflow);
-    scrollbar(ui, Rect::new(l.aux_x() - 13.0, cells_area.y, 8.0, cells_area.h), rows.total(), view.cells_scroll, ControlId { strip: "view".into(), control: Control::CellsScroll });
+    if overflow > 0.0 {
+        scrollbar_column(ui, scroll_x, main_y, status_y, cells_h, rows.total(), view.cells_scroll, Some(ControlId { strip: "view".into(), control: Control::CellsScroll }), false);
+    }
 
     let aux_w = auxes.len().max(2) as f32 * STRIP_W;
     match view.monitor_page {
         MonitorPage::Aux => {
             let aux_off = (aux_rows.total() - aux_cells_h).min(0.0);
+            if l.aux_scroll {
+                let aux_main_y = W::COLUMN.0 + col_h - aux_rows.main;
+                scrollbar_column(ui, l.aux_x() + aux_w + 0.5, aux_main_y, status_y, aux_cells_h, aux_rows.total(), 0.0, None, true);
+            }
             for (i, s) in auxes.iter().enumerate() {
                 let r = Rect::new(l.aux_x() + i as f32 * STRIP_W, W::COLUMN.0, STRIP_W, col_h);
                 ui.fill(r, PANEL);
@@ -298,17 +308,68 @@ fn title_bar(ui: &mut Ui, model: &dyn MixerModel, width: f32) {
     }
 }
 
-/// Vertical scrollbar with a draggable thumb; nothing when the content fits.
-fn scrollbar(ui: &mut Ui, track: Rect, content: f32, scroll: f32, id: ControlId) {
-    if content <= track.h {
+/// Empty strip columns from `x0` (the edge after the last strip) to `x1`, at the strip pitch
+/// (1.3.1): swatch row, black rule, cells well with light column rules, the main area with
+/// dark rules and the label band. Colours measured on refpair p1.
+fn empty_columns(ui: &mut Ui, x0: f32, x1: f32, main_y: f32, status_y: f32) {
+    const CELLS: Rgba = Rgba::rgb8(58, 61, 64);
+    const MAIN: Rgba = Rgba::rgb8(80, 84, 87);
+    const LABEL: Rgba = Rgba::rgb8(88, 93, 97);
+    let w = x1 - x0;
+    if w <= 0.0 {
         return;
     }
-    ui.fill(track, Rgba::rgb8(36, 38, 40));
-    let thumb_h = (track.h * track.h / content).max(30.0);
-    let thumb = Rect::new(track.x, track.y + (track.h - thumb_h) * scroll.clamp(0.0, 1.0), track.w, thumb_h);
-    ui.fill(thumb, Rgba::rgb8(20, 21, 22));
-    ui.fill(thumb.inset(1.0, 1.0, 1.0, 1.0), Rgba::rgb8(104, 108, 112));
-    ui.hit(thumb.inset(-3.0, 0.0, -3.0, 0.0), id, HitKind::Drag { value: 1.0 - scroll as f64, span: track.h - thumb_h, reset: None });
+    let top = W::COLUMN.0;
+    let label_y = status_y - main_strip::LABEL_H;
+    ui.fill(Rect::new(x0, top + 4.0, w, 1.0), Rgba::BLACK);
+    ui.fill(Rect::new(x0, top + 5.0, w, main_y - top - 5.0), CELLS);
+    ui.fill(Rect::new(x0, main_y, w, label_y - 1.0 - main_y), MAIN);
+    ui.fill(Rect::new(x0, main_y + 4.0, w, 1.0), CELLS);
+    ui.fill(Rect::new(x0, label_y - 1.0, w, 1.0), CELLS);
+    ui.fill(Rect::new(x0, label_y, w, status_y - label_y), LABEL);
+    let mut x = x0;
+    while x < x1 {
+        ui.fill(Rect::new(x - 0.5, top, 1.0, 4.0), Rgba::BLACK);
+        if x > x0 {
+            ui.fill(Rect::new(x - 0.5, top + 10.0, 1.0, main_y - top - 15.0), MAIN);
+            ui.fill(Rect::new(x - 0.5, main_y, 1.0, status_y - main_y), CELLS);
+        }
+        x += STRIP_W;
+    }
+}
+
+/// Scrollbar column (`uad2_scrollbar_background`, 18 pt): white swatch, the
+/// `mixer_scrollbar_background` track over the cells with the `Small-Vertical-Scroll-Bar`
+/// thumb (9-slice; height track × visible / content), then the strip bottom and label plate.
+/// Measured on refpair p1 (inputs at 1596, auxes at 1806).
+#[allow(clippy::too_many_arguments)]
+fn scrollbar_column(ui: &mut Ui, x: f32, main_y: f32, status_y: f32, visible: f32, content: f32, scroll: f32, id: Option<ControlId>, bus: bool) {
+    let top = W::COLUMN.0;
+    let label_y = status_y - main_strip::LABEL_H;
+    ui.fill(Rect::new(x + 1.0, top, 17.0, 4.0), Rgba::WHITE);
+    let track = Rect::new(x, top + 4.0, 18.0, main_y - top - 4.0);
+    let bg = ui.assets.appearance.colors.get("mixer_scrollbar_background").copied().unwrap_or(Rgba::rgb8(35, 37, 40));
+    ui.fill(track, bg);
+    let thumb_h = (track.h * visible / content.max(1.0)).clamp(30.0, track.h);
+    let thumb = Rect::new(x, track.y + (track.h - thumb_h) * scroll.clamp(0.0, 1.0), 18.0, thumb_h);
+    if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|k| k.image("image")) {
+        ui.image(img, thumb, Some(houston::Insets::uniform(12.0)), None, 1.0);
+    }
+    if let Some(id) = id {
+        ui.hit(thumb, id, HitKind::Drag { value: 1.0 - scroll as f64, span: track.h - thumb_h, reset: None });
+    }
+    if bus {
+        // Under the bus scrollbar: the aux strips' dark main area and name band.
+        ui.fill(Rect::new(x, main_y, 18.0, 2.0), Rgba::rgb8(82, 88, 89));
+        ui.fill(Rect::new(x, main_y + 2.0, 18.0, label_y - 1.0 - main_y - 2.0), Rgba::rgb8(51, 53, 56));
+        ui.fill(Rect::new(x, label_y - 1.0, 18.0, 1.0), Rgba::rgb8(73, 76, 79));
+        ui.fill(Rect::new(x, label_y, 18.0, main_strip::LABEL_H - 1.0), Rgba::rgb8(50, 52, 55));
+        ui.fill(Rect::new(x, status_y - 1.0, 18.0, 1.0), Rgba::rgb8(72, 76, 78));
+    } else {
+        ui.background("Channel-Bottom", Rect::new(x, main_y, 18.0, label_y - main_y));
+        ui.fill(Rect::new(x, label_y - 1.0, 18.0, 1.0), Rgba::BLACK);
+        ui.fill(Rect::new(x, label_y, 18.0, main_strip::LABEL_H - 1.0), Rgba::WHITE);
+    }
 }
 
 /// `Rack_ChannelStripsSideSection` (46.5 pt) and the reveal column (`console_reveal.json`):
