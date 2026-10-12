@@ -97,9 +97,12 @@ pub struct Visibility {
     pub table: Vec<Row>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ActionRow {
-    pub current: f64,
+    #[serde(default)]
+    pub current: Option<f64>,
+    #[serde(default)]
+    pub key: Option<Vec<f64>>,
     pub value: f64,
 }
 
@@ -128,6 +131,8 @@ pub struct Action {
     pub delta: Option<f64>,
     #[serde(default)]
     pub table: Option<Vec<ActionRow>>,
+    #[serde(default)]
+    pub keys: Option<Vec<u16>>,
     /// `multi`: every action in order (e.g. a jack that sets input and level).
     #[serde(default)]
     pub actions: Option<Vec<Action>>,
@@ -135,7 +140,7 @@ pub struct Action {
 
 impl Action {
     pub fn new(kind: ActionKind, param: u16) -> Self {
-        Self { kind, param: Some(param), value: None, delta: None, table: None, actions: None }
+        Self { kind, param: Some(param), value: None, delta: None, table: None, keys: None, actions: None }
     }
 
     /// Parameters this action (and its sub-actions) writes.
@@ -243,7 +248,16 @@ impl Element {
 #[serde(rename_all = "camelCase")]
 pub struct MeterSource {
     /// Native plug-in variable id: `<slot>/VendorSpecific/value?floats=ID`.
-    pub vendor_specific_float: i64,
+    #[serde(default)]
+    pub vendor_specific_float: Option<i64>,
+    #[serde(default)]
+    pub combine: Option<MeterCombine>,
+    #[serde(default)]
+    pub absolute: bool,
+    #[serde(default)]
+    pub integer: bool,
+    #[serde(default)]
+    pub ignore_zero: bool,
     /// `(raw, needle 0…1)` points, raw ascending.
     #[serde(default)]
     pub calibration: Vec<Vec<f64>>,
@@ -257,6 +271,12 @@ pub struct MeterSource {
     pub mode_param: Option<u16>,
     #[serde(default)]
     pub mode_calibrations: Option<Vec<ModeCalibration>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct MeterCombine {
+    pub op: String,
+    pub meters: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -403,7 +423,7 @@ impl PluginSpec {
 
     /// Float ids to poll with `floats=`, ascending (the order the reply lists them).
     pub fn poll_floats(&self) -> Vec<i64> {
-        let ids: BTreeSet<i64> = self.meters().filter(|(_, m)| !self.uses_opcode(m)).map(|(_, m)| m.vendor_specific_float).collect();
+        let ids: BTreeSet<i64> = self.meters().filter(|(_, m)| !self.uses_opcode(m)).filter_map(|(_, m)| m.vendor_specific_float).collect();
         ids.into_iter().collect()
     }
 }

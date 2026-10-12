@@ -248,6 +248,89 @@ fn meters_decode_and_calibrate() {
 }
 
 #[test]
+fn combined_and_conditioned_meters_follow_consolelink() {
+    let mut json: serde_json::Value = serde_json::from_str(SPEC).unwrap();
+    json["meterSources"] = serde_json::json!({
+        "left": {"vendorSpecificFloat": 1, "absolute": true, "ignoreZero": true, "smoothing": 1,
+                 "calibration": [[0,0],[1,1]]},
+        "right": {"vendorSpecificFloat": 2, "integer": true, "opcode": {"op":519,"p0":2,"p1":1},
+                  "smoothing": 1, "calibration": [[0,0],[2,1]]},
+        "clip": {"combine":{"op":"max","meters":["left","right"]}, "smoothing":1}
+    });
+    let spec = PluginSpec::from_json(&json.to_string()).unwrap();
+    assert_eq!(spec.poll_floats(), [1], "derived meters must never poll an invented ID");
+    let mut feed = MeterFeed::new();
+    let mut needles = std::collections::HashMap::new();
+    feed.ingest_floats(&spec, "bf000000", |_| 0.0); // -0.5 becomes +0.5
+    feed.tick(&spec, &mut needles, 0.016);
+    assert_eq!(needles["clip"], 0.5);
+    feed.ingest_floats(&spec, "0", |_| 0.0); // hold the previous nonzero target
+    feed.tick(&spec, &mut needles, 0.016);
+    assert_eq!(needles["left"], 0.5);
+    feed.ingest_opcode(&spec, 2, &[f32::from_bits(2) as f64], |_| 0.0);
+    feed.tick(&spec, &mut needles, 0.016);
+    assert_eq!(needles["right"], 1.0);
+    assert_eq!(needles["clip"], 1.0);
+}
+
+#[test]
+fn keyed_action_tables_select_using_all_key_parameters() {
+    let mut json: serde_json::Value = serde_json::from_str(SPEC).unwrap();
+    json["elements"][4]["action"] = serde_json::json!({
+        "type":"table", "param":0, "keys":[1,2], "table":[
+            {"key":[0,0],"value":0.2}, {"key":[0,1],"value":0.8}
+        ]
+    });
+    let spec = Arc::new(PluginSpec::from_json(&json.to_string()).unwrap());
+    let mut panel = PluginPanel::with_sprites(spec.clone(), SLOT, |_| None);
+    let mut params = MockParams::from_spec(&spec);
+    panel.tap(4, &mut params);
+    assert_eq!(params.normalized(0), Some(0.8));
+    params.set(2, 0.0);
+    panel.tap(4, &mut params);
+    assert_eq!(params.normalized(0), Some(0.2));
+}
+
+#[test]
+fn image_clips_restore_the_panel_for_later_images_and_controls() {
+    let dir = std::env::temp_dir().join(format!("plugin-ui-clips-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = std::fs::File::create(dir.join("pixel.png")).unwrap();
+    let mut encoder = png::Encoder::new(file, 2, 2);
+    encoder.set_color(png::ColorType::Rgba);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[255; 16]).unwrap();
+    drop(writer);
+    let assets = assets();
+    assets.images.register_root("spec", &dir);
+    let mut json: serde_json::Value = serde_json::from_str(SPEC).unwrap();
+    json["background"] = serde_json::Value::Null;
+    json["elements"] = serde_json::json!([
+        {"id":"toolbar","kind":"image","sprite":"pixel","x":0,"y":0,"w":400,"h":24},
+        {"id":"panel","kind":"image","sprite":"pixel","x":0,"y":24,"w":400,"h":176},
+        {"id":"knob","kind":"knob","sprite":"pixel","param":0,"x":10,"y":80,"w":20,"h":20}
+    ]);
+    let spec = Arc::new(PluginSpec::from_json(&json.to_string()).unwrap());
+    let panel = PluginPanel::with_sprites(spec.clone(), SLOT, |_| Some("spec:pixel.png".into()));
+    let params = MockParams::from_spec(&spec);
+    let mut ui = Ui::new(&assets);
+    panel.build(&mut ui, Rect::new(0.0, 0.0, 400.0, 200.0), &params);
+    assert!(ui.current_clip().is_none(), "panel must leave the clip stack balanced");
+    assert!(ui.hits.iter().any(|h| h.id.control == Control::PluginParam(0)), "a toolbar image must not clip controls below it");
+    let mut clip = None;
+    let mut image_clips = Vec::new();
+    for draw in &ui.list.items {
+        match draw {
+            rack::Draw::Clip(rect) => clip = *rect,
+            rack::Draw::Image { .. } => image_clips.push(clip),
+            _ => {}
+        }
+    }
+    assert_eq!(image_clips[1], Some(Rect::new(0.0, 24.0, 400.0, 176.0)));
+    assert_eq!(image_clips[2], Some(Rect::new(0.0, 0.0, 400.0, 200.0)));
+}
+
+#[test]
 fn slot_paths() {
     let slot = SlotPath::input_insert(0, 2, 1);
     assert_eq!(slot.param(7).normalized(), "/devices/0/inputs/2/effects/1/parameters/7/NormalizedValue");
@@ -291,6 +374,25 @@ fn every_spec_in_the_folder_decodes() {
         }
     }
     eprintln!("{} specs decoded from {} ({} without elements: {empty:?})", lib.entries.len(), lib.folder.display(), empty.len());
+}
+
+#[test]
+fn every_catalog_spec_opens_and_builds_its_window() {
+    let Some(lib) = library() else { return };
+    let assets = assets();
+    lib.attach(&assets.images);
+    for entry in &lib.entries {
+        let spec = lib.spec(entry).unwrap();
+        let params = MockParams::from_spec(&spec);
+        let win = plugin_ui::PluginWindow::open(SLOT, &entry.effect_name, "Software preview", Some(&lib), None, false);
+        assert_eq!(win.content.kind(), if spec.elements.is_empty() { "generic" } else { "spec" }, "{}", entry.stem());
+        let mut ui = Ui::new(&assets);
+        let layout = win.build(&mut ui, (0.0, 0.0), &params);
+        assert!(ui.current_clip().is_none(), "{} leaves an unbalanced clip stack", entry.stem());
+        assert!(layout.editor.w > 0.0 && layout.editor.h > 0.0, "{}", entry.stem());
+        assert!(!ui.list.is_empty(), "{}", entry.stem());
+    }
+    assert!(assets.images.missing().iter().all(|k| !k.starts_with("spec:")), "missing panel sprites: {:?}", assets.images.missing());
 }
 
 #[test]
