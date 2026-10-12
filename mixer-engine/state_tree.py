@@ -189,6 +189,8 @@ class StateTree:
             prop_data["max"] = ctrl["max"]
         if ctrl.get("values") is not None:
             prop_data["values"] = ctrl["values"]
+        if "default" in ctrl:
+            prop_data["default"] = ctrl["default"]
         if "value" in ctrl:
             prop_data["value"] = ctrl["value"]
         if ctrl.get("readonly"):
@@ -357,6 +359,18 @@ class StateTree:
 
         # Convert value to match the property type
         prop_type = resolved.get("type")
+        if value == "default":
+            # Captured current values are not factory defaults. Only reset
+            # controls whose neutral value is known, or explicit metadata.
+            defaults = {"Pan": 0.0, "FaderLevel": 0.0,
+                        "FaderLevelTapered": 43.0 / 55.0}
+            if "default" in resolved:
+                value = resolved["default"]
+            elif prop_name in defaults and prop_type == "float":
+                value = defaults[prop_name]
+            else:
+                log.warning("SET: default unavailable: %s", path)
+                return False
         value = self._coerce_value(value, prop_type, resolved)
 
         old_value = resolved.get("value")
@@ -409,8 +423,18 @@ class StateTree:
         elif prop_type == "string":
             value = str(value)
             allowed = meta.get("values")
-            if allowed and value not in allowed:
-                log.warning("SET: value %r not in allowed values %r", value, allowed)
+            def names(entries, prefix=""):
+                result = set()
+                for item in entries:
+                    if isinstance(item, dict):
+                        name = str(item.get("value", ""))
+                        result.add(prefix + name)
+                        result.update(names(item.get("children", []), prefix + name + "/"))
+                    else:
+                        result.add(item)
+                return result
+            if value and allowed and value not in names(allowed):
+                log.warning("SET: value %r is absent from %d allowed entries", value, len(allowed))
             return value
         return value
 
