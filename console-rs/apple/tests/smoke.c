@@ -71,8 +71,17 @@ int main(int argc, char **argv) {
     printf("zoomed: %.2f, origin %.1f, %.1f pt\n", s.zoom, s.origin_x_pt, s.origin_y_pt);
     uac_set_zoom(ctx, 0.0f, 0.0f, 0.0f);
 
-    if (uac_set_model_engine(ctx, "127.0.0.1", 4710, 0) != UAC_ERR_UNSUPPORTED) {
-        fprintf(stderr, "engine hook should be a stub\n");
+    /* An engine snapshot offline (UAC_SNAPSHOT=path; never a live engine from a smoke test). */
+    const char *snapshot = getenv("UAC_SNAPSHOT");
+    if (snapshot && *snapshot) {
+        if (uac_use_snapshot(ctx, snapshot) != UAC_OK || uac_model_state(ctx) != UAC_MODEL_SNAPSHOT) {
+            fprintf(stderr, "snapshot: %s\n", uac_last_error());
+            return 1;
+        }
+        printf("model: %s\n", uac_model_status(ctx));
+    }
+    if (uac_connect_engine(ctx, "", 0, false) != UAC_ERR_ARG) {
+        fprintf(stderr, "empty host should be refused\n");
         return 1;
     }
     if (uac_write_png(ctx, out) != UAC_OK) {
