@@ -8,3 +8,4 @@ license.workspace = true
 gfx = { version = "0.1.0", path = "../gfx" }
 houston = { version = "0.1.0", path = "../houston" }
 rack = { version = "0.1.0", path = "../rack" }
+winit = "0.30.13"
