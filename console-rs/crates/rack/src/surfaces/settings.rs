@@ -401,7 +401,7 @@ fn hardware_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page: 
 
 /// A DEVICES row (`Device-A-Background` …, 200 × 60): unit letter, monitor / talkback icons,
 /// name, device icon.
-fn device_row(ui: &mut Ui, d: &settings::SettingsDevice, r: Rect) {
+pub(crate) fn device_row(ui: &mut Ui, d: &settings::SettingsDevice, r: Rect) {
     ui.background(&format!("Device-{}-Background", d.letter()), r);
     let letter = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(if d.online { 0.85 } else { 0.4 }));
     ui.text(&d.letter().to_string(), letter, Rect::new(r.x + 6.0, r.y, 14.0, r.h), Align::Center);

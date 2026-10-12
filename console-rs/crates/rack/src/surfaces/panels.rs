@@ -802,25 +802,39 @@ fn io_presets(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rec
 // ---- Route source ([cap] s35, 520 × 360) ----
 
 fn route_source(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, route: u16, outputs: bool, bounds: Rect) {
+    // `Rack_IOMatrixPopover` (resized 0x181128920; capture set-d-insrc, 522 × 360): a legacy
+    // popover; the device list (4, 31, 200, h − 35), the categories (204, 31, 160, …) and the
+    // channels (365, 31, w − 369, …) with 2-pt `Vertical-Divider`s between; 40-pt rows, the
+    // selected one (67, 80, 86) inset 3 pt.
     let Some(src) = model.properties() else { return };
     let routes = settings::io_routes(src, outputs);
-    let Some(r) = routes.get(route as usize) else { return };
+    let Some(rt) = routes.get(route as usize) else { return };
     let title = format!("{} {}", if outputs { "OUTPUT" } else { "INPUT" }, route + 1);
-    let c = sub_window(ui, bounds, (522.0, 360.0), &title);
-    let node = format!("{}/{}", if outputs { "/outputroutes" } else { "/inputroutes" }, r.index);
-    ui.fill(c, DARK);
-    // Devices: NONE, then each unit.
+    let r = centred(bounds, (522.0, 360.0));
+    legacy_popover_frame(ui, r, &title, 403.0);
+    // ^ v step through the routes; < > drawn as Console does (their target is unknown).
+    let n = routes.len() as u16;
+    for (k, (key, to)) in [("Popover-Up", route.checked_sub(1)), ("Popover-Down", (route + 1 < n).then_some(route + 1)), ("Popover-Left", route.checked_sub(1)), ("Popover-Right", (route + 1 < n).then_some(route + 1))].into_iter().enumerate() {
+        let b = Rect::new(r.x + 403.0 + k as f32 * 30.0, r.y + 1.0, 20.0, 27.0);
+        if let Some(img) = ui.skin("views", key).and_then(|s| s.image("image")) {
+            let img = img.to_string();
+            ui.image(&img, Rect::new(b.x + 4.0, b.y + 7.5, 12.0, 12.0), None, None, if to.is_some() { 1.0 } else { 0.3 });
+        }
+        if let (Some(to), true) = (to, k < 2) {
+            ui.hit(b, sid(Control::ShowPanel(Panel::RouteSource { route: to, outputs })), HitKind::Tap);
+        }
+    }
+    let node = format!("{}/{}", if outputs { "/outputroutes" } else { "/inputroutes" }, rt.index);
+    let (top, h) = (r.y + 31.0, r.h - 35.0);
+    // Devices: the NONE slot, then each unit's row (as in Settings).
     let devs = settings::devices(src);
-    let dcol = Rect::new(c.x, c.y, 198.0, c.h);
-    ui.fill(dcol, Rgba::rgb8(43, 46, 48));
-    let none = Rect::new(dcol.x, dcol.y + 2.0, dcol.w, 58.0);
-    ui.fill(none, Rgba::rgb8(29, 32, 33));
-    ui.text("NONE", Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.5)), none, Align::Center);
+    ui.background("Device-Settings-Background", Rect::new(r.x + 4.0, top, 200.0, h));
+    let none = Rect::new(r.x + 4.0, top, 200.0, 60.0);
+    ui.background("No-Device-Settings-Background", Rect::new(none.x + 2.0, none.y + 1.0, 196.0, 58.0));
+    ui.text("NONE", Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4)), none, Align::Center);
+    let letter = devs.first().map(|d| d.letter()).unwrap_or('A');
     for (k, d) in devs.iter().enumerate() {
-        let row = Rect::new(dcol.x, none.max_y() + 1.0 + k as f32 * 61.0, dcol.w, 58.0);
-        ui.background(&format!("Device-{}-Background", d.letter()), row);
-        ui.text(&d.name, Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.9)), Rect::new(row.x + 57.0, row.y, 80.0, row.h), Align::Left);
-        ui.text(&d.letter().to_string(), Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.85)), Rect::new(row.x + 4.0, row.y, 14.0, row.h), Align::Center);
+        crate::surfaces::settings::device_row(ui, d, Rect::new(none.x, none.max_y() + k as f32 * 60.0, 200.0, 60.0));
     }
     // Categories and their channels.
     let cats: [(&str, &[&str]); 6] = [
@@ -831,30 +845,54 @@ fn route_source(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, route: u1
         ("MONITOR", &["CtrlRoom", "Cue", "Aux"]),
         ("TALKBACK", &["Talkback"]),
     ];
-    let sel = view.settings.list.map(|i| i as usize).unwrap_or_else(|| cats.iter().position(|(_, t)| t.contains(&r.io_type.as_str())).unwrap_or(0)).min(cats.len() - 1);
-    let ccol = Rect::new(dcol.max_x() + 2.0, c.y, 158.0, c.h);
-    let item = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.8));
+    let sel = view.settings.list.map(|i| i as usize).unwrap_or_else(|| cats.iter().position(|(_, t)| t.contains(&rt.io_type.as_str())).unwrap_or(0)).min(cats.len() - 1);
+    let ccol = Rect::new(r.x + 204.0, top, 160.0, h);
+    let xcol = Rect::new(r.x + 365.0, top, r.w - 369.0, h);
+    for col in [ccol, xcol] {
+        ui.background(&format!("Device-{letter}-Settings-Background"), col);
+        ui.background("Vertical-Divider", Rect::new(col.x - 2.0 + if col.x == ccol.x { 1.0 } else { 0.0 }, top, 2.0, h));
+    }
+    let row_at = |col: Rect, i: usize| Rect::new(col.x, col.y + i as f32 * 40.0, col.w, 40.0);
+    let item = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.85));
     for (i, (name, _)) in cats.iter().enumerate() {
-        let row = Rect::new(ccol.x, ccol.y + 2.0 + i as f32 * 40.0, ccol.w, 38.0);
+        let row = row_at(ccol, i);
         if i == sel {
-            ui.fill(row, LIST_SEL);
+            ui.fill(Rect::new(row.x + 3.0, row.y + 3.0, row.w - 6.0, 34.0), Rgba::rgb8(67, 80, 86));
         }
         ui.text(name, item.clone(), row.inset(10.0, 0.0, 24.0, 0.0), Align::Left);
-        ui.text("▸", item.clone(), Rect::new(row.max_x() - 22.0, row.y, 14.0, row.h), Align::Center);
+        ui.text("▶", Ui::plain_style("Helvetica", 9.0, false, Rgba::WHITE.with_alpha(0.85)), Rect::new(row.max_x() - 20.5, row.y, 10.0, row.h), Align::Center);
         ui.hit(row, sid(Control::ListSelect(i as u16)), HitKind::Tap);
     }
     let all = settings::io_routes(src, false);
     let chans: Vec<&settings::IoRoute> = all.iter().filter(|x| cats[sel].1.contains(&x.io_type.as_str())).collect();
-    let xcol = Rect::new(ccol.max_x() + 2.0, c.y, c.max_x() - ccol.max_x() - 2.0, c.h);
     let ty = cats[sel].1.first().copied().unwrap_or("");
     for (i, ch) in chans.iter().enumerate() {
-        let row = Rect::new(xcol.x, xcol.y + 2.0 + i as f32 * 40.0, xcol.w, 38.0);
-        if ch.default_name == r.default_name {
-            ui.fill(row, LIST_SEL);
+        let row = row_at(xcol, i);
+        if ch.default_name == rt.default_name {
+            ui.fill(Rect::new(row.x + 3.0, row.y + 3.0, row.w - 6.0, 34.0), Rgba::rgb8(67, 80, 86));
         }
         ui.text(&ch.default_name, item.clone(), row.inset(10.0, 0.0, 4.0, 0.0), Align::Left);
         ui.hit(row, sid(Control::SettingChoose(format!("route:{node}:{ty}").into(), i as u16)), HitKind::Tap);
     }
+}
+
+/// A legacy popover (`Legacy-Popover-Header` / `-Content`, the I/O matrix source picker): the
+/// grey header, the close X centred in (8, 1, 20, 27), the title centred between the X and
+/// `title_right`, a `Horizontal-Divider` under the header. Swallows taps.
+fn legacy_popover_frame(ui: &mut Ui, r: Rect, title: &str, title_right: f32) {
+    ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
+    ui.fill(r, Rgba::rgb8(26, 26, 26));
+    let inner = r.inset(0.5, 0.5, 0.5, 0.5);
+    ui.background("Legacy-Popover-Header", Rect::new(inner.x, inner.y, inner.w, 26.5));
+    ui.background("Legacy-Popover-Content", Rect::new(inner.x, r.y + 27.0, inner.w, inner.max_y() - r.y - 27.0));
+    ui.background("Horizontal-Divider", Rect::new(r.x, r.y + 27.0, r.w, 2.0));
+    let style = ui.style("views", "Button-Popover-Header");
+    ui.text(title, style, Rect::new(r.x + 28.0, r.y, title_right - 28.0, 27.0), Align::Center);
+    if let Some(x) = ui.skin("views", "Popover-Close-Old").and_then(|s| s.image("image")) {
+        let x = x.to_string();
+        ui.image(&x, Rect::new(r.x + 12.0, r.y + 8.5, 12.0, 12.0), None, None, 1.0);
+    }
+    ui.hit(Rect::new(r.x + 8.0, r.y + 1.0, 20.0, 27.0), sid(Control::PanelClose), HitKind::Tap);
 }
 
 // ---- TEMPO ([cap] s05; drive capture sb-tempo: 196 × 111 at (9, 963)) ----
