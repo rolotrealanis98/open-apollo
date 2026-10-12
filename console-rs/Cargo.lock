@@ -1263,6 +1263,18 @@ dependencies = [
  "rack",
 ]
 
+
+[[package]]
+name = "uaconsole-ffi"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "houston",
+ "pollster",
+ "rack",
+ "wgpu",
+]
+
 [[package]]
 name = "unicode-bidi"
 version = "0.3.18"
