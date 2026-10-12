@@ -325,6 +325,7 @@ MONITOR_PARAM = {
     "HP2Source":       0x40,   # ch_idx=1: 0=CUE1, 1=CUE2 (HP2 routing)
     "DimLevel":        0x43,   # ch_idx=0: 1-7 (dim attenuation step)
     "TalkbackOn":      0x46,   # ch_idx=1 ON / ch_idx=9 OFF (DTrace-verified)
+    "TalkbackMaster":  0x48,   # native kPropTalkbackMaster: local unit-order match
     "DigitalOutputMode": 0x21, # ch_idx=0: 0=SPDIF, 8=ADAT
     "SRConvert":       0x1f,   # ch_idx=1: sample rate converter on/off (S/PDIF inputs)
     "DSPSpanning":     0x16,   # ch_idx=0: DSP pairing/spanning mode
@@ -1660,7 +1661,7 @@ _RE_DEVICE_GLOBAL = re.compile(
 
 # Global driver controls
 _RE_GLOBAL = re.compile(
-    r'^/(SampleRate|ClockSource|PostFaderMetering)/value$')
+    r'^/(SampleRate|ClockSource|PostFaderMetering|TalkbackOn|TalkbackInPhysicalCR|TalkbackMaster)/value$')
 
 
 class HardwareRouter:
@@ -2437,6 +2438,23 @@ class HardwareRouter:
         WARNING: Changing sample rate or clock source while streaming
         will disrupt audio. The macOS kext warns but proceeds.
         """
+        if control == "TalkbackOn":
+            return self._handle_device_global(path, control, value)
+        if control == "TalkbackInPhysicalCR":
+            # Reconciled driver-v2 SetOtherParam mapping: param 0x47, type 2.
+            self.backend.set_mixer_param(MONITOR_CHANNEL_TYPE, 0,
+                                         MONITOR_PARAM["TBConfig"], int(bool(value)))
+            return
+        if control == "TalkbackMaster":
+            # Native property selects a cascade unit by MultiUnitOrder, not a bool.
+            order = self.state_tree.get_value("/devices/0/MultiUnitOrder") if self.state_tree else 0
+            try:
+                selected = int(value) == int(order or 0)
+            except (ValueError, TypeError):
+                return
+            self.backend.set_mixer_param(MONITOR_CHANNEL_TYPE, 0,
+                                         MONITOR_PARAM["TalkbackMaster"], int(selected))
+            return
         if control == "SampleRate":
             try:
                 rate = int(value)

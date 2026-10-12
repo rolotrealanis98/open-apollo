@@ -168,13 +168,25 @@ class Sessions:
                 self.publish("/Dirty", True)
             self.refresh()
         elif command == "RenameSession":
-            old, new = self.path(args.get("origName", "")), self.path(args.get("newName", ""))
+            folder = self.path(args.get("origName", ""), extension=False)
+            is_folder = folder.is_dir()
+            old = folder if is_folder else self.path(args.get("origName", ""))
+            new = self.path(args.get("newName", ""), extension=not is_folder)
+            if new == old or (is_folder and new.is_relative_to(old)):
+                raise ValueError("invalid session rename destination")
             if new.exists():
                 raise ValueError("session already exists")
             new.parent.mkdir(parents=True, exist_ok=True)
             old.rename(new)
-            if self.state.get_value("/Session") == old.relative_to(self.directory).with_suffix("").as_posix():
-                self.publish("/Session", new.relative_to(self.directory).with_suffix("").as_posix(), "string")
+            old_name = old.relative_to(self.directory).as_posix() if is_folder else old.relative_to(self.directory).with_suffix("").as_posix()
+            new_name = new.relative_to(self.directory).as_posix() if is_folder else new.relative_to(self.directory).with_suffix("").as_posix()
+            current = self.state.get_value("/Session") or ""
+            if current == old_name or (is_folder and current.startswith(old_name + "/")):
+                self.publish("/Session", new_name + current[len(old_name):], "string")
+            for retained in self.modified.values():
+                name = retained["name"]
+                if name == old_name or (is_folder and name.startswith(old_name + "/")):
+                    retained["name"] = new_name + name[len(old_name):]
             self.refresh()
         elif command in ("NewFolder", "DeleteFolder"):
             if args.get("type") != "session":

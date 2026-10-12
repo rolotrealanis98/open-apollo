@@ -159,7 +159,8 @@ class MixerDaemon:
                  helper_port: int = DEFAULT_HELPER_PORT,
                  trace: bool = False,
                  helper_tree: HelperTree | None = None,
-                 metering=None, sessions_dir=None):
+                 metering=None, sessions_dir=None, software_only=False,
+                 presets_dir=None, factory_presets=None):
         self.state = state
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
         self.hw_router = hw_router
@@ -196,7 +197,9 @@ class MixerDaemon:
         # Wire state tree SET notifications to hardware router
         if hw_router:
             self.state.on_set = hw_router.on_set
-        self.commands = ConsoleCommands(state, sessions_dir)
+        self.commands = ConsoleCommands(state, sessions_dir, software_only=software_only,
+                                        helper=helper_tree, presets_dir=presets_dir,
+                                        factory_presets=factory_presets)
 
     async def start(self):
         """Start TCP servers on both ports (runs forever)."""
@@ -521,6 +524,7 @@ class MixerDaemon:
         if talkback != last_rb.get("talkback_active"):
             self._push_to_clients(
                 "/devices/0/outputs/18/TalkbackOn", talkback)
+            self._push_to_clients("/TalkbackOn", talkback)
 
         # Preamp gain readback — 4 individual channels.
         # rb_data[3]: ch0=[7:0], ch1=[15:8], ch2=[23:16], ch3=[31:24]
@@ -1659,6 +1663,10 @@ Examples:
                         help="Protocol trace (log every message sent/received)")
     parser.add_argument("--sessions-dir", type=Path,
                         help="Session .uadmix directory (default: ~/Documents/Universal Audio/Sessions)")
+    parser.add_argument("--presets-dir", type=Path,
+                        help="Daemon-owned .oapreset library directory")
+    parser.add_argument("--factory-presets-dir", type=Path,
+                        help="Read-only factory .fxp/.uadchannel directory")
     args = parser.parse_args()
 
     # Logging
@@ -1753,7 +1761,8 @@ Examples:
     daemon = MixerDaemon(state, hw_router, args.host, args.port,
                          helper_port=helper_port, trace=args.trace,
                          helper_tree=helper_tree, metering=metering,
-                         sessions_dir=args.sessions_dir)
+                         sessions_dir=args.sessions_dir, software_only=args.no_hardware,
+                         presets_dir=args.presets_dir, factory_presets=args.factory_presets_dir)
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None
