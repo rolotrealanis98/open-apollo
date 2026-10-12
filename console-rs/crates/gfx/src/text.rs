@@ -29,6 +29,7 @@ pub struct TextSystem {
     shelf: (u32, u32, u32), // x, y, row height
 }
 
+#[cfg(not(target_vendor = "apple"))]
 fn family_for(name: &str) -> &'static str {
     match name {
         "Helvetica" | "Helvetica Neue" | "Lucida Grande" | "Segoe UI" => "Nimbus Sans",
@@ -38,9 +39,23 @@ fn family_for(name: &str) -> &'static str {
     }
 }
 
+/// macOS and iOS ship the faces Console asks for.
+#[cfg(target_vendor = "apple")]
+fn family_for(name: &str) -> &'static str {
+    match name {
+        "Helvetica" => "Helvetica",
+        "Arial" => "Arial",
+        "Oxygen" => "Oxygen",
+        _ => "Helvetica Neue",
+    }
+}
+
 impl TextSystem {
     pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, sampler: &wgpu::Sampler, console_fonts: PathBuf) -> Self {
         let mut fonts = FontSystem::new();
+        // fontdb scans system fonts on macOS/Windows/Linux only; iOS keeps them here.
+        #[cfg(target_os = "ios")]
+        fonts.db_mut().load_fonts_dir("/System/Library/Fonts");
         if console_fonts.is_dir() {
             fonts.db_mut().load_fonts_dir(console_fonts);
         }

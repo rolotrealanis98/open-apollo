@@ -1,0 +1,84 @@
+name: console-rs
+
+# Native mixer console (console-rs/). GitHub runners have no GPU and no UA
+# resources: tests that need either skip themselves (console-rs/README.md,
+# "Tests in CI").
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'console-rs/**'
+      - 'flake.nix'
+      - 'nix/**'
+      - '.github/workflows/console-rs.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'console-rs/**'
+      - 'flake.nix'
+      - 'nix/**'
+      - '.github/workflows/console-rs.yml'
+
+concurrency:
+  group: console-rs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: Build and test (Linux, no GPU)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console-rs
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: console-rs
+      - name: Build
+        run: cargo build --workspace --all-targets --locked
+      - name: Test
+        run: cargo test --workspace --locked
+
+  lint:
+    # Advisory until the tree is formatted and clippy-clean: failures show in the
+    # log but do not fail the check.
+    name: rustfmt and clippy (advisory)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console-rs
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: console-rs
+      - name: rustfmt
+        continue-on-error: true
+        run: cargo fmt --all --check
+      - name: clippy
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets --locked
+
+  nix:
+    name: Nix package (nix flake check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      # Builds packages.uaconsole (through checks.uaconsole) and runs its unit tests.
+      - name: nix flake check
+        run: nix flake check -L

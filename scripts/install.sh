@@ -1266,6 +1266,10 @@ main() {
         echo -e "${YELLOW}${BOLD}Installation finished with issues — see above.${NC}"
     fi
 
+    echo ""
+    info "Optional: the native mixer console (uaconsole). Install it as your normal user, not with sudo:"
+    echo "        bash $PROJECT_DIR/scripts/install-uaconsole.sh"
+
     # Report + telemetry at the very end (captures all results including audio test)
     generate_report
     telemetry_prompt

@@ -71,3 +71,7 @@ driver/.*.cmd
 # console-rs
 console-rs/target/
 console-rs/shots/
+
+# Nix build output links
+result
+result-*

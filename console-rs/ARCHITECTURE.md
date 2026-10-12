@@ -26,6 +26,7 @@ Plug-in icons come from `Resources/Plug-In Icons` (Windows) or
 | `rack` | Render-agnostic Console UI: geometry recovered from Rack.dll (strip, cells, fader & meters, monitor column, window), Rack components, `MixerModel` trait, and **a `DrawList` per frame** plus hit regions and input handling. Pure CPU, unit-testable. | `houston` |
 | `gfx` | wgpu renderer for a `DrawList`: lazily uploaded textures (one per image, filmstrip frames as sub-rects), instanced textured quads, 9-slice, fills, glyphon text; render to a window surface or offscreen to PNG. | `rack`, `houston` |
 | `uaconsole` | Binary: winit window, engine connection, `MixerModel` adapter over `ua-engine`, input routing. CLI: `uaconsole --render out.png [--snapshot f.json]` for headless renders. | all |
+| `uaconsole-ffi` | C ABI (`apple/include/uaconsole.h`) over houston + rack + gfx for native Apple hosts: a context renders into a host-owned `CAMetalLayer` (or offscreen), takes pointer events in view points and owns zoom/pan. Built as a staticlib into `UAConsoleFFI.xcframework`; see `apple/README.md`. | `houston`, `rack`, `gfx` |
 
 Frame pipeline: engine pushes → `ua-engine::Store` (main-thread owned) and `MeterStore`
 (atomics, written by the network task) → `rack` builds the whole window's `DrawList`

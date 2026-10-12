@@ -1,35 +1,137 @@
-//! uaconsole — a native UAD Console for open-apollo.
-//!
-//!   uaconsole --render out.png [--compact] [--scale 2]     headless render (preview data)
+//! uaconsole — a native UAD Console for open-apollo. See `cli::USAGE`.
 
-use std::path::PathBuf;
+mod app;
+mod bench;
+mod cli;
+mod frame;
+mod input;
+mod overlay;
+mod settings;
+mod source;
+mod view;
+
+use std::process::ExitCode;
 use std::time::Instant;
 
 use houston::Resources;
-use rack::{Assets, PreviewMixer, Ui, build_window};
+use rack::Assets;
 
-fn arg(name: &str) -> Option<String> {
-    let args: Vec<String> = std::env::args().collect();
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
+use cli::Args;
+use settings::Settings;
+use source::ModelSource;
+use view::View;
+
+fn main() -> ExitCode {
+    let args = match Args::parse(std::env::args().skip(1)) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("uaconsole: {e}\n\n{}", cli::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    if args.help {
+        println!("{}", cli::USAGE);
+        return ExitCode::SUCCESS;
+    }
+    let Some(assets) = load_assets() else {
+        return ExitCode::from(2);
+    };
+    let headless = args.render.is_some() || args.bench.is_some();
+    let settings = Settings::load();
+
+    // The window connects to the local engine unless told otherwise; headless modes use
+    // preview data unless --engine/--mock is given.
+    let engine = args
+        .engine
+        .clone()
+        .or_else(|| (!headless).then(cli::EngineAddr::local));
+    let source = match (&args.mock, engine) {
+        _ if args.preview => ModelSource::Preview,
+        (Some(path), _) => ModelSource::Mock(path.clone()),
+        (None, Some(addr)) => ModelSource::Engine {
+            addr,
+            writes: args.writes,
+        },
+        (None, None) => ModelSource::Preview,
+    };
+    if args.writes && !matches!(source, ModelSource::Engine { .. }) {
+        eprintln!("uaconsole: --writes has no effect without an engine");
+    }
+
+    if headless {
+        let mut opened = source.open().unwrap_or_else(|e| {
+            eprintln!("uaconsole: {e}; showing preview data");
+            source::preview("preview")
+        });
+        if matches!(source, ModelSource::Engine { .. }) {
+            // Headless frames from a live engine: wait (≤10 s) for the tree and first pushes.
+            let deadline = Instant::now() + std::time::Duration::from_secs(10);
+            while Instant::now() < deadline {
+                opened.model.pump();
+                if !opened.model.inputs().is_empty() {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    opened.model.pump();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            eprintln!("engine: {} inputs, {} auxes", opened.model.inputs().len(), opened.model.auxes().len());
+        }
+        let scale = args.scale.unwrap_or(2.0);
+        let result = match (&args.render, args.bench) {
+            (Some(out), _) => bench::render_png(
+                &assets,
+                &*opened.model,
+                args.compact,
+                scale,
+                args.open_plugin.as_ref(),
+                out,
+            ),
+            (None, Some(n)) => {
+                bench::bench(&assets, &mut *opened.model, args.compact, scale, n.max(1))
+            }
+            (None, None) => unreachable!("headless without --render/--bench"),
+        };
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("uaconsole: {e}");
+                ExitCode::from(3)
+            }
+        };
+    }
+
+    let mode = args.view.unwrap_or(settings.view);
+    let opts = app::Options {
+        source,
+        view: View::new(mode, settings.zoom),
+        compact: args.compact || settings.compact,
+        live_meters: args.live_meters,
+        stats: args.stats,
+        open_plugin: args.open_plugin,
+        settings,
+    };
+    match app::run(assets, opts) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("uaconsole: {e}");
+            ExitCode::from(1)
+        }
+    }
 }
 
-fn flag(name: &str) -> bool {
-    std::env::args().any(|a| a == name)
-}
-
-fn main() {
+fn load_assets() -> Option<Assets> {
     let Some(resources) = Resources::locate() else {
         eprintln!("uaconsole: UAD Console resources not found. Looked in:");
         for c in Resources::candidates() {
             eprintln!("  {}", c.display());
         }
-        std::process::exit(2);
+        return None;
     };
     let t = Instant::now();
-    let assets = Assets::load(resources).unwrap_or_else(|e| {
-        eprintln!("uaconsole: appearance: {e}");
-        std::process::exit(2);
-    });
+    let assets = Assets::load(resources)
+        .map_err(|e| eprintln!("uaconsole: appearance: {e}"))
+        .ok()?;
     eprintln!(
         "resources: {} (Console {}), {} skins in {:.1} ms",
         assets.resources.root.display(),
@@ -37,48 +139,5 @@ fn main() {
         assets.appearance.skins.len(),
         t.elapsed().as_secs_f64() * 1e3
     );
-
-    if let Some(out) = arg("--render") {
-        let scale: f32 = arg("--scale").and_then(|s| s.parse().ok()).unwrap_or(2.0);
-        let model = PreviewMixer::default();
-        let t = Instant::now();
-        let mut ui = Ui::new(&assets);
-        let layout = build_window(&mut ui, &model, flag("--compact"));
-        let build_ms = t.elapsed().as_secs_f64() * 1e3;
-        let Some(gpu) = gfx::Headless::new() else {
-            eprintln!("uaconsole: no GPU adapter");
-            std::process::exit(3);
-        };
-        eprintln!("gpu: {} ({:?})", gpu.adapter_info.name, gpu.adapter_info.backend);
-        let mut renderer = gfx::Renderer::new(&gpu.device, &gpu.queue, wgpu_format(), assets.images.clone());
-        let t = Instant::now();
-        gpu.render_png(&mut renderer, &ui.list, layout.size(), scale, &PathBuf::from(&out)).expect("write png");
-        let first_ms = t.elapsed().as_secs_f64() * 1e3;
-        // Warm frame: everything uploaded, measures steady-state build + draw.
-        let t = Instant::now();
-        let mut ui2 = Ui::new(&assets);
-        build_window(&mut ui2, &model, flag("--compact"));
-        let rebuild_ms = t.elapsed().as_secs_f64() * 1e3;
-        let s = renderer.stats;
-        eprintln!(
-            "wrote {out}: {} draws, {} hits; build {build_ms:.2} ms (warm {rebuild_ms:.2} ms); first render {first_ms:.0} ms; {} quads, {} batches, {} textures ({:.1} MB), {} glyphs",
-            ui.list.len(),
-            ui.hits.len(),
-            s.quads,
-            s.batches,
-            s.textures,
-            s.texture_bytes as f64 / 1e6,
-            s.glyphs
-        );
-        let missing = assets.images.missing();
-        if !missing.is_empty() {
-            eprintln!("missing images: {missing:?}");
-        }
-        return;
-    }
-    eprintln!("usage: uaconsole --render out.png [--compact] [--scale N]");
-}
-
-fn wgpu_format() -> gfx::TextureFormat {
-    gfx::TextureFormat::Rgba8Unorm
+    Some(assets)
 }
