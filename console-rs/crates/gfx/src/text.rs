@@ -135,7 +135,7 @@ pub struct TextSystem {
     fonts: FontSystem,
     scale: ScaleContext,
     atlas: wgpu::Texture,
-    bind: wgpu::BindGroup,
+    view: wgpu::TextureView,
     glyphs: HashMap<GlyphKey, Option<Placed>>,
     shelf: (u32, u32, u32), // x, y, row height
     layouts: HashMap<u64, Shaped>,
@@ -152,7 +152,7 @@ fn layout_key(text: &str, style: &TextStyle, scale: f32) -> (u64, StyleKey) {
 }
 
 impl TextSystem {
-    pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, sampler: &wgpu::Sampler, console_fonts: PathBuf) -> Self {
+    pub fn new(device: &wgpu::Device, console_fonts: PathBuf) -> Self {
         let mut fonts = FontSystem::new();
         // fontdb scans system fonts on macOS/Windows/Linux only; iOS keeps them here.
         #[cfg(target_os = "ios")]
@@ -171,19 +171,11 @@ impl TextSystem {
             view_formats: &[],
         });
         let view = atlas.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("glyphs"),
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
-            ],
-        });
         Self {
             fonts,
             scale: ScaleContext::new(),
             atlas,
-            bind,
+            view,
             glyphs: HashMap::new(),
             shelf: (0, 0, 0),
             layouts: HashMap::new(),
@@ -192,8 +184,9 @@ impl TextSystem {
         }
     }
 
-    pub fn bind_group(&self) -> &wgpu::BindGroup {
-        &self.bind
+    /// The R8 glyph atlas (bound next to every image texture; see the renderer's batching).
+    pub fn atlas_view(&self) -> &wgpu::TextureView {
+        &self.view
     }
 
     /// Call once per rendered frame: drops layouts unused for a few hundred frames.

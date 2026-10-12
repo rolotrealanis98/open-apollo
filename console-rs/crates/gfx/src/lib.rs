@@ -20,6 +20,11 @@ pub use wgpu::TextureFormat;
 
 const ART_SCALE: f32 = 2.0;
 
+/// Vertex `mode`: premultiplied image texel × tint, glyph-atlas coverage × colour, or flat colour.
+const MODE_IMAGE: f32 = 0.0;
+const MODE_GLYPH: f32 = 1.0;
+const MODE_FILL: f32 = 2.0;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -29,10 +34,12 @@ struct Vertex {
     mode: f32,
 }
 
+/// The image texture a batch binds. Fills and text bind nothing of their own (the glyph atlas
+/// sits next to every image texture), so they join whatever batch is open.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum TexId {
-    White,
-    Atlas,
+    /// Not chosen yet: the batch holds only fills and text so far.
+    Any,
     Image(u32),
     /// A slot in `Renderer::resampled`.
     Resampled(u32),
@@ -77,6 +84,7 @@ pub struct Renderer {
     tex_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     white: wgpu::BindGroup,
+    vbuf: Option<wgpu::Buffer>,
     images: Arc<ImageCache>,
     textures: HashMap<(Arc<str>, Option<Frame>), Option<u32>>,
     gpu_textures: Vec<GpuTexture>,
@@ -120,6 +128,16 @@ impl Renderer {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -178,9 +196,9 @@ impl Renderer {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
+        let text = TextSystem::new(device, images.resources().fonts_dir());
         let white_tex = upload_rgba(device, queue, 1, 1, &[255, 255, 255, 255]);
-        let white = bind_texture(device, &tex_layout, &white_tex, &sampler);
-        let text = TextSystem::new(device, &tex_layout, &sampler, images.resources().fonts_dir());
+        let white = bind_texture(device, &tex_layout, &white_tex, &sampler, text.atlas_view());
         Self {
             pipeline,
             globals,
@@ -188,6 +206,7 @@ impl Renderer {
             tex_layout,
             sampler,
             white,
+            vbuf: None,
             images,
             textures: HashMap::new(),
             gpu_textures: Vec::new(),
@@ -225,7 +244,7 @@ impl Renderer {
             (premultiply(slice), img.width, f.height, Some((f.index * f.height, f.height)), (key.clone(), Some(f)))
         };
         let tex = upload_rgba(device, queue, w, h, &data);
-        let bind = bind_texture(device, &self.tex_layout, &tex, &self.sampler);
+        let bind = bind_texture(device, &self.tex_layout, &tex, &self.sampler, self.text.atlas_view());
         self.stats.texture_bytes += data.len();
         self.gpu_textures.push(GpuTexture { bind, size: (w, h), frame_rows: rows });
         let id = (self.gpu_textures.len() - 1) as u32;
@@ -245,7 +264,7 @@ impl Renderer {
         let img = self.images.get(key)?;
         let data = img.resample_area_premul((0, rows.0, img.width, rows.1), size.0, size.1);
         let tex = upload_rgba(device, queue, size.0, size.1, &data);
-        let bind = bind_texture(device, &self.tex_layout, &tex, &self.sampler);
+        let bind = bind_texture(device, &self.tex_layout, &tex, &self.sampler, self.text.atlas_view());
         let gt = GpuTexture { bind, size, frame_rows: None };
         let slot = match self.resampled_slots.iter().position(Option::is_none) {
             Some(i) => {
@@ -319,7 +338,16 @@ impl Renderer {
                 return;
             }
             if let Some(last) = batches.last_mut() {
-                if last.tex == tex && last.scissor == scissor && last.range.end == start {
+                if last.scissor == scissor && last.range.end == start {
+                    match (last.tex, tex) {
+                        (_, TexId::Any) => {}
+                        (TexId::Any, t) => last.tex = t,
+                        (a, b) if a == b => {}
+                        _ => {
+                            batches.push(Batch { tex, scissor, range: start..end });
+                            return;
+                        }
+                    }
                     last.range.end = end;
                     return;
                 }
@@ -341,9 +369,9 @@ impl Renderer {
                 }
                 Draw::Fill { rect, color } => {
                     let start = verts.len() as u32;
-                    quad(&mut verts, snap_edges(scaled(*rect, scale)), [0.0, 0.0, 1.0, 1.0], *color, 0.0);
+                    quad(&mut verts, snap_edges(scaled(*rect, scale)), [0.0, 0.0, 1.0, 1.0], *color, MODE_FILL);
                     quads += 1;
-                    push_batch(&mut batches, TexId::White, scissor, start, verts.len() as u32);
+                    push_batch(&mut batches, TexId::Any, scissor, start, verts.len() as u32);
                 }
                 Draw::Image { key, frame, dst, slice, tint } => {
                     let Some(id) = self.texture(device, queue, key, *frame) else { continue };
@@ -390,7 +418,7 @@ impl Renderer {
                             match if minified { self.resampled(device, queue, key, rows, size) } else { None } {
                                 Some(slot) => {
                                     tex = TexId::Resampled(slot);
-                                    quad(&mut verts, dst, [0.0, 0.0, 1.0, 1.0], *tint, 0.0);
+                                    quad(&mut verts, dst, [0.0, 0.0, 1.0, 1.0], *tint, MODE_IMAGE);
                                 }
                                 None => quad(&mut verts, dst, [src.x / tw, src.y / th, src.max_x() / tw, src.max_y() / th], *tint, 0.0),
                             }
@@ -402,19 +430,27 @@ impl Renderer {
                 Draw::Text { text, style, rect, align } => {
                     let start = verts.len() as u32;
                     glyphs += self.text.layout(device, queue, text, style, scaled(*rect, scale), *align, scale, &mut |r, uv, color| {
-                        quad(&mut verts, r, uv, color, 1.0);
+                        quad(&mut verts, r, uv, color, MODE_GLYPH);
                     });
-                    push_batch(&mut batches, TexId::Atlas, scissor, start, verts.len() as u32);
+                    push_batch(&mut batches, TexId::Any, scissor, start, verts.len() as u32);
                 }
             }
         }
 
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&[size_px.0 as f32, size_px.1 as f32, 0.0, 0.0]));
-        let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("quads"),
-            contents: if verts.is_empty() { &[0u8; 64] } else { bytemuck::cast_slice(&verts) },
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        // One vertex buffer, grown by doubling and rewritten each frame.
+        let bytes: &[u8] = if verts.is_empty() { &[0u8; 64] } else { bytemuck::cast_slice(&verts) };
+        if self.vbuf.as_ref().is_none_or(|b| b.size() < bytes.len() as u64) {
+            let size = (bytes.len() as u64).next_power_of_two().max(1 << 16);
+            self.vbuf = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("quads"),
+                size,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let vbuf = self.vbuf.clone().expect("vertex buffer");
+        queue.write_buffer(&vbuf, 0, bytes);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("rack") });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -435,7 +471,7 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.globals_bind, &[]);
-            pass.set_vertex_buffer(0, vbuf.slice(..));
+            pass.set_vertex_buffer(0, vbuf.slice(..bytes.len() as u64));
             for b in &batches {
                 match b.scissor {
                     Some([x, y, w, h]) if w > 0 && h > 0 => pass.set_scissor_rect(x, y, w, h),
@@ -443,8 +479,7 @@ impl Renderer {
                     None => pass.set_scissor_rect(0, 0, size_px.0, size_px.1),
                 }
                 let bind = match b.tex {
-                    TexId::White => &self.white,
-                    TexId::Atlas => self.text.bind_group(),
+                    TexId::Any => &self.white,
                     TexId::Image(id) => &self.gpu_textures[id as usize].bind,
                     TexId::Resampled(slot) => match &self.resampled_slots[slot as usize] {
                         Some(t) => &t.bind,
@@ -520,7 +555,7 @@ fn nine_slice(v: &mut Vec<Vertex>, dst: Rect, src: Rect, tex: (f32, f32), ins: I
             if r.w <= 0.0 || r.h <= 0.0 {
                 continue;
             }
-            quad(v, r, [us[i], vs[j], us[i + 1], vs[j + 1]], tint, 0.0);
+            quad(v, r, [us[i], vs[j], us[i + 1], vs[j + 1]], tint, MODE_IMAGE);
             n += 1;
         }
     }
@@ -556,7 +591,7 @@ fn upload_rgba(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, data:
     )
 }
 
-fn bind_texture(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, tex: &wgpu::Texture, sampler: &wgpu::Sampler) -> wgpu::BindGroup {
+fn bind_texture(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, tex: &wgpu::Texture, sampler: &wgpu::Sampler, atlas: &wgpu::TextureView) -> wgpu::BindGroup {
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -564,6 +599,7 @@ fn bind_texture(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, tex: &wgp
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
             wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(atlas) },
         ],
     })
 }
