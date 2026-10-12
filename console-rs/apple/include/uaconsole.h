@@ -2,15 +2,23 @@
  * uaconsole.h — C API of console-rs (crates/uaconsole-ffi), for native Apple hosts.
  *
  * Hand-written; keep in sync with crates/uaconsole-ffi/src/lib.rs (its `abi` test checks
- * the UacStats layout). Rendering goes through wgpu's Metal backend into a CAMetalLayer the
- * host owns. UA's art is never bundled: the host passes the path of a UAD Console
- * `Resources` folder (on iPad, one the user imported into Documents).
+ * the UacStats and UacPluginRequest layouts). Rendering goes through wgpu's Metal backend into
+ * a CAMetalLayer the host owns. UA's art is never bundled: the host passes the path of a UAD
+ * Console `Resources` folder (on iPad, one the user imported into Documents).
  *
  * Threading: a context is single-threaded. Create, drive and destroy it on one thread (the
- * main thread on iOS, where the CAMetalLayer and the CADisplayLink live).
+ * main thread on iOS, where the CAMetalLayer and the CADisplayLink live). An engine
+ * connection runs on its own threads; uac_needs_frame()/uac_frame() apply its updates.
  *
- * Coordinates: pointer and zoom anchors are in view points (UIKit points, origin at the
- * layer's top-left). The context owns the mapping to Console window points.
+ * Coordinates: pointer and zoom anchors are in view points (UIKit/AppKit points, origin at
+ * the layer's top-left). The context owns the mapping to Console window points.
+ *
+ * Layout: like Console, the full layout follows its window. By default the Console window
+ * is the view's size in points (uac_resize), so a 1470 x 1105 pt view lays out exactly like
+ * a 1470 x 1105 pt Console window at zoom 1; uac_set_window_size() pins another size.
+ *
+ * Engine safety: uac_connect_engine() is read-only unless `writes` is true. Read-only, the
+ * connection refuses set/post and controls move locally only.
  *
  * SPDX-License-Identifier: GPL-2.0-only
  */
@@ -31,6 +39,7 @@ extern "C" {
 #define UAC_ERR_SURFACE     (-2)
 #define UAC_ERR_UNSUPPORTED (-3)
 #define UAC_ERR_IO          (-4)
+#define UAC_ERR_ARG         (-5)
 #define UAC_ERR_PANIC       (-99)
 
 /* uac_pointer kinds. */
@@ -38,10 +47,32 @@ extern "C" {
 #define UAC_POINTER_MOVE   1
 #define UAC_POINTER_UP     2
 #define UAC_POINTER_CANCEL 3
+#define UAC_POINTER_SECONDARY 4 /* right click / long press: insert context menu, assign mode */
 
 /* uac_pointer flags. */
 #define UAC_POINTER_DOUBLE (1u << 0) /* double tap: reset a dragged control to its default */
 #define UAC_POINTER_FINE   (1u << 1) /* fine adjustment: motion / 10 */
+
+/* uac_set_model_engine flags. */
+#define UAC_ENGINE_WRITES  (1u << 0) /* open both write gates (only after the user asked) */
+
+/* uac_model_state values. */
+#define UAC_MODEL_PREVIEW      0
+#define UAC_MODEL_SNAPSHOT     1
+#define UAC_MODEL_CONNECTING   2
+#define UAC_MODEL_LOADING      3
+#define UAC_MODEL_LIVE         4
+#define UAC_MODEL_RECONNECTING 5
+#define UAC_MODEL_FAILED       6
+#define UAC_MODEL_OFFLINE      7
+
+/* uac_key keys. */
+#define UAC_KEY_ENTER     1
+#define UAC_KEY_BACKSPACE 2
+#define UAC_KEY_ESCAPE    3
+
+/* UacPluginRequest.slot for the Unison slot. */
+#define UAC_UNISON_SLOT 255
 
 typedef struct UacContext UacContext;
 
@@ -62,6 +93,17 @@ typedef struct UacStats {
     float    origin_x_pt;       /* Console point at the view's top-left */
     float    origin_y_pt;
 } UacStats;
+
+/* A loaded insert (or Unison) slot the user opened: the host shows its plug-in window.
+ * Strings are owned by the context: valid until the next uac_take_plugin_request() or
+ * uac_destroy(). */
+typedef struct UacPluginRequest {
+    const char *strip_id;     /* engine node path ("/devices/0/inputs/1") or "in1" (preview) */
+    const char *strip_title;  /* as the mixer shows it ("ANALOG 1") */
+    const char *slot_path;    /* the slot's engine node ("…/inserts/2"); "" without an engine */
+    const char *effect_name;  /* the loaded plug-in's EffectName */
+    int32_t     slot;         /* 0-based insert slot, or UAC_UNISON_SLOT */
+} UacPluginRequest;
 
 /* Library version (static string). */
 const char *uac_version(void);
@@ -85,23 +127,52 @@ bool uac_resources_valid(const char *path);
 UacContext *uac_create(const char *resources_path, void *metal_layer,
                        uint32_t width_px, uint32_t height_px, float scale);
 
-/* New drawable size (pixels) and pixels per view point. */
+/* New drawable size (pixels) and pixels per view point. Unless a window size is pinned, the
+ * Console window follows the view and the full layout reflows (Console's responsive window). */
 void uac_resize(UacContext *ctx, uint32_t width_px, uint32_t height_px, float scale);
 
-/* True when the model, view or input changed since the last presented frame. */
+/* Pins the Console window size in Console points (e.g. 1920 x 1050, Console's default);
+ * width or height <= 0 follows the view again (the default). The view fits the window unless
+ * zoomed; the layout never goes below its minimum size. */
+void uac_set_window_size(UacContext *ctx, float width_pt, float height_pt);
+
+/* Call every display refresh: applies queued engine updates and returns true when a frame is
+ * due (model, view or input changed, or live meters moved; meters redraw at <= 30 Hz). */
 bool uac_needs_frame(UacContext *ctx);
 
 /* Forces the next uac_needs_frame() to return true (layer contents lost, benchmarks). */
 void uac_invalidate(UacContext *ctx);
 
-/* Builds the draw list from the model and renders one frame into the layer.
- * Returns UAC_OK, UAC_SKIPPED or a negative error. */
+/* Applies queued engine updates, builds the draw list from the model and renders one frame
+ * into the layer. Returns UAC_OK, UAC_SKIPPED or a negative error. */
 int32_t uac_frame(UacContext *ctx);
 
-/* Pointer/touch event in view points. Returns 1 if it hit or is driving a control, 0 if it
- * panned the view or missed, or a negative error. Track one touch; send CANCEL when a
- * gesture recognizer takes over. */
+/* Pointer/touch event in view points. DOWN/MOVE/UP/CANCEL drive rack's Interaction through
+ * the mixer's ViewState (navigator, browser, popovers, modifiers, then the model); drags off
+ * controls pan a zoomed view; SECONDARY opens context menus. Returns 1 if it hit or is
+ * driving a control, 0 if it panned the view or missed, or a negative error. Track one
+ * touch; send CANCEL when a gesture recognizer takes over. Tap-kind controls (inserts, menu
+ * items, browser rows) fire on UP inside them, so a long press (DOWN, CANCEL, SECONDARY)
+ * opens the context menu without opening the plug-in. A tap on a loaded insert queues a
+ * plug-in request (uac_take_plugin_request). */
 int32_t uac_pointer(UacContext *ctx, int32_t kind, float x_pt, float y_pt, uint32_t flags);
+
+/* True while a pointer drag drives a control (fader, knob): keep a long-press recognizer from
+ * turning a held drag into a context click. */
+bool uac_dragging(UacContext *ctx);
+
+/* Wheel/trackpad scroll at a point; deltas in view points, AppKit's scrollingDelta convention
+ * (positive reveals content above / to the left). Scrolls the browser list or the cells
+ * column under the point (returns 1), else pans a zoomed view (returns 0). */
+int32_t uac_scroll(UacContext *ctx, float x_pt, float y_pt, float dx_pt, float dy_pt);
+
+/* Keyboard for a focused text field (channel rename, tempo, browser search). */
+bool uac_text_editing(UacContext *ctx);
+/* UTF-8 text; returns 1 if a field took it. */
+int32_t uac_key_text(UacContext *ctx, const char *utf8);
+/* UAC_KEY_ENTER / BACKSPACE (focused field), ESCAPE (closes field, popover, sheet or
+ * modifier). Returns 1 if consumed. */
+int32_t uac_key(UacContext *ctx, int32_t key);
 
 /* Zoom in view points per Console point, keeping the Console point under the anchor (view
  * points) in place. zoom <= 0 returns to fit-to-view. Clamped to [fit, 4]. */
@@ -110,15 +181,36 @@ void uac_set_zoom(UacContext *ctx, float zoom, float anchor_x_pt, float anchor_y
 /* Compact layout: hides the plug-in browser/navigator, packs aux + monitor after the strips. */
 void uac_set_compact(UacContext *ctx, bool compact);
 
-/* Offline preview mixer (6 inputs, 2 aux). Edits stay local. This is the default model. */
+/* Offline preview mixer (6 inputs, 2 aux). Edits stay local. This is the default model.
+ * Closes an engine connection. */
 void uac_set_model_preview(UacContext *ctx);
 
 /*
- * TODO(engine-model): attach a MixerModel over ua-engine connected to a UA Mixer Engine
- * (open-apollo daemon or UA's engine) at host:port, read-only unless `flags` enables
- * writes. Currently returns UAC_ERR_UNSUPPORTED and leaves the model unchanged.
+ * Connects to a UA Mixer Engine (UA's engine or the open-apollo daemon) at host:port
+ * (port 0 = 4710) and shows it live (engine_model::EngineMixer over ua-engine, plus the
+ * read-only UA Mixer Helper on host:4720 when port is 4710). Replaces the model, closing an
+ * earlier connection. Connecting runs in the background; see uac_model_state().
+ * READ-ONLY unless `writes`: the connection refuses set/post and controls move locally only.
+ * Pass writes=true only after the user explicitly enabled writes.
  */
+int32_t uac_connect_engine(UacContext *ctx, const char *host, uint16_t port, bool writes);
+
+/* uac_connect_engine() with flags (UAC_ENGINE_WRITES). */
 int32_t uac_set_model_engine(UacContext *ctx, const char *host, uint16_t port, uint32_t flags);
+
+/* Shows an engine snapshot offline (ConsoleLab/ua-engine snapshot JSON, a raw
+ * `get /?recursive=1` reply or an open-apollo device map). Edits stay local. */
+int32_t uac_use_snapshot(UacContext *ctx, const char *path);
+
+/* UAC_MODEL_* (negative on error). */
+int32_t uac_model_state(UacContext *ctx);
+
+/* One status line, e.g. "Apollo x4 · live · read-only". Owned by the context; valid until
+ * the next call. */
+const char *uac_model_status(UacContext *ctx);
+
+/* Takes the oldest pending plug-in window request into *out; false when there is none. */
+bool uac_take_plugin_request(UacContext *ctx, UacPluginRequest *out);
 
 /* Copies the latest stats into *out. */
 int32_t uac_get_stats(UacContext *ctx, UacStats *out);
@@ -126,10 +218,12 @@ int32_t uac_get_stats(UacContext *ctx, UacStats *out);
 /* GPU adapter name and backend, e.g. "Apple M2 (Metal)". Owned by the context. */
 const char *uac_adapter_name(UacContext *ctx);
 
-/* Renders the current view offscreen into an RGBA PNG (debugging, tests). */
+/* Renders the current view offscreen into an RGBA PNG plus <name>.draws.json (what was drawn
+ * where, for console-rs/tools/align). Debugging, tests, alignment. */
 int32_t uac_write_png(UacContext *ctx, const char *path);
 
-/* Destroys a context (NULL is ignored). The layer may be released afterwards. */
+/* Destroys a context (NULL is ignored) and closes its engine connection. The layer may be
+ * released afterwards. */
 void uac_destroy(UacContext *ctx);
 
 #ifdef __cplusplus

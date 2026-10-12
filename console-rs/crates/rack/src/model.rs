@@ -17,6 +17,158 @@ pub struct StripInfo {
     /// Preamp layout (`preamp_channel_strip_controls[...]`), None for digital/virtual inputs.
     pub preamp_layout: Option<String>,
     pub shows_sr_convert: bool,
+    /// The console model in the strip's console slot (API Summing, Neve 8028, …), which swaps
+    /// the strip's skins ([`ConsoleModel`]). None on Apollo (4710) strips: the engine has no
+    /// console slot.
+    pub console_model: Option<ConsoleModel>,
+}
+
+/// A console model ("console extension") assigned to a strip's console slot. Console swaps
+/// fader, bottom, send and pan skins by it through `Rack_ExtensionCustomization_*`.
+///
+/// Evidence (Console 1.2.9 `Rack.dll` and 1.3.1 Mac `Rack`; WEBBRIDGE-style tags):
+/// - [obs] The slot is the strip's console insert: Rack asks for the plug-in id of insert kind 3,
+///   index 0 (`… + 0xc1b8` vfunc +0x10 with `(strip, 3, 0)`; Mac `UpdateFaderInfoID` 0x1611d10,
+///   `Rack_Pans` 0x16935f0). The helper's (4720) supercore buses carry it as
+///   `effects/console` with `insert_type` `"console"` and a `plugin_id`; the engine (4710) has
+///   no such node.
+/// - [obs] Model numbers and plug-in ids (Win 0x181fa6c00): 1 none, 2 `uaudio_api_summing`,
+///   3 `uaudio_neve_console`, 4 `UAD API Preamp`, 5 `uaudio_ampex_atr_102_ext`,
+///   6 `uaudio_api_vision_ext`, 7 `uaudio_api_2500_ext`, 8 `uaudio_tube_channel_strip_ext`,
+///   9 `uaudio_rhea` (flagged), 10 `uaudio_hardware_insert`.
+/// - [obs] `Rack_LookAndFeelBase::GetConsoleModelCustomization` (Win 0x180ca89b0) looks the id up
+///   in a table filled at Win 0x180ca9040: model 3 → `Neve8028`, 2 → `APISumming`,
+///   4 → `APIPreamp`, 6 → `APIVision`, 8 → `CenturyChannelStrip`, 7 → `API2500`. Models 5, 9
+///   and 10 have no customization. `APIPreamp` returns `""` for every strip slot (it skins the
+///   preamp), so it is not a strip model here.
+/// - [obs] The vtables of `APIVision`, `API2500` and `CenturyChannelStrip` share
+///   `APISumming`'s strip slots, so they draw the `-API-Summing` skins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ConsoleModel {
+    /// API Summing, `uaudio_api_summing` (model 2).
+    ApiSumming,
+    /// Neve Summing (8028 skins), `uaudio_neve_console` (model 3).
+    Neve8028,
+    /// API Vision channel strip extension, `uaudio_api_vision_ext` (model 6).
+    ApiVision,
+    /// API 2500 bus compressor extension, `uaudio_api_2500_ext` (model 7).
+    Api2500,
+    /// Century tube channel strip extension, `uaudio_tube_channel_strip_ext` (model 8).
+    CenturyTubeChannelStrip,
+}
+
+impl ConsoleModel {
+    pub const ALL: [ConsoleModel; 5] = [ConsoleModel::ApiSumming, ConsoleModel::Neve8028, ConsoleModel::ApiVision, ConsoleModel::Api2500, ConsoleModel::CenturyTubeChannelStrip];
+
+    /// The model whose plug-in id this is; None for no model or one without strip skins.
+    pub fn from_plugin_id(id: &str) -> Option<ConsoleModel> {
+        ConsoleModel::ALL.into_iter().find(|m| m.plugin_id() == id.trim())
+    }
+
+    pub fn plugin_id(self) -> &'static str {
+        match self {
+            ConsoleModel::ApiSumming => "uaudio_api_summing",
+            ConsoleModel::Neve8028 => "uaudio_neve_console",
+            ConsoleModel::ApiVision => "uaudio_api_vision_ext",
+            ConsoleModel::Api2500 => "uaudio_api_2500_ext",
+            ConsoleModel::CenturyTubeChannelStrip => "uaudio_tube_channel_strip_ext",
+        }
+    }
+
+    /// Rack's console-model number (2…10).
+    pub fn number(self) -> u8 {
+        match self {
+            ConsoleModel::ApiSumming => 2,
+            ConsoleModel::Neve8028 => 3,
+            ConsoleModel::ApiVision => 6,
+            ConsoleModel::Api2500 => 7,
+            ConsoleModel::CenturyTubeChannelStrip => 8,
+        }
+    }
+
+    fn neve(self) -> bool {
+        self == ConsoleModel::Neve8028
+    }
+
+    /// The skin-name suffix: `API-Summing` or `Neve-8028`.
+    pub fn skin_suffix(self) -> &'static str {
+        if self.neve() { "Neve-8028" } else { "API-Summing" }
+    }
+
+    /// Fader (`faders`; customization slot 6, Mac `UpdateFaderInfoID` vfunc +0x38).
+    pub fn fader_skin(self) -> &'static str {
+        if self.neve() { "Main-Input-Fader-Neve-8028" } else { "Main-Input-Fader-API-Summing" }
+    }
+
+    /// Main-strip bottom of a non-input strip (`backgrounds`; slot 5, Win 0x18144c570).
+    pub fn aux_channel_bottom_skin(self) -> &'static str {
+        if self.neve() { "Aux-Channel-Bottom-Neve-8028" } else { "Aux-Channel-Bottom-API-Summing" }
+    }
+
+    /// Send level knob (`knobs`, parent `Mini-Send-Level`; slot 8, Win 0x181454690).
+    pub fn gain_skin(self) -> &'static str {
+        if self.neve() { "Gain-Neve-8028" } else { "Gain-API-Summing" }
+    }
+
+    /// Pan knob (`knobs`; slot 11, Win 0x18146db00): `Pan-*` (parent `Pan-White`) when the flag
+    /// is set, `Input-Pan-*` (parent `Pan-Black`) when not. `Rack_Pans` passes its section flag
+    /// (+0x33c, nonzero outside the input section).
+    pub fn pan_skin(self, bus: bool) -> &'static str {
+        match (self.neve(), bus) {
+            (true, true) => "Pan-Neve-8028",
+            (true, false) => "Input-Pan-Neve-8028",
+            (false, true) => "Pan-API-Summing",
+            (false, false) => "Input-Pan-API-Summing",
+        }
+    }
+
+    /// Lower plate of a send (`backgrounds`, parent `Send-Lower-State-Plate`; slot 12,
+    /// `Rack_SendRoute` Win 0x18148ff70).
+    pub fn lower_state_plate_skin(self) -> &'static str {
+        if self.neve() { "Lower-State-Plate-Neve-8028" } else { "Lower-State-Plate-API-Summing" }
+    }
+}
+
+/// The skins a strip draws with, by kind and console model (the default rendering is the
+/// `console_model == None` case).
+impl StripInfo {
+    /// `Rack_FaderAndMeters::UpdateFaderInfoID` (Mac 0x1611d10): a console model's fader for any
+    /// strip with one; otherwise `Main-Bus-Fader` on buses and `Main-Input-Fader` on inputs.
+    pub fn fader_skin(&self) -> &'static str {
+        match (self.console_model, self.kind) {
+            (Some(m), _) => m.fader_skin(),
+            (None, StripKind::Aux) => "Main-Bus-Fader",
+            (None, StripKind::Input) => "Main-Input-Fader",
+        }
+    }
+
+    /// `Rack_Pans` (Mac 0x16935f0, Win 0x18146db00): inputs in the mixer always draw `Pan-Black`;
+    /// other strips draw the model's `Pan-*`, or `Pan-White`.
+    pub fn pan_skin(&self) -> &'static str {
+        match self.kind {
+            StripKind::Input => "Pan-Black",
+            StripKind::Aux => self.console_model.map_or("Pan-White", |m| m.pan_skin(true)),
+        }
+    }
+
+    /// Image behind a bus's main strip when it has a console model (`Aux-Channel-Bottom-*`,
+    /// Mac 0x165b73f); None keeps the blank aux bottom.
+    pub fn aux_bottom_skin(&self) -> Option<&'static str> {
+        match self.kind {
+            StripKind::Aux => self.console_model.map(ConsoleModel::aux_channel_bottom_skin),
+            StripKind::Input => None,
+        }
+    }
+
+    /// Send row lower plate (`Rack_SendRoute`, Mac 0x16d8a5b).
+    pub fn send_plate_skin(&self) -> &'static str {
+        self.console_model.map_or("Send-Lower-State-Plate", ConsoleModel::lower_state_plate_skin)
+    }
+
+    /// Send level knob (Mac 0x166a2a5).
+    pub fn send_knob_skin(&self) -> &'static str {
+        self.console_model.map_or("Mini-Send-Level", ConsoleModel::gain_skin)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -472,8 +624,9 @@ impl Default for PreviewMixer {
             stereo,
             preamp_layout: preamp.then(|| "preamp_channel_strip_controls".into()),
             shows_sr_convert: sr,
+            console_model: None,
         };
-        let aux = |id: &str, title: &str| StripInfo { id: id.into(), title: title.into(), kind: StripKind::Aux, stereo: true, preamp_layout: None, shows_sr_convert: false };
+        let aux = |id: &str, title: &str| StripInfo { id: id.into(), title: title.into(), kind: StripKind::Aux, stereo: true, preamp_layout: None, shows_sr_convert: false, console_model: None };
         let inputs = vec![
             input("in0", "ANALOG 1", false, true, false),
             input("in1", "ANALOG 2", false, true, false),

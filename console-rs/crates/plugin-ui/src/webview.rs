@@ -1,9 +1,10 @@
 //! (feature `webview`, Linux) UA's HTML plug-in GUIs in a WebKitGTK webview through wry.
 //!
-//! The component's `html/` folder is served on the custom scheme `uapw://localhost/…` (so the
-//! GUI's `fetch`es of its own files are same-origin), and the page is opened with the query its
-//! `@uaudio/client` expects ([`GuiQuery`]); the GUI then opens its own WebSocket to the host's
-//! bridge (WEBBRIDGE.md).
+//! The page is loaded the way UAD Console 1.3.1 loads it on macOS: `ua-content://gui/index.html`
+//! with Console's query (`host`, `port`, `path`, `plugin_id`; [`GuiQuery`]), the component's
+//! `html/` folder served by a `ua-content` handler with Console's rules and headers
+//! ([`crate::content`]). The Windows (1.2.x) `file://…/index.html` form stays available
+//! ([`GuiSource::File`]). The GUI then opens its own WebSocket to the host's bridge (WEBBRIDGE.md).
 //!
 //! **Embedding.** This first step opens the GUI in its own GTK top-level window (or an offscreen
 //! one, for snapshots); the console's winit loop calls [`pump`] to service GTK. Trade-offs:
@@ -16,19 +17,30 @@
 
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 use webkit2gtk::{HardwareAccelerationPolicy, LoadEvent, SettingsExt, SnapshotOptions, SnapshotRegion, WebViewExt};
-use wry::http::{Request, Response, StatusCode, header::CONTENT_TYPE};
+use wry::http::{Request, Response};
 use wry::{WebViewBuilder, WebViewBuilderExtUnix, WebViewExtUnix};
 
+use crate::content::{self, ContentRoots};
 use crate::web::{GuiQuery, LunaComponent};
 
-/// Custom scheme the component's `html/` folder is served on.
-pub const SCHEME: &str = "uapw";
+/// Custom scheme the component's `html/` folder is served on (Console 1.3.1's).
+pub const SCHEME: &str = content::SCHEME;
+
+/// How the GUI page is loaded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GuiSource {
+    /// `ua-content://gui/index.html?…`: Console 1.3.1 (macOS), through our `ua-content` handler.
+    #[default]
+    UaContent,
+    /// `file://…/index.html?…`: Console 1.2.x (Windows layout).
+    File,
+}
 
 /// Initialises GTK on this thread (once, before opening windows).
 pub fn init() -> Result<(), String> {
@@ -42,9 +54,9 @@ pub fn pump() {
     }
 }
 
-/// `uapw://localhost/index.html?<query>`.
+/// `ua-content://gui/index.html?<query>`.
 pub fn page_url(query: &GuiQuery) -> String {
-    format!("{SCHEME}://localhost/index.html?{}", query.to_query())
+    content::page_url(query)
 }
 
 pub struct WebPanelWindow {
@@ -55,23 +67,24 @@ pub struct WebPanelWindow {
 }
 
 impl WebPanelWindow {
-    /// Opens `component` with `query`, at the GUI's natural size. `offscreen` renders without
-    /// showing a window (snapshots, tests).
+    /// Opens `component` with `query`, at the GUI's natural size, on `ua-content://`. `offscreen`
+    /// renders without showing a window (snapshots, tests).
     pub fn open(component: &LunaComponent, query: &GuiQuery, title: &str, offscreen: bool) -> Result<Self, String> {
-        Self::open_with(component, query, title, offscreen, false)
+        Self::open_with(component, query, title, offscreen, GuiSource::UaContent)
     }
 
-    /// As [`open`](Self::open); `file_url` loads `file://…/index.html` instead of `uapw://`.
-    pub fn open_with(component: &LunaComponent, query: &GuiQuery, title: &str, offscreen: bool, file_url: bool) -> Result<Self, String> {
+    /// As [`open`](Self::open), loading the page from `source`.
+    pub fn open_with(component: &LunaComponent, query: &GuiQuery, title: &str, offscreen: bool, source: GuiSource) -> Result<Self, String> {
         let size = (component.window.width.round() as i32, component.window.height.round() as i32);
         let window: gtk::Window = if offscreen { gtk::OffscreenWindow::new().upcast() } else { gtk::Window::new(gtk::WindowType::Toplevel) };
         window.set_title(title);
         window.set_default_size(size.0, size.1);
         window.set_size_request(size.0, size.1);
-        let root = component.html_dir.clone();
+        let file_url = source == GuiSource::File;
+        let roots = ContentRoots::for_component(component);
         let webview = WebViewBuilder::new()
-            .with_custom_protocol(SCHEME.into(), move |_, req| serve(&root, &req))
-            .with_url(if file_url { component.url(query) } else { page_url(query) })
+            .with_custom_protocol(SCHEME.into(), move |_, req| serve(&roots, &req))
+            .with_url(if file_url { component.url(query) } else { component.content_url(query) })
             .with_devtools(std::env::var_os("UACONSOLE_WEB_DEVTOOLS").is_some())
             .build_gtk(&window)
             .map_err(|e| e.to_string())?;
@@ -190,52 +203,12 @@ impl WebPanelWindow {
     }
 }
 
-/// Serves a file under `root` for a `uapw://localhost/<path>` request.
-fn serve(root: &Path, req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
-    let rel = req.uri().path().trim_start_matches('/');
-    let rel = if rel.is_empty() { "index.html" } else { rel };
-    let rel = percent_decode(rel);
-    let path = PathBuf::from(&rel);
-    let safe = path.components().all(|c| matches!(c, Component::Normal(_)));
-    let body = if safe { std::fs::read(root.join(&path)).ok() } else { None };
-    match body {
-        Some(bytes) => Response::builder().header(CONTENT_TYPE, mime(&rel)).body(Cow::Owned(bytes)).unwrap(),
-        None => Response::builder().status(StatusCode::NOT_FOUND).body(Cow::Borrowed(&b"not found"[..])).unwrap(),
+/// Answers a `ua-content://gui/<path>` request as Console 1.3.1's `UAPWSchemeHandler` does.
+fn serve(roots: &ContentRoots, req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+    let reply = roots.respond(req.uri().path());
+    let mut res = Response::builder().status(reply.status);
+    for (k, v) in &reply.headers {
+        res = res.header(*k, v.as_str());
     }
-}
-
-fn mime(path: &str) -> &'static str {
-    match path.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
-        "html" | "htm" => "text/html",
-        "js" | "mjs" => "text/javascript",
-        "json" => "application/json",
-        "css" => "text/css",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "svg" => "image/svg+xml",
-        "woff" => "font/woff",
-        "woff2" => "font/woff2",
-        "ttf" => "font/ttf",
-        "otf" => "font/otf",
-        "wasm" => "application/wasm",
-        _ => "application/octet-stream",
-    }
-}
-
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
+    res.body(Cow::Owned(reply.body)).unwrap_or_else(|_| Response::new(Cow::Borrowed(&b""[..])))
 }

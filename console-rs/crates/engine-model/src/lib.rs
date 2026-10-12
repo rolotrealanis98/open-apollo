@@ -317,6 +317,7 @@ impl MixerModel for EngineMixer {
                 stereo: s.is_stereo(),
                 preamp_layout: s.preamp.as_ref().map(|_| PREAMP_LAYOUT.to_owned()),
                 shows_sr_convert: s.kind == InputKind::Spdif,
+                console_model: self.input_console_model(s),
             })
             .collect()
     }
@@ -334,6 +335,7 @@ impl MixerModel for EngineMixer {
                 stereo: true,
                 preamp_layout: None,
                 shows_sr_convert: false,
+                console_model: self.aux_console_model(a),
             })
             .collect()
     }

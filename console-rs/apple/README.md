@@ -48,16 +48,36 @@ One opaque `UacContext` per view, used from one thread (the main thread on iOS):
 | call | |
 |---|---|
 | `uac_create(resources, CAMetalLayer*, w_px, h_px, scale)` | NULL layer = offscreen (tests) |
-| `uac_resize`, `uac_needs_frame`, `uac_frame`, `uac_invalidate` | render only when dirty |
-| `uac_pointer(ctx, DOWN/MOVE/UP/CANCEL, x_pt, y_pt, DOUBLE/FINE)` | drags controls; drags elsewhere pan |
+| `uac_resize`, `uac_needs_frame`, `uac_frame`, `uac_invalidate` | call `uac_needs_frame` every display refresh: it pumps the engine; render only when it says so |
+| `uac_set_window_size(ctx, w_pt, h_pt)` | pin the Console window (e.g. 1920×1050); `<= 0` follows the view (default) |
+| `uac_pointer(ctx, DOWN/MOVE/UP/CANCEL/SECONDARY, x_pt, y_pt, DOUBLE/FINE)` | rack `Interaction` routed through `ViewState`; taps fire on release (so long press = CANCEL + SECONDARY); drags elsewhere pan; `uac_dragging` while a control drag is active |
+| `uac_scroll(ctx, x, y, dx, dy)` | browser list / cells column under the point, else pan |
+| `uac_text_editing`, `uac_key_text`, `uac_key(ENTER/BACKSPACE/ESCAPE)` | rename, tempo, browser search; Escape closes popovers |
 | `uac_set_zoom(ctx, zoom, anchor_x, anchor_y)` | pinch; `zoom <= 0` fits the window |
-| `uac_set_compact`, `uac_set_model_preview` | layout and the offline preview model |
-| `uac_set_model_engine` | **TODO stub** (returns `UAC_ERR_UNSUPPORTED`): ua-engine adapter |
-| `uac_get_stats`, `uac_adapter_name`, `uac_write_png`, `uac_last_error`, `uac_destroy` | |
+| `uac_set_compact` | browser + navigator hidden, aux/monitor packed after the strips |
+| `uac_connect_engine(ctx, host, port, writes)` | `engine_model::EngineMixer` live over ua-engine (+ the 4720 helper); **read-only unless `writes`** |
+| `uac_use_snapshot(ctx, path)`, `uac_set_model_preview` | offline models |
+| `uac_model_state`, `uac_model_status` | `UAC_MODEL_LIVE` …; "Apollo x4 · live · read-only" |
+| `uac_take_plugin_request(ctx, &req)` | a tap on a loaded insert/Unison: strip, slot, engine slot path, `EffectName` for the host's plug-in window |
+| `uac_get_stats`, `uac_adapter_name`, `uac_write_png` (+ `.draws.json`), `uac_last_error`, `uac_destroy` | |
 
 Pointer coordinates are view points. The context owns the zoom and pan that map them to
-Console window points. Rust tests (`cargo test -p uaconsole-ffi`) exercise the C entry points
-offscreen on any GPU (Vulkan on Linux), including the coordinate mapping, a solo tap and zoom.
+Console window points.
+
+Layout follows the view like Console's window does: a 1470×1105 pt view lays out exactly like
+a 1470×1105 pt Console window (zoom 1). Compact takes its width from the strips and its height
+from the window.
+
+Engine connections run on their own threads. `uac_needs_frame` applies queued updates
+(`MixerModel::pump`) and asks for a frame when values change, or at most every 33 ms while
+meters move. Read-only, the connection refuses `set`/`post` and the writer gate stays closed:
+controls move locally and nothing is sent. `uac_set_model_engine(…, UAC_ENGINE_WRITES)` is the
+older flag form of the same call.
+
+Rust tests (`cargo test -p uaconsole-ffi`) exercise the C entry points offscreen on any GPU
+(Vulkan on Linux): coordinate mapping, a solo tap, zoom, window-size following, navigator and
+rename routing through `ViewState`, plug-in requests, a snapshot, and a read-only connection to
+ua-engine's `MockEngine` (a fader drag sends nothing).
 
 ## iPad
 
@@ -118,6 +138,103 @@ folder (or `UAD Console.app` or its `Contents`) anywhere in Files, e.g. iCloud D
 copies it into Documents. You can also drop the folder into the app's Documents with Finder
 file sharing (iPad → Files → uaconsole) as `UADConsoleResources` or `Resources`.
 
+## UA's HTML plug-in GUIs in WKWebView (`ua-content://`)
+
+UAD Console 1.3.1 loads a lunacomponent GUI as
+`ua-content://gui/index.html?host=<h>&port=<p>&path=<insert path>&plugin_id=<component id>`
+and answers the scheme with one `WKURLSchemeHandler` per web view (`UAPWSchemeHandler`,
+registered with `setURLSchemeHandler:forURLScheme:`). An Apple host (ConsoleLink, or a SwiftUI
+shell over `uaconsole-ffi`) should do the same, so the page sees the origin and URL keys it sees
+in Console. The rules are in `crates/plugin-ui/WEBBRIDGE.md` §8, and `plugin_ui::content` is
+the Rust version used on Linux.
+
+- **Root.** The component's `<id>.lunacomponent/gui.bundle/Contents/Resources/html` folder.
+  Ignore the URL host (`gui`), take the percent-decoded path, standardize it, and serve it only
+  if it stays inside the root.
+- **Reply.** Status 200, `HTTP/1.1`, `Content-Type` by extension (default
+  `application/octet-stream`), `Content-Length`, `Access-Control-Allow-Origin: *`,
+  `Cache-Control: no-cache`. Read off the main thread, and deliver only while the task is
+  still active: calling a stopped task throws. Fail anything else with
+  `URLError(.fileDoesNotExist)`.
+- **Keys.** `host` first (the client's `getURLParams` glues the first key to the URL), `port`
+  = a UANet WebSocket endpoint (plugin-ui's bridge, or the server that owns the insert),
+  `path` = the insert node with no trailing `/`, `plugin_id` last.
+- **Registration.** A scheme handler can only be set on a `WKWebViewConfiguration` before the
+  view is created, and `ua-content` is not a scheme WebKit handles itself.
+- `uaconsole-ffi` draws the mixer only; it creates no web views. A tap on a loaded insert
+  queues a `UacPluginRequest` (`uac_take_plugin_request`): `slot_path` is the `path` key and
+  `effect_name` picks the lunacomponent (its id is `plugin_id`). The Swift host owns the
+  `WKWebView`, the handler, the window placement and the UANet endpoint for `port`.
+
+```swift
+import WebKit
+
+/// Serves ua-content://gui/<file> from one lunacomponent's html folder (UAD Console 1.3.1's rules).
+final class UAContentSchemeHandler: NSObject, WKURLSchemeHandler {
+    private let root: URL
+    private var active = Set<ObjectIdentifier>()
+    private static let types = [
+        "html": "text/html", "htm": "text/html", "js": "text/javascript", "mjs": "text/javascript",
+        "css": "text/css", "json": "application/json", "map": "application/json",
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif",
+        "svg": "image/svg+xml", "webp": "image/webp", "ico": "image/x-icon", "woff": "font/woff",
+        "woff2": "font/woff2", "ttf": "font/ttf", "otf": "font/otf", "wasm": "application/wasm",
+        "mp4": "video/mp4", "webm": "video/webm", "mp3": "audio/mpeg", "wav": "audio/wav",
+        "txt": "text/plain", "xml": "application/xml", "pdf": "application/pdf",
+    ]
+
+    init(htmlFolder: URL) { root = htmlFolder.standardizedFileURL }
+
+    func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+        guard let url = task.request.url, let file = resolve(url) else {
+            return task.didFailWithError(URLError(.fileDoesNotExist))
+        }
+        let id = ObjectIdentifier(task)
+        active.insert(id)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let data = try? Data(contentsOf: file)
+            DispatchQueue.main.async { [self] in
+                guard active.remove(id) != nil else { return } // stopped meanwhile
+                guard let data else { return task.didFailWithError(URLError(.fileDoesNotExist)) }
+                let headers = [
+                    "Content-Type": Self.types[file.pathExtension.lowercased()] ?? "application/octet-stream",
+                    "Content-Length": String(data.count),
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "no-cache",
+                ]
+                task.didReceive(HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers)!)
+                task.didReceive(data)
+                task.didFinish()
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {
+        active.remove(ObjectIdentifier(task))
+    }
+
+    /// The URL's path (decoded; the host is ignored), standardized, and only inside the root.
+    private func resolve(_ url: URL) -> URL? {
+        let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? ""
+        let file = root.appendingPathComponent(path.isEmpty ? "index.html" : path).standardizedFileURL
+        return file.path.hasPrefix(root.path + "/") ? file : nil
+    }
+}
+
+// One handler per web view, set before the view exists.
+let config = WKWebViewConfiguration()
+config.setURLSchemeHandler(UAContentSchemeHandler(htmlFolder: htmlFolder), forURLScheme: "ua-content")
+let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 950, height: 175), configuration: config) // manifest.json "window"
+var page = URLComponents(string: "ua-content://gui/index.html")!
+page.queryItems = [ // host first
+    URLQueryItem(name: "host", value: "127.0.0.1"),
+    URLQueryItem(name: "port", value: String(bridgePort)),
+    URLQueryItem(name: "path", value: "/devices/0/inputs/0/effects/0"),
+    URLQueryItem(name: "plugin_id", value: "uaudio_ua_1176_rev_a"),
+]
+web.load(URLRequest(url: page.url!))
+```
+
 ## Measured (2026-10-11, Mac Studio M2 Ultra, macOS 27.2, Xcode 27.1)
 
 | where | first frame | warm frame |
@@ -138,5 +255,6 @@ file sharing (iPad → Files → uaconsole) as `UADConsoleResources` or `Resourc
 - Landscape orientation on the simulator (screenshots so far are portrait), Stage Manager
   and resizing, and memory pressure on real hardware. Images decode lazily and the art
   folder is about 200 MB on disk.
-- `uac_set_model_engine` is a stub. No engine connection is made from the Apple shells.
+- The UAConsoleiPad sample still shows the preview model; ConsoleLink's Console 1:1 screen
+  (`feat/console-1to1`) is the host that connects to an engine.
 - Only arm64 is built: no x86_64 simulator or Intel Mac slices.

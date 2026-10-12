@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use engine_model::{EngineMixer, SlotSource};
-use rack::model::{InsertState, MixerModel};
+use rack::model::{ConsoleModel, InsertState, MixerModel};
 use ua_engine::{
     HelperStore, Json, MockEngine, MockHelper, MockOptions, Property, Snapshot, Status, Store,
     Value,
@@ -253,4 +253,85 @@ fn live_native_insert_appears() {
         "{cmds:?}"
     );
     assert!(engine.write_commands().is_empty());
+}
+
+/// Sets `plugin_id` of the `effects/console` slot of `node` (a supercore track or bus).
+fn set_console_slot(node: &mut Json, plugin_id: &str) {
+    let effects = node["children"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|c| c["path"] == "effects")
+        .unwrap();
+    let console = effects["children"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|c| c["path"] == "console")
+        .unwrap();
+    assert_eq!(console["properties"]["insert_type"]["value"], "console");
+    console["properties"]["plugin_id"]["value"] = Json::String(plugin_id.into());
+}
+
+/// SYNTHETIC: the captured helper with a supercore track named "Vocal Mic" and the first bus
+/// renamed "AUX 1", both with `plugin_id` in their console slot. No live helper has shown a
+/// populated console slot (the Mac's were all empty).
+fn helper_with_console_models(plugin_id: &str) -> Json {
+    let mut root = helper_with_track("Vocal Mic", "Tube-Tech CL 1B mkII");
+    let dev = &mut devices_mut(&mut root)["children"][0];
+    for coll in ["tracks", "buses"] {
+        let node = &mut dev["children"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["path"] == coll)
+            .unwrap()["children"][0];
+        if coll == "buses" {
+            node["properties"]["name"]["value"] = Json::String("AUX 1".into());
+        }
+        set_console_slot(node, plugin_id);
+    }
+    root
+}
+
+/// The console model in a supercore track's or bus's console slot reaches the strip with the
+/// same name, and rack then draws that model's skins. Apollo strips without a helper match keep
+/// no model (the default rendering).
+#[test]
+fn console_models_come_from_the_helper_console_slot() {
+    let plain = EngineMixer::new(engine_with_catalogue(true));
+    assert!(plain
+        .inputs()
+        .iter()
+        .chain(plain.auxes().iter())
+        .all(|s| s.console_model.is_none()));
+    let mut with_empty_slots = EngineMixer::new(engine_with_catalogue(true));
+    with_empty_slots.set_helper(HelperStore::from_helper_json(&helper_fixture()));
+    assert!(with_empty_slots
+        .inputs()
+        .iter()
+        .chain(with_empty_slots.auxes().iter())
+        .all(|s| s.console_model.is_none()));
+
+    for model in ConsoleModel::ALL {
+        let mut m = EngineMixer::new(engine_with_catalogue(true));
+        m.set_helper(HelperStore::from_helper_json(&helper_with_console_models(
+            model.plugin_id(),
+        )));
+        let inputs = m.inputs();
+        assert_eq!(inputs[0].console_model, Some(model), "track \"Vocal Mic\"");
+        assert!(inputs[1..].iter().all(|s| s.console_model.is_none()));
+        assert_eq!(inputs[0].fader_skin(), model.fader_skin());
+        let auxes = m.auxes();
+        assert_eq!(auxes[0].title, "AUX 1");
+        assert_eq!(auxes[0].console_model, Some(model), "bus \"AUX 1\"");
+        assert_eq!(auxes[0].send_plate_skin(), model.lower_state_plate_skin());
+        assert_eq!(auxes.get(1).and_then(|a| a.console_model), None);
+    }
+    // A console slot holding something that is not a strip model (tape, model 5).
+    let mut tape = EngineMixer::new(engine_with_catalogue(true));
+    tape.set_helper(HelperStore::from_helper_json(&helper_with_console_models(
+        "uaudio_ampex_atr_102_ext",
+    )));
+    assert_eq!(tape.inputs()[0].console_model, None);
 }

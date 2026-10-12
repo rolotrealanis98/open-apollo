@@ -10,10 +10,12 @@
 //!   adapter maps it onto [`paths`].
 //! - [`meters`]: VendorSpecific meter queries, decoding, calibration and ballistics.
 //! - [`web`]: UA's own HTML/JS plug-in GUIs (lunacomponents): discovery and the URL to load;
-//!   [`webview`] (feature `webview`) hosts them in WebKitGTK.
+//!   [`content`]: the `ua-content://` scheme Console 1.3.1 serves them on; [`webview`] (feature
+//!   `webview`) hosts them in WebKitGTK.
 
 #[cfg(feature = "bridge")]
 pub mod bridge;
+pub mod content;
 pub mod engine;
 pub mod generic;
 pub mod library;
@@ -36,5 +38,6 @@ pub use engine::EngineSlot;
 pub use params::{MockEvent, MockParam, MockParams, ParamSnapshot, ParamSource};
 pub use paths::{ParamPaths, SlotPath};
 pub use spec::PluginSpec;
+pub use content::{ContentResponse, ContentRoots};
 pub use web::{GuiQuery, LunaComponent, LunaLibrary, LunaLocator};
 pub use window::{ChromeState, Content, PluginWindow, WindowEvent, WindowLayout};

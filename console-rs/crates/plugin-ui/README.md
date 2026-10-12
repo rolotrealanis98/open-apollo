@@ -8,7 +8,8 @@ to the UA Mixer Engine through ua-engine's gated writer.
 The editor is, in order of preference:
 
 1. **UA's own HTML/JS GUI** (a LUNA "lunacomponent", feature `webview`): hosted in WebKitGTK via
-   wry and answered by our UANet bridge, a local WebSocket speaking the GUI's dialect over the
+   wry, loaded as Console 1.3.1 loads it (`ua-content://gui/index.html?host=…&port=…&path=…&plugin_id=…`),
+   and answered by our UANet bridge, a local WebSocket speaking the GUI's dialect over the
    engine's `parameters/<k>` ([WEBBRIDGE.md](WEBBRIDGE.md)).
 2. **A ConsoleLink panel spec** (`PluginSpec_*.json` + `Images/*@2x.png`), drawn by
    [`PluginPanel`](src/panel.rs) into the frame's `rack::DrawList`.
@@ -24,9 +25,10 @@ No UA asset is in this repository: GUIs, specs, sprites and Console art are read
 | `params` | `ParamSource`, `MockParams`, `ParamSnapshot` |
 | `engine` | `EngineSlot`: `ParamSource` over `ua_engine::Store` |
 | `meters` | VendorSpecific meter queries, decoding, calibration, ballistics |
-| `web`, `uanet` | lunacomponent discovery, URL, and the UANet dialect (pure) |
+| `web`, `uanet` | lunacomponent discovery, the page URL and its keys (`GuiQuery`), and the UANet dialect (pure) |
+| `content` | the `ua-content://` scheme: Console 1.3.1's path resolution, MIME table and headers (pure; WEBBRIDGE.md §8) |
 | `bridge` (feature) | the WebSocket endpoint (tungstenite, a thread per connection) |
-| `webview` (feature) | wry/WebKitGTK window, `uapw://` scheme, snapshots |
+| `webview` (feature) | wry/WebKitGTK window, `ua-content://` handler (or `file://`, the 1.2.x layout), snapshots |
 
 ## Where things are found
 
@@ -97,7 +99,7 @@ sidechain, power, in/out, A/B compare, copy/paste, mixer, more, footer buttons, 
 ```
 cargo run -p plugin-ui --example render -- ua_1176_rev_a out.png                 # spec panel at defaults + out.zero.png
 cargo run -p plugin-ui --example render -- ua_1176_rev_a out.png --window --status "NO UAD-2 DEVICES FOUND"
-cargo run -p plugin-ui --features webview --example web -- ua_1176_rev_a --snapshot gui.png [--zero] [--compare ref.png]
+cargo run -p plugin-ui --features webview --example web -- ua_1176_rev_a --snapshot gui.png [--zero] [--compare ref.png] [--file]
 cargo run -p uaconsole -- --render out.png --open-plugin in2:1                     # the app, preview data, dbx 160 open
 cargo run -p uaconsole -- --render out.png --mock …/apollo-x4-12.0.0.snapshot.json --open-plugin in0:1
 ```
@@ -107,17 +109,18 @@ Checks against the spec pipeline's LUNA references (all parameters 0, >24/255):
 | what | pixels off |
 |---|---|
 | spec panel: dbx 160, UA 1176 Rev A, LA-2A Silver | 0.000% |
-| UA's 1176 Rev A HTML GUI in our webview, fed by our bridge | 0.000% |
+| UA's 1176 Rev A HTML GUI in our webview, fed by our bridge, on `ua-content://` and on `file://` | 0.000% |
 | header layout vs the 1.3.1 capture (SSL G, 304×710) | every button edge to the point |
 
 ## Tests
 
-`cargo test -p plugin-ui` (add `--features webview` for the bridge transport test): spec parsing
+`cargo test -p plugin-ui` (add `--features webview` for the bridge transport tests): spec parsing
 (inline spec covering every element kind, plus every spec in the found folder), hit rects and
 actions through `rack::Interaction`, stepped quantisation, local values, `MockParams`, the list,
 meters, slot paths, lunacomponent matching, Console's header layout, the engine adapter against
 the recorded x4 snapshot (gated writes, subscriptions), and the UANet dialect (parsing, subtree,
-pushes, gated writes, touch gestures, step indices). `cargo test -p uaconsole plugin` covers the
+pushes, gated writes, touch gestures, step indices), the `ua-content` resolver (traversal,
+allowed roots, headers) and the page keys as the GUI's two URL parsers read them. `cargo test -p uaconsole plugin` covers the
 hook on engine and preview models.
 
 ## Gaps

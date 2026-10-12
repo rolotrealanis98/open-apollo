@@ -138,10 +138,12 @@ impl CellRows {
         let sec = view.sections;
         let slots = strips.iter().map(|s| visible_slots(&model.inserts(s), view.fixed_slots)).max().unwrap_or(4);
         let sends = strips.iter().map(|s| model.send_rows(s)).max().unwrap_or(0);
+        // The bus section keeps its Sends row open (Console's default collapses only the inputs').
+        let open = |r: Section| sec.get(r) || (aux && r == Section::Sends);
         Self {
-            input: (!aux).then_some(if sec.inputs { INPUT_CELL_H } else { HEADER_H }),
-            inserts: if sec.inserts { cells::inserts_cell_h(slots, view.insert_size, !aux) } else { HEADER_H },
-            sends: if sec.sends { cells::sends_cell_h(sends, view.sends_overview) } else { HEADER_H },
+            input: (!aux).then_some(if open(Section::Inputs) { INPUT_CELL_H } else { HEADER_H }),
+            inserts: if open(Section::Inserts) { cells::inserts_cell_h(slots, view.insert_size, !aux) } else { HEADER_H },
+            sends: if open(Section::Sends) { cells::sends_cell_h(sends, view.sends_overview) } else { HEADER_H },
             slots,
             main: if sec.fader { main_strip::HEIGHT } else { MAIN_HIDDEN_H },
         }
@@ -179,15 +181,10 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     // Cell rows. Content that fits is bottom-aligned on the main strips (1.3.1 at 1470 × 1105);
     // content that overflows scrolls, from the top.
     let rows = CellRows::new(model, view, &inputs, false);
-    let mut aux_rows = CellRows::new(model, view, &auxes, true);
-    // The aux sends cell keeps room for as many sends as an input strip has (1.3.1: two cues
-    // shown, four reserved; the p1 aux scrollbar thumb gives 583 pt of aux cells).
-    // Independent of whether the input Sends row is expanded (p1 and p2 both show it collapsed
-    // while the aux cells keep their full 583 pt).
-    {
-        let in_sends = inputs.iter().map(|s| model.input_sends(s).len()).max().unwrap_or(0);
-        aux_rows.sends = aux_rows.sends.max(cells::sends_cell_h(in_sends, view.sends_overview));
-    }
+    // The aux Sends cell keeps a row for every cue send the engine lists (1.3.1: two cues shown,
+    // four reserved, `MixerModel::send_rows`): 242 + 340 = 582 pt (p2: aux header at 84), open
+    // whatever the input Sends row does (p1 and p2 show that one collapsed).
+    let aux_rows = CellRows::new(model, view, &auxes, true);
     let cells_h = col_h - rows.main - 5.0;
     let aux_cells_h = col_h - aux_rows.main - 5.0;
     let aux_scroll = view.monitor_page == MonitorPage::Aux && aux_rows.total() > aux_cells_h;
@@ -238,7 +235,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let aux_w = auxes.len().max(2) as f32 * STRIP_W;
     match view.monitor_page {
         MonitorPage::Aux => {
-            let aux_off = (aux_rows.total() - aux_cells_h).min(0.0);
+            let aux_off = cells_offset(&aux_rows, aux_cells_h, 0.0);
             if l.aux_scroll {
                 let aux_main_y = W::COLUMN.0 + col_h - aux_rows.main;
                 scrollbar_column(ui, l.aux_x() + aux_w + 0.5, aux_main_y, status_y, aux_cells_h, aux_rows.total(), 0.0, None, true);
@@ -406,7 +403,6 @@ fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
     const ROW_ICON: Rgba = Rgba::rgb8(246, 201, 91);
     const ROW_ICON_EDGE: Rgba = Rgba::rgb8(44, 46, 48);
     let main_y = r.h - rows.main;
-    let nav = |c: Control| ControlId { strip: navigator::NAV_ID.into(), control: c };
     // Measured on p1 and the 1470-pt user shot: the cells column is (76, 80, 83) between a 1-pt
     // channel_strip_separator_line and a black right edge (x 487, against the first strip's own
     // black edge) with a half-point shade before it.
@@ -433,7 +429,7 @@ fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
                     ui.fill(Rect::new(icon.x + 1.0, icon.y + 1.0, 14.0, 6.0), ROW_ICON);
                     ui.fill(Rect::new(icon.x + 1.0, icon.y + 8.0, 14.0, 6.0), ROW_ICON);
                 }
-                ui.hit(Rect::new(0.0, y, r.w, HEADER_H), nav(Control::Section(sec)), HitKind::Toggle);
+                ui.hit(Rect::new(0.0, y, r.w, HEADER_H), ControlId { strip: navigator::NAV_ID.into(), control: Control::Section(sec) }, HitKind::Toggle);
             }
         });
         ui.clip(None);
@@ -639,6 +635,9 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
         }
         StripKind::Aux => {
             ui.fill(Rect::new(0.0, 0.0, STRIP_W, main_strip::HEIGHT), AUX_MAIN_BG);
+            if let Some(bottom) = s.aux_bottom_skin() {
+                ui.background(bottom, Rect::new(0.0, 0.0, STRIP_W, g.label.y));
+            }
             ui.fill(Rect::new(0.0, 0.0, STRIP_W, 2.0), SEPARATOR);
             if pos.index > 0 {
                 ui.fill(Rect::new(0.0, 5.0, 2.0, g.label.y - 10.0), SEPARATOR);
@@ -647,11 +646,12 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
     }
     if let Some(p) = g.pans {
         let half = (p.w / 2.0).floor();
+        let pan = s.pan_skin();
         if s.stereo {
-            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x, p.y, half, p.h), cid(s, Control::PanL), Some(0.0));
-            ui.knob("Pan-Black", st.pan_r, Rect::new(p.x + half, p.y, half, p.h), cid(s, Control::PanR), Some(1.0));
+            ui.knob(pan, st.pan_l, Rect::new(p.x, p.y, half, p.h), cid(s, Control::PanL), Some(0.0));
+            ui.knob(pan, st.pan_r, Rect::new(p.x + half, p.y, half, p.h), cid(s, Control::PanR), Some(1.0));
         } else {
-            ui.knob("Pan-Black", st.pan_l, Rect::new(p.x + (half / 2.0).floor(), p.y, half, p.h), cid(s, Control::PanL), Some(0.5));
+            ui.knob(pan, st.pan_l, Rect::new(p.x + (half / 2.0).floor(), p.y, half, p.h), cid(s, Control::PanL), Some(0.5));
         }
     }
     if let Some(r) = g.solo_mute {
@@ -669,8 +669,7 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
         ui.toggle("Switch", Some("MONO"), st.mono, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::Mono), None);
         ui.toggle("Switch-Red", Some("MUTE"), st.mute, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::Mute), None);
     }
-    let fader_key = if s.kind == StripKind::Aux { "Main-Bus-Fader" } else { "Main-Input-Fader" };
-    ui.fader_and_meters(fader_key, s.stereo, st.fader, meters, &st.readout, g.fader_meters, cid(s, Control::Fader));
+    ui.fader_and_meters(s.fader_skin(), s.stereo, st.fader, meters, &st.readout, g.fader_meters, cid(s, Control::Fader));
     name_plate(ui, model, s, g.label);
 }
 

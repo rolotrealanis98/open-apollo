@@ -100,6 +100,7 @@ fn section_toggle_collapses_the_input_row() {
     assert!(!view.sections.inputs);
     let (hits, _) = build(&assets, &model, &view);
     let slot = find(&hits, "in0", &Control::Insert(0)).unwrap().rect;
+    // Collapsed = header only; with Sends open the stack still overflows and scrolls from the top.
     assert_eq!(slot.y, 72.0 + 5.0 + 22.0 + 26.0 + 6.0, "collapsed = header only");
     // Input sends are reachable now (mini sends of the expanded Sends row).
     assert!(find(&hits, "in0", &Control::SendMute(0)).is_some());
@@ -158,6 +159,7 @@ fn session_navigator_scrolls_many_strips() {
             stereo: false,
             preamp_layout: None,
             shows_sr_convert: false,
+            console_model: None,
         };
         model.inputs.push(s);
     }

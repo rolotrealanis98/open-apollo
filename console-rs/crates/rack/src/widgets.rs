@@ -231,9 +231,10 @@ impl Ui<'_> {
             let mut fstyle = ui.style("faders", fader_key);
             fstyle.color = fcolor;
             for (label, db) in scales::FADER_MARKS {
-                let y = (g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32).floor();
-                ui.fill(Rect::new(g.fader_marks.x, y, 4.0, 1.0), fcolor);
-                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 6.0, y - 4.75, 20.0, 10.0), Align::Left);
+                // Ticks sit on whole points; the numbers follow the unrounded taper position.
+                let exact = g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32;
+                ui.fill(Rect::new(g.fader_marks.x, exact.floor(), 4.0, 1.0), fcolor);
+                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 6.0, exact - 4.25, 20.0, 10.0), Align::Left);
             }
             // Gain button separator (0x18141ea20, no polarity toggle): a dotted 1-pt line at
             // (value.x + 6, value.y − 3), value = (well.x, well.bottom − 20); white 0.15 dots every 2 pt.
