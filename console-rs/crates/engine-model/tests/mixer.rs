@@ -360,3 +360,89 @@ fn read_only_connection_sends_nothing() {
     assert_eq!(m.main(&mic).fader, 0.2);
     assert_eq!(m.store().writer().sent_count(), 0);
 }
+
+/// The UI-surface methods read the x4 capture (2 active cues, HP 1/2, monitor with dim).
+#[test]
+fn surface_data_from_the_capture() {
+    let m = offline();
+    let a1 = m.inputs()[0].clone();
+    let sends = m.input_sends(&a1);
+    let names: Vec<&str> = sends.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["AUX 1", "AUX 2", "CUE 1", "CUE 2"], "CueBusCount 2 hides CUE 3/4");
+    assert!(m.send_pre(&a1, 0).is_some());
+    assert_eq!(m.input_sources(&a1), ["LINE", "MIC", "DANTE"]);
+    assert!(m.input_sources(&m.inputs()[3]).is_empty(), "no preamp, no picker");
+
+    let st = m.status();
+    assert_eq!(st.sample_rate, Some(48_000));
+    assert_eq!(st.clock_source.as_deref(), Some("Internal"));
+    assert_eq!(st.tempo, 120.0);
+    let set = m.engine_settings();
+    assert_eq!(set.sample_rates.len(), 6);
+    assert_eq!(set.clock_sources, ["Internal", "S/PDIF"]);
+    assert!(!set.writes_enabled);
+
+    let cues = m.cue_outputs();
+    assert_eq!(cues.len(), 2);
+    assert_eq!(cues[0].name, "CUE 1");
+    assert!(!cues[0].source_cue, "MixInSource mon");
+    let hps = m.headphone_outputs();
+    assert_eq!(hps[0].name, "HP 1");
+    assert_eq!(hps[0].options[hps[0].source], "CUE 1");
+    let mon = m.monitor_options();
+    assert_eq!(mon.dim, Some(false));
+    assert_eq!(mon.dim_readout, "-17 dB");
+    assert_eq!(mon.talkback, Some(false));
+}
+
+/// Surface controls write the paths in ui-to-path.md (offline: local values move).
+#[test]
+fn surface_actions_move_local_values() {
+    let mut m = offline();
+    let a1 = m.inputs()[0].clone();
+    let tap = |c: Control| Action::Tap(id(&a1, c));
+    m.apply(&tap(Control::InputSource(1)));
+    assert_eq!(m.preamp(&a1).unwrap().source, "MIC");
+    m.apply(&Action::Toggle(id(&a1, Control::Isolate)));
+    assert!(m.isolated(&a1));
+    let pre = m.send_pre(&a1, 0).unwrap();
+    m.apply(&Action::Toggle(id(&a1, Control::SendPre(0))));
+    assert_eq!(m.send_pre(&a1, 0), Some(!pre));
+    m.apply(&Action::Toggle(id(&a1, Control::SendMute(2))));
+    assert!(m.input_sends(&a1)[2].muted);
+    m.apply(&Action::Set(id(&a1, Control::SendLevel(1)), 0.5));
+    assert_eq!(m.input_sends(&a1)[1].level, 0.5);
+
+    m.set_text(&id(&a1, Control::Insert(0)), "UAD Pultec EQP-1A");
+    // Loading writes EffectName only (as Console does); Power keeps the slot's value.
+    let InsertState::Loaded { name, power } = m.inserts(&a1)[0].clone() else { panic!("not loaded") };
+    assert_eq!(name, "UAD Pultec EQP-1A");
+    m.apply(&tap(Control::InsertPower(0)));
+    assert!(matches!(m.inserts(&a1)[0], InsertState::Loaded { power: p, .. } if p != power));
+    let empty = 1 + m.inserts(&a1)[1..].iter().position(|s| *s == InsertState::Empty).expect("an empty slot");
+    m.apply(&tap(Control::InsertCopy(0)));
+    m.apply(&tap(Control::InsertCopy(empty as u8)));
+    assert!(matches!(&m.inserts(&a1)[empty], InsertState::Loaded { name, .. } if name == "UAD Pultec EQP-1A"));
+    m.apply(&tap(Control::InsertRemove(0)));
+    assert_eq!(m.inserts(&a1)[0], InsertState::Empty);
+    assert!(m.take_taps().is_empty(), "surface taps are not plug-in opens");
+
+    m.set_text(&id(&a1, Control::Name), "Vox");
+    assert_eq!(m.main(&a1).name, "Vox");
+    let g = |c: Control| ControlId { strip: "global".into(), control: c };
+    m.apply(&Action::Tap(g(Control::SampleRate(3))));
+    assert_eq!(m.status().sample_rate, Some(96_000));
+    m.apply(&Action::Tap(g(Control::ClockSource(1))));
+    assert_eq!(m.status().clock_source.as_deref(), Some("S/PDIF"));
+    m.apply(&Action::Tap(g(Control::AllRecordPreEffects(true))));
+    assert!(m.inputs().iter().all(|s| m.records_pre_effects(s)));
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Toggle(mon(Control::MonitorDim)));
+    assert_eq!(m.monitor_options().dim, Some(true));
+    m.apply(&Action::Toggle(mon(Control::CueSource(0))));
+    assert!(m.cue_outputs()[0].source_cue);
+    m.apply(&Action::Tap(mon(Control::HeadphoneSource { output: 0, option: 0 })));
+    assert_eq!(m.headphone_outputs()[0].options[m.headphone_outputs()[0].source], "MON");
+    m.apply(&Action::Toggle(ControlId { strip: "settings".into(), control: Control::WritesEnabled }));
+    assert!(m.engine_settings().writes_enabled);
+}

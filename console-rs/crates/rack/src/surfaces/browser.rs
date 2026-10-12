@@ -186,7 +186,8 @@ fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     y += group_h;
     if b.group_open {
         if shown.is_empty() {
-            ui.text("No matching plug-ins", Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4)), Rect::new(r.x, y, r.w, 30.0), Align::Center);
+            let msg = if catalog.is_empty() { "Plug-in catalog not loaded" } else { "No matching plug-ins" };
+            ui.text(msg, Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4)), Rect::new(r.x, y, r.w, 30.0), Align::Center);
         }
         let name_style = Ui::plain_style("Helvetica", if b.large_rows { 12.0 } else { 11.0 }, true, Rgba::WHITE.with_alpha(0.88));
         for &i in &shown {
