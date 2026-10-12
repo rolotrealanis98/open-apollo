@@ -2,6 +2,7 @@ struct Globals { viewport: vec2<f32>, _pad: vec2<f32> };
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
+@group(1) @binding(2) var glyphs: texture_2d<f32>;
 
 struct VsIn {
     @location(0) pos: vec2<f32>,
@@ -27,14 +28,19 @@ fn vs_main(v: VsIn) -> VsOut {
     return o;
 }
 
-// Textures are premultiplied RGBA (mode 0) or an R8 glyph mask (mode 1). `color` is
-// straight alpha; output is premultiplied.
+// mode 0: premultiplied RGBA image × tint; mode 1: R8 glyph coverage (atlas, binding 2) × colour;
+// mode 2: flat colour. `color` is straight alpha; output is premultiplied. Both textures are
+// sampled unconditionally (uniform control flow) so fills, text and one image share a draw call.
 @fragment
 fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
     let s = textureSample(tex, samp, i.uv);
-    if (i.mode > 0.5) {
-        let a = s.r * i.color.a;
-        return vec4<f32>(i.color.rgb * a, a);
+    let g = textureSample(glyphs, samp, i.uv).r;
+    let pm = vec4<f32>(i.color.rgb * i.color.a, i.color.a);
+    if (i.mode > 1.5) {
+        return pm;
     }
-    return s * vec4<f32>(i.color.rgb * i.color.a, i.color.a);
+    if (i.mode > 0.5) {
+        return pm * g;
+    }
+    return s * pm;
 }

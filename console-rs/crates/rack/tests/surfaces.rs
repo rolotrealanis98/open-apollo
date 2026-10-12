@@ -195,10 +195,17 @@ fn browser_matches_console_geometry() {
     // List viewport below the hint, 5 pt inside the well; groups and 48 pt rows.
     let list = scrolls.iter().find(|s| s.target == ScrollTarget::Browser).expect("list");
     assert_eq!((list.rect.x, list.rect.y, list.rect.w, list.rect.h), (5.0, 330.0, 335.0, 670.0));
-    assert_eq!(rect(Control::BrowserGroupReveal), (5.0, 330.0, 317.0, 30.0));
+    assert_eq!(rect(Control::BrowserGroupReveal), (5.0, 330.0, 317.0, 32.0));
     let first = model.plugin_catalog().iter().position(|p| p.enabled).expect("an active plug-in");
-    assert_eq!(rect(Control::BrowserItem(first as u16)), (5.0, 360.0, 317.0, 48.0));
-    assert!(find(&hits, "browser", &Control::BrowserInactiveReveal).is_some());
+    assert_eq!(rect(Control::BrowserItem(first as u16)), (5.0, 362.0, 317.0, 48.0));
+    // Demo-able plug-ins (DEMO badge) close the "Universal Audio" group after the licensed
+    // ones (refpairs/p2); only the rest go to "Universal Audio (Inactive)".
+    let catalog = model.plugin_catalog();
+    let licensed = catalog.iter().filter(|p| p.enabled).count();
+    let first_demo = catalog.iter().position(|p| !p.enabled && p.badge == Some(rack::PluginBadge::Demo)).expect("a demo-able plug-in");
+    assert_eq!(rect(Control::BrowserItem(first_demo as u16)).1, 362.0 + 48.0 * licensed as f32);
+    assert!(catalog.iter().all(|p| p.enabled || p.badge == Some(rack::PluginBadge::Demo)));
+    assert!(find(&hits, "browser", &Control::BrowserInactiveReveal).is_none());
     let thumb = rect(Control::BrowserScroll);
     assert_eq!((thumb.0, thumb.1, thumb.2), (322.0, 330.0, 18.0));
 }
