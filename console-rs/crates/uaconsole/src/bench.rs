@@ -74,6 +74,10 @@ pub fn render_png(
         for c in taps {
             let _ = view.route(tap(c.clone()), model);
         }
+        // The status bar TEMPO field (loads the tempo into the TEMPO window's field).
+        if what == "tempo" {
+            let _ = view.route(Action::Tap(ControlId { strip: "status".into(), control: Control::StatusTempo }), model);
+        }
     }
     let (w, h) = layout_for(model, &view).size();
     if let Some(spec) = menu {
