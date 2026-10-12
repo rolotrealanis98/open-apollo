@@ -49,6 +49,8 @@ fn console_subscriptions_vs_ours() {
         "missing": missing,
         "missing_but_in_x4_12_tree": missing_in_tree,
         "extra": extra,
+        "ours": ours,
+        "console": console,
     });
     std::fs::write(out_dir().join("subscriptions.json"), serde_json::to_string_pretty(&report).unwrap()).unwrap();
     eprintln!(
