@@ -104,6 +104,14 @@ pub trait MixerModel {
     fn pump(&mut self) -> bool {
         false
     }
+    /// The concrete model, for hosts that need more than this trait (plug-in windows reach the
+    /// engine store through it). None by default.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
 }
 
 /// Reproduces console-main-1.png offline; actions edit local state.

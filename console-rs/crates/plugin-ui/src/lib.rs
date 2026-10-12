@@ -14,6 +14,7 @@
 
 #[cfg(feature = "bridge")]
 pub mod bridge;
+pub mod engine;
 pub mod generic;
 pub mod library;
 pub mod meters;
@@ -30,7 +31,8 @@ pub use generic::GenericPanel;
 pub use library::{Entry, PluginSpecLibrary, SpecLocator};
 pub use meters::MeterFeed;
 pub use panel::PluginPanel;
-pub use params::{MockEvent, MockParam, MockParams, ParamSource};
+pub use engine::EngineSlot;
+pub use params::{MockEvent, MockParam, MockParams, ParamSnapshot, ParamSource};
 pub use paths::{ParamPaths, SlotPath};
 pub use spec::PluginSpec;
 pub use web::{GuiQuery, LunaComponent, LunaLibrary, LunaLocator};

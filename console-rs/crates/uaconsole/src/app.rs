@@ -17,7 +17,7 @@ use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::frame::{Frame, FrameTimes, Hud, build_frame, layout_for};
 use crate::input::{ClickTracker, Command, PIXELS_PER_LINE, shortcut, wheel_actions};
-use crate::overlay::{OverlayStack, PlaceholderHook, PointerEvent, Routed};
+use crate::overlay::{OverlayStack, PointerEvent, Routed};
 use crate::settings::Settings;
 use crate::source::{ModelSource, OpenedModel};
 use crate::view::{Transform, View, ViewMode, zoom_in, zoom_out};
@@ -90,18 +90,20 @@ pub fn run(assets: Assets, opts: Options) -> Result<(), String> {
 impl App {
     pub fn new(assets: Assets, opts: Options) -> Self {
         let OpenedModel {
-            model,
+            mut model,
             live_meters,
             label,
         } = opts.source.open().unwrap_or_else(|e| {
             eprintln!("uaconsole: {e}; showing preview data");
             crate::source::preview("preview")
         });
-        // TODO(plugin-ui): replace PlaceholderHook with the plugin-ui crate's hook.
-        let mut overlays = OverlayStack::new(Box::new(PlaceholderHook));
+        let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
         if let Some((strip, slot)) = &opts.open_plugin {
-            overlays.on_open_plugin(strip, *slot, &*model);
+            if !overlays.on_open_plugin(strip, *slot, &*model) {
+                eprintln!("uaconsole: --open-plugin {strip}:{slot}: no plug-in loaded there");
+            }
         }
+        overlays.sync(&mut *model);
         let area = houston::Rect::new(0.0, 0.0, 1.0, 1.0);
         let frame = build_frame(&assets, &*model, opts.compact, &mut overlays, area, None);
         Self {
@@ -179,6 +181,7 @@ impl App {
             text,
             px_per_pt: tf.scale,
         });
+        self.overlays.sync(&mut *self.model);
         self.frame = build_frame(
             &self.assets,
             &*self.model,

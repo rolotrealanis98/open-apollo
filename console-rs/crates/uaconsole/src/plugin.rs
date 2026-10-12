@@ -1,0 +1,286 @@
+//! Plug-in windows from the plugin-ui crate as overlay panels.
+//!
+//! Tapping a loaded insert (or Unison) slot opens UAD Console's plug-in window
+//! ([`plugin_ui::PluginWindow`]): the title bar, the UAPW toolbar and the plug-in's panel (its
+//! ConsoleLink spec, else the generic parameter list). With an engine model the panel reads and
+//! writes the slot's `parameters/<k>` through the engine store (writes obey the store's gate,
+//! read-only by default); with preview data it edits local values.
+//!
+//! UA's HTML GUIs (lunacomponents) need a webview and a WebSocket bridge (plugin-ui's `webview`
+//! and `bridge` features, WEBBRIDGE.md); until the app hosts them the window shows the spec panel
+//! for those plug-ins too.
+
+use std::sync::Arc;
+
+use engine_model::EngineMixer;
+use houston::{ImageCache, Rect};
+use plugin_ui::{Content, EngineSlot, LunaLibrary, MockParams, ParamSnapshot, PluginSpecLibrary, PluginWindow, WindowEvent};
+use rack::model::{InsertState, StripInfo};
+use rack::{Action, Control, ControlId, Hit, Interaction, MixerModel, PluginWindowButton as B, Ui};
+use ua_engine::InsertPaths;
+
+use crate::overlay::{Panel, PanelResponse, PluginHook, PointerEvent, UNISON_SLOT};
+
+pub struct PluginUiHook {
+    specs: Option<Arc<PluginSpecLibrary>>,
+    luna: Arc<LunaLibrary>,
+    /// Host UA's HTML GUIs when one matches (needs the webview; off until the app embeds it).
+    pub prefer_web: bool,
+}
+
+impl PluginUiHook {
+    /// Finds the spec folder (and registers it with `images`, which gfx draws through) and the
+    /// lunacomponents.
+    pub fn new(images: &ImageCache) -> Self {
+        let specs = PluginSpecLibrary::locate().map(Arc::new);
+        match &specs {
+            Some(lib) => {
+                lib.attach(images);
+                log_line(&format!("plug-in specs: {} in {}", lib.entries.len(), lib.folder.display()));
+            }
+            None => log_line("plug-in specs: none found (generic parameter lists only)"),
+        }
+        Self { specs, luna: Arc::new(LunaLibrary::locate()), prefer_web: false }
+    }
+}
+
+fn log_line(s: &str) {
+    eprintln!("uaconsole: {s}");
+}
+
+fn engine(model: &dyn MixerModel) -> Option<&EngineMixer> {
+    model.as_any()?.downcast_ref()
+}
+
+fn engine_mut(model: &mut dyn MixerModel) -> Option<&mut EngineMixer> {
+    model.as_any_mut()?.downcast_mut()
+}
+
+/// A strip by id; `inN` / `auxN` (the preview's ids) also name the model's Nth input / aux.
+fn resolve_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
+    let inputs = model.inputs();
+    let auxes = model.auxes();
+    if let Some(s) = inputs.iter().chain(&auxes).find(|s| &*s.id == id) {
+        return Some(s.clone());
+    }
+    let nth = |list: &[StripInfo], rest: &str| rest.parse::<usize>().ok().and_then(|n| list.get(n).cloned());
+    match (id.strip_prefix("aux"), id.strip_prefix("in")) {
+        (Some(n), _) => nth(&auxes, n),
+        (_, Some(n)) => nth(&inputs, n),
+        _ => None,
+    }
+}
+
+impl PluginHook for PluginUiHook {
+    fn on_open_plugin(&mut self, strip_id: &str, slot: u8, model: &dyn MixerModel) -> Option<Box<dyn Panel>> {
+        let strip = resolve_strip(model, strip_id)?;
+        let state = if slot == UNISON_SLOT { model.unison(&strip) } else { model.inserts(&strip).get(slot as usize).cloned()? };
+        // An empty slot opens Console's plug-in browser, not a window.
+        let InsertState::Loaded { name, power } = state else { return None };
+        let channel = model.main(&strip).name;
+        let channel = if channel.is_empty() { strip.title.clone() } else { channel };
+        let which = if slot == UNISON_SLOT { "Unison".to_string() } else { format!("Insert {}", slot as u32 + 1) };
+        let paths = engine(model).and_then(|e| e.insert_slot(&ControlId { strip: strip.id.clone(), control: Control::Insert(slot) }));
+        let slot_path = paths.as_ref().map(|p| p.base.clone()).unwrap_or_else(|| format!("{}/effects/{slot}", strip.id));
+        let mut window = PluginWindow::open(slot_path, &name, &format!("{channel}, {which}"), self.specs.as_deref(), Some(&self.luna), self.prefer_web);
+        window.chrome.power = power;
+        if !self.prefer_web {
+            if let Some(gui) = self.luna.component_for_effect(&name) {
+                log_line(&format!("{name}: UA's web GUI ({}) is available; showing the {} panel", gui.id, window.content.kind()));
+            }
+        }
+        let offline = match (&paths, &window.content) {
+            (Some(_), _) => None,
+            (None, Content::Spec(p)) => Some(MockParams::from_spec(&p.spec)),
+            (None, _) => Some(MockParams::default()),
+        };
+        let snapshot = match (&offline, engine(model), &paths) {
+            (Some(m), ..) => ParamSnapshot::capture(m),
+            (None, Some(e), Some(p)) => ParamSnapshot::capture(&EngineSlot::peek(e.store(), p.clone()).view(e.store())),
+            _ => ParamSnapshot::default(),
+        };
+        Some(Box::new(WindowPanel { window, pending: paths, engine: None, offline, snapshot, hits: Vec::new(), interaction: Interaction::default(), origin: (0.0, 0.0) }))
+    }
+}
+
+/// One open plug-in window.
+pub struct WindowPanel {
+    window: PluginWindow,
+    /// The engine slot, opened (refresh + subscriptions) on the first sync.
+    pending: Option<InsertPaths>,
+    engine: Option<EngineSlot>,
+    /// Local values when there is no engine (preview data).
+    offline: Option<MockParams>,
+    /// What the last sync read, for drawing.
+    snapshot: ParamSnapshot,
+    hits: Vec<Hit>,
+    interaction: Interaction,
+    origin: (f32, f32),
+}
+
+impl WindowPanel {
+    fn refresh(&mut self, model: &mut dyn MixerModel) {
+        if let Some(e) = engine_mut(model) {
+            let store = e.store_mut();
+            if self.engine.is_none() {
+                if let Some(paths) = self.pending.take() {
+                    self.engine = Some(EngineSlot::open(store, paths));
+                }
+            }
+            if let Some(slot) = &mut self.engine {
+                slot.sync(store);
+                self.snapshot = ParamSnapshot::capture(&slot.view(store));
+                if let Some(p) = slot.power(store) {
+                    self.window.chrome.power = p;
+                }
+                self.window.chrome.preset = slot.preset(store).unwrap_or_else(|| "Default".into());
+            }
+        } else if let Some(m) = &self.offline {
+            self.snapshot = ParamSnapshot::capture(m);
+        }
+    }
+
+    fn apply(&mut self, action: &Action, model: &mut dyn MixerModel) -> Option<WindowEvent> {
+        if let (Some(slot), Some(e)) = (&self.engine, engine_mut(model)) {
+            let mut params = slot.view_mut(e.store_mut());
+            return self.window.apply(action, &mut params);
+        }
+        match &mut self.offline {
+            Some(m) => self.window.apply(action, m),
+            None => self.window.apply(action, &mut self.snapshot),
+        }
+    }
+
+    fn button(&mut self, b: B, model: &mut dyn MixerModel) {
+        match b {
+            B::Power => {
+                let on = !self.window.chrome.power;
+                match (&self.engine, engine_mut(model)) {
+                    (Some(slot), Some(e)) => slot.set_power(e.store_mut(), on),
+                    _ => self.window.chrome.power = on,
+                }
+            }
+            other => log_line(&format!("plug-in window: {other:?} is not implemented yet")),
+        }
+    }
+
+    fn close(&mut self, model: &mut dyn MixerModel) {
+        if let (Some(slot), Some(e)) = (&mut self.engine, engine_mut(model)) {
+            slot.close(e.store_mut());
+        }
+    }
+}
+
+impl Panel for WindowPanel {
+    fn size(&self) -> (f32, f32) {
+        self.window.size(&self.snapshot)
+    }
+
+    fn build(&mut self, ui: &mut Ui, rect: Rect) {
+        self.origin = (rect.x, rect.y);
+        let first = ui.hits.len();
+        self.window.build(ui, self.origin, &self.snapshot);
+        // The stack drops panel hits from the frame; keep ours for `pointer`.
+        self.hits = ui.hits[first..].to_vec();
+    }
+
+    fn pointer(&mut self, ev: PointerEvent, model: &mut dyn MixerModel) -> PanelResponse {
+        let (dx, dy) = self.origin;
+        let actions = match ev {
+            PointerEvent::Down { x, y, double } => self.interaction.pointer_down(&self.hits, x + dx, y + dy, double),
+            PointerEvent::Move { x, y, fine } => self.interaction.pointer_move(x + dx, y + dy, fine),
+            PointerEvent::Up { .. } => self.interaction.pointer_up(),
+            PointerEvent::Wheel { .. } => return PanelResponse::Ignored,
+        };
+        if actions.is_empty() {
+            return if matches!(ev, PointerEvent::Down { .. }) { PanelResponse::Handled } else { PanelResponse::Ignored };
+        }
+        let mut close = false;
+        for a in &actions {
+            match self.apply(a, model) {
+                Some(WindowEvent::Close) => close = true,
+                Some(WindowEvent::Button(b)) => self.button(b, model),
+                _ => {}
+            }
+        }
+        self.refresh(model);
+        if close {
+            self.close(model);
+            return PanelResponse::Close;
+        }
+        PanelResponse::Handled
+    }
+
+    fn sync(&mut self, model: &mut dyn MixerModel) {
+        self.refresh(model);
+    }
+
+    /// Console's plug-in windows are independent windows: the mixer stays usable.
+    fn modal(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    use houston::Resources;
+    use rack::{Assets, PreviewMixer};
+
+    fn assets() -> Assets {
+        let r = Resources { root: PathBuf::from("/nonexistent"), console_version: None };
+        Assets::from_parts(r.clone(), houston::Appearance::default(), Arc::new(ImageCache::new(r)))
+    }
+
+    fn fixture() -> EngineMixer {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
+        EngineMixer::from_snapshot(path).expect("fixture")
+    }
+
+    #[test]
+    fn opens_loaded_slots_only() {
+        let assets = assets();
+        let mut hook = PluginUiHook::new(&assets.images);
+        let model = fixture();
+        assert!(hook.on_open_plugin("in0", 0, &model).is_none(), "empty slot");
+        assert!(hook.on_open_plugin("in0", 1, &model).is_some(), "Vitalizer on in0 insert 2");
+        assert!(hook.on_open_plugin("/devices/0/inputs/1/effects/0", 0, &model).is_none(), "not a strip id");
+        assert!(hook.on_open_plugin("/devices/0/inputs/1", 0, &model).is_some(), "Curve Bender");
+        assert!(hook.on_open_plugin("in0", 1, &PreviewMixer::default()).is_none(), "preview inserts are empty");
+    }
+
+    #[test]
+    fn panel_reads_engine_and_writes_through_the_gate() {
+        let assets = assets();
+        let mut hook = PluginUiHook::new(&assets.images);
+        let mut model = fixture();
+        let mut panel = hook.on_open_plugin("in0", 1, &model).unwrap();
+        panel.sync(&mut model);
+        let (w, h) = panel.size();
+        let mut ui = Ui::new(&assets);
+        panel.build(&mut ui, Rect::new(100.0, 50.0, w, h));
+        // The title and the engine-backed parameter list (spec panel or generic list).
+        let texts: Vec<String> = ui.list.items.iter().filter_map(|d| if let rack::Draw::Text { text, .. } = d { Some(text.clone()) } else { None }).collect();
+        assert!(texts.iter().any(|t| t.ends_with(", Insert 2")), "{texts:?}");
+        // Drag the first parameter drag target up by 100 pt: one gesture, local only (gate closed).
+        let drag = ui.hits.iter().find(|h| matches!(h.id.control, Control::PluginParam(_))).cloned().expect("a parameter hit");
+        let Control::PluginParam(k) = drag.id.control else { unreachable!() };
+        let path = format!("{}/parameters/{k}/NormalizedValue", drag.id.strip);
+        let before = model.store().value(&path).and_then(|v| v.as_f64()).unwrap();
+        let (cx, cy) = drag.rect.center();
+        for ev in [PointerEvent::Down { x: cx - 100.0, y: cy - 50.0, double: false }, PointerEvent::Move { x: cx - 100.0, y: cy - 150.0, fine: false }, PointerEvent::Up { x: cx - 100.0, y: cy - 150.0 }] {
+            assert_ne!(panel.pointer(ev, &mut model), PanelResponse::Ignored);
+        }
+        let after = model.store().value(&path).and_then(|v| v.as_f64()).unwrap();
+        assert!(after > before || after == 1.0, "{before} → {after}");
+        assert_eq!(model.store().writer().sent_count(), 0, "read-only by default");
+        // Close releases the parameter subscriptions.
+        let close = ui.hits.iter().find(|h| h.id.control == Control::PluginWindow(B::Close)).unwrap().rect;
+        let (x, y) = close.center();
+        assert!(model.store().retained_subscriptions().count() > 0);
+        assert_eq!(panel.pointer(PointerEvent::Down { x: x - 100.0, y: y - 50.0, double: false }, &mut model), PanelResponse::Close);
+        assert_eq!(model.store().retained_subscriptions().count(), 0);
+    }
+}

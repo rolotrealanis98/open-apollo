@@ -40,30 +40,47 @@ pub enum Control {
     PluginWindow(PluginWindowButton),
 }
 
-/// Plug-in window chrome buttons (UAD Console's `Rack_PluginWindow` / UAPW toolbar).
+/// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the
+/// `Rack_NewPlugInHeader` toolbar (element ids in comments) and `Rack_PlugInFooter`.
 /// Append-only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PluginWindowButton {
+    /// Title-bar close.
     Close,
-    /// ⋮ menu at the toolbar's left.
-    More,
+    /// `channel_strip`: rack-controls / plug-in GUI view toggle.
+    RackView,
+    /// `assign` (⋮): the insert menu.
+    Assign,
+    /// `prev_preset`.
     PresetPrev,
+    /// `next_preset`.
     PresetNext,
-    /// The current-preset field (opens the preset browser).
-    Preset,
-    /// Slot power / bypass.
+    /// `presets`: the current-preset field; opens the preset browser.
+    Presets,
+    /// `sidechain`: sidechain source picker.
+    Sidechain,
+    /// `power`: slot bypass.
     Power,
-    /// The engine button at the toolbar's right ("UAD-2 •••").
-    Engine,
-    Favorite,
-    Compare,
+    /// `in_out`.
+    InOut,
+    /// `a` / `b`: compare.
+    CompareA,
+    CompareB,
+    /// `copy` / `paste`.
     Copy,
     Paste,
+    /// `mixer`: multi-out mixer.
+    Mixer,
+    /// `more` (•••, "UAD-2 •••"): scale, overflowed items, Resize, Apply To All, Help & Video.
+    More,
+    /// Footer `state_button` (license/device status).
+    FooterState,
+    /// Footer `action_button` (BUY / START DEMO).
+    FooterAction,
+    /// Preset browser: favourite toggle.
+    Favorite,
+    /// "Help & Video".
     Help,
-    /// Rack (vertical) / panel view toggle.
-    RackView,
-    /// The footer status plate.
-    Status,
 }
 
 #[derive(Clone, Debug, PartialEq)]

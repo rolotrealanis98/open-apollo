@@ -156,3 +156,58 @@ impl ParamSource for MockParams {
         self.events.push(MockEvent::End);
     }
 }
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SnapParam {
+    pub name: String,
+    pub value: Option<f64>,
+    pub display: Option<String>,
+    pub steps: Vec<String>,
+}
+
+/// A copy of a source's parameters, for drawing where the live source is not reachable (the app's
+/// overlay panels build without the model). `set` moves the copy's value only; `begin/end` are
+/// no-ops. Refresh it with [`capture`](Self::capture) each frame.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ParamSnapshot {
+    pub params: std::collections::BTreeMap<u16, SnapParam>,
+}
+
+impl ParamSnapshot {
+    pub fn capture(src: &dyn ParamSource) -> Self {
+        let params = src
+            .indices()
+            .into_iter()
+            .map(|k| (k, SnapParam { name: src.name(k).unwrap_or_default(), value: src.normalized(k), display: src.display(k), steps: src.steps(k) }))
+            .collect();
+        Self { params }
+    }
+}
+
+impl ParamSource for ParamSnapshot {
+    fn count(&self) -> usize {
+        self.params.len()
+    }
+    fn indices(&self) -> Vec<u16> {
+        self.params.keys().copied().collect()
+    }
+    fn name(&self, k: u16) -> Option<String> {
+        self.params.get(&k).map(|p| p.name.clone())
+    }
+    fn normalized(&self, k: u16) -> Option<f64> {
+        self.params.get(&k).and_then(|p| p.value)
+    }
+    fn display(&self, k: u16) -> Option<String> {
+        self.params.get(&k).and_then(|p| p.display.clone())
+    }
+    fn steps(&self, k: u16) -> Vec<String> {
+        self.params.get(&k).map(|p| p.steps.clone()).unwrap_or_default()
+    }
+    fn begin_gesture(&mut self) {}
+    fn set(&mut self, k: u16, v: f64) {
+        if let Some(p) = self.params.get_mut(&k) {
+            p.value = Some(clamp01(v));
+        }
+    }
+    fn end_gesture(&mut self) {}
+}

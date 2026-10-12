@@ -6,6 +6,7 @@ mod cli;
 mod frame;
 mod input;
 mod overlay;
+mod plugin;
 mod settings;
 mod source;
 mod view;

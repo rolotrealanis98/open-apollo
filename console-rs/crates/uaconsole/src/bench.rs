@@ -30,7 +30,7 @@ pub fn render_png(
     open_plugin: Option<&(String, u8)>,
     out: &Path,
 ) -> Result<(), String> {
-    let mut overlays = OverlayStack::new(Box::new(PlaceholderHook));
+    let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
     if let Some((strip, slot)) = open_plugin {
         overlays.on_open_plugin(strip, *slot, model);
     }

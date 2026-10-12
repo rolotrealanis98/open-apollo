@@ -8,6 +8,7 @@ license.workspace = true
 engine-model = { version = "0.1.0", path = "../engine-model" }
 gfx = { version = "0.1.0", path = "../gfx" }
 houston = { version = "0.1.0", path = "../houston" }
+plugin-ui = { version = "0.1.0", path = "../plugin-ui" }
 rack = { version = "0.1.0", path = "../rack" }
 ua-engine = { version = "0.1.0", path = "../ua-engine" }
 winit = "0.30.13"

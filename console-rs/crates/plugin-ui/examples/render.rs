@@ -105,7 +105,7 @@ fn main() {
             win.chrome.status = arg("--status");
             let size = win.size(&params);
             let layout = win.build(&mut ui, (0.0, 0.0), &params);
-            eprintln!("window: {}×{} pt, content {} at {:?}", size.0, size.1, win.content.kind(), layout.content);
+            eprintln!("window: {}×{} pt, content {} at {:?}", size.0, size.1, win.content.kind(), layout.editor);
             size
         } else if flag("--generic") {
             let g = GenericPanel::new(slot);

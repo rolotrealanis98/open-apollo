@@ -2437,6 +2437,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tungstenite",
+ "ua-engine",
  "webkit2gtk",
  "wry",
 ]
@@ -3551,6 +3552,7 @@ dependencies = [
  "engine-model",
  "gfx",
  "houston",
+ "plugin-ui",
  "rack",
  "ua-engine",
  "winit",

@@ -1,13 +1,19 @@
-//! UAD Console's plug-in window: `Rack_PluginWindow` → `Rack_PluginWindowContent` → the UA
-//! Plug-in Wrapper (UAPW) toolbar above the plug-in, and a status footer. Geometry and art are in
-//! WINDOW.md; the art is Console's `images/uapw/*.png`, loaded from the user's install.
+//! UAD Console's plug-in window, rebuilt from Rack.dll (see WINDOW.md for every rule's source):
 //!
-//! The content area holds UA's HTML GUI (a webview the shell places over
-//! [`WindowLayout::content`]), a spec panel, or the generic list.
+//! ```text
+//! Rack_PluginWindow (juce::DocumentWindow, black, 1-pt border)       W = pw + 4
+//! ├─ title bar (1, 1, W−2, 22): skin Title-Bar, close, "<strip>, Insert n"
+//! └─ Rack_PluginWindowContent (1, 23, cw, ch), black                cw = pw + 2
+//!    ├─ Rack_NewPlugInHeader (0, 0, cw, 32): the UAPW toolbar         ch = ph + 33
+//!    ├─ editor (1, 32, pw, ph): UA's HTML GUI, a spec panel or the list
+//!    └─ Rack_PlugInFooter (0, ch−32, cw, 32), when shown              (+32)
+//! ```
+//!
+//! Art is Console's `images/uapw/*.png` and Appearance skins, from the user's install.
 
 use std::sync::Arc;
 
-use houston::{Rect, Rgba};
+use houston::{Insets, Rect, Rgba};
 use rack::{Action, Align, Control, ControlId, HitKind, PluginWindowButton as B, TextStyle, Ui};
 
 use crate::generic::GenericPanel;
@@ -16,70 +22,25 @@ use crate::panel::{PluginPanel, action_id};
 use crate::params::ParamSource;
 use crate::web::{LunaComponent, LunaLibrary};
 
-/// Chrome geometry in points. See WINDOW.md for provenance.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ChromeMetrics {
-    pub title_h: f32,
-    pub toolbar_h: f32,
-    pub footer_h: f32,
-    /// Content inset from the window's left/right edges.
-    pub side: f32,
-    /// Toolbar buttons: top offset within the toolbar and height.
-    pub button_y: f32,
-    pub button_h: f32,
-    pub more_x: f32,
-    pub more_w: f32,
-    /// Prev, next and the preset field form one group.
-    pub prev_x: f32,
-    pub arrow_w: f32,
-    pub preset_w: f32,
-    pub gap: f32,
-    pub power_w: f32,
-    /// Engine button ("UAD-2 •••"), right-aligned with `right_margin`.
-    pub engine_w: f32,
-    pub right_margin: f32,
-    /// Footer status plate height and horizontal inset.
-    pub plate_h: f32,
-    pub plate_inset: f32,
-    pub min_width: f32,
-}
+pub const BORDER: f32 = 1.0;
+pub const TITLE_H: f32 = 22.0;
+pub const HEADER_H: f32 = 32.0;
+pub const FOOTER_H: f32 = 32.0;
+const BUTTON_Y: f32 = 5.0;
+const BUTTON_H: f32 = 22.0;
 
-/// Measured from the 1.3.1 reference capture (`plugin-window-gtr-ins4.png`, 304 pt wide).
-pub const METRICS: ChromeMetrics = ChromeMetrics {
-    title_h: 23.0,
-    toolbar_h: 30.0,
-    footer_h: 30.0,
-    side: 2.0,
-    button_y: 5.0,
-    button_h: 22.0,
-    more_x: 6.0,
-    more_w: 21.5,
-    prev_x: 33.0,
-    arrow_w: 21.0,
-    preset_w: 110.5,
-    gap: 5.5,
-    power_w: 21.5,
-    engine_w: 58.0,
-    right_margin: 6.0,
-    plate_h: 22.0,
-    plate_inset: 42.0,
-    min_width: 304.0,
-};
+const BLACK: Rgba = Rgba::BLACK;
+const TITLE_TEXT: Rgba = Rgba::rgb8(229, 245, 255);
+const LABEL: Rgba = Rgba { r: 1.0, g: 1.0, b: 1.0, a: 0.86 };
+const LABEL_ON: Rgba = Rgba { r: 1.0, g: 197.0 / 255.0, b: 74.0 / 255.0, a: 0.7 };
+const SHADOW: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.4 };
 
-const WINDOW_BG: Rgba = Rgba::rgb8(64, 66, 69);
-const TITLE_BG: Rgba = Rgba::rgb8(47, 50, 53);
-const TOOLBAR_BG: Rgba = Rgba::rgb8(64, 66, 69);
-const BUTTON_BG: Rgba = Rgba::rgb8(47, 49, 52);
-const CONTENT_BG: Rgba = Rgba::rgb8(20, 21, 22);
-const PLATE_RED: Rgba = Rgba::rgb8(74, 18, 21);
-const TEXT: Rgba = Rgba::rgb8(222, 224, 226);
-
-fn img(name: &str) -> String {
+fn uapw(name: &str) -> String {
     format!("uapw/{name}.png")
 }
 
 pub enum Content {
-    /// UA's HTML GUI; the shell's webview covers [`WindowLayout::content`].
+    /// UA's HTML GUI; the shell's webview covers [`WindowLayout::editor`].
     Web(LunaComponent),
     Spec(PluginPanel),
     Generic(GenericPanel),
@@ -95,34 +56,96 @@ impl Content {
     }
 }
 
-/// Slot state shown by the chrome (from the engine: `<slot>/Preset`, `<slot>/Power`, device status).
+/// Which header items the slot has (Console's visibility predicates; most are [unk] in
+/// WINDOW.md, so the defaults reproduce the 1.3.1 capture of a UAD-2 plug-in).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeaderItems {
+    pub rack_view: bool,
+    pub assign: bool,
+    pub presets: bool,
+    /// Sidechain source label (`SIDECHAIN: {input}`), when the effect has a sidechain.
+    pub sidechain: Option<String>,
+    pub power: bool,
+    pub in_out: bool,
+    pub compare: bool,
+    pub copy_paste: bool,
+    pub mixer: bool,
+    /// Label on the "more" button ("UAD-2" for UAD-2 plug-ins); forces it visible.
+    pub more_label: Option<String>,
+    pub more_forced: bool,
+}
+
+impl Default for HeaderItems {
+    fn default() -> Self {
+        Self {
+            rack_view: false,
+            assign: true,
+            presets: true,
+            sidechain: None,
+            power: true,
+            in_out: false,
+            compare: false,
+            copy_paste: true,
+            mixer: false,
+            more_label: Some("UAD-2".into()),
+            more_forced: false,
+        }
+    }
+}
+
+/// Slot state the chrome shows (engine: `<slot>/Preset`, `<slot>/Power`; status from the
+/// license/device layer).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChromeState {
-    /// Title bar: "<strip name>, Insert <n>" (or "…, Unison").
+    /// "<strip name>, Insert <n>" (or ", Unison").
     pub title: String,
     pub preset: String,
     pub power: bool,
-    /// The engine button's label ("UAD-2").
-    pub engine: String,
-    /// Footer plate text, e.g. "NO UAD-2 DEVICES FOUND"; None hides the plate.
+    pub rack_view: bool,
+    pub compare_b: bool,
+    /// Footer state plate text ("NO UAD-2 DEVICES FOUND"); None hides the footer.
     pub status: Option<String>,
+    /// Footer plate background: 2 = error (red), 3 = blue, else neutral (`SetBgState`).
+    pub status_state: u8,
+    /// Footer action button ("BUY" / "START DEMO"), when shown.
+    pub action: Option<String>,
+    pub items: HeaderItems,
+    /// Close button on the left (macOS Console, the reference capture) or right (Windows).
+    pub close_on_left: bool,
 }
 
 impl Default for ChromeState {
     fn default() -> Self {
-        Self { title: String::new(), preset: "Default".into(), power: true, engine: "UAD-2".into(), status: None }
+        Self {
+            title: String::new(),
+            preset: "Default".into(),
+            power: true,
+            rack_view: false,
+            compare_b: false,
+            status: None,
+            status_state: 2,
+            action: None,
+            items: HeaderItems::default(),
+            close_on_left: true,
+        }
     }
 }
 
-/// Where everything went, in the coordinates `build` drew in.
+/// Everything placed, in the coordinates `build` drew in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowLayout {
     pub frame: Rect,
     pub title_bar: Rect,
-    pub toolbar: Rect,
     pub content: Rect,
-    pub footer: Rect,
+    pub header: Rect,
+    /// Where the plug-in editor goes (the webview's rect for HTML GUIs).
+    pub editor: Rect,
+    pub footer: Option<Rect>,
     pub buttons: Vec<(B, Rect)>,
+    /// Header layout mode 0/1/2 (WINDOW.md §3.3).
+    pub mode: u8,
+    /// Header items that did not fit (reachable from "more").
+    pub overflow: Vec<B>,
 }
 
 impl WindowLayout {
@@ -138,8 +161,100 @@ pub enum WindowEvent {
     Handled,
     /// Close the window.
     Close,
-    /// A chrome button the shell acts on (power → `<slot>/Power`, preset prev/next, …).
+    /// A chrome button the shell acts on: `Power` → `<slot>/Power`, preset prev/next, copy,
+    /// paste, compare, footer buttons, help.
     Button(B),
+}
+
+/// The header's toolbar items, left to right, in header coordinates (WINDOW.md §3.3). Returns
+/// the placed buttons, the layout mode and the items that overflowed into "more".
+pub fn header_layout(cw: f32, items: &HeaderItems) -> (Vec<(B, Rect)>, u8, Vec<B>) {
+    let r = |x: f32, w: f32| Rect::new(x, BUTTON_Y, w, BUTTON_H);
+    // Layout mode: the smallest of {0, 1} whose shown items fit, else 2.
+    let width = |m: u8| {
+        let mut ws = Vec::new();
+        if items.rack_view {
+            ws.push(22.0);
+        }
+        if items.assign {
+            ws.push(22.0);
+        }
+        if items.presets {
+            ws.push(if m == 2 { 153.0 } else { 263.0 });
+        }
+        if items.sidechain.is_some() {
+            ws.push(if m == 0 { 160.0 } else { 22.0 });
+        }
+        for (on, w) in [(items.power, 22.0), (items.in_out, 22.0), (items.compare, 44.0), (items.copy_paste, 80.0), (items.mixer, 102.0)] {
+            if on {
+                ws.push(w);
+            }
+        }
+        5.0 + ws.iter().map(|w| w + 5.0).sum::<f32>()
+    };
+    let mode = (0..2u8).find(|&m| width(m) <= cw).unwrap_or(2);
+
+    let mut out = Vec::new();
+    let mut x = 5.0;
+    if items.rack_view {
+        out.push((B::RackView, r(5.0, 22.0)));
+        x = 32.0;
+    }
+    if items.assign {
+        out.push((B::Assign, r(x, 22.0)));
+        x += 27.0;
+    }
+    if items.presets {
+        let p = if mode == 2 { 110.0 } else { 220.0 };
+        out.extend([(B::PresetPrev, r(x, 22.0)), (B::PresetNext, r(x + 22.0, 21.0)), (B::Presets, r(x + 43.0, p))]);
+        x += 43.0 + p + 5.0;
+    }
+    // Overflowable groups: (buttons as (id, dx, w), group width, advance).
+    let side = if mode == 0 { 160.0 } else { 22.0 };
+    let groups: Vec<(Vec<(B, f32, f32)>, f32, f32)> = [
+        (items.sidechain.is_some(), vec![(B::Sidechain, 0.0, side)], side, side + 5.0),
+        (items.power, vec![(B::Power, 0.0, 22.0)], 22.0, 27.0),
+        (items.in_out, vec![(B::InOut, 0.0, 22.0)], 22.0, 27.0),
+        (items.compare, vec![(B::CompareA, 0.0, 22.0), (B::CompareB, 22.0, 22.0)], 44.0, 49.0),
+        (items.copy_paste, vec![(B::Copy, 0.0, 40.0), (B::Paste, 40.0, 40.0)], 80.0, 85.0),
+        (items.mixer, vec![(B::Mixer, 0.0, 102.0)], 102.0, 107.0),
+    ]
+    .into_iter()
+    .filter(|(on, ..)| *on)
+    .map(|(_, b, w, adv)| (b, w, adv))
+    .collect();
+    let more_w = if items.more_label.is_some() { 58.0 } else { 22.0 };
+    let place = |reserve: f32| {
+        let mut placed = Vec::new();
+        let mut hidden = Vec::new();
+        let mut cx = x;
+        let mut full = false;
+        for (bs, w, adv) in &groups {
+            if !full && (cw - reserve - cx) - 5.0 >= *w {
+                placed.extend(bs.iter().map(|(b, dx, bw)| (*b, r(cx + dx, *bw))));
+                cx += adv;
+            } else {
+                full = true;
+                hidden.extend(bs.iter().map(|(b, ..)| *b));
+            }
+        }
+        (placed, hidden)
+    };
+    // Pass 0 is skipped when "more" is forced (its label, the flag, or A/B shown).
+    let forced = items.more_forced || items.more_label.is_some() || items.compare;
+    let (placed, hidden) = match forced {
+        false => match place(0.0) {
+            (p, h) if h.is_empty() => (p, h),
+            _ => place(27.0),
+        },
+        true => place(if items.more_label.is_some() { 63.0 } else { 27.0 }),
+    };
+    let more = forced || !hidden.is_empty();
+    out.extend(placed);
+    if more {
+        out.push((B::More, r(cw - more_w - 5.0, more_w)));
+    }
+    (out, mode, hidden)
 }
 
 pub struct PluginWindow {
@@ -148,14 +263,13 @@ pub struct PluginWindow {
     pub effect_name: String,
     pub chrome: ChromeState,
     pub content: Content,
-    /// Placeholder overlays for the preset browser and the ⋮ menu (not implemented yet).
-    pub browser_open: bool,
-    pub menu_open: bool,
+    /// Open stub popover: `More` (menu), `Presets` (browser), `Assign` (insert menu).
+    pub popover: Option<B>,
 }
 
 impl PluginWindow {
-    /// Picks the content for `effect_name`: UA's HTML GUI when a lunacomponent matches (and
-    /// `prefer_web`), else a panel spec with controls, else the generic list.
+    /// Picks the content for `effect_name`: UA's HTML GUI when a lunacomponent with images
+    /// matches (and `prefer_web`), else a panel spec with elements, else the generic list.
     pub fn open(
         slot: impl Into<Arc<str>>,
         effect_name: &str,
@@ -173,18 +287,18 @@ impl PluginWindow {
         } else {
             Content::Generic(GenericPanel::new(slot.clone()))
         };
+        let more_label = effect_name.starts_with("UAD ").then(|| "UAD-2".to_string());
         Self {
             slot,
             effect_name: effect_name.into(),
-            chrome: ChromeState { title: title.into(), ..Default::default() },
+            chrome: ChromeState { title: title.into(), items: HeaderItems { more_label, ..Default::default() }, ..Default::default() },
             content,
-            browser_open: false,
-            menu_open: false,
+            popover: None,
         }
     }
 
-    /// The content's natural size in points.
-    pub fn content_size(&self, params: &dyn ParamSource) -> (f32, f32) {
+    /// The editor's size in points (pw × ph).
+    pub fn editor_size(&self, params: &dyn ParamSource) -> (f32, f32) {
         match &self.content {
             Content::Web(c) => (c.window.width, c.window.height),
             Content::Spec(p) => p.size(),
@@ -195,144 +309,241 @@ impl PluginWindow {
         }
     }
 
-    /// Window size for the content at its natural size.
+    /// Window size W × H: `pw + 4` × `ph + 57`, plus 32 with the footer.
     pub fn size(&self, params: &dyn ParamSource) -> (f32, f32) {
-        let m = METRICS;
-        let (cw, ch) = self.content_size(params);
-        ((cw + 2.0 * m.side).max(m.min_width), m.title_h + m.toolbar_h + ch + m.footer_h)
+        let (pw, ph) = self.editor_size(params);
+        let footer = if self.chrome.status.is_some() { FOOTER_H } else { 0.0 };
+        (pw + 2.0 + 2.0 * BORDER, ph + HEADER_H + 1.0 + footer + TITLE_H + 2.0 * BORDER)
     }
 
-    /// Layout for a window of `size` at `origin`.
-    pub fn layout(&self, origin: (f32, f32), size: (f32, f32)) -> WindowLayout {
-        let m = METRICS;
-        let (x, y) = origin;
-        let (w, h) = size;
-        let title_bar = Rect::new(x, y, w, m.title_h);
-        let toolbar = Rect::new(x, title_bar.max_y(), w, m.toolbar_h);
-        let footer = Rect::new(x, y + h - m.footer_h, w, m.footer_h);
-        let content = Rect::new(x + m.side, toolbar.max_y(), (w - 2.0 * m.side).max(0.0), (footer.y - toolbar.max_y()).max(0.0));
-        let by = toolbar.y + m.button_y;
-        let bh = m.button_h;
-        let mut buttons = vec![(B::Close, Rect::new(x + 4.0, y + (m.title_h - 18.0) / 2.0, 18.0, 18.0))];
-        buttons.push((B::More, Rect::new(x + m.more_x, by, m.more_w, bh)));
-        let prev = Rect::new(x + m.prev_x, by, m.arrow_w, bh);
-        let next = Rect::new(prev.max_x(), by, m.arrow_w, bh);
-        let preset = Rect::new(next.max_x(), by, m.preset_w, bh);
-        let power = Rect::new(preset.max_x() + m.gap, by, m.power_w, bh);
-        let engine = Rect::new(x + w - m.right_margin - m.engine_w, by, m.engine_w, bh);
-        buttons.extend([(B::PresetPrev, prev), (B::PresetNext, next), (B::Preset, preset), (B::Power, power), (B::Engine, engine)]);
-        if self.chrome.status.is_some() {
-            let plate = Rect::new(x + m.plate_inset, footer.y + (m.footer_h - m.plate_h) / 2.0, (w - 2.0 * m.plate_inset).max(0.0), m.plate_h);
-            buttons.push((B::Status, plate));
+    /// Layout for an editor of `(pw, ph)` with the window's top-left at `origin`.
+    pub fn layout(&self, origin: (f32, f32), editor: (f32, f32)) -> WindowLayout {
+        let (ox, oy) = origin;
+        let (pw, ph) = editor;
+        let footer_h = if self.chrome.status.is_some() { FOOTER_H } else { 0.0 };
+        let (cw, ch) = (pw + 2.0, ph + HEADER_H + 1.0 + footer_h);
+        let frame = Rect::new(ox, oy, cw + 2.0 * BORDER, ch + TITLE_H + 2.0 * BORDER);
+        let title_bar = Rect::new(ox + BORDER, oy + BORDER, frame.w - 2.0 * BORDER, TITLE_H);
+        let content = Rect::new(ox + BORDER, title_bar.max_y(), cw, ch);
+        let header = Rect::new(content.x, content.y, cw, HEADER_H);
+        let editor = Rect::new(content.x + 1.0, content.y + HEADER_H, pw, ph);
+        let footer = self.chrome.status.is_some().then(|| Rect::new(content.x, content.max_y() - FOOTER_H, cw, FOOTER_H));
+
+        let (items, mode, overflow) = header_layout(cw, &self.chrome.items);
+        let mut buttons: Vec<(B, Rect)> = items.into_iter().map(|(b, r)| (b, r.offset(header.x, header.y))).collect();
+        let close = if self.chrome.close_on_left {
+            Rect::new(ox + 6.0, oy + 2.0, 20.0, 20.0)
+        } else {
+            Rect::new(ox + frame.w - 24.0, oy + 3.0, 20.0, 20.0)
+        };
+        buttons.insert(0, (B::Close, close));
+        if let Some(f) = footer {
+            let state_w: f32 = 220.0;
+            let action_w = if self.chrome.action.is_some() { 72.0 + 4.0 } else { 0.0 };
+            let total = (state_w + action_w).min(cw - 8.0);
+            let x = f.x + (cw - total) / 2.0;
+            buttons.push((B::FooterState, Rect::new(x, f.y + 5.0, state_w, BUTTON_H)));
+            if self.chrome.action.is_some() {
+                buttons.push((B::FooterAction, Rect::new(x + state_w + 4.0, f.y + 5.0, 72.0, BUTTON_H)));
+            }
         }
-        WindowLayout { frame: Rect::new(x, y, w, h), title_bar, toolbar, content, footer, buttons }
+        WindowLayout { frame, title_bar, content, header, editor, footer, buttons, mode, overflow }
     }
 
     fn id(&self, control: Control) -> ControlId {
         ControlId { strip: self.slot.clone(), control }
     }
 
-    /// Draws the window at its natural size at `origin` and registers its hits. For web content
-    /// the content rect is left for the shell's webview.
+    /// Draws the window at its natural size with its top-left at `origin` and registers its
+    /// hits. For web content the editor rect is left for the shell's webview.
     pub fn build(&self, ui: &mut Ui, origin: (f32, f32), params: &dyn ParamSource) -> WindowLayout {
-        let l = self.layout(origin, self.size(params));
-        ui.fill(l.frame, WINDOW_BG);
+        let l = self.layout(origin, self.editor_size(params));
+        ui.fill(l.frame, BLACK);
         self.title_bar(ui, &l);
-        self.toolbar(ui, &l);
-        ui.fill(l.content, CONTENT_BG);
+        ui.fill(l.content, BLACK);
+        self.header(ui, &l);
         match &self.content {
             Content::Web(c) => {
-                // Placeholder under the webview (also what a headless render shows).
-                let style = Ui::plain_style("Helvetica", 11.0, false, TEXT.with_alpha(0.6));
-                ui.text(&format!("{} (web GUI)", c.name), style, l.content, Align::Center);
+                let style = Ui::plain_style("Helvetica", 11.0, false, LABEL.with_alpha(0.5));
+                ui.text(&c.name, style, l.editor, Align::Center);
             }
-            Content::Spec(p) => {
-                let (pw, ph) = p.size();
-                p.build(ui, Rect::new(l.content.x + (l.content.w - pw).max(0.0) / 2.0, l.content.y, pw, ph), params);
-            }
-            Content::Generic(g) => g.build(ui, l.content, params),
+            Content::Spec(p) => p.build(ui, l.editor, params),
+            Content::Generic(g) => g.build(ui, l.editor, params),
         }
-        if self.browser_open || self.menu_open {
-            let what = if self.browser_open { "Preset browser" } else { "Plug-in menu" };
-            ui.fill(l.content, Rgba::BLACK.with_alpha(0.75));
-            let style = Ui::plain_style("Helvetica", 13.0, true, TEXT);
-            ui.text(&format!("{what} (not implemented)"), style, l.content, Align::Center);
-            ui.hit(l.content, self.id(Control::PluginWindow(if self.browser_open { B::Preset } else { B::More })), HitKind::Tap);
+        if let Some(f) = l.footer {
+            self.footer(ui, &l, f);
         }
-        self.footer(ui, &l);
+        if let Some(which) = self.popover {
+            self.popover(ui, &l, which);
+        }
         l
     }
 
     fn title_bar(&self, ui: &mut Ui, l: &WindowLayout) {
-        ui.fill(l.title_bar, TITLE_BG);
+        ui.background("Title-Bar", l.title_bar);
+        let style = TextStyle { family: "Helvetica Neue".into(), size: 11.0, bold: true, italic: false, color: TITLE_TEXT };
+        ui.text(&self.chrome.title, style, l.title_bar, Align::Center);
         if let Some(r) = l.button(B::Close) {
-            ui.image_centered(&img("icon_close"), r, 1.0);
+            let skin = if self.chrome.close_on_left { "Window-Button-Close" } else { "Small-Window-Button-Close-Win" };
+            match ui.skin("views", skin).and_then(|s| s.image("image").or(s.image("image-off"))).map(str::to_string) {
+                Some(img) => ui.image_centered(&img, r, 1.0),
+                None => ui.text("×", Ui::plain_style("Helvetica", 16.0, true, TITLE_TEXT), r, Align::Center),
+            }
             ui.hit(r, self.id(Control::PluginWindow(B::Close)), HitKind::Tap);
         }
-        let style = TextStyle { family: "Helvetica".into(), size: 12.0, bold: true, italic: false, color: TEXT };
-        ui.text(&self.chrome.title, style, l.title_bar, Align::Center);
     }
 
-    fn toolbar(&self, ui: &mut Ui, l: &WindowLayout) {
-        ui.fill(l.toolbar, TOOLBAR_BG);
-        let label = TextStyle { family: "Helvetica".into(), size: 12.0, bold: true, italic: false, color: TEXT };
+    /// `Rack_NewPlugInHeader`: HTML plug-ins get their manifest's `window-background` colour
+    /// with a 1-pt black outline; others the `Plug-In-Header` skin.
+    fn header(&self, ui: &mut Ui, l: &WindowLayout) {
+        let h = l.header;
+        match &self.content {
+            Content::Web(c) => {
+                ui.fill(h, c.colors.get("window-background").copied().unwrap_or(Rgba::rgb8(85, 85, 85)));
+                ui.fill(Rect::new(h.x, h.y, 1.0, h.h), BLACK);
+                ui.fill(Rect::new(h.max_x() - 1.0, h.y, 1.0, h.h), BLACK);
+                ui.fill(Rect::new(h.x, h.max_y() - 1.0, h.w, 1.0), BLACK);
+            }
+            _ => {
+                ui.fill(h, Rgba::rgb8(75, 75, 75));
+                ui.background("Plug-In-Header", h);
+            }
+        }
+        let label = TextStyle { family: "Helvetica".into(), size: 10.0, bold: true, italic: false, color: LABEL };
+        let on = |b: B| match b {
+            B::Power => self.chrome.power,
+            B::RackView => self.chrome.rack_view,
+            B::CompareB => self.chrome.compare_b,
+            B::CompareA => !self.chrome.compare_b,
+            B::More => self.popover == Some(B::More),
+            _ => false,
+        };
         for &(b, r) in &l.buttons {
+            let bg = match b {
+                B::PresetPrev | B::CompareA | B::Copy => "btn_header_bg_l",
+                B::PresetNext => "btn_header_bg_c",
+                B::Presets | B::CompareB | B::Paste => "btn_header_bg_r",
+                B::Close | B::FooterState | B::FooterAction => continue,
+                _ => "btn_header_bg",
+            };
+            nine(ui, &uapw(bg), r);
+            let text = |ui: &mut Ui, s: &str, lit: bool| {
+                let style = TextStyle { color: if lit { LABEL_ON } else { LABEL }, ..label.clone() };
+                ui.text(s, style, r, Align::Center);
+            };
             match b {
-                B::More => {
-                    self.button_bg(ui, r);
-                    ui.image_centered(&img("icon_more_vertical"), r, 1.0);
+                B::RackView => ui.image_centered(&uapw(if on(b) { "plugin_rack_view_on" } else { "plugin_rack_view" }), r, 1.0),
+                B::Assign => ui.image(&uapw("icon_more_vertical"), Rect::new(r.x + 9.0, r.y + 2.0, 5.0, 18.0), None, None, 1.0),
+                B::PresetPrev => ui.image_centered(&uapw("icon_prev"), r, 1.0),
+                B::PresetNext => ui.image_centered(&uapw("icon_next"), r, 1.0),
+                B::Presets => text(ui, &self.chrome.preset, false),
+                B::Sidechain => {
+                    let s = self.chrome.items.sidechain.clone().unwrap_or_default();
+                    text(ui, &if r.w > 22.0 { format!("SIDECHAIN: {s}") } else { "SC".into() }, false)
                 }
-                B::PresetPrev => {
-                    self.button_bg(ui, r);
-                    ui.image_centered(&img("icon_prev"), r, 1.0);
-                }
-                B::PresetNext => {
-                    self.button_bg(ui, r);
-                    ui.image_centered(&img("icon_next"), r, 1.0);
-                }
-                B::Preset => {
-                    self.button_bg(ui, r);
-                    ui.text(&self.chrome.preset, label.clone(), r, Align::Center);
-                }
-                B::Power => {
-                    self.button_bg(ui, r);
-                    ui.image_centered(&img(if self.chrome.power { "icon_power_on" } else { "icon_power" }), r, 1.0);
-                }
-                B::Engine => {
-                    self.button_bg(ui, r);
-                    let dots = ui.image_size(&img("icon_more")).unwrap_or((16.0, 6.0));
-                    let text_r = Rect::new(r.x + 4.0, r.y, r.w - dots.0 - 10.0, r.h);
-                    ui.text(&self.chrome.engine, label.clone(), text_r, Align::Right);
-                    ui.image_centered(&img("icon_more"), Rect::new(r.max_x() - dots.0 - 5.0, r.y, dots.0, r.h), 1.0);
-                }
-                _ => continue,
+                B::Power => ui.image_centered(&uapw(if on(b) { "icon_power_on" } else { "icon_power" }), r, 1.0),
+                B::InOut => text(ui, "IN", false),
+                B::CompareA => text(ui, "A", on(b)),
+                B::CompareB => text(ui, "B", on(b)),
+                B::Copy => text(ui, "COPY", false),
+                B::Paste => text(ui, "PASTE", false),
+                B::Mixer => text(ui, "MULTI-OUT MIXER", false),
+                B::More => self.more_button(ui, r, on(b)),
+                _ => {}
             }
             ui.hit(r, self.id(Control::PluginWindow(b)), HitKind::Tap);
         }
     }
 
-    /// Toolbar button background: `btn_header_bg_{l,c,r}` (3-slice), else a flat fill.
-    fn button_bg(&self, ui: &mut Ui, r: Rect) {
-        if ui.assets.images.get(&img("btn_header_bg")).is_some() {
-            ui.image_stretched(&img("btn_header_bg"), r, 1.0);
-        } else {
-            ui.fill(r, BUTTON_BG);
+    /// `UAPW::Toolbar::ImageButtonWithLabel`: label at +6 (shadow +7,+2), dots right-aligned 4 pt
+    /// from the edge, or centred without a label.
+    fn more_button(&self, ui: &mut Ui, r: Rect, toggled: bool) {
+        let icon = uapw(if toggled { "icon_more_yellow" } else { "icon_more" });
+        let (iw, ih) = ui.image_size(&icon).unwrap_or((16.0, 6.0));
+        match &self.chrome.items.more_label {
+            Some(text) => {
+                let style = TextStyle { family: "Helvetica".into(), size: 10.0, bold: true, italic: false, color: SHADOW };
+                ui.text(text, style.clone(), Rect::new(r.x + 7.0, r.y + 1.0, r.w - 7.0, r.h), Align::Left);
+                ui.text(text, TextStyle { color: LABEL, ..style }, Rect::new(r.x + 6.0, r.y, r.w - 6.0, r.h), Align::Left);
+                ui.image(&icon, Rect::new(r.max_x() - iw - 4.0, r.y + (r.h - ih) / 2.0, iw, ih), None, None, 1.0);
+            }
+            None => ui.image_centered(&icon, r, 1.0),
         }
     }
 
-    fn footer(&self, ui: &mut Ui, l: &WindowLayout) {
-        ui.fill(l.footer, TOOLBAR_BG);
-        let (Some(text), Some(r)) = (&self.chrome.status, l.button(B::Status)) else { return };
-        if ui.assets.images.get(&img("btn_header_error_bg")).is_some() {
-            ui.image_stretched(&img("btn_header_error_bg"), r, 1.0);
-        } else {
-            ui.fill(r, PLATE_RED);
+    /// `Rack_PlugInFooter`: the manifest's `scrollbar-thumbnail` colour, a black outline, the
+    /// state plate (background by state) and the optional action button.
+    fn footer(&self, ui: &mut Ui, l: &WindowLayout, f: Rect) {
+        let fill = match &self.content {
+            Content::Web(c) => c.colors.get("scrollbar-thumbnail").copied(),
+            _ => None,
+        };
+        ui.fill(f, fill.unwrap_or(Rgba::rgb8(85, 85, 85)));
+        for r in [Rect::new(f.x, f.y, f.w, 1.0), Rect::new(f.x, f.max_y() - 1.0, f.w, 1.0), Rect::new(f.x, f.y, 1.0, f.h), Rect::new(f.max_x() - 1.0, f.y, 1.0, f.h)] {
+            ui.fill(r, BLACK);
         }
-        let style = TextStyle { family: "Helvetica".into(), size: 12.0, bold: true, italic: false, color: TEXT };
-        ui.text(text, style, r, Align::Center);
+        let label = TextStyle { family: "Helvetica".into(), size: 10.0, bold: true, italic: false, color: LABEL };
+        if let (Some(r), Some(text)) = (l.button(B::FooterState), &self.chrome.status) {
+            let bg = match self.chrome.status_state {
+                2 => "btn_header_error_bg",
+                3 => "btn_footer_blue",
+                _ => "btn_header_bg",
+            };
+            nine(ui, &uapw(bg), r);
+            ui.text(text, label.clone(), r, Align::Center);
+            ui.hit(r, self.id(Control::PluginWindow(B::FooterState)), HitKind::Tap);
+        }
+        if let (Some(r), Some(text)) = (l.button(B::FooterAction), &self.chrome.action) {
+            nine(ui, &uapw("btn_footer_blue"), r);
+            ui.text(text, label, r, Align::Center);
+            ui.hit(r, self.id(Control::PluginWindow(B::FooterAction)), HitKind::Tap);
+        }
     }
 
-    /// Applies an action aimed at this window (chrome or content).
+    /// Stub popovers: the "more" menu lists Console's entries (overflowed items act); the
+    /// preset browser and insert menu are placeholders.
+    fn popover(&self, ui: &mut Ui, l: &WindowLayout, which: B) {
+        let style = Ui::plain_style("Helvetica", 11.0, true, LABEL);
+        let dim = Ui::plain_style("Helvetica", 11.0, false, LABEL.with_alpha(0.5));
+        if which == B::More {
+            let mut rows: Vec<(String, Option<B>)> = ["50%", "75%", "100%", "150%", "200%"].iter().map(|s| (s.to_string(), None)).collect();
+            for b in &l.overflow {
+                let name = match b {
+                    B::Sidechain => "Sidechain",
+                    B::Power => "Power",
+                    B::InOut => "In",
+                    B::CompareA => "Copy A to B",
+                    B::Copy => "Copy",
+                    B::Paste => "Paste",
+                    _ => continue,
+                };
+                rows.push((name.into(), Some(*b)));
+            }
+            rows.extend([("Resize Plug-In".into(), None), ("Apply To All".into(), None), ("Help & Video".into(), Some(B::Help))]);
+            let anchor = l.button(B::More).unwrap_or(l.header);
+            let (w, rh) = (150.0, 20.0);
+            let menu = Rect::new((anchor.max_x() - w).max(l.frame.x), anchor.max_y() + 2.0, w, rows.len() as f32 * rh + 8.0);
+            ui.fill(menu, Rgba::rgb8(40, 42, 44));
+            for (i, (name, action)) in rows.iter().enumerate() {
+                let r = Rect::new(menu.x + 10.0, menu.y + 4.0 + i as f32 * rh, w - 20.0, rh);
+                ui.text(name, if action.is_some() { style.clone() } else { dim.clone() }, r, Align::Left);
+                if let Some(b) = action {
+                    ui.hit(r, self.id(Control::PluginWindow(*b)), HitKind::Tap);
+                }
+            }
+            return;
+        }
+        let what = match which {
+            B::Presets => "Preset browser",
+            B::Assign => "Insert menu",
+            _ => "Not implemented",
+        };
+        ui.fill(l.editor, Rgba::BLACK.with_alpha(0.8));
+        ui.text(&format!("{what} (not implemented)"), style, l.editor, Align::Center);
+        ui.hit(l.editor, self.id(Control::PluginWindow(which)), HitKind::Tap);
+    }
+
+    /// Applies an action aimed at this window (chrome or content); None when it is not for it.
     pub fn apply(&mut self, action: &Action, params: &mut dyn ParamSource) -> Option<WindowEvent> {
         let id = action_id(action);
         if id.strip != self.slot {
@@ -344,17 +555,22 @@ impl PluginWindow {
             }
             return Some(match b {
                 B::Close => WindowEvent::Close,
-                B::Preset => {
-                    self.browser_open ^= true;
-                    self.menu_open = false;
+                B::Presets | B::Assign | B::More => {
+                    self.popover = if self.popover == Some(b) { None } else { Some(b) };
                     WindowEvent::Handled
                 }
-                B::More => {
-                    self.menu_open ^= true;
-                    self.browser_open = false;
+                B::RackView => {
+                    self.chrome.rack_view ^= true;
                     WindowEvent::Handled
                 }
-                other => WindowEvent::Button(other),
+                B::CompareA | B::CompareB => {
+                    self.chrome.compare_b = b == B::CompareB;
+                    WindowEvent::Button(b)
+                }
+                other => {
+                    self.popover = None;
+                    WindowEvent::Button(other)
+                }
             });
         }
         let handled = match &mut self.content {
@@ -363,5 +579,48 @@ impl PluginWindow {
             Content::Web(_) => false,
         };
         handled.then_some(WindowEvent::Handled)
+    }
+}
+
+/// UAPW 9-slice: corner = floor(min(w, h) / 3) image px, drawn at half size (WINDOW.md §3.2).
+fn nine(ui: &mut Ui, key: &str, r: Rect) {
+    match ui.assets.images.get(key) {
+        Some(img) => {
+            let c = (img.width.min(img.height) / 3) as f32;
+            ui.image(key, r, Some(Insets::uniform(c)), None, 1.0);
+        }
+        None => ui.fill(r, Rgba::BLACK.with_alpha(0.3)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The 1.3.1 capture: SSL G (300×621) → cw 302, mode 2, "UAD-2" more (WINDOW.md §3.3).
+    #[test]
+    fn header_matches_capture() {
+        let (items, mode, overflow) = header_layout(302.0, &HeaderItems::default());
+        assert_eq!(mode, 2);
+        let x = |b: B| items.iter().find(|(x, _)| *x == b).map(|(_, r)| (r.x, r.max_x()));
+        assert_eq!(x(B::Assign), Some((5.0, 27.0)));
+        assert_eq!(x(B::PresetPrev), Some((32.0, 54.0)));
+        assert_eq!(x(B::PresetNext), Some((54.0, 75.0)));
+        assert_eq!(x(B::Presets), Some((75.0, 185.0)));
+        assert_eq!(x(B::Power), Some((190.0, 212.0)));
+        assert_eq!(x(B::More), Some((239.0, 297.0)));
+        assert_eq!(overflow, vec![B::Copy, B::Paste]);
+        assert!(items.iter().all(|(_, r)| r.y == 5.0 && r.h == 22.0));
+    }
+
+    #[test]
+    fn wide_header_shows_everything_in_mode_0() {
+        let items = HeaderItems { more_label: None, ..Default::default() };
+        let (placed, mode, overflow) = header_layout(952.0, &items);
+        assert_eq!(mode, 0);
+        assert!(overflow.is_empty());
+        assert!(!placed.iter().any(|(b, _)| *b == B::More), "nothing overflowed and more is not forced");
+        assert_eq!(placed.iter().find(|(b, _)| *b == B::Presets).unwrap().1.w, 220.0);
+        assert!(placed.iter().any(|(b, _)| *b == B::Paste));
     }
 }

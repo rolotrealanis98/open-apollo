@@ -16,6 +16,7 @@ parking_lot = "0.12.5"
 rack = { version = "0.1.0", path = "../rack" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.154"
+ua-engine = { version = "0.1.0", path = "../ua-engine" }
 png = { version = "0.18.1", optional = true }
 tungstenite = { version = "0.30", optional = true, default-features = false, features = ["handshake"] }
 

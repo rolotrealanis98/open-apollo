@@ -8,8 +8,10 @@
 //!
 //! They are UA's files, read from the user's install and never bundled.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use houston::Rgba;
 use serde::Deserialize;
 
 /// Where lunacomponents are looked for; every existing folder is scanned and the first copy of a
@@ -45,9 +47,17 @@ pub struct WindowSize {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct GuiAppearance {
+    #[serde(default)]
+    colors: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct GuiManifest {
     #[serde(default)]
     name: String,
+    #[serde(default)]
+    appearance: GuiAppearance,
     #[serde(default)]
     window: Option<WindowSize>,
     #[serde(default)]
@@ -81,6 +91,9 @@ pub struct LunaComponent {
     pub client_interface_version: Option<String>,
     /// False when `html/images` is missing (the GUI then cannot draw its art).
     pub has_images: bool,
+    /// `manifest.json` `appearance.colors` ("window-background", "scrollbar-thumbnail", …):
+    /// Console tints the toolbar and footer of HTML plug-ins with them.
+    pub colors: BTreeMap<String, Rgba>,
 }
 
 impl LunaComponent {
@@ -106,6 +119,7 @@ impl LunaComponent {
             short_names: algo.short_names,
             window: gui.window.unwrap_or(WindowSize { width: 300.0, height: 600.0 }),
             client_interface_version: gui.client_interface_support_version,
+            colors: gui.appearance.colors.iter().filter_map(|(k, v)| Some((k.clone(), Rgba::parse(v)?))).collect(),
         })
     }
 
@@ -128,11 +142,12 @@ impl LunaComponent {
     }
 }
 
-/// Query parameters the GUI's `@uaudio/client` reads from `window.location.search`
-/// (see WEBBRIDGE.md for their meaning).
+/// Query parameters the GUI's `@uaudio/client` reads from `window.location.search`, with
+/// Console's keys `host`, `port`, `path` (WEBBRIDGE.md). `path` must not be the first key: one
+/// of the GUI's parsers glues the first key to the page URL.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GuiQuery {
-    /// Host of the WebSocket the GUI connects to (`ip`/`host`).
+    /// Host of the WebSocket the GUI connects to (`host`).
     pub ip: String,
     /// Its port (`port`; the client's default is 4718).
     pub port: u16,
@@ -148,7 +163,7 @@ impl GuiQuery {
     }
 
     pub fn to_query(&self) -> String {
-        let mut parts = vec![format!("ip={}", encode(&self.ip)), format!("port={}", self.port), format!("path={}", encode(&self.path))];
+        let mut parts = vec![format!("host={}", encode(&self.ip)), format!("port={}", self.port), format!("path={}", encode(&self.path))];
         parts.extend(self.extra.iter().map(|(k, v)| format!("{}={}", encode(k), encode(v))));
         parts.join("&")
     }
@@ -252,6 +267,7 @@ mod tests {
             window: WindowSize { width: 300.0, height: 621.0 },
             client_interface_version: None,
             has_images: true,
+            colors: BTreeMap::new(),
         }
     }
 
@@ -275,7 +291,7 @@ mod tests {
         let url = c.url(&GuiQuery::new("127.0.0.1", 4718, "/devices/0/inputs/2/effects/3"));
         assert_eq!(
             url,
-            "file:///x/uaudio_ssl_g_bus_compressor.lunacomponent/gui.bundle/Contents/Resources/html/index.html?ip=127.0.0.1&port=4718&path=/devices/0/inputs/2/effects/3"
+            "file:///x/uaudio_ssl_g_bus_compressor.lunacomponent/gui.bundle/Contents/Resources/html/index.html?host=127.0.0.1&port=4718&path=/devices/0/inputs/2/effects/3"
         );
     }
 }

@@ -101,6 +101,8 @@ pub trait Panel {
     fn live(&self) -> bool {
         false
     }
+    /// Called before each build with the model (read state, keep subscriptions).
+    fn sync(&mut self, _model: &mut dyn MixerModel) {}
 }
 
 /// Called when the user opens a plug-in insert (`Action::Tap` on `Control::Insert(slot)`).
@@ -273,6 +275,13 @@ impl OverlayStack {
                 true
             }
             None => false,
+        }
+    }
+
+    /// Lets every panel read the model before the next build.
+    pub fn sync(&mut self, model: &mut dyn MixerModel) {
+        for p in &mut self.panels {
+            p.sync(model);
         }
     }
 
