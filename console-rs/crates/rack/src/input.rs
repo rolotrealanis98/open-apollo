@@ -120,6 +120,13 @@ pub enum Control {
     /// [model] Monitor DIM / talkback, and the speaker set (0 = main MONITOR, 1 = ALT 1, 2 = ALT 2).
     MonitorDim,
     Talkback,
+    /// [model] Talkback strip TALKBACK TO MONITOR (`/TalkbackInPhysicalCR`).
+    TalkbackToMonitor,
+    /// [model] View > Show/Hide Channels row: toggles the strip's `ChannelHidden` (strip = the
+    /// channel's id from `MixerModel::channel_list`).
+    ChannelVisible,
+    /// [view] Closes the Show/Hide Channels window.
+    ChannelsClose,
     MonitorAlt(u8),
     /// [model] Dim attenuation knob (drag 0…1).
     DimLevel,

@@ -177,7 +177,9 @@ pub fn monitor_rect(x: f32, window_h: f32) -> Rect {
 pub fn draw_monitor_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     let m = model.monitor();
     let opts = model.monitor_options();
-    let st = MonitorStack::new(r.h, opts.alt_count, opts.controller, opts.hp_correction.is_some(), opts.speaker_correction.is_some());
+    // View > Section > Show Monitor Correction (`Rack_ShowSection` 0xf) hides the correction rows.
+    let correction = view.show_monitor_correction;
+    let st = MonitorStack::new(r.h, opts.alt_count, opts.controller, correction && opts.hp_correction.is_some(), correction && opts.speaker_correction.is_some());
     ui.at(r.x, r.y, |ui| {
         ui.fill(Rect::new(0.0, 0.0, STRIP_W, r.h), SECTION_BG);
         monitor_meters(ui, model.monitor_meters(), st.silk - 4.0);

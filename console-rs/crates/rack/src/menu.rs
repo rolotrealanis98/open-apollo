@@ -48,30 +48,31 @@ const TEXT_MARGIN: f32 = 20.0;
 /// Current-value bullet (`dropdown_in_use_dot`, 4 pt): 3 pt into the row, centred (s04, s18).
 const BULLET_X: f32 = 3.0;
 const BULLET: f32 = 4.0;
-// Colours from the colour-managed drive captures (`screencapture`, like refpairs p1/p2); the
-// earlier clipboard captures s01–s42 carry no display profile and read 8–10 levels lighter.
+// Colours from the drive captures converted to sRGB through their embedded ICC profile (ASUS
+// PG32); read raw they are about 10 levels dark. The clipboard captures s01–s42 are already
+// sRGB and agree (s01 body (185,194,199)).
 /// Separator: a 1-pt dark line over a 1-pt light one (hov-pan).
-const SEP_DARK: Rgba = Rgba::rgb8(124, 134, 138);
-const SEP_LIGHT: Rgba = Rgba::rgb8(195, 206, 211);
+const SEP_DARK: Rgba = Rgba::rgb8(135, 145, 149);
+const SEP_LIGHT: Rgba = Rgba::rgb8(202, 212, 216);
 /// Highlighted row, the full row (hov-ins / hov-lbl / hov-rate: 22 pt × the inner width).
-const HIGHLIGHT: Rgba = Rgba::rgb8(223, 227, 230);
-const HEADER_BG: Rgba = Rgba::rgb8(156, 164, 170);
-const HEADER_TEXT: Rgba = Rgba::rgb8(29, 77, 115);
+const HIGHLIGHT: Rgba = Rgba::rgb8(227, 231, 233);
+const HEADER_BG: Rgba = Rgba::rgb8(166, 174, 179);
+const HEADER_TEXT: Rgba = Rgba::rgb8(32, 87, 126);
 /// Section header text: the item font, bold (s01/s02: header and item glyph widths match).
 const HEADER_FONT_SCALE: f32 = 1.0;
 /// Window edge, outside in (ins-in-empty at 2 px per pt): a 0.5-pt black outline outside the
 /// window (square), a 1-pt border with 2-pt rounded corners, a 1-pt light line, then the body.
-const WINDOW_OUTLINE: Rgba = Rgba::rgb8(4, 4, 4);
-const WINDOW_BORDER: Rgba = Rgba::rgb8(145, 151, 155);
-const WINDOW_LIGHT: Rgba = Rgba::rgb8(177, 187, 193);
-const WINDOW_BODY: Rgba = Rgba::rgb8(176, 186, 192);
+const WINDOW_OUTLINE: Rgba = Rgba::rgb8(1, 1, 1);
+const WINDOW_BORDER: Rgba = Rgba::rgb8(156, 161, 165);
+const WINDOW_LIGHT: Rgba = Rgba::rgb8(186, 195, 200);
+const WINDOW_BODY: Rgba = Rgba::rgb8(185, 194, 199);
 /// Rounded corner of the border, per half-point row from the top (and mirrored at the bottom):
 /// how far the row starts in from each side (ins-in-empty, 2 px per pt).
 const BORDER_CORNER: [f32; 3] = [1.5, 0.5, 0.5];
 /// The light line's first half-point row starts this much further in.
 const LIGHT_CORNER: [f32; 1] = [0.5];
-/// Disabled text (ins-in-empty "Paste": (124,131,135) on the body = black at 0.3).
-const DISABLED_ALPHA: f32 = 0.3;
+/// Disabled text (ins-in-empty "Paste": (135,142,146) on the body = black at 0.27).
+const DISABLED_ALPHA: f32 = 0.27;
 /// Console menus draw their text 1 pt below the row's centre (every row of lbl-mono and
 /// ins-in-empty: ink 6.0 pt from the row top vs 5.0 centred).
 const TEXT_DY: f32 = 1.0;
@@ -793,9 +794,13 @@ pub fn command_enabled(c: Command, model: &dyn MixerModel, view: &ViewState) -> 
     match c {
         C::Undo => st.can_undo,
         C::Redo => st.can_redo,
-        // Not built yet: Console's monitor page toggle, monitor correction, compact monitor
-        // fader, channel visibility popover and offline-device list.
-        C::ShowMonitor | C::ShowMonitorCorrection | C::ToggleCompactMonitor | C::ShowHideChannels | C::ShowOfflineDevices => false,
+        // `Rack_ShowSection` 0 / 0xf and `Rack_ShowHideChannels` (window page 8).
+        C::ShowMonitor | C::ShowMonitorCorrection | C::ShowHideChannels => true,
+        // `Rack_ToggleCompactMonitor` ("Compact Monitor Faders", 0x180946500) compacts the
+        // monitor *faders* of the HB/Volt monitor sections; the UAD-2 monitor has a knob.
+        C::ToggleCompactMonitor => false,
+        // `Rack_ShowOfflineDevices`: only meaningful with a unit that is offline.
+        C::ShowOfflineDevices => model.devices().iter().any(|d| !d.online),
         C::ShowMixerNav | C::ShowBrowser => !view.compact,
         C::MixerTabLeft | C::MixerTabRight => false,
         C::ShowPluginScenes => model.status().plugin_scenes,
@@ -811,7 +816,10 @@ pub fn command_ticked(c: Command, view: &ViewState) -> bool {
         C::ShowMixerNav => view.show_navigator && !view.compact,
         C::ShowBuses => view.show_aux,
         C::ShowControlRoom => view.show_ctrl_room,
-        C::ShowMonitor => true,
+        C::ShowMonitor => view.show_monitor,
+        C::ShowMonitorCorrection => view.show_monitor_correction,
+        C::ShowHideChannels => view.show_channels,
+        C::ShowOfflineDevices => view.show_offline_devices,
         C::ShowSettings => view.sheet == Some(Sheet::Settings),
         _ => false,
     }
@@ -1311,7 +1319,9 @@ fn header_style(item: &crate::draw::TextStyle) -> crate::draw::TextStyle {
 }
 
 fn text_w(style: &crate::draw::TextStyle, text: &str) -> f32 {
-    if style.bold { helvetica_bold_width(text, style.size) } else { helvetica_width(text, style.size) }
+    // Bold menu text measures with macOS Helvetica Bold's own advances and kerning
+    // (`menu_metrics`); the AFM widths differ by a fraction that the width rounding exposes.
+    if style.bold { crate::menu_metrics::helvetica_bold_kerned_width(text, style.size) } else { helvetica_width(text, style.size) }
 }
 
 /// Entry widths and heights per [`MenuLook`].
@@ -1719,6 +1729,10 @@ impl ViewState {
             C::ShowPluginScenes => self.toggle_scenes(model),
             C::ShowBuses => self.show_aux ^= true,
             C::ShowControlRoom => self.show_ctrl_room ^= true,
+            C::ShowMonitor => self.show_monitor ^= true,
+            C::ShowMonitorCorrection => self.show_monitor_correction ^= true,
+            C::ShowHideChannels => self.show_channels ^= true,
+            C::ShowOfflineDevices => self.show_offline_devices ^= true,
             C::ShowSettings => self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) },
             C::MixerScrollLeft => self.first_strip = self.first_strip.saturating_sub(1),
             C::MixerScrollRight => self.first_strip = (self.first_strip + 1).min(model.inputs().len().saturating_sub(1)),
@@ -1894,10 +1908,10 @@ impl ViewState {
 }
 
 /// A PLUG-IN SCENES row's menu opens at this offset from the row's top-left (captures
-/// browser-row and browser-hdr: x 143 in the 288-pt column, 23.5 pt below the 32-pt row's top,
+/// browser-row and browser-hdr: x 143 in the 288-pt column, 26 pt below the 32-pt row's top,
 /// wherever the click was).
 const SCENE_MENU_DX: f32 = 143.0;
-const SCENE_MENU_DY: f32 = 23.5;
+const SCENE_MENU_DY: f32 = 26.0;
 
 /// The context menu Console opens for a secondary click at (`x`, `y`), from the frame's hits
 /// (captures lbl-*, ins-*, unison, solo-*, meter-*, preamp-*, pan-*, fader-*, monitor-*). Aux

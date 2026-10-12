@@ -819,8 +819,11 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             f.extend(mapped(src, "io_mode", "/IOMapUsingDefault", "MODE", 0).map(|x| x.width(90.0)));
             if let Some(mut preset) = engine_choice_with(src, "/IOMapPreset", "I/O PRESETS", 0, false, |_| true) {
                 preset.key = "iopreset:/IOMapPreset".into();
+                // No preset: "Automatic" in Default mode (capture s12), "(Untitled)" in Custom
+                // (drive capture set-tab-io).
                 if str_at(src, "/IOMapPreset").is_none_or(|v| v.is_empty()) {
-                    preset.display = Some("Automatic".into());
+                    let default = src.prop("/IOMapUsingDefault").and_then(|v| v.as_bool()).unwrap_or(true);
+                    preset.display = Some(if default { "Automatic" } else { "(Untitled)" }.into());
                 }
                 let name = str_at(src, "/IOMapPreset").filter(|s| !s.is_empty()).unwrap_or_else(|| "Custom".into());
                 f.push(preset.width(210.0).with_inline(SettingField::new(format!("post:SaveIOMapPreset:{name}"), "SAVE", FieldKind::Button, 0)));

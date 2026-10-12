@@ -251,7 +251,8 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
 /// y 1074.5 to 1095.5 on the (155, 1074.5, 140, 21.5) field).
 pub fn status_field_open(ui: &mut Ui, a: Rect) {
     let o = Rect::new(a.x + 0.5, a.y, a.w - 3.0, a.h - 0.5);
-    let amber = Rgba::rgb8(175, 127, 36);
+    // The open field's amber outline (sb-rate / sb-clock, in sRGB).
+    let amber = Rgba::rgb8(184, 138, 40);
     ui.fill(Rect::new(o.x, o.y, o.w, 1.0), amber);
     ui.fill(Rect::new(o.x, o.max_y() - 1.0, o.w, 1.0), amber);
     ui.fill(Rect::new(o.x, o.y + 1.0, 1.0, o.h - 2.0), amber);
