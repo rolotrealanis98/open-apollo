@@ -25,7 +25,10 @@
 //! [`EngineMixer::insert_slot`] resolves the slot, whose plug-in parameters are at
 //! [`InsertPaths::parameter`](ua_engine::InsertPaths::parameter)).
 
+mod slots;
 mod surfaces;
+
+pub use slots::{SlotInfo, SlotSource};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -56,6 +59,8 @@ pub struct EngineMixer {
     taps: Vec<ControlId>,
     /// Plug-in name copied with the COPY modifier / insert menu, pasted into an empty slot.
     clipboard: Option<String>,
+    /// The read-only UA Mixer Helper (4720): native inserts and helper state.
+    helper: Option<ua_engine::HelperStore>,
 }
 
 impl EngineMixer {
@@ -66,6 +71,7 @@ impl EngineMixer {
             live_meters: true,
             taps: Vec::new(),
             clipboard: None,
+            helper: None,
         }
     }
 
@@ -86,10 +92,16 @@ impl EngineMixer {
     /// Like [`EngineMixer::connect`] with explicit connection options; `writes` opens the writer
     /// gate (it has no effect unless `options.allow_writes` is set too).
     pub fn connect_with(endpoint: Endpoint, options: Options, writes: bool) -> EngineMixer {
+        let helper = EngineMixer::helper_endpoint(&endpoint);
         let mut store = Store::new();
         store.connect(endpoint, options);
         store.set_writes_enabled(writes);
-        EngineMixer::new(store)
+        let mut mixer = EngineMixer::new(store);
+        // The UA Mixer Helper on host:4720, read-only (native inserts, helper state).
+        if let Some(h) = helper {
+            mixer.connect_helper(h);
+        }
+        mixer
     }
 
     /// Offline, from a snapshot file (ConsoleLab snapshot, raw engine reply or open-apollo device
@@ -104,7 +116,9 @@ impl EngineMixer {
     /// frame. Returns true when values, topology or status changed (meters are separate: see
     /// [`EngineMixer::meter_generation`]).
     pub fn pump(&mut self) -> bool {
-        self.store.drain()
+        let engine = self.store.drain();
+        let helper = self.helper.as_mut().is_some_and(|h| h.drain());
+        engine || helper
     }
 
     /// Alias of [`EngineMixer::pump`].
@@ -114,7 +128,8 @@ impl EngineMixer {
 
     /// When [`EngineMixer::pump`] next has timed work (to schedule a wake-up).
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.store.next_deadline()
+        let helper = self.helper.as_ref().and_then(|h| h.next_deadline());
+        self.store.next_deadline().into_iter().chain(helper).min()
     }
 
     /// Moves on every meter push: redraw meters when it changes.
@@ -412,20 +427,9 @@ impl MixerModel for EngineMixer {
     }
 
     fn inserts(&self, strip: &StripInfo) -> Vec<InsertState> {
-        let slots: &[InsertPaths] = match self.input(&strip.id) {
-            Some(s) => &s.inserts,
-            None => self
-                .aux(&strip.id)
-                .map(|a| a.inserts.as_slice())
-                .unwrap_or(&[]),
-        };
-        let mut out: Vec<InsertState> = slots
-            .iter()
-            .take(INSERT_SLOTS)
-            .map(|p| self.slot_state(p))
-            .collect();
-        out.resize(INSERT_SLOTS, InsertState::Empty);
-        out
+        // UAD-2 (4710) and native (helper, 4720) merged; see `EngineMixer::slots` for labels and
+        // the native flag.
+        self.slots(strip).into_iter().map(|s| s.state).collect()
     }
 
     fn unison(&self, strip: &StripInfo) -> InsertState {
@@ -519,11 +523,28 @@ impl MixerModel for EngineMixer {
     }
 
     fn status(&self) -> StatusInfo {
-        self.surface_status()
+        let mut s = self.surface_status();
+        // The engine is authoritative; the helper fills the rate when the engine has none.
+        if s.sample_rate.is_none() {
+            s.sample_rate = self
+                .helper_info()
+                .and_then(|i| i.sample_rate)
+                .map(|r| r as u32);
+        }
+        s
     }
 
     fn engine_settings(&self) -> EngineSettings {
-        self.surface_settings()
+        let mut s = self.surface_settings();
+        if let Some(info) = self.helper_info() {
+            if s.sample_rate.is_none() {
+                s.sample_rate = info.sample_rate.map(|r| r as u32);
+            }
+            if s.sample_rates.is_empty() {
+                s.sample_rates = info.sample_rates.iter().map(|r| *r as u32).collect();
+            }
+        }
+        s
     }
 
     fn monitor_options(&self) -> MonitorOptions {

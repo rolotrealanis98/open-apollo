@@ -35,6 +35,7 @@ pub mod connection;
 pub mod discovery;
 pub mod error;
 pub mod framing;
+pub mod helper;
 pub mod message;
 pub mod meters;
 pub mod mock;
@@ -54,9 +55,10 @@ pub use connection::{
 };
 pub use error::{Error, Result};
 pub use framing::NulFramer;
+pub use helper::{DriverInfo, HELPER_PORT, HelperInfo, HelperStore, NativeInsert, NativeOwner};
 pub use message::Message;
 pub use meters::{MeterHandle, MeterProperty, MeterReading, MeterStats, MeterStore};
-pub use mock::{MockEngine, MockOptions};
+pub use mock::{MockEngine, MockHelper, MockOptions};
 pub use store::{Changes, Status, Store};
 pub use subscription::{Batch, SubscriptionPlan};
 pub use topology::{
