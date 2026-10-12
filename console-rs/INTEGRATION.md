@@ -161,3 +161,22 @@ pushes, offline filtering and device-aware send targets; 273 workspace tests;
 locked release build; p1 158/158, p2 195/195, windows_check, live-snapshot ledger
 and regenerated scorecard all pass. Existing helper tests also pass. No real
 engines or UA GUI were driven.
+
+## P1 — browser activation and client selection
+
+Task branch `codex/p1-browser-selection` separates row selection from explicit
+activation. Double clicks and the browser Assign command target the selected
+client strip's first empty insert; an explicit assign header takes precedence.
+Preset double clicks without a header load the selected channel. With no
+selected channel, no default target is guessed.
+
+Rack_Selection LoadProperties/SaveProperties (0x180a7cd40/0x180a7e940) and
+AssignPluginToNextAvailableSlot (inserts-work/decomp/1812d44f0.c) establish
+client selection rather than engine SelectedOnFront. The exact native
+selection-changing gestures remain unknown: Rust explicitly records the last
+mixer strip pressed/dragged. This policy is documented in code, not labelled
+as verified native gesture parity. Selection is currently session-local.
+
+Validation: three interaction/routing tests, 276 workspace tests, locked
+release build, p1 158/158 and p2 195/195, windows_check, live-snapshot ledger
+and regenerated scorecard pass. No real-engine writes or GUI automation.

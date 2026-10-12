@@ -310,6 +310,10 @@ pub struct ViewState {
     pub show_channels: bool,
     /// View > Show Offline Devices (`Rack_ShowOfflineDevices`): device tabs include offline units.
     pub show_offline_devices: bool,
+    /// Rack_Selection is client state (LoadProperties 0x180a7cd40), not
+    /// SelectedOnFront. Selection-changing gestures are an explicit Rust
+    /// policy: the last mixer strip pressed/dragged, pending native parity.
+    pub selected_channel: Option<Arc<str>>,
     /// Shell-scope commands the menus requested (`take_commands`).
     pub commands: Vec<crate::menu::Command>,
     /// Model effects a menu command produced outside `route` (File > Save → the session tap).
@@ -361,6 +365,7 @@ impl Default for ViewState {
             show_monitor_correction: true,
             show_channels: false,
             show_offline_devices: false,
+            selected_channel: None,
             commands: Vec::new(),
             deferred: Vec::new(),
             drag: None,
@@ -411,6 +416,8 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::BrowserInactiveReveal
             | C::BrowserScroll
             | C::BrowserItem(_)
+            | C::BrowserActivate(_)
+            | C::BrowserPresetActivate(..)
             | C::SessionNavigate(_)
             | C::CellsScroll
             | C::AuxCellsScroll
@@ -568,6 +575,9 @@ impl ViewState {
         use Control as C;
         let id = action.id().clone();
         let press = matches!(action, Action::Tap(_) | Action::Toggle(_));
+        if (press || matches!(action, Action::GestureBegin(_))) && find_strip(model, &id.strip).is_some() {
+            self.selected_channel = Some(id.strip.clone());
+        }
         if is_view_control(&id.control) {
             if let Action::Set(_, v) = action {
                 let frac = (1.0 - v as f32).clamp(0.0, 1.0);
@@ -805,6 +815,27 @@ impl ViewState {
                 }
                 None => self.browser.selected = if self.browser.selected == Some(i) { None } else { Some(i) },
             },
+            C::BrowserActivate(i) => {
+                let target = self.browser.assign_to.take().or_else(|| {
+                    let strip = self.selected_channel.as_ref()?;
+                    let s = find_strip(model, strip)?;
+                    let k = model.inserts(&s).iter().position(|slot| matches!(slot, crate::model::InsertState::Empty))?;
+                    Some(ControlId { strip: strip.clone(), control: C::Insert(k as u8) })
+                });
+                if let (Some(target), Some(plugin)) = (target, model.plugin_catalog().get(i as usize)) {
+                    out.push(Effect::SetText(target, plugin.name.clone()));
+                    self.browser.selected = None;
+                }
+            }
+            C::BrowserPresetActivate(top, child) => {
+                if self.browser.preset_target.is_some() {
+                    out.extend(self.press_preset_file(top, child, model));
+                } else if let Some(strip) = self.selected_channel.as_ref().filter(|id| find_strip(model, id).is_some()) {
+                    if let Some(effect) = self.preset_drop(top, child, strip.clone(), model) {
+                        out.push(effect);
+                    }
+                }
+            }
             C::SessionNavigate(first) => self.first_strip = first as usize,
             // TEMPO opens Console's dialog (capture s05).
             C::StatusTempo => self.toggle_panel(Panel::Tempo, model),
