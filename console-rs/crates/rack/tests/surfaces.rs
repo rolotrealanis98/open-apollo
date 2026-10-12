@@ -98,8 +98,14 @@ fn section_toggle_collapses_the_input_row() {
     assert!(!view.sections.inputs);
     let (hits, _) = build(&assets, &model, &view);
     let slot = find(&hits, "in0", &Control::Insert(0)).unwrap().rect;
-    assert_eq!(slot.y, 72.0 + 5.0 + 22.0 + 26.0 + 6.0, "collapsed = header only");
-    // Input sends are reachable now (mini sends of the expanded Sends row).
+    // Collapsed = header only; the now shorter stack (22 + 288 + 22) sits on the fader area
+    // (cells 77…611), as Console anchors short stacks.
+    assert_eq!(slot.y, 611.0 - (22.0 + 288.0 + 22.0) + 22.0 + 26.0 + 6.0, "collapsed = header only");
+    // Console opens with the input Sends row collapsed; its side chevron expands it.
+    assert!(find(&hits, "in0", &Control::SendMute(0)).is_none());
+    let chevron = find(&hits, "side", &Control::Section(Section::Sends)).expect("sends chevron").clone();
+    tap(&hits, &chevron, &mut view, &mut model);
+    let (hits, _) = build(&assets, &model, &view);
     assert!(find(&hits, "in0", &Control::SendMute(0)).is_some());
     assert!(find(&hits, "in0", &Control::SendPre(0)).is_some());
 }

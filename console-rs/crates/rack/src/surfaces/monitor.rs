@@ -352,7 +352,7 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
     let opts = model.monitor_options();
     let cues = model.cue_outputs();
     let hps = model.headphone_outputs();
-    let name = Ui::plain_style("Helvetica Neue", 11.0, true, Rgba::rgb8(226, 226, 227));
+    let name = crate::draw::TextStyle { color: Rgba::rgb8(226, 226, 227), ..ui.style("fonts", "Channel-Strip-Section-Header") };
     let small = Ui::plain_style("Helvetica", 9.0, false, Rgba::WHITE.with_alpha(0.5));
     ui.at(r.x, r.y, |ui| {
         let w = r.w;

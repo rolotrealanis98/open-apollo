@@ -12,7 +12,9 @@ uaconsole — a native UAD Console for open-apollo
 usage:
   uaconsole [--compact] [--fit|--1to1] [--engine host[:port]] [--mock snapshot.json]
             [--preview] [--writes] [--live-meters] [--stats] [--open-plugin STRIP:SLOT]
-  uaconsole --render out.png [--compact] [--scale N]     headless render (preview data)
+  uaconsole --render out.png [--compact] [--scale N] [--size WxH]
+                                                         headless render (preview data);
+                                                         --size is the window in points
   uaconsole --bench N [--compact] [--scale N]            render N frames headless, print timings
 
   --stats starts with the F1 overlay; --open-plugin in0:0 (or in0:unison) opens that insert's
@@ -86,6 +88,8 @@ pub struct Args {
     pub render: Option<PathBuf>,
     pub bench: Option<usize>,
     pub scale: Option<f32>,
+    /// Window size in points for `--render` (Console lays out to its window).
+    pub size: Option<(f32, f32)>,
     pub compact: bool,
     pub view: Option<ViewMode>,
     pub engine: Option<EngineAddr>,
@@ -121,6 +125,7 @@ impl Args {
                             .map_err(|_| "--scale needs a number")?,
                     )
                 }
+                "--size" => out.size = Some(parse_size(&value("--size")?)?),
                 "--compact" => out.compact = true,
                 "--fit" => out.view = Some(ViewMode::Fit),
                 "--1to1" | "--1:1" => out.view = Some(ViewMode::OneToOne),
@@ -140,6 +145,17 @@ impl Args {
         }
         Ok(out)
     }
+}
+
+/// `WxH` in points, e.g. `1470x1105`.
+fn parse_size(s: &str) -> Result<(f32, f32), String> {
+    let bad = || format!("bad --size {s:?} (expected WxH in points, e.g. 1470x1105)");
+    let (w, h) = s.split_once(['x', 'X']).ok_or_else(bad)?;
+    let (w, h): (f32, f32) = (w.trim().parse().map_err(|_| bad())?, h.trim().parse().map_err(|_| bad())?);
+    if !(w > 0.0 && h > 0.0) {
+        return Err(bad());
+    }
+    Ok((w, h))
 }
 
 /// `strip:slot` with a 0-based slot or `unison`.
@@ -200,6 +216,8 @@ mod tests {
 
     #[test]
     fn flags() {
+        assert_eq!(parse("--size 1470x1105").unwrap().size, Some((1470.0, 1105.0)));
+        assert!(parse("--size 1470").is_err());
         let a = parse("--compact --1to1 --engine studio:4710 --writes").unwrap();
         assert!(a.compact && a.writes);
         assert_eq!(a.view, Some(ViewMode::OneToOne));

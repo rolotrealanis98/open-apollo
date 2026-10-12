@@ -26,6 +26,7 @@ pub fn render_png(
     assets: &Assets,
     model: &dyn MixerModel,
     compact: bool,
+    size: Option<(f32, f32)>,
     scale: f32,
     open_plugin: Option<&(String, u8)>,
     out: &Path,
@@ -36,6 +37,7 @@ pub fn render_png(
     }
     let view = ViewState {
         compact,
+        window: size,
         ..ViewState::default()
     };
     let (w, h) = layout_for(model, &view).size();

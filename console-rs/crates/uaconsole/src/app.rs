@@ -180,6 +180,13 @@ impl App {
     fn rebuild(&mut self) {
         let t = Instant::now();
         let surface = self.surface_size();
+        // Console lays out to its window: the mixer follows the surface (in points; at 1:1
+        // zoom divides them), down to the layout's minimum size.
+        if self.gpu.is_some() {
+            let z = if self.view.mode == ViewMode::OneToOne { self.view.zoom } else { 1.0 };
+            let k = (self.scale_factor as f32 * z).max(0.01);
+            self.mixer.window = Some((surface.0 as f32 / k, surface.1 as f32 / k));
+        }
         let logical = layout_for(&*self.model, &self.mixer).size();
         let tf = self.view.transform(logical, surface, self.scale_factor);
         let area = tf.visible(logical, surface);
