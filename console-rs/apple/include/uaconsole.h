@@ -293,6 +293,8 @@ bool uac_layer_info(UacContext *ctx, uint32_t index, UacLayer *out);
 int32_t uac_attach_layer(UacContext *ctx, const char *id, void *metal_layer, uint32_t width_px, uint32_t height_px);
 void uac_detach_layer(UacContext *ctx, const char *id);
 int32_t uac_layer_pointer(UacContext *ctx, const char *id, int32_t kind, float x_pt, float y_pt, uint32_t flags);
+/* Wheel input in the child window's local view points; does not pan the mixer. */
+int32_t uac_layer_scroll(UacContext *ctx, const char *id, float x_pt, float y_pt, float dy_pt);
 void uac_layer_moved(UacContext *ctx, const char *id, float x_pt, float y_pt);
 
 /* Destroys a context (NULL is ignored) and closes its engine connection. The layer may be

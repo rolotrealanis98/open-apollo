@@ -986,6 +986,21 @@ impl UacContext {
         0
     }
 
+    fn layer_scroll(&mut self, id: &str, x: f32, y: f32, dy: f32) -> i32 {
+        if self.dirty { self.build(); }
+        let Some(k)=self.layers.iter().position(|l|l.id==id) else {
+            set_error(format!("no separate window {id:?}"));
+            return UAC_ERR_ARG;
+        };
+        let z=self.view.zoom(self.content);
+        let r=self.layers[k].rect;
+        let consumed=dy!=0.0 && !self.interaction.is_dragging()
+            && self.mixer.wheel(&self.layer_parts[k].scrolls,r.x+x/z,r.y+y/z,-dy/z);
+        self.dirty|=consumed;
+        // An empty child window never pans the main mixer.
+        i32::from(consumed)
+    }
+
     /// Returns 1 if the key was consumed.
     fn key(&mut self, key: i32) -> i32 {
         let consumed = match key {
@@ -1701,6 +1716,20 @@ pub unsafe extern "C" fn uac_layer_pointer(ctx: *mut UacContext, id: *const c_ch
     }
 }
 
+/// Wheel input in a separate window's local view points. Unconsumed input does
+/// not pan the main mixer; child scroll regions are separate from its regions.
+///
+/// # Safety
+/// `ctx` is null or live; `id` is a valid NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_layer_scroll(ctx:*mut UacContext,id:*const c_char,x_pt:f32,y_pt:f32,dy_pt:f32)->i32 {
+    let id=unsafe{str_arg(id)};
+    unsafe{with_ctx(ctx,|c|match id {
+        Some(id)=>c.layer_scroll(&id,x_pt,y_pt,dy_pt),
+        None=>UAC_ERR_ARG,
+    })}
+}
+
 /// The user moved separate window `id` (a `UAC_LAYER_WINDOW` / `_DIALOG` dragged by its title
 /// bar) to (`x_pt`, `y_pt`) view points: it stays there, like Console's windows.
 ///
@@ -2119,6 +2148,42 @@ mod tests {
             assert_eq!(uac_set_windowing(ctx, 0.0, 0.0, 0.0, 0.0), UAC_OK);
             assert_eq!(uac_layer_count(ctx), 0);
             assert!(c.mixer.menu.is_some());
+            uac_destroy(ctx);
+        }
+    }
+
+    #[test]
+    fn child_scroll_uses_its_settings_region_without_panning_mixer() {
+        unsafe {
+            let Some((_gpu,ctx))=offscreen(2940,1400,2.0) else{return};
+            assert_eq!(uac_set_windowing(ctx,-800.0,-300.0,3200.0,1770.0),UAC_OK);
+            let c=&mut *ctx;
+            let mut tree=ua_engine::Tree::default();
+            tree.set_property("/TotalDriverInputRoutes",ua_engine::Property::with_value(64.into()));
+            for i in 0..64 {
+                tree.set_property(&format!("/inputroutes/{i}/Name"),ua_engine::Property::with_value(format!("Fixture {i}").into()));
+                tree.set_property(&format!("/inputroutes/{i}/IOType"),ua_engine::Property::with_value("Line".into()));
+            }
+            let snapshot=ua_engine::Snapshot::new(tree,Default::default());
+            c.set_model(Box::new(EngineMixer::new(ua_engine::Store::from_snapshot(snapshot))),Source::Snapshot("synthetic routes".into()));
+            c.mixer.sheet=Some(rack::surfaces::Sheet::Settings);
+            c.mixer.settings.tab=rack::settings::SettingsTab::IoMatrix;
+            assert_eq!(uac_frame(ctx),UAC_OK);
+            let k=c.layers.iter().position(|l|l.id=="settings").unwrap();
+            let region=c.layer_parts[k].scrolls.iter().find(|r|r.target==rack::ScrollTarget::Settings && r.max>0.0).unwrap().clone();
+            let layer=c.layers[k].rect;
+            let z=c.view.zoom(c.content);
+            let x=(region.rect.x+4.0-layer.x)*z;
+            let y=(region.rect.y+4.0-layer.y)*z;
+            let origin=c.view.origin;
+            let id=CString::new("settings").unwrap();
+            assert_eq!(uac_layer_scroll(ctx,id.as_ptr(),x,y,-30.0),1);
+            assert!(c.mixer.settings.scroll>0.0);
+            assert_eq!(c.view.origin,origin);
+            assert_eq!(uac_layer_scroll(ctx,id.as_ptr(),-20.0,-20.0,-30.0),0);
+            assert_eq!(c.view.origin,origin);
+            let absent=CString::new("absent").unwrap();
+            assert_eq!(uac_layer_scroll(ctx,absent.as_ptr(),0.0,0.0,-30.0),UAC_ERR_ARG);
             uac_destroy(ctx);
         }
     }
