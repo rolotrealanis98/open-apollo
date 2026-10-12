@@ -36,6 +36,19 @@ fn button(ui: &mut Ui, key: &str, label: &str, on: bool, r: Rect, control: Contr
     ui.hit(r, mid(control), kind);
 }
 
+/// `Switch-Popover-Left`: its `Switch-Large` parent plus the arrow overlay placed by the skin's
+/// `align-overlay` (left +10, bottom −10; houston keeps no nested skin objects, so the offsets
+/// are spelled out here).
+fn popover_button(ui: &mut Ui, key: &str, label: &str, on: bool, r: Rect, control: Control) {
+    button(ui, "Switch-Large", label, on, r, control, HitKind::Tap);
+    if let Some(path) = ui.skin("views", key).and_then(|s| s.image("image-overlay")) {
+        let path = path.to_string();
+        if let Some((w, h)) = ui.image_size(&path) {
+            ui.image(&path, Rect::new(r.x + 10.0, r.max_y() - 10.0 - h, w, h), None, None, 1.0);
+        }
+    }
+}
+
 /// Bottom-up stack of the monitor column (`Rack_MonitorSection_UAD2::resized` 0x1811ef010),
 /// column-relative y values. Optional rows are `None` when hidden.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -166,7 +179,7 @@ pub fn draw_monitor_column(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState
         button(ui, "Switch", "AUX", aux, Rect::new(8.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::Aux), HitKind::Tap);
         button(ui, "Switch-Tight-Kerning", "CTRL\nROOM", !aux, Rect::new(48.0, st.show_buttons, 40.0, 40.0), Control::MonitorPage(MonitorPage::ControlRoom), HitKind::Tap);
         let cue_open = matches!(&view.popover, Some(p) if p.kind == Popover::CueOutputs);
-        button(ui, "Switch-Popover-Left", "CUE\nOUTPUTS", cue_open, Rect::new(8.0, st.cue_outputs, 80.0, 40.0), Control::CueOutputs, HitKind::Tap);
+        popover_button(ui, "Switch-Popover-Left", "CUE\nOUTPUTS", cue_open, Rect::new(8.0, st.cue_outputs, 80.0, 40.0), Control::CueOutputs);
         if let Some(y) = st.controller {
             ui.toggle("Switch-Large-Tight-Kerning", Some("MONITOR\nCONTROLLER"), false, true, Rect::new(8.0, y, 80.0, 40.0), None, None);
         }
