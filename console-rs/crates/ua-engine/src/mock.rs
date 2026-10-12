@@ -71,6 +71,7 @@ struct State {
     pulse: i64,
     meter_state: HashMap<String, f64>,
     daemon_style: bool,
+    read_rpc_replies: HashMap<String, Json>,
 }
 
 type Shared = Arc<Mutex<State>>;
@@ -87,6 +88,11 @@ pub struct MockEngine {
 }
 
 impl MockEngine {
+    /// Synthetic replies for the audited read RPCs; no hardware/vendor execution.
+    pub fn set_read_rpc_reply(&self, path: &str, data: Json) {
+        assert!(matches!(path, "/GetMidiBuffers" | "/GetCorrectionImage"));
+        lock(&self.state).read_rpc_replies.insert(path.to_owned(), data);
+    }
     /// Starts listening on 127.0.0.1.
     pub fn start(tree: Tree, options: MockOptions) -> std::io::Result<MockEngine> {
         let std_listener = std::net::TcpListener::bind(("127.0.0.1", options.port))?;
@@ -492,7 +498,14 @@ fn handle(s: &mut State, id: u64, text: String) {
         }
         "post" => {
             let (target, body) = split_first(rest);
-            session_post(s, split_query(target).0, body);
+            let (path, query) = split_query(target);
+            if let Some(data) = s.read_rpc_replies.get(path) {
+                if let Some(c) = s.clients.get(&id) {
+                    reply(c, path, Some(data.clone()), &echo_params(&query, s.daemon_style), None);
+                }
+            } else {
+                session_post(s, path, body);
+            }
         }
         _ => {} // unknown verbs: recorded only
     }

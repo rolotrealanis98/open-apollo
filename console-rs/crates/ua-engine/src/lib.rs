@@ -26,8 +26,9 @@
 //! store.end_gesture();                   // flush, then /UndoRecording/value false
 //! ```
 //!
-//! **Safety.** The connection refuses `set`/`post` unless [`Options::allow_writes`]; the
-//! [`Writer`] gate (`writes_enabled`) is off by default too.
+//! **Safety.** General `set`/`post` commands require [`Options::allow_writes`]; the
+//! [`Writer`] gate (`writes_enabled`) is off by default too. Typed read RPCs for
+//! `GetMidiBuffers`/`GetCorrectionImage` and the per-socket sleep hint are exceptions.
 
 pub mod command;
 pub mod connection;
@@ -38,6 +39,7 @@ pub mod framing;
 pub mod helper;
 pub mod message;
 pub mod meters;
+pub mod midi;
 pub mod mock;
 pub mod path;
 pub mod session;

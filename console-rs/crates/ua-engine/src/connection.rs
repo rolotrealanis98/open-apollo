@@ -277,6 +277,14 @@ enum Request {
         timeout: Duration,
         reply: mpsc::Sender<Result<Message>>,
     },
+    /// Only constructed by the two audited read RPCs below; never a general post bypass.
+    ReadPost {
+        id: u64,
+        generation: u64,
+        command: Command,
+        timeout: Duration,
+        reply: mpsc::Sender<Result<Message>>,
+    },
     Close,
 }
 
@@ -400,6 +408,9 @@ impl EngineHandle {
         self.shared.state()
     }
 
+    /// Changes when a transport is replaced, so read consumers can reset watermarks.
+    pub fn generation(&self) -> u64 { self.shared.generation.load(Relaxed) }
+
     pub fn counters(&self) -> Counters {
         let c = &self.shared.counters;
         Counters {
@@ -457,6 +468,34 @@ impl EngineHandle {
     /// [`Error::Engine`].
     pub fn request(&self, path: &str, recursive: bool) -> PendingReply {
         self.request_with_timeout(path, recursive, self.options.request_timeout)
+    }
+
+    /// Read-only Console 1.3.1 RPC (CMxGetMidiBuffers::execute, 0x10028c168).
+    /// The verb is `post`, but this retrieves buffered input; it cannot set engine values.
+    pub fn request_midi_buffers(&self) -> PendingReply {
+        self.read_post("/GetMidiBuffers", "{}".into())
+    }
+
+    /// Read-only correction SVG retrieval. The slot is validated before any frame is sent.
+    pub fn request_correction_image(&self, slot: &str) -> Result<PendingReply> {
+        if !matches!(slot, "speaker" | "headphone" | "headphone2") {
+            return Err(Error::Other("invalid correction image slot".into()));
+        }
+        Ok(self.read_post("/GetCorrectionImage", format!("{{\"type\":\"{slot}\"}}")))
+    }
+
+    fn read_post(&self, path: &'static str, payload: String) -> PendingReply {
+        let (reply, rx) = mpsc::channel();
+        let id = self.shared.next_func_id.fetch_add(1, Relaxed);
+        if !self.shared.state().is_connected() {
+            let _ = reply.send(Err(Error::NotConnected));
+        } else if self.tx.send(Request::ReadPost {
+            id, generation: self.generation(), command: Command::Post { path: path.into(), payload: Some(payload) },
+            timeout: self.options.request_timeout, reply: reply.clone(),
+        }).is_err() {
+            let _ = reply.send(Err(Error::Closed));
+        }
+        PendingReply { rx }
     }
 
     pub fn request_with_timeout(
@@ -648,7 +687,7 @@ impl Task {
     fn reject(&self, req: Request) -> bool {
         match req {
             Request::Close => false,
-            Request::Get { reply, .. } => {
+            Request::Get { reply, .. } | Request::ReadPost { reply, .. } => {
                 let _ = reply.send(Err(Error::NotConnected));
                 true
             }
@@ -862,6 +901,21 @@ impl Task {
                         path: without_query(&path).to_owned(),
                     },
                 );
+            }
+            Request::ReadPost { id, generation: requested_generation, command, timeout, reply } => {
+                if requested_generation != generation {
+                    let _ = reply.send(Err(Error::Disconnected));
+                    return true;
+                }
+                let path = match &command {
+                    Command::Post { path, .. } if matches!(path.as_str(), "/GetMidiBuffers" | "/GetCorrectionImage") => path.clone(),
+                    _ => { let _ = reply.send(Err(Error::WriteRefused)); return true; }
+                };
+                out.extend(NulFramer::encode(&command.with_func_id(id).text()));
+                self.shared.counters.commands_out.fetch_add(1, Relaxed);
+                pending.insert(id, Pending {
+                    kind: PendingKind::Reply(reply), deadline: Instant::now() + timeout, path,
+                });
             }
         }
         true
