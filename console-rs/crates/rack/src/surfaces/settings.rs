@@ -4,10 +4,15 @@
 //! combo, switch, button or text field, section headers, the combo dropdown) are used by the
 //! secondary panels too (`surfaces::panels`).
 //!
-//! Geometry: [obs] HARDWARE cells per `Rack_SettingsBase` (0x180e8ee90): label box
-//! `(x, y, 160, 58)`, control `(x + 5, y + 17, 150, 36)`, 170 pt apart, rows 68 pt apart
-//! starting at (10, 10). [I] Window size, tab and section placement until a 1.3.1 capture of
-//! the Settings window exists.
+//! Geometry:
+//! - [obs] `Rack_SettingsPage::resized` (0x180e92d40): content width `min(w − 20, 980)`,
+//!   centred; the header (tabs) at y 20, `settings_header_height` (48) tall; pages below it
+//!   down to 10 pt above the bottom. Dimension table (0x180855110…): `settings_header_gap` 4,
+//!   `settings_header_height` 48, `settings_header_tab` 124.
+//! - [obs] HARDWARE cells per `Rack_SettingsBase` (0x180e8ee90): label box `(x, y, 160, 58)`,
+//!   control `(x + 5, y + 17, 150, 36)`, 170 pt apart, rows 68 pt apart starting at (10, 10).
+//! - [I] The window size, the tab art and the section placement until a 1.3.1 capture of the
+//!   Settings window exists.
 
 use houston::{Rect, Rgba};
 
@@ -28,7 +33,13 @@ pub const CELL_W: f32 = 160.0;
 pub const CELL_H: f32 = 58.0;
 pub const CELL_PITCH_X: f32 = 170.0;
 pub const CELL_PITCH_Y: f32 = 68.0;
-const TAB_H: f32 = 30.0;
+/// `settings_header_height`, `settings_header_tab`, `settings_header_gap`.
+const TAB_H: f32 = 48.0;
+const TAB_W: f32 = 124.0;
+const TAB_GAP: f32 = 4.0;
+/// `Rack_SettingsPage`: page content width cap and top margin.
+const PAGE_MAX_W: f32 = 980.0;
+const PAGE_TOP: f32 = 20.0;
 const HEADER_H: f32 = 30.0;
 const FOOTER_H: f32 = 26.0;
 pub(crate) const SECTION_HEADER_H: f32 = 30.0;
@@ -222,8 +233,8 @@ fn page_tab(ui: &mut Ui, label: &str, on: bool, first: bool, last: bool, r: Rect
 pub fn draw_settings_sheet(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
     ui.fill(bounds, Rgba::BLACK.with_alpha(0.5));
     ui.hit(bounds, pid(Control::PopoverDismiss), HitKind::Tap);
-    let w = (bounds.w - 40.0).clamp(640.0, 1040.0).min(bounds.w);
-    let h = (bounds.h - 60.0).clamp(420.0, 720.0).min(bounds.h);
+    let w = (bounds.w - 40.0).clamp(640.0, PAGE_MAX_W + 22.0).min(bounds.w);
+    let h = (bounds.h - 60.0).clamp(420.0, 760.0).min(bounds.h);
     let r = Rect::new(bounds.x + ((bounds.w - w) / 2.0).round(), bounds.y + ((bounds.h - h) / 2.5).round(), w, h);
     let content = window_frame(ui, r, "SETTINGS", sid(Control::SettingsClose));
     let body = Rect::new(content.x, content.y, content.w, content.h - FOOTER_H);
@@ -237,22 +248,24 @@ pub fn draw_settings_sheet(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState
     let tabs = settings::tabs(src);
     let tab = if tabs.contains(&view.settings.tab) { view.settings.tab } else { tabs[0] };
 
-    // Tab bar (`Settings-Header`).
-    let bar = Rect::new(body.x, body.y, body.w, TAB_H);
-    ui.fill(bar, Rgba::rgb8(30, 32, 34));
+    // `Rack_SettingsPage`: border, then the header (tabs) and the page in a centred column.
+    ui.fill(body, Rgba::rgb8(52, 55, 58));
+    ui.background("Settings-Background", body);
+    let cw = (body.w - 20.0).min(PAGE_MAX_W);
+    let cx = body.x + ((body.w - cw) / 2.0).floor();
+    let bar = Rect::new(cx, body.y + PAGE_TOP, cw, TAB_H);
     ui.background("Settings-Header", bar);
-    let mut x = bar.x + 10.0;
+    let mut x = bar.x;
     for (i, t) in tabs.iter().enumerate() {
-        let tw = (helvetica_width(t.label(), 11.0) + 28.0).max(80.0).round();
-        let tr = Rect::new(x, bar.y, tw, TAB_H);
+        let tw = TAB_W.max((helvetica_width(t.label(), 11.0) + 28.0).round());
+        let tr = Rect::new(x, bar.y + (TAB_H - 30.0), tw, 30.0);
         page_tab(ui, t.label(), *t == tab, i == 0, i + 1 == tabs.len(), tr);
         ui.hit(tr, sid(Control::SettingsTab(*t)), HitKind::Tap);
-        x += tw;
+        x += tw + TAB_GAP;
     }
 
-    let page = Rect::new(body.x, bar.max_y(), body.w, body.max_y() - bar.max_y());
-    ui.fill(page, Rgba::rgb8(52, 55, 58));
-    ui.background("Settings-Background", page);
+    let page = Rect::new(cx, bar.max_y(), cw, body.max_y() - 10.0 - bar.max_y());
+    ui.fill(page, Rgba::rgb8(44, 47, 50));
     let mut drawn = Vec::new();
     ui.clip(Some(page));
     let edit = view.text_edit.as_ref();
