@@ -339,17 +339,18 @@ pub fn panel_rows(info: &SessionInfo) -> Vec<PanelRow> {
 }
 
 // Geometry and colours measured on capture sess-panel (2 px per pt), relative to the column.
-const PANEL_BG: Rgba = Rgba::rgb8(105, 113, 118);
+// Colours read from the drive captures converted to sRGB (their ICC profile, ASUS PG32).
+const PANEL_BG: Rgba = Rgba::rgb8(115, 123, 128);
 const PANEL_TITLE_H: f32 = 34.0;
 const SEARCH: Rect = Rect { x: 4.0, y: 34.0, w: 337.0, h: 28.0 };
 const SEARCH_EDGE: Rgba = Rgba::rgb8(18, 20, 20);
-const SEARCH_FILL: Rgba = Rgba::rgb8(32, 34, 37);
+const SEARCH_FILL: Rgba = Rgba::rgb8(35, 38, 42);
 const BOX: Rect = Rect { x: 5.0, y: 66.0, w: 335.0, h: 66.0 };
-const BOX_EDGE: Rgba = Rgba::rgb8(33, 36, 38);
-const BOX_FILL: Rgba = Rgba::rgb8(42, 45, 47);
+const BOX_EDGE: Rgba = Rgba::rgb8(37, 40, 43);
+const BOX_FILL: Rgba = Rgba::rgb8(48, 51, 54);
 const CARD: Rect = Rect { x: 10.0, y: 71.0, w: 325.0, h: 56.0 };
-const CARD_EDGE: Rgba = Rgba::rgb8(71, 74, 76);
-const CARD_FILL: Rgba = Rgba::rgb8(60, 62, 64);
+const CARD_EDGE: Rgba = Rgba::rgb8(81, 84, 86);
+const CARD_FILL: Rgba = Rgba::rgb8(68, 71, 73);
 /// The ••• button: its menu opens at (10, 117) in the window (sess-dots), i.e. under a
 /// component at the card's left edge, 20 pt high.
 const DOTS: Rect = Rect { x: 10.0, y: 71.0, w: 30.0, h: 20.0 };
@@ -357,13 +358,13 @@ const BUTTON_Y: f32 = 99.0;
 const BUTTON_H: f32 = 23.0;
 const BUTTON_W: f32 = 102.0;
 const BUTTON_X: [f32; 3] = [15.0, 121.0, 227.0];
-const BUTTON_FILL: Rgba = Rgba::rgb8(80, 82, 83);
-const BUTTON_EDGE: Rgba = Rgba::rgb8(97, 99, 101);
+const BUTTON_FILL: Rgba = Rgba::rgb8(90, 92, 94);
+const BUTTON_EDGE: Rgba = Rgba::rgb8(108, 110, 112);
 const TREE_Y: f32 = 132.0;
 const TREE_ROW_H: f32 = 32.0;
-const FOLDER_FILL: Rgba = Rgba::rgb8(59, 70, 76);
-const ROW_SELECTED: Rgba = Rgba::rgb8(82, 82, 82);
-const TREE_LINE: Rgba = Rgba::rgb8(69, 70, 70);
+const FOLDER_FILL: Rgba = Rgba::rgb8(67, 80, 86);
+const ROW_SELECTED: Rgba = Rgba::rgb8(92, 92, 92);
+const TREE_LINE: Rgba = Rgba::rgb8(78, 80, 80);
 /// A tree row's menu opens under the row at x 33 in the column (sess-row, browser-cat2).
 pub const ROW_MENU_X: f32 = 33.0;
 

@@ -106,9 +106,15 @@ pub(crate) fn window_frame(ui: &mut Ui, r: Rect, title: &str, close: ControlId) 
 pub(crate) fn section_header(ui: &mut Ui, title: &str, r: Rect) {
     ui.fill(r, Rgba::rgb8(67, 74, 75));
     ui.background("Hardware-Setup-Device-Header", r);
+    section_header_text(ui, title, r);
+}
+
+/// The title of a section header band, centred 1 pt below the band's middle (Settings DEVICES /
+/// OPTIONS, CUE OUTPUTS).
+pub(crate) fn section_header_text(ui: &mut Ui, title: &str, r: Rect) {
     let mut style = ui.style("fonts", "Settings-Section-Header-Static-Text");
     style.color = Rgba::WHITE.with_alpha(0.8);
-    ui.text(title, style, r, Align::Center);
+    ui.text(title, style, r.offset(0.0, 1.0), Align::Center);
 }
 
 /// A page section title (OPTIONS › DISPLAY / EDITING): left, no band.
@@ -213,7 +219,7 @@ pub(crate) fn field_cell(ui: &mut Ui, f: &SettingField, x: f32, y: f32, edit: Op
     let cell = Rect::new(x, y, f.width, CELL_H);
     ui.background("Silk-Screen", cell);
     let style = ui.style("views", "Silk-Screen");
-    ui.text(&f.label, style, Rect::new(x + 6.0, y + 3.0, f.width - 8.0, 14.0), Align::Left);
+    ui.text(&f.label, style, Rect::new(x + 6.0, y + 4.0, f.width - 8.0, 14.0), Align::Left);
     let full = Rect::new(x + 5.0, y + 17.0, f.width - 10.0, 36.0);
     match &f.inline {
         Some(second) => {
@@ -322,7 +328,7 @@ pub fn draw_settings_sheet(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState
         let on = *t == tab;
         ui.fill(Rect::new(tr.x + 14.0, tr.y + 8.0, 96.0, 2.0), if on { TAB_ON } else { TAB_OFF });
         let style = Ui::plain_style("Helvetica", 10.0, true, if on { TAB_TEXT_ON } else { TAB_TEXT_OFF });
-        ui.text(t.label(), style, Rect::new(tr.x, tr.y + 15.0, tr.w, 15.0), Align::Center);
+        ui.text(t.label(), style, Rect::new(tr.x, tr.y + 16.0, tr.w, 15.0), Align::Center);
         ui.hit(tr, sid(Control::SettingsTab(*t)), HitKind::Tap);
     }
 
@@ -399,17 +405,19 @@ fn hardware_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page: 
 
 /// A DEVICES row (`Device-A-Background` …, 200 × 60): unit letter, monitor / talkback icons,
 /// name, device icon.
-fn device_row(ui: &mut Ui, d: &settings::SettingsDevice, r: Rect) {
+pub(crate) fn device_row(ui: &mut Ui, d: &settings::SettingsDevice, r: Rect) {
     ui.background(&format!("Device-{}-Background", d.letter()), r);
+    // Letter and name 2 pt under the row's middle (set-hw).
+    let r = Rect::new(r.x, r.y + 2.0, r.w, r.h - 2.0);
     let letter = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(if d.online { 0.85 } else { 0.4 }));
-    ui.text(&d.letter().to_string(), letter, Rect::new(r.x + 6.0, r.y, 14.0, r.h), Align::Center);
-    ui.background("Speaker-Icon", Rect::new(r.x + 19.0, r.y + 13.0, 12.0, 11.0));
-    ui.image("backgrounds/icon_talkback_microphone@2x.png", Rect::new(r.x + 21.0, r.y + 32.0, 9.0, 15.0), None, None, 1.0);
-    let name = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(if d.online { 0.9 } else { 0.45 }));
-    ui.text(&d.name, name, Rect::new(r.x + 59.0, r.y, 80.0, r.h), Align::Left);
+    ui.text(&d.letter().to_string(), letter, Rect::new(r.x + 4.5, r.y, 14.0, r.h), Align::Center);
+    ui.background("Speaker-Icon", Rect::new(r.x + 19.0, r.y + 11.0, 12.0, 11.0));
+    ui.image("backgrounds/icon_talkback_microphone@2x.png", Rect::new(r.x + 21.0, r.y + 30.0, 9.0, 15.0), None, None, 1.0);
+    let name = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(if d.online { 0.9 } else { 0.45 }));
+    ui.text(&d.name, name, Rect::new(r.x + 58.0, r.y, 80.0, r.h), Align::Left);
     let key = d.icon_key();
     if let Some((w, h)) = ui.skin("backgrounds", &key).and_then(|s| s.size()) {
-        ui.background(&key, Rect::new(r.x + 141.0, r.y + ((r.h - h) / 2.0).round(), w, h));
+        ui.background(&key, Rect::new(r.x + 139.0, r.y - 2.0 + ((r.h + 2.0 - h) / 2.0).round(), w, h));
     }
     ui.hit(r, sid(Control::SettingsDevice(d.index)), HitKind::Tap);
 }
@@ -420,23 +428,24 @@ fn device_row(ui: &mut Ui, d: &settings::SettingsDevice, r: Rect) {
 /// caption, then labelled combos), then CHANNEL DSP PAIRING (caption, DSP PAIRS / VIRTUAL
 /// CHANNELS, the 210 × 40 slider).
 fn device_options(ui: &mut Ui, fields: &[SettingField], o: (f32, f32), edit: Option<&TextEdit>, drawn: &mut Vec<Drawn>) {
+    // Captions 13 pt in, controls 9 pt in, 110 apart (drive capture set-hw).
     let (ox, oy) = o;
     let row = |n: u8| fields.iter().filter(move |f| f.row == n);
     if let Some(name) = row(0).next() {
-        static_label(ui, &name.label, Rect::new(ox + 10.0, oy + 10.0, 300.0, 16.0), Align::Left);
+        static_label(ui, &name.label, Rect::new(ox + 13.0, oy + 10.0, 300.0, 16.0), Align::Left);
         if let FieldKind::Text(t) = &name.kind {
-            text_box(ui, name, t, edit, Rect::new(ox + 10.0, oy + 26.0, 350.0, 40.0));
+            text_box(ui, name, t, edit, Rect::new(ox + 8.5, oy + 26.0, 350.0, 40.0));
             drawn.push(Drawn { field: name.clone() });
         }
         if let Some(b) = &name.inline {
-            push_button(ui, b, &b.label, Rect::new(ox + 360.0, oy + 26.0, 80.0, 40.0));
+            push_button(ui, b, &b.label, Rect::new(ox + 358.5, oy + 26.0, 80.0, 40.0));
         }
     }
     let mut y = 76.0;
     let mut combos = |ui: &mut Ui, list: Vec<&SettingField>, y: f32| {
         for (k, f) in list.into_iter().enumerate() {
-            let x = ox + 10.0 + k as f32 * 110.0;
-            static_label(ui, &f.label, Rect::new(x, oy + y, 100.0, 16.0), Align::Left);
+            let x = ox + 9.0 + k as f32 * 110.0;
+            static_label(ui, &f.label, Rect::new(x + 4.0, oy + y, 100.0, 16.0), Align::Left);
             control(ui, f, Rect::new(x, oy + y + 16.0, 100.0, 40.0), edit, drawn);
         }
     };
@@ -450,17 +459,17 @@ fn device_options(ui: &mut Ui, fields: &[SettingField], o: (f32, f32), edit: Opt
         if list.is_empty() {
             continue;
         }
-        static_label(ui, title, Rect::new(ox + 10.0, oy + y, 400.0, 16.0), Align::Left);
+        static_label(ui, title, Rect::new(ox + 13.0, oy + y, 400.0, 16.0), Align::Left);
         combos(ui, list, y + 20.0);
         y += 20.0 + 56.0 + 10.0;
     }
     let mut slider_at = None;
     if let Some(f) = row(4).next() {
         if let FieldKind::Slider { left_label, right_label, .. } = &f.kind {
-            static_label(ui, &f.label, Rect::new(ox + 10.0, oy + y, 204.0, 16.0), Align::Left);
-            static_label(ui, left_label, Rect::new(ox + 10.0, oy + y + 20.0, 204.0, 16.0), Align::Left);
-            static_label(ui, right_label, Rect::new(ox + 10.0, oy + y + 20.0, 204.0, 16.0), Align::Right);
-            slider_at = Some((f.clone(), Rect::new(ox + 10.0, oy + y + 36.0, 210.0, 40.0)));
+            static_label(ui, &f.label, Rect::new(ox + 13.0, oy + y, 204.0, 16.0), Align::Left);
+            static_label(ui, left_label, Rect::new(ox + 13.0, oy + y + 20.0, 204.0, 16.0), Align::Left);
+            static_label(ui, right_label, Rect::new(ox + 13.0, oy + y + 20.0, 204.0, 16.0), Align::Right);
+            slider_at = Some((f.clone(), Rect::new(ox + 13.0, oy + y + 36.0, 210.0, 40.0)));
             y += 36.0 + 40.0 + 10.0;
         }
     }
@@ -489,26 +498,33 @@ fn io_matrix_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page:
     let outputs = settings::io_routes(src, true);
     let n = inputs.len().max(outputs.len()) as f32;
     let list_y = top + 29.0 + 26.0;
-    let list_h = (table.max_y() - list_y).max(0.0);
+    // The lists show whole rows (+ 2 pt), the page's grey under them (set-tab-io).
+    let list_h = (((table.max_y() - list_y) / row_h).floor() * row_h + 2.0).max(0.0);
     let overflow = (n * row_h - list_h).max(0.0);
     let off = (overflow * view.settings.scroll).round();
     for (k, (title, kind, routes)) in [("INPUTS", "INPUT", &inputs), ("OUTPUTS", "OUTPUT", &outputs)].into_iter().enumerate() {
         let x = table.x + k as f32 * half;
         let w = if k == 0 { half } else { table.w - half };
         section_header(ui, title, Rect::new(x, top, w, 29.0));
+        // Column header (set-tab-io, sRGB): (72, 78, 80) under a dark top line and a 1-px
+        // highlight, a black foot; titles 1.5 pt under the band's middle.
         let head = Rect::new(x, top + 29.0, w, 26.0);
-        ui.fill(head, Rgba::rgb8(48, 53, 55));
+        ui.fill(head, Rgba::rgb8(72, 78, 80));
+        ui.fill(Rect::new(x, head.y, w, 1.0), Rgba::rgb8(51, 55, 56));
+        ui.fill(Rect::new(x, head.y + 1.0, w, 0.5), Rgba::rgb8(98, 104, 106));
         ui.fill(Rect::new(x, head.max_y() - 1.0, w, 1.0), DIVIDER);
         let cols = [(0.0, 40.0, "CH"), (40.0, 95.0, "DEVICE"), (135.0, 77.0, kind), (212.0, w - 212.0, "CUSTOM NAME")];
         let hs = ui.style("views", "Settings-Col-Header-Text");
         for (cx, cw, label) in cols {
-            ui.text(label, hs.clone(), Rect::new(x + cx, head.y, cw, head.h), Align::Center);
+            ui.text(label, hs.clone(), Rect::new(x + cx, head.y + 1.5, cw, head.h), Align::Center);
             if cx > 0.0 {
                 ui.fill(Rect::new(x + cx, head.y, 1.0, head.h), Rgba::rgb8(30, 33, 35));
             }
         }
+        // Rows: cells on the (43, 46, 48) list ground, half a point apart — CH (29, 32, 33), the
+        // device's 7-pt blue bar, then DEVICE / INPUT / CUSTOM NAME on (28, 37, 42).
         let area = Rect::new(x, list_y, w, list_h);
-        ui.fill(area, Rgba::rgb8(28, 35, 42));
+        ui.fill(area, Rgba::rgb8(43, 46, 48));
         ui.clip(Some(area));
         let num = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.9));
         let text = Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.85));
@@ -519,14 +535,19 @@ fn io_matrix_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page:
             if y + row_h < area.y || y > area.max_y() {
                 continue;
             }
-            ui.fill(Rect::new(x, y + row_h - 1.0, w, 1.0), Rgba::rgb8(36, 42, 47));
+            let ch = row_h - 0.5;
+            ui.fill(Rect::new(x + 0.5, y, 39.0, ch), Rgba::rgb8(29, 32, 33));
+            ui.fill(Rect::new(x + 40.5, y, 7.0, ch), Rgba::rgb8(0, 123, 201));
+            for (cx, cw) in [(47.5, 88.0), (136.0, 75.5), (212.0, w - 212.0)] {
+                ui.fill(Rect::new(x + cx, y, cw, ch), Rgba::rgb8(28, 37, 42));
+            }
+            let y = y + 1.0;
             ui.text(&r.channel.to_string(), num.clone(), Rect::new(x, y, 40.0, row_h), Align::Center);
-            ui.fill(Rect::new(x + 42.0, y, 5.0, row_h), Rgba::rgb8(7, 105, 169));
             let st = if r.active { &text } else { &dim };
-            ui.text(&dev_name, st.clone(), Rect::new(x + 40.0, y, 95.0, row_h), Align::Center);
-            ui.text(&r.default_name, st.clone(), Rect::new(x + 135.0, y, 77.0, row_h), Align::Center);
+            ui.text(&dev_name, st.clone(), Rect::new(x + 47.5, y, 88.0, row_h), Align::Center);
+            ui.text(&r.default_name, st.clone(), Rect::new(x + 136.0, y, 75.5, row_h), Align::Center);
             // The INPUT / OUTPUT cell opens the cascading source picker (capture s35).
-            ui.hit(Rect::new(x + 40.0, y, 172.0, row_h), sid(Control::ShowPanel(crate::settings::Panel::RouteSource { route: i as u16, outputs: k == 1 })), HitKind::Tap);
+            ui.hit(Rect::new(x + 40.0, y - 1.0, 172.0, row_h), sid(Control::ShowPanel(crate::settings::Panel::RouteSource { route: i as u16, outputs: k == 1 })), HitKind::Tap);
             ui.text(&r.name, text.clone(), Rect::new(x + 222.0, y, w - 232.0, row_h), Align::Left);
         }
         ui.clip(None);

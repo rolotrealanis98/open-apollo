@@ -1874,10 +1874,10 @@ impl ViewState {
 }
 
 /// A PLUG-IN SCENES row's menu opens at this offset from the row's top-left (captures
-/// browser-row and browser-hdr: x 143 in the 288-pt column, 23.5 pt below the 32-pt row's top,
+/// browser-row and browser-hdr: x 143 in the 288-pt column, 26 pt below the 32-pt row's top,
 /// wherever the click was).
 const SCENE_MENU_DX: f32 = 143.0;
-const SCENE_MENU_DY: f32 = 23.5;
+const SCENE_MENU_DY: f32 = 26.0;
 
 /// The context menu Console opens for a secondary click at (`x`, `y`), from the frame's hits
 /// (captures lbl-*, ins-*, unison, solo-*, meter-*, preamp-*, pan-*, fader-*, monitor-*). Aux
