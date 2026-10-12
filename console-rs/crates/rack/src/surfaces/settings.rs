@@ -105,9 +105,15 @@ pub(crate) fn window_frame(ui: &mut Ui, r: Rect, title: &str, close: ControlId) 
 pub(crate) fn section_header(ui: &mut Ui, title: &str, r: Rect) {
     ui.fill(r, Rgba::rgb8(67, 74, 75));
     ui.background("Hardware-Setup-Device-Header", r);
+    section_header_text(ui, title, r);
+}
+
+/// The title of a section header band, centred 1 pt below the band's middle (Settings DEVICES /
+/// OPTIONS, CUE OUTPUTS).
+pub(crate) fn section_header_text(ui: &mut Ui, title: &str, r: Rect) {
     let mut style = ui.style("fonts", "Settings-Section-Header-Static-Text");
     style.color = Rgba::WHITE.with_alpha(0.8);
-    ui.text(title, style, r, Align::Center);
+    ui.text(title, style, r.offset(0.0, 1.0), Align::Center);
 }
 
 /// A page section title (OPTIONS › DISPLAY / EDITING): left, no band.

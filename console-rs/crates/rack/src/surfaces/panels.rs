@@ -24,7 +24,7 @@ use crate::input::{Control, ControlId, HitKind, ScrollTarget};
 use crate::model::{MeterFrame, MixerModel};
 use crate::settings::{self, FieldKind, Panel, PropertySource, SendsOf, SettingField, SettingsGroup};
 use crate::surfaces::popover::pid;
-use crate::surfaces::settings::{CELL_PITCH_X, Drawn, centred, choice_box, choice_menu, field_grid, section_header, sid, static_label, text_box, window_frame};
+use crate::surfaces::settings::{CELL_PITCH_X, Drawn, centred, choice_box, choice_menu, field_grid, section_header, section_header_text, sid, static_label, text_box, window_frame};
 use crate::surfaces::view::{TextTarget, ViewState};
 use crate::ui::Ui;
 
@@ -165,50 +165,86 @@ fn db_readout(db: f64) -> String {
     }
 }
 
-// ---- CUE OUTPUTS ([cap] s07, 360 × 242) ----
+// ---- CUE OUTPUTS (drive capture panel-cue "Cues Assignments", 348 × 238) ----
 
+/// `Rack_CuesAssignments` (resized 0x180d29880; ids/skins: cues_assignments, `Rack_CueRoute`):
+/// a 27-pt title, the DEVICES header (3, 27, 161, 32) and one 90-pt cue column per cue from
+/// x 164 (header, MONO / MIX, MIRROR TO), the device list from y 59 (an empty
+/// `No-Device-Background` slot 90 tall, then the device rows), and per headphone output a
+/// `Switch-Cue-A` tile (89 × 41) in the column of the cue it plays, rows 43 pt apart from 150.
 fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Vec<Drawn>) {
     let Some(src) = model.properties() else { return };
     let devices = settings::devices(src);
     let Some(dev) = devices.first() else { return };
     let cues = settings::fields(src, SettingsGroup::CueRoutes(dev.index));
     let n = cues.iter().map(|f| f.row as usize + 1).max().unwrap_or(0).max(1);
+    let hp: Vec<String> = src.indices(&format!("{}/outputs", dev.path)).into_iter().map(|o| format!("{}/outputs/{o}", dev.path)).filter(|o| str_at(src, &format!("{o}/IOType")).as_deref() == Some("Headphone")).collect();
+    let rows = hp.len().max(2) as f32;
     let col_w = 90.0;
-    let size = (180.0 + n as f32 * col_w, 242.0);
-    // Opens left of its button, like Console's popover.
+    let size = (164.0 + n as f32 * col_w + 4.0, 149.0 + rows * 44.0 + 1.0);
+    // Opens beside its button; Console's window may leave the main window, ours stays inside.
     let anchor = ui.hit_rect(&ControlId { strip: "monitor".into(), control: Control::CueOutputs });
     let r = match anchor {
-        Some(a) => Rect::new((a.x - 8.0 - size.0).max(bounds.x), (a.max_y() - size.1).clamp(bounds.y, (bounds.max_y() - size.1).max(bounds.y)), size.0, size.1),
+        Some(a) => Rect::new((a.x - 178.0).min(bounds.max_x() - size.0).max(bounds.x), (a.y - 24.0).clamp(bounds.y, (bounds.max_y() - size.1).max(bounds.y)), size.0, size.1),
         None => centred(bounds, size),
     };
     ui.popover_catcher(bounds);
-    let c = window_frame(ui, r, "CUE OUTPUTS", sid(Control::PanelClose));
-    let x0 = c.x;
-    section_header(ui, "DEVICES", Rect::new(x0, c.y, 160.0, 28.0));
-    ui.fill(Rect::new(x0, c.y + 28.0, c.w, c.h - 28.0), DARK);
-    let hp: Vec<String> = src.indices(&format!("{}/outputs", dev.path)).into_iter().map(|o| format!("{}/outputs/{o}", dev.path)).filter(|o| str_at(src, &format!("{o}/IOType")).as_deref() == Some("Headphone")).collect();
-    let dev_y = c.y + 28.0 + 88.0;
+    sub_window_frame(ui, r, "CUE OUTPUTS");
+    let (x0, y0) = (r.x, r.y);
+    // The body (`Device-Settings-Background`) under the slots; the device list: the empty top
+    // slot, then the device's row (blue bar, icons, name, HPs).
+    ui.background("Device-Settings-Background", Rect::new(x0 + 3.0, y0 + 59.0, size.0 - 6.0, size.1 - 62.0));
+    ui.background("No-Device-Background", Rect::new(x0 + 3.0, y0 + 59.0, 161.0, 90.0));
+    let row = Rect::new(x0 + 3.0, y0 + 149.0, 161.0, rows * 44.0);
+    ui.background(&format!("Device-{}-Background", dev.letter()), row);
+    let letter = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.85));
+    ui.text(&dev.letter().to_string(), letter, Rect::new(row.x + 6.0, row.y, 10.0, row.h), Align::Center);
+    ui.background("Speaker-Icon", Rect::new(row.x + 20.0, row.y + 20.0, 12.0, 11.0));
+    ui.image("backgrounds/icon_talkback_microphone@2x.png", Rect::new(row.x + 22.0, row.y + 40.5, 9.0, 15.0), None, None, 1.0);
+    let name = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.9));
+    ui.text(&dev.name, name, Rect::new(row.x + 45.0, row.y + 1.0, 86.0, 14.0), Align::Center);
+    let key = dev.icon_key();
+    if let Some((w, h)) = ui.skin("backgrounds", &key).and_then(|s| s.size()) {
+        ui.background(&key, Rect::new(row.x + 72.0, row.y + 39.0, w * 0.85, h * 0.85));
+    }
+    for h in 0..hp.len().min(2) {
+        ui.background(if h == 0 { "Headphone1-Icon" } else { "Headphone2-Icon" }, Rect::new(row.x + 135.0, row.y + 14.0 + h as f32 * 43.0, 18.0, 15.0));
+    }
+    // One header band across, DEVICES and each cue titled in its column, `Vertical-Divider`s
+    // (2 pt) at the column edges; each cue column's slots start 1 pt right of the divider.
+    section_header(ui, "", Rect::new(x0 + 3.0, y0 + 27.0, size.0 - 6.0, 32.0));
+    section_header_text(ui, "DEVICES", Rect::new(x0 + 3.0, y0 + 27.0, 161.0, 32.0));
     for k in 0..n {
-        let cx = x0 + 162.0 + k as f32 * col_w;
-        let row: Vec<&SettingField> = cues.iter().filter(|f| f.row as usize == k).collect();
-        let name = row.first().map(|f| f.label.clone()).unwrap_or_default();
-        section_header(ui, &name, Rect::new(cx, c.y, col_w - 2.0, 28.0));
-        for f in &row {
+        let cx = x0 + 164.0 + k as f32 * col_w;
+        let fields: Vec<&SettingField> = cues.iter().filter(|f| f.row as usize == k).collect();
+        let name = fields.first().map(|f| f.label.clone()).unwrap_or_default();
+        ui.background("No-Device-Settings-Background", Rect::new(cx + 1.0, y0 + 59.0, col_w - 1.0, 89.0));
+        ui.background(&format!("Device-{}-Settings-Background", dev.letter()), Rect::new(cx + 1.0, row.y + 1.0, col_w - 1.0, row.h - 1.0));
+        ui.background("Vertical-Divider", Rect::new(cx, y0 + 27.0, 2.0, 31.0));
+        section_header_text(ui, &name, Rect::new(cx, y0 + 27.0, col_w, 32.0));
+        for f in &fields {
             match (&f.kind, f.label.as_str()) {
-                (FieldKind::Toggle { on }, _) => switch(ui, "MONO", *on, &f.key, Rect::new(cx + 6.0, c.y + 34.0, 36.0, 36.0)),
+                (FieldKind::Toggle { on }, _) => switch(ui, "MONO", *on, &f.key, Rect::new(cx + 7.0, y0 + 65.0, 36.0, 36.0)),
                 (FieldKind::Choice { selected, .. }, "SOURCE") => {
                     // MIX lit while the cue plays its own mix; tapping flips the source.
                     let mix = *selected == Some(0);
-                    let b = Rect::new(cx + 46.0, c.y + 34.0, 36.0, 36.0);
+                    let b = Rect::new(cx + 48.0, y0 + 65.0, 36.0, 36.0);
                     ui.toggle("Switch", Some("MIX"), mix, true, b, None, None);
                     ui.hit(b, sid(Control::SettingChoose(f.key.clone(), if mix { 1 } else { 0 })), HitKind::Tap);
                 }
                 (FieldKind::Choice { .. }, _) => {
-                    // MIRROR TO: the caption over the destination combo.
-                    let box_r = Rect::new(cx + 4.0, c.y + 76.0, col_w - 10.0, 34.0);
-                    choice_box(ui, f, box_r);
-                    let st = ui.style("views", "Silk-Screen");
-                    ui.text("MIRROR TO", st, Rect::new(box_r.x, box_r.y + 3.0, box_r.w, 12.0), Align::Center);
+                    // MIRROR TO (`Mirror-Background-Popup`): caption over the destination.
+                    let box_r = Rect::new(cx + 3.0, y0 + 106.0, 86.0, 36.0);
+                    ui.background("Mirror-Background-Popup", box_r);
+                    if let Some(icon) = ui.skin("backgrounds", "Mirror-Background-Popup").and_then(|s| s.image("image-overlay")) {
+                        let icon = icon.to_string();
+                        ui.image(&icon, Rect::new(box_r.x + 69.0, box_r.y + 23.0, 7.0, 7.0), None, None, 1.0);
+                    }
+                    let cap = ui.style("fonts", "Silk-Screen");
+                    ui.text("MIRROR TO", cap, Rect::new(box_r.x, box_r.y + 6.5, box_r.w, 12.0), Align::Center);
+                    let value = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.7));
+                    ui.text(&f.value_text(), value, Rect::new(box_r.x, box_r.y + 18.0, box_r.w, 13.0), Align::Center);
+                    ui.hit(box_r, sid(Control::SettingMenu(f.key.clone())), HitKind::Tap);
                     drawn.push(Drawn { field: (*f).clone() });
                 }
                 _ => {}
@@ -217,34 +253,35 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
         // The headphone tile: which HP output plays this cue.
         for (h, o) in hp.iter().enumerate() {
             if str_at(src, &format!("{o}/MixInSource")).unwrap_or_default() == format!("cue{}", k + 1) {
-                let mix = row.iter().find(|f| f.label == "SOURCE").map(|f| f.value_text()).unwrap_or_default();
+                let mix = fields.iter().find(|f| f.label == "SOURCE").map(|f| f.value_text()).unwrap_or_default();
                 let what = if mix == "MIX" { "MONITOR MIX".to_string() } else { format!("CUE {} MIX", k + 1) };
-                let tile = Rect::new(cx + 1.0, dev_y + 2.0 + h as f32 * 42.0, col_w - 4.0, 39.0);
-                ui.fill(tile, BLUE);
-                let st = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.9));
-                ui.text(&format!("{what}\nto\n{} HP {}", dev.letter(), h + 1), st, tile, Align::Center);
+                let tile = Rect::new(cx + 1.0, row.y + 1.0 + h as f32 * 43.0, 89.0, 41.0);
+                // The tile art fills the 89 × 41 tile (`Switch-NoDedicatedCue-A`, stretched).
+                ui.toggle("Switch-NoDedicatedCue-A", Some(&format!("{what}\nto\n{} HP {}", dev.letter(), h + 1)), true, true, tile, None, None);
             }
         }
     }
-    // The device row: unit letter, icons, name, device icon, HP outputs.
-    let row = Rect::new(x0, dev_y, 160.0, 84.0);
-    ui.fill(Rect::new(x0, dev_y - 1.0, c.w, 1.0), Rgba::BLACK.with_alpha(0.6));
-    ui.fill(row, Rgba::rgb8(29, 32, 33));
-    ui.fill(Rect::new(row.x + 31.0, row.y, 6.0, row.h), Rgba::rgb8(7, 105, 169));
-    let letter = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.85));
-    ui.text(&dev.letter().to_string(), letter, Rect::new(row.x + 2.0, row.y + 30.0, 14.0, 14.0), Align::Center);
-    ui.background("Speaker-Icon", Rect::new(row.x + 16.0, row.y + 16.0, 12.0, 11.0));
-    ui.image("backgrounds/icon_talkback_microphone@2x.png", Rect::new(row.x + 18.0, row.y + 36.0, 9.0, 15.0), None, None, 1.0);
-    let name = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.9));
-    ui.text(&dev.name, name, Rect::new(row.x + 40.0, row.y + 2.0, 80.0, 14.0), Align::Center);
-    let key = dev.icon_key();
-    if let Some((w, h)) = ui.skin("backgrounds", &key).and_then(|s| s.size()) {
-        ui.background(&key, Rect::new(row.x + 63.0, row.y + 38.0, w * 0.9, h * 0.9));
+}
+
+/// `Rack_SubWindow` chrome (the cue / monitor sub-windows; capture panel-cue): a 1-px dark
+/// outline, the grey frame (lighter under the title), the title centred in the 27-pt bar and
+/// the close X at the left. Swallows taps.
+fn sub_window_frame(ui: &mut Ui, r: Rect, title: &str) {
+    ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
+    ui.fill(r, Rgba::rgb8(26, 26, 26));
+    let inner = r.inset(0.5, 0.5, 1.0, 0.5);
+    ui.fill(inner, Rgba::rgb8(60, 64, 66));
+    ui.fill(Rect::new(inner.x, inner.y, inner.w, 12.5), Rgba::rgb8(63, 67, 69));
+    ui.fill(Rect::new(inner.x, inner.y + 12.5, inner.w, 12.0), Rgba::rgb8(61, 65, 67));
+    ui.fill(Rect::new(inner.x, inner.y + 24.5, inner.w, 2.0), Rgba::rgb8(55, 59, 61));
+    ui.fill(Rect::new(inner.x, inner.y, inner.w, 0.5), Rgba::rgb8(68, 72, 74));
+    let style = ui.style("views", "Button-Popover-Header");
+    ui.text(title, style, Rect::new(r.x, r.y, r.w, 27.0), Align::Center);
+    if let Some(x) = ui.skin("views", "Window-Button-Close").and_then(|s| s.image("image")) {
+        let x = x.to_string();
+        ui.image(&x, Rect::new(r.x + 10.5, r.y + 7.5, 12.0, 12.0), None, None, 1.0);
     }
-    let hs = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.7));
-    for h in 0..hp.len().min(2) {
-        ui.text(&format!("HP{}", h + 1), hs.clone(), Rect::new(row.x + 124.0, row.y + 12.0 + h as f32 * 42.0, 30.0, 16.0), Align::Center);
-    }
+    ui.hit(Rect::new(r.x, r.y, 34.0, 27.0), sid(Control::PanelClose), HitKind::Tap);
 }
 
 // ---- MONITOR CONTROLLER ([cap] s06, 821 × 532) ----
