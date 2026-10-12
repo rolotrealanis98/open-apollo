@@ -219,11 +219,11 @@ fn submenus_hover_and_escape() {
     let sub = find(&h, "menu", &Control::Menu(MenuCmd::OpenSub { level: 0, index: 0 })).unwrap().rect;
     assert!(view.menu_hover(&h, sub.center().0, sub.center().1));
     assert_eq!(view.menu.as_ref().unwrap().open, vec![0]);
-    // Its rows are live; Show Control Room switches the monitor page.
+    // Its rows are live; Show Control Room toggles the control-room show (independent of AUX).
     let h = hits(&assets, &model, &view);
     let ctrl = ControlId { strip: "global".into(), control: Control::Menu(MenuCmd::App(Command::ShowControlRoom)) };
     press(&h, find(&h, "global", &ctrl.control).unwrap(), &mut view, &mut model);
-    assert_eq!(view.monitor_page, rack::surfaces::MonitorPage::ControlRoom);
+    assert!(view.show_ctrl_room && view.show_aux);
     assert!(view.menu.is_none());
     // Escape closes the submenu first, then the menu.
     view.menu = Some(MenuState { open: vec![0], ..MenuState::at(MenuTarget::Bar(3), 0.0, 0.0) });

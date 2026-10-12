@@ -40,6 +40,8 @@ pub struct Options {
     pub open_plugin: Option<(String, u8)>,
     /// Settings window / panel to open at start (`--open`).
     pub open: Option<String>,
+    /// `--view` spec applied to the mixer view at start.
+    pub view_spec: Option<String>,
     pub settings: Settings,
 }
 
@@ -116,6 +118,11 @@ impl App {
             menu_bar: true,
             ..ViewState::default()
         };
+        if let Some(spec) = &opts.view_spec {
+            if let Err(e) = mixer.apply_spec(spec) {
+                eprintln!("uaconsole: --view: {e}");
+            }
+        }
         if let Some(name) = &opts.open {
             mixer.open_named(name);
         }

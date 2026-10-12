@@ -129,6 +129,23 @@ impl ConsoleModel {
     }
 }
 
+/// A channel preset folder or file (a strip's `Preset` values tree; the PRESETS tab).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PresetNode {
+    pub name: String,
+    /// Some for a folder (its entries, sorted by name as Console lists them).
+    pub children: Option<Vec<PresetNode>>,
+}
+
+impl PresetNode {
+    pub fn file(name: &str) -> Self {
+        Self { name: name.into(), children: None }
+    }
+    pub fn folder(name: &str, children: Vec<PresetNode>) -> Self {
+        Self { name: name.into(), children: Some(children) }
+    }
+}
+
 /// The skins a strip draws with, by kind and console model (the default rendering is the
 /// `console_model == None` case).
 impl StripInfo {
@@ -137,7 +154,7 @@ impl StripInfo {
     pub fn fader_skin(&self) -> &'static str {
         match (self.console_model, self.kind) {
             (Some(m), _) => m.fader_skin(),
-            (None, StripKind::Aux) => "Main-Bus-Fader",
+            (None, StripKind::Aux | StripKind::Talkback) => "Main-Bus-Fader",
             (None, StripKind::Input) => "Main-Input-Fader",
         }
     }
@@ -147,7 +164,7 @@ impl StripInfo {
     pub fn pan_skin(&self) -> &'static str {
         match self.kind {
             StripKind::Input => "Pan-Black",
-            StripKind::Aux => self.console_model.map_or("Pan-White", |m| m.pan_skin(true)),
+            StripKind::Aux | StripKind::Talkback => self.console_model.map_or("Pan-White", |m| m.pan_skin(true)),
         }
     }
 
@@ -156,7 +173,7 @@ impl StripInfo {
     pub fn aux_bottom_skin(&self) -> Option<&'static str> {
         match self.kind {
             StripKind::Aux => self.console_model.map(ConsoleModel::aux_channel_bottom_skin),
-            StripKind::Input => None,
+            StripKind::Input | StripKind::Talkback => None,
         }
     }
 
@@ -419,6 +436,8 @@ pub struct MonitorOptions {
     pub speaker_correction: Option<bool>,
     /// The hardware monitor knob controls this mixer's monitor level (green `knob_focus` dot).
     pub knob_focus: bool,
+    /// Control-room SOURCE (`outputs/MON/MixInSource`): 0 = MONITOR, n = CUE n.
+    pub cr_source: u8,
 }
 
 /// A cue output (`outputs/14..17`): what it plays and how.
@@ -450,6 +469,15 @@ pub trait MixerModel {
     }
     fn inputs(&self) -> Vec<StripInfo>;
     fn auxes(&self) -> Vec<StripInfo>;
+    /// Channel presets (the PRESETS tab): a strip's `Preset` values tree.
+    fn channel_presets(&self) -> Vec<PresetNode> {
+        Vec::new()
+    }
+    /// The talkback mic strip (`IOType` `TalkbackMic`), shown with SHOW CTRL ROOM. Its sends
+    /// (AUX 1, AUX 2, CUE 1…) come from `input_sends`.
+    fn talkback(&self) -> Option<StripInfo> {
+        None
+    }
     fn main(&self, s: &StripInfo) -> MainState;
     fn preamp(&self, s: &StripInfo) -> Option<PreampState>;
     fn inserts(&self, s: &StripInfo) -> Vec<InsertState>;
@@ -566,6 +594,7 @@ pub trait MixerModel {
 pub struct PreviewMixer {
     pub inputs: Vec<StripInfo>,
     pub auxes: Vec<StripInfo>,
+    pub talkback: Option<StripInfo>,
     pub mains: HashMap<Arc<str>, MainState>,
     pub preamps: HashMap<Arc<str>, PreampState>,
     pub monitor: MonitorState,
@@ -671,6 +700,7 @@ impl Default for PreviewMixer {
             input("v2", "VIRTUAL 3/4", true, false, false),
         ];
         let auxes = vec![aux("aux0", "AUX 1"), aux("aux1", "AUX 2")];
+        let talkback = StripInfo { id: "tb".into(), title: "TALKBACK".into(), kind: StripKind::Talkback, stereo: false, preamp_layout: None, shows_sr_convert: false, console_model: None };
         let names = ["SM7B", "GTR", "Dante AVIO", "S/PDIF", "Macbook", "Macbook 3/4"];
         let mut mains = HashMap::new();
         for (s, n) in inputs.iter().zip(names) {
@@ -679,6 +709,7 @@ impl Default for PreviewMixer {
         }
         mains.insert("aux0".into(), MainState { name: "AUX 1".into(), fader: scales::fader_tapered(-9.4), readout: "-9.4".into(), ..Default::default() });
         mains.insert("aux1".into(), MainState { name: "AUX 2".into(), ..Default::default() });
+        mains.insert("tb".into(), MainState { name: "TALKBACK".into(), fader: scales::fader_tapered(-6.0), readout: "-6.0".into(), ..Default::default() });
         let mut preamps = HashMap::new();
         preamps.insert("in0".into(), PreampState { gain: 0.3, gain_text: "27 dB".into(), source: "LINE".into(), ..Default::default() });
         for id in ["in1", "in2"] {
@@ -716,10 +747,15 @@ impl Default for PreviewMixer {
         for a in &auxes {
             sends.insert(a.id.clone(), vec![(send("CUE 1", 0.5, false), None), (send("CUE 2", 0.5, false), None)]);
         }
+        sends.insert(
+            talkback.id.clone(),
+            vec![(send("AUX 1", 0.5, false), None), (send("AUX 2", 0.5, false), None), (send("CUE 1", 0.5, false), None), (send("CUE 2", 0.5, false), None)],
+        );
         let record_pre = inputs.iter().map(|s| (s.id.clone(), s.preamp_layout.is_none())).collect();
         Self {
             inputs,
             auxes,
+            talkback: Some(talkback),
             mains,
             preamps,
             monitor: MonitorState { level: 0.09, readout: "-52.0 dB".into(), mono: false, mute: false },
@@ -752,6 +788,7 @@ impl Default for PreviewMixer {
                 hp_correction: Some(true),
                 speaker_correction: Some(true),
                 knob_focus: true,
+                cr_source: 0,
             },
             cues: vec![
                 CueOutput { name: "CUE 1".into(), source_cue: true, mono: false, destination: "LINE 3/4".into() },
@@ -771,7 +808,7 @@ impl Default for PreviewMixer {
 
 impl PreviewMixer {
     fn strip(&self, id: &str) -> Option<&StripInfo> {
-        self.inputs.iter().chain(&self.auxes).find(|s| &*s.id == id)
+        self.inputs.iter().chain(&self.auxes).chain(&self.talkback).find(|s| &*s.id == id)
     }
 }
 
@@ -794,6 +831,18 @@ impl MixerModel for PreviewMixer {
     fn auxes(&self) -> Vec<StripInfo> {
         self.auxes.clone()
     }
+    fn talkback(&self) -> Option<StripInfo> {
+        self.talkback.clone()
+    }
+    fn channel_presets(&self) -> Vec<PresetNode> {
+        let f = |names: &[&str]| names.iter().map(|n| PresetNode::file(n)).collect::<Vec<_>>();
+        vec![
+            PresetNode::folder("Bass", f(&["Andrew Scheps - Bass", "Darrell Thorp - Bass"])),
+            PresetNode::folder("Drums", f(&["Andrew Scheps - Kick", "Andrew Scheps - Snare"])),
+            PresetNode::folder("Guitar", f(&["Darrell Thorp - Electric Guitar", "Jeff Balding - Acoustic"])),
+            PresetNode::folder("Vocals", f(&["Darrell Thorp - Vocals", "Dave Isaac - Lead Vox"])),
+        ]
+    }
     fn main(&self, s: &StripInfo) -> MainState {
         self.mains.get(&s.id).cloned().unwrap_or_default()
     }
@@ -810,7 +859,7 @@ impl MixerModel for PreviewMixer {
         if s.kind == StripKind::Aux { self.sends.get(&s.id).map(|v| v.iter().map(|(s, _)| s.clone()).collect()).unwrap_or_default() } else { vec![] }
     }
     fn input_sends(&self, s: &StripInfo) -> Vec<SendState> {
-        if s.kind == StripKind::Input { self.sends.get(&s.id).map(|v| v.iter().map(|(s, _)| s.clone()).collect()).unwrap_or_default() } else { vec![] }
+        if matches!(s.kind, StripKind::Input | StripKind::Talkback) { self.sends.get(&s.id).map(|v| v.iter().map(|(s, _)| s.clone()).collect()).unwrap_or_default() } else { vec![] }
     }
     fn send_pre(&self, s: &StripInfo, k: usize) -> Option<bool> {
         self.sends.get(&s.id).and_then(|v| v.get(k)).and_then(|(_, p)| *p)

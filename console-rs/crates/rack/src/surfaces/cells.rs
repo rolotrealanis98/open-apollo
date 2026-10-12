@@ -14,11 +14,49 @@ use crate::ui::Ui;
 pub const HEADER_H: f32 = 22.0;
 /// Input cell with Unison + preamp (measured, §1.2).
 pub const INPUT_CELL_H: f32 = 237.0;
+/// SMALL shrinks the Unison slot like the insert slots (50 → 23): the input cell loses 27
+/// (user captures s47/s48).
+pub const INPUT_CELL_SMALL_DH: f32 = 27.0;
 /// `Rack_UADRecord` row under the input inserts list (`(0, listH + 30, w, 42)`).
 pub const REC_ROW_H: f32 = 42.0;
-/// Send heights: medium (mini send) 75, compact (overview) 35; pitch +3 (0x1814c0400).
+/// Send heights: medium (mini send) 75, compact 35, full (`Rack_SendChannelStrip`) 322; pitch
+/// +3 (0x1814c0400).
 pub const SEND_H: f32 = 75.0;
 pub const SEND_H_COMPACT: f32 = 35.0;
+pub const SEND_H_FULL: f32 = 322.0;
+/// SENDS OVERVIEW: one birds-eye panel of mini send faders (`Rack_Overview_Sends`), 77 pt
+/// (user capture s47: 583.5…660.5).
+pub const OVERVIEW_H: f32 = 77.0;
+
+/// How a Sends cell draws its sends (Console 1.3.1, user captures s45/s46): SENDS OVERVIEW
+/// shows the birds-eye panel on every strip; otherwise input strips show full send strips
+/// (route, pan, mute, fader and meter) and bus strips mini sends (knob and M).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendStyle {
+    Overview,
+    Medium,
+    Full,
+}
+
+impl SendStyle {
+    pub fn of(overview: bool, bus: bool) -> Self {
+        if overview {
+            SendStyle::Overview
+        } else if bus {
+            SendStyle::Medium
+        } else {
+            SendStyle::Full
+        }
+    }
+    /// One send's height (stacked styles).
+    pub fn send_h(self) -> f32 {
+        match self {
+            SendStyle::Overview => OVERVIEW_H,
+            SendStyle::Medium => SEND_H,
+            SendStyle::Full => SEND_H_FULL,
+        }
+    }
+}
 /// Sends cell height when there are no sends (0x1814c01f0).
 pub const SENDS_DEFAULT_H: f32 = 87.0;
 
@@ -58,13 +96,17 @@ pub fn inserts_cell_h(slots: usize, size: InsertSize, rec_row: bool) -> f32 {
 }
 
 /// Sends cell: header 22 + `CalcNeededContentHeight` (0x1814c01f0: 4 + Σ(H + 3) − 3 + 5), or 87
-/// without sends. p2: an aux with CUE 1–4 rows is 22 + 4 + 3·78 + 75 + 5 = 340.
-pub fn sends_cell_h(sends: usize, overview: bool) -> f32 {
+/// without sends. p2: an aux with CUE 1–4 rows is 22 + 4 + 3·78 + 75 + 5 = 340. The overview is
+/// one panel whatever the send count.
+pub fn sends_cell_h(sends: usize, style: SendStyle) -> f32 {
     if sends == 0 {
         return SENDS_DEFAULT_H;
     }
-    let h = if overview { SEND_H_COMPACT } else { SEND_H };
-    HEADER_H + 4.0 + sends as f32 * (h + 3.0) - 3.0 + 5.0
+    if style == SendStyle::Overview {
+        // One panel; the cell is a point taller than header + 4 + 77 + 5 (s46/s47: 109).
+        return HEADER_H + 4.0 + OVERVIEW_H + 5.0 + 1.0;
+    }
+    HEADER_H + 4.0 + sends as f32 * (style.send_h() + 3.0) - 3.0 + 5.0
 }
 
 fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
@@ -74,7 +116,9 @@ fn cid(strip: &StripInfo, control: Control) -> Option<ControlId> {
 /// Insert list (`Rack_Inserts`) at `y`, sized for `list_slots`: `Channel-Inserts-Background`
 /// at `(4, 0, w−8, h)` and slot k at `(0, 5 + k·pitch + 1, w, pitch − 2)` (resized 0x181440960).
 /// `labels[k]` is Console's label for slot k ([`crate::MixerModel::insert_labels`]).
-pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[Option<InsertLabel>], list_slots: usize, size: InsertSize, y: f32) {
+/// `targeted`: the slot an "Assign..." is choosing a plug-in for (`image-targeted`, s08).
+#[allow(clippy::too_many_arguments)]
+pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[Option<InsertLabel>], list_slots: usize, size: InsertSize, targeted: Option<u8>, y: f32) {
     let pitch = size.pitch();
     ui.background("Channel-Inserts-Background", Rect::new(4.0, y, STRIP_W - 8.0, inserts_list_h(list_slots, size)));
     for (k, slot) in slots.iter().take(list_slots).enumerate() {
@@ -84,11 +128,21 @@ pub fn insert_list(ui: &mut Ui, s: &StripInfo, slots: &[InsertState], labels: &[
             InsertSize::Large => ui.insert_slot(slot, label, r, cid(s, Control::Insert(k as u8))),
             InsertSize::Small => small_slot(ui, slot, label, r, cid(s, Control::Insert(k as u8))),
         }
+        if targeted == Some(k as u8) {
+            if let Some(img) = ui.skin("inserts", "Small-Normal").and_then(|k| k.image("image-targeted")) {
+                let img = img.to_string();
+                ui.image_centered(&img, r, 1.0);
+            }
+            if let Some(plus) = ui.skin("inserts", "Small-Normal").and_then(|k| k.image("image-plus")) {
+                let plus = plus.to_string();
+                ui.image_centered(&plus, r, 1.0);
+            }
+        }
     }
 }
 
 /// SMALL insert slot: stretched slot art with the plug-in name (no icon).
-fn small_slot(ui: &mut Ui, state: &InsertState, label: Option<&InsertLabel>, r: Rect, id: Option<ControlId>) {
+pub fn small_slot(ui: &mut Ui, state: &InsertState, label: Option<&InsertLabel>, r: Rect, id: Option<ControlId>) {
     let skin = ui.skin("inserts", "Small-Normal");
     let img = skin.and_then(|k| match state {
         InsertState::Empty => k.image("image-empty"),
@@ -134,15 +188,24 @@ pub fn send_list(ui: &mut Ui, s: &StripInfo, sends: &[SendState], pre: &dyn Fn(u
         ui.text("NO SENDS", TextStyle { color: style.color.with_alpha(0.35), ..style }, Rect::new(0.0, y + 4.0, STRIP_W, 40.0), Align::Center);
         return;
     }
-    ui.fill(Rect::new(4.0, y, STRIP_W - 8.0, well_h), SENDS_WELL);
-    if view.sends_overview {
-        for (k, send) in sends.iter().enumerate() {
-            overview_send(ui, s, k, send, y + k as f32 * (SEND_H_COMPACT + 3.0));
-        }
-        return;
+    let style = SendStyle::of(view.sends_overview, s.kind.is_bus());
+    if style != SendStyle::Overview {
+        ui.fill(Rect::new(4.0, y, STRIP_W - 8.0, well_h), SENDS_WELL);
     }
-    for (k, send) in sends.iter().enumerate() {
-        mini_send(ui, s, k, send, pre(k), y + k as f32 * (SEND_H + 3.0));
+    match style {
+        SendStyle::Overview => overview_panel(ui, s, sends, y),
+        SendStyle::Medium => {
+            // The talkback strip's sends are bus-style: M only, no PRE (s45).
+            let talkback = s.kind == crate::geometry::StripKind::Talkback;
+            for (k, send) in sends.iter().enumerate() {
+                mini_send(ui, s, k, send, if talkback { None } else { pre(k) }, y + k as f32 * (SEND_H + 3.0));
+            }
+        }
+        SendStyle::Full => {
+            for (k, send) in sends.iter().enumerate() {
+                full_send(ui, s, k, send, y + k as f32 * (SEND_H_FULL + 3.0));
+            }
+        }
     }
 }
 
@@ -200,19 +263,78 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
     }
 }
 
-/// SENDS OVERVIEW row (35 pt): name, level bar, M.
-fn overview_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, sy: f32) {
-    ui.background("Send-Route-Background", Rect::new(4.0, sy, 88.0, SEND_H_COMPACT - 2.0));
-    let label = ui.style("fonts", "Send-Label");
-    ui.text(&send.name, label.clone(), Rect::new(8.0, sy + 2.0, 50.0, 14.0), Align::Left);
-    let db = crate::scales::format_db(crate::scales::fader_db(send.level));
-    ui.text(&db, label, Rect::new(40.0, sy + 2.0, 46.0, 14.0), Align::Right);
-    let bar = Rect::new(9.0, sy + 20.0, 54.0, 6.0);
-    ui.fill(bar, Rgba::rgb8(18, 19, 20));
-    let c = send_color(&send.name, k);
-    ui.fill(Rect::new(bar.x, bar.y, bar.w * send.level.clamp(0.0, 1.0) as f32, bar.h), if send.muted { c.with_alpha(0.3) } else { c });
-    ui.hit(bar.inset(0.0, -6.0, 0.0, -6.0), ControlId { strip: s.id.clone(), control: Control::SendLevel(k as u8) }, crate::input::HitKind::Drag { value: send.level, span: 120.0, reset: Some(crate::scales::UNITY) });
-    ui.toggle("Mini-Send-Mute", Some("M"), send.muted, true, Rect::new(68.0, sy + 13.0, 18.0, 18.0), cid(s, Control::SendMute(k as u8)), None);
+/// Full send strip (`Rack_SendChannelStrip`, id `fullsend_<k>`, 322 pt): the route plate as on
+/// a mini send, then the strip body (`Secondary-Send-Background`) with the pan knob, M and a
+/// fader with its meters. Positions measured on user capture s45 (input sends, OVERVIEW off).
+fn full_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, sy: f32) {
+    let top = 35.0;
+    let plate = Rect::new(7.0, sy + 3.5, STRIP_W - 14.0, 29.0);
+    if let Some(img) = ui.skin("views", "Flex-Route-Focus").and_then(|k| k.image("image")) {
+        let img = img.to_string();
+        ui.image_stretched(&img, plate, 1.0);
+    }
+    ui.fill(Rect::new(plate.x + 3.5, plate.max_y() - 6.5, plate.w - 7.0, 3.0), route_bar(&send.name));
+    let mut label = ui.style("fonts", "Flex-Route-Value-Font");
+    if let Some(c) = ui.skin("fonts", "Flex-Route-Value-Font").and_then(|k| k.color("color-text-off")) {
+        label.color = c;
+    }
+    ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 6.0), Align::Center);
+    let body = Rect::new(4.0, sy + top, STRIP_W - 8.0, SEND_H_FULL - top);
+    ui.background("Secondary-Send-Background", body);
+    // Send pans are white on every strip (s45: `knob_pan_white`); stereo strips have none.
+    if !s.stereo {
+        ui.knob("Pan-White", 0.5, Rect::new(28.0, sy + top + 3.0, 40.0, 46.0), cid(s, Control::SendPan(k as u8)), Some(0.5));
+    }
+    ui.toggle("Send-Mute", Some("M"), send.muted, true, Rect::new(32.0, sy + top + 55.0, 32.0, 18.0), cid(s, Control::SendMute(k as u8)), None);
+    // Meters as a 203-pt fader-and-meters box from sy + 109 (s45: meter 238…397 for a send at
+    // 118); the fader runs 205 pt from its top + 4 (caps: −∞ at 369, 0 dB at 254).
+    let fm = Rect::new(0.0, sy + 109.0, STRIP_W, 203.0);
+    let readout = crate::scales::format_db(crate::scales::fader_db(send.level));
+    let fader = Rect::new(2.0, 4.0, (STRIP_W / 2.0).floor(), 205.0);
+    ui.fader_and_meters_with(s.fader_skin(), false, send.level, Default::default(), &readout, fm, cid(s, Control::SendLevel(k as u8)), Some(fader));
+}
+
+/// SENDS OVERVIEW panel (`Rack_Overview_Sends`, one per strip): `Birds-Eye-Send-Background`
+/// `(6, y, w−12, 77)` holding one column per send, spread evenly (6-pt items, equal gaps;
+/// user capture s47: centres 20.5/38.5/56.5/74.5 for four sends, 32.3/62.3 for two): the
+/// `Signal-Present` LED (not on aux strips), the `Send-Overview-Fader`, a state square, the
+/// route colour bar and the short name (A1, A2, C1, C2) in `Send-Label`.
+fn overview_panel(ui: &mut Ui, s: &StripInfo, sends: &[SendState], y: f32) {
+    let panel = Rect::new(6.0, y, STRIP_W - 12.0, OVERVIEW_H);
+    ui.background("Birds-Eye-Send-Background", panel);
+    let n = sends.len() as f32;
+    let iw = 6.0;
+    let gap = (panel.w - n * iw) / (n + 1.0);
+    let aux = s.kind == crate::geometry::StripKind::Aux;
+    for (k, send) in sends.iter().enumerate() {
+        // Item x (whole points): the LED starts on it, the 7-pt cap one point left (s46/s47).
+        let ix = (panel.x + gap * (k as f32 + 1.0) + iw * k as f32).round();
+        let cx = ix + 2.5;
+        if !aux {
+            ui.film("meters", "Signal-Present", "image-film", 0.0, Rect::new(ix, y + 12.0, 5.0, 5.0));
+        }
+        // Caps (top) at y + 38.5 for −∞, + 23.5 at −6 dB, + 21.5 at 0 dB (s46/s47): a 22-pt
+        // travel, which the skin's 5-pt margin gives in a 39-pt box from y + 12.5.
+        ui.fader("Send-Overview-Fader", send.level, Rect::new(cx - 3.5, y + 12.5, 7.0, 39.0), cid(s, Control::SendLevel(k as u8)));
+        let cue = send.name.starts_with("CUE");
+        ui.fill(Rect::new(cx - 3.0, y + 47.5, 6.0, 6.0), if cue { Rgba::rgb8(44, 43, 41) } else { Rgba::rgb8(41, 35, 28) });
+        ui.fill(Rect::new(cx - 3.5, y + 56.0, 7.0, 1.5), route_bar(&send.name));
+        let mut style = ui.style("fonts", "Send-Label");
+        style.bold = true;
+        if cue {
+            style.color = style.color.with_alpha(style.color.a * 0.5);
+        }
+        ui.text(&short_send_name(&send.name), style, Rect::new(cx - 12.0, y + 59.0, 24.0, 12.0), Align::Center);
+    }
+}
+
+/// "AUX 1" → "A1", "CUE 2" → "C2".
+fn short_send_name(name: &str) -> String {
+    let mut parts = name.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (Some(a), Some(n)) => format!("{}{n}", &a[..1]),
+        _ => name.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -226,8 +348,9 @@ mod tests {
         assert_eq!(inserts_cell_h(4, InsertSize::Large, false), 242.0);
         assert_eq!(inserts_cell_h(4, InsertSize::Small, true), 22.0 + 92.0 + 11.0 + 55.0);
         // p2: the aux Sends cell (CUE 1–4 rows) runs 326 → 666.
-        assert_eq!(sends_cell_h(4, false), 340.0);
-        assert_eq!(sends_cell_h(0, false), SENDS_DEFAULT_H);
+        assert_eq!(sends_cell_h(4, SendStyle::Medium), 340.0);
+        assert_eq!(sends_cell_h(0, SendStyle::Medium), SENDS_DEFAULT_H);
+        assert_eq!(sends_cell_h(4, SendStyle::Overview), 109.0);
     }
 
     #[test]

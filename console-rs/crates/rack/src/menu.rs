@@ -27,7 +27,7 @@ use houston::{Rect, Rgba};
 use crate::draw::Align;
 use crate::input::{Control, ControlId, Hit, HitKind};
 use crate::model::{InsertState, MixerModel, StripInfo};
-use crate::surfaces::{MonitorPage, Popover, PopoverState, Sheet, TextEdit, TextTarget, ViewState};
+use crate::surfaces::{Popover, PopoverState, Sheet, TextEdit, TextTarget, ViewState};
 use crate::ui::Ui;
 use crate::window::{helvetica_bold_width, helvetica_width};
 
@@ -700,8 +700,8 @@ pub fn command_ticked(c: Command, view: &ViewState) -> bool {
     match c {
         C::ShowBrowser => view.show_browser && !view.compact,
         C::ShowMixerNav => view.show_navigator && !view.compact,
-        C::ShowBuses => view.monitor_page == MonitorPage::Aux,
-        C::ShowControlRoom => view.monitor_page == MonitorPage::ControlRoom,
+        C::ShowBuses => view.show_aux,
+        C::ShowControlRoom => view.show_ctrl_room,
         C::ShowMonitor => true,
         C::ShowSettings => view.sheet == Some(Sheet::Settings),
         _ => false,
@@ -1353,11 +1353,9 @@ impl ViewState {
         match c {
             C::ShowBrowser => self.show_browser = !self.show_browser,
             C::ShowMixerNav => self.show_navigator = !self.show_navigator,
-            C::ShowPluginScenes => {
-                self.popover = Some(PopoverState { kind: Popover::Scenes, anchor: ControlId { strip: "nav".into(), control: Control::ShowPluginScenes } });
-            }
-            C::ShowBuses => self.monitor_page = MonitorPage::Aux,
-            C::ShowControlRoom => self.monitor_page = MonitorPage::ControlRoom,
+            C::ShowPluginScenes => self.toggle_scenes(model),
+            C::ShowBuses => self.show_aux ^= true,
+            C::ShowControlRoom => self.show_ctrl_room ^= true,
             C::ShowSettings => self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) },
             C::MixerScrollLeft => self.first_strip = self.first_strip.saturating_sub(1),
             C::MixerScrollRight => self.first_strip = (self.first_strip + 1).min(model.inputs().len().saturating_sub(1)),

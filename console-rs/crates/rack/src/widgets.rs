@@ -191,9 +191,21 @@ impl Ui<'_> {
 
     /// Fader, meter well, meters, scale labels and the dB readout (`Rack_FaderAndMeters`).
     pub fn fader_and_meters(&mut self, fader_key: &str, stereo: bool, fader: f64, meters: MeterFrame, readout: &str, r: Rect, id: Option<ControlId>) {
+        self.fader_and_meters_with(fader_key, stereo, fader, meters, readout, r, id, None);
+    }
+
+    /// As [`Self::fader_and_meters`], with the fader (and its scale) in `fader_rect` (relative
+    /// to `r`) instead of the strip geometry's: a full send strip's fader runs past its meters.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fader_and_meters_with(&mut self, fader_key: &str, stereo: bool, fader: f64, meters: MeterFrame, readout: &str, r: Rect, id: Option<ControlId>, fader_rect: Option<Rect>) {
         let left_key = if stereo { "Left-Input-Meter" } else { "Mono-Input-Meter" };
         let meter_w = self.skin("meters", left_key).and_then(|s| s.size()).map(|s| s.0).unwrap_or(if stereo { 4.0 } else { 8.0 });
-        let g = FaderAndMetersGeometry::new(r.w, r.h, stereo, meter_w);
+        let mut g = FaderAndMetersGeometry::new(r.w, r.h, stereo, meter_w);
+        if let Some(f) = fader_rect {
+            g.fader = f;
+            g.fader_marks = Rect::new(g.fader_marks.x, f.y - 20.0, g.fader_marks.w, f.h + 40.0);
+            g.ref_mark.y = f.max_y() - 27.0;
+        }
         self.at(r.x, r.y, |ui| {
             // secondary_meter_well then meter_well, same rect (0x18141ea20).
             ui.background("Secondary-Display-Background", g.meter_well);

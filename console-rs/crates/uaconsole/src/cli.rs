@@ -12,8 +12,8 @@ uaconsole — a native UAD Console for open-apollo
 usage:
   uaconsole [--compact] [--fit|--1to1] [--engine host[:port]] [--mock snapshot.json]
             [--preview] [--writes] [--live-meters] [--stats] [--open-plugin STRIP:SLOT]
-            [--open SHEET]
-  uaconsole --render out.png [--compact] [--scale N] [--size WxH] [--menu SPEC] [--menu-bar]
+            [--open SHEET] [--view SPEC]
+  uaconsole --render out.png [--compact] [--scale N] [--size WxH] [--view SPEC] [--menu SPEC] [--menu-bar]
                                                          headless render (preview data);
                                                          --size is the window in points
   uaconsole --bench N [--compact] [--scale N]            render N frames headless, print timings
@@ -21,6 +21,10 @@ usage:
   --open settings[:hardware|io-matrix|options|midi|network], cue-outputs,
   monitor-controller[:1], headphone-correction, plugin-scenes, meters, talkback,
   aux-sends:N, add-device, io-presets, input-source:N, tempo or about opens that window.
+  --view sets the mixer view at start (window and --render), comma-separated items:
+  inputs|inserts|sends|fader=0|1, small|large, fixed=0|1, overview=0|1, scroll=F, aux-scroll=F,
+  browser=0|1, tab=plugins|presets, hint=0|1, aux=0|1, ctrl=0|1, scenes=0|1, scene-info=0|1,
+  first=N, assign=STRIP:SLOT (e.g. --view ctrl=1,overview=1,small).
   --stats starts with the F1 overlay; --open-plugin in0:0 (or in0:unison) opens that insert's
   panel at start (window and --render). --menu opens a Console menu in --render: bar:N,
   insert:STRIP:SLOT, label:STRIP, solo:STRIP, meter:STRIP, preamp:STRIP, browser:N, then >I
@@ -110,6 +114,8 @@ pub struct Args {
     pub open_plugin: Option<(String, u8)>,
     /// Settings window / panel to open at start (`ViewState::open_named`).
     pub open: Option<String>,
+    /// Mixer view spec (`rack::ViewState::apply_spec`).
+    pub view_spec: Option<String>,
     /// `--menu SPEC` (`ViewState::open_menu_spec`) for `--render`.
     pub menu: Option<String>,
     /// `--menu-bar`: the in-window menu bar in `--render`.
@@ -150,6 +156,11 @@ impl Args {
                 "--live-meters" => out.live_meters = true,
                 "--stats" => out.stats = true,
                 "--open-plugin" => out.open_plugin = Some(parse_slot(&value("--open-plugin")?)?),
+                "--view" => {
+                    let spec = value("--view")?;
+                    rack::ViewState::default().apply_spec(&spec)?;
+                    out.view_spec = Some(spec);
+                }
                 "--open" => {
                     let v = value("--open")?;
                     if !rack::ViewState::default().open_named(&v) {
@@ -258,5 +269,7 @@ mod tests {
             Some(("in0".into(), 255))
         );
         assert!(parse("--open-plugin in0").is_err());
+        assert_eq!(parse("--view ctrl=1,overview=1").unwrap().view_spec.as_deref(), Some("ctrl=1,overview=1"));
+        assert!(parse("--view nope=1").is_err());
     }
 }

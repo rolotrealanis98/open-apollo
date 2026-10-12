@@ -190,6 +190,14 @@ impl EngineMixer {
                     (*kind != "outputs" || n != m.index) && self.bool_at(&format!("{dev}/{kind}/{n}/SelectedOnFront")) == Some(true)
                 })
             }),
+            // `MixInSource` "mon" | "cueN".
+            cr_source: self
+                .store
+                .value(&format!("{dev}/outputs/{}/MixInSource", m.index))
+                .and_then(Value::as_str)
+                .and_then(|v| v.strip_prefix("cue"))
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0),
         }
     }
 
