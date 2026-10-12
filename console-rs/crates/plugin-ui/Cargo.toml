@@ -5,8 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [features]
+# The local WebSocket endpoint UA's HTML GUIs connect to (pure Rust).
+bridge = ["dep:tungstenite"]
 # Host UA's HTML/JS plug-in GUIs in a WebKitGTK webview (needs webkit2gtk-4.1 and gtk3).
-webview = ["dep:wry", "dep:gtk", "dep:webkit2gtk", "dep:png"]
+webview = ["bridge", "dep:wry", "dep:gtk", "dep:webkit2gtk", "dep:png"]
 
 [dependencies]
 houston = { version = "0.1.0", path = "../houston" }
@@ -15,6 +17,7 @@ rack = { version = "0.1.0", path = "../rack" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.154"
 png = { version = "0.18.1", optional = true }
+tungstenite = { version = "0.30", optional = true, default-features = false, features = ["handshake"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }

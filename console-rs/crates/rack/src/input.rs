@@ -36,6 +36,34 @@ pub enum Control {
     PluginElement(u16),
     /// Set plug-in parameter `.0` to step `.1` (segmented switches, step selectors): tap.
     PluginStep(u16, u16),
+    /// A button of the plug-in window's chrome (title bar, UAPW toolbar, footer): tap.
+    PluginWindow(PluginWindowButton),
+}
+
+/// Plug-in window chrome buttons (UAD Console's `Rack_PluginWindow` / UAPW toolbar).
+/// Append-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PluginWindowButton {
+    Close,
+    /// ⋮ menu at the toolbar's left.
+    More,
+    PresetPrev,
+    PresetNext,
+    /// The current-preset field (opens the preset browser).
+    Preset,
+    /// Slot power / bypass.
+    Power,
+    /// The engine button at the toolbar's right ("UAD-2 •••").
+    Engine,
+    Favorite,
+    Compare,
+    Copy,
+    Paste,
+    Help,
+    /// Rack (vertical) / panel view toggle.
+    RackView,
+    /// The footer status plate.
+    Status,
 }
 
 #[derive(Clone, Debug, PartialEq)]

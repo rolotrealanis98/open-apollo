@@ -15,7 +15,7 @@ pub mod window;
 
 pub use draw::{Align, Draw, DrawList, Frame, TextStyle};
 pub use houston::{Insets, Rect, Rgba};
-pub use input::{Action, Control, ControlId, Hit, HitKind, Interaction};
+pub use input::{Action, Control, ControlId, Hit, HitKind, Interaction, PluginWindowButton};
 pub use model::{MixerModel, PreviewMixer};
 pub use ui::{Assets, Ui};
 pub use window::{WindowLayout, build_window};

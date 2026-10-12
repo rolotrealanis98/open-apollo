@@ -1,7 +1,10 @@
 //! Headless render of a plug-in panel.
 //!
 //!   cargo run -p plugin-ui --example render -- <spec name> out.png [--scale 2] [--generic]
+//!       [--window [--title "GTR, Insert 4"] [--status "NO UAD-2 DEVICES FOUND"] [--web]]
 //!
+//! `--window` draws Console's plug-in window chrome around the content (`--web` picks UA's HTML
+//! GUI when a lunacomponent matches; a headless render shows a placeholder where the webview goes).
 //! Writes `out.png` (parameters at their spec defaults) and `out.zero.png` (all parameters 0, the
 //! state the spec pipeline's LUNA references show), and compares the latter with a LUNA reference
 //! (`$PLUGIN_UI_REFS` or `~/wine-ua-work/plugin-specs/render/uaudio_<stem>.ref.png`) when one exists.
@@ -11,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use houston::{Appearance, ImageCache, ImageData, Rect, Resources};
-use plugin_ui::{GenericPanel, MockParams, PluginPanel, PluginSpecLibrary, SpecLocator};
+use plugin_ui::{GenericPanel, LunaLibrary, MockParams, PluginPanel, PluginSpecLibrary, PluginWindow, SpecLocator};
 use rack::{Assets, Ui};
 
 fn arg(name: &str) -> Option<String> {
@@ -29,7 +32,7 @@ fn main() {
         let mut out = Vec::new();
         let mut i = 0;
         while i < args.len() {
-            if args[i] == "--scale" {
+            if ["--scale", "--title", "--status"].contains(&args[i].as_str()) {
                 i += 2;
                 continue;
             }
@@ -93,7 +96,18 @@ fn main() {
             params.set_all(0.0);
         }
         let mut ui = Ui::new(&assets);
-        let size = if flag("--generic") {
+        let size = if flag("--window") {
+            let luna = LunaLibrary::locate();
+            let mut win = PluginWindow::open(slot, &spec.effect_name, &arg("--title").unwrap_or_else(|| "GTR, Insert 4".into()), Some(&lib), Some(&luna), flag("--web"));
+            if flag("--generic") {
+                win.content = plugin_ui::Content::Generic(GenericPanel::new(slot));
+            }
+            win.chrome.status = arg("--status");
+            let size = win.size(&params);
+            let layout = win.build(&mut ui, (0.0, 0.0), &params);
+            eprintln!("window: {}×{} pt, content {} at {:?}", size.0, size.1, win.content.kind(), layout.content);
+            size
+        } else if flag("--generic") {
             let g = GenericPanel::new(slot);
             let size = g.size(&params);
             g.build(&mut ui, Rect::new(0.0, 0.0, size.0, size.1), &params);
@@ -107,7 +121,7 @@ fn main() {
         eprintln!("wrote {} ({} draws, {} hits)", path.display(), ui.list.len(), ui.hits.len());
     }
 
-    if !flag("--generic") && scale == 2.0 {
+    if !flag("--generic") && !flag("--window") && scale == 2.0 {
         match reference(entry.stem()) {
             Some(r) => compare(&zero_path, &r),
             None => eprintln!("no LUNA reference for {}", entry.stem()),
