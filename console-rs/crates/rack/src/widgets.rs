@@ -82,8 +82,12 @@ impl Ui<'_> {
                 if let Some((w, h)) = self.image_size(ov) {
                     self.image(ov, Rect::new(r.x + 6.0, r.max_y() - 6.0 - h, w, h), None, None, opacity);
                 }
-            } else if let Some((w, h)) = self.image_size(ov) {
-                self.image(ov, snap_centered(r, w, h), None, None, opacity);
+            } else if let Some((iw, ih)) = self.image_size(ov) {
+                // The overlay box is width-overlay × height-overlay (else the art size), centred
+                // on whole points, and the art is stretched into it.
+                let (w, h) = (skin.number("width-overlay").map_or(iw, |v| v as f32), skin.number("height-overlay").map_or(ih, |v| v as f32));
+                let b = Rect::new(r.x + ((r.w - w) / 2.0).floor(), r.y + ((r.h - h) / 2.0).floor(), w, h);
+                self.image(ov, b, None, None, opacity);
             }
         }
         if let Some(label) = label {

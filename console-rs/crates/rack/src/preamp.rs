@@ -31,6 +31,7 @@ pub fn draw_preamp(ui: &mut Ui, layout_name: &str, state: &PreampState, strip: &
                 "lower_state_plate" => ui.background("Send-Lower-State-Plate", r),
                 "preamp_input_meter" => ui.film("meters", "Preamp-Input-Meter", "image-film", state.input_led, r),
                 "preamp_gain" => ui.knob("Small-Green-Input", state.gain, r, id("preamp_gain"), None),
+                "input_source_secondary_backround" | "peamp_db_gain_secondary_backround" => ui.background("Secondary-Display-Background", r),
                 "input_source_backround" | "preamp_db_gain_backround" => ui.background("Display-Background", r),
                 "input_source" => {
                     let key = match state.source.as_str() {
