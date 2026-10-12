@@ -212,3 +212,31 @@ The proposed supervised test is prepared outside git at
 authorized Apollo investigation while unused. A fresh preflight still reported
 DeviceOnline=false, so no hardware writes were sent. The daemon remains running;
 ALSA currently enumerates no Apollo, and Thunderbolt device enumeration is empty.
+
+## P2 — approved hardware preflight (blocked before writes)
+
+The user approved the bounded ANALOG 1 fader-and-restore test, confirmed the
+channel is spare, and subsequently allowed Apollo investigation while unused.
+No further permission is needed to run that approved test once its online
+preconditions hold. No Mac Console automation is authorized or required.
+
+Fresh Linux daemon snapshot: Apollo x4, DeviceOnline=false, ANALOG 1 Mute=true,
+Stereo=false, FaderLevel=0 dB. Local process 1324 runs the exported
+`/home/rolo/oa-test/driver-v2-latest/mixer-engine/ua_mixer_daemon.py`; the older
+handoff's pid 1386 is stale. This running process was not restarted or modified.
+
+Titan (hostname omarchy) currently has no Apollo ALSA card, no enumerated
+Thunderbolt domain/device and no Thunderbolt NHI endpoint. PCI reports Intel
+8086:1136 at 0b:00.0 behind root port 00:1c.4. The boot kernel reports:
+`devices behind bridge are unusable because [bus 0c] cannot be assigned for them`.
+The root port has subordinate bus 0b, while its downstream bridge needs bus 0c;
+0c:00.0 is also reported as a Mellanox 15b3:1015 adapter. This is a host PCI
+resource/enumeration failure before Apollo transport or DSP acceptance can be
+assessed. Raw read-only snapshots remain outside git under /tmp.
+
+After the user power-cycled the Apollo and reseated the Thunderbolt cable,
+a targeted non-removal rescan of 0b:00.0 was performed. It reproduced the same
+bus-assignment failure and detected no NHI or Apollo. No PCI remove, bridge
+reset, bus-number rewriting, network-adapter reset, firmware change or reboot
+was attempted. The bounded fader test aborted without Apollo writes;
+its exact bounded plan remains `/tmp/apollo-supervised-test-plan.md`.
