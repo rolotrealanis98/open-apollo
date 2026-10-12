@@ -112,6 +112,8 @@ impl App {
         let area = houston::Rect::new(0.0, 0.0, 1.0, 1.0);
         let mut mixer = ViewState {
             compact: opts.compact,
+            // No native menu bar here: Windows Console's in-window one, in the title bar.
+            menu_bar: true,
             ..ViewState::default()
         };
         if let Some(spec) = &opts.view_spec {
@@ -346,7 +348,12 @@ impl App {
     }
 
     fn route(&mut self, ev: PointerEvent) -> bool {
-        match self.overlays.pointer(ev, &mut *self.model) {
+        let routed = self.overlays.pointer(ev, &mut *self.model);
+        let forwarded = self.overlays.take_mixer_actions();
+        if !forwarded.is_empty() {
+            self.apply(forwarded);
+        }
+        match routed {
             Routed::ToMixer => false,
             Routed::Consumed => true,
             Routed::Changed => {
@@ -390,6 +397,8 @@ impl App {
         if self.interaction.is_dragging() {
             let actions = self.interaction.pointer_move(x, y, self.fine());
             self.apply(actions);
+        } else if self.mixer.menu.is_some() && self.mixer.menu_hover(&self.frame.hits, x, y) {
+            self.changed();
         }
     }
 
@@ -521,7 +530,8 @@ impl App {
             Command::Escape => {
                 if self.overlays.dismiss_top() {
                     self.changed();
-                } else if self.mixer.popover.is_some()
+                } else if self.mixer.menu.is_some()
+                    || self.mixer.popover.is_some()
                     || self.mixer.sheet.is_some()
                     || self.mixer.modifier.is_some()
                     || self.mixer.editing()
@@ -546,6 +556,21 @@ impl App {
             match next.save() {
                 Ok(_) => self.settings = next,
                 Err(e) => eprintln!("uaconsole: could not save settings: {e}"),
+            }
+        }
+    }
+
+    /// Shell commands the Console menus asked for (`ViewState::take_commands`).
+    fn run_menu_commands(&mut self, event_loop: &ActiveEventLoop) {
+        use rack::menu::Command as C;
+        for c in self.mixer.take_commands() {
+            match c {
+                C::Quit => self.quit(event_loop),
+                C::ToggleFullScreen => self.run_command(Command::ToggleFullscreen, false, event_loop),
+                C::Documentation => open_url(rack::menu::DOCUMENTATION_URL),
+                C::About => eprintln!("uaconsole {} — a native UAD Console for open-apollo", env!("CARGO_PKG_VERSION")),
+                // Session commands are the sessions layer's hooks; the rest have no window here.
+                other => eprintln!("uaconsole: {} ({}): not available yet", other.label(), other.id()),
             }
         }
     }
@@ -648,7 +673,52 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        self.handle_window_event(event_loop, id, event);
+        if !self.mixer.commands.is_empty() {
+            self.run_menu_commands(event_loop);
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let live =
+            (self.live_meters || self.overlays.live()) && self.gpu.is_some() && !self.occluded;
+        if !live {
+            self.next_tick = None;
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
+        let now = Instant::now();
+        let next = match self.next_tick {
+            Some(t) if t > now => t,
+            _ => now + METER_PERIOD,
+        };
+        self.next_tick = Some(next);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+    }
+}
+
+/// Console's keyboard shortcuts (`rack::menu::command_for_key`): Ctrl / ⌘ as "command".
+fn console_key(key: &Key, mods: ModifiersState) -> Option<rack::menu::Command> {
+    let name = match key {
+        Key::Named(NamedKey::ArrowLeft) => "left".to_string(),
+        Key::Named(NamedKey::ArrowRight) => "right".to_string(),
+        Key::Character(s) if s.is_ascii() => s.to_ascii_lowercase(),
+        _ => return None,
+    };
+    rack::menu::command_for_key(&name, mods.control_key() || mods.super_key(), mods.shift_key(), mods.alt_key())
+}
+
+/// Opens a URL in the desktop's browser.
+fn open_url(url: &str) {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    if let Err(e) = std::process::Command::new(opener).arg(url).spawn() {
+        eprintln!("uaconsole: {opener} {url}: {e}");
+    }
+}
+
+impl App {
+    fn handle_window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => self.quit(event_loop),
             WindowEvent::Resized(size) => {
@@ -683,6 +753,10 @@ impl ApplicationHandler for App {
                 }
                 if let Some(cmd) = shortcut(&event.logical_key, event.physical_key, self.mods) {
                     self.command(cmd, event.repeat, event_loop);
+                } else if let Some(c) = console_key(&event.logical_key, self.mods) {
+                    if self.mixer.run_command_id(c.id(), &mut *self.model) {
+                        self.changed();
+                    }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -702,20 +776,4 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let live =
-            (self.live_meters || self.overlays.live()) && self.gpu.is_some() && !self.occluded;
-        if !live {
-            self.next_tick = None;
-            event_loop.set_control_flow(ControlFlow::Wait);
-            return;
-        }
-        let now = Instant::now();
-        let next = match self.next_tick {
-            Some(t) if t > now => t,
-            _ => now + METER_PERIOD,
-        };
-        self.next_tick = Some(next);
-        event_loop.set_control_flow(ControlFlow::WaitUntil(next));
-    }
 }

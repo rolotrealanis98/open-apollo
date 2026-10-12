@@ -283,6 +283,7 @@ impl EngineMixer {
         }
         let monitor = self.store.topology().monitor.clone();
         match &id.control {
+            Control::Menu(cmd) => self.apply_menu(&id.strip, cmd),
             Control::InsertPower(_) | Control::InsertRemove(_) | Control::InsertCopy(_) => {
                 let k = match id.control {
                     Control::InsertPower(k) | Control::InsertRemove(k) | Control::InsertCopy(k) => k,

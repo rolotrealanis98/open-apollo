@@ -30,15 +30,28 @@ pub fn render_png(
     scale: f32,
     open_plugin: Option<&(String, u8)>,
     view_spec: Option<&str>,
+    menu: Option<&str>,
+    menu_bar: bool,
     out: &Path,
 ) -> Result<(), String> {
     let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
     if let Some((strip, slot)) = open_plugin {
         overlays.on_open_plugin(strip, *slot, model);
     }
+    // `--menu plugin:assign|more|help` opens the plug-in window's menu instead.
+    let menu = match menu.and_then(|m| m.strip_prefix("plugin:")) {
+        Some(which) => {
+            if !overlays.open_menu(which) {
+                return Err(format!("--menu plugin:{which}: no plug-in window menu by that name (open one with --open-plugin)"));
+            }
+            None
+        }
+        None => menu,
+    };
     let mut view = ViewState {
         compact,
         window: size,
+        menu_bar,
         ..ViewState::default()
     };
     if let Some(spec) = view_spec {
@@ -59,6 +72,10 @@ pub fn render_png(
         }
     }
     let (w, h) = layout_for(model, &view).size();
+    if let Some(spec) = menu {
+        let first = build_frame(assets, model, &view, &mut overlays, Rect::new(0.0, 0.0, w, h), None);
+        view.open_menu_spec(&first.hits, spec)?;
+    }
     let t = Instant::now();
     let frame = build_frame(
         assets,
