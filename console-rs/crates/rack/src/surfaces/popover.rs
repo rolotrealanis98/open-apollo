@@ -8,7 +8,8 @@ use houston::{Rect, Rgba};
 
 use crate::draw::Align;
 use crate::input::{Control, ControlId, HitKind};
-use crate::model::{InsertState, MixerModel};
+use crate::menu::{MenuLook, PopupItem, PopupMenu, layout_menu};
+use crate::model::MixerModel;
 use crate::surfaces::view::{Popover, PopoverState, TextEdit, ViewState};
 use crate::ui::Ui;
 
@@ -214,28 +215,26 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
     let low = a.y > bounds.h * 0.75;
     match kind {
         Popover::InputSource { strip } => {
+            // `Rack_PreampChannelStripControls::DoInputSourcePopup` 0x181476f00 (context look):
+            // SOURCE, then MIC / LINE (or a disabled Hi-Z while the jack is used).
             let s = model.inputs().into_iter().find(|s| &s.id == strip);
             let current = s.as_ref().and_then(|s| model.preamp(s)).map(|p| p.source).unwrap_or_default();
             let sources = s.as_ref().map(|s| model.input_sources(s)).unwrap_or_default();
-            let items: Vec<MenuItem> =
-                sources.iter().enumerate().map(|(i, src)| MenuItem::new(src.clone(), sid(strip, Control::InputSource(i as u8))).checked(*src == current)).collect();
-            ui.popover_menu(a, Placement::Below, bounds, Some("INPUT"), &items, 120.0);
+            let hi_z = s.as_ref().map(|s| model.strip_menu_state(s).hi_z).unwrap_or(false);
+            let mut m = PopupMenu::new();
+            m.header("SOURCE");
+            if hi_z {
+                m.push(PopupItem { label: "Hi-Z".into(), id: None, toggle: false, enabled: false, ticked: true, shortcut: None, command: None });
+            } else {
+                for (i, src) in sources.iter().enumerate() {
+                    m.push(PopupItem::new(src.to_uppercase(), sid(strip, Control::InputSource(i as u8))).ticked(src.eq_ignore_ascii_case(&current)));
+                }
+            }
+            anchored_menu(ui, &m.finish(), MenuLook::Context, a, bounds);
         }
         Popover::InsertMenu { strip, slot } => {
-            let s = model.inputs().into_iter().chain(model.auxes()).find(|s| &s.id == strip);
-            let state = s.as_ref().map(|s| if *slot == 255 { model.unison(s) } else { model.inserts(s).get(*slot as usize).cloned().unwrap_or(InsertState::Empty) });
-            let (title, loaded, power) = match &state {
-                Some(InsertState::Loaded { name, power }) => (name.strip_prefix("UAD ").unwrap_or(name).to_string(), true, *power),
-                _ => ("EMPTY SLOT".to_string(), false, false),
-            };
-            let k = *slot;
-            let items = vec![
-                MenuItem::new("Open", sid(strip, Control::Insert(k))).enabled(loaded),
-                MenuItem::new("Power", sid(strip, Control::InsertPower(k))).enabled(loaded).checked(power).separated(),
-                MenuItem::new("Remove", sid(strip, Control::InsertRemove(k))).enabled(loaded),
-                MenuItem::new(if loaded { "Copy" } else { "Paste" }, sid(strip, Control::InsertCopy(k))),
-            ];
-            ui.popover_menu(a, Placement::Right, bounds, Some(&title), &items, 150.0);
+            let m = crate::menu::insert_menu(model, strip, *slot);
+            anchored_menu(ui, &m, MenuLook::Context, a, bounds);
         }
         Popover::Rename { .. } => text_popover(ui, a, bounds, "CHANNEL NAME", view.text_edit.as_ref()),
         Popover::Tempo => text_popover(ui, a, bounds, "TEMPO", view.text_edit.as_ref()),
@@ -243,42 +242,48 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
         Popover::Headphone { output } => {
             let hps = model.headphone_outputs();
             let Some(hp) = hps.get(*output as usize) else { return };
-            let items: Vec<MenuItem> = hp
-                .options
-                .iter()
-                .enumerate()
-                .map(|(i, o)| {
-                    MenuItem::new(o.clone(), ControlId { strip: "monitor".into(), control: Control::HeadphoneSource { output: *output, option: i as u8 } }).checked(i == hp.source)
-                })
-                .collect();
-            ui.popover_menu(a, Placement::Left, bounds, Some(&hp.name), &items, 120.0);
+            let mut m = PopupMenu::new();
+            for (i, o) in hp.options.iter().enumerate() {
+                m.push(PopupItem::new(o.clone(), ControlId { strip: "monitor".into(), control: Control::HeadphoneSource { output: *output, option: i as u8 } }).ticked(i == hp.source));
+            }
+            anchored_menu(ui, &m, MenuLook::Base, a, bounds);
         }
         Popover::SampleRate => {
+            // `Rack_*Info` status-bar menus: the choices, the current one ticked.
             let st = model.engine_settings();
-            let items: Vec<MenuItem> = if st.sample_rates.is_empty() {
-                vec![MenuItem::new("Not connected", gid(Control::SampleRate(0))).enabled(false)]
-            } else {
-                st.sample_rates.iter().enumerate().map(|(i, hz)| MenuItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).checked(Some(*hz) == st.sample_rate)).collect()
-            };
-            ui.popover_menu(a, if low { Placement::Above } else { Placement::Below }, bounds, Some("SAMPLE RATE"), &items, 140.0);
+            let mut m = PopupMenu::new();
+            if st.sample_rates.is_empty() {
+                m.push(PopupItem::new("OFFLINE", gid(Control::SampleRate(0))).enabled(false));
+            }
+            for (i, hz) in st.sample_rates.iter().enumerate() {
+                m.push(PopupItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).ticked(Some(*hz) == st.sample_rate));
+            }
+            anchored_menu(ui, &m, MenuLook::Base, a, bounds);
         }
         Popover::ClockSource => {
+            // `Rack_ClockInfo::ShowMenu` 0x181546830.
             let st = model.engine_settings();
-            let items: Vec<MenuItem> = if st.clock_sources.is_empty() {
-                vec![MenuItem::new("Not connected", gid(Control::ClockSource(0))).enabled(false)]
-            } else {
-                st.clock_sources.iter().enumerate().map(|(i, c)| MenuItem::new(c.clone(), gid(Control::ClockSource(i as u8))).checked(Some(c) == st.clock_source.as_ref())).collect()
-            };
-            ui.popover_menu(a, if low { Placement::Above } else { Placement::Below }, bounds, Some("CLOCK SOURCE"), &items, 150.0);
+            let mut m = PopupMenu::new();
+            if st.clock_sources.is_empty() {
+                m.push(PopupItem::new("OFFLINE", gid(Control::ClockSource(0))).enabled(false));
+            }
+            for (i, c) in st.clock_sources.iter().enumerate() {
+                m.push(PopupItem::new(c.clone(), gid(Control::ClockSource(i as u8))).ticked(Some(c) == st.clock_source.as_ref()));
+            }
+            anchored_menu(ui, &m, MenuLook::Base, a, bounds);
         }
         Popover::BufferSize => {
+            // `Rack_BufferSizeInfo::BuildBufferSizeMenu` 0x18153f070 (sizes; Windows adds
+            // "Open ASIO Control Panel").
             let st = model.engine_settings();
-            let items: Vec<MenuItem> = if st.buffer_sizes.is_empty() {
-                vec![MenuItem::new("Not available", gid(Control::BufferSize(0))).enabled(false)]
-            } else {
-                st.buffer_sizes.iter().enumerate().map(|(i, b)| MenuItem::new(format!("{b} samples"), gid(Control::BufferSize(i as u8))).checked(Some(*b) == st.buffer_size)).collect()
-            };
-            ui.popover_menu(a, Placement::Below, bounds, Some("BUFFER SIZE"), &items, 140.0);
+            let mut m = PopupMenu::new();
+            if st.buffer_sizes.is_empty() {
+                m.push(PopupItem::new("Not available", gid(Control::BufferSize(0))).enabled(false));
+            }
+            for (i, b) in st.buffer_sizes.iter().enumerate() {
+                m.push(PopupItem::new(format!("{b}"), gid(Control::BufferSize(i as u8))).ticked(Some(*b) == st.buffer_size));
+            }
+            anchored_menu(ui, &m, MenuLook::Base, a, bounds);
         }
         Popover::Scenes => {
             let scenes = model.plugin_scenes();
@@ -291,6 +296,19 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
             ui.popover_menu(a, if low { Placement::Above } else { Placement::Right }, bounds, Some("PLUG-IN SCENES"), &items, 170.0);
         }
     }
+}
+
+/// A Console popup menu for a combo-like control: below `anchor` (at least its width), above it
+/// when there is no room below (JUCE `showMenuAsync` with a target component).
+pub fn anchored_menu(ui: &mut Ui, menu: &PopupMenu, look: MenuLook, anchor: Rect, bounds: Rect) {
+    if menu.is_empty() {
+        return;
+    }
+    let probe = layout_menu(ui, menu, look, (anchor.x, anchor.max_y()), anchor.w, bounds);
+    let h = probe.frame.h;
+    let y = if anchor.max_y() + h <= bounds.max_y() { anchor.max_y() } else { (anchor.y - h).max(bounds.y) };
+    let f = layout_menu(ui, menu, look, (anchor.x, y), anchor.w, bounds);
+    ui.popup_menu(menu, look, &f, 0, None, None);
 }
 
 fn text_popover(ui: &mut Ui, anchor: Rect, bounds: Rect, title: &str, edit: Option<&TextEdit>) {

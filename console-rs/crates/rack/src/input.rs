@@ -138,6 +138,9 @@ pub enum Control {
     PluginStep(u16, u16),
     /// A button of the plug-in window's chrome (title bar, UAPW toolbar, footer): tap.
     PluginWindow(PluginWindowButton),
+    /// A popup-menu row or menu-bar title (`menu`): view commands (`MenuCmd::is_view`) are
+    /// consumed by `ViewState`, the rest reach `MixerModel::apply` as `Action::Tap`.
+    Menu(crate::menu::MenuCmd),
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the

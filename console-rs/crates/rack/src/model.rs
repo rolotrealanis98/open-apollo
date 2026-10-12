@@ -523,6 +523,14 @@ pub trait MixerModel {
     /// Text edits committed by the UI: `Name` (channel name), `Insert(k)` (load plug-in by
     /// catalogue name), `Tempo`.
     fn set_text(&mut self, _id: &ControlId, _text: &str) {}
+    /// Ticks and enable states of the strip menus (label, solo, preamp).
+    fn strip_menu_state(&self, _s: &StripInfo) -> crate::menu::StripMenuState {
+        crate::menu::StripMenuState::default()
+    }
+    /// Global menu state: undo / redo, metering, the plug-in clipboard.
+    fn menu_state(&self) -> crate::menu::MenuModelState {
+        crate::menu::MenuModelState::default()
+    }
     /// The concrete model, for hosts that need more than this trait (plug-in windows reach the
     /// engine store through it). None by default.
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -554,6 +562,10 @@ pub struct PreviewMixer {
     pub headphones: Vec<HeadphoneOutput>,
     /// Insert copied with COPY, pasted by the next COPY on an empty slot.
     pub clipboard: Option<InsertState>,
+    /// Strip menu toggles (solo safe, link, hide, SR convert) set through the menus.
+    pub strip_flags: HashMap<Arc<str>, crate::menu::StripMenuState>,
+    /// `/PostFaderMetering`.
+    pub post_fader_metering: bool,
 }
 
 fn demo_catalog() -> Vec<PluginEntry> {
@@ -727,6 +739,8 @@ impl Default for PreviewMixer {
                 HeadphoneOutput { name: "HP 2".into(), source: 2, options: vec!["MON".into(), "CUE 1".into(), "CUE 2".into()] },
             ],
             clipboard: None,
+            strip_flags: HashMap::new(),
+            post_fader_metering: false,
         }
     }
 }
@@ -811,6 +825,23 @@ impl MixerModel for PreviewMixer {
     fn headphone_outputs(&self) -> Vec<HeadphoneOutput> {
         self.headphones.clone()
     }
+    fn strip_menu_state(&self, s: &StripInfo) -> crate::menu::StripMenuState {
+        let mut st = self.strip_flags.get(&s.id).cloned().unwrap_or_default();
+        if s.kind == StripKind::Input && st.linked.is_none() && s.preamp_layout.is_some() {
+            st.linked = Some(s.stereo);
+        }
+        if s.shows_sr_convert && st.sr_convert.is_none() {
+            st.sr_convert = Some(false);
+        }
+        st
+    }
+    fn menu_state(&self) -> crate::menu::MenuModelState {
+        let clipboard = match &self.clipboard {
+            Some(InsertState::Loaded { name, .. }) => Some(name.clone()),
+            _ => None,
+        };
+        crate::menu::MenuModelState { can_undo: false, can_redo: false, post_fader_metering: Some(self.post_fader_metering), clipboard }
+    }
     fn set_text(&mut self, id: &ControlId, text: &str) {
         match id.control {
             Control::Name => {
@@ -856,6 +887,7 @@ impl MixerModel for PreviewMixer {
                 Control::BufferSize(i) => return self.settings.buffer_size = self.settings.buffer_sizes.get(*i as usize).copied(),
                 Control::RecallScene(i) => return self.status.scene = self.scenes.get(*i as usize).cloned(),
                 Control::WritesEnabled => return self.settings.writes_enabled ^= true,
+                Control::Menu(cmd) => return self.apply_menu(&id.strip, cmd),
                 _ => {}
             }
         }
@@ -959,6 +991,60 @@ impl MixerModel for PreviewMixer {
             }
             _ => {}
         }
+    }
+}
+
+impl PreviewMixer {
+    /// Model-scope menu commands (`menu::MenuCmd`).
+    fn apply_menu(&mut self, strip: &Arc<str>, cmd: &crate::menu::MenuCmd) {
+        use crate::menu::{MenuCmd as M, PluginScope};
+        let default = self.strip(strip).map(|s| self.strip_menu_state(s)).unwrap_or_default();
+        let flags = self.strip_flags.entry(strip.clone()).or_insert(default);
+        match cmd {
+            M::SoloSafe => flags.solo_safe ^= true,
+            M::Link => flags.linked = flags.linked.map(|l| !l),
+            M::Hide => flags.hidden ^= true,
+            M::SrConvert(on) => flags.sr_convert = Some(*on),
+            M::PostFaderMetering(post) => self.post_fader_metering = *post,
+            M::InsertPaste(k) => {
+                let Some(c) = self.clipboard.clone() else { return };
+                if let Some(slot) = self.inserts.get_mut(strip).and_then(|v| v.get_mut(*k as usize)) {
+                    *slot = c;
+                }
+            }
+            M::StripInserts(op) => {
+                if let Some(v) = self.inserts.get_mut(strip) {
+                    v.iter_mut().for_each(|slot| plugin_op(slot, *op));
+                }
+            }
+            M::App(c) => {
+                let Some((op, scope)) = c.plugin_op() else { return };
+                let auxes: HashSet<Arc<str>> = self.auxes.iter().map(|a| a.id.clone()).collect();
+                for (id, v) in self.inserts.iter_mut() {
+                    let aux = auxes.contains(id);
+                    let hit = match scope {
+                        PluginScope::All => true,
+                        PluginScope::Inserts => !aux,
+                        PluginScope::Aux => aux,
+                        PluginScope::Unison => false,
+                    };
+                    if hit {
+                        v.iter_mut().for_each(|slot| plugin_op(slot, op));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn plugin_op(slot: &mut InsertState, op: crate::menu::PluginOp) {
+    use crate::menu::PluginOp;
+    match (op, &mut *slot) {
+        (PluginOp::Remove, _) => *slot = InsertState::Empty,
+        (PluginOp::Enable, InsertState::Loaded { power, .. }) => *power = true,
+        (PluginOp::Disable, InsertState::Loaded { power, .. }) => *power = false,
+        _ => {}
     }
 }
 

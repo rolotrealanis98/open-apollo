@@ -1,0 +1,1345 @@
+//! Console's popup menus: context menus, option menus and the menu bar, with the look of
+//! Rack's JUCE `PopupMenu` LookAndFeel. The catalog with provenance is
+//! `console-port/surfaces/menus.md`.
+//!
+//! Look (Rack.dll 1.2.x; `PopupMenu::LookAndFeelMethods` is the vtable at +0x40 of
+//! `Rack_LookAndFeelBase` 0x1838c8030, `Rack_ContextLookAndFeel` 0x18384d338 for context menus):
+//! * background: `backgrounds:Popup-Menu-Background` 9-slice over the whole window
+//!   (`drawPopupMenuBackground` 0x180cafc90); JUCE's default 2-pt window border.
+//! * rows (`getIdealPopupMenuItemSize` 0x180cb3460 / context 0x180c9dc20): items 22 pt, separators
+//!   2 pt; width = text + 3 × font height (base) or text + 2 × 22 (context). Section headers are
+//!   JUCE's `HeaderItemComponent`: 1.5 × the row height, width + ¼.
+//! * item (`drawPopupMenuItem` 0x180cafd50): separator = two 1-pt lines from x 1 to w − 1,
+//!   (135,145,149) then (202,212,216); highlight = (227,231,233) rounded rect (0, 1, w, h − 2),
+//!   corner 2 (`inset-background` 1,0,1,0 read top-first); text `views:Popup-Menu-Item` (black
+//!   `text-on` / `text-off`) in (12, 2, w − 24, h − 2) centred-left, opacity 0.3 when disabled;
+//!   shortcut right-aligned in (0, 0, w − 8, h); ticked = `misc/dropdown_in_use_dot`, submenu =
+//!   `misc/dropdown_submenu_chevron`.
+//! * context section header (`drawPopupMenuSectionHeader` 0x180c9dad0): band in palette
+//!   `context_menu_section_header_bg`, bold popup font in `context_menu_section_header_text`
+//!   at (x + 5, y + 1, w − 10, h), centred-left.
+//! * menu bar (`Rack_WinMenuBarLookAndFeel`, Windows title bar): `views:Menu-Bar-Item-Win`.
+
+use std::sync::Arc;
+
+use houston::{Rect, Rgba};
+
+use crate::draw::Align;
+use crate::input::{Control, ControlId, Hit, HitKind};
+use crate::model::{InsertState, MixerModel, StripInfo};
+use crate::surfaces::{MonitorPage, Popover, PopoverState, Sheet, TextEdit, TextTarget, ViewState};
+use crate::ui::Ui;
+use crate::window::{helvetica_bold_width, helvetica_width};
+
+// MARK: metrics
+
+/// Item row height (`getIdealPopupMenuItemSize`: 0x16).
+pub const ITEM_H: f32 = 22.0;
+/// Separator row height.
+pub const SEPARATOR_H: f32 = 2.0;
+/// Section header row: JUCE `HeaderItemComponent` adds half the row height.
+pub const HEADER_H: f32 = ITEM_H * 1.5;
+/// JUCE `LookAndFeel_V2::getPopupMenuBorderSize`.
+pub const BORDER: f32 = 2.0;
+/// Text inset from the row's left edge (0xc) and the total horizontal text margin (0x18).
+const TEXT_X: f32 = 12.0;
+const TEXT_MARGIN: f32 = 24.0;
+const SEP_DARK: Rgba = Rgba::rgb8(135, 145, 149);
+const SEP_LIGHT: Rgba = Rgba::rgb8(202, 212, 216);
+const HIGHLIGHT: Rgba = Rgba::rgb8(227, 231, 233);
+const HEADER_BG: Rgba = Rgba::rgb8(166, 174, 179);
+const HEADER_TEXT: Rgba = Rgba::rgb8(31, 87, 126);
+const DISABLED_ALPHA: f32 = 0.3;
+/// Hover / open menu-bar title overlay (`Menu-Bar-Item-Win` `color-mouseover`).
+const BAR_HOVER: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.2 };
+
+/// Which LookAndFeel draws a menu: menu-bar and combo menus use `Rack_LookAndFeelBase`,
+/// right-click menus `Rack_ContextLookAndFeel` (wider rows, coloured section headers).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MenuLook {
+    #[default]
+    Base,
+    Context,
+}
+
+// MARK: menu model
+
+/// One clickable row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopupItem {
+    pub label: String,
+    /// What a click sends (None: drawn, not clickable).
+    pub id: Option<ControlId>,
+    /// `Toggle` for controls the model toggles (preamp switches, isolate); `Tap` otherwise.
+    pub toggle: bool,
+    pub enabled: bool,
+    pub ticked: bool,
+    /// Key description drawn right-aligned (menu bar).
+    pub shortcut: Option<String>,
+    /// The Console command id behind a menu-bar item (`show_browser`, …): native menus run it
+    /// through `ViewState::run_command_id`.
+    pub command: Option<&'static str>,
+}
+
+impl PopupItem {
+    pub fn new(label: impl Into<String>, id: ControlId) -> Self {
+        Self { label: label.into(), id: Some(id), toggle: false, enabled: true, ticked: false, shortcut: None, command: None }
+    }
+    pub fn enabled(mut self, on: bool) -> Self {
+        self.enabled = on;
+        self
+    }
+    pub fn ticked(mut self, on: bool) -> Self {
+        self.ticked = on;
+        self
+    }
+    pub fn toggle(mut self) -> Self {
+        self.toggle = true;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PopupEntry {
+    Item(PopupItem),
+    Separator,
+    Header(String),
+    Submenu { label: String, enabled: bool, menu: PopupMenu },
+}
+
+/// A JUCE `PopupMenu`: entries in order.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PopupMenu {
+    pub entries: Vec<PopupEntry>,
+}
+
+impl PopupMenu {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn push(&mut self, item: PopupItem) -> &mut Self {
+        self.entries.push(PopupEntry::Item(item));
+        self
+    }
+    pub fn item(&mut self, label: impl Into<String>, id: ControlId) -> &mut Self {
+        self.push(PopupItem::new(label, id))
+    }
+    /// JUCE `addSeparator`: never first, never twice in a row.
+    pub fn separator(&mut self) -> &mut Self {
+        if matches!(self.entries.last(), Some(e) if !matches!(e, PopupEntry::Separator)) {
+            self.entries.push(PopupEntry::Separator);
+        }
+        self
+    }
+    pub fn header(&mut self, title: impl Into<String>) -> &mut Self {
+        self.entries.push(PopupEntry::Header(title.into()));
+        self
+    }
+    pub fn submenu(&mut self, label: impl Into<String>, menu: PopupMenu, enabled: bool) -> &mut Self {
+        self.entries.push(PopupEntry::Submenu { label: label.into(), enabled, menu });
+        self
+    }
+    /// Drops a trailing separator (JUCE never draws one last).
+    pub fn finish(mut self) -> Self {
+        while matches!(self.entries.last(), Some(PopupEntry::Separator)) {
+            self.entries.pop();
+        }
+        self
+    }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    /// The submenu at `path` (entry indices from this menu).
+    pub fn at_path(&self, path: &[u16]) -> Option<&PopupMenu> {
+        let mut m = self;
+        for &i in path {
+            match m.entries.get(i as usize)? {
+                PopupEntry::Submenu { menu, .. } => m = menu,
+                _ => return None,
+            }
+        }
+        Some(m)
+    }
+    /// Every item, depth first (tests, native menus).
+    pub fn items(&self) -> Vec<&PopupItem> {
+        let mut out = Vec::new();
+        for e in &self.entries {
+            match e {
+                PopupEntry::Item(i) => out.push(i),
+                PopupEntry::Submenu { menu, .. } => out.extend(menu.items()),
+                _ => {}
+            }
+        }
+        out
+    }
+    pub fn find(&self, label: &str) -> Option<&PopupItem> {
+        self.items().into_iter().find(|i| i.label == label)
+    }
+}
+
+// MARK: commands
+
+/// A keyboard shortcut from `Resources/shortcuts/shortcuts.json` (Console 1.3.1 defaults).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Shortcut {
+    /// `shortcuts.json` key: a character or `left` / `right`.
+    pub key: &'static str,
+    /// "command": ⌘ on macOS, Ctrl elsewhere.
+    pub command: bool,
+    pub shift: bool,
+    /// "option": ⌥ / Alt.
+    pub option: bool,
+    /// "control": ⌃ on macOS (with "command" on Windows it is plain Ctrl).
+    pub control: bool,
+}
+
+impl Shortcut {
+    const fn cmd(key: &'static str) -> Self {
+        Self { key, command: true, shift: false, option: false, control: false }
+    }
+    const fn plain(key: &'static str) -> Self {
+        Self { key, command: false, shift: false, option: false, control: false }
+    }
+    /// JUCE `KeyPress::getTextDescriptionWithIcons`: "⇧⌘S" on macOS, "ctrl + shift + S" elsewhere.
+    pub fn text(&self, mac: bool) -> String {
+        let key = match self.key {
+            "left" => if mac { "←" } else { "cursor left" }.to_string(),
+            "right" => if mac { "→" } else { "cursor right" }.to_string(),
+            k => k.to_uppercase(),
+        };
+        if mac {
+            let mut s = String::new();
+            if self.control {
+                s.push('⌃');
+            }
+            if self.option {
+                s.push('⌥');
+            }
+            if self.shift {
+                s.push('⇧');
+            }
+            if self.command {
+                s.push('⌘');
+            }
+            s + &key
+        } else {
+            let mut s = String::new();
+            if self.command || self.control {
+                s += "ctrl + ";
+            }
+            if self.shift {
+                s += "shift + ";
+            }
+            if self.option {
+                s += "alt + ";
+            }
+            s + &key
+        }
+    }
+}
+
+/// Who carries out a [`Command`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandScope {
+    /// `ViewState` (pages, browser, navigation).
+    View,
+    /// The model (engine writes behind the write gate).
+    Model,
+    /// The app shell (`ViewState::take_commands`): quit, full screen, URLs, windows, sessions.
+    Shell,
+}
+
+macro_rules! commands {
+    ($($v:ident = $id:literal, $label:literal, $scope:ident, $sc:expr;)*) => {
+        /// The Console menu-bar commands (`Rack_KeyboardShortcuts` command registry, Rack.dll
+        /// 0x180946be0 / 0x1809381d0: id → name; labels as the menu builders pass them).
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum Command { $($v),* }
+        impl Command {
+            pub const ALL: &'static [Command] = &[$(Command::$v),*];
+            /// Console's command id.
+            pub fn id(self) -> &'static str { match self { $(Command::$v => $id),* } }
+            /// Menu text.
+            pub fn label(self) -> &'static str { match self { $(Command::$v => $label),* } }
+            pub fn scope(self) -> CommandScope { match self { $(Command::$v => CommandScope::$scope),* } }
+            pub fn shortcut(self) -> Option<Shortcut> { match self { $(Command::$v => $sc),* } }
+            pub fn from_id(id: &str) -> Option<Command> {
+                Self::ALL.iter().copied().find(|c| c.id() == id)
+            }
+        }
+    };
+}
+
+const fn sc(key: &'static str, command: bool, shift: bool, option: bool, control: bool) -> Option<Shortcut> {
+    Some(Shortcut { key, command, shift, option, control })
+}
+
+commands! {
+    // File (`Rack_MenuBarModel_Console` slot 14, 0x18161dc00: labels passed explicitly).
+    NewSession = "select_new_session_panel", "New", Shell, Some(Shortcut::cmd("n"));
+    OpenSession = "open_session", "Open...", Shell, Some(Shortcut::cmd("o"));
+    SaveSession = "save_bookmark", "Save", Shell, Some(Shortcut::cmd("s"));
+    SaveSessionAs = "save_as", "Save As...", Shell, sc("s", true, true, false, false);
+    Quit = "quit", "Quit", Shell, Some(Shortcut::cmd("q"));
+    // Edit (`UpdateEditMenu` 0x18161cee0).
+    Undo = "undo", "Undo", Model, Some(Shortcut::cmd("z"));
+    Redo = "redo", "Redo", Model, sc("z", true, true, false, false);
+    RemoveAllPlugins = "remove_all_plugins", "Remove All Plug-Ins", Model, None;
+    RemoveAllInsertPlugins = "remove_all_insert_plugins", "Remove All Insert Plug-Ins", Model, None;
+    RemoveAllAuxPlugins = "remove_all_aux_plugins", "Remove All Aux Plug-Ins", Model, None;
+    RemoveAllUnisonPlugins = "remove_all_unison_plugins", "Remove All Unison Plug-Ins", Model, None;
+    EnableAllPlugins = "enable_all_plugins", "Enable All Plug-Ins", Model, None;
+    EnableAllInsertPlugins = "enable_all_insert_plugins", "Enable All Insert Plug-Ins", Model, None;
+    EnableAllAuxPlugins = "enable_all_aux_plugins", "Enable All Aux Plug-Ins", Model, None;
+    EnableAllUnisonPlugins = "enable_all_unison_plugins", "Enable All Unison Plug-Ins", Model, None;
+    DisableAllPlugins = "disable_all_plugins", "Disable All Plug-Ins", Model, None;
+    DisableAllInsertPlugins = "disable_all_insert_plugins", "Disable All Insert Plug-Ins", Model, None;
+    DisableAllAuxPlugins = "disable_all_aux_plugins", "Disable All Aux Plug-Ins", Model, None;
+    DisableAllUnisonPlugins = "disable_all_unison_plugins", "Disable All Unison Plug-Ins", Model, None;
+    // Navigation (0x18161e3b0).
+    MixerScrollLeft = "mixer_scroll_left", "Mixer Scroll Left", View, Some(Shortcut::plain("left"));
+    MixerScrollRight = "mixer_scroll_right", "Mixer Scroll Right", View, Some(Shortcut::plain("right"));
+    MixerBankLeft = "mixer_bank_left", "Mixer Bank Left", View, Some(Shortcut::cmd("left"));
+    MixerBankRight = "mixer_bank_right", "Mixer Bank Right", View, Some(Shortcut::cmd("right"));
+    MixerFarLeft = "mixer_far_left", "Mixer Far Left", View, sc("left", true, false, true, false);
+    MixerFarRight = "mixer_far_right", "Mixer Far Right", View, sc("right", true, false, true, false);
+    MixerTabLeft = "mixer_tab_left", "Mixer Tab Left", View, sc("left", true, false, false, true);
+    MixerTabRight = "mixer_tab_right", "Mixer Tab Right", View, sc("right", true, false, false, true);
+    // View (`UpdateViewMenu` 0x18161eba0), "Section" submenu first.
+    ShowBrowser = "show_browser", "Show Browser", View, Some(Shortcut::plain("`"));
+    ShowMixerNav = "show_mixer_nav", "Show Mixer Navigation", View, None;
+    ShowPluginScenes = "show_plugin_scenes", "Show Plug-In Scenes", View, Some(Shortcut::cmd("e"));
+    ShowBuses = "show_buses", "Show Auxes", View, Some(Shortcut::cmd("a"));
+    ShowControlRoom = "show_control_room", "Show Control Room", View, Some(Shortcut::cmd("r"));
+    ShowMonitor = "show_monitor", "Show Monitor", View, None;
+    ShowMonitorCorrection = "show_monitor_correction", "Show Monitor Correction", View, None;
+    ShowNotifications = "show_notification_browser", "Notifications", Shell, None;
+    ToggleCompactMonitor = "toggle_compact_monitor_fader", "Toggle Compact Monitor", View, None;
+    ShowHideChannels = "show_hide_channels", "Show/Hide Channels", View, Some(Shortcut::cmd("i"));
+    ShowHideFloatingWindows = "show_hide_floating_windows", "Show/Hide Floating Windows", Shell, sc("w", false, true, false, false);
+    ShowOfflineDevices = "show_offline_devices", "Show Offline Devices", View, None;
+    ShowSettings = "show_settings", "Show Settings", View, Some(Shortcut::cmd(","));
+    // Window (`Rack_MenuBarModel::UpdateWindowMenu` 0x18161ab70).
+    PreviousWindow = "cycle_windows_previous", "Previous Window", Shell, sc("`", true, true, false, false);
+    NextWindow = "cycle_windows_next", "Next Window", Shell, Some(Shortcut::cmd("`"));
+    ToggleFullScreen = "toggle_full_screen", "Full Screen On/Off", Shell, sc("f", true, true, false, false);
+    // Help (`UpdateHelpMenu` 0x18161dfd0) and the macOS application menu (0x1816078d0).
+    Documentation = "open_documentation_url_app", "Documentation...", Shell, None;
+    GiveFeedback = "give_feedback", "Give Feedback...", Shell, None;
+    About = "about", "About...", Shell, None;
+}
+
+/// The Console command bound to a key (`shortcuts.json` defaults): `key` as `shortcuts.json`
+/// names it (a lowercase character, `left`, `right`); `command` is ⌘ on macOS / Ctrl elsewhere.
+pub fn command_for_key(key: &str, command: bool, shift: bool, option: bool) -> Option<Command> {
+    Command::ALL.iter().copied().find(|c| {
+        c.shortcut().is_some_and(|s| s.key == key && (s.command || s.control) == command && s.shift == shift && s.option == option)
+            && c.id() != "mixer_tab_left"
+            && c.id() != "mixer_tab_right"
+    })
+}
+
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn entries_json(menu: &PopupMenu) -> String {
+    let items: Vec<String> = menu
+        .entries
+        .iter()
+        .map(|e| match e {
+            PopupEntry::Separator => r#"{"type":"separator"}"#.to_string(),
+            PopupEntry::Header(t) => format!(r#"{{"type":"header","label":{}}}"#, json_str(t)),
+            PopupEntry::Submenu { label, enabled, menu } => {
+                format!(r#"{{"type":"submenu","label":{},"enabled":{},"items":{}}}"#, json_str(label), enabled, entries_json(menu))
+            }
+            PopupEntry::Item(i) => {
+                let sc = i
+                    .command
+                    .and_then(Command::from_id)
+                    .and_then(Command::shortcut)
+                    .map(|s| format!(r#"{{"key":{},"command":{},"shift":{},"option":{},"control":{}}}"#, json_str(s.key), s.command, s.shift, s.option, s.control))
+                    .unwrap_or_else(|| "null".into());
+                format!(
+                    r#"{{"type":"item","label":{},"command":{},"enabled":{},"ticked":{},"shortcut":{}}}"#,
+                    json_str(&i.label),
+                    i.command.map(json_str).unwrap_or_else(|| "null".into()),
+                    i.enabled,
+                    i.ticked,
+                    sc
+                )
+            }
+        })
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+/// The menu bar as JSON for native menus (ConsoleLink's `NSMenu` / `UIMenu`):
+/// `{"app": [entries], "menus": [{"title", "items": [entries]}]}`; an entry is
+/// `{"type": "item", "label", "command", "enabled", "ticked", "shortcut": {"key", "command",
+/// "shift", "option", "control"} | null}`, `{"type": "separator"}`, `{"type": "header", "label"}`
+/// or `{"type": "submenu", "label", "enabled", "items"}`. Run an item with
+/// `ViewState::run_command_id(command)`.
+pub fn menu_bar_json(model: &dyn MixerModel, view: &ViewState, mac: bool) -> String {
+    let menus: Vec<String> = menu_bar(model, view, mac).iter().map(|b| format!(r#"{{"title":{},"items":{}}}"#, json_str(b.title), entries_json(&b.menu))).collect();
+    let app = if mac { entries_json(&app_menu(model, view)) } else { "[]".into() };
+    format!(r#"{{"app":{},"menus":[{}]}}"#, app, menus.join(","))
+}
+
+/// `open_documentation_url_app` (`Rack_Configuration::GetDeviceDocumentationURL` 0x180a189a0).
+pub const DOCUMENTATION_URL: &str = "https://help.uaudio.com/hc/en-us/sections/12262368930324-Apollo-UAD-2-Documentation";
+
+/// Plug-in operations of the Edit menu and the inserts context menus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PluginOp {
+    Remove,
+    Enable,
+    Disable,
+}
+
+/// Which slots an Edit-menu plug-in operation covers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PluginScope {
+    All,
+    /// Input channel inserts.
+    Inserts,
+    /// Aux inserts.
+    Aux,
+    /// Unison (preamp) slots.
+    Unison,
+}
+
+impl Command {
+    /// The plug-in operation behind an Edit-menu "… All" command.
+    pub fn plugin_op(self) -> Option<(PluginOp, PluginScope)> {
+        use Command as C;
+        use PluginOp as O;
+        use PluginScope as S;
+        Some(match self {
+            C::RemoveAllPlugins => (O::Remove, S::All),
+            C::RemoveAllInsertPlugins => (O::Remove, S::Inserts),
+            C::RemoveAllAuxPlugins => (O::Remove, S::Aux),
+            C::RemoveAllUnisonPlugins => (O::Remove, S::Unison),
+            C::EnableAllPlugins => (O::Enable, S::All),
+            C::EnableAllInsertPlugins => (O::Enable, S::Inserts),
+            C::EnableAllAuxPlugins => (O::Enable, S::Aux),
+            C::EnableAllUnisonPlugins => (O::Enable, S::Unison),
+            C::DisableAllPlugins => (O::Disable, S::All),
+            C::DisableAllInsertPlugins => (O::Disable, S::Inserts),
+            C::DisableAllAuxPlugins => (O::Disable, S::Aux),
+            C::DisableAllUnisonPlugins => (O::Disable, S::Unison),
+            _ => return None,
+        })
+    }
+}
+
+/// What a menu row does: `Control::Menu(MenuCmd)`. View commands change `ViewState`; model
+/// commands reach `MixerModel::apply` as `Action::Tap` (the strip is the id's strip).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MenuCmd {
+    /// [view] Hover marker of entry `index` at menu level `level` (registered under the row's
+    /// own hit); `index` = `u16::MAX` is the menu window, which swallows clicks between rows.
+    Row { level: u8, index: u16 },
+    /// [view] Open the submenu of entry `index` at menu level `level` (0 = root).
+    OpenSub { level: u8, index: u16 },
+    /// [view] A title of the in-window menu bar.
+    BarTitle(u8),
+    /// A menu-bar command (scope per [`Command::scope`]).
+    App(Command),
+    /// [view] Strip label "Rename..." → the rename editor.
+    Rename,
+    /// [view] Insert "Assign..." → the plug-in browser assigns to this slot (255 = Unison).
+    Assign(u8),
+    /// [view] Insert / strip "Presets..." and label "Channel Presets..." → the browser's
+    /// PRESETS tab.
+    Presets,
+    /// [model] Strip `SoloSafe`, `Stereo` (link, left channel) and `ChannelHidden` toggles.
+    SoloSafe,
+    Link,
+    Hide,
+    /// [model] Meter menu CLEAR: this strip's / every meter's clip and peak hold.
+    ClearMeter,
+    ClearAllMeters,
+    /// [model] Meter menu METERING: `/PostFaderMetering`.
+    PostFaderMetering(bool),
+    /// [model] Paste the copied plug-in into the slot (`Paste "<name>"`).
+    InsertPaste(u8),
+    /// [model] This strip's inserts: Remove All / Enable All / Disable All.
+    StripInserts(PluginOp),
+    /// [model] S/PDIF `SRConvert` (preamp menu "Sample Rate Convertsion").
+    SrConvert(bool),
+}
+
+impl MenuCmd {
+    /// Consumed by `ViewState` (never reaches the model).
+    pub fn is_view(&self) -> bool {
+        match self {
+            MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets => true,
+            MenuCmd::App(c) => c.scope() != CommandScope::Model,
+            _ => false,
+        }
+    }
+}
+
+// MARK: model state the menus show
+
+/// Per-strip state for ticks and enable states ([`MixerModel::strip_menu_state`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StripMenuState {
+    pub solo_safe: bool,
+    /// None: the strip has no link button (`Stereo/enabled` false).
+    pub linked: Option<bool>,
+    pub hidden: bool,
+    /// Hi-Z jack in use (the input source menu shows a disabled "Hi-Z").
+    pub hi_z: bool,
+    /// S/PDIF `SRConvert`; None when the strip has none.
+    pub sr_convert: Option<bool>,
+}
+
+/// Global menu state ([`MixerModel::menu_state`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MenuModelState {
+    pub can_undo: bool,
+    pub can_redo: bool,
+    /// `/PostFaderMetering`; None hides the meter menu's METERING section.
+    pub post_fader_metering: Option<bool>,
+    /// The plug-in a slot Copy put on the clipboard (`Paste "<name>"`).
+    pub clipboard: Option<String>,
+}
+
+// MARK: open-menu state
+
+/// What an open menu belongs to.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MenuTarget {
+    /// In-window menu-bar title `index` (into [`menu_bar`]).
+    Bar(u8),
+    /// Insert slot context menu (`Rack_Inserts` 0x18143be10 + slot section 0x18143c320); 255 =
+    /// Unison.
+    Insert { strip: Arc<str>, slot: u8 },
+    /// Strip label (`Rack_ChannelStripLabel::SetupUAD2ButtonPopup` 0x181408e30).
+    StripLabel { strip: Arc<str> },
+    /// Solo button (0x181494a40): Clear Solos / Solo Safe.
+    Solo { strip: Arc<str> },
+    /// Fader meter (`Rack_Meter::HandlePopupMenu` 0x1809cadf0).
+    Meter { strip: Arc<str> },
+    /// Preamp / input area (`Rack_Overview_Preamp` 0x180dd7a60 → 0x180dd7bf0 / 0x180dd81a0 /
+    /// 0x180dd8320 by input type).
+    Preamp { strip: Arc<str> },
+    /// Plug-in browser row (`Rack_PluginAssignBrowser::ShowTreeViewItemPopupMenu` 0x1812d6da0).
+    BrowserItem(u16),
+}
+
+/// Where the root menu opens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MenuAnchor {
+    /// Right click / long press: top-left at the point.
+    Point(f32, f32),
+    /// Combo box: below the rect, at least its width.
+    Below(Rect),
+    /// Below in-window menu-bar title `i` ([`bar_titles`] from [`BAR_X`]).
+    Bar(u8),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuState {
+    pub target: MenuTarget,
+    pub anchor: MenuAnchor,
+    /// Open submenus: entry index per level from the root.
+    pub open: Vec<u16>,
+    /// Highlighted row: (level, entry index).
+    pub hover: Option<(u8, u16)>,
+}
+
+impl MenuState {
+    pub fn at(target: MenuTarget, x: f32, y: f32) -> Self {
+        Self { target, anchor: MenuAnchor::Point(x, y), open: Vec::new(), hover: None }
+    }
+}
+
+fn sid(strip: &Arc<str>, control: Control) -> ControlId {
+    ControlId { strip: strip.clone(), control }
+}
+
+fn mid(strip: &Arc<str>, cmd: MenuCmd) -> ControlId {
+    sid(strip, Control::Menu(cmd))
+}
+
+fn gid(cmd: MenuCmd) -> ControlId {
+    ControlId { strip: "global".into(), control: Control::Menu(cmd) }
+}
+
+fn find_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
+    model.inputs().into_iter().chain(model.auxes()).find(|s| &*s.id == id)
+}
+
+// MARK: menu bar
+
+/// One menu-bar menu: title and entries.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BarMenu {
+    pub title: &'static str,
+    pub menu: PopupMenu,
+}
+
+fn cmd_item(c: Command, mac: bool) -> PopupItem {
+    PopupItem {
+        label: c.label().to_string(),
+        id: Some(gid(MenuCmd::App(c))),
+        toggle: false,
+        enabled: true,
+        ticked: false,
+        shortcut: c.shortcut().map(|s| s.text(mac)),
+        command: Some(c.id()),
+    }
+}
+
+/// Whether a command can run now (menu enable state).
+pub fn command_enabled(c: Command, model: &dyn MixerModel, view: &ViewState) -> bool {
+    use Command as C;
+    let st = model.menu_state();
+    match c {
+        C::Undo => st.can_undo,
+        C::Redo => st.can_redo,
+        // Not built yet: Console's monitor page toggle, monitor correction, compact monitor
+        // fader, channel visibility popover and offline-device list.
+        C::ShowMonitor | C::ShowMonitorCorrection | C::ToggleCompactMonitor | C::ShowHideChannels | C::ShowOfflineDevices => false,
+        C::ShowMixerNav | C::ShowBrowser => !view.compact,
+        C::MixerTabLeft | C::MixerTabRight => false,
+        C::ShowPluginScenes => model.status().plugin_scenes,
+        _ => true,
+    }
+}
+
+/// Whether a command shows a tick.
+pub fn command_ticked(c: Command, view: &ViewState) -> bool {
+    use Command as C;
+    match c {
+        C::ShowBrowser => view.show_browser && !view.compact,
+        C::ShowMixerNav => view.show_navigator && !view.compact,
+        C::ShowBuses => view.monitor_page == MonitorPage::Aux,
+        C::ShowControlRoom => view.monitor_page == MonitorPage::ControlRoom,
+        C::ShowMonitor => true,
+        C::ShowSettings => view.sheet == Some(Sheet::Settings),
+        _ => false,
+    }
+}
+
+/// Console's menu bar for the Apollo mixer page (`Rack_MenuBarModel_Console::getMenuBarNames`
+/// 0x1816200b0: File, Edit, Navigation (mixer pages 7/8), View, Window, Help; Test and Debug are
+/// build flags). `mac` picks shortcut text and moves About into the application menu.
+pub fn menu_bar(model: &dyn MixerModel, view: &ViewState, mac: bool) -> Vec<BarMenu> {
+    use Command as C;
+    let item = |c: Command| {
+        let mut i = cmd_item(c, mac);
+        i.enabled = command_enabled(c, model, view);
+        i.ticked = command_ticked(c, view);
+        i
+    };
+    let mut file = PopupMenu::new();
+    file.push(item(C::NewSession)).push(item(C::OpenSession)).push(item(C::SaveSession)).push(item(C::SaveSessionAs));
+    if !mac {
+        file.separator().push(item(C::Quit));
+    }
+
+    let mut edit = PopupMenu::new();
+    edit.push(item(C::Undo)).push(item(C::Redo)).separator();
+    for (title, cmds) in [
+        ("Remove All", [C::RemoveAllPlugins, C::RemoveAllInsertPlugins, C::RemoveAllAuxPlugins, C::RemoveAllUnisonPlugins]),
+        ("Enable All", [C::EnableAllPlugins, C::EnableAllInsertPlugins, C::EnableAllAuxPlugins, C::EnableAllUnisonPlugins]),
+        ("Disable All", [C::DisableAllPlugins, C::DisableAllInsertPlugins, C::DisableAllAuxPlugins, C::DisableAllUnisonPlugins]),
+    ] {
+        let mut sub = PopupMenu::new();
+        for c in cmds {
+            sub.push(item(c));
+        }
+        edit.submenu(title, sub, true);
+    }
+
+    let mut nav = PopupMenu::new();
+    for c in [C::MixerScrollLeft, C::MixerScrollRight, C::MixerBankLeft, C::MixerBankRight, C::MixerFarLeft, C::MixerFarRight, C::MixerTabLeft, C::MixerTabRight] {
+        nav.push(item(c));
+    }
+
+    let mut section = PopupMenu::new();
+    section.push(item(C::ShowBrowser)).push(item(C::ShowMixerNav));
+    if model.status().plugin_scenes {
+        section.push(item(C::ShowPluginScenes));
+    }
+    section.push(item(C::ShowBuses)).push(item(C::ShowControlRoom)).push(item(C::ShowMonitor));
+    let opts = model.monitor_options();
+    if opts.hp_correction.is_some() || opts.speaker_correction.is_some() {
+        section.push(item(C::ShowMonitorCorrection));
+    }
+    section.push(item(C::ShowNotifications));
+    let mut viewm = PopupMenu::new();
+    viewm.submenu("Section", section, true);
+    viewm.push(item(C::ToggleCompactMonitor)).separator();
+    viewm.push(item(C::ShowHideChannels)).push(item(C::ShowHideFloatingWindows)).push(item(C::ShowOfflineDevices));
+    viewm.separator().push(item(C::ShowSettings));
+
+    let mut window = PopupMenu::new();
+    window.push(item(C::PreviousWindow)).push(item(C::NextWindow)).push(item(C::ShowHideFloatingWindows));
+    window.separator().push(item(C::ToggleFullScreen));
+
+    let mut help = PopupMenu::new();
+    help.push(item(C::Documentation)).separator().push(item(C::GiveFeedback));
+    if !mac {
+        help.push(item(C::About));
+    }
+
+    vec![
+        BarMenu { title: "File", menu: file.finish() },
+        BarMenu { title: "Edit", menu: edit.finish() },
+        BarMenu { title: "Navigation", menu: nav.finish() },
+        BarMenu { title: "View", menu: viewm.finish() },
+        BarMenu { title: "Window", menu: window.finish() },
+        BarMenu { title: "Help", menu: help.finish() },
+    ]
+}
+
+/// The macOS application menu's extra items (`Rack_MenuBarModel` slot 13, 0x1816078d0): About,
+/// then Show Settings. (The Keyboard Shortcuts submenu is LUNA's preset list.)
+pub fn app_menu(model: &dyn MixerModel, view: &ViewState) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let mut about = cmd_item(Command::About, true);
+    about.label = "About UAD Console".into();
+    m.push(about).separator();
+    let mut settings = cmd_item(Command::ShowSettings, true);
+    settings.enabled = command_enabled(Command::ShowSettings, model, view);
+    m.push(settings);
+    m.finish()
+}
+
+// MARK: context menus
+
+/// The menu for an open target, built from the model on every frame so ticks follow the engine.
+pub fn build_menu(model: &dyn MixerModel, view: &ViewState, target: &MenuTarget, mac: bool) -> (PopupMenu, MenuLook) {
+    match target {
+        MenuTarget::Bar(i) => (menu_bar(model, view, mac).into_iter().nth(*i as usize).map(|b| b.menu).unwrap_or_default(), MenuLook::Base),
+        MenuTarget::Insert { strip, slot } => (insert_menu(model, strip, *slot), MenuLook::Context),
+        MenuTarget::StripLabel { strip } => (label_menu(model, strip), MenuLook::Context),
+        MenuTarget::Solo { strip } => (solo_menu(model, strip), MenuLook::Context),
+        MenuTarget::Meter { strip } => (meter_menu(model, strip), MenuLook::Context),
+        MenuTarget::Preamp { strip } => (preamp_menu(model, strip), MenuLook::Context),
+        MenuTarget::BrowserItem(i) => (browser_item_menu(model, *i), MenuLook::Context),
+    }
+}
+
+fn insert_state(model: &dyn MixerModel, s: &StripInfo, slot: u8) -> InsertState {
+    if slot == 255 { model.unison(s) } else { model.inserts(s).get(slot as usize).cloned().unwrap_or(InsertState::Empty) }
+}
+
+/// Insert slot menu: the slot section (`Rack_Inserts` 0x18143c320), then the strip's inserts
+/// section under the channel name (0x18143be10, Apollo page 8: Presets..., Remove All,
+/// Disable All, Enable All).
+pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(s) = find_strip(model, strip) else { return m };
+    let st = model.menu_state();
+    let paste_label = |name: &str| format!("Paste \"{}\"", name.strip_prefix("UAD ").unwrap_or(name));
+    match insert_state(model, &s, slot) {
+        InsertState::Empty => {
+            m.header(if slot == 255 { "UNISON (EMPTY)".to_string() } else { format!("INSERT {} (EMPTY)", slot as u16 + 1) });
+            m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(slot))));
+            match &st.clipboard {
+                Some(name) => m.push(PopupItem::new(paste_label(name), mid(strip, MenuCmd::InsertPaste(slot)))),
+                None => m.push(PopupItem::new("Paste", mid(strip, MenuCmd::InsertPaste(slot))).enabled(false)),
+            };
+        }
+        InsertState::Loaded { name, power } => {
+            m.header(name.strip_prefix("UAD ").unwrap_or(&name).to_string());
+            m.push(PopupItem::new("Copy", sid(strip, Control::InsertCopy(slot))));
+            match &st.clipboard {
+                Some(c) => m.push(PopupItem::new(paste_label(c), mid(strip, MenuCmd::InsertPaste(slot)))),
+                None => m.push(PopupItem::new("Paste", mid(strip, MenuCmd::InsertPaste(slot))).enabled(false)),
+            };
+            m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(slot))));
+            m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets)));
+            m.push(PopupItem::new("Remove", sid(strip, Control::InsertRemove(slot))));
+            m.push(PopupItem::new(if power { "Disable" } else { "Enable" }, sid(strip, Control::InsertPower(slot))));
+        }
+    }
+    if slot != 255 {
+        let loaded = model.inserts(&s).iter().any(|i| matches!(i, InsertState::Loaded { .. }));
+        m.header(model.main(&s).name.to_uppercase());
+        m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets)));
+        m.push(PopupItem::new("Remove All", mid(strip, MenuCmd::StripInserts(PluginOp::Remove))).enabled(loaded));
+        m.push(PopupItem::new("Disable All", mid(strip, MenuCmd::StripInserts(PluginOp::Disable))).enabled(loaded));
+        m.push(PopupItem::new("Enable All", mid(strip, MenuCmd::StripInserts(PluginOp::Enable))).enabled(loaded));
+    }
+    m.finish()
+}
+
+/// Strip label (`SetupUAD2ButtonPopup` 0x181408e30): the channel name as header, Rename...,
+/// Link (linkable pairs only), Hide, Isolate, Channel Presets....
+pub fn label_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(s) = find_strip(model, strip) else { return m };
+    let st = model.strip_menu_state(&s);
+    m.header(model.main(&s).name.to_uppercase());
+    m.push(PopupItem::new("Rename...", mid(strip, MenuCmd::Rename)));
+    if let Some(linked) = st.linked {
+        m.push(PopupItem::new("Link", mid(strip, MenuCmd::Link)).ticked(linked));
+    }
+    m.push(PopupItem::new("Hide", mid(strip, MenuCmd::Hide)).ticked(st.hidden));
+    m.push(PopupItem::new("Isolate", sid(strip, Control::Isolate)).ticked(model.isolated(&s)).toggle());
+    m.push(PopupItem::new("Channel Presets...", mid(strip, MenuCmd::Presets)));
+    m.finish()
+}
+
+/// Solo button (0x181494a40): Clear Solos, separator, Solo Safe (ticked).
+pub fn solo_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(s) = find_strip(model, strip) else { return m };
+    let st = model.strip_menu_state(&s);
+    m.push(PopupItem::new("Clear Solos", sid(strip, Control::ClearSolos)));
+    m.separator();
+    m.push(PopupItem::new("Solo Safe", mid(strip, MenuCmd::SoloSafe)).ticked(st.solo_safe));
+    m.finish()
+}
+
+/// Meter (`Rack_Meter::HandlePopupMenu` 0x1809cadf0): CLEAR Meter / All Meters, then METERING
+/// Pre-Fader / Post-Fader when the mixer meters post-fader on request.
+pub fn meter_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    m.header("CLEAR");
+    m.push(PopupItem::new("Meter", mid(strip, MenuCmd::ClearMeter)));
+    m.push(PopupItem::new("All Meters", mid(strip, MenuCmd::ClearAllMeters)));
+    if let Some(post) = model.menu_state().post_fader_metering {
+        m.header("METERING");
+        m.push(PopupItem::new("Pre-Fader", mid(strip, MenuCmd::PostFaderMetering(false))).ticked(!post));
+        m.push(PopupItem::new("Post-Fader", mid(strip, MenuCmd::PostFaderMetering(true))).ticked(post));
+    }
+    m.finish()
+}
+
+/// Preamp / input area (`Rack_Overview_Preamp` 0x180dd7a60): a preamp input gets Input Source
+/// (MIC / LINE, or a disabled Hi-Z while the jack is used), Settings (Low Cut, Phase, +48V,
+/// Pad) and Unison; S/PDIF gets "Sample Rate Convertsion" On / Off (Console's spelling).
+pub fn preamp_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(s) = find_strip(model, strip) else { return m };
+    let st = model.strip_menu_state(&s);
+    if let Some(p) = model.preamp(&s) {
+        m.header("Input Source");
+        if st.hi_z {
+            m.push(PopupItem { label: "Hi-Z".into(), id: None, toggle: false, enabled: false, ticked: true, shortcut: None, command: None });
+        } else {
+            for (i, src) in model.input_sources(&s).iter().enumerate() {
+                m.push(PopupItem::new(src.to_uppercase(), sid(strip, Control::InputSource(i as u8))).ticked(src.eq_ignore_ascii_case(&p.source)));
+            }
+        }
+        m.header("Settings");
+        let t = |name: &str| sid(strip, Control::Preamp(name.into()));
+        m.push(PopupItem::new("Low Cut", t("low_cut")).ticked(p.low_cut).toggle());
+        m.push(PopupItem::new("Phase", t("phase")).ticked(p.phase).toggle());
+        m.push(PopupItem::new("+48V", t("48v")).ticked(p.phantom).enabled(p.phantom_enabled).toggle());
+        m.push(PopupItem::new("Pad", t("pad")).ticked(p.pad).enabled(p.pad_enabled).toggle());
+        m.header("Unison");
+        match model.unison(&s) {
+            InsertState::Empty => {
+                m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(255))));
+            }
+            InsertState::Loaded { power, .. } => {
+                m.push(PopupItem::new("Open...", sid(strip, Control::Insert(255))));
+                m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(255))));
+                m.push(PopupItem::new("Power", sid(strip, Control::InsertPower(255))).ticked(power));
+                m.push(PopupItem::new("Remove", sid(strip, Control::InsertRemove(255))));
+                m.push(PopupItem::new("Copy Settings", sid(strip, Control::InsertCopy(255))));
+                m.push(PopupItem::new("Paste Settings", mid(strip, MenuCmd::InsertPaste(255))).enabled(model.menu_state().clipboard.is_some()));
+            }
+        }
+    } else if let Some(on) = st.sr_convert {
+        m.header("Sample Rate Convertsion");
+        m.push(PopupItem::new("On", mid(strip, MenuCmd::SrConvert(true))).ticked(on));
+        m.push(PopupItem::new("Off", mid(strip, MenuCmd::SrConvert(false))).ticked(!on));
+    }
+    m.finish()
+}
+
+/// Plug-in browser row (0x1812d6da0): the plug-in name, Assign (into the selected slot, or
+/// arms assign mode), separator, Manage Plug-Ins.... ("Show in Explorer" is for file-based
+/// plug-ins.)
+pub fn browser_item_menu(model: &dyn MixerModel, index: u16) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let cat = model.plugin_catalog();
+    let Some(p) = cat.get(index as usize) else { return m };
+    m.header(p.display_name().to_string());
+    m.push(PopupItem::new("Assign", ControlId { strip: "browser".into(), control: Control::BrowserItem(index) }));
+    m.finish()
+}
+
+// MARK: layout
+
+/// A laid-out menu window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuFrame {
+    pub frame: Rect,
+    /// Each entry's row rect, by entry index.
+    pub rows: Vec<Rect>,
+}
+
+/// Popup item font (`views:Popup-Menu-Item`, Mac 1.3.1: Helvetica 11 bold, dyn).
+fn item_style(ui: &Ui) -> crate::draw::TextStyle {
+    let mut s = ui.style("views", "Popup-Menu-Item");
+    if ui.skin("views", "Popup-Menu-Item").is_none() {
+        s = Ui::plain_style("Helvetica", 12.0, true, Rgba::BLACK);
+    }
+    s.color = Rgba::BLACK;
+    s
+}
+
+fn text_w(style: &crate::draw::TextStyle, text: &str) -> f32 {
+    if style.bold { helvetica_bold_width(text, style.size) } else { helvetica_width(text, style.size) }
+}
+
+/// Entry widths and heights per [`MenuLook`].
+fn measure(style: &crate::draw::TextStyle, look: MenuLook, e: &PopupEntry) -> (f32, f32) {
+    let font_h = style.size * 1.15;
+    let item_w = |t: &str| match look {
+        MenuLook::Base => text_w(style, t) + 3.0 * font_h,
+        MenuLook::Context => text_w(style, t) + 2.0 * ITEM_H,
+    };
+    match e {
+        PopupEntry::Separator => (0.0, SEPARATOR_H),
+        PopupEntry::Header(t) => {
+            let bold = crate::draw::TextStyle { bold: true, ..style.clone() };
+            let w = text_w(&bold, t) + 2.0 * ITEM_H;
+            (w + w / 4.0, HEADER_H)
+        }
+        PopupEntry::Item(i) => {
+            let extra = i.shortcut.as_deref().map(|s| text_w(style, s) + 3.0 * font_h).unwrap_or(0.0);
+            (item_w(&i.label) + extra, ITEM_H)
+        }
+        PopupEntry::Submenu { label, .. } => (item_w(label) + 12.0, ITEM_H),
+    }
+}
+
+/// Lays out `menu` at `origin` (its window's top-left), at least `min_w` wide, kept inside
+/// `bounds` (flipped left / up like JUCE when it would overflow).
+pub fn layout_menu(ui: &Ui, menu: &PopupMenu, look: MenuLook, origin: (f32, f32), min_w: f32, bounds: Rect) -> MenuFrame {
+    let style = item_style(ui);
+    let mut w: f32 = min_w - 2.0 * BORDER;
+    let mut h = 0.0;
+    let mut sizes = Vec::with_capacity(menu.entries.len());
+    for e in &menu.entries {
+        let (ew, eh) = measure(&style, look, e);
+        w = w.max(ew.ceil());
+        sizes.push(eh);
+        h += eh;
+    }
+    let fw = w + 2.0 * BORDER;
+    let fh = h + 2.0 * BORDER;
+    let mut x = origin.0;
+    let mut y = origin.1;
+    if x + fw > bounds.max_x() {
+        x = (bounds.max_x() - fw).max(bounds.x);
+    }
+    if y + fh > bounds.max_y() {
+        y = (bounds.max_y() - fh).max(bounds.y);
+    }
+    let frame = Rect::new(x, y, fw, fh);
+    let mut rows = Vec::with_capacity(sizes.len());
+    let mut ry = y + BORDER;
+    for eh in sizes {
+        rows.push(Rect::new(x + BORDER, ry, w, eh));
+        ry += eh;
+    }
+    MenuFrame { frame, rows }
+}
+
+/// Where a submenu of the row `row` (in a window `parent`) opens: to the right, flipped left
+/// when it does not fit.
+fn submenu_origin(parent: Rect, row: Rect, size_w: f32, bounds: Rect) -> (f32, f32) {
+    let x = if parent.max_x() + size_w <= bounds.max_x() { parent.max_x() - BORDER } else { parent.x - size_w + BORDER };
+    (x, row.y - BORDER)
+}
+
+// MARK: drawing
+
+impl Ui<'_> {
+    /// One menu window: background, rows, hits. `hover` / `open` are entry indices of this
+    /// level; submenu rows get `MenuCmd::OpenSub { level, index }` hits.
+    pub fn popup_menu(&mut self, menu: &PopupMenu, look: MenuLook, f: &MenuFrame, level: u8, hover: Option<u16>, open: Option<u16>) {
+        let r = f.frame;
+        self.fill(r.offset(1.0, 2.0), Rgba::BLACK.with_alpha(0.25));
+        if self.skin("backgrounds", "Popup-Menu-Background").is_some() {
+            self.background("Popup-Menu-Background", r);
+        } else {
+            self.fill(r, Rgba::rgb8(146, 153, 157));
+            self.fill(r.inset(1.0, 1.0, 1.0, 1.0), Rgba::rgb8(185, 194, 199));
+        }
+        // The window swallows clicks between rows.
+        self.hit(r, row_id(level, u16::MAX), HitKind::Tap);
+        let style = item_style(self);
+        for (i, (e, row)) in menu.entries.iter().zip(&f.rows).enumerate() {
+            let i = i as u16;
+            let lit = hover == Some(i) || open == Some(i);
+            self.hit(*row, row_id(level, i), HitKind::Tap);
+            match e {
+                PopupEntry::Separator => {
+                    self.fill(Rect::new(row.x + 1.0, row.y, row.w - 2.0, 1.0), SEP_DARK);
+                    self.fill(Rect::new(row.x + 1.0, row.y + 1.0, row.w - 2.0, 1.0), SEP_LIGHT);
+                }
+                PopupEntry::Header(t) => {
+                    let mut hs = crate::draw::TextStyle { bold: true, ..style.clone() };
+                    match look {
+                        MenuLook::Context => {
+                            self.fill(*row, HEADER_BG);
+                            hs.color = HEADER_TEXT;
+                        }
+                        MenuLook::Base => hs.color = Rgba::BLACK,
+                    }
+                    self.text(t, hs, Rect::new(row.x + 5.0, row.y + 1.0, row.w - 10.0, row.h), Align::Left);
+                }
+                PopupEntry::Item(it) => {
+                    if lit && it.enabled && it.id.is_some() {
+                        self.fill(Rect::new(row.x, row.y + 1.0, row.w, row.h - 2.0), HIGHLIGHT);
+                    }
+                    let mut ts = style.clone();
+                    if !it.enabled {
+                        ts.color = ts.color.with_alpha(DISABLED_ALPHA);
+                    }
+                    if it.ticked {
+                        let dot = Rect::new(row.x + 4.0, row.y + (row.h - 4.0) / 2.0, 4.0, 4.0);
+                        if self.assets.images.get("misc/dropdown_in_use_dot.png").is_some() {
+                            self.image("misc/dropdown_in_use_dot.png", dot, None, None, if it.enabled { 1.0 } else { DISABLED_ALPHA });
+                        } else {
+                            self.fill(dot, ts.color);
+                        }
+                    }
+                    self.text(&it.label, ts.clone(), Rect::new(row.x + TEXT_X, row.y + 2.0, row.w - TEXT_MARGIN, row.h - 2.0), Align::Left);
+                    if let Some(k) = &it.shortcut {
+                        self.text(k, ts, Rect::new(row.x, row.y, row.w - 8.0, row.h), Align::Right);
+                    }
+                    if let (true, Some(id)) = (it.enabled, &it.id) {
+                        self.hit(*row, id.clone(), if it.toggle { HitKind::Toggle } else { HitKind::Tap });
+                    }
+                }
+                PopupEntry::Submenu { label, enabled, .. } => {
+                    if lit && *enabled {
+                        self.fill(Rect::new(row.x, row.y + 1.0, row.w, row.h - 2.0), HIGHLIGHT);
+                    }
+                    let mut ts = style.clone();
+                    if !*enabled {
+                        ts.color = ts.color.with_alpha(DISABLED_ALPHA);
+                    }
+                    self.text(label, ts.clone(), Rect::new(row.x + TEXT_X, row.y + 2.0, row.w - TEXT_MARGIN, row.h - 2.0), Align::Left);
+                    let chevron = Rect::new(row.max_x() - 4.0 - 8.0, row.y + (row.h - 11.0) / 2.0, 8.0, 11.0);
+                    if self.assets.images.get("misc/dropdown_submenu_chevron.png").is_some() {
+                        self.image("misc/dropdown_submenu_chevron.png", chevron, None, None, if *enabled { 1.0 } else { DISABLED_ALPHA });
+                    } else {
+                        self.text("›", ts, chevron, Align::Center);
+                    }
+                    if *enabled {
+                        self.hit(*row, ControlId { strip: "menu".into(), control: Control::Menu(MenuCmd::OpenSub { level, index: i }) }, HitKind::Tap);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Left edge of the in-window menu bar.
+pub const BAR_X: f32 = 8.0;
+
+/// Menu-bar title rects: the in-window bar (Windows Console's title bar, `Menu-Bar-Item-Win`),
+/// laid left to right from `x` in a bar of height `h`.
+pub fn bar_titles(titles: &[&str], x: f32, h: f32) -> Vec<Rect> {
+    let mut out = Vec::with_capacity(titles.len());
+    let mut x = x;
+    for t in titles {
+        let w = (helvetica_bold_width(t, 12.0) + 16.0).ceil();
+        out.push(Rect::new(x, 1.0, w, h - 2.0));
+        x += w;
+    }
+    out
+}
+
+/// The in-window menu bar (when `ViewState::menu_bar`): titles from `x`; returns its right edge.
+pub fn draw_menu_bar(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: f32, h: f32) -> f32 {
+    let bar = menu_bar(model, view, false);
+    let titles: Vec<&str> = bar.iter().map(|b| b.title).collect();
+    let rects = bar_titles(&titles, x, h);
+    let open = match &view.menu {
+        Some(MenuState { target: MenuTarget::Bar(i), .. }) => Some(*i as usize),
+        _ => None,
+    };
+    let mut style = ui.style("views", "Menu-Bar-Item-Win");
+    if ui.skin("views", "Menu-Bar-Item-Win").is_none() {
+        style = Ui::plain_style("Helvetica", 12.0, true, Rgba::WHITE);
+    }
+    let off = ui.skin("views", "Menu-Bar-Item-Win").and_then(|s| s.color("color-text-off")).unwrap_or(Rgba::rgb8(229, 246, 254));
+    let on = ui.skin("views", "Menu-Bar-Item-Win").and_then(|s| s.color("color-text-on")).unwrap_or(Rgba::WHITE);
+    for (i, (t, r)) in titles.iter().zip(&rects).enumerate() {
+        let lit = open == Some(i);
+        if lit {
+            ui.fill(*r, BAR_HOVER);
+        }
+        let s = crate::draw::TextStyle { color: if lit { on } else { off }, ..style.clone() };
+        ui.text(t, s, *r, Align::Center);
+        ui.hit(*r, ControlId { strip: "menubar".into(), control: Control::Menu(MenuCmd::BarTitle(i as u8)) }, HitKind::Tap);
+    }
+    rects.last().map(|r| r.max_x()).unwrap_or(x)
+}
+
+/// Draws the open menu (root and submenus) on top of the frame, over a dismiss catcher.
+pub fn draw_menu(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
+    let Some(state) = &view.menu else { return };
+    let (menu, look) = build_menu(model, view, &state.target, false);
+    if menu.is_empty() {
+        return;
+    }
+    ui.popover_catcher(bounds);
+    if let MenuTarget::Bar(_) = state.target {
+        // The titles stay live above the catcher: a click on another one switches menus.
+        let titles: Vec<&str> = menu_bar(model, view, false).iter().map(|b| b.title).collect();
+        for (i, r) in bar_titles(&titles, BAR_X, crate::geometry::window::CONTENT_TOP).into_iter().enumerate() {
+            ui.hit(r, ControlId { strip: "menubar".into(), control: Control::Menu(MenuCmd::BarTitle(i as u8)) }, HitKind::Tap);
+        }
+    }
+    let (origin, min_w) = match state.anchor {
+        MenuAnchor::Point(x, y) => ((x, y), 0.0),
+        MenuAnchor::Below(r) => ((r.x, r.max_y()), r.w),
+        MenuAnchor::Bar(i) => {
+            let titles: Vec<&str> = menu_bar(model, view, false).iter().map(|b| b.title).collect();
+            let r = bar_titles(&titles, BAR_X, crate::geometry::window::CONTENT_TOP).get(i as usize).copied().unwrap_or_default();
+            ((r.x, r.max_y()), 0.0)
+        }
+    };
+    let mut frame = layout_menu(ui, &menu, look, origin, min_w, bounds);
+    let mut level_menu = &menu;
+    let mut level = 0u8;
+    loop {
+        let open = state.open.get(level as usize).copied();
+        let hover = state.hover.filter(|(l, _)| *l == level).map(|(_, i)| i);
+        ui.popup_menu(level_menu, look, &frame, level, hover, open);
+        let Some(i) = open else { break };
+        let (Some(PopupEntry::Submenu { menu: sub, .. }), Some(row)) = (level_menu.entries.get(i as usize), frame.rows.get(i as usize)) else { break };
+        let probe = layout_menu(ui, sub, look, (0.0, 0.0), 0.0, bounds);
+        let o = submenu_origin(frame.frame, *row, probe.frame.w, bounds);
+        frame = layout_menu(ui, sub, look, o, 0.0, bounds);
+        level_menu = sub;
+        level += 1;
+    }
+}
+
+// MARK: ViewState integration
+
+impl ViewState {
+    /// Opens a context menu for the control at (`x`, `y`) (right click / long press). True when
+    /// a menu opened.
+    pub fn open_context_menu(&mut self, hits: &[Hit], x: f32, y: f32) -> bool {
+        let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return false };
+        let strip = hit.id.strip.clone();
+        let target = match &hit.id.control {
+            Control::Insert(slot) => MenuTarget::Insert { strip, slot: *slot },
+            Control::Name => MenuTarget::StripLabel { strip },
+            Control::Solo => MenuTarget::Solo { strip },
+            Control::Fader => MenuTarget::Meter { strip },
+            Control::Preamp(_) | Control::InputSource(_) => MenuTarget::Preamp { strip },
+            Control::BrowserItem(i) => MenuTarget::BrowserItem(*i),
+            _ => return false,
+        };
+        self.popover = None;
+        self.menu = Some(MenuState::at(target, x, y));
+        true
+    }
+
+    /// Pointer motion while a menu is open: highlight the row under it, open submenus on hover,
+    /// switch menu-bar menus. True when something changed.
+    pub fn menu_hover(&mut self, hits: &[Hit], x: f32, y: f32) -> bool {
+        let Some(before) = self.menu.clone() else { return false };
+        let mut state = before.clone();
+        state.hover = None;
+        let bar = hits.iter().rev().find(|h| h.rect.contains(x, y) && matches!(h.id.control, Control::Menu(MenuCmd::BarTitle(_))));
+        if let (Some(h), MenuTarget::Bar(open)) = (bar, &before.target) {
+            if let Control::Menu(MenuCmd::BarTitle(i)) = h.id.control {
+                if i != *open {
+                    state = self.bar_menu_state(i);
+                }
+            }
+        } else if let Some((level, index, sub)) = row_under(hits, x, y) {
+            if index != u16::MAX {
+                state.open.truncate(level as usize);
+                if sub {
+                    state.open.push(index);
+                }
+                state.hover = Some((level, index));
+            }
+        }
+        let changed = state != before;
+        self.menu = Some(state);
+        changed
+    }
+
+    fn bar_menu_state(&self, i: u8) -> MenuState {
+        MenuState { target: MenuTarget::Bar(i), anchor: MenuAnchor::Bar(i), open: Vec::new(), hover: None }
+    }
+
+    /// Handles a press on a menu control (`Control::Menu`) that `ViewState` owns.
+    pub(crate) fn press_menu(&mut self, id: &ControlId, cmd: &MenuCmd, model: &dyn MixerModel) {
+        match cmd {
+            MenuCmd::Row { .. } => {} // a header, separator, disabled row or the window
+            MenuCmd::OpenSub { level, index } => {
+                if let Some(m) = &mut self.menu {
+                    m.open.truncate(*level as usize);
+                    m.open.push(*index);
+                    m.hover = Some((*level, *index));
+                }
+            }
+            MenuCmd::BarTitle(i) => {
+                if matches!(self.menu, Some(MenuState { target: MenuTarget::Bar(j), .. }) if j == *i) {
+                    self.menu = None;
+                } else {
+                    self.popover = None;
+                    self.menu = Some(self.bar_menu_state(*i));
+                }
+            }
+            MenuCmd::App(c) => self.run_command(*c, model),
+            MenuCmd::Rename => {
+                let name = find_strip(model, &id.strip).map(|s| model.main(&s).name).unwrap_or_default();
+                self.text_edit = Some(TextEdit { target: TextTarget::Rename(id.strip.clone()), text: name });
+                self.popover = Some(PopoverState { kind: Popover::Rename { strip: id.strip.clone() }, anchor: ControlId { strip: id.strip.clone(), control: Control::Name } });
+            }
+            MenuCmd::Assign(slot) => {
+                self.show_browser = true;
+                self.compact = false;
+                self.browser.tab = crate::surfaces::BrowserTab::Plugins;
+                self.browser.assign_to = Some(ControlId { strip: id.strip.clone(), control: Control::Insert(*slot) });
+            }
+            MenuCmd::Presets => {
+                self.show_browser = true;
+                self.compact = false;
+                self.browser.tab = crate::surfaces::BrowserTab::Presets;
+            }
+            _ => {}
+        }
+    }
+
+    /// Runs a view- or shell-scope command; model commands are left to `route`.
+    pub fn run_command(&mut self, c: Command, model: &dyn MixerModel) {
+        use Command as C;
+        match c {
+            C::ShowBrowser => self.show_browser = !self.show_browser,
+            C::ShowMixerNav => self.show_navigator = !self.show_navigator,
+            C::ShowPluginScenes => {
+                self.popover = Some(PopoverState { kind: Popover::Scenes, anchor: ControlId { strip: "nav".into(), control: Control::ShowPluginScenes } });
+            }
+            C::ShowBuses => self.monitor_page = MonitorPage::Aux,
+            C::ShowControlRoom => self.monitor_page = MonitorPage::ControlRoom,
+            C::ShowSettings => self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) },
+            C::MixerScrollLeft => self.first_strip = self.first_strip.saturating_sub(1),
+            C::MixerScrollRight => self.first_strip = (self.first_strip + 1).min(model.inputs().len().saturating_sub(1)),
+            C::MixerBankLeft | C::MixerBankRight => {
+                let bank = self.visible_strips(model).max(1);
+                self.first_strip = if c == C::MixerBankLeft { self.first_strip.saturating_sub(bank) } else { (self.first_strip + bank).min(model.inputs().len().saturating_sub(1)) };
+            }
+            C::MixerFarLeft => self.first_strip = 0,
+            C::MixerFarRight => self.first_strip = model.inputs().len().saturating_sub(1),
+            _ if c.scope() == CommandScope::Shell => self.commands.push(c),
+            _ => {}
+        }
+    }
+
+    fn visible_strips(&self, model: &dyn MixerModel) -> usize {
+        crate::window::WindowLayout::new(self, model.inputs().len(), model.auxes().len()).visible_inputs()
+    }
+
+    /// Runs a Console command by id (native menus, keyboard). Model commands go to `model`.
+    /// False for an unknown or disabled id.
+    pub fn run_command_id(&mut self, id: &str, model: &mut dyn MixerModel) -> bool {
+        let Some(c) = Command::from_id(id) else { return false };
+        if !command_enabled(c, model, self) {
+            return false;
+        }
+        self.menu = None;
+        if c.scope() == CommandScope::Model {
+            model.apply(&crate::input::Action::Tap(gid(MenuCmd::App(c))));
+        } else {
+            self.run_command(c, model);
+        }
+        true
+    }
+
+    /// Shell commands requested since the last call (quit, full screen, URLs, sessions…), oldest
+    /// first.
+    pub fn take_commands(&mut self) -> Vec<Command> {
+        std::mem::take(&mut self.commands)
+    }
+}
+
+impl ViewState {
+    /// Opens a menu from a text spec (CLI `--menu`, tests): `bar:N`, `insert:STRIP:SLOT`,
+    /// `label:STRIP`, `solo:STRIP`, `meter:STRIP`, `preamp:STRIP` or `browser:N`, optionally
+    /// followed by `>I>J…` to open submenu entries. Context menus open at the control's centre
+    /// in `hits` (a frame built without the menu).
+    pub fn open_menu_spec(&mut self, hits: &[Hit], spec: &str) -> Result<(), String> {
+        let mut parts = spec.split('>');
+        let head = parts.next().unwrap_or_default();
+        let fields: Vec<&str> = head.split(':').collect();
+        let find = |strip: &str, f: &dyn Fn(&Control) -> bool| {
+            hits.iter().rev().find(|h| &*h.id.strip == strip && f(&h.id.control)).map(|h| h.rect.center()).ok_or_else(|| format!("--menu {spec}: no such control on screen"))
+        };
+        match fields.as_slice() {
+            ["bar", n] => {
+                let i: u8 = n.parse().map_err(|_| format!("--menu {spec}: bad menu index"))?;
+                self.menu = Some(self.bar_menu_state(i));
+            }
+            ["browser", n] => {
+                let i: u16 = n.parse().map_err(|_| format!("--menu {spec}: bad row"))?;
+                let (x, y) = hits.iter().rev().find(|h| h.id.control == Control::BrowserItem(i)).map(|h| h.rect.center()).ok_or_else(|| format!("--menu {spec}: row not shown"))?;
+                self.menu = Some(MenuState::at(MenuTarget::BrowserItem(i), x, y));
+            }
+            [kind, strip, rest @ ..] => {
+                let strip_id: Arc<str> = (*strip).into();
+                let (target, (x, y)) = match (*kind, rest) {
+                    ("insert", [slot]) => {
+                        let slot: u8 = if slot.eq_ignore_ascii_case("unison") { 255 } else { slot.parse().map_err(|_| format!("--menu {spec}: bad slot"))? };
+                        (MenuTarget::Insert { strip: strip_id, slot }, find(strip, &|c| *c == Control::Insert(slot))?)
+                    }
+                    ("label", []) => (MenuTarget::StripLabel { strip: strip_id }, find(strip, &|c| *c == Control::Name)?),
+                    ("solo", []) => (MenuTarget::Solo { strip: strip_id }, find(strip, &|c| *c == Control::Solo)?),
+                    ("meter", []) => (MenuTarget::Meter { strip: strip_id }, find(strip, &|c| *c == Control::Fader)?),
+                    ("preamp", []) => (MenuTarget::Preamp { strip: strip_id }, find(strip, &|c| matches!(c, Control::Preamp(_)))?),
+                    _ => return Err(format!("--menu {spec}: unknown menu")),
+                };
+                self.menu = Some(MenuState::at(target, x, y));
+            }
+            _ => return Err(format!("--menu {spec}: unknown menu")),
+        }
+        if let Some(m) = &mut self.menu {
+            for p in parts {
+                m.open.push(p.parse().map_err(|_| format!("--menu {spec}: bad submenu index {p}"))?);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn row_id(level: u8, index: u16) -> ControlId {
+    ControlId { strip: "menu".into(), control: Control::Menu(MenuCmd::Row { level, index }) }
+}
+
+/// The menu row under (`x`, `y`): the topmost row marker or submenu opener. `(level, index,
+/// submenu)`.
+fn row_under(hits: &[Hit], x: f32, y: f32) -> Option<(u8, u16, bool)> {
+    hits.iter().rev().filter(|h| h.rect.contains(x, y)).find_map(|h| match h.id.control {
+        Control::Menu(MenuCmd::Row { level, index }) => Some((level, index, false)),
+        Control::Menu(MenuCmd::OpenSub { level, index }) => Some((level, index, true)),
+        _ => None,
+    })
+}

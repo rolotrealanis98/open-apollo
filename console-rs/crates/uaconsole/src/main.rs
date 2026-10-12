@@ -87,6 +87,8 @@ fn main() -> ExitCode {
                 args.size,
                 scale,
                 args.open_plugin.as_ref(),
+                args.menu.as_deref(),
+                args.menu_bar,
                 out,
             ),
             (None, Some(n)) => {

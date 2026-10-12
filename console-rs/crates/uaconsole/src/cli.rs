@@ -12,16 +12,20 @@ uaconsole — a native UAD Console for open-apollo
 usage:
   uaconsole [--compact] [--fit|--1to1] [--engine host[:port]] [--mock snapshot.json]
             [--preview] [--writes] [--live-meters] [--stats] [--open-plugin STRIP:SLOT]
-  uaconsole --render out.png [--compact] [--scale N] [--size WxH]
+  uaconsole --render out.png [--compact] [--scale N] [--size WxH] [--menu SPEC] [--menu-bar]
                                                          headless render (preview data);
                                                          --size is the window in points
   uaconsole --bench N [--compact] [--scale N]            render N frames headless, print timings
 
   --stats starts with the F1 overlay; --open-plugin in0:0 (or in0:unison) opens that insert's
-  panel at start (window and --render).
+  panel at start (window and --render). --menu opens a Console menu in --render: bar:N,
+  insert:STRIP:SLOT, label:STRIP, solo:STRIP, meter:STRIP, preamp:STRIP, browser:N, then >I
+  to open submenu entry I; --menu-bar draws Windows Console's in-window menu bar.
 
 window keys: Ctrl+Q quit · F11 fullscreen · Ctrl+0/=/- zoom · Ctrl+1 fit/1:1 · Tab compact ·
              F1 stats overlay · Esc close panel · wheel pans (or steps a knob/fader under it)
+             right click / long press: Console's context menus; Console's own shortcuts
+             (Ctrl+Z, Ctrl+, settings, Ctrl+A auxes, Ctrl+R control room, ←/→ scroll, …)
 
 Without --engine/--mock the window connects to the local engine (127.0.0.1:4710); --preview
 forces preview data. Engine writes (set/post) stay off unless --writes is given.";
@@ -100,6 +104,10 @@ pub struct Args {
     pub stats: bool,
     /// (strip id, slot) to open at start.
     pub open_plugin: Option<(String, u8)>,
+    /// `--menu SPEC` (`ViewState::open_menu_spec`) for `--render`.
+    pub menu: Option<String>,
+    /// `--menu-bar`: the in-window menu bar in `--render`.
+    pub menu_bar: bool,
     pub help: bool,
 }
 
@@ -136,6 +144,8 @@ impl Args {
                 "--live-meters" => out.live_meters = true,
                 "--stats" => out.stats = true,
                 "--open-plugin" => out.open_plugin = Some(parse_slot(&value("--open-plugin")?)?),
+                "--menu" => out.menu = Some(value("--menu")?),
+                "--menu-bar" => out.menu_bar = true,
                 "-h" | "--help" => out.help = true,
                 other => return Err(format!("unknown argument {other:?}")),
             }

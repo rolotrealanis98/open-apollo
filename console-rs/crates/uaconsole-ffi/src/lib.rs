@@ -51,6 +51,8 @@ pub const UAC_POINTER_UP: i32 = 2;
 pub const UAC_POINTER_CANCEL: i32 = 3;
 /// Secondary click / long press at a point: the insert context menu, browser assign mode.
 pub const UAC_POINTER_SECONDARY: i32 = 4;
+/// Pointer motion with no button down (mouse hover): highlights rows of an open menu.
+pub const UAC_POINTER_HOVER: i32 = 5;
 
 /// Double tap / double click: resets a dragged control to its default.
 pub const UAC_POINTER_DOUBLE: u32 = 1 << 0;
@@ -432,6 +434,9 @@ pub struct UacContext {
     /// Keeps the strings of the request last handed to C alive.
     taken_request: Option<PluginRequest>,
     status: CString,
+    /// Keeps `uac_menu_bar_json` / `uac_take_command` strings alive.
+    menu_json: CString,
+    taken_command: CString,
     dirty: bool,
     stats: UacStats,
     adapter_name: CString,
@@ -470,6 +475,8 @@ impl UacContext {
             plugin_requests: VecDeque::new(),
             taken_request: None,
             status: CString::default(),
+            menu_json: CString::default(),
+            taken_command: CString::default(),
             dirty: true,
             stats: UacStats::default(),
             adapter_name,
@@ -721,8 +728,18 @@ impl UacContext {
                     self.dirty |= self.view.origin != before;
                     return 0;
                 }
-                None => self.interaction.pointer_move(cx, cy, flags & UAC_POINTER_FINE != 0),
+                None => {
+                    if !self.interaction.is_dragging() && self.mixer.menu.is_some() {
+                        self.dirty |= self.mixer.menu_hover(&self.hits, cx, cy);
+                    }
+                    self.interaction.pointer_move(cx, cy, flags & UAC_POINTER_FINE != 0)
+                }
             },
+            UAC_POINTER_HOVER => {
+                let changed = self.mixer.menu.is_some() && self.mixer.menu_hover(&self.hits, cx, cy);
+                self.dirty |= changed;
+                return i32::from(changed);
+            }
             UAC_POINTER_UP => {
                 self.pan = None;
                 let mut actions = self.interaction.pointer_up();
@@ -781,7 +798,7 @@ impl UacContext {
     fn key(&mut self, key: i32) -> i32 {
         let consumed = match key {
             UAC_KEY_ESCAPE => {
-                let open = self.mixer.popover.is_some() || self.mixer.sheet.is_some() || self.mixer.modifier.is_some() || self.mixer.editing();
+                let open = self.mixer.menu.is_some() || self.mixer.popover.is_some() || self.mixer.sheet.is_some() || self.mixer.modifier.is_some() || self.mixer.editing();
                 if open {
                     self.mixer.key_escape();
                 }
@@ -1204,6 +1221,80 @@ pub unsafe extern "C" fn uac_take_plugin_request(ctx: *mut UacContext, out: *mut
     })
 }
 
+/// Console's menu bar as JSON for native menus (`rack::menu::menu_bar_json`): File, Edit,
+/// Navigation, View, Window, Help with live enable / tick states, plus the macOS application
+/// menu's extra items under "app" when `mac`. Valid until the next call or `uac_destroy`;
+/// rebuild native menus when they open (`menuNeedsUpdate`). NULL on error.
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_menu_bar_json(ctx: *mut UacContext, mac: bool) -> *const c_char {
+    guard(std::ptr::null(), || {
+        let Some(c) = (unsafe { ctx_mut(ctx) }) else { return std::ptr::null() };
+        c.menu_json = cstring(rack::menu::menu_bar_json(c.model.as_ref(), &c.mixer, mac));
+        c.menu_json.as_ptr()
+    })
+}
+
+/// Runs a Console menu command by id (a menu-bar item's "command", e.g. `show_browser`,
+/// `undo`). Returns 1 when it ran, 0 when it is unknown or disabled now. Shell-level commands
+/// (`quit`, `toggle_full_screen`, `open_session`, …) come back through `uac_take_command`.
+///
+/// # Safety
+/// `ctx` is null or a live context; `id` is null or a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_run_command(ctx: *mut UacContext, id: *const c_char) -> i32 {
+    let id = unsafe { str_arg(id) };
+    unsafe {
+        with_ctx(ctx, |c| {
+            let Some(id) = id else {
+                set_error("null or empty command id");
+                return UAC_ERR_ARG;
+            };
+            let ran = c.mixer.run_command_id(&id, c.model.as_mut());
+            c.dirty |= ran;
+            i32::from(ran)
+        })
+    }
+}
+
+/// Takes the oldest command the in-renderer menus or `uac_run_command` left for the host
+/// (`quit`, `toggle_full_screen`, `open_documentation_url_app`, the session commands
+/// `select_new_session_panel` / `open_session` / `save_bookmark` / `save_as`, …). NULL when
+/// there is none; the string stays valid until the next call or `uac_destroy`.
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_take_command(ctx: *mut UacContext) -> *const c_char {
+    guard(std::ptr::null(), || {
+        let Some(c) = (unsafe { ctx_mut(ctx) }) else { return std::ptr::null() };
+        if c.mixer.commands.is_empty() {
+            return std::ptr::null();
+        }
+        let cmd = c.mixer.commands.remove(0);
+        c.taken_command = cstring(cmd.id());
+        c.taken_command.as_ptr()
+    })
+}
+
+/// Draws Windows Console's menu bar in the renderer's title bar (hosts without a native menu
+/// bar: iPad without a keyboard menu, Linux). Off by default.
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_set_menu_bar(ctx: *mut UacContext, on: bool) {
+    unsafe {
+        with_ctx(ctx, |c| {
+            c.mixer.menu_bar = on;
+            c.dirty = true;
+            UAC_OK
+        });
+    }
+}
+
 /// Fills `out` with the latest stats.
 ///
 /// # Safety
@@ -1485,9 +1576,9 @@ mod tests {
             assert_eq!(uac_pointer(ctx, UAC_POINTER_CANCEL, x, y, 0), 1);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_SECONDARY, x, y, 0), 1);
             assert!(!uac_take_plugin_request(ctx, &mut req));
-            assert!(c.mixer.popover.is_some());
+            assert!(c.mixer.menu.is_some(), "Console's insert context menu");
             assert_eq!(uac_key(ctx, UAC_KEY_ESCAPE), 1);
-            assert!(c.mixer.popover.is_none());
+            assert!(c.mixer.menu.is_none());
             uac_destroy(ctx);
         }
     }
