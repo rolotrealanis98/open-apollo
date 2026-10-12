@@ -249,3 +249,122 @@ fn status_bar_loads_and_scene() {
     assert!(!t.iter().any(|s| s == "SCENE" || s == "(NONE)"));
     assert!(find(&hits, "status", &Control::StatusScene).is_none());
 }
+
+fn press(view: &mut ViewState, model: &mut PreviewMixer, hits: &[Hit], strip: &str, control: Control) {
+    let h = find(hits, strip, &control).unwrap_or_else(|| panic!("no hit for {strip} {control:?}")).clone();
+    tap(hits, &h, view, model);
+}
+
+#[test]
+fn settings_tabs_combos_and_text_fields() {
+    use rack::settings::{PropertySource, SettingsTab};
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    assert!(view.open_named("settings"));
+    let (hits, _) = build(&assets, &model, &view);
+    for t in [SettingsTab::Hardware, SettingsTab::IoMatrix, SettingsTab::PlugIns, SettingsTab::Options, SettingsTab::Midi] {
+        assert!(find(&hits, "settings", &Control::SettingsTab(t)).is_some(), "tab {t:?}");
+    }
+    // SAMPLE RATE: open the dropdown, pick 96 kHz; the dropdown closes and the model follows.
+    press(&mut view, &mut model, &hits, "settings", Control::SettingMenu("/SampleRate".into()));
+    assert_eq!(view.settings.menu.as_deref(), Some("/SampleRate"));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SettingChoose("/SampleRate".into(), 3));
+    assert!(view.settings.menu.is_none());
+    assert_eq!(model.props.prop("/SampleRate").and_then(|v| v.as_i64()), Some(96000));
+    assert_eq!(model.status.sample_rate, Some(96000));
+    // A tap outside an open dropdown closes it and keeps the window.
+    press(&mut view, &mut model, &hits, "settings", Control::SettingMenu("/ClockSource".into()));
+    let (hits, _) = build(&assets, &model, &view);
+    let top = hits.iter().rev().find(|h| h.rect.contains(2.0, 1040.0)).unwrap().clone();
+    assert_eq!(top.id.control, Control::PopoverDismiss);
+    tap(&hits, &top, &mut view, &mut model);
+    assert!(view.settings.menu.is_none());
+    assert_eq!(view.sheet, Some(rack::surfaces::Sheet::Settings));
+    // DEVICE NAME: focus, type, Enter.
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SettingEdit("/devices/0/DeviceName".into()));
+    assert_eq!(view.text_edit.as_ref().map(|t| t.text.as_str()), Some("Apollo x4"));
+    for _ in 0..2 {
+        view.key_backspace();
+    }
+    view.key_text("8p");
+    view.key_enter(&mut model);
+    assert_eq!(model.props.prop("/devices/0/DeviceName").and_then(|v| v.as_str().map(str::to_owned)).as_deref(), Some("Apollo 8p"));
+    // OPTIONS page: METERING → POST-FADER.
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SettingsTab(SettingsTab::Options));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SettingMenu("map:metering:/PostFaderMetering".into()));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SettingChoose("map:metering:/PostFaderMetering".into(), 1));
+    assert_eq!(model.props.prop("/PostFaderMetering").and_then(|v| v.as_bool()), Some(true));
+    // Escape closes the window.
+    view.key_escape();
+    assert!(view.sheet.is_none());
+}
+
+#[test]
+fn monitor_buttons_open_their_panels() {
+    use rack::settings::{Panel, PropertySource};
+    use rack::surfaces::Sheet;
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    let (hits, _) = build(&assets, &model, &view);
+    // CUE OUTPUTS opens the anchored panel; MIX on CUE 2 sets its MixInSource to the cue mix.
+    press(&mut view, &mut model, &hits, "monitor", Control::CueOutputs);
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SettingChoose("map:cue_source:/devices/0/outputs/15/MixInSource".into(), 0));
+    assert_eq!(model.props.prop("/devices/0/outputs/15/MixInSource").and_then(|v| v.as_str().map(str::to_owned)).as_deref(), Some("cue"));
+    // A tap outside closes it.
+    let (hits, _) = build(&assets, &model, &view);
+    let outside = hits.iter().rev().find(|h| h.rect.contains(2.0, 1040.0)).unwrap().clone();
+    tap(&hits, &outside, &mut view, &mut model);
+    assert!(view.sheet.is_none());
+    // MONITOR CONTROLLER and its tabs; BASS MANAGEMENT ENABLE toggles the device property.
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::ShowPanel(Panel::MonitorController));
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::MonitorController)));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SettingPress("toggle:/devices/0/BassMgrEnable".into()));
+    assert_eq!(model.props.prop("/devices/0/BassMgrEnable").and_then(|v| v.as_bool()), Some(true));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::PanelTab(1));
+    assert_eq!(view.settings.panel_tab, 1);
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::PanelClose);
+    assert!(view.sheet.is_none());
+    // HEADPHONES (MONITOR CORRECTION) opens HEADPHONE CORRECTION.
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::ShowPanel(Panel::HeadphoneCorrection));
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::HeadphoneCorrection)));
+}
+
+#[test]
+fn plugin_scenes_panel_primes_and_recalls() {
+    use rack::settings::Panel;
+    use rack::surfaces::Sheet;
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "nav", Control::ShowPluginScenes);
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::PluginScenes)));
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "global", &Control::RecallScene(0)).is_none(), "RECALL needs a primed scene");
+    press(&mut view, &mut model, &hits, "settings", Control::SceneSelect(1));
+    assert_eq!(view.settings.scene, Some(1));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "settings", Control::SceneStep(false));
+    assert_eq!(view.settings.scene, Some(2));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "global", Control::RecallScene(2));
+    assert_eq!(model.status.scene.as_deref(), Some(model.scenes[2].as_str()));
+    // The navigator button closes it again.
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "nav", Control::ShowPluginScenes);
+    assert!(view.sheet.is_none());
+}
