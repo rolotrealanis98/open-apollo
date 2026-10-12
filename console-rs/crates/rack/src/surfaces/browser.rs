@@ -98,7 +98,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
     let b = &view.browser;
     // An insert's "Assign..." (capture s08): a lighter browser titled with the slot, and a
     // CHOOSE PLUG-IN panel instead of the hint.
-    let assign = b.assign_to.as_ref().map(|id| assign_title(model, id));
+    let assign = b.assign_to.as_ref().map(|id| assign_title(model, id)).or_else(|| b.preset_target.as_ref().map(|(strip, scope)| preset_title(model, strip, *scope)));
     let bg = if assign.is_some() { ASSIGN_BG } else { BG };
     ui.fill(r, bg);
     if assign.is_none() {
@@ -152,7 +152,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         ui.hit(sr, bid(Control::BrowserSearch), HitKind::Tap);
 
         let mut y = sr.max_y() + MARGIN;
-        if assign.is_some() {
+        if b.assign_to.is_some() {
             // s08: a 2-pt white rule, then a (90,96,99) panel 120 pt high with CHOOSE PLUG-IN
             // 8 pt down and a dashed drop box.
             let panel = Rect::new(MARGIN, y + 2.0, inner, 120.0);
@@ -246,6 +246,21 @@ fn assign_title(model: &dyn MixerModel, id: &ControlId) -> String {
         _ => String::new(),
     };
     format!("{}: {slot}", name.unwrap_or_default().to_uppercase())
+}
+
+/// The browser's title while the PRESETS tab is targeted: "<channel>: CHANNEL PRESET" or the
+/// insert's "<channel>: INSERT n" (Rack's `channel_preset_assign_browser`; not captured).
+fn preset_title(model: &dyn MixerModel, strip: &std::sync::Arc<str>, scope: crate::presets::PresetScope) -> String {
+    match scope {
+        crate::presets::PresetScope::Channel => {
+            let name = model.inputs().into_iter().chain(model.auxes()).find(|s| s.id == *strip).map(|s| {
+                let n = model.main(&s).name;
+                if n.is_empty() { s.title.clone() } else { n }
+            });
+            format!("{}: CHANNEL PRESET", name.unwrap_or_default().to_uppercase())
+        }
+        crate::presets::PresetScope::Insert(k) => assign_title(model, &ControlId { strip: strip.clone(), control: Control::Insert(k) }),
+    }
 }
 
 /// A 1-pt dashed outline (2 pt dashes, 2 pt gaps).
@@ -473,13 +488,18 @@ fn entry_row(ui: &mut Ui, p: &PluginEntry, i: usize, view: &ViewState, row: Rect
 
 /// PRESETS tab (`Rack_PresetListBox`, user captures s09/s45): the list well under the search
 /// field, the dismissable "DOUBLE-CLICK OR DRAG / TO ASSIGN CHANNEL PRESET" hint, then the
-/// channel preset tree in 32-pt rows: folders with their reveal chevron and grey name, files
-/// indented under an open folder on a 1-pt tree line, white.
+/// preset tree in 32-pt rows: folders with their reveal chevron and grey name, files indented
+/// under an open folder on a 1-pt tree line, white. Top-level files sit at the folder indent.
+/// A row tap selects (and, with a "Channel Presets..." / "Presets..." target, loads there); the
+/// target adds Console's operations row (`Rack_DeleteRenameSave`: NEW FOLDER, DELETE, RENAME,
+/// SAVE AS...). The operations row's look is not captured yet; it follows the I/O PRESETS
+/// panel (s38).
 fn presets_tab(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
+    use crate::presets::{PresetCmd, PresetRow};
     let b = &view.browser;
     rounded(ui, r, WELL, WELL_EDGE, BG, &UA_CORNER, [true; 4]);
     let mut y = r.y + MARGIN;
-    if b.hint {
+    if b.hint && b.preset_target.is_none() {
         let hr = Rect::new(r.x + MARGIN, y, r.w - 2.0 * MARGIN, HINT_H);
         ui.image_stretched("uapw/tag_bg_on.png", hr, 1.0);
         let hs = bold(11.0, Rgba::rgb8(227, 227, 228));
@@ -493,17 +513,25 @@ fn presets_tab(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
         ui.hit(close, bid(Control::BrowserHintClose), HitKind::Tap);
         y = hr.max_y() + MARGIN;
     }
-    let list = Rect::new(r.x, y, r.w, r.max_y() - MARGIN - y);
-    // Lines: (depth, folder index or None, node).
-    let presets = model.channel_presets();
-    let mut lines: Vec<(bool, Option<usize>, &crate::model::PresetNode, bool)> = Vec::new();
-    for (k, f) in presets.iter().enumerate() {
-        let open = f.children.is_some() && b.presets_open.iter().any(|n| *n == f.name);
-        lines.push((false, Some(k), f, open));
+    // The operations row, at the bottom of the well while a target is set.
+    const OPS_H: f32 = 26.0;
+    let ops = b.preset_target.as_ref().map(|_| Rect::new(r.x + MARGIN, r.max_y() - MARGIN - OPS_H, r.w - 2.0 * MARGIN, OPS_H));
+    let bottom = ops.map(|o| o.y - MARGIN).unwrap_or(r.max_y() - MARGIN);
+    let list = Rect::new(r.x, y, r.w, bottom - y);
+    let tree = view.preset_tree(model);
+    let current = b.preset_target.as_ref().and_then(|(strip, scope)| {
+        let s = model.inputs().into_iter().chain(model.auxes()).find(|s| s.id == *strip)?;
+        model.preset_name(&s, *scope)
+    });
+    // Lines: (row, node, last child of its folder).
+    let mut lines: Vec<(PresetRow, &crate::model::PresetNode, bool)> = Vec::new();
+    for (k, f) in tree.iter().enumerate() {
+        lines.push((PresetRow { top: k as u16, child: None }, f, false));
+        let open = f.children.is_some() && (b.presets_open.iter().any(|n| *n == f.name) || !b.search.trim().is_empty());
         if open {
             let kids = f.children.as_deref().unwrap_or_default();
             for (j, c) in kids.iter().enumerate() {
-                lines.push((true, None, c, j + 1 == kids.len()));
+                lines.push((PresetRow { top: k as u16, child: Some(j as u16) }, c, j + 1 == kids.len()));
             }
         }
     }
@@ -513,23 +541,33 @@ fn presets_tab(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     let content_w = list.w - SCROLLBAR_W;
     let line_c = Rgba::rgb8(88, 90, 92);
     ui.clip(Some(list));
-    for (i, &(child, folder, node, flag)) in lines.iter().enumerate() {
+    for (i, &(row_id, node, last)) in lines.iter().enumerate() {
         let row = Rect::new(list.x, list.y - off + i as f32 * GROUP_H, content_w, GROUP_H);
         if row.max_y() <= list.y || row.y >= list.max_y() {
             continue;
         }
-        if child {
+        let (top, child) = row_id.encode();
+        if node.children.is_some() {
+            reveal(ui, b.presets_open.iter().any(|n| *n == node.name), Rect::new(row.x + 4.0, row.y + 6.0, 20.0, 20.0));
+            ui.text(&node.name, bold(11.0, Rgba::rgb8(132, 132, 133)), Rect::new(row.x + 33.0, row.y + 1.25, row.w - 38.0, 30.0), Align::Left);
+            ui.hit(row, bid(Control::BrowserPresetFolder(top)), HitKind::Toggle);
+            continue;
+        }
+        if b.preset_selected == Some((top, child)) {
+            ui.fill(row.inset(2.0, 1.0, 2.0, 1.0), CELL_ON);
+        }
+        let value = row_id.value(&tree);
+        let is_current = value.is_some() && value == current.as_ref().map(|c| c.trim_start_matches('/').to_string());
+        let color = if is_current { AMBER } else { Rgba::rgb8(235, 236, 236) };
+        if row_id.child.is_some() {
             // Tree line: down the folder's chevron column, a tick to the name (s09).
             let cx = row.x + 14.0;
-            let end = if flag { row.y + GROUP_H / 2.0 } else { row.max_y() };
+            let end = if last { row.y + GROUP_H / 2.0 } else { row.max_y() };
             ui.fill(Rect::new(cx, row.y, 1.0, end - row.y), line_c);
             ui.fill(Rect::new(cx, row.y + GROUP_H / 2.0, 13.0, 1.0), line_c);
-            ui.text(&node.name, bold(11.0, Rgba::rgb8(235, 236, 236)), Rect::new(row.x + 33.0, row.y + 1.25, row.w - 38.0, 30.0), Align::Left);
-        } else if let Some(k) = folder {
-            reveal(ui, flag, Rect::new(row.x + 4.0, row.y + 6.0, 20.0, 20.0));
-            ui.text(&node.name, bold(11.0, Rgba::rgb8(132, 132, 133)), Rect::new(row.x + 33.0, row.y + 1.25, row.w - 38.0, 30.0), Align::Left);
-            ui.hit(row, bid(Control::BrowserPresetFolder(k as u16)), HitKind::Toggle);
         }
+        ui.text(&node.name, bold(11.0, color), Rect::new(row.x + 33.0, row.y + 1.25, row.w - 38.0, 30.0), Align::Left);
+        ui.hit(row, bid(Control::BrowserPresetFile(top, child)), HitKind::Tap);
     }
     ui.clip(None);
     ui.scroll_region(list, ScrollTarget::Browser, max);
@@ -540,6 +578,36 @@ fn presets_tab(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
         if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|s| s.image("image")) {
             let img = img.to_string();
             ui.image_stretched(&img, Rect::new(track.x, ty, track.w, thumb_h), 1.0);
+        }
+    }
+    if let (Some(o), Some((strip, scope))) = (ops, b.preset_target.as_ref()) {
+        let sel = b.preset_selected.map(|(t, c)| PresetRow::decode(t, c));
+        let sel_node = sel.and_then(|r| r.node(&tree));
+        let user = sel_node.filter(|n| !n.locked && n.children.is_none()).and(sel).and_then(|r| r.value(&tree));
+        let cmd = |c: PresetCmd| Some(ControlId { strip: strip.clone(), control: Control::PresetCmd(*scope, c) });
+        let buttons: [(&str, Option<ControlId>); 4] = [
+            ("NEW FOLDER", cmd(PresetCmd::NewFolder)),
+            ("DELETE", user.as_ref().and_then(|v| cmd(PresetCmd::Delete(v.as_str().into())))),
+            ("RENAME", user.as_ref().and_then(|v| cmd(PresetCmd::Rename(v.as_str().into())))),
+            ("SAVE AS...", cmd(PresetCmd::SaveAs)),
+        ];
+        let bw = (o.w / 4.0).floor();
+        for (k, (label, id)) in buttons.into_iter().enumerate() {
+            let br = Rect::new(o.x + k as f32 * bw, o.y, bw - 1.0, o.h);
+            ui.fill(br, Rgba::rgb8(88, 93, 96));
+            ui.fill(Rect::new(br.x, br.max_y() - 1.0, br.w, 1.0), Rgba::BLACK.with_alpha(0.35));
+            let alpha = if id.is_some() { 0.95 } else { 0.4 };
+            ui.text(label, bold(10.0, Rgba::WHITE.with_alpha(alpha)), br, Align::Center);
+            if let Some(id) = id {
+                ui.hit(br, id, HitKind::Tap);
+            }
+        }
+        // SAVE AS / RENAME / NEW FOLDER: the name field over the operations row.
+        if let Some(e) = view.text_edit.as_ref().filter(|e| matches!(e.target, TextTarget::Preset(..))) {
+            let fr = Rect::new(o.x, o.y - 30.0, o.w, 28.0);
+            ui.fill(fr, Rgba::rgb8(20, 21, 22));
+            ui.fill(Rect::new(fr.x, fr.max_y() - 1.0, fr.w, 1.0), AMBER);
+            ui.text(&format!("{}|", e.text), bold(11.0, Rgba::WHITE), Rect::new(fr.x + 8.0, fr.y, fr.w - 16.0, fr.h), Align::Left);
         }
     }
 }

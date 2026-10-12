@@ -135,15 +135,35 @@ pub struct PresetNode {
     pub name: String,
     /// Some for a folder (its entries, sorted by name as Console lists them).
     pub children: Option<Vec<PresetNode>>,
+    /// A factory entry (`locked` in the engine's values): cannot be renamed or deleted.
+    pub locked: bool,
 }
 
 impl PresetNode {
     pub fn file(name: &str) -> Self {
-        Self { name: name.into(), children: None }
+        Self { name: name.into(), children: None, locked: false }
     }
     pub fn folder(name: &str, children: Vec<PresetNode>) -> Self {
-        Self { name: name.into(), children: Some(children) }
+        Self { name: name.into(), children: Some(children), locked: false }
     }
+    pub fn locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
+        self
+    }
+}
+
+/// The plug-in window footer (`Rack_PlugInFooter`) for an unlicensed plug-in: the state plate
+/// and its action button (Rack.dll strings: "DEMO NOT STARTED", "DEMO ACTIVE - ", "DEMO
+/// EXPIRED", "START DEMO"; `DoStateClicked` → StartDemo).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PluginFooter {
+    pub status: String,
+    /// Plate background: 2 = error (red), 3 = blue, else neutral.
+    pub state: u8,
+    /// "START DEMO" / "BUY".
+    pub action: Option<String>,
+    /// The catalogue entry (`/plugins/N`), for `post /PluginStartDemo {"pluginPath"}`.
+    pub plugin_path: Option<String>,
 }
 
 /// The skins a strip draws with, by kind and console model (the default rendering is the
@@ -472,6 +492,22 @@ pub trait MixerModel {
     /// Channel presets (the PRESETS tab): a strip's `Preset` values tree.
     fn channel_presets(&self) -> Vec<PresetNode> {
         Vec::new()
+    }
+    /// A loaded insert's plug-in presets (its `Preset` values: `.fxp` files and folders).
+    fn plugin_presets(&self, _s: &StripInfo, _slot: u8) -> Vec<PresetNode> {
+        Vec::new()
+    }
+    /// The preset a strip (Channel) or insert shows (`Preset`, `[folder/]name`), if any.
+    fn preset_name(&self, _s: &StripInfo, _scope: crate::presets::PresetScope) -> Option<String> {
+        None
+    }
+    /// Whether the plug-in bar's PASTE is enabled (`CanPastePluginBarSettings`).
+    fn can_paste_plugin_settings(&self, _s: &StripInfo, _slot: u8) -> bool {
+        false
+    }
+    /// The plug-in window footer for `effect_name` (None: licensed, no footer).
+    fn plugin_footer(&self, _effect_name: &str) -> Option<PluginFooter> {
+        None
     }
     /// The talkback mic strip (`IOType` `TalkbackMic`), shown with SHOW CTRL ROOM. Its sends
     /// (AUX 1, AUX 2, CUE 1…) come from `input_sends`.

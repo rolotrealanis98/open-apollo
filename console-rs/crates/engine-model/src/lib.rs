@@ -28,6 +28,7 @@
 mod settings;
 mod sessions;
 mod menus;
+mod presets;
 mod slots;
 mod surfaces;
 
@@ -358,20 +359,23 @@ impl MixerModel for EngineMixer {
         // shown input's, else the first aux's.
         let t = self.store.topology();
         let path = t.inputs.first().map(|s| format!("{}/Preset", s.base)).or_else(|| t.auxes.first().map(|a| format!("{}/Preset", a.base)));
-        let Some(values) = path.and_then(|p| self.store.tree().meta(&p).and_then(|m| m.values.clone())) else { return Vec::new() };
-        fn convert(e: &ua_engine::SessionEntry) -> rack::PresetNode {
-            match e {
-                ua_engine::SessionEntry::File { name, .. } => rack::PresetNode::file(name),
-                ua_engine::SessionEntry::Folder { name, children, .. } => {
-                    let mut c: Vec<_> = children.iter().map(convert).collect();
-                    c.sort_by_key(|n| n.name.to_lowercase());
-                    rack::PresetNode::folder(name, c)
-                }
-            }
-        }
-        let mut out: Vec<_> = ua_engine::session::parse_entries(&values).iter().map(convert).collect();
-        out.sort_by_key(|n| n.name.to_lowercase());
-        out
+        path.map(|p| self.preset_tree_at(&p)).unwrap_or_default()
+    }
+
+    fn plugin_presets(&self, s: &StripInfo, slot: u8) -> Vec<rack::PresetNode> {
+        self.surface_plugin_presets(s, slot)
+    }
+
+    fn preset_name(&self, s: &StripInfo, scope: rack::presets::PresetScope) -> Option<String> {
+        self.surface_preset_name(s, scope)
+    }
+
+    fn can_paste_plugin_settings(&self, s: &StripInfo, slot: u8) -> bool {
+        self.surface_can_paste_plugin_settings(s, slot)
+    }
+
+    fn plugin_footer(&self, effect_name: &str) -> Option<rack::model::PluginFooter> {
+        self.surface_plugin_footer(effect_name)
     }
 
     fn talkback(&self) -> Option<StripInfo> {
@@ -634,6 +638,9 @@ impl MixerModel for EngineMixer {
         if self.session_set_text(id, text) {
             return;
         }
+        if self.preset_set_text(id, text) {
+            return;
+        }
         self.surface_set_text(id, text);
     }
 
@@ -677,6 +684,9 @@ impl MixerModel for EngineMixer {
             }
         }
         if self.apply_session(action) {
+            return;
+        }
+        if self.apply_presets(action) {
             return;
         }
         if self.apply_surface(action) {

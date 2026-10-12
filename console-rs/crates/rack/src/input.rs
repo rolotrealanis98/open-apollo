@@ -88,6 +88,13 @@ pub enum Control {
     BrowserAssignClose,
     /// [view] PRESETS tab: open / close the k-th top-level preset folder.
     BrowserPresetFolder(u16),
+    /// [view] PRESETS tab file row `(top, child)` (`u16::MAX` child = a top-level file): selects;
+    /// with a target (Channel Presets...) or tapped again, loads it.
+    BrowserPresetFile(u16, u16),
+    /// [view → model] A preset file operation on the PRESETS target (`presets::PresetCmd`).
+    PresetCmd(crate::presets::PresetScope, crate::presets::PresetCmd),
+    /// [model] `set_text` target: load `[folder/]name` into the strip's or an insert's `Preset`.
+    Preset(crate::presets::PresetScope),
     BrowserGroupReveal,
     /// The "Universal Audio (Inactive)" group's reveal toggle.
     BrowserInactiveReveal,
@@ -219,6 +226,10 @@ pub enum PluginWindowButton {
     RackView,
     /// `assign` (⋮): the insert menu.
     Assign,
+    /// A row of the preset menu (the presets field), by index into the window's flattened list.
+    PresetItem(u16),
+    /// The preset menu's "Preset Browser...": the mixer's PRESETS tab targeted at this insert.
+    PresetBrowser,
     /// `prev_preset`.
     PresetPrev,
     /// `next_preset`.

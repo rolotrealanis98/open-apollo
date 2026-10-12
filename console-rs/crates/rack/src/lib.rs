@@ -10,6 +10,7 @@ pub mod layers;
 pub mod menu;
 pub mod model;
 pub mod preamp;
+pub mod presets;
 pub mod scales;
 pub mod settings;
 pub mod surfaces;
