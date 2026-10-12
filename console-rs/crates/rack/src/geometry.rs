@@ -9,6 +9,9 @@ pub const STRIP_W: f32 = 96.0;
 pub mod window {
     pub const SIZE: (f32, f32) = (1920.0, 1050.0);
     pub const TITLE_BAR: f32 = 26.0;
+    /// Top of the columns below the title bar (1.3.1: the bar is 27 pt including its
+    /// bottom black line, which also covers the browser's first point).
+    pub const CONTENT_TOP: f32 = 27.0;
     pub const NAV_STRIP: (f32, f32) = (27.0, 71.0);
     pub const BROWSER_W: f32 = 345.0;
     pub const NAV_COLUMN: (f32, f32) = (345.0, 96.0);

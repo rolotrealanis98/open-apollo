@@ -32,7 +32,6 @@ pub struct WindowLayout {
 
 const GAP: f32 = 18.0;
 const PANEL: Rgba = Rgba::rgb8(72, 76, 78);
-const CHROME: Rgba = Rgba::rgb8(35, 37, 40);
 const SEPARATOR: Rgba = Rgba::rgb8(82, 87, 89);
 /// Main strip height with the fader hidden (F = 5, label 28).
 const MAIN_HIDDEN_H: f32 = 5.0 + main_strip::LABEL_H;
@@ -134,9 +133,6 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let col_h = W::COLUMN.1 - W::COLUMN.0;
 
     ui.fill(bounds, Rgba::rgb8(41, 43, 46));
-    ui.fill(Rect::new(0.0, 0.0, width, W::TITLE_BAR), CHROME);
-    let title = Ui::plain_style("Helvetica Neue", 12.0, true, Rgba::WHITE.with_alpha(0.85));
-    ui.text(&format!("Apollo: {}", model.session_name()), title, Rect::new(97.0, 0.0, 400.0, W::TITLE_BAR), Align::Left);
 
     // Input cell rows and scrolling.
     let rows = CellRows::new(model, view, &inputs, false);
@@ -152,8 +148,9 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
         if l.browser {
             draw_browser(ui, model, view, Rect::new(0.0, W::TITLE_BAR, W::BROWSER_W, W::STATUS_BAR.0 - W::TITLE_BAR));
         }
-        draw_navigator(ui, model, view, l.nav_x(), W::TITLE_BAR, W::STATUS_BAR.0, visible_rows);
+        draw_navigator(ui, model, view, l.nav_x(), W::CONTENT_TOP, W::STATUS_BAR.0, visible_rows);
     }
+    title_bar(ui, model, width);
 
     // Strip area panel and session navigator.
     let visible = l.visible_inputs();
@@ -192,6 +189,61 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     }
     draw_popover(ui, model, view, bounds);
     l
+}
+
+/// Approximate advance width of `text` in Helvetica Bold at `size` pt (Adobe AFM widths),
+/// standing in for JUCE's `Font::getStringWidth` where Console sizes a component to its label.
+pub fn helvetica_bold_width(text: &str, size: f32) -> f32 {
+    const W: [u16; 95] = [
+        278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, // ' '…/
+        556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, // 0…?
+        975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778, // @…O
+        667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556, // P…_
+        333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611, // `…o
+        611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584, // p…~
+    ];
+    text.chars().map(|c| W.get((c as usize).wrapping_sub(32)).copied().unwrap_or(611) as f32).sum::<f32>() * size / 1000.0
+}
+
+/// Text with Console's `text-stroke` (a dark outline), approximated by offset copies.
+fn stroked_text(ui: &mut Ui, text: &str, style: crate::draw::TextStyle, stroke: Rgba, r: Rect, align: Align) {
+    let shadow = crate::draw::TextStyle { color: stroke, ..style.clone() };
+    for (dx, dy) in [(-0.5, 0.0), (0.5, 0.0), (0.0, -0.5), (0.0, 0.5), (0.5, 0.5), (-0.5, 0.5)] {
+        ui.text(text, shadow.clone(), r.offset(dx, dy), align);
+    }
+    ui.text(text, style, r, align);
+}
+
+/// macOS Console 1.3.1 title bar (`Rack_TitleBar` with `Main-Title-Bar-LP`): a flat 27 pt
+/// bar between 1 pt black lines; the window buttons (close, minimise, zoom) dimmed at the
+/// left, the session tab (`Titlebar-Tab-On` + divider, `Session-Tab-Single` text) and
+/// FEEDBACK (`Toggle-Feedback-LP`: label, icon right-aligned 3 pt in, 6 pt from the edge).
+fn title_bar(ui: &mut Ui, model: &dyn MixerModel, width: f32) {
+    let h = W::CONTENT_TOP;
+    let bg = ui.skin("backgrounds", "Main-Title-Bar-LP").and_then(|s| s.color("color-overlay")).unwrap_or(Rgba::rgb8(75, 79, 83));
+    ui.fill(Rect::new(0.0, 0.0, width, h), bg);
+    ui.fill(Rect::new(0.0, 0.0, width, 1.0), Rgba::BLACK);
+    ui.fill(Rect::new(0.0, h - 1.0, width, 1.0), Rgba::BLACK);
+    for (i, key) in ["Window-Button-Close", "Window-Button-Min", "Window-Button-Max-Console"].into_iter().enumerate() {
+        if let Some(img) = ui.skin("views", key).and_then(|s| s.image("image")) {
+            ui.image(img, Rect::new(10.0 + i as f32 * 25.0, 7.0, 12.0, 12.0), None, None, 0.2);
+        }
+    }
+    let title = format!("Apollo: {}", model.session_name());
+    let style = ui.style("views", "Session-Tab-Single");
+    let tab_w = helvetica_bold_width(&title, style.size).ceil() + 26.0;
+    ui.background("Titlebar-Tab-On", Rect::new(80.0, 0.0, tab_w, h));
+    ui.background("Titlebar-Tab-Divider", Rect::new(80.0 + tab_w - 3.0, 0.0, 3.0, h));
+    let stroke = ui.skin("views", "Session-Tab").and_then(|s| s.color("color-text-stroke")).unwrap_or(Rgba::BLACK.with_alpha(0.4));
+    stroked_text(ui, &title, style, stroke, Rect::new(80.0, 1.0, tab_w, h - 2.0), Align::Center);
+
+    let style = crate::surfaces::navigator::console_style(ui, "views", "Toggle-Feedback-LP");
+    let fw = helvetica_bold_width("FEEDBACK", style.size).ceil();
+    let b = Rect::new(width - 6.0 - (fw + 31.0), (h - 1.0 - 22.0) / 2.0, fw + 31.0, 22.0);
+    ui.text("FEEDBACK", style, Rect::new(b.x + 1.0, b.y, fw + 2.0, b.h), Align::Left);
+    if let Some(img) = ui.skin("views", "Toggle-Feedback-LP").and_then(|s| s.image("image-overlay")) {
+        ui.image(img, Rect::new(b.max_x() - 3.0 - 26.0, b.y, 26.0, 22.0), None, None, 1.0);
+    }
 }
 
 /// Vertical scrollbar with a draggable thumb; nothing when the content fits.
