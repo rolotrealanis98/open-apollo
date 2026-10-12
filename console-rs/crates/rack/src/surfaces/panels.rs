@@ -292,135 +292,185 @@ fn sub_window_frame(ui: &mut Ui, r: Rect, title: &str) {
     ui.hit(Rect::new(r.x, r.y, 34.0, 27.0), sid(Control::PanelClose), HitKind::Tap);
 }
 
-// ---- MONITOR CONTROLLER ([cap] s06, 821 × 532) ----
+// ---- MONITOR CONTROLLER (drive capture panel-monctl "Monitor", 812 × 527) ----
 
+/// `Rack_MonitorSubWindow` (resized 0x181148550): the knob section (5, 32, 264, 98), the
+/// BASS MANAGEMENT / SPEAKER UTILITIES tabs (5, h − 389, 132, 25 each) over the 264 × 359
+/// section at (5, 163), and right of them the MAIN MONITOR CORRECTION label (279, 37, w − 284,
+/// 25) over the room correction section (279, 62, w − 284, h − 67).
 fn monitor_controller(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect, drawn: &mut Vec<Drawn>) {
-    let c = sub_window(ui, bounds, (821.0, 532.0), "MONITOR CONTROLLER");
+    let r = centred(bounds, (812.0, 527.0));
+    sub_window_frame(ui, r, "MONITOR CONTROLLER");
+    ui.fill(Rect::new(r.x + 0.5, r.y + 27.0, r.w - 1.5, r.h - 27.5), Rgba::rgb8(81, 88, 91));
     let Some(src) = model.properties() else { return };
     let d = device_of(model, view);
     let dev = format!("/devices/{d}");
-    let left = Rect::new(c.x + 3.0, c.y + 1.0, 268.0, c.h - 2.0);
-    // Monitor knob section (`Monitor-Knob-Section-Background`, 264 × 98).
-    let knob = Rect::new(left.x + 2.0, left.y + 2.0, 264.0, 98.0);
-    ui.fill(knob, Rgba::rgb8(50, 54, 57));
+    let (x0, y0) = (r.x, r.y);
+    // Monitor knob section (`Monitor-Knob-Section-Background`, 264 × 98): MONITOR MODE and its
+    // display, the monitor knob with its readout, MONO / MUTE.
+    let knob = Rect::new(x0 + 5.0, y0 + 32.0, 264.0, 98.0);
     ui.background("Monitor-Knob-Section-Background", knob);
     let mode = settings::fields(src, SettingsGroup::MonitorKnob(d));
-    static_label(ui, "MONITOR MODE", Rect::new(knob.x + 6.0, knob.y + 28.0, 80.0, 12.0), Align::Left);
+    let cr = Ui::plain_style("Helvetica", 9.0, false, Rgba::rgb8(116, 122, 126));
+    ui.text("MONITOR MODE", cr, Rect::new(knob.x + 8.0, knob.y + 32.0, 80.0, 12.0), Align::Left);
     let mode_text = mode.iter().find(|f| f.label == "MONITOR MODE").map(|f| f.value_text()).unwrap_or_else(|| "STEREO".into());
-    let mbox = Rect::new(knob.x + 6.0, knob.y + 42.0, 68.0, 22.0);
-    ui.fill(mbox, Rgba::rgb8(22, 24, 26));
-    ui.text(&mode_text, Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.8)), mbox, Align::Center);
+    let mbox = Rect::new(knob.x + 8.0, knob.y + 44.0, 67.0, 19.0);
+    ui.background("Combo-Box", mbox);
+    ui.text(&mode_text, Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.85)), mbox.offset(0.0, 0.5), Align::Center);
     let m = model.monitor();
-    ui.knob("Monitor-Green", m.level, Rect::new(knob.x + 88.0, knob.y + 2.0, 88.0, 86.0), Some(ControlId { strip: "monitor".into(), control: Control::MonitorLevel }), None);
-    let lvl = mode.iter().find(|f| f.label == "LEVEL").map(|f| f.value_text()).unwrap_or_default();
-    ui.text(&lvl, Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.75)), Rect::new(knob.x + 100.0, knob.y + 78.0, 64.0, 12.0), Align::Center);
-    ui.toggle("Switch", Some("MONO"), m.mono, true, Rect::new(knob.x + 184.0, knob.y + 30.0, 36.0, 36.0), Some(ControlId { strip: "monitor".into(), control: Control::MonitorMono }), None);
-    ui.toggle("Switch-Red", Some("MUTE"), m.mute, true, Rect::new(knob.x + 222.0, knob.y + 30.0, 36.0, 36.0), Some(ControlId { strip: "monitor".into(), control: Control::MonitorMute }), None);
-    // BASS MANAGEMENT / SPEAKER UTILITIES.
-    let top = section_tabs(ui, &["BASS MANAGEMENT", "SPEAKER UTILITIES"], view.settings.panel_tab.min(1), left.x + 2.0, knob.max_y() + 8.0, 264.0);
-    let area = Rect::new(left.x + 2.0, top, 264.0, left.max_y() - top);
-    ui.fill(area, Rgba::rgb8(52, 55, 58));
-    let group = if view.settings.panel_tab == 0 { SettingsGroup::BassManagement(d) } else { SettingsGroup::SpeakerUtilities(d) };
+    ui.knob("Monitor-Green", m.level, Rect::new(knob.x + 93.0, knob.y + 6.0, 77.0, 87.0), Some(ControlId { strip: "monitor".into(), control: Control::MonitorLevel }), None);
+    let lvl = mode.iter().find(|f| f.label == "LEVEL").map(|f| f.value_text()).unwrap_or_else(|| m.readout.clone());
+    ui.text(&lvl, Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.75)), Rect::new(knob.x + 99.0, knob.y + 76.0, 65.0, 12.0), Align::Center);
+    ui.toggle("Switch", Some("MONO"), m.mono, true, Rect::new(knob.x + 186.0, knob.y + 32.0, 36.0, 36.0), Some(ControlId { strip: "monitor".into(), control: Control::MonitorMono }), None);
+    ui.toggle("Switch-Red", Some("MUTE"), m.mute, true, Rect::new(knob.x + 223.0, knob.y + 32.0, 36.0, 36.0), Some(ControlId { strip: "monitor".into(), control: Control::MonitorMute }), None);
+    // BASS MANAGEMENT / SPEAKER UTILITIES (`Tab-Section-Left` / `-Right`).
+    let tab = view.settings.panel_tab.min(1);
+    for (k, label) in ["BASS MANAGEMENT", "SPEAKER UTILITIES"].into_iter().enumerate() {
+        let b = Rect::new(x0 + 5.0 + k as f32 * 132.0, y0 + 138.0, 132.0, 25.0);
+        ui.toggle(if k == 0 { "Tab-Section-Left" } else { "Tab-Section-Right" }, Some(label), tab as usize == k, true, b, None, None);
+        ui.hit(b, sid(Control::PanelTab(k as u8)), HitKind::Tap);
+    }
+    let area = Rect::new(x0 + 5.0, y0 + 163.0, 264.0, 359.0);
+    ui.background("Bass-Management-Background", area);
+    let group = if tab == 0 { SettingsGroup::BassManagement(d) } else { SettingsGroup::SpeakerUtilities(d) };
     let f = settings::fields(src, group);
-    let mut y = area.y + 8.0;
-    if f.is_empty() {
-        ui.text("N/A", Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.5)), Rect::new(area.x, y, area.w, 40.0), Align::Center);
-    }
-    // `Rack_BassManagement` layout (capture s06): ENABLE (66 × 28) then LFE FILTER / SATELLITE
-    // FILTER (78 wide) on the first row; CHANNEL (66) and SATELLITE CROSSOVER (168) below.
-    let slots = [(6.0, 0.0, 66.0), (85.0, 0.0, 78.0), (175.0, 0.0, 78.0), (6.0, 36.0, 66.0), (85.0, 36.0, 168.0)];
-    for (fl, (dx, dy, w)) in f.iter().zip(slots).filter(|_| view.settings.panel_tab == 0) {
-        let (x, yy) = (area.x + dx, y + dy);
-        match &fl.kind {
-            FieldKind::Toggle { on } => {
-                let r = Rect::new(x, yy + 4.0, w, 28.0);
-                ui.toggle("Switch-Large", Some(&fl.label), *on, true, r, None, None);
-                ui.hit(r, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
-            }
-            _ => {
-                static_label(ui, &fl.label, Rect::new(x, yy, w, 12.0), Align::Left);
-                choice_box(ui, fl, Rect::new(x, yy + 12.0, w, 20.0));
-                drawn.push(Drawn { field: fl.clone() });
-            }
-        }
-    }
-    if view.settings.panel_tab == 1 {
-        for (k, fl) in f.iter().enumerate() {
-            let x = area.x + 6.0 + (k % 3) as f32 * 86.0;
-            let yy = y + (k / 3) as f32 * 40.0;
-            static_label(ui, &fl.label, Rect::new(x, yy, 84.0, 12.0), Align::Left);
-            let r = Rect::new(x, yy + 12.0, 80.0, 24.0);
+    // `Rack_BassManagement` (capture): ENABLE (11, 11, 65, 29); LFE FILTER / SATELLITE FILTER
+    // labels at y 11 over 78 × 18 combos at (87, 22) / (177, 22); CHANNEL (11, 59, 65) and
+    // SATELLITE CROSSOVER (87, 59, 168) under labels at y 47.
+    let label_at = |ui: &mut Ui, t: &str, x: f32, y: f32, w: f32| {
+        let st = Ui::plain_style("Helvetica", 9.0, false, Rgba::rgb8(116, 122, 126));
+        ui.text(t, st, Rect::new(area.x + x + 2.0, area.y + y, w, 9.0), Align::Left);
+    };
+    if tab == 0 {
+        let slots = [(11.0, 11.0, 65.0), (87.0, 11.0, 78.0), (177.0, 11.0, 78.0), (11.0, 47.0, 65.0), (87.0, 47.0, 168.0)];
+        for (fl, (dx, dy, w)) in f.iter().zip(slots) {
             match &fl.kind {
                 FieldKind::Toggle { on } => {
-                    ui.toggle("Switch-Large", Some(if *on { "ON" } else { "OFF" }), *on, true, r, None, None);
-                    ui.hit(r, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
+                    let b = Rect::new(area.x + dx, area.y + dy, w, 29.0);
+                    ui.toggle("Switch-Large-Stretch", Some(&fl.label), *on, true, b, None, None);
+                    ui.hit(b, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
                 }
-                FieldKind::Choice { .. } => {
-                    choice_box(ui, fl, r);
+                _ => {
+                    label_at(ui, &fl.label, dx, dy, w + 20.0);
+                    choice_box(ui, fl, Rect::new(area.x + dx, area.y + dy + 11.0, w, 18.0));
                     drawn.push(Drawn { field: fl.clone() });
                 }
-                _ => ui.text(&fl.value_text(), Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.75)), r, Align::Center),
+            }
+        }
+    } else {
+        for (k, fl) in f.iter().enumerate() {
+            let (dx, dy) = (11.0 + (k % 3) as f32 * 83.0, 11.0 + (k / 3) as f32 * 36.0);
+            label_at(ui, &fl.label, dx, dy, 80.0);
+            let b = Rect::new(area.x + dx, area.y + dy + 11.0, 78.0, 18.0);
+            match &fl.kind {
+                FieldKind::Toggle { on } => {
+                    ui.toggle("Switch-Large-Stretch", Some(if *on { "ON" } else { "OFF" }), *on, true, b, None, None);
+                    ui.hit(b, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
+                }
+                FieldKind::Choice { .. } => {
+                    choice_box(ui, fl, b);
+                    drawn.push(Drawn { field: fl.clone() });
+                }
+                _ => ui.text(&fl.value_text(), Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.75)), b, Align::Center),
             }
         }
     }
-    y += if view.settings.panel_tab == 0 { 76.0 } else { f.len().div_ceil(3) as f32 * 40.0 + 8.0 };
-    // The speaker display (`Monitor-Surround-Speakers-Background`).
-    let disp = Rect::new(area.x + 6.0, y, area.w - 12.0, (area.max_y() - y - 6.0).max(0.0));
-    ui.fill(disp, Rgba::rgb8(20, 22, 24));
+    // The speaker display (`Monitor-Surround-Speakers-Background`, 254 × 270) with the L / R
+    // speaker icons and their N/A trims.
+    let disp = Rect::new(area.x + 5.0, area.y + 85.0, 254.0, 270.0);
     ui.background("Monitor-Surround-Speakers-Background", disp);
-    let spk = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.6));
-    for k in 0..2 {
-        let x = if k == 0 { disp.x + 10.0 } else { disp.max_x() - 40.0 };
-        ui.background(if k == 0 { "Monitor-Selected-Left" } else { "Monitor-Selected-Right" }, Rect::new(x + 5.0, disp.y + 14.0, 20.0, 20.0));
-        ui.text("N/A", spk.clone(), Rect::new(x, disp.y + 38.0, 30.0, 12.0), Align::Center);
+    let spk = Ui::plain_style("Helvetica", 9.0, false, Rgba::WHITE.with_alpha(0.7));
+    for (k, (key, x)) in [("Monitor-Selected-Left", 17.0), ("Monitor-Selected-Right", 215.0)].into_iter().enumerate() {
+        ui.toggle(key, None, false, true, Rect::new(disp.x + x, disp.y + 19.0, 20.0, 20.0), None, None);
+        ui.text("N/A", spk.clone(), Rect::new(disp.x + x - 10.0 + if k == 0 { -2.5 } else { 2.5 }, disp.y + 45.0, 40.0, 12.0), Align::Center);
+        let dots = Rect::new(disp.x + if k == 0 { 4.0 } else { 202.0 }, disp.y + 57.0, 38.0, 1.0);
+        for i in 0..19 {
+            ui.fill(Rect::new(dots.x + 2.0 * i as f32, dots.y, 1.0, 0.5), Rgba::WHITE.with_alpha(0.35));
+        }
     }
-    // MAIN MONITOR CORRECTION.
-    let right = Rect::new(left.max_x() + 6.0, c.y + 1.0, c.max_x() - left.max_x() - 9.0, c.h - 2.0);
-    ui.fill(right, Rgba::rgb8(52, 55, 58));
-    ui.text("MAIN MONITOR CORRECTION", Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.45)), Rect::new(right.x, right.y + 6.0, right.w, 16.0), Align::Center);
+    // MAIN MONITOR CORRECTION (`Rack_RoomCorrection`).
+    let right = Rect::new(x0 + 279.0, y0 + 37.0, r.w - 284.0, r.h - 42.0);
+    ui.fill(right, Rgba::rgb8(65, 71, 74));
+    ui.text("MAIN MONITOR CORRECTION", Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.35)), Rect::new(right.x, right.y + 6.0, right.w, 14.0), Align::Center);
     let rc = settings::fields(src, SettingsGroup::RoomCorrection(d));
     let profile = rc.iter().find(|f| f.label == "CALIBRATION PROFILE").map(|f| f.value_text()).unwrap_or_else(|| "<PROFILE>".into());
-    static_label(ui, "CALIBRATION PROFILE", Rect::new(right.x + 10.0, right.y + 62.0, 200.0, 14.0), Align::Left);
-    let pbox = Rect::new(right.x + 8.0, right.y + 80.0, right.w - 18.0, 22.0);
-    ui.fill(pbox, Rgba::rgb8(20, 22, 24));
-    ui.text(&profile, Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.85)), pbox.inset(8.0, 0.0, 100.0, 0.0), Align::Left);
-    ui.text("OPEN SoundID", Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.9)), Rect::new(pbox.max_x() - 90.0, pbox.y, 84.0, pbox.h), Align::Right);
+    ui.text("CALIBRATION PROFILE", Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.35)), Rect::new(right.x + 11.0, right.y + 67.0, 200.0, 12.0), Align::Left);
+    let pbox = Rect::new(right.x + 10.0, right.y + 83.0, right.w - 20.0, 20.0);
+    ui.background("Combo-Box", pbox);
+    ui.text(&profile, Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.85)), pbox.inset(8.0, 0.0, 120.0, 0.0), Align::Left);
+    ui.fill(Rect::new(pbox.max_x() - 98.0, pbox.y + 6.0, 9.0, 8.0), Rgba::WHITE.with_alpha(0.85));
+    ui.fill(Rect::new(pbox.max_x() - 97.0, pbox.y + 8.0, 7.0, 5.0), Rgba::rgb8(24, 25, 27));
+    ui.text("OPEN SoundID", Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.95)), Rect::new(pbox.max_x() - 84.0, pbox.y, 77.0, pbox.h), Align::Right);
     ui.hit(Rect::new(pbox.max_x() - 100.0, pbox.y, 100.0, pbox.h), sid(Control::SettingPress("post:ShowSoundIDReference:speaker".into())), HitKind::Tap);
-    // The correction curve: grid, dB and frequency labels (the curve itself comes from
-    // `GetCorrectionImage`, which the tree does not carry).
-    let graph = Rect::new(right.x, pbox.max_y() + 8.0, right.w, 298.0);
-    ui.fill(graph, Rgba::rgb8(12, 13, 14));
-    let grid = Rgba::WHITE.with_alpha(0.08);
-    let label = Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.7));
-    for (i, db) in ["+18 dB", "+12 dB", "+6 dB", "0 dB", "-6 dB", "-12 dB", "-18 dB"].iter().enumerate() {
-        let y = graph.y + 46.0 + i as f32 * 36.0;
-        ui.fill(Rect::new(graph.x, y, graph.w - 50.0, 1.0), grid);
-        ui.text(db, label.clone(), Rect::new(graph.max_x() - 50.0, y - 6.0, 46.0, 12.0), Align::Right);
-    }
-    for (i, fq) in ["100 Hz", "1 kHz", "10 kHz"].iter().enumerate() {
-        let x = graph.x + 140.0 + i as f32 * 165.0;
-        ui.fill(Rect::new(x, graph.y, 1.0, graph.h - 18.0), grid);
-        ui.text(fq, label.clone(), Rect::new(x - 30.0, graph.max_y() - 16.0, 60.0, 12.0), Align::Center);
-    }
-    ui.fill(Rect::new(graph.x + 8.0, graph.y + 46.0 + 3.0 * 36.0, graph.w - 60.0, 1.0), Rgba::rgb8(120, 200, 110).with_alpha(0.6));
-    // SAFE HEADROOM, BYPASS; MAIN MONITOR CORRECTION ENABLE.
-    let by = graph.max_y() + 10.0;
+    correction_graph(ui, Rect::new(right.x, right.y + 113.0, right.w, 296.0), None);
+    // SAFE HEADROOM, BYPASS; MAIN MONITOR CORRECTION ENABLE (70 × 30 at y 455).
+    let by = y0 + 455.0;
     let head = rc.iter().find(|f| f.label == "HEADROOM").map(|f| f.value_text()).unwrap_or_default();
-    for (label, x) in [("SAFE HEADROOM", 14.0), ("BYPASS", 95.0)] {
+    for (label, x) in [("SAFE HEADROOM", 293.0), ("BYPASS", 374.0)] {
         if let Some(fl) = rc.iter().find(|f| f.label == label) {
             if let FieldKind::Toggle { on } = fl.kind {
-                let r = Rect::new(right.x + x, by, 70.0, 30.0);
+                let b = Rect::new(x0 + x, by, 71.0, 30.0);
                 let text = if label == "BYPASS" { "BYPASS".to_string() } else { format!("({head} SAFE\nHEADROOM)") };
-                ui.toggle("Switch-Large", Some(&text), on, true, r, None, None);
-                ui.hit(r, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
+                ui.toggle("Switch-Large-Stretch", Some(&text), on, true, b, None, None);
+                ui.hit(b, sid(Control::SettingPress(fl.key.clone())), HitKind::Toggle);
             }
         }
     }
     let power = bool_at(src, &format!("{dev}/SpeakerCorrectionPower")).unwrap_or(false);
-    ui.text("MAIN MONITOR\nCORRECTION", Ui::plain_style("Helvetica", 9.0, true, Rgba::WHITE.with_alpha(0.45)), Rect::new(right.max_x() - 180.0, by, 90.0, 30.0), Align::Right);
-    let er = Rect::new(right.max_x() - 80.0, by, 70.0, 30.0);
-    ui.toggle("Switch-Large", Some("ENABLE"), power, true, er, None, None);
+    ui.text("MAIN MONITOR\nCORRECTION", Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.35)), Rect::new(x0 + 618.0, by, 100.0, 30.0), Align::Right);
+    let er = Rect::new(x0 + 727.0, by, 71.0, 30.0);
+    ui.toggle("Switch-Large-Stretch", Some("ENABLE"), power, true, er, None, None);
     ui.hit(er, sid(Control::SettingPress(format!("toggle:{dev}/SpeakerCorrectionPower").into())), HitKind::Toggle);
+}
+
+/// The correction display (black, `r` = 528 × 296 in the capture panel-monctl): log-frequency
+/// grid lines 20 Hz…20 kHz (161.5 pt a decade, 100 Hz at x + 120), dB lines every 3 dB 18 pt
+/// apart with 0 dB at y + 150.5 (the 6-dB ones run under the labels), the ±6/12/18 labels
+/// right-aligned at x + 516 just under their lines, the frequency labels 5.5 pt right of the
+/// 100 Hz / 1 kHz / 10 kHz lines. `curve` (dB at evenly spaced log frequencies, 20 Hz…20 kHz) is
+/// drawn green when the engine gives one (`GetCorrectionImage`); without it a flat 0 dB line.
+pub(crate) fn correction_graph(ui: &mut Ui, r: Rect, curve: Option<&[f32]>) {
+    ui.fill(r, Rgba::BLACK);
+    let x_of = |hz: f32| r.x + 120.0 + 161.5 * (hz / 100.0).log10();
+    let y_of = |db: f32| r.y + 150.5 - db * 6.0;
+    let (gx0, gx1) = (x_of(20.0).round(), x_of(20000.0).round());
+    let line = Rgba::WHITE.with_alpha(0.118);
+    for k in -7i32..=7 {
+        let y = y_of(k as f32 * 3.0) - 0.5;
+        let long = k % 2 == 0 && k != 0 && k.abs() < 7;
+        ui.fill(Rect::new(gx0, y, if long { r.x + 520.0 - gx0 } else { gx1 - gx0 }, 1.0), line);
+    }
+    for decade in [10.0f32, 100.0, 1000.0, 10000.0] {
+        for m in 1..10 {
+            let hz = decade * m as f32;
+            if !(20.0..=20000.0).contains(&hz) {
+                continue;
+            }
+            let x = x_of(hz).round() - 0.5;
+            ui.fill(Rect::new(x, r.y + 7.0, 1.0, 274.0), line);
+        }
+    }
+    let label = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.7));
+    for k in [18, 12, 6, 0, -6, -12, -18] {
+        let t = if k > 0 { format!("+{k} dB") } else { format!("{k} dB") };
+        ui.text(&t, label.clone(), Rect::new(r.x + 446.0, y_of(k as f32) - 0.5, 70.0, 14.0), Align::Right);
+    }
+    for (hz, t) in [(100.0, "100 Hz"), (1000.0, "1 kHz"), (10000.0, "10 kHz")] {
+        ui.text(t, label.clone(), Rect::new(x_of(hz).round() + 5.0, r.y + 283.0, 60.0, 14.0), Align::Left);
+    }
+    let green = Rgba::rgb8(120, 200, 110);
+    match curve {
+        Some(c) if c.len() > 1 => {
+            let step = (gx1 - gx0) / (c.len() - 1) as f32;
+            for (i, db) in c.iter().enumerate() {
+                let x = gx0 + step * i as f32;
+                let y = y_of(*db);
+                ui.fill(Rect::new(x, y.min(y_of(0.0)), step.max(0.5), (y - y_of(0.0)).abs().max(0.5)), green.with_alpha(0.12));
+                ui.fill(Rect::new(x, y - 0.5, step.max(0.5), 1.0), green);
+            }
+        }
+        _ => ui.fill(Rect::new(gx0, y_of(0.0) - 0.5, gx1 - gx0, 1.0), green.with_alpha(0.6)),
+    }
 }
 
 // ---- HEADPHONE CORRECTION ----
