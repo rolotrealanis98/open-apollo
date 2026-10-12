@@ -105,7 +105,10 @@ impl EngineMixer {
                     Ok(args) => self.store.post(&cmd, Some(&args)),
                     Err(e) => log::warn!("settings: invalid post {cmd}: {e}"),
                 },
-                Write::Pref(name, v) => self.prefs.set(&name, v),
+                Write::Pref(name, v) => {
+                    self.prefs.set(&name, v);
+                    self.save_prefs();
+                }
                 // Helper settings go out only while writes are on (the helper connection is
                 // read-only otherwise, too).
                 Write::Helper(path, v) => {
@@ -120,6 +123,57 @@ impl EngineMixer {
                     }
                 }
             }
+        }
+    }
+}
+
+impl EngineMixer {
+    /// Keeps Console's client preferences (OPTIONS, MIDI) in `path`, as Console keeps its own
+    /// preferences file: loads it now (defaults for missing keys) and saves after each change.
+    pub fn set_prefs_path(&mut self, path: Option<std::path::PathBuf>) {
+        self.prefs_path = path;
+        let Some(p) = &self.prefs_path else { return };
+        let Ok(text) = std::fs::read_to_string(p) else { return };
+        match serde_json::from_str::<Json>(&text) {
+            Ok(Json::Object(map)) => {
+                for (k, v) in map {
+                    let v = match v {
+                        Json::Bool(b) => PropValue::Bool(b),
+                        Json::Number(n) if n.is_i64() => PropValue::Int(n.as_i64().unwrap_or_default()),
+                        Json::Number(n) => PropValue::Float(n.as_f64().unwrap_or_default()),
+                        Json::String(s) => PropValue::Str(s),
+                        _ => continue,
+                    };
+                    self.prefs.set(&k, v);
+                }
+            }
+            Ok(_) => log::warn!("prefs: {} is not a JSON object", p.display()),
+            Err(e) => log::warn!("prefs: {}: {e}", p.display()),
+        }
+    }
+
+    fn save_prefs(&self) {
+        let Some(p) = &self.prefs_path else { return };
+        let map: serde_json::Map<String, Json> = self
+            .prefs
+            .0
+            .iter()
+            .map(|(k, v)| {
+                let j = match v {
+                    PropValue::Bool(b) => Json::Bool(*b),
+                    PropValue::Int(i) => Json::from(*i),
+                    PropValue::Float(f) => Json::from(*f),
+                    PropValue::Str(s) => Json::String(s.clone()),
+                };
+                (k.clone(), j)
+            })
+            .collect();
+        let text = serde_json::to_string_pretty(&Json::Object(map)).unwrap_or_default();
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(p, text + "\n") {
+            log::warn!("prefs: could not save {}: {e}", p.display());
         }
     }
 }

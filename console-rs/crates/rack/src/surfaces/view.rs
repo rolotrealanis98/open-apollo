@@ -300,6 +300,9 @@ pub struct ViewState {
     /// URLs the console asked the host to open, oldest first (`take_open_urls`): Show In
     /// Finder's `file://` URLs, documentation, Dante Controller and patent pages, feedback.
     pub open_urls: Vec<String>,
+    /// When the armed navigator modifier was armed or last used: it disarms after OPTIONS ›
+    /// MODIFIERS TIMEOUT seconds (`expire_modifier`).
+    pub modifier_armed: Option<std::time::Instant>,
     /// Console's menus, Settings and panels as separate OS windows placed on the screen
     /// (`crate::layers`); None draws them inside the mixer window (iPad, plain `--render`).
     pub windowing: Option<crate::layers::Windowing>,
@@ -336,6 +339,7 @@ impl Default for ViewState {
             commands: Vec::new(),
             deferred: Vec::new(),
             open_urls: Vec::new(),
+            modifier_armed: None,
             windowing: None,
         }
     }
@@ -487,6 +491,33 @@ impl ViewState {
         Ok(())
     }
 
+    /// Seconds an armed modifier stays armed (OPTIONS › MODIFIERS TIMEOUT, Console's default 6;
+    /// 0 or blank: until disarmed by hand).
+    pub fn modifier_timeout(model: &dyn MixerModel) -> Option<f32> {
+        let text = model.properties().and_then(|p| p.prop("pref:modifiers_timeout")).map(|v| v.display());
+        let secs = text.as_deref().map(str::trim).unwrap_or("6").parse::<f32>().ok()?;
+        (secs > 0.0).then_some(secs)
+    }
+
+    /// When the armed modifier disarms (`None` when none is armed or there is no timeout).
+    pub fn modifier_deadline(&self, model: &dyn MixerModel) -> Option<std::time::Instant> {
+        self.modifier?;
+        Some(self.modifier_armed? + std::time::Duration::from_secs_f32(Self::modifier_timeout(model)?))
+    }
+
+    /// Disarms the modifier once MODIFIERS TIMEOUT has passed since it was armed or last used.
+    /// Call once per frame; true when it changed the view.
+    pub fn expire_modifier(&mut self, model: &dyn MixerModel, now: std::time::Instant) -> bool {
+        match self.modifier_deadline(model) {
+            Some(t) if now >= t => {
+                self.modifier = None;
+                self.modifier_armed = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// URLs to open (Show In Finder, links, launch buttons) since the last call, oldest first.
     pub fn take_open_urls(&mut self) -> Vec<String> {
         std::mem::take(&mut self.open_urls)
@@ -591,6 +622,9 @@ impl ViewState {
                 }
             }
             let to = |control| ControlId { strip: id.strip.clone(), control };
+            if self.modifier.is_some() {
+                self.modifier_armed = Some(std::time::Instant::now()); // a use restarts the timeout
+            }
             return vec![Effect::Model(match self.modifier {
                 Some(Modifier::Power) => Action::Tap(to(C::InsertPower(k))),
                 Some(Modifier::Remove) => Action::Tap(to(C::InsertRemove(k))),
@@ -639,7 +673,10 @@ impl ViewState {
             C::InsertSize(s) => self.insert_size = s,
             C::FixedSlots => self.fixed_slots ^= true,
             C::SendsOverview => self.sends_overview ^= true,
-            C::Modifier(m) => self.modifier = if self.modifier == Some(m) { None } else { Some(m) },
+            C::Modifier(m) => {
+                self.modifier = if self.modifier == Some(m) { None } else { Some(m) };
+                self.modifier_armed = self.modifier.map(|_| std::time::Instant::now());
+            }
             C::ShowBrowser => self.show_browser ^= true,
             C::ShowPluginScenes => self.toggle_scenes(model),
             C::ShowSettings => {

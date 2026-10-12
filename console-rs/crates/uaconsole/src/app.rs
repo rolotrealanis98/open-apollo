@@ -933,11 +933,19 @@ impl ApplicationHandler for App {
             self.mixer.menu = None;
             self.changed();
         }
+        // OPTIONS › MODIFIERS TIMEOUT: an armed navigator modifier disarms on its own.
+        if self.mixer.expire_modifier(self.model.as_ref(), Instant::now()) {
+            self.changed();
+        }
+        let modifier_deadline = self.mixer.modifier_deadline(self.model.as_ref());
         let live =
             (self.live_meters || self.overlays.live()) && self.gpu.is_some() && !self.occluded;
         if !live {
             self.next_tick = None;
-            event_loop.set_control_flow(ControlFlow::Wait);
+            event_loop.set_control_flow(match modifier_deadline {
+                Some(t) => ControlFlow::WaitUntil(t),
+                None => ControlFlow::Wait,
+            });
             return;
         }
         let now = Instant::now();
