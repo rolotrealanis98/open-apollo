@@ -186,6 +186,7 @@ type Waker = Arc<dyn Fn() + Send + Sync>;
 pub struct Store {
     model: Model,
     writer: Writer,
+    default_writes: bool,
     status: Status,
     topology: Topology,
     topology_revision: u64,
@@ -255,6 +256,7 @@ impl Store {
                 live: false,
             },
             writer: Writer::default(),
+            default_writes: false,
             status: Status::Empty,
             topology: Topology::default(),
             topology_revision: 0,
@@ -844,10 +846,28 @@ impl Store {
     /// Sets a property (`/a/FaderLevelTapered` or `/a/FaderLevelTapered/value`): the local value
     /// moves now, the wire write is coalesced (latest per path, ~60 Hz).
     pub fn set(&mut self, path: &str, value: impl Into<Value>) {
-        self.writer.set(&mut self.model, path, value.into());
+        if self.default_writes {
+            self.writer.reset(&mut self.model, path, value.into());
+        } else {
+            self.writer.set(&mut self.model, path, value.into());
+        }
         if self.model.topology_dirty {
             self.recompute_topology();
         }
+    }
+
+    /// While on, [`set`](Self::set) resets instead: the value shows locally and the wire carries
+    /// `"default"` (an engine model maps a UI reset through its usual control → path code).
+    pub fn set_default_writes(&mut self, on: bool) {
+        self.default_writes = on;
+    }
+
+    /// Resets a property to the engine's default (Console's double-click): `local` shows now,
+    /// the engine gets `set <path>/value "default"` in its own undo step.
+    pub fn reset(&mut self, path: &str, local: impl Into<Value>) {
+        self.begin_gesture();
+        self.writer.reset(&mut self.model, path, local.into());
+        self.end_gesture();
     }
 
     /// A discrete edit (button, menu): its own gesture, sent at once.
@@ -880,6 +900,10 @@ impl Store {
     /// Runs a session command (load, save, new, …) through the writer gate. Loads move the
     /// local `/Session` value at once, like any `commit`.
     pub fn session(&mut self, command: &SessionCommand) {
+        if !command.is_sendable() {
+            log::warn!("session command refused (empty name or path): {command:?}");
+            return;
+        }
         match command {
             SessionCommand::Load(name) => self.commit(session::SESSION, name.as_str()),
             SessionCommand::RestoreModified(v) => {

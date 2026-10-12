@@ -654,6 +654,14 @@ impl MixerModel for EngineMixer {
     }
 
     fn apply(&mut self, action: &Action) {
+        // A double-click reset: the same control → path mapping as a drag, written as Console's
+        // `set <prop>/value "default"` (MAP.md: CMxNtwk_Server::setObjectValue).
+        if let Action::Reset(id, v) = action {
+            self.store.set_default_writes(true);
+            self.apply(&Action::Set(id.clone(), *v));
+            self.store.set_default_writes(false);
+            return;
+        }
         if let Action::Set(ControlId { control: Control::SettingSet(k), .. }, v) = action {
             return self.apply_setting(k, &rack::settings::SettingOp::Value(*v));
         }
@@ -673,6 +681,7 @@ impl MixerModel for EngineMixer {
         match action {
             Action::GestureBegin(_) => self.store.begin_gesture(),
             Action::GestureEnd(_) => self.store.end_gesture(),
+            Action::Reset(..) => {} // mapped to a default-writing Set above
             Action::Tap(id) => self.taps.push(id.clone()),
             Action::Set(id, v) => {
                 let v = *v;

@@ -182,6 +182,28 @@ fn writes_use_console_wire_format() {
     );
     assert!(ids.windows(2).all(|w| w[0] < w[1]), "func_id is a running counter: {ids:?}");
     assert_eq!(server.value(&strip.mute()), Some(Value::Bool(true)));
+
+    // Only func_id for non-mix controls (RecordPreEffects, as in the 1.2.x traces); no query
+    // for insert assignment or a reset to the default.
+    store.commit(&strip.record_pre_effects(), true);
+    store.commit(&strip.inserts[0].effect_name(), "UAD 1176");
+    store.reset(&strip.pan(), 0.0);
+    wait_until("more writes", T, || server.raw_write_commands().len() == 13);
+    let raw = server.raw_write_commands();
+    let strip_ids = |c: &str| {
+        let (path, value) = c.split_once(' ').unwrap().1.split_once(' ').unwrap();
+        let query = path.split_once('?').map(|(_, q)| q.split('&').filter(|kv| !kv.starts_with("func_id=")).collect::<Vec<_>>().join("&"));
+        (path.split('?').next().unwrap().to_owned(), query, value.to_owned())
+    };
+    let rec = strip_ids(&raw[5]);
+    assert_eq!(rec, (format!("{}/value", strip.record_pre_effects()), Some(String::new()), "true".to_owned()));
+    let fx = strip_ids(&raw[8]);
+    assert_eq!(fx, (format!("{}/value", strip.inserts[0].effect_name()), None, "\"UAD 1176\"".to_owned()));
+    let pan = strip_ids(&raw[11]);
+    assert_eq!(pan, (format!("{}/value", strip.pan()), None, "\"default\"".to_owned()));
+    assert!(raw[10].starts_with("set /UndoRecording/value?func_id=") && raw[12].starts_with("set /UndoRecording/value?func_id="));
+    // The UI shows the default at once.
+    assert_eq!(store.value(&strip.pan()), Some(&Value::Number(0.0)));
 }
 
 /// A drag is not pulled back by echoes of its own earlier values.

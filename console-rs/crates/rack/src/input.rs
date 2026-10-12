@@ -296,6 +296,9 @@ pub struct ScrollRegion {
 pub enum Action {
     GestureBegin(ControlId),
     Set(ControlId, f64),
+    /// Double click / double tap: back to the default. `.1` is the UI's default (what to show);
+    /// an engine model sends Console's `set <prop>/value "default"` instead of a number.
+    Reset(ControlId, f64),
     GestureEnd(ControlId),
     Toggle(ControlId),
     Tap(ControlId),
@@ -304,7 +307,7 @@ pub enum Action {
 impl Action {
     pub fn id(&self) -> &ControlId {
         match self {
-            Action::GestureBegin(id) | Action::Set(id, _) | Action::GestureEnd(id) | Action::Toggle(id) | Action::Tap(id) => id,
+            Action::GestureBegin(id) | Action::Set(id, _) | Action::Reset(id, _) | Action::GestureEnd(id) | Action::Toggle(id) | Action::Tap(id) => id,
         }
     }
 }
@@ -334,7 +337,7 @@ impl Interaction {
                     if let Some(r) = reset {
                         return vec![
                             Action::GestureBegin(hit.id.clone()),
-                            Action::Set(hit.id.clone(), *r),
+                            Action::Reset(hit.id.clone(), *r),
                             Action::GestureEnd(hit.id.clone()),
                         ];
                     }
@@ -381,6 +384,6 @@ mod tests {
         assert_eq!(i.pointer_move(10.0, 60.0, false), vec![Action::Set(id(), 0.7)]);
         assert_eq!(i.pointer_up(), vec![Action::GestureEnd(id())]);
         let reset = i.pointer_down(&hits, 10.0, 100.0, true);
-        assert_eq!(reset[1], Action::Set(id(), 0.78));
+        assert_eq!(reset[1], Action::Reset(id(), 0.78));
     }
 }

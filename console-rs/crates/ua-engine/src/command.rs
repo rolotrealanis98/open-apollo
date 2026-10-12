@@ -89,10 +89,14 @@ impl Command {
         match self {
             Command::Set { path, value } if !path.contains('?') => {
                 let prop = path::property_path(&path);
-                let query = match prop {
-                    "/Sleep" | "/sleep" => return Command::Set { path, value },
-                    crate::writer::UNDO_RECORDING_PATH | "/status/timeout_ms" => format!("func_id={id}"),
-                    _ => format!("context_type=main&func_id={id}"),
+                let leaf = prop.rsplit('/').next().unwrap_or_default();
+                let query = if prop == "/Sleep" || prop == "/sleep" || leaf == "EffectName" || value == "\"default\"" {
+                    // No query: per-socket sleep, insert assignment, a reset to the default.
+                    return Command::Set { path, value };
+                } else if mix_control(prop, leaf) {
+                    format!("context_type=main&func_id={id}")
+                } else {
+                    format!("func_id={id}")
                 };
                 Command::Set { path: format!("{path}?{query}"), value }
             }
@@ -172,6 +176,20 @@ impl Command {
                 )
             }
         }
+    }
+}
+
+/// Mixer controls Console writes with `context_type=main`: observed for input `Mute` and `Pan`
+/// (1.3.1 pcap), input/aux `FaderLevelTapered` and `CRMonitorLevelTapered` (1.2.x traces). Its
+/// other writes (`/UndoRecording`, `RecordPreEffects`, preamp `Phase`) carry only `func_id`.
+/// The rest of this list — `Solo`, `Pan2`, `FaderLevel`, `CRMonitorLevel` and the sends'
+/// `Gain`/`Pan`/`Bypass` — is a guess by kind (mix controls), not observed.
+fn mix_control(prop: &str, leaf: &str) -> bool {
+    match leaf {
+        "Mute" | "Solo" | "Pan" | "Pan2" | "FaderLevel" | "FaderLevelTapered" | "CRMonitorLevel"
+        | "CRMonitorLevelTapered" => !prop.contains("/preamps/"),
+        "Gain" | "GainTapered" | "Bypass" => prop.contains("/sends/"),
+        _ => false,
     }
 }
 

@@ -975,6 +975,9 @@ impl MixerModel for PreviewMixer {
         }
     }
     fn apply(&mut self, action: &Action) {
+        if let Action::Reset(id, v) = action {
+            return self.apply(&Action::Set(id.clone(), *v));
+        }
         if let Action::Set(ControlId { control: Control::SettingSet(k), .. }, v) = action {
             return self.apply_setting(k, &crate::settings::SettingOp::Value(*v));
         }

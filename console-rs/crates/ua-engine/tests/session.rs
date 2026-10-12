@@ -92,3 +92,30 @@ fn engine_side_list_changes_are_picked_up() {
     let reads = server.received_commands();
     assert!(reads.iter().any(|c| c.starts_with("get /Session/values")), "{reads:?}");
 }
+
+/// Session folders take `{"folder","type":"session"}` (UA Mixer Engine 12 `NewFolder` /
+/// `DeleteFolder` handlers), and an empty Save As name or Open path never leaves: the engine
+/// would answer with a native file dialog on its host.
+#[test]
+fn folder_shapes_and_empty_name_guard() {
+    let cmd = |c: SessionCommand| c.command().text();
+    assert_eq!(cmd(SessionCommand::NewFolder { folder: "Live".into() }), r#"post /NewFolder {"folder":"Live","type":"session"}"#);
+    assert_eq!(cmd(SessionCommand::DeleteFolder { folder: "Live".into() }), r#"post /DeleteFolder {"folder":"Live","type":"session"}"#);
+    assert_eq!(cmd(SessionCommand::Delete { name: "Band".into() }), r#"post /DeleteSession {"name":"Band"}"#);
+    assert_eq!(cmd(SessionCommand::Rename { from: "Band".into(), to: "Band 2".into() }), r#"post /RenameSession {"newName":"Band 2","origName":"Band"}"#);
+    for bad in [SessionCommand::save_as(""), SessionCommand::save_as("  .uadmix"), SessionCommand::Open { path: " ".into() }, SessionCommand::NewFolder { folder: String::new() }] {
+        assert!(!bad.is_sendable(), "{bad:?}");
+    }
+    let server = MockEngine::start(live_x4(), MockOptions::default()).unwrap();
+    let mut store = live(&server, true);
+    store.session(&SessionCommand::save_as(""));
+    store.session(&SessionCommand::Open { path: String::new() });
+    store.session(&SessionCommand::Save);
+    let end = Instant::now() + Duration::from_secs(10);
+    while server.write_commands().is_empty() {
+        assert!(Instant::now() < end, "no writes");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(server.write_commands(), ["post /SaveSession {}"]);
+}

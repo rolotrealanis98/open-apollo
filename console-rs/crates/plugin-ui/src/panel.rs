@@ -287,7 +287,7 @@ impl PluginPanel {
         match (action, &id.control) {
             (Action::GestureBegin(_), Control::PluginParam(_)) => params.begin_gesture(),
             (Action::GestureEnd(_), Control::PluginParam(_)) => params.end_gesture(),
-            (Action::Set(_, v), Control::PluginParam(k)) => {
+            (Action::Set(_, v) | Action::Reset(_, v), Control::PluginParam(k)) => {
                 let n = self.steps(*k, params);
                 let v = if n > 1 { step_value(step_index(*v, n), n) } else { clamp01(*v) };
                 if v != self.value(*k, params) {
@@ -386,7 +386,7 @@ impl PluginPanel {
 
 pub(crate) fn action_id(action: &Action) -> &ControlId {
     match action {
-        Action::GestureBegin(id) | Action::Set(id, _) | Action::GestureEnd(id) | Action::Toggle(id) | Action::Tap(id) => id,
+        Action::GestureBegin(id) | Action::Set(id, _) | Action::Reset(id, _) | Action::GestureEnd(id) | Action::Toggle(id) | Action::Tap(id) => id,
     }
 }
 
