@@ -161,8 +161,10 @@ the Rust version used on Linux.
   `path` = the insert node with no trailing `/`, `plugin_id` last.
 - **Registration.** A scheme handler can only be set on a `WKWebViewConfiguration` before the
   view is created, and `ua-content` is not a scheme WebKit handles itself.
-- `uaconsole-ffi` draws the mixer only; it creates no web views. The Swift host owns the
-  `WKWebView`, the handler and the window placement.
+- `uaconsole-ffi` draws the mixer only; it creates no web views. A tap on a loaded insert
+  queues a `UacPluginRequest` (`uac_take_plugin_request`): `slot_path` is the `path` key and
+  `effect_name` picks the lunacomponent (its id is `plugin_id`). The Swift host owns the
+  `WKWebView`, the handler, the window placement and the UANet endpoint for `port`.
 
 ```swift
 import WebKit
