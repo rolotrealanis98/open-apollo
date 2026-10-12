@@ -55,9 +55,20 @@ impl EngineMixer {
         self.store.post("/SceneOperation", Some(&args));
     }
 
-    /// `/UndoRedo` values `{value, type: undo | current | redo, enabled}`: the nearest enabled
-    /// undo step before the current one and the nearest redo step after it.
+    /// `/UndoRedo` values `{value, type: undo | current | redo, enabled}`: whether an undo / redo
+    /// step is enabled, as the value Console would set. UA Mixer Engine 12 only acts on
+    /// current − 1 (undo) and current + 1 (redo) (`CMxUndoManager::SetProperty` 0x1000b5084).
     fn undo_redo_targets(&self) -> (Option<Json>, Option<Json>) {
+        let current = self.store.value(ua_engine::UNDO_REDO).and_then(|v| v.as_f64()).map(|c| c as i64);
+        let (undo, redo) = self.undo_redo_entries();
+        match current {
+            Some(c) => (undo.map(|_| Json::from(c - 1)), redo.map(|_| Json::from(c + 1))),
+            None => (undo, redo),
+        }
+    }
+
+    /// The enabled undo and redo entries of the `/UndoRedo` list.
+    fn undo_redo_entries(&self) -> (Option<Json>, Option<Json>) {
         let Some(Json::Array(list)) = self.store.meta("/UndoRedo").and_then(|m| m.values.clone()) else { return (None, None) };
         let mut undo = None;
         let mut redo = None;
@@ -156,8 +167,9 @@ impl EngineMixer {
                     Command::Redo => redo,
                     _ => None,
                 };
+                // Unbracketed (an /UndoRecording group around an undo would record a step).
                 if let Some(v) = target.and_then(|v| v.as_i64()) {
-                    self.store.commit("/UndoRedo", v);
+                    self.store.set_now(ua_engine::UNDO_REDO, v);
                 }
             }
             // Meter menu CLEAR (`Rack_Meter::HandlePopupMenu` 0x1809cadf0 →

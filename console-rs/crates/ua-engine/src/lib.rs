@@ -61,7 +61,7 @@ pub use message::Message;
 pub use session::{ModifiedSession, SessionCommand, SessionEntry, SessionState, SnapshotCommand};
 pub use meters::{MeterHandle, MeterProperty, MeterReading, MeterStats, MeterStore};
 pub use mock::{MockEngine, MockHelper, MockOptions};
-pub use store::{Changes, Status, Store};
+pub use store::{Changes, Status, Store, UNDO_REDO};
 pub use subscription::{Batch, SubscriptionPlan};
 pub use topology::{
     AuxStrip, CueOutput, HeadphoneOutput, InputKind, InputStrip, InsertPaths, MeterPaths,

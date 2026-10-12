@@ -158,3 +158,37 @@ fn tap_tempo_sets_the_tempo_from_four_taps() {
     let shown: f64 = v.text_edit.as_ref().unwrap().text.parse().unwrap();
     assert!((shown - bpm).abs() < 0.006, "{shown} vs {bpm}");
 }
+
+/// Edit › Undo sets `/UndoRedo` to current − 1 (the only value the engine acts on), and every
+/// gesture is followed by Console's `get /UndoRedo/values?cmdID=15`.
+#[test]
+fn undo_sets_current_minus_one_and_gestures_refresh_the_list() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let mut v = ViewState::default();
+    assert!(v.run_command_id("undo", &mut m));
+    let w = writes_after(&server, 1);
+    assert_eq!(w, ["set /UndoRedo/value 46"]);
+    let end = Instant::now() + Duration::from_secs(10);
+    while !server.received_commands().iter().any(|c| c.starts_with("get /UndoRedo/values?cmdID=15&func_id=")) {
+        assert!(Instant::now() < end, "no undo list refresh: {:?}", server.received_commands());
+        m.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// A double click resets through the engine's default: `set …/value "default"` in its own undo
+/// step, no request query.
+#[test]
+fn double_click_reset_sends_default() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let strip = m.inputs()[0].id.clone();
+    let id = ControlId { strip, control: Control::PanL };
+    for a in [Action::GestureBegin(id.clone()), Action::Reset(id.clone(), 0.5), Action::GestureEnd(id)] {
+        m.apply(&a);
+    }
+    let w = writes_after(&server, 3);
+    assert_eq!(w, ["set /UndoRecording/value true", r#"set /devices/0/inputs/0/Pan/value "default""#, "set /UndoRecording/value false"]);
+    assert!(server.raw_write_commands()[1].starts_with(r#"set /devices/0/inputs/0/Pan/value "default""#));
+}

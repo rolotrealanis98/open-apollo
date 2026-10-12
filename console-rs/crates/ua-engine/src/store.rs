@@ -84,6 +84,10 @@ const STRUCTURAL: [&str; 10] = [
 const METADATA_TRIGGERS: [&str; 3] = ["Stereo", "IOType", "EffectName"];
 const LOG_CAP: usize = 16_384;
 const REFRESH_DELAY: Duration = Duration::from_millis(100);
+/// `/UndoRedo`: an int whose `values` are `[{type:"undo"…},{type:"current"…},{type:"redo"…}]`.
+pub const UNDO_REDO: &str = "/UndoRedo";
+/// How long after a gesture the undo list is re-read (Console: 30–90 ms).
+const UNDO_VALUES_DELAY: Duration = Duration::from_millis(40);
 
 struct Hold {
     until: Instant,
@@ -103,6 +107,8 @@ struct Model {
     refresh_wanted: Vec<String>,
     /// A session identity property changed: re-read the session lists.
     values_wanted: bool,
+    /// `/UndoRedo` changed (another client, the hardware): re-read its list.
+    undo_values_wanted: bool,
     live: bool,
 }
 
@@ -138,6 +144,9 @@ impl Model {
         }
         if self.live && session::IDENTITY_PATHS.contains(&pp) {
             self.values_wanted = true;
+        }
+        if self.live && pp == UNDO_REDO {
+            self.undo_values_wanted = true;
         }
         true
     }
@@ -203,6 +212,8 @@ pub struct Store {
     refresh_inflight: Vec<(String, PendingReply)>,
     /// `get <property>/values` in flight (session lists).
     values_inflight: Vec<(String, PendingReply)>,
+    /// When to re-read `/UndoRedo/values` after a gesture.
+    undo_values_due: Option<Instant>,
     last_error: Option<String>,
     waker: Option<Waker>,
     simulation: Option<Simulation>,
@@ -253,6 +264,7 @@ impl Store {
                 topology_dirty: false,
                 refresh_wanted: Vec::new(),
                 values_wanted: false,
+                undo_values_wanted: false,
                 live: false,
             },
             writer: Writer::default(),
@@ -271,6 +283,7 @@ impl Store {
             refresh_due: HashMap::new(),
             refresh_inflight: Vec::new(),
             values_inflight: Vec::new(),
+            undo_values_due: None,
             last_error: None,
             waker: None,
             simulation: None,
@@ -409,6 +422,7 @@ impl Store {
             (!self.refresh_inflight.is_empty()).then(|| Instant::now() + Duration::from_millis(50));
         holds
             .chain(refresh)
+            .chain(self.undo_values_due)
             .chain(self.writer.deadline())
             .chain(inflight)
             .min()
@@ -870,6 +884,13 @@ impl Store {
         self.end_gesture();
     }
 
+    /// A `set` sent at once with no undo bracket: for properties that are not edits themselves
+    /// (`/UndoRedo`, which an open `/UndoRecording` group would record).
+    pub fn set_now(&mut self, path: &str, value: impl Into<Value>) {
+        self.set(path, value);
+        self.flush();
+    }
+
     /// A discrete edit (button, menu): its own gesture, sent at once.
     pub fn commit(&mut self, path: &str, value: impl Into<Value>) {
         self.begin_gesture();
@@ -885,8 +906,14 @@ impl Store {
     }
 
     pub fn end_gesture(&mut self) {
+        let closing = self.writer.gesture_depth() == 1;
         self.writer
             .end_gesture(&self.model, sink_of(&self.sink, &self.handle));
+        // Console re-reads the undo list after every gesture (`get /UndoRedo/values?cmdID=15`,
+        // 30–90 ms later in the 1.3.1 pcap) so Edit › Undo / Redo enable correctly.
+        if closing && self.writer.writes_enabled {
+            self.undo_values_due = Some(Instant::now() + UNDO_VALUES_DELAY);
+        }
     }
 
     /// `post <path> <payload>` through the writer gate (suppressed and counted while writes are
@@ -939,6 +966,12 @@ impl Store {
     /// Re-reads `<property>/values` (read-only `get`) and replaces the property's list when the
     /// reply arrives (in a later `drain`). False when not live.
     pub fn refresh_values(&mut self, property: &str) -> bool {
+        self.refresh_values_query(property, None)
+    }
+
+    /// [`refresh_values`](Self::refresh_values) with Console's request query (`cmdID=15` for
+    /// `/UndoRedo`; `func_id` is added by the connection).
+    fn refresh_values_query(&mut self, property: &str, query: Option<&str>) -> bool {
         let prop = path::property_path(property).to_owned();
         if self.status != Status::Live || !self.model.tree.has_property(&prop) {
             return false;
@@ -949,7 +982,11 @@ impl Store {
         if self.values_inflight.iter().any(|(p, _)| *p == prop) {
             return true;
         }
-        let reply = handle.request(&session::values_path(&prop), false);
+        let mut target = session::values_path(&prop);
+        if let Some(q) = query {
+            target = format!("{target}?{q}");
+        }
+        let reply = handle.request(&target, false);
         self.values_inflight.push((prop, reply));
         true
     }
@@ -959,6 +996,11 @@ impl Store {
             for p in session::LIST_PATHS {
                 self.refresh_values(p);
             }
+        }
+        let undo_due = self.undo_values_due.is_some_and(|t| Instant::now() >= t);
+        if undo_due || std::mem::take(&mut self.model.undo_values_wanted) {
+            self.undo_values_due = None;
+            self.refresh_values_query(UNDO_REDO, Some("cmdID=15"));
         }
         let mut done = Vec::new();
         self.values_inflight
