@@ -1,0 +1,16 @@
+[package]
+name = "ua-engine"
+version = "0.1.0"
+description = "UA Mixer Engine protocol and model: NUL-framed JSON over TCP 4710, path tree, topology, tapers, meters, gated writer"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# `Snapshot::bundled_x4()`: a sanitized live Apollo x4 capture (engine 12.0.0) compiled into
+# the binary (~0.5 MB) for offline rendering without a snapshot file.
+bundled-snapshot = []
+
+[dependencies]
+serde_json = "1"
