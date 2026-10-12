@@ -264,6 +264,10 @@ fn strip_id(base: &str) -> Arc<str> {
 }
 
 impl MixerModel for EngineMixer {
+    fn pump(&mut self) -> bool {
+        EngineMixer::pump(self)
+    }
+
     fn session_name(&self) -> String {
         let name = self
             .str_at("/Session")

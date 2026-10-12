@@ -30,25 +30,17 @@ impl ModelSource {
     pub fn open(&self) -> Result<OpenedModel, String> {
         Ok(match self {
             ModelSource::Preview => preview("preview"),
-            ModelSource::Mock(path) => {
-                // TODO(engine-model): one line —
-                //   return Ok(OpenedModel { model: Box::new(engine_model::EngineMixer::from_snapshot(path).map_err(|e| e.to_string())?), live_meters: false, label: file_name(path) });
-                eprintln!(
-                    "uaconsole: --mock {}: snapshot models need the engine-model crate; showing preview data",
-                    path.display()
-                );
-                preview(&format!("mock {} (preview data)", file_name(path)))
-            }
-            ModelSource::Engine { addr, writes } => {
-                // TODO(engine-model): one line —
-                //   return Ok(OpenedModel { model: Box::new(engine_model::EngineMixer::connect(&addr.host, addr.port, *writes).map_err(|e| e.to_string())?), live_meters: true, label: addr.to_string() });
-                // Until then nothing connects to the engine (and nothing can write to it).
-                let _ = writes;
-                eprintln!(
-                    "uaconsole: engine {addr}: the engine-model crate is not wired in yet; showing preview data"
-                );
-                preview(&format!("{addr} (preview data)"))
-            }
+            ModelSource::Mock(path) => OpenedModel {
+                model: Box::new(engine_model::EngineMixer::from_snapshot(path).map_err(|e| e.to_string())?),
+                live_meters: false,
+                label: file_name(path),
+            },
+            ModelSource::Engine { addr, writes } => OpenedModel {
+                // Read-only unless `writes` (both the writer gate and the connection refuse set/post).
+                model: Box::new(engine_model::EngineMixer::connect(ua_engine::Endpoint::new(addr.host.clone(), addr.port), *writes)),
+                live_meters: true,
+                label: addr.to_string(),
+            },
         })
     }
 }

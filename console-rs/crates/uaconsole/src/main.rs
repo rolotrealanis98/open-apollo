@@ -63,6 +63,20 @@ fn main() -> ExitCode {
             eprintln!("uaconsole: {e}; showing preview data");
             source::preview("preview")
         });
+        if matches!(source, ModelSource::Engine { .. }) {
+            // Headless frames from a live engine: wait (≤10 s) for the tree and first pushes.
+            let deadline = Instant::now() + std::time::Duration::from_secs(10);
+            while Instant::now() < deadline {
+                opened.model.pump();
+                if !opened.model.inputs().is_empty() {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    opened.model.pump();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            eprintln!("engine: {} inputs, {} auxes", opened.model.inputs().len(), opened.model.auxes().len());
+        }
         let scale = args.scale.unwrap_or(2.0);
         let result = match (&args.render, args.bench) {
             (Some(out), _) => bench::render_png(

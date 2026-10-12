@@ -235,6 +235,10 @@ impl App {
     }
 
     fn redraw(&mut self) {
+        // Engine pushes land here once per frame; live meters rebuild every tick (≈0.2 ms).
+        if self.model.pump() || self.live_meters {
+            self.dirty = true;
+        }
         if self.dirty || self.show_stats {
             self.rebuild();
         }
