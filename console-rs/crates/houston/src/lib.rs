@@ -3,6 +3,7 @@
 //! runtime and are never bundled.
 
 pub mod appearance;
+pub mod fonts;
 pub mod geom;
 pub mod image;
 pub mod json;

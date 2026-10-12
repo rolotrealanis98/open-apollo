@@ -60,6 +60,9 @@ fn bid(control: Control) -> ControlId {
     ControlId { strip: BROWSER_ID.into(), control }
 }
 
+/// Helvetica bold at an em `size` in points. Console's browser fonts are `font-size-dyn` skins
+/// (e.g. `Browser-Category-*`, 10 + 1 = 11; houston::fonts): measured on refpair p1, list names,
+/// headers and category labels are 11, the tabs 12.
 fn bold(size: f32, color: Rgba) -> TextStyle {
     Ui::plain_style("Helvetica", size, true, color)
 }
@@ -137,7 +140,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         let sec = Rect::new(MARGIN, y, inner, section_height(b.categories_open, cats.len()));
         rounded(ui, sec, SECTION, SECTION_EDGE, BG, &UA_CORNER, [true; 4]);
         reveal(ui, b.categories_open, Rect::new(sec.x + 1.0, sec.y + 5.0, 20.0, 20.0));
-        let head = bold(12.0, Rgba::rgb8(227, 227, 227));
+        let head = bold(11.0, Rgba::rgb8(227, 227, 227));
         ui.text("CATEGORIES", head.clone(), Rect::new(sec.x + 21.0, sec.y, 120.0, SECTION_HEADER_H), Align::Left);
         ui.hit(Rect::new(sec.x, sec.y, 160.0, SECTION_HEADER_H), bid(Control::BrowserCategoriesReveal), HitKind::Toggle);
         let fav_on = b.favorites_only;
@@ -181,7 +184,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         if b.hint {
             let hr = Rect::new(list.x + MARGIN, y, list.w - 2.0 * MARGIN, HINT_H);
             ui.image_stretched("uapw/tag_bg_on.png", hr, 1.0);
-            let hs = bold(12.0, Rgba::rgb8(227, 227, 228));
+            let hs = bold(11.0, Rgba::rgb8(227, 227, 228));
             ui.text("DRAG TO AN INSERT TO ASSIGN", hs.clone(), Rect::new(hr.x, hr.y + 5.75, hr.w, 20.0), Align::Center);
             ui.text("RIGHT CLICK TO ENTER ASSIGN MODE", hs, Rect::new(hr.x, hr.y + 27.75, hr.w, 20.0), Align::Center);
             // `Browser-Modal-Close-White`: 20 pt button, art in its 3,3,4,4 background insets.
@@ -255,14 +258,9 @@ fn reveal(ui: &mut Ui, open: bool, r: Rect) {
 
 fn category_cell(ui: &mut Ui, label: &str, on: bool, r: Rect) {
     rounded(ui, r, if on { CELL_ON } else { CELL }, CELL_EDGE, SECTION, &CELL_CORNER, [true; 4]);
-    // Console fits long names by squeezing them horizontally; shrink instead.
-    let size = match label.len() {
-        0..=15 => 12.0,
-        16..=19 => 11.0,
-        _ => 10.0,
-    };
+    // Long names are squeezed to fit by the renderer (JUCE drawFittedText, down to 0.7).
     let color = if on { AMBER } else { Rgba::rgb8(225, 225, 224) };
-    ui.text(label, bold(size, color), r.inset(2.0, 0.0, 2.0, 0.0), Align::Center);
+    ui.text(label, bold(11.0, color), r.inset(5.0, 0.0, 5.0, 0.0), Align::Center);
 }
 
 /// One list line: a group header or a catalog entry.
@@ -303,8 +301,8 @@ fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
         ui.text(msg, Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4)), Rect::new(r.x, r.y, content_w, 30.0), Align::Center);
     }
     ui.clip(Some(r));
-    let name_style = bold(if b.large_rows { 12.0 } else { 11.0 }, Rgba::rgb8(230, 230, 230));
-    let group_style = bold(12.0, Rgba::rgb8(132, 132, 133));
+    let name_style = bold(11.0, Rgba::rgb8(230, 230, 230));
+    let group_style = bold(11.0, Rgba::rgb8(132, 132, 133));
     let mut y = r.y - off;
     for line in &lines {
         let lh = height(line);
@@ -373,7 +371,7 @@ fn presets_tab(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     rounded(ui, r, WELL, WELL_EDGE, BG, &UA_CORNER, [true; 4]);
     let catalog = model.plugin_catalog();
     let sel = view.browser.selected.and_then(|i| catalog.get(i as usize));
-    let head = bold(12.0, Rgba::rgb8(227, 227, 227));
+    let head = bold(11.0, Rgba::rgb8(227, 227, 227));
     ui.text(sel.map(|p| p.display_name()).unwrap_or("NO PLUG-IN SELECTED"), head, Rect::new(r.x + 10.0, r.y + 4.0, r.w - 20.0, 24.0), Align::Left);
     let note = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.45));
     ui.text("Presets: not yet wired (plugins/P/Preset values)", note, Rect::new(r.x + 10.0, r.y + 30.0, r.w - 20.0, 20.0), Align::Left);

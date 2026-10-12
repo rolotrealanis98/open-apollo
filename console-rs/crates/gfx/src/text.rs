@@ -4,8 +4,10 @@
 //!   glyph runs of every label it drew before and only positions them.
 //! * Vertical placement (JUCE `GlyphArrangement::justifyGlyphs`): a line's box is the font height
 //!   (ascent + descent) and is centred in the rect; the baseline sits `ascent` below the box top.
-//!   Ascent and descent are those of the face Console asks for (CoreText metrics of Helvetica,
-//!   Helvetica Neue, Arial, Lucida Grande), also when Linux substitutes a metric-compatible face.
+//!   Ascent and descent are those of the face Console asks for ([`houston::fonts::face_metrics`]:
+//!   CoreText's for Helvetica, Helvetica Neue, Arial, Lucida Grande; Oxygen's own), also when Linux
+//!   substitutes a metric-compatible face. `TextStyle::size` is the em in points; skin fonts
+//!   convert Console's JUCE heights to it in [`houston::Skin::font`].
 //!   `\n` stacks lines one font height apart and centres the block.
 //! * Horizontal placement: advance widths, trailing whitespace ignored when centred.
 //! * Fitting (JUCE `drawFittedText`): a single line wider than its rect is squeezed horizontally
@@ -39,19 +41,6 @@ pub const MIN_HORIZONTAL_SCALE: f32 = 0.7;
 /// tools/align/text_diff.py (ink mass ours/Console, labels of equal size): light text 0.76 → 1.0
 /// at 0.018; dark text 1.006 either way.
 pub const SMOOTHING: f32 = 0.018;
-
-/// Ascent and descent (fraction of the em) of the faces Console names, as CoreText reports them
-/// (macOS 27, CTFontGetAscent/Descent). JUCE's font height is their sum.
-fn console_metrics(family: &str, bold: bool) -> Option<(f32, f32)> {
-    Some(match family {
-        "Helvetica" => (0.770, 0.230),
-        "Helvetica Neue" if bold => (0.975, 0.217),
-        "Helvetica Neue" => (0.952, 0.213),
-        "Arial" => (0.905, 0.212),
-        "Lucida Grande" => (0.967, 0.211),
-        _ => return None,
-    })
-}
 
 #[cfg(not(target_vendor = "apple"))]
 fn family_for(name: &str) -> &'static str {
@@ -272,7 +261,7 @@ impl TextSystem {
                 face_metrics = Some((m.ascent / upm, m.descent.abs() / upm));
             }
         }
-        let (ascent, descent) = console_metrics(&style.family, style.bold).or(face_metrics).unwrap_or((0.8, 0.2));
+        let (ascent, descent) = houston::fonts::face_metrics(&style.family, style.bold, style.italic).or(face_metrics).unwrap_or((0.8, 0.2));
         Shaped {
             text: text.into(),
             style: key,
