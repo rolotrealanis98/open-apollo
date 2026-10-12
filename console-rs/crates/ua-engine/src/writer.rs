@@ -158,6 +158,18 @@ impl Writer {
         }
     }
 
+    /// Sends (or counts as suppressed) a discrete command, a `post` or an uncoalesced `set`,
+    /// after the pending values so the engine sees edits in order.
+    pub(crate) fn send_now(
+        &mut self,
+        model: &impl LocalModel,
+        sink: Option<&dyn CommandSink>,
+        command: Command,
+    ) {
+        self.flush(model, sink);
+        self.emit(sink, command);
+    }
+
     /// Flushes if the coalescing interval has elapsed.
     pub(crate) fn poll(
         &mut self,
