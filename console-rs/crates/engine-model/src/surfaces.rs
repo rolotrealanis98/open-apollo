@@ -174,6 +174,7 @@ impl EngineMixer {
             dim_level: (atten / 60.0).clamp(0.0, 1.0),
             dim_readout: format!("-{atten:.0} dB"),
             talkback: self.bool_at(&self.store.topology().talkback.on()),
+            talkback_to_monitor: self.bool_at(&self.store.topology().talkback.in_physical_cr()),
             alt_count,
             alt_selection: self.store.value(&m.alt_mon_selection()).and_then(Value::as_i64).unwrap_or(0).clamp(0, 2) as u8,
             // Rack's controller predicate is unresolved; Console 1.3.1 shows the button for an
@@ -372,6 +373,24 @@ impl EngineMixer {
             Control::Talkback => {
                 let p = self.store.topology().talkback.on();
                 self.toggle(&p, false);
+            }
+            // `Rack_Talkback` talkback_to_mons (0x181497377) → `/TalkbackInPhysicalCR` (registered
+            // by MxClnt_UAD2MixerData 0x181b187ca; root on engine 12.0.0).
+            Control::TalkbackToMonitor => {
+                let p = self.store.topology().talkback.in_physical_cr();
+                self.toggle(&p, false);
+            }
+            // Control-room SOURCE (`Rack_ControlRoom` cue_N/mon_source, 0x181b1fa7b):
+            // `outputs/MON/MixInSource` "mon" | "cueN" (values on the x4: mon, cue1…cue4).
+            Control::CrSource(k) => {
+                if let Some(m) = monitor {
+                    let path = format!("/devices/{}/outputs/{}/MixInSource", m.device, m.index);
+                    let want = if *k == 0 { "mon".to_owned() } else { format!("cue{k}") };
+                    let allowed = self.choices(&path);
+                    if allowed.is_empty() || allowed.iter().any(|v| v.as_str() == Some(want.as_str())) {
+                        self.store.commit(&path, want);
+                    }
+                }
             }
             Control::CueSource(k) | Control::CueMono(k) => {
                 let cue = self.store.topology().cues.iter().filter(|c| c.is_active).nth(*k as usize).cloned();

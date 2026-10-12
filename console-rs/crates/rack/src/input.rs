@@ -120,6 +120,8 @@ pub enum Control {
     /// [model] Monitor DIM / talkback, and the speaker set (0 = main MONITOR, 1 = ALT 1, 2 = ALT 2).
     MonitorDim,
     Talkback,
+    /// [model] Talkback strip TALKBACK TO MONITOR (`/TalkbackInPhysicalCR`).
+    TalkbackToMonitor,
     MonitorAlt(u8),
     /// [model] Dim attenuation knob (drag 0…1).
     DimLevel,

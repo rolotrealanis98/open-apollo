@@ -868,9 +868,11 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
         ui.toggle("Switch", Some("POST"), !st.pre, true, Rect::new(48.0, r.y, 40.0, r.h), cid(s, Control::PrePost), None);
     }
     if let Some((talk, to_mons)) = g.talkback {
-        let on = model.monitor_options().talkback.unwrap_or(false);
+        let opts = model.monitor_options();
+        let on = opts.talkback.unwrap_or(false);
         ui.toggle("Switch-Large", Some("TALK"), on, true, talk, Some(ControlId { strip: "monitor".into(), control: Control::Talkback }), None);
-        ui.toggle("Switch-Large", Some("TALKBACK\nTO MONITOR"), false, true, to_mons, None, None);
+        let to_mon = ControlId { strip: "monitor".into(), control: Control::TalkbackToMonitor };
+        ui.toggle("Switch-Large", Some("TALKBACK\nTO MONITOR"), opts.talkback_to_monitor.unwrap_or(false), opts.talkback_to_monitor.is_some(), to_mons, Some(to_mon), None);
     }
     if let Some(r) = g.mono_mute {
         ui.toggle("Switch", Some("MONO"), st.mono, true, Rect::new(8.0, r.y, 40.0, r.h), cid(s, Control::Mono), None);

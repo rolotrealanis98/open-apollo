@@ -438,6 +438,9 @@ pub struct MonitorOptions {
     pub knob_focus: bool,
     /// Control-room SOURCE (`outputs/MON/MixInSource`): 0 = MONITOR, n = CUE n.
     pub cr_source: u8,
+    /// TALKBACK TO MONITOR (`Rack_Talkback` `talkback_to_mons`, 0x181497377):
+    /// `/TalkbackInPhysicalCR`; None hides the button's state (off).
+    pub talkback_to_monitor: Option<bool>,
 }
 
 /// A cue output (`outputs/14..17`): what it plays and how.
@@ -792,6 +795,7 @@ impl Default for PreviewMixer {
                 speaker_correction: Some(true),
                 knob_focus: true,
                 cr_source: 0,
+                talkback_to_monitor: Some(false),
             },
             cues: vec![
                 CueOutput { name: "CUE 1".into(), source_cue: true, mono: false, destination: "LINE 3/4".into() },
@@ -995,6 +999,10 @@ impl MixerModel for PreviewMixer {
                 Control::MonitorMute => return self.monitor.mute ^= true,
                 Control::MonitorDim => return self.monitor_options.dim = self.monitor_options.dim.map(|d| !d),
                 Control::Talkback => return self.monitor_options.talkback = self.monitor_options.talkback.map(|t| !t),
+                Control::TalkbackToMonitor => {
+                    return self.monitor_options.talkback_to_monitor = self.monitor_options.talkback_to_monitor.map(|t| !t);
+                }
+                Control::CrSource(k) => return self.monitor_options.cr_source = *k,
                 Control::MonitorAlt(k) => return self.monitor_options.alt_selection = *k,
                 Control::CueSource(k) => return if let Some(c) = self.cues.get_mut(*k as usize) { c.source_cue ^= true },
                 Control::CueMono(k) => return if let Some(c) = self.cues.get_mut(*k as usize) { c.mono ^= true },
