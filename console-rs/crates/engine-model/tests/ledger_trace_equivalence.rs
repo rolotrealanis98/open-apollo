@@ -193,8 +193,10 @@ const KNOWN_DIVERGENT: &[(&str, &str)] = &[
     ("unison-assign", "Console sends the assign unbracketed (no /UndoRecording); we commit it inside a bracket"),
 ];
 
-/// Strict (query-parameter) mismatches allowed today: our writer sends no `context_type=main`.
-const MAX_QUERY_MISMATCH: usize = 6;
+/// Strict (query-parameter) mismatches allowed today: our writer sends no `context_type=main`
+/// (Console also numbers every request with `func_id`, which is ignored here: the engine only
+/// echoes it).
+const MAX_QUERY_MISMATCH: usize = 4;
 
 #[test]
 fn console_ui_actions_produce_the_same_engine_traffic() {
@@ -206,15 +208,11 @@ fn console_ui_actions_produce_the_same_engine_traffic() {
     let aux0 = "/devices/0/auxs/0";
     let mut outcomes = Vec::new();
     let mut check = |scenario: &'static str, source: &'static str, ui_action: &'static str, console: Option<Vec<Wire>>, ours: Vec<Wire>, note: String| {
-        let mut console = console.unwrap_or_else(|| panic!("{scenario}: no traced action in {source}"));
-        // 1.3.1 is the source of truth: it tags every control write `context_type=main` (seen on
-        // bool Mute and float Pan sets), where 1.2.x only tagged continuous ones. Upgrade 1.2.x
-        // expectations accordingly (EffectName writes stay as traced: no 1.3.1 sample yet).
-        if source == "v12" {
-            for w in console.iter_mut().filter(|w| w.verb == "set" && !w.is_undo() && !w.prop.ends_with("/EffectName")) {
-                w.query.insert("context_type=main".into());
-            }
-        }
+        // 1.3.1 is the source of truth where it was captured (Mute, Pan); elsewhere the 1.2.x
+        // shape stands. protocol/v131/map.json: 1.3.1 tags mixer-control sets (Mute, Pan,
+        // FaderLevelTapered, CRMonitorLevelTapered) `context_type=main`; 1.2.x sent Phase and
+        // RecordPreEffects with a plain func_id, and no 1.3.1 sample of those exists yet.
+        let console = console.unwrap_or_else(|| panic!("{scenario}: no traced action in {source}"));
         let ours = collapse(&ours);
         let core = |v: &[Wire]| v.iter().map(Wire::core).collect::<Vec<_>>();
         let core_match = core(&console) == core(&ours);
@@ -310,4 +308,92 @@ fn console_ui_actions_produce_the_same_engine_traffic() {
         }
     }
     assert!(strict_fail <= MAX_QUERY_MISMATCH, "{strict_fail} scenarios miss Console 1.3.1's query parameters (max {MAX_QUERY_MISMATCH})");
+}
+
+/// Console 1.3.1 wire-profile rules (protocol/v131/MAP.md "Console 1.3.1 client profile") that
+/// fail today, with the work that fixes them. A ratchet: the test prints rules that now pass.
+const KNOWN_WIRE_GAPS: &[(&str, &str)] = &[
+    ("set-func-id", "in progress (rc/wiring): one connection-wide func_id counter on every request with a query (MAP.md P1 #4)"),
+    ("set-context-type", "in progress (rc/wiring): context_type=main on mixer-control sets (MAP.md P1 #4)"),
+    ("undo-func-id", "in progress (rc/wiring): func_id on /UndoRecording sets (MAP.md P1 #4)"),
+    ("undo-refresh", "in progress (rc/wiring): get /UndoRedo/values?cmdID=15 after every gesture (MAP.md P1 #6)"),
+    ("reset-default", "in progress (rc/wiring): double-click reset writes the literal \"default\" (MAP.md P1 #5)"),
+];
+
+/// Live against a `MockEngine` (writes on): the exact frames we send for a mute click, a pan
+/// drag and a pan double-click, checked against Console 1.3.1's wire profile. Report:
+/// `$LEDGER_OUT/wire-profile.json`.
+#[test]
+fn wire_profile_matches_console_131() {
+    use std::time::{Duration, Instant};
+    use ua_engine::{MockEngine, MockOptions, Snapshot, Status};
+
+    let tree = Snapshot::load(fixture()).unwrap().tree;
+    let server = MockEngine::start(tree, MockOptions::default()).unwrap();
+    let mut m = EngineMixer::connect(server.endpoint(), true);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while *m.store().status() != Status::Live {
+        m.pump();
+        assert!(Instant::now() < deadline, "not live");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mark = server.received_commands().len();
+    let mut view = ViewState::default();
+    let id = |c: Control| ControlId { strip: Arc::from("/devices/0/inputs/1"), control: c };
+    // Mute click; pan drag (3 mouse events); pan double-click (Interaction: begin, reset, end).
+    view.dispatch(Action::Toggle(id(Control::Mute)), &mut m);
+    let pan = id(Control::PanL);
+    view.dispatch(Action::GestureBegin(pan.clone()), &mut m);
+    for v in [0.45, 0.40, 0.35] {
+        view.dispatch(Action::Set(pan.clone(), v), &mut m);
+        m.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    view.dispatch(Action::GestureEnd(pan.clone()), &mut m);
+    for a in [Action::GestureBegin(pan.clone()), Action::Set(pan.clone(), 0.5), Action::GestureEnd(pan.clone())] {
+        view.dispatch(a, &mut m);
+    }
+    let settle = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < settle {
+        m.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let sent: Vec<String> = server.received_commands()[mark..].to_vec();
+    let sets: Vec<&String> = sent.iter().filter(|c| c.starts_with("set ")).collect();
+    let undo: Vec<&&String> = sets.iter().filter(|c| c.starts_with("set /UndoRecording/")).collect();
+    let controls: Vec<&&String> = sets.iter().filter(|c| !c.starts_with("set /UndoRecording/")).collect();
+    let has = |c: &str, q: &str| c.split(' ').nth(1).is_some_and(|p| p.split_once('?').is_some_and(|(_, qs)| qs.split('&').any(|kv| kv.starts_with(q))));
+    // After each closing bracket, a `get /UndoRedo/values?cmdID=15` before the next bracket opens.
+    let closes: Vec<usize> = sent.iter().enumerate().filter(|(_, c)| c.starts_with("set /UndoRecording/") && c.ends_with(" false")).map(|(i, _)| i).collect();
+    let refreshed = !closes.is_empty()
+        && closes.iter().all(|&i| sent[i + 1..].iter().take_while(|c| !(c.starts_with("set /UndoRecording/") && c.ends_with(" true"))).any(|c| c.starts_with("get /UndoRedo/values") && c.contains("cmdID=15")));
+    let pan_sets = controls.iter().filter(|c| c.contains("/inputs/1/Pan/")).count();
+    let rules: Vec<(&str, bool, String)> = vec![
+        ("set-func-id", !controls.is_empty() && controls.iter().all(|c| has(c, "func_id=")), "every control set carries ?func_id=<n>".into()),
+        ("set-context-type", !controls.is_empty() && controls.iter().filter(|c| !c.ends_with("\"default\"")).all(|c| has(c, "context_type=main")), "mixer-control sets carry context_type=main".into()),
+        ("undo-func-id", !undo.is_empty() && undo.iter().all(|c| has(c, "func_id=")), "/UndoRecording sets carry ?func_id=<n>".into()),
+        ("undo-refresh", refreshed, "get /UndoRedo/values?cmdID=15 after every gesture".into()),
+        ("reset-default", controls.iter().any(|c| c.contains("/inputs/1/Pan/value") && c.ends_with(" \"default\"")), "double-click reset sends \"default\"".into()),
+        ("brackets", undo.len() >= 6 && undo.len() % 2 == 0, format!("{} /UndoRecording sets for 3 gestures", undo.len())),
+        // P2 (informational): Console sends one set per mouse event (3 here); we coalesce.
+        ("drag-uncoalesced (P2, info)", pan_sets >= 4, format!("{pan_sets} Pan sets for 3 drag events + reset")),
+    ];
+    let report: Vec<serde_json::Value> = rules
+        .iter()
+        .map(|(r, ok, what)| serde_json::json!({ "rule": r, "pass": ok, "what": what, "known_gap": KNOWN_WIRE_GAPS.iter().find(|(k, _)| k == r).map(|(_, w)| *w) }))
+        .collect();
+    std::fs::write(out_dir().join("wire-profile.json"), serde_json::to_string_pretty(&serde_json::json!({ "sent": sent, "rules": report })).unwrap()).unwrap();
+    for (r, ok, what) in &rules {
+        eprintln!("{:<28} {}  {what}", r, if *ok { "pass" } else { "FAIL" });
+    }
+    for (r, ok, _) in &rules {
+        let known = KNOWN_WIRE_GAPS.iter().any(|(k, _)| k == r);
+        if r.contains("(P2, info)") {
+            continue;
+        }
+        if known && *ok {
+            eprintln!("{r}: now passes; remove it from KNOWN_WIRE_GAPS");
+        }
+        assert!(*ok || known, "wire rule {r} fails and is not a known gap");
+    }
 }
