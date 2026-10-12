@@ -713,11 +713,12 @@ impl App {
             match c {
                 C::Quit => self.quit(event_loop),
                 C::ToggleFullScreen => self.run_command(Command::ToggleFullscreen, false, event_loop),
-                C::Documentation => open_url(rack::menu::DOCUMENTATION_URL),
-                C::About => eprintln!("uaconsole {} — a native UAD Console for open-apollo", env!("CARGO_PKG_VERSION")),
-                // Session commands are the sessions layer's hooks; the rest have no window here.
                 other => eprintln!("uaconsole: {} ({}): not available yet", other.label(), other.id()),
             }
+        }
+        // Show In Finder, documentation, Dante pages, feedback (`ViewState::take_open_urls`).
+        for url in self.mixer.take_open_urls() {
+            open_target(&url);
         }
     }
 
@@ -917,7 +918,7 @@ impl ApplicationHandler for App {
             }
             self.handle_window_event(event_loop, id, event);
         }
-        if !self.mixer.commands.is_empty() {
+        if !self.mixer.commands.is_empty() || !self.mixer.open_urls.is_empty() {
             self.run_menu_commands(event_loop);
         }
     }
@@ -980,6 +981,59 @@ fn open_url(url: &str) {
     if let Err(e) = std::process::Command::new(opener).arg(url).spawn() {
         eprintln!("uaconsole: {opener} {url}: {e}");
     }
+}
+
+/// Opens what the console asked for: a `file://` URL is revealed like Console's Show In Finder
+/// (macOS selects the file in Finder; Linux file managers open its folder), the Dante
+/// Controller page launches Dante Controller when it is installed (macOS), anything else opens.
+fn open_target(url: &str) {
+    if let Some(path) = file_url_path(url) {
+        let p = std::path::Path::new(&path);
+        if cfg!(target_os = "macos") {
+            let mut c = std::process::Command::new("open");
+            if p.is_file() {
+                c.arg("-R");
+            }
+            if let Err(e) = c.arg(&path).spawn() {
+                eprintln!("uaconsole: open {path}: {e}");
+            }
+        } else {
+            let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
+            if !dir.exists() {
+                eprintln!("uaconsole: {} does not exist", dir.display());
+                return;
+            }
+            open_url(&rack::surfaces::session::file_url(&dir.to_string_lossy()));
+        }
+        return;
+    }
+    if cfg!(target_os = "macos") && url == rack::menu::DANTE_CONTROLLER_URL {
+        let launched = std::process::Command::new("open").args(["-a", "Dante Controller"]).status().is_ok_and(|s| s.success());
+        if launched {
+            return;
+        }
+    }
+    open_url(url);
+}
+
+/// The path of a `file://` URL (percent-decoded).
+fn file_url_path(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("file://")?;
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&rest[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).ok()
 }
 
 impl App {

@@ -197,6 +197,9 @@ pub enum TextTarget {
     SessionRename(u16),
     /// The CURRENT SESSION panel's New Folder.
     SessionNewFolder,
+    /// A folder row's Rename and New Folder, by panel row index.
+    SessionFolderRename(u16),
+    SessionNewFolderIn(u16),
     /// A PLUG-IN SCENES row's Rename (`Rack_ScenesListBoxRow::EditSceneName`), by scene index.
     SceneName(u16),
 }
@@ -293,6 +296,9 @@ pub struct ViewState {
     pub commands: Vec<crate::menu::Command>,
     /// Model effects a menu command produced outside `route` (File > Save → the session tap).
     pub deferred: Vec<Effect>,
+    /// URLs the console asked the host to open, oldest first (`take_open_urls`): Show In
+    /// Finder's `file://` URLs, documentation, Dante Controller and patent pages, feedback.
+    pub open_urls: Vec<String>,
     /// Console's menus, Settings and panels as separate OS windows placed on the screen
     /// (`crate::layers`); None draws them inside the mixer window (iPad, plain `--render`).
     pub windowing: Option<crate::layers::Windowing>,
@@ -328,6 +334,7 @@ impl Default for ViewState {
             show_navigator: true,
             commands: Vec::new(),
             deferred: Vec::new(),
+            open_urls: Vec::new(),
             windowing: None,
         }
     }
@@ -479,6 +486,11 @@ impl ViewState {
         Ok(())
     }
 
+    /// URLs to open (Show In Finder, links, launch buttons) since the last call, oldest first.
+    pub fn take_open_urls(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.open_urls)
+    }
+
     /// A text field has keyboard focus.
     pub fn editing(&self) -> bool {
         self.text_edit.is_some()
@@ -509,6 +521,19 @@ impl ViewState {
         }
         if !press {
             return vec![Effect::Model(action)];
+        }
+        // NETWORK's LAUNCH / MORE INFO open pages (Console: `Rack_NetworkSettings` 0x18085ca10,
+        // 0x18085cc00); they send nothing to the engine.
+        if let C::SettingPress(k) = &id.control {
+            let url = match &**k {
+                "launch:dante_controller" => Some(crate::menu::DANTE_CONTROLLER_URL),
+                "launch:dante_patents" => Some(crate::menu::DANTE_PATENTS_URL),
+                _ => None,
+            };
+            if let Some(url) = url {
+                self.open_urls.push(url.into());
+                return Vec::new();
+            }
         }
         // Picking a settings option closes its dropdown.
         if matches!(id.control, C::SettingChoose(..)) {
@@ -750,7 +775,7 @@ impl ViewState {
             TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
             TextTarget::Search => Vec::new(),
             TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
-            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder) => self.commit_session_text(&t, edit.text, model),
+            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder | TextTarget::SessionFolderRename(_) | TextTarget::SessionNewFolderIn(_)) => self.commit_session_text(&t, edit.text, model),
         }
     }
 

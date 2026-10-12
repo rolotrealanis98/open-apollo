@@ -151,6 +151,8 @@ impl Audit {
             return;
         }
         self.model = EngineMixer::new(Store::from_snapshot(self.snap.clone()));
+        // A local engine (Show In Finder reveals the Sessions folder on this computer).
+        self.model.set_local_sessions_dir(Some("/tmp/Universal Audio/Sessions".into()));
         self.seen = self.model.store().writer().suppressed_count();
         self.dirty = false;
     }
@@ -190,7 +192,7 @@ impl Audit {
             view.dispatch(a, &mut self.model);
         }
         let cmds: Vec<String> = self.written().into_iter().filter(|c| !c.contains("/UndoRecording/")).collect();
-        let shell = !self.model.take_taps().is_empty() | !view.take_commands().is_empty();
+        let shell = !self.model.take_taps().is_empty() | !view.take_commands().is_empty() | !view.take_open_urls().is_empty();
         let model_only = gate != self.model.store().writer().writes_enabled || revision != self.model.store().revision();
         self.dirty = model_only || !cmds.is_empty() || shell;
         (cmds, shell, view, model_only)
@@ -300,11 +302,9 @@ impl Audit {
 const KNOWN_NOOPS: &[&str] = &[
     // Control-room SOURCE (MONITOR / CUE n): no engine write (`outputs/<MON>/MixInSource`). Gap.
     "monitor CrSource(#)",
-    // Settings › NETWORK / I/O MATRIX buttons that launch other apps or URLs (Dante Controller,
-    // Dante discovery refresh, patent info, CASCADE editor): not implemented. Gap.
-    "settings SettingPress(\"launch:dante_controller\")",
+    // Settings › NETWORK DANTE DISCOVERY › REFRESH and I/O MATRIX › EDIT CASCADE: not
+    // implemented (LAUNCH and MORE INFO open their pages). Gap.
     "settings SettingPress(\"launch:dante_discovery\")",
-    "settings SettingPress(\"launch:dante_patents\")",
     "settings SettingPress(\"launch:io_cascade\")",
     // Insert menu Paste is enabled with an empty clipboard; Console greys it out (s01). Gap.
     "menu Insert(aux) Paste",
@@ -327,7 +327,6 @@ const KNOWN_NOOPS: &[&str] = &[
     // posts `/ClearSolos {}`), OL has no engine command (Console: `post /ClearClips {}`). Gap.
     // Benign: INSERT EFFECTS UAD MON when every input already records post-inserts; a session
     // navigator slot for a strip that is already in view.
-    "nav AllRecordPreEffects(true)",
     "session SessionNavigate(#)",
     // Benign without plug-in scenes (the x4 fixture has none): nothing to step through.
     "settings SceneStep(false)",

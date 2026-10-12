@@ -469,6 +469,7 @@ pub struct UacContext {
     /// Keeps `uac_menu_bar_json` / `uac_take_command` strings alive.
     menu_json: CString,
     taken_command: CString,
+    taken_url: CString,
     dirty: bool,
     stats: UacStats,
     adapter_name: CString,
@@ -520,6 +521,7 @@ impl UacContext {
             status: CString::default(),
             menu_json: CString::default(),
             taken_command: CString::default(),
+            taken_url: CString::default(),
             dirty: true,
             stats: UacStats::default(),
             adapter_name,
@@ -1417,6 +1419,27 @@ pub unsafe extern "C" fn uac_take_command(ctx: *mut UacContext) -> *const c_char
         let cmd = c.mixer.commands.remove(0);
         c.taken_command = cstring(cmd.id());
         c.taken_command.as_ptr()
+    })
+}
+
+/// Takes the oldest URL the console asked the host to open (`ViewState::take_open_urls`): a
+/// `file://` URL from Show In Finder (reveal it: `NSWorkspace.activateFileViewerSelecting`), the
+/// documentation, Dante Controller (launch the app when installed, else open the page) and Dante
+/// patent pages, and the feedback page. NULL when there is none; the string stays valid until the
+/// next call or `uac_destroy`.
+///
+/// # Safety
+/// `ctx` is null or a live context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn uac_take_open_url(ctx: *mut UacContext) -> *const c_char {
+    guard(std::ptr::null(), || {
+        let Some(c) = (unsafe { ctx_mut(ctx) }) else { return std::ptr::null() };
+        if c.mixer.open_urls.is_empty() {
+            return std::ptr::null();
+        }
+        let url = c.mixer.open_urls.remove(0);
+        c.taken_url = cstring(&url);
+        c.taken_url.as_ptr()
     })
 }
 

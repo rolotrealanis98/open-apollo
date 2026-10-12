@@ -65,8 +65,12 @@ pub struct EngineMixer {
     clipboard: Option<String>,
     /// The read-only UA Mixer Helper (4720): native inserts and helper state.
     helper: Option<ua_engine::HelperStore>,
-    /// Console's client-side preferences (Settings › OPTIONS / MIDI), kept in memory.
+    /// Console's client-side preferences (Settings › OPTIONS / MIDI). Saved to `prefs_path`
+    /// when one is set ([`EngineMixer::set_prefs_path`]), as Console keeps its own preferences.
     prefs: rack::settings::Prefs,
+    prefs_path: Option<std::path::PathBuf>,
+    /// The engine's Sessions folder on this computer (Show In Finder), when the engine is local.
+    local_sessions_dir: Option<String>,
 }
 
 impl EngineMixer {
@@ -79,6 +83,8 @@ impl EngineMixer {
             clipboard: None,
             helper: None,
             prefs: rack::settings::Prefs::default(),
+            prefs_path: None,
+            local_sessions_dir: None,
         }
     }
 
@@ -100,10 +106,14 @@ impl EngineMixer {
     /// gate (it has no effect unless `options.allow_writes` is set too).
     pub fn connect_with(endpoint: Endpoint, options: Options, writes: bool) -> EngineMixer {
         let helper = EngineMixer::helper_endpoint(&endpoint);
+        let local = is_loopback(&endpoint.host);
         let mut store = Store::new();
         store.connect(endpoint, options);
         store.set_writes_enabled(writes);
         let mut mixer = EngineMixer::new(store);
+        if local {
+            mixer.local_sessions_dir = default_sessions_dir();
+        }
         // The UA Mixer Helper on host:4720, read-only (native inserts, helper state).
         if let Some(h) = helper {
             mixer.connect_helper(h);
@@ -759,5 +769,31 @@ impl MixerModel for EngineMixer {
                 }
             }
         }
+    }
+}
+
+/// The engine runs on this computer (`127.0.0.1`, `localhost`, `::1`).
+fn is_loopback(host: &str) -> bool {
+    let h = host.trim_matches(|c| c == '[' || c == ']');
+    h.eq_ignore_ascii_case("localhost") || h.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Where UA Mixer Engine (and the open-apollo daemon) keep sessions: `~/Documents/Universal
+/// Audio/Sessions` of the user. A sandboxed host's `HOME` (`…/Library/Containers/<id>/Data`) is
+/// mapped back to the user's home.
+pub fn default_sessions_dir() -> Option<String> {
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+    let home = match home.find("/Library/Containers/") {
+        Some(i) => home[..i].to_owned(),
+        None => home,
+    };
+    Some(format!("{}/Documents/Universal Audio/Sessions", home.trim_end_matches('/')))
+}
+
+impl EngineMixer {
+    /// The engine's Sessions folder as a local path (Show In Finder); `None` when the engine's
+    /// files aren't on this computer. Connecting to a loopback engine sets the default.
+    pub fn set_local_sessions_dir(&mut self, dir: Option<String>) {
+        self.local_sessions_dir = dir;
     }
 }

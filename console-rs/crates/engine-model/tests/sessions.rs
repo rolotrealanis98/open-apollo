@@ -125,3 +125,71 @@ fn sandbox_daemon_session_menu() {
     eprintln!("sent {}, suppressed {}", m.store().writer().sent_count(), m.store().writer().suppressed_count());
     eprintln!("after: {:?}", m.session());
 }
+
+/// CURRENT SESSION folder rows: Delete → `DeleteFolder {folder, type}`, Rename →
+/// `RenameSession {origName, newName}` (folders keep their parent), New Folder inside a folder;
+/// Show In Finder reveals locally and sends nothing.
+#[test]
+fn folder_rows_and_show_in_finder() {
+    use rack::surfaces::session::{PanelRowKind, REVEAL_SESSIONS_FOLDER, panel_rows};
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    server.set_values("/Session", serde_json::json!([
+        {"value": "Session", "type": "file", "locked": false},
+        {"value": "Live", "type": "folder", "locked": false, "children": [{"value": "Band", "type": "file", "locked": false}]}
+    ]));
+    let mut m = live(&server, true);
+    pump_until(&mut m, "list", |m| m.session().files.len() == 2);
+    assert!(m.session().local_dir.is_some(), "MockEngine runs on 127.0.0.1, so the Sessions folder is local");
+    m.set_local_sessions_dir(Some("/Users/me/Documents/Universal Audio/Sessions".into()));
+    let rows = panel_rows(&m.session());
+    let folder = rows.iter().position(|r| matches!(&r.kind, PanelRowKind::Folder { path, root: false } if path == "Live")).unwrap() as u16;
+    let file = rows.iter().position(|r| matches!(r.kind, PanelRowKind::File(_)) && r.label == "Band").unwrap() as u16;
+
+    let mut v = ViewState::default();
+    v.dispatch(Action::Tap(sid(Control::Session(SessionOp::FolderRename(folder)))), &mut m);
+    assert_eq!(v.text_edit.as_ref().map(|t| t.text.as_str()), Some("Live"));
+    for _ in 0..4 {
+        v.key_backspace();
+    }
+    v.key_text("Gigs");
+    v.key_enter(&mut m);
+    v.dispatch(Action::Tap(sid(Control::Session(SessionOp::NewFolderIn(folder)))), &mut m);
+    v.key_text("Rehearsal");
+    v.key_enter(&mut m);
+    v.dispatch(Action::Tap(sid(Control::Session(SessionOp::FolderDelete(folder)))), &mut m);
+    let w = writes_after(&server, 3);
+    assert!(w.contains(&r#"post /RenameSession {"newName":"Gigs","origName":"Live"}"#.to_string()), "{w:?}");
+    assert!(w.contains(&r#"post /NewFolder {"folder":"Live/Rehearsal","type":"session"}"#.to_string()), "{w:?}");
+    assert!(w.contains(&r#"post /DeleteFolder {"folder":"Live","type":"session"}"#.to_string()), "{w:?}");
+
+    // Show In Finder: a file URL for the file, the folder, and the Sessions folder; no writes.
+    let before = server.write_commands().len();
+    for row in [file, folder, REVEAL_SESSIONS_FOLDER] {
+        v.dispatch(Action::Tap(sid(Control::Session(SessionOp::Reveal(row)))), &mut m);
+    }
+    assert_eq!(
+        v.take_open_urls(),
+        [
+            "file:///Users/me/Documents/Universal%20Audio/Sessions/Live/Band.uadmix",
+            "file:///Users/me/Documents/Universal%20Audio/Sessions/Live",
+            "file:///Users/me/Documents/Universal%20Audio/Sessions",
+        ]
+    );
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(server.write_commands().len(), before);
+    // Without a local Sessions folder the rows are disabled and reveal nothing.
+    m.set_local_sessions_dir(None);
+    let menu = rack::menu::session_row_menu(&m, file);
+    assert!(menu.items().iter().any(|i| i.label == rack::menu::SHOW_IN_FINDER_LABEL && !i.enabled));
+    v.dispatch(Action::Tap(sid(Control::Session(SessionOp::Reveal(file)))), &mut m);
+    assert!(v.take_open_urls().is_empty());
+}
+
+fn writes_after(server: &MockEngine, n: usize) -> Vec<String> {
+    let end = Instant::now() + Duration::from_secs(10);
+    while server.write_commands().len() < n {
+        assert!(Instant::now() < end, "timed out waiting for {n} writes: {:?}", server.write_commands());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    server.write_commands()
+}

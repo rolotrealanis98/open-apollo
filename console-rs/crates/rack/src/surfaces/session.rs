@@ -45,7 +45,22 @@ pub enum SessionOp {
     Rename(u16),
     /// Opens the folder name field (model: [`Control::SessionNewFolderName`] via `set_text`).
     NewFolder,
+    /// A folder row's Delete (`DeleteFolder {folder, type: session}`), by panel row index.
+    FolderDelete(u16),
+    /// Opens a folder row's name field (model: [`Control::SessionFolderRenameTo`]).
+    FolderRename(u16),
+    /// Opens the name field for a folder inside a folder row (model: [`Control::SessionNewFolderIn`]).
+    NewFolderIn(u16),
+    /// Show In Finder / Show In File Explorer: reveals a panel row's file or folder (or, with
+    /// [`REVEAL_SESSIONS_FOLDER`], the Sessions folder) on this computer. Console does this
+    /// client-side (`juce::File::revealToUser`, `Rack_PresetsView::ShowPopupMenu` 0x181229470,
+    /// case 5), so it needs the engine's Sessions folder to be local
+    /// ([`MixerModel::local_sessions_dir`]).
+    Reveal(u16),
 }
+
+/// [`SessionOp::Reveal`] of the Sessions folder itself (the ••• menu).
+pub const REVEAL_SESSIONS_FOLDER: u16 = u16::MAX;
 
 impl SessionOp {
     /// Replaces the open session (Console asks about unsaved changes first).
@@ -86,6 +101,9 @@ pub struct SessionInfo {
     pub files: Vec<SessionFile>,
     /// Modified-session labels (`[Sep 18, 2026 05:14:34 AM] - - New Session -`).
     pub modified: Vec<String>,
+    /// The engine's Sessions folder as a path on this computer, when the engine runs here
+    /// (Show In Finder needs it; Console reveals files client-side).
+    pub local_dir: Option<String>,
 }
 
 impl SessionInfo {
@@ -157,6 +175,23 @@ impl ViewState {
                 self.popover = Some(PopoverState { kind: Popover::SessionNewFolder, anchor });
                 Vec::new()
             }
+            SessionOp::NewFolderIn(row) => {
+                self.text_edit = Some(TextEdit { target: TextTarget::SessionNewFolderIn(row), text: String::new() });
+                self.popover = Some(PopoverState { kind: Popover::SessionNewFolder, anchor });
+                Vec::new()
+            }
+            SessionOp::FolderRename(row) => {
+                let name = panel_rows(info).get(row as usize).map(|r| r.label.clone()).unwrap_or_default();
+                self.text_edit = Some(TextEdit { target: TextTarget::SessionFolderRename(row), text: name });
+                self.popover = Some(PopoverState { kind: Popover::SessionRename, anchor });
+                Vec::new()
+            }
+            SessionOp::Reveal(row) => {
+                if let Some(url) = reveal_url(info, row) {
+                    self.open_urls.push(url);
+                }
+                Vec::new()
+            }
             SessionOp::Save if !info.has_file => self.ask_save_as(info, None, anchor),
             op => vec![model_tap(op)],
         }
@@ -197,6 +232,8 @@ impl ViewState {
             TextTarget::SessionOpen => vec![set(Control::SessionOpenPath)],
             TextTarget::SessionRename(i) => vec![set(Control::SessionRenameTo(*i))],
             TextTarget::SessionNewFolder => vec![set(Control::SessionNewFolderName)],
+            TextTarget::SessionFolderRename(row) => vec![set(Control::SessionFolderRenameTo(*row))],
+            TextTarget::SessionNewFolderIn(row) => vec![set(Control::SessionNewFolderIn(*row))],
             TextTarget::SessionSaveAs { then } => {
                 let mut out = vec![set(Control::SessionSaveAsName)];
                 if let Some(op) = then {
@@ -209,6 +246,40 @@ impl ViewState {
             _ => Vec::new(),
         }
     }
+}
+
+/// The `file://` URL Show In Finder opens for CURRENT SESSION row `row`: the session file
+/// (`.uadmix`) or folder under the local Sessions folder, or the folder itself for the root row
+/// and [`REVEAL_SESSIONS_FOLDER`]. `None` when the engine's Sessions folder isn't on this computer.
+pub fn reveal_url(info: &SessionInfo, row: u16) -> Option<String> {
+    let dir = info.local_dir.as_deref()?.trim_end_matches('/').to_owned();
+    let path = if row == REVEAL_SESSIONS_FOLDER {
+        dir
+    } else {
+        match &panel_rows(info).get(row as usize)?.kind {
+            PanelRowKind::Folder { path, root } if *root || path.is_empty() => dir,
+            PanelRowKind::Folder { path, .. } => format!("{dir}/{path}"),
+            PanelRowKind::File(i) => format!("{dir}/{}{}", info.files.get(*i as usize)?.path, ua_session_ext()),
+        }
+    };
+    Some(file_url(&path))
+}
+
+/// Session files' extension (the engine's `.uadmix`).
+fn ua_session_ext() -> &'static str {
+    ".uadmix"
+}
+
+/// `file://` URL of an absolute path, percent-encoding what a URL can't carry.
+pub fn file_url(path: &str) -> String {
+    let mut out = String::from("file://");
+    for b in path.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 fn model_tap(op: SessionOp) -> Effect {
@@ -572,8 +643,9 @@ mod tests {
             crate::menu::PopupEntry::Separator => "-".into(),
             crate::menu::PopupEntry::Submenu { label, .. } => label.clone(),
         }).collect();
-        // sess-row: the open session's Load is disabled.
-        assert_eq!(items, ["[Session]", "Load 'Session' (off)", "-", "Delete", "Rename", "Show In Finder"]);
+        // sess-row: the open session's Load is disabled. The preview has no local Sessions
+        // folder, so Show In Finder is off (it reveals files on this computer only).
+        assert_eq!(items, ["[Session]", "Load 'Session' (off)", "-", "Delete", "Rename", "Show In Finder (off)"]);
         let root = crate::menu::session_row_menu(&model, 0);
         assert!(root.find("Delete").is_some_and(|i| !i.enabled), "the root folder cannot be deleted (browser-cat2)");
         // Rename opens the name field; its commit renames inside the folder.
