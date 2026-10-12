@@ -75,7 +75,10 @@ class History:
         else:
             raise ValueError("undo/redo requires current minus/plus one")
         for path, pair in delta.items():
-            self.state.set(path + "/value", pair[side])
+            if path.startswith("@node:"):
+                self.state.replace_node(path[6:], pair[side])
+            else:
+                self.state.set(path + "/value", pair[side])
         self.current = target
         self.publish("/Dirty", True)
         self.refresh()

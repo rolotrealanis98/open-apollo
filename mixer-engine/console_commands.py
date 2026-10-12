@@ -2,13 +2,19 @@
 from pathlib import Path
 from console_history import History
 from console_sessions import Sessions
+from console_inserts import Inserts, SLOT
+from console_presets import Presets
+from console_network import Network
+import re
 
 
 class ConsoleCommands:
-    def __init__(self, state, directory=None):
+    def __init__(self, state, directory=None, *, software_only=False,
+                 helper=None, presets_dir=None, factory_presets=None):
         self.state = state
         self.scenes = {}
         self.history = History(state, self.publish)
+        self.inserts = Inserts(state, self.history, self.publish, software_only)
         self.sessions = Sessions(state, self.history, self.publish,
                                  directory or Path.home() / "Documents/Universal Audio/Sessions",
                                  self.scenes)
@@ -23,6 +29,39 @@ class ConsoleCommands:
                 self.publish(base + "/SceneName", "EMPTY SCENE", "string")
                 self.publish(base + "/SceneTempo", 120.0, "float")
         self.publish("/pluginscenes/0/RecalledSceneIndex", -1, "int")
+        self.presets = Presets(state, self.history, self.publish, self.inserts,
+                               presets_dir or Path.home() / ".local/share/open-apollo/Presets",
+                               factory_presets)
+        self.network = Network(state, helper, self.publish)
+        self.inserts.refresh_paste()
+        self.publish("/openapollo/PluginBackend", "software-model" if software_only else "unavailable", "string")
+        for path in list(state._props):
+            if re.fullmatch(r"/devices/\d+/inputs/\d+/Name", path):
+                base = path.removesuffix("/Name")
+                if state.get_prop_dict(base + "/ChannelHidden") is None:
+                    self.publish(base + "/ChannelHidden", False)
+            if re.fullmatch(r"/plugins/\d+/Name", path):
+                base = path.removesuffix("/Name")
+                for key in ("Unison", "Demoing", "DemoAvailable"):
+                    if state.get_prop_dict(base + "/" + key) is None:
+                        self.publish(base + "/" + key, False)
+                if state.get_prop_dict(base + "/DemoDaysRemaining") is None:
+                    self.publish(base + "/DemoDaysRemaining", 0, "int")
+            if path.endswith("/MixInSource"):
+                meta = state.get_prop_dict(path)
+                values = meta.get("values") or []
+                names = [v.get("value") if isinstance(v, dict) else v for v in values]
+                if "cue1" in names and "mon" in names:
+                    for name in ("cue3", "cue4"):
+                        if name not in names:
+                            values.append({"value": name} if values and isinstance(values[0], dict) else name)
+                    meta["values"] = values
+        if state.get_prop_dict("/TalkbackOn") is None:
+            self.publish("/TalkbackOn", bool(state.get_value("/devices/0/outputs/18/TalkbackOn")))
+        if state.get_prop_dict("/TalkbackInPhysicalCR") is None:
+            self.publish("/TalkbackInPhysicalCR", False)
+        if state.get_prop_dict("/TalkbackMaster") is None:
+            self.publish("/TalkbackMaster", 0, "int")
 
     def publish(self, path, value, kind="bool"):
         meta = self.state.get_prop_dict(path)
@@ -34,7 +73,18 @@ class ConsoleCommands:
 
     def set(self, client, path, value):
         prop = path.removesuffix("/value")
-        if prop == "/UndoRecording":
+        if prop.endswith("/EffectName") and SLOT.fullmatch(prop.removesuffix("/EffectName")):
+            self.inserts.assign(prop.removesuffix("/EffectName"), value)
+            self.presets.refresh()
+        elif prop.endswith("/Preset"):
+            self.presets.load(prop.removesuffix("/Preset"), value)
+        elif prop == "/dante/primary_network_adapter":
+            self.network.set_primary(value)
+        elif prop.endswith("/MixInSource") and value in ("cue3", "cue4"):
+            if not self.inserts.software_only:
+                raise ValueError("CUE3/4 hardware encoding has not been verified")
+            return False
+        elif prop == "/UndoRecording":
             self.history.bracket(client, value)
         elif prop == "/UndoRedo":
             self.history.move(value)
@@ -49,6 +99,20 @@ class ConsoleCommands:
     def post(self, path, args):
         if not isinstance(args, dict):
             raise ValueError("command arguments must be an object")
+        command = path.removeprefix("/")
+        if self.inserts.post(command, args) or self.presets.post(command, args):
+            self.presets.refresh()
+            return True
+        if command == "PluginStartDemo":
+            plugin = args.get("pluginPath", "")
+            if not self.inserts.software_only:
+                raise ValueError("native demo activation requires the vendor backend")
+            if not isinstance(plugin, str) or not re.fullmatch(r"/plugins/\d+", plugin) or not self.state.get_value(plugin + "/DemoAvailable"):
+                raise ValueError("demo is unavailable")
+            self.publish(plugin + "/Demoing", True)
+            self.publish(plugin + "/DemoAvailable", False)
+            self.publish(plugin + "/DemoDaysRemaining", 14, "int")
+            return True  # A simulated footer state, never vendor authorization.
         if path != "/SceneOperation":
             return self.sessions.post(path.removeprefix("/"), args)
         if len(args) != 1:

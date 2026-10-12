@@ -93,3 +93,42 @@ binaries, lunacomponent code or screenshots were added to git.
   unsupported properties/chunks are preserved, not inferred or executed.
 - Insert assignments retain an extra undo bracket versus captured traffic;
   rapid gestures can coalesce the delayed undo-list refresh.
+
+## Continuation P0 — Console 1.3.1 host contracts
+
+Task branch `codex/p0-console-daemon`, based on `50ace46`, is merged with
+history. Added software slot-tree CopyInsert/PasteInsert/MoveInsert,
+PluginBar settings clipboard and capability pushes, with atomic target/Unison
+validation and structural undo. Plugin mutation on a hardware-backed daemon
+fails closed until a real DSP backend exists. `/openapollo/PluginBackend`
+explicitly distinguishes the software model; test clients require that marker.
+
+Preset commands publish folder/file trees and support save/load/rename/delete
+and folders for daemon-owned `.oapreset` snapshots. They are not disguised as
+native UA files. The scalar-only native `channel_strip` XML subset is readable;
+files carrying opaque plugin state are rejected before any scalar mutation.
+Factory libraries are optional `--factory-presets-dir` inputs and read-only.
+Static review found all 9,575 installed FXPs use opaque FPCh chunks: native
+factory FXP restoration remains blocked on the plugin backend, not "verified"
+by a successful filename set. Evidence: presets-decomp/1000dee38.c and
+100056370.c, retained host-contract notes and source-derived session mapping.
+
+Root TalkbackOn/InPhysicalCR/Master are published; verified SetOtherParam
+mappings are tested only with mock hardware. Monitor CUE3/4 choices are
+available in the software model; unverified hardware encodings are refused.
+ChannelHidden persists. Session-folder rename updates the current/retained
+paths. Helper adapter lists enumerate Linux interfaces; primary selection is
+validated/persisted, while the listening address remains explicit `--host`.
+PluginStartDemo updates a simulated footer only under explicit --no-hardware;
+it cannot activate a vendor license/demo or claim native authorization.
+
+Validation: 25 Python host tests; three sequential UA_SANDBOX_ENGINE Rust
+round trips on private ports 34713/34723; 269 workspace tests; locked release
+build; p1 158/158 and p2 195/195; windows_check and live-snapshot ledger tests;
+scorecard regenerated under wine-ua-work. Round trips compare a second client,
+retain parameter subscriptions explicitly, and avoid shared-state timing
+assumptions. No real-engine writes, vendor UI input, push or UA assets in git.
+
+P0 still needs genuine DSP-backed instance/preset/demo operations before
+hardware acceptance. Those operations now return errors instead of false
+success. The old daemon gaps are covered at the host/software contract layer.

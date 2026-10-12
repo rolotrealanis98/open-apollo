@@ -576,3 +576,56 @@ class StateTree:
     def all_paths(self) -> list[str]:
         """Return all control paths (flat list)."""
         return list(self._props.keys())
+
+    def replace_node(self, path, data):
+        """Replace an existing software-owned subtree and republish its values.
+
+        Used by the opt-in software plugin model, not a DSP instance loader.
+        """
+        from copy import deepcopy
+        self.validate_node(data)
+        node, prop = self._resolve_path(path)
+        if node is None or prop is not None:
+            raise ValueError("unknown object node")
+        prefix = path.rstrip("/") + "/"
+        old_paths = {p for p in self._props if p.startswith(prefix)}
+        for key in old_paths:
+            del self._props[key]
+        node.clear()
+        node.update(deepcopy(data))
+
+        def index(current, base):
+            for name, meta in current.get("properties", {}).items():
+                self._props[base + "/" + name] = meta
+            for name, child in current.get("children", {}).items():
+                index(child, base + "/" + name)
+        index(node, path)
+        new_paths = {p for p in self._props if p.startswith(prefix)}
+        for key in sorted(old_paths | new_paths):
+            self._notify_subscribers(key + "/value", self.get_value(key))
+
+    @staticmethod
+    def validate_node(data):
+        """Validate imported host snapshot structure before modifying a tree."""
+        import math
+        pending = [(data, 0)]
+        count = 0
+        while pending:
+            node, depth = pending.pop()
+            count += 1
+            if not isinstance(node, dict) or depth > 64 or count > 50000:
+                raise ValueError("invalid or oversized preset tree")
+            props, children = node.get("properties", {}), node.get("children", {})
+            if not isinstance(props, dict) or not isinstance(children, dict):
+                raise ValueError("invalid preset properties/children")
+            for key in [*props, *children]:
+                if not isinstance(key, str) or not key or "/" in key or key in (".", ".."):
+                    raise ValueError("invalid preset property/child key")
+            for meta in props.values():
+                if not isinstance(meta, dict):
+                    raise ValueError("invalid preset property metadata")
+                value = meta.get("value")
+                if value is not None and meta.get("type") in ("float", "int", "int64"):
+                    if not isinstance(value, (int, float)) or not math.isfinite(value):
+                        raise ValueError("invalid preset numeric value")
+            pending.extend((child, depth + 1) for child in children.values())
