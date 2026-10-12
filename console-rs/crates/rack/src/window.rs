@@ -182,7 +182,9 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     let mut aux_rows = CellRows::new(model, view, &auxes, true);
     // The aux sends cell keeps room for as many sends as an input strip has (1.3.1: two cues
     // shown, four reserved; the p1 aux scrollbar thumb gives 583 pt of aux cells).
-    if view.sections.sends {
+    // Independent of whether the input Sends row is expanded (p1 and p2 both show it collapsed
+    // while the aux cells keep their full 583 pt).
+    {
         let in_sends = inputs.iter().map(|s| model.input_sends(s).len()).max().unwrap_or(0);
         aux_rows.sends = aux_rows.sends.max(cells::sends_cell_h(in_sends, view.sends_overview));
     }

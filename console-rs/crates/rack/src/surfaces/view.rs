@@ -79,7 +79,8 @@ pub struct Sections {
 
 impl Default for Sections {
     fn default() -> Self {
-        Self { inputs: true, inserts: true, sends: true, fader: true }
+        // Console 1.3.1 opens with the input SENDS row collapsed (both reference pairs).
+        Self { inputs: true, inserts: true, sends: false, fader: true }
     }
 }
 
@@ -354,7 +355,7 @@ impl ViewState {
         match id.control.clone() {
             C::Section(s) => self.sections.set(s, !self.sections.get(s)),
             C::SectionsOpenAll => {
-                self.sections = Sections { fader: self.sections.fader, ..Sections::default() };
+                self.sections = Sections { inputs: true, inserts: true, sends: true, fader: self.sections.fader };
             }
             C::SectionsCloseAll => {
                 self.sections = Sections { inputs: false, inserts: false, sends: false, fader: self.sections.fader };

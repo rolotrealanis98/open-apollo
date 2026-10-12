@@ -88,7 +88,9 @@ fn every_surface_registers_its_controls() {
 fn section_toggle_collapses_the_input_row() {
     let assets = assets();
     let mut model = PreviewMixer::default();
+    // Sends open (Console's default is collapsed), so the cells overflow and scroll from the top.
     let mut view = ViewState::default();
+    view.sections.sends = true;
     let (hits, _) = build(&assets, &model, &view);
     let slot = find(&hits, "in0", &Control::Insert(0)).expect("insert slot").rect;
     // Inputs row 237 + list top 26 + 5 + 1 under the column top (72) + swatch (5).
