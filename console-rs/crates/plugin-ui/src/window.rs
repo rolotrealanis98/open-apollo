@@ -263,8 +263,17 @@ pub struct PluginWindow {
     pub effect_name: String,
     pub chrome: ChromeState,
     pub content: Content,
-    /// Open stub popover: `More` (menu), `Presets` (browser), `Assign` (insert menu).
+    /// Open popover: `More` (the dark menu), `Assign` (the ⋮ insert menu), `Presets` (stub).
     pub popover: Option<B>,
+    /// The ⋮ menu (`rack::menu::plugin_insert_menu`, s41), refreshed by the host from the
+    /// mixer; its rows are mixer controls the host routes (they are not this window's).
+    pub insert_menu: Option<rack::menu::PopupMenu>,
+    /// "Resize Plug-In" scale (percent); the window does not scale yet.
+    pub scale: u16,
+    /// The "Help & Video" panel of the more menu (s43).
+    pub help_open: bool,
+    /// Plug-in version for the help panel ("v1.0.0").
+    pub version: Option<String>,
 }
 
 impl PluginWindow {
@@ -294,6 +303,10 @@ impl PluginWindow {
             chrome: ChromeState { title: title.into(), items: HeaderItems { more_label, ..Default::default() }, ..Default::default() },
             content,
             popover: None,
+            insert_menu: None,
+            scale: 100,
+            help_open: false,
+            version: None,
         }
     }
 
@@ -501,47 +514,83 @@ impl PluginWindow {
         }
     }
 
-    /// Stub popovers: the "more" menu lists Console's entries (overflowed items act); the
-    /// preset browser and insert menu are placeholders.
+    /// Popovers: the ⋮ insert menu (light console menu, s41), the "more" menu (the plug-in
+    /// window's dark menu, s42, with the Help & Video panel s43); the preset browser is a stub.
     fn popover(&self, ui: &mut Ui, l: &WindowLayout, which: B) {
-        let style = Ui::plain_style("Helvetica", 11.0, true, LABEL);
-        let dim = Ui::plain_style("Helvetica", 11.0, false, LABEL.with_alpha(0.5));
-        if which == B::More {
-            let mut rows: Vec<(String, Option<B>)> = ["50%", "75%", "100%", "150%", "200%"].iter().map(|s| (s.to_string(), None)).collect();
-            for b in &l.overflow {
-                let name = match b {
-                    B::Sidechain => "Sidechain",
-                    B::Power => "Power",
-                    B::InOut => "In",
-                    B::CompareA => "Copy A to B",
-                    B::Copy => "Copy",
-                    B::Paste => "Paste",
-                    _ => continue,
-                };
-                rows.push((name.into(), Some(*b)));
+        use rack::menu::{MenuLook, PopupEntry, PopupItem, PopupMenu, layout_menu};
+        let bounds = Rect::new(l.frame.x - 400.0, l.frame.y, l.frame.w + 800.0, 2000.0);
+        match which {
+            B::Assign => {
+                let Some(menu) = &self.insert_menu else { return };
+                let anchor = l.button(B::Assign).unwrap_or(l.header);
+                let f = layout_menu(ui, menu, MenuLook::Context, (anchor.x, anchor.max_y()), 0.0, bounds);
+                ui.popup_menu(menu, MenuLook::Context, &f, 0, None, None);
             }
-            rows.extend([("Resize Plug-In".into(), None), ("Apply To All".into(), None), ("Help & Video".into(), Some(B::Help))]);
-            let anchor = l.button(B::More).unwrap_or(l.header);
-            let (w, rh) = (150.0, 20.0);
-            let menu = Rect::new((anchor.max_x() - w).max(l.frame.x), anchor.max_y() + 2.0, w, rows.len() as f32 * rh + 8.0);
-            ui.fill(menu, Rgba::rgb8(40, 42, 44));
-            for (i, (name, action)) in rows.iter().enumerate() {
-                let r = Rect::new(menu.x + 10.0, menu.y + 4.0 + i as f32 * rh, w - 20.0, rh);
-                ui.text(name, if action.is_some() { style.clone() } else { dim.clone() }, r, Align::Left);
-                if let Some(b) = action {
-                    ui.hit(r, self.id(Control::PluginWindow(*b)), HitKind::Tap);
+            B::More => {
+                // `Rack_PlugInHeader` 0x180dfb8d0: overflowed toolbar items, then Resize Plug-In
+                // (scales), Apply To All, separator, Help & Video.
+                let mut m = PopupMenu::new();
+                for b in &l.overflow {
+                    let name = match b {
+                        B::Sidechain => "Sidechain",
+                        B::Power => "Power",
+                        B::InOut => "In",
+                        B::CompareA => "Copy A to B",
+                        B::Copy => "Copy",
+                        B::Paste => "Paste",
+                        _ => continue,
+                    };
+                    m.push(PopupItem::new(name, self.id(Control::PluginWindow(*b))));
+                }
+                m.separator();
+                m.header("Resize Plug-In");
+                for pct in [75u16, 100, 125, 150, 175, 200] {
+                    m.push(PopupItem::new(format!("{pct}%"), self.id(Control::PluginWindow(B::Scale(pct)))).ticked(self.scale == pct));
+                }
+                m.push(PopupItem::new("Apply To All", self.id(Control::PluginWindow(B::ApplyToAll))));
+                m.separator();
+                m.submenu("Help & Video", PopupMenu::new(), true);
+                let menu = m.finish();
+                let anchor = l.button(B::More).unwrap_or(l.header);
+                let probe = layout_menu(ui, &menu, MenuLook::Plugin, (0.0, 0.0), 0.0, bounds);
+                let x = (anchor.max_x() - probe.frame.w).max(l.frame.x);
+                let f = layout_menu(ui, &menu, MenuLook::Plugin, (x, anchor.max_y()), 0.0, bounds);
+                let help = if self.help_open { menu.entries.len().checked_sub(1).map(|i| i as u16) } else { None };
+                ui.popup_menu(&menu, MenuLook::Plugin, &f, 0, None, help);
+                // Help & Video opens this window's panel (topmost over the row's submenu hit).
+                if let (Some(PopupEntry::Submenu { .. }), Some(row)) = (menu.entries.last(), f.rows.last()) {
+                    ui.hit(*row, self.id(Control::PluginWindow(B::Help)), HitKind::Tap);
+                    if self.help_open {
+                        self.help_panel(ui, Rect::new(f.frame.max_x() - 2.0, row.y - 2.0, 145.0, 122.0));
+                    }
                 }
             }
-            return;
+            _ => {
+                let style = Ui::plain_style("Helvetica", 11.0, true, LABEL);
+                ui.fill(l.editor, Rgba::BLACK.with_alpha(0.8));
+                ui.text("Preset browser (not implemented)", style, l.editor, Align::Center);
+                ui.hit(l.editor, self.id(Control::PluginWindow(which)), HitKind::Tap);
+            }
         }
-        let what = match which {
-            B::Presets => "Preset browser",
-            B::Assign => "Insert menu",
-            _ => "Not implemented",
-        };
-        ui.fill(l.editor, Rgba::BLACK.with_alpha(0.8));
-        ui.text(&format!("{what} (not implemented)"), style, l.editor, Align::Center);
-        ui.hit(l.editor, self.id(Control::PluginWindow(which)), HitKind::Tap);
+    }
+
+    /// The Help & Video panel (s43): Documentation (a link) and the version, a rule, and the
+    /// Quick Tip Video tile (the thumbnail is the plug-in's own art; a dark well stands in).
+    fn help_panel(&self, ui: &mut Ui, r: Rect) {
+        ui.fill(r.inset(-0.5, -0.5, -0.5, -0.5), Rgba::rgb8(2, 3, 4));
+        ui.fill(r, Rgba::rgb8(70, 80, 86));
+        ui.fill(r.inset(1.0, 1.0, 1.0, 1.0), Rgba::rgb8(22, 27, 30));
+        let link = Ui::plain_style("Helvetica", 11.0, true, Rgba::rgb8(214, 226, 232));
+        let docs = Rect::new(r.x + 12.0, r.y + 8.0, 76.0, 18.0);
+        ui.text("Documentation", link.clone(), docs, Align::Left);
+        ui.fill(Rect::new(docs.x, docs.max_y() - 2.0, 74.0, 1.0), link.color);
+        let v = self.version.clone().map(|v| format!("v{v}")).unwrap_or_else(|| "v1.0.0".into());
+        ui.text(&v, Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE), Rect::new(docs.max_x() + 4.0, docs.y, 50.0, 18.0), Align::Left);
+        ui.fill(Rect::new(r.x + 6.0, r.y + 33.0, r.w - 12.0, 1.0), Rgba::rgb8(40, 46, 50));
+        let thumb = Rect::new(r.x + 13.0, r.y + 43.0, r.w - 26.0, 45.0);
+        ui.fill(thumb, Rgba::rgb8(60, 64, 66));
+        ui.text("Quick Tip Video", Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE), Rect::new(r.x, thumb.max_y() + 4.0, r.w, 20.0), Align::Center);
+        ui.hit(docs, self.id(Control::PluginWindow(B::Help)), HitKind::Tap);
     }
 
     /// Applies an action aimed at this window (chrome or content); None when it is not for it.
@@ -558,7 +607,17 @@ impl PluginWindow {
                 B::Close => WindowEvent::Close,
                 B::Presets | B::Assign | B::More => {
                     self.popover = if self.popover == Some(b) { None } else { Some(b) };
+                    self.help_open = false;
                     WindowEvent::Handled
+                }
+                B::Help if self.popover == Some(B::More) && !self.help_open => {
+                    self.help_open = true;
+                    WindowEvent::Handled
+                }
+                B::Scale(pct) => {
+                    self.scale = pct;
+                    self.popover = None;
+                    WindowEvent::Button(b)
                 }
                 B::RackView => {
                     self.chrome.rack_view ^= true;

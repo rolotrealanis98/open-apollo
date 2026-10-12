@@ -184,6 +184,10 @@ pub enum PluginWindowButton {
     Favorite,
     /// "Help & Video".
     Help,
+    /// "Resize Plug-In" scale in percent (the "more" menu).
+    Scale(u16),
+    /// "Apply To All" (the scale to every plug-in window).
+    ApplyToAll,
 }
 
 #[derive(Clone, Debug, PartialEq)]

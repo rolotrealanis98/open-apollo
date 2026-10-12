@@ -37,29 +37,94 @@ use crate::window::{helvetica_bold_width, helvetica_width};
 pub const ITEM_H: f32 = 22.0;
 /// Separator row height.
 pub const SEPARATOR_H: f32 = 2.0;
-/// Section header row: JUCE `HeaderItemComponent` adds half the row height.
-pub const HEADER_H: f32 = ITEM_H * 1.5;
-/// JUCE `LookAndFeel_V2::getPopupMenuBorderSize`.
+/// Section header row: a row like the items (Console 1.3.1 captures s01/s02: 44 px bands).
+pub const HEADER_H: f32 = ITEM_H;
+/// Rows sit 2 pt inside the window on every side (JUCE `getPopupMenuBorderSize`; s01–s04).
 pub const BORDER: f32 = 2.0;
-/// Text inset from the row's left edge (0xc) and the total horizontal text margin (0x18).
-const TEXT_X: f32 = 12.0;
-const TEXT_MARGIN: f32 = 24.0;
+/// Text inset from the row's left edge (s02/s04: the first glyph 10.5–11 pt in) and the total
+/// horizontal text margin.
+const TEXT_X: f32 = 10.0;
+const TEXT_MARGIN: f32 = 20.0;
+/// Current-value bullet (`dropdown_in_use_dot`, 4 pt): 3 pt into the row, centred (s04, s18).
+const BULLET_X: f32 = 3.0;
+const BULLET: f32 = 4.0;
 const SEP_DARK: Rgba = Rgba::rgb8(135, 145, 149);
 const SEP_LIGHT: Rgba = Rgba::rgb8(202, 212, 216);
-const HIGHLIGHT: Rgba = Rgba::rgb8(227, 231, 233);
+/// Highlighted row, the full row (s18: (224,228,231) over 44 × the window's inner width).
+const HIGHLIGHT: Rgba = Rgba::rgb8(224, 228, 231);
 const HEADER_BG: Rgba = Rgba::rgb8(166, 174, 179);
 const HEADER_TEXT: Rgba = Rgba::rgb8(31, 87, 126);
-const DISABLED_ALPHA: f32 = 0.3;
+/// Section header text: the item font, bold (s01/s02: header and item glyph widths match).
+const HEADER_FONT_SCALE: f32 = 1.0;
+/// Window edge, outside in (s04 / s01 at 2 px per pt): a 0.5-pt black outline outside the
+/// window, a 1-pt border, a 0.5-pt light line, then the body.
+const WINDOW_OUTLINE: Rgba = Rgba::rgb8(2, 3, 4);
+const WINDOW_BORDER: Rgba = Rgba::rgb8(156, 161, 165);
+const WINDOW_LIGHT: Rgba = Rgba::rgb8(186, 195, 200);
+const WINDOW_BODY: Rgba = Rgba::rgb8(185, 194, 199);
+/// Disabled text (s01 "Paste": (135,142,146) on the body = black at 0.27).
+const DISABLED_ALPHA: f32 = 0.27;
 /// Hover / open menu-bar title overlay (`Menu-Bar-Item-Win` `color-mouseover`).
 const BAR_HOVER: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.2 };
 
-/// Which LookAndFeel draws a menu: menu-bar and combo menus use `Rack_LookAndFeelBase`,
-/// right-click menus `Rack_ContextLookAndFeel` (wider rows, coloured section headers).
+/// Which LookAndFeel draws a menu. Console has two styles: the light console menus
+/// (`Rack_LookAndFeelBase` for menu-bar and combo menus, `Rack_ContextLookAndFeel` for right
+/// clicks: wider rows, coloured section headers; captures s01–s04, s18–s40) and the dark
+/// plug-in window menus (UAPW toolbar "more" menu, s42: check marks, white text).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MenuLook {
     #[default]
     Base,
     Context,
+    /// The plug-in window's dark menu.
+    Plugin,
+}
+
+/// Colours and insets of a [`MenuLook`], measured on Console 1.3.1 (2 px per pt).
+struct LookStyle {
+    outline: Option<Rgba>,
+    border: Rgba,
+    light: Rgba,
+    body: Rgba,
+    text: Rgba,
+    highlight: Rgba,
+    /// Highlight inset top and bottom (s42: 1 pt; s18: none).
+    highlight_inset: f32,
+    text_x: f32,
+    /// Ticked rows: the console bullet, or the plug-in window's check mark.
+    check: bool,
+}
+
+impl MenuLook {
+    fn style(self) -> LookStyle {
+        match self {
+            MenuLook::Base | MenuLook::Context => LookStyle {
+                outline: Some(WINDOW_OUTLINE),
+                border: WINDOW_BORDER,
+                light: WINDOW_LIGHT,
+                body: WINDOW_BODY,
+                text: Rgba::BLACK,
+                highlight: HIGHLIGHT,
+                highlight_inset: 0.0,
+                text_x: TEXT_X,
+                check: false,
+            },
+            // s42: 1-pt (70,80,86) border, a 0.5-pt (54,65,72) line, (50,62,68) body; rows of
+            // white bold text 19 pt in (room for the check mark at 7 pt); highlight (108,117,121)
+            // inset 1 pt; separators a 1-pt (118,125,129) line 3 pt in from each side.
+            MenuLook::Plugin => LookStyle {
+                outline: None,
+                border: Rgba::rgb8(70, 80, 86),
+                light: Rgba::rgb8(54, 65, 72),
+                body: Rgba::rgb8(50, 62, 68),
+                text: Rgba::WHITE,
+                highlight: Rgba::rgb8(108, 117, 121),
+                highlight_inset: 1.0,
+                text_x: 19.0,
+                check: true,
+            },
+        }
+    }
 }
 
 // MARK: menu model
@@ -465,6 +530,8 @@ pub enum MenuCmd {
     /// [view] Insert / strip "Presets..." and label "Channel Presets..." → the browser's
     /// PRESETS tab.
     Presets,
+    /// [view] The assign-mode browser's close button: leave assign mode.
+    AssignCancel,
     /// [model] Strip `SoloSafe`, `Stereo` (link, left channel) and `ChannelHidden` toggles.
     SoloSafe,
     Link,
@@ -486,7 +553,7 @@ impl MenuCmd {
     /// Consumed by `ViewState` (never reaches the model).
     pub fn is_view(&self) -> bool {
         match self {
-            MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets => true,
+            MenuCmd::Row { .. } | MenuCmd::OpenSub { .. } | MenuCmd::BarTitle(_) | MenuCmd::Rename | MenuCmd::Assign(_) | MenuCmd::Presets | MenuCmd::AssignCancel => true,
             MenuCmd::App(c) => c.scope() != CommandScope::Model,
             _ => false,
         }
@@ -760,7 +827,8 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
             };
         }
         InsertState::Loaded { name, power } => {
-            m.header(name.strip_prefix("UAD ").unwrap_or(&name).to_string());
+            // The catalogue name in capitals (s40: "UAD A-TYPE MULTIBAND ENHANCER").
+            m.header(name.to_uppercase());
             m.push(PopupItem::new("Copy", sid(strip, Control::InsertCopy(slot))));
             match &st.clipboard {
                 Some(c) => m.push(PopupItem::new(paste_label(c), mid(strip, MenuCmd::InsertPaste(slot)))),
@@ -773,13 +841,42 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
         }
     }
     if slot != 255 {
+        // The channel name as the header (s01: "SM7B"); the "… All" rows only when the strip has
+        // plug-ins (0x18143be10; s01 shows Presets... alone on an empty strip).
         let loaded = model.inserts(&s).iter().any(|i| matches!(i, InsertState::Loaded { .. }));
-        m.header(model.main(&s).name.to_uppercase());
+        m.header(model.main(&s).name);
         m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets)));
-        m.push(PopupItem::new("Remove All", mid(strip, MenuCmd::StripInserts(PluginOp::Remove))).enabled(loaded));
-        m.push(PopupItem::new("Disable All", mid(strip, MenuCmd::StripInserts(PluginOp::Disable))).enabled(loaded));
-        m.push(PopupItem::new("Enable All", mid(strip, MenuCmd::StripInserts(PluginOp::Enable))).enabled(loaded));
+        if loaded {
+            m.push(PopupItem::new("Remove All", mid(strip, MenuCmd::StripInserts(PluginOp::Remove))));
+            m.push(PopupItem::new("Disable All", mid(strip, MenuCmd::StripInserts(PluginOp::Disable))));
+            m.push(PopupItem::new("Enable All", mid(strip, MenuCmd::StripInserts(PluginOp::Enable))));
+        }
     }
+    m.finish()
+}
+
+/// The plug-in window's ⋮ menu (`Rack_PlugInHeader` 0x180dff8f0, capture s41): INSERT with the
+/// strip's loaded plug-ins (the window's own ticked; picking another opens it), then OPTIONS
+/// Assign.... (PROCESSING UADx / UAD-2 and UTILITIES follow for native-capable plug-ins.)
+pub fn plugin_insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(s) = find_strip(model, strip) else { return m };
+    let short = |n: &str| n.strip_prefix("UAD ").unwrap_or(n).to_string();
+    if slot == 255 {
+        m.header("UNISON");
+        if let InsertState::Loaded { name, .. } = model.unison(&s) {
+            m.push(PopupItem::new(short(&name), sid(strip, Control::Insert(255))).ticked(true));
+        }
+    } else {
+        m.header("INSERT");
+        for (k, st) in model.inserts(&s).iter().enumerate() {
+            if let InsertState::Loaded { name, .. } = st {
+                m.push(PopupItem::new(short(name), sid(strip, Control::Insert(k as u8))).ticked(k == slot as usize));
+            }
+        }
+    }
+    m.header("OPTIONS");
+    m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(slot))));
     m.finish()
 }
 
@@ -789,7 +886,7 @@ pub fn label_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
     let mut m = PopupMenu::new();
     let Some(s) = find_strip(model, strip) else { return m };
     let st = model.strip_menu_state(&s);
-    m.header(model.main(&s).name.to_uppercase());
+    m.header(model.main(&s).name);
     m.push(PopupItem::new("Rename...", mid(strip, MenuCmd::Rename)));
     if let Some(linked) = st.linked {
         m.push(PopupItem::new("Link", mid(strip, MenuCmd::Link)).ticked(linked));
@@ -902,6 +999,10 @@ fn item_style(ui: &Ui) -> crate::draw::TextStyle {
     s
 }
 
+fn header_style(item: &crate::draw::TextStyle) -> crate::draw::TextStyle {
+    crate::draw::TextStyle { bold: true, size: item.size * HEADER_FONT_SCALE, color: HEADER_TEXT, ..item.clone() }
+}
+
 fn text_w(style: &crate::draw::TextStyle, text: &str) -> f32 {
     if style.bold { helvetica_bold_width(text, style.size) } else { helvetica_width(text, style.size) }
 }
@@ -911,15 +1012,12 @@ fn measure(style: &crate::draw::TextStyle, look: MenuLook, e: &PopupEntry) -> (f
     let font_h = style.size * 1.15;
     let item_w = |t: &str| match look {
         MenuLook::Base => text_w(style, t) + 3.0 * font_h,
+        MenuLook::Plugin => text_w(style, t) + 19.0 + 2.0 * font_h,
         MenuLook::Context => text_w(style, t) + 2.0 * ITEM_H,
     };
     match e {
         PopupEntry::Separator => (0.0, SEPARATOR_H),
-        PopupEntry::Header(t) => {
-            let bold = crate::draw::TextStyle { bold: true, ..style.clone() };
-            let w = text_w(&bold, t) + 2.0 * ITEM_H;
-            (w + w / 4.0, HEADER_H)
-        }
+        PopupEntry::Header(t) => (text_w(&header_style(style), t) + 2.0 * ITEM_H, HEADER_H),
         PopupEntry::Item(i) => {
             let extra = i.shortcut.as_deref().map(|s| text_w(style, s) + 3.0 * font_h).unwrap_or(0.0);
             (item_w(&i.label) + extra, ITEM_H)
@@ -975,53 +1073,61 @@ impl Ui<'_> {
     /// level; submenu rows get `MenuCmd::OpenSub { level, index }` hits.
     pub fn popup_menu(&mut self, menu: &PopupMenu, look: MenuLook, f: &MenuFrame, level: u8, hover: Option<u16>, open: Option<u16>) {
         let r = f.frame;
-        self.fill(r.offset(1.0, 2.0), Rgba::BLACK.with_alpha(0.25));
-        if self.skin("backgrounds", "Popup-Menu-Background").is_some() {
-            self.background("Popup-Menu-Background", r);
-        } else {
-            self.fill(r, Rgba::rgb8(146, 153, 157));
-            self.fill(r.inset(1.0, 1.0, 1.0, 1.0), Rgba::rgb8(185, 194, 199));
+        let st = look.style();
+        // `Popup-Menu-Background` (dropdown_bg.png) as Console 1.3.1 shows it, measured: the art's
+        // 9-slice scaling leaves a 1-pt (156,161,165) border and a light inner line.
+        if let Some(o) = st.outline {
+            self.fill(r.inset(-0.5, -0.5, -0.5, -0.5), o);
         }
+        self.fill(r, st.border);
+        self.fill(r.inset(1.0, 1.0, 1.0, 1.0), st.light);
+        self.fill(r.inset(1.5, 1.5, 1.5, 1.5), st.body);
         // The window swallows clicks between rows.
         self.hit(r, row_id(level, u16::MAX), HitKind::Tap);
-        let style = item_style(self);
+        let mut style = item_style(self);
+        style.color = st.text;
+        let lit_rect = |row: &Rect| Rect::new(row.x, row.y + st.highlight_inset, row.w, row.h - 2.0 * st.highlight_inset);
         for (i, (e, row)) in menu.entries.iter().zip(&f.rows).enumerate() {
             let i = i as u16;
             let lit = hover == Some(i) || open == Some(i);
             self.hit(*row, row_id(level, i), HitKind::Tap);
             match e {
-                PopupEntry::Separator => {
-                    self.fill(Rect::new(row.x + 1.0, row.y, row.w - 2.0, 1.0), SEP_DARK);
-                    self.fill(Rect::new(row.x + 1.0, row.y + 1.0, row.w - 2.0, 1.0), SEP_LIGHT);
-                }
+                PopupEntry::Separator => match look {
+                    MenuLook::Plugin => self.fill(Rect::new(row.x + 3.0, row.y, row.w - 6.0, 1.0), Rgba::rgb8(118, 125, 129)),
+                    _ => {
+                        self.fill(Rect::new(row.x + 1.0, row.y, row.w - 2.0, 1.0), SEP_DARK);
+                        self.fill(Rect::new(row.x + 1.0, row.y + 1.0, row.w - 2.0, 1.0), SEP_LIGHT);
+                    }
+                },
                 PopupEntry::Header(t) => {
-                    let mut hs = crate::draw::TextStyle { bold: true, ..style.clone() };
+                    let mut hs = header_style(&style);
                     match look {
-                        MenuLook::Context => {
-                            self.fill(*row, HEADER_BG);
-                            hs.color = HEADER_TEXT;
-                        }
+                        MenuLook::Context | MenuLook::Plugin => self.fill(*row, HEADER_BG),
                         MenuLook::Base => hs.color = Rgba::BLACK,
                     }
-                    self.text(t, hs, Rect::new(row.x + 5.0, row.y + 1.0, row.w - 10.0, row.h), Align::Left);
+                    self.text(t, hs, Rect::new(row.x + 5.0, row.y, row.w - 10.0, row.h), Align::Left);
                 }
                 PopupEntry::Item(it) => {
                     if lit && it.enabled && it.id.is_some() {
-                        self.fill(Rect::new(row.x, row.y + 1.0, row.w, row.h - 2.0), HIGHLIGHT);
+                        self.fill(lit_rect(row), st.highlight);
                     }
                     let mut ts = style.clone();
                     if !it.enabled {
                         ts.color = ts.color.with_alpha(DISABLED_ALPHA);
                     }
-                    if it.ticked {
-                        let dot = Rect::new(row.x + 4.0, row.y + (row.h - 4.0) / 2.0, 4.0, 4.0);
+                    if it.ticked && st.check {
+                        // s42: a ✓ 9 × 12 pt at 7 pt in.
+                        let check = crate::draw::TextStyle { size: 15.0, bold: true, ..ts.clone() };
+                        self.text("✓", check, Rect::new(row.x + 6.0, row.y, 12.0, row.h), Align::Left);
+                    } else if it.ticked {
+                        let dot = Rect::new(row.x + BULLET_X, row.y + (row.h - BULLET) / 2.0, BULLET, BULLET);
                         if self.assets.images.get("misc/dropdown_in_use_dot.png").is_some() {
                             self.image("misc/dropdown_in_use_dot.png", dot, None, None, if it.enabled { 1.0 } else { DISABLED_ALPHA });
                         } else {
                             self.fill(dot, ts.color);
                         }
                     }
-                    self.text(&it.label, ts.clone(), Rect::new(row.x + TEXT_X, row.y + 2.0, row.w - TEXT_MARGIN, row.h - 2.0), Align::Left);
+                    self.text(&it.label, ts.clone(), Rect::new(row.x + st.text_x, row.y, row.w - st.text_x - TEXT_MARGIN / 2.0, row.h), Align::Left);
                     if let Some(k) = &it.shortcut {
                         self.text(k, ts, Rect::new(row.x, row.y, row.w - 8.0, row.h), Align::Right);
                     }
@@ -1031,15 +1137,18 @@ impl Ui<'_> {
                 }
                 PopupEntry::Submenu { label, enabled, .. } => {
                     if lit && *enabled {
-                        self.fill(Rect::new(row.x, row.y + 1.0, row.w, row.h - 2.0), HIGHLIGHT);
+                        self.fill(lit_rect(row), st.highlight);
                     }
                     let mut ts = style.clone();
                     if !*enabled {
                         ts.color = ts.color.with_alpha(DISABLED_ALPHA);
                     }
-                    self.text(label, ts.clone(), Rect::new(row.x + TEXT_X, row.y + 2.0, row.w - TEXT_MARGIN, row.h - 2.0), Align::Left);
+                    self.text(label, ts.clone(), Rect::new(row.x + st.text_x, row.y, row.w - st.text_x - TEXT_MARGIN / 2.0, row.h), Align::Left);
                     let chevron = Rect::new(row.max_x() - 4.0 - 8.0, row.y + (row.h - 11.0) / 2.0, 8.0, 11.0);
-                    if self.assets.images.get("misc/dropdown_submenu_chevron.png").is_some() {
+                    if look == MenuLook::Plugin {
+                        // s42: a white 4 × 6 pt chevron 5 pt from the right.
+                        self.text("›", ts, Rect::new(row.max_x() - 5.0 - 6.0, row.y, 6.0, row.h), Align::Right);
+                    } else if self.assets.images.get("misc/dropdown_submenu_chevron.png").is_some() {
                         self.image("misc/dropdown_submenu_chevron.png", chevron, None, None, if *enabled { 1.0 } else { DISABLED_ALPHA });
                     } else {
                         self.text("›", ts, chevron, Align::Center);
@@ -1224,8 +1333,10 @@ impl ViewState {
             MenuCmd::Presets => {
                 self.show_browser = true;
                 self.compact = false;
+                self.browser.assign_to = None;
                 self.browser.tab = crate::surfaces::BrowserTab::Presets;
             }
+            MenuCmd::AssignCancel => self.browser.assign_to = None,
             _ => {}
         }
     }
@@ -1288,6 +1399,23 @@ impl ViewState {
     /// followed by `>I>J…` to open submenu entries. Context menus open at the control's centre
     /// in `hits` (a frame built without the menu).
     pub fn open_menu_spec(&mut self, hits: &[Hit], spec: &str) -> Result<(), String> {
+        // `~N` highlights row N of the innermost menu (renders of a hovered row).
+        let (spec, hover) = match spec.split_once('~') {
+            Some((s, h)) => (s, Some(h.parse::<u16>().map_err(|_| format!("--menu {spec}: bad row {h}"))?)),
+            None => (spec, None),
+        };
+        let popover = |kind: Popover, control: Control| PopoverState { kind, anchor: ControlId { strip: "status".into(), control } };
+        match spec {
+            "rate" => {
+                self.popover = Some(popover(Popover::SampleRate, Control::StatusRate));
+                return Ok(());
+            }
+            "clock" => {
+                self.popover = Some(popover(Popover::ClockSource, Control::StatusClock));
+                return Ok(());
+            }
+            _ => {}
+        }
         let mut parts = spec.split('>');
         let head = parts.next().unwrap_or_default();
         let fields: Vec<&str> = head.split(':').collect();
@@ -1325,6 +1453,7 @@ impl ViewState {
             for p in parts {
                 m.open.push(p.parse().map_err(|_| format!("--menu {spec}: bad submenu index {p}"))?);
             }
+            m.hover = hover.map(|i| (m.open.len() as u8, i));
         }
         Ok(())
     }

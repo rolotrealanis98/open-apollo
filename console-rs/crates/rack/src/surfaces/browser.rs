@@ -26,6 +26,8 @@ pub const BROWSER_ID: &str = "browser";
 
 /// `Browser` background (`backgrounds/browser_bg.png`), under every panel.
 const BG: Rgba = Rgba::rgb8(71, 76, 79);
+/// Assign mode (s08).
+const ASSIGN_BG: Rgba = Rgba::rgb8(115, 123, 128);
 /// Search field and list.
 const WELL: Rgba = Rgba::rgb8(29, 30, 32);
 const WELL_EDGE: Rgba = Rgba::rgb8(23, 24, 25);
@@ -94,11 +96,27 @@ fn section_height(open: bool, count: usize) -> f32 {
 /// Draws the browser into `r` (window points).
 pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     let b = &view.browser;
-    ui.fill(r, BG);
-    ui.background("Browser", r);
+    // An insert's "Assign..." (capture s08): a lighter browser titled with the slot, and a
+    // CHOOSE PLUG-IN panel instead of the hint.
+    let assign = b.assign_to.as_ref().map(|id| assign_title(model, id));
+    let bg = if assign.is_some() { ASSIGN_BG } else { BG };
+    ui.fill(r, bg);
+    if assign.is_none() {
+        ui.background("Browser", r);
+    }
     ui.at(r.x, r.y, |ui| {
         let (w, h) = (r.w, r.h);
         let inner = w - 2.0 * MARGIN;
+        if let Some(title) = &assign {
+            let band = Rect::new(0.0, 0.0, w, SEARCH_Y - 4.0);
+            ui.text(title, bold(12.0, Rgba::rgb8(240, 241, 242)), band, Align::Center);
+            let close = Rect::new(w - MARGIN - 24.0, (band.h - 24.0) / 2.0, 24.0, 24.0);
+            if let Some(x) = ui.skin("views", "Browser-Modal-Close-White").and_then(|s| s.image("image")) {
+                let x = x.to_string();
+                ui.image(&x, Rect::new(close.x + 5.0, close.y + 5.0, 14.0, 14.0), None, None, 1.0);
+            }
+            ui.hit(close, bid(Control::Menu(crate::menu::MenuCmd::AssignCancel)), HitKind::Tap);
+        }
         // Tabs (`Tab-Left` / `Tab-Right`, art stretched to the tab).
         let tw = (inner / 2.0).floor();
         let tabs = [
@@ -106,6 +124,9 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
             (BrowserTab::Presets, "PRESETS", "Tab-Right", Rect::new(MARGIN + tw, TAB_Y, inner - tw, TAB_H)),
         ];
         for (t, label, key, tr) in tabs {
+            if assign.is_some() {
+                break;
+            }
             let on = b.tab == t;
             if let Some(img) = ui.skin("views", key).and_then(|s| if on { s.image("image-on") } else { s.image("image-off") }) {
                 let img = img.to_string();
@@ -117,7 +138,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         }
         // Search header (`browser_search_header.json`).
         let sr = Rect::new(MARGIN, SEARCH_Y, inner, SEARCH_H);
-        rounded(ui, sr, WELL, WELL_EDGE, BG, &UA_CORNER, [true; 4]);
+        rounded(ui, sr, WELL, WELL_EDGE, bg, &UA_CORNER, [true; 4]);
         if let Some(icon) = ui.skin("views", "Browser-Search-Icon").and_then(|s| s.image("image")) {
             let icon = icon.to_string();
             ui.image(&icon, Rect::new(sr.x + 9.0, sr.y + 6.0, 16.0, 16.0), None, None, 1.0);
@@ -131,6 +152,17 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         ui.hit(sr, bid(Control::BrowserSearch), HitKind::Tap);
 
         let mut y = sr.max_y() + MARGIN;
+        if assign.is_some() {
+            // s08: a 2-pt white rule, then a (90,96,99) panel 120 pt high with CHOOSE PLUG-IN
+            // 8 pt down and a dashed drop box.
+            let panel = Rect::new(MARGIN, y + 2.0, inner, 120.0);
+            ui.fill(Rect::new(panel.x, y, panel.w, 2.0), Rgba::WHITE);
+            ui.fill(panel, Rgba::rgb8(90, 96, 99));
+            ui.text("CHOOSE PLUG-IN", bold(12.0, Rgba::rgb8(240, 241, 242)), Rect::new(panel.x, panel.y + 8.0, panel.w, 16.0), Align::Center);
+            let dash = Rect::new(panel.x + (panel.w - 120.0) / 2.0, panel.y + 34.0, 120.0, 48.0);
+            dashed(ui, dash, Rgba::rgb8(20, 22, 23));
+            y = panel.max_y() + MARGIN + 3.0;
+        }
         if b.tab == BrowserTab::Presets {
             presets_tab(ui, model, view, Rect::new(MARGIN, y, inner, h - y - MARGIN));
             return;
@@ -138,7 +170,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         // CATEGORIES section.
         let cats = model.plugin_categories();
         let sec = Rect::new(MARGIN, y, inner, section_height(b.categories_open, cats.len()));
-        rounded(ui, sec, SECTION, SECTION_EDGE, BG, &UA_CORNER, [true; 4]);
+        rounded(ui, sec, SECTION, SECTION_EDGE, bg, &UA_CORNER, [true; 4]);
         reveal(ui, b.categories_open, Rect::new(sec.x + 1.0, sec.y + 5.0, 20.0, 20.0));
         let head = bold(11.0, Rgba::rgb8(227, 227, 227));
         ui.text("CATEGORIES", head.clone(), Rect::new(sec.x + 21.0, sec.y, 120.0, SECTION_HEADER_H), Align::Left);
@@ -168,7 +200,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
 
         // View-mode bar: rounded top, joined to the list below.
         let bar = Rect::new(MARGIN, y, inner, VIEW_BAR_H);
-        rounded(ui, bar, SECTION, SECTION_EDGE, BG, &UA_CORNER, [true, true, false, false]);
+        rounded(ui, bar, SECTION, SECTION_EDGE, bg, &UA_CORNER, [true, true, false, false]);
         let toggle = Rect::new(bar.x + 6.0, bar.y + 6.0, 16.0, 15.0);
         if let Some(img) = ui.skin("views", "Large-Icon-Toggle").and_then(|s| if b.large_rows { s.image("image-on") } else { s.image("image-off") }) {
             let img = img.to_string();
@@ -179,9 +211,9 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
 
         // List: rounded bottom, square top.
         let list = Rect::new(MARGIN, y, inner, h - y - MARGIN);
-        rounded(ui, list, WELL, WELL_EDGE, BG, &UA_CORNER, [false, false, true, true]);
+        rounded(ui, list, WELL, WELL_EDGE, bg, &UA_CORNER, [false, false, true, true]);
         y += MARGIN;
-        if b.hint {
+        if b.hint && assign.is_none() {
             let hr = Rect::new(list.x + MARGIN, y, list.w - 2.0 * MARGIN, HINT_H);
             ui.image_stretched("uapw/tag_bg_on.png", hr, 1.0);
             let hs = bold(11.0, Rgba::rgb8(227, 227, 228));
@@ -198,6 +230,40 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         }
         plugin_list(ui, model, view, Rect::new(list.x, y, list.w, list.max_y() - MARGIN - y));
     });
+}
+
+/// The browser's title in assign mode: "<channel>: INSERT n" (s08 "AUX 1: INSERT 2") or
+/// "<channel>: UNISON".
+fn assign_title(model: &dyn MixerModel, id: &ControlId) -> String {
+    let strip = model.inputs().into_iter().chain(model.auxes()).find(|s| s.id == id.strip);
+    let name = strip.map(|s| {
+        let n = model.main(&s).name;
+        if n.is_empty() { s.title.clone() } else { n }
+    });
+    let slot = match id.control {
+        Control::Insert(255) => "UNISON".to_string(),
+        Control::Insert(k) => format!("INSERT {}", k as u16 + 1),
+        _ => String::new(),
+    };
+    format!("{}: {slot}", name.unwrap_or_default().to_uppercase())
+}
+
+/// A 1-pt dashed outline (2 pt dashes, 2 pt gaps).
+fn dashed(ui: &mut Ui, r: Rect, color: Rgba) {
+    let mut x = r.x;
+    while x < r.max_x() {
+        let w = 2.0f32.min(r.max_x() - x);
+        ui.fill(Rect::new(x, r.y, w, 1.0), color);
+        ui.fill(Rect::new(x, r.max_y() - 1.0, w, 1.0), color);
+        x += 4.0;
+    }
+    let mut y = r.y;
+    while y < r.max_y() {
+        let h = 2.0f32.min(r.max_y() - y);
+        ui.fill(Rect::new(r.x, y, 1.0, h), color);
+        ui.fill(Rect::new(r.max_x() - 1.0, y, 1.0, h), color);
+        y += 4.0;
+    }
 }
 
 /// Top-left corner coverage of UA's 2 pt panel corner, 0.5 pt cells: `(outer, fill)`;
