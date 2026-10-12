@@ -34,6 +34,17 @@ enum TexId {
     White,
     Atlas,
     Image(u32),
+    /// A slot in `Renderer::resampled`.
+    Resampled(u32),
+}
+
+/// An image (or filmstrip frame) area-resampled to the device-pixel size it is drawn at.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ResampleKey {
+    key: Arc<str>,
+    /// Source rows (y, h) in image px.
+    rows: (u32, u32),
+    size: (u32, u32),
 }
 
 struct Batch {
@@ -69,6 +80,9 @@ pub struct Renderer {
     images: Arc<ImageCache>,
     textures: HashMap<(Arc<str>, Option<Frame>), Option<u32>>,
     gpu_textures: Vec<GpuTexture>,
+    resampled: HashMap<ResampleKey, (u32, u64)>,
+    resampled_slots: Vec<Option<GpuTexture>>,
+    frame_no: u64,
     max_dim: u32,
     pub text: TextSystem,
     pub stats: FrameStats,
@@ -177,6 +191,9 @@ impl Renderer {
             images,
             textures: HashMap::new(),
             gpu_textures: Vec::new(),
+            resampled: HashMap::new(),
+            resampled_slots: Vec::new(),
+            frame_no: 0,
             max_dim: device.limits().max_texture_dimension_2d,
             text,
             stats: FrameStats::default(),
@@ -214,6 +231,51 @@ impl Renderer {
         let id = (self.gpu_textures.len() - 1) as u32;
         self.textures.insert(cache_key, Some(id));
         Some(id)
+    }
+
+    /// Texture slot holding `rows` of image `key` box-filtered to `size` px (see
+    /// [`houston::ImageData::resample_area_premul`]): drawn 1:1, a minified image looks like
+    /// CoreGraphics' high-quality downscale instead of aliased bilinear taps.
+    fn resampled(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, key: &Arc<str>, rows: (u32, u32), size: (u32, u32)) -> Option<u32> {
+        let rk = ResampleKey { key: key.clone(), rows, size };
+        if let Some((slot, used)) = self.resampled.get_mut(&rk) {
+            *used = self.frame_no;
+            return Some(*slot);
+        }
+        let img = self.images.get(key)?;
+        let data = img.resample_area_premul((0, rows.0, img.width, rows.1), size.0, size.1);
+        let tex = upload_rgba(device, queue, size.0, size.1, &data);
+        let bind = bind_texture(device, &self.tex_layout, &tex, &self.sampler);
+        let gt = GpuTexture { bind, size, frame_rows: None };
+        let slot = match self.resampled_slots.iter().position(Option::is_none) {
+            Some(i) => {
+                self.resampled_slots[i] = Some(gt);
+                i
+            }
+            None => {
+                self.resampled_slots.push(Some(gt));
+                self.resampled_slots.len() - 1
+            }
+        } as u32;
+        self.resampled.insert(rk, (slot, self.frame_no));
+        Some(slot)
+    }
+
+    /// Drops resampled textures not drawn for a while (zooming leaves many sizes behind).
+    fn evict_resampled(&mut self) {
+        self.frame_no += 1;
+        if self.frame_no % 128 != 0 {
+            return;
+        }
+        let now = self.frame_no;
+        let slots = &mut self.resampled_slots;
+        self.resampled.retain(|_, (slot, used)| {
+            let keep = now - *used < 600;
+            if !keep {
+                slots[*slot as usize] = None;
+            }
+            keep
+        });
     }
 
     /// Renders `list` (window points) into `target` of `size_px`, at `scale` px per point.
@@ -279,7 +341,7 @@ impl Renderer {
                 }
                 Draw::Fill { rect, color } => {
                     let start = verts.len() as u32;
-                    quad(&mut verts, scaled(*rect, scale), [0.0, 0.0, 1.0, 1.0], *color, 0.0);
+                    quad(&mut verts, snap_edges(scaled(*rect, scale)), [0.0, 0.0, 1.0, 1.0], *color, 0.0);
                     quads += 1;
                     push_batch(&mut batches, TexId::White, scissor, start, verts.len() as u32);
                 }
@@ -292,16 +354,50 @@ impl Renderer {
                         (Some(f), None) => Rect::new(0.0, (f.index * f.height) as f32, tw, f.height as f32),
                         _ => Rect::new(0.0, 0.0, tw, th),
                     };
+                    // Source rows in image px (frames of split strips live in their own texture).
+                    let rows = match (frame, t.frame_rows) {
+                        (_, Some(r)) => r,
+                        (Some(f), None) => (f.index * f.height, f.height),
+                        (None, None) => (0, t.size.1),
+                    };
                     let start = verts.len() as u32;
-                    let dst = scaled(*dst, scale);
+                    let dst = if slice.is_some() { snap_out(scaled(*dst, scale)) } else { snap(scaled(*dst, scale)) };
+                    if dst.w < 0.5 || dst.h < 0.5 {
+                        continue;
+                    }
+                    let mut tex = TexId::Image(id);
                     match slice {
-                        Some(ins) => quads += nine_slice(&mut verts, dst, src, (tw, th), *ins, scale / ART_SCALE, *tint),
+                        Some(ins) => {
+                            // Corners keep inset × scale/2 px; below 1:1 the whole source is
+                            // box-filtered by that factor first.
+                            let f = scale / ART_SCALE;
+                            let size = ((src.w * f).round().max(1.0) as u32, (src.h * f).round().max(1.0) as u32);
+                            let res = if f < 0.98 { self.resampled(device, queue, key, rows, size) } else { None };
+                            match res {
+                                Some(slot) => {
+                                    tex = TexId::Resampled(slot);
+                                    let (rw, rh) = (size.0 as f32, size.1 as f32);
+                                    let k = (rw / src.w, rh / src.h);
+                                    let ins = Insets { l: ins.l * k.0, r: ins.r * k.0, t: ins.t * k.1, b: ins.b * k.1 };
+                                    quads += nine_slice(&mut verts, dst, Rect::new(0.0, 0.0, rw, rh), (rw, rh), ins, 1.0, *tint);
+                                }
+                                None => quads += nine_slice(&mut verts, dst, src, (tw, th), *ins, f, *tint),
+                            }
+                        }
                         None => {
-                            quad(&mut verts, dst, [src.x / tw, src.y / th, src.max_x() / tw, src.max_y() / th], *tint, 0.0);
+                            let size = (dst.w.round() as u32, dst.h.round() as u32);
+                            let minified = (size.0 as f32) < src.w - 0.5 || (size.1 as f32) < src.h - 0.5;
+                            match if minified { self.resampled(device, queue, key, rows, size) } else { None } {
+                                Some(slot) => {
+                                    tex = TexId::Resampled(slot);
+                                    quad(&mut verts, dst, [0.0, 0.0, 1.0, 1.0], *tint, 0.0);
+                                }
+                                None => quad(&mut verts, dst, [src.x / tw, src.y / th, src.max_x() / tw, src.max_y() / th], *tint, 0.0),
+                            }
                             quads += 1;
                         }
                     }
-                    push_batch(&mut batches, TexId::Image(id), scissor, start, verts.len() as u32);
+                    push_batch(&mut batches, tex, scissor, start, verts.len() as u32);
                 }
                 Draw::Text { text, style, rect, align } => {
                     let start = verts.len() as u32;
@@ -350,6 +446,10 @@ impl Renderer {
                     TexId::White => &self.white,
                     TexId::Atlas => self.text.bind_group(),
                     TexId::Image(id) => &self.gpu_textures[id as usize].bind,
+                    TexId::Resampled(slot) => match &self.resampled_slots[slot as usize] {
+                        Some(t) => &t.bind,
+                        None => continue,
+                    },
                 };
                 pass.set_bind_group(1, bind, &[]);
                 pass.draw(b.range.clone(), 0..1);
@@ -357,8 +457,31 @@ impl Renderer {
         }
         queue.submit([encoder.finish()]);
         self.text.end_frame();
-        self.stats = FrameStats { quads, batches: batches.len(), textures: self.gpu_textures.len(), texture_bytes: self.stats.texture_bytes, glyphs };
+        self.evict_resampled();
+        let textures = self.gpu_textures.len() + self.resampled.len();
+        self.stats = FrameStats { quads, batches: batches.len(), textures, texture_bytes: self.stats.texture_bytes, glyphs };
     }
+}
+
+/// Device-pixel snapping for plain images, after Rack.dll's `GUI_Images` DrawImage
+/// (0x181c1de70): the image covers `ceil(size × scale)` device pixels, drawn 1:1 from a cached
+/// resample when that differs from the source. The origin rounds to the nearest pixel.
+fn snap(r: Rect) -> Rect {
+    let (x, y) = (r.x.round(), r.y.round());
+    Rect::new(x, y, (r.w - 0.01).ceil().max(0.0), (r.h - 0.01).ceil().max(0.0))
+}
+
+/// 9-slice destinations (Rack.dll 0x181c237c0): `(int)(x·s)` to `ceilf((x+w)·s)`.
+fn snap_out(r: Rect) -> Rect {
+    let (x0, y0) = ((r.x + 0.01).floor(), (r.y + 0.01).floor());
+    let (x1, y1) = ((r.max_x() - 0.01).ceil(), (r.max_y() - 0.01).ceil());
+    Rect::new(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
+}
+
+/// Fills: both edges round to pixels, so adjacent fills meet without seams or overlap.
+fn snap_edges(r: Rect) -> Rect {
+    let (x0, y0, x1, y1) = (r.x.round(), r.y.round(), r.max_x().round(), r.max_y().round());
+    Rect::new(x0, y0, x1 - x0, y1 - y0)
 }
 
 fn quad(v: &mut Vec<Vertex>, r: Rect, uv: [f32; 4], c: Rgba, mode: f32) {
@@ -518,5 +641,24 @@ impl Headless {
         // What was drawn where, for console-rs/tools/align (image paths and labels only).
         std::fs::write(draws::sidecar_path(path), draws::draws_json(list, size_pt, scale))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::*;
+
+    #[test]
+    fn image_snapping() {
+        // 2x: half-point art lands on whole pixels unchanged.
+        assert_eq!(snap(Rect::new(975.0, 1242.0, 96.0, 152.0)), Rect::new(975.0, 1242.0, 96.0, 152.0));
+        // Fractional (fader cap at 0.25 pt): origin rounds, size stays whole.
+        assert_eq!(snap(Rect::new(10.5, 20.4, 96.0, 152.0)), Rect::new(11.0, 20.0, 96.0, 152.0));
+        // Non-integer zoom: size is ceil(w·s).
+        assert_eq!(snap(Rect::new(3.3, 0.0, 65.76, 26.3)), Rect::new(3.0, 0.0, 66.0, 27.0));
+        // 9-slice: floor/ceil of the edges.
+        assert_eq!(snap_out(Rect::new(3.3, 1.7, 10.0, 10.0)), Rect::new(3.0, 1.0, 11.0, 11.0));
+        assert_eq!(snap_out(Rect::new(4.0, 2.0, 10.0, 10.0)), Rect::new(4.0, 2.0, 10.0, 10.0));
+        assert_eq!(snap_edges(Rect::new(0.4, 0.6, 10.2, 10.0)), Rect::new(0.0, 1.0, 11.0, 10.0));
     }
 }

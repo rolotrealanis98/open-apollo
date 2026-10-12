@@ -41,6 +41,102 @@ impl ImageData {
     pub fn bytes(&self) -> usize {
         self.rgba.len()
     }
+
+    /// Premultiplied RGBA8 of the source rect `(x, y, w, h)` (image px), area-averaged (box
+    /// filter with fractional pixel coverage) to `out_w`×`out_h`. This is what CoreGraphics'
+    /// high-quality downscale gives UAD Console's plug-in icons (RMS error 2.7/255 on refpair p1,
+    /// against 8.5 for bilinear and 7.8 for trilinear mipmaps).
+    pub fn resample_area_premul(&self, src: (u32, u32, u32, u32), out_w: u32, out_h: u32) -> Vec<u8> {
+        let (sx, sy, sw, sh) = src;
+        let (sw, sh) = (sw.min(self.width.saturating_sub(sx)), sh.min(self.height.saturating_sub(sy)));
+        let (ow, oh) = (out_w.max(1) as usize, out_h.max(1) as usize);
+        if sw == 0 || sh == 0 {
+            return vec![0; ow * oh * 4];
+        }
+        let xw = area_weights(sw as usize, ow);
+        let yw = area_weights(sh as usize, oh);
+        // Horizontal pass into f32 premultiplied rows.
+        let stride = self.width as usize * 4;
+        let mut tmp = vec![0f32; sh as usize * ow * 4];
+        for r in 0..sh as usize {
+            let row = &self.rgba[(sy as usize + r) * stride + sx as usize * 4..];
+            for (o, taps) in xw.iter().enumerate() {
+                let mut acc = [0f32; 4];
+                for &(i, w) in taps {
+                    let p = &row[i * 4..i * 4 + 4];
+                    let a = p[3] as f32 / 255.0;
+                    acc[0] += p[0] as f32 * a * w;
+                    acc[1] += p[1] as f32 * a * w;
+                    acc[2] += p[2] as f32 * a * w;
+                    acc[3] += p[3] as f32 * w;
+                }
+                tmp[(r * ow + o) * 4..(r * ow + o) * 4 + 4].copy_from_slice(&acc);
+            }
+        }
+        let mut out = vec![0u8; ow * oh * 4];
+        for (o, taps) in yw.iter().enumerate() {
+            for x in 0..ow {
+                let mut acc = [0f32; 4];
+                for &(i, w) in taps {
+                    let p = &tmp[(i * ow + x) * 4..(i * ow + x) * 4 + 4];
+                    for c in 0..4 {
+                        acc[c] += p[c] * w;
+                    }
+                }
+                for c in 0..4 {
+                    out[(o * ow + x) * 4 + c] = (acc[c] + 0.5).clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Box-filter taps for resizing `n_in` samples to `n_out`: per output sample, the input samples
+/// it covers and their coverage weights (summing to 1).
+fn area_weights(n_in: usize, n_out: usize) -> Vec<Vec<(usize, f32)>> {
+    let scale = n_in as f64 / n_out as f64;
+    (0..n_out)
+        .map(|o| {
+            let (start, end) = (o as f64 * scale, (o + 1) as f64 * scale);
+            let mut taps = Vec::new();
+            let mut i = start.floor() as usize;
+            while (i as f64) < end && i < n_in {
+                let w = (end.min(i as f64 + 1.0) - start.max(i as f64)) / scale;
+                if w > 1e-9 {
+                    taps.push((i, w as f32));
+                }
+                i += 1;
+            }
+            taps
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod resample_tests {
+    use super::*;
+
+    #[test]
+    fn area_weights_cover_input() {
+        let w = area_weights(400, 190);
+        assert_eq!(w.len(), 190);
+        for taps in &w {
+            let s: f32 = taps.iter().map(|t| t.1).sum();
+            assert!((s - 1.0).abs() < 1e-5);
+        }
+        assert_eq!(w[0][0], (0, 190.0 / 400.0));
+        assert_eq!(area_weights(4, 2), vec![vec![(0, 0.5), (1, 0.5)], vec![(2, 0.5), (3, 0.5)]]);
+    }
+
+    #[test]
+    fn resample_box_average_premultiplied() {
+        // 2x2 → 1x1: opaque red, opaque blue, two transparent pixels.
+        let img = ImageData { width: 2, height: 2, rgba: vec![255, 0, 0, 255, 0, 0, 255, 255, 9, 9, 9, 0, 9, 9, 9, 0] };
+        assert_eq!(img.resample_area_premul((0, 0, 2, 2), 1, 1), vec![64, 0, 64, 128]);
+        // Source sub-rect (a filmstrip frame): the bottom row only.
+        assert_eq!(img.resample_area_premul((0, 1, 2, 1), 1, 1), vec![0, 0, 0, 0]);
+    }
 }
 
 /// Thread-safe decode cache. Keys are `images/`-relative paths, `plugin:<EffectName>`, or
