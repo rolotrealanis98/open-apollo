@@ -136,8 +136,30 @@ impl EngineMixer {
                     self.store.commit("/UndoRedo", v);
                 }
             }
-            // No engine path: Console clears its own meter holds (the helper has `clear_clips`).
-            MenuCmd::ClearMeter | MenuCmd::ClearAllMeters => {}
+            // `post /ClearClips {path?, reset}` (the engine's own `commands` list): a strip's
+            // meter, or every meter without a path. "reset" also clears the peak holds, as
+            // Console's CLEAR does (inferred: no captured Console traffic).
+            MenuCmd::ClearMeter | MenuCmd::ClearAllMeters => {
+                let mut args: Vec<(&str, Json)> = Vec::new();
+                if *cmd == MenuCmd::ClearMeter {
+                    let path = match &**strip {
+                        "monitor" => self.store.topology().monitor.as_ref().map(|m| m.base.clone()),
+                        id => self.input(id).map(|s| s.base.clone()).or_else(|| self.aux(id).map(|a| a.base.clone())),
+                    };
+                    let Some(path) = path else { return };
+                    args.push(("path", Json::String(path)));
+                }
+                args.push(("reset", Json::Bool(true)));
+                self.store.post("/ClearClips", Some(&args.into_iter().collect::<Json>()));
+            }
+            // `post /CopyToSends {"send": i}`: the monitor mix into send `i` (fader / pan menu).
+            MenuCmd::CopyMixTo(i) => {
+                let args: Json = [("send", Json::from(*i as i64))].into_iter().collect();
+                self.store.post("/CopyToSends", Some(&args));
+            }
+            // Scene save / rename / overwrite / clear: the `SceneOperation` arguments are not
+            // known yet, so these send nothing (Recall is `RecallScene`, a plain control).
+            MenuCmd::Scene(..) => {}
             _ => {}
         }
     }

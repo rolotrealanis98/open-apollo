@@ -639,9 +639,10 @@ impl ViewState {
             C::SessionNavigate(first) => self.first_strip = first as usize,
             // TEMPO opens Console's dialog (capture s05).
             C::StatusTempo => self.toggle_panel(Panel::Tempo, model),
-            C::StatusRate | C::SettingsRate => self.open(Popover::SampleRate, id),
-            C::StatusClock | C::SettingsClock => self.open(Popover::ClockSource, id),
-            C::SettingsBuffer => self.open(Popover::BufferSize, id),
+            // Console menus under the field (sb-rate / sb-clock), with hover like any menu.
+            C::StatusRate | C::SettingsRate => self.open_field_menu(crate::menu::MenuTarget::SampleRate, id),
+            C::StatusClock | C::SettingsClock => self.open_field_menu(crate::menu::MenuTarget::ClockSource, id),
+            C::SettingsBuffer => self.open_field_menu(crate::menu::MenuTarget::BufferSize, id),
             // The status bar's SCENE opens the PLUG-IN SCENES column (Console 1.3.1 capture).
             C::StatusScene => {
                 if !self.show_scenes {

@@ -574,6 +574,21 @@ pub enum MenuCmd {
     StripInserts(PluginOp),
     /// [model] S/PDIF `SRConvert` (preamp menu "Sample Rate Convertsion").
     SrConvert(bool),
+    /// [model] Fader / pan "COPY MIX TO": `post /CopyToSends {"send": i}` (the monitor mix into
+    /// send `i` of every input; capture fader-in / pan-in).
+    CopyMixTo(u8),
+    /// [model] A PLUG-IN SCENES row's menu (capture browser-row).
+    Scene(SceneOp, u16),
+}
+
+/// The PLUG-IN SCENES row menu's operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SceneOp {
+    Rename,
+    Overwrite,
+    Clear,
+    Save,
+    Recall,
 }
 
 impl MenuCmd {
@@ -634,15 +649,35 @@ pub enum MenuTarget {
     Preamp { strip: Arc<str> },
     /// Plug-in browser row (`Rack_PluginAssignBrowser::ShowTreeViewItemPopupMenu` 0x1812d6da0).
     BrowserItem(u16),
+    /// Input fader or pan: COPY MIX TO the strip's sends (captures fader-in, pan-in, pan-stereo).
+    CopyMix { strip: Arc<str> },
+    /// The MIC / LINE button: SOURCE (capture preamp-mic; the same menu as a left click).
+    InputSource { strip: Arc<str> },
+    /// The monitor column's big meter: CLEAR Meter / All Meters (capture monitor-meter).
+    MonitorMeter,
+    /// A PLUG-IN SCENES row (captures browser-row, browser-hdr).
+    SceneRow(u16),
+    /// Status bar RATE / CLOCK and the buffer size (`Rack_*Info`; sb-rate, sb-clock).
+    SampleRate,
+    ClockSource,
+    BufferSize,
 }
 
 /// Where the root menu opens.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MenuAnchor {
     /// Right click / long press: top-left at the point.
     Point(f32, f32),
     /// Combo box: below the rect, at least its width.
     Below(Rect),
+    /// A combo-like control's menu, below the control's hit rect at least its width (resolved
+    /// when drawn): the status bar fields.
+    BelowControl(ControlId),
+    /// A context menu's target component: the menu's top-left at the component's bottom-left
+    /// (JUCE `withTargetComponent`), above it when there is no room below. Strip labels,
+    /// insert and Unison slots, solo and MIC / LINE buttons (captures lbl-*, ins-*, unison,
+    /// solo-in, preamp-mic: every popup at the component's x and bottom).
+    Under(Rect),
     /// Below in-window menu-bar title `i` ([`bar_titles`] from [`BAR_X`]).
     Bar(u8),
 }
@@ -657,9 +692,31 @@ pub struct MenuState {
     pub hover: Option<(u8, u16)>,
 }
 
+/// Where a pointer-anchored context menu opens relative to the click (meter, fader, pan,
+/// monitor meter: every capture puts the window's top-left 20 pt left of and 10 pt below the
+/// click, i.e. at the bottom-left of a 40 × 20 target area centred on it).
+pub const POINTER_DX: f32 = -20.0;
+pub const POINTER_DY: f32 = 10.0;
+
 impl MenuState {
+    /// A menu whose window's top-left is at (`x`, `y`).
     pub fn at(target: MenuTarget, x: f32, y: f32) -> Self {
         Self { target, anchor: MenuAnchor::Point(x, y), open: Vec::new(), hover: None }
+    }
+
+    /// A context menu for a click at (`x`, `y`) with no target component.
+    pub fn pointer(target: MenuTarget, x: f32, y: f32) -> Self {
+        Self::at(target, x + POINTER_DX, y + POINTER_DY)
+    }
+
+    /// A context menu under its target component `r`.
+    pub fn under(target: MenuTarget, r: Rect) -> Self {
+        Self { target, anchor: MenuAnchor::Under(r), open: Vec::new(), hover: None }
+    }
+
+    /// A combo menu below the control `id` (its hit rect when drawn).
+    pub fn below_control(target: MenuTarget, id: ControlId) -> Self {
+        Self { target, anchor: MenuAnchor::BelowControl(id), open: Vec::new(), hover: None }
     }
 }
 
@@ -829,6 +886,13 @@ pub fn build_menu(model: &dyn MixerModel, view: &ViewState, target: &MenuTarget,
         MenuTarget::Meter { strip } => (meter_menu(model, strip), MenuLook::Context),
         MenuTarget::Preamp { strip } => (preamp_menu(model, strip), MenuLook::Context),
         MenuTarget::BrowserItem(i) => (browser_item_menu(model, *i), MenuLook::Context),
+        MenuTarget::CopyMix { strip } => (copy_mix_menu(model, strip), MenuLook::Context),
+        MenuTarget::InputSource { strip } => (input_source_menu(model, strip), MenuLook::Context),
+        MenuTarget::MonitorMeter => (monitor_meter_menu(), MenuLook::Context),
+        MenuTarget::SceneRow(i) => (scene_row_menu(model, *i), MenuLook::Context),
+        MenuTarget::SampleRate => (crate::surfaces::popover::sample_rate_menu(model), MenuLook::Base),
+        MenuTarget::ClockSource => (crate::surfaces::popover::clock_source_menu(model), MenuLook::Base),
+        MenuTarget::BufferSize => (crate::surfaces::popover::buffer_size_menu(model), MenuLook::Base),
     }
 }
 
@@ -846,7 +910,8 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
     let paste_label = |name: &str| format!("Paste \"{}\"", name.strip_prefix("UAD ").unwrap_or(name));
     match insert_state(model, &s, slot) {
         InsertState::Empty => {
-            m.header(if slot == 255 { "UNISON (EMPTY)".to_string() } else { format!("INSERT {} (EMPTY)", slot as u16 + 1) });
+            // The Unison slot reads "INSERT 1" too (capture unison).
+            m.header(format!("INSERT {} (EMPTY)", if slot == 255 { 1 } else { slot as u16 + 1 }));
             m.push(PopupItem::new("Assign...", mid(strip, MenuCmd::Assign(slot))));
             match &st.clipboard {
                 Some(name) => m.push(PopupItem::new(paste_label(name), mid(strip, MenuCmd::InsertPaste(slot)))),
@@ -867,9 +932,10 @@ pub fn insert_menu(model: &dyn MixerModel, strip: &Arc<str>, slot: u8) -> PopupM
             m.push(PopupItem::new(if power { "Disable" } else { "Enable" }, sid(strip, Control::InsertPower(slot))));
         }
     }
-    if slot != 255 {
-        // The channel name as the header (s01: "SM7B"); the "… All" rows only when the strip has
-        // plug-ins (0x18143be10; s01 shows Presets... alone on an empty strip).
+    {
+        // The channel name as the header (s01: "SM7B"; the Unison slot's menu too, capture
+        // unison); the "… All" rows only when the strip has plug-ins (0x18143be10; s01 shows
+        // Presets... alone on an empty strip).
         let loaded = model.inserts(&s).iter().any(|i| matches!(i, InsertState::Loaded { .. }));
         m.header(model.main(&s).name);
         m.push(PopupItem::new("Presets...", mid(strip, MenuCmd::Presets)));
@@ -947,6 +1013,84 @@ pub fn meter_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
         m.push(PopupItem::new("Pre-Fader", mid(strip, MenuCmd::PostFaderMetering(false))).ticked(!post));
         m.push(PopupItem::new("Post-Fader", mid(strip, MenuCmd::PostFaderMetering(true))).ticked(post));
     }
+    m.finish()
+}
+
+/// Input fader / pan (captures fader-in, pan-in, pan-stereo): COPY MIX TO, then the strip's
+/// sends by group (AUX 1, AUX 2 | CUE 1, CUE 2), a separator between groups.
+pub fn copy_mix_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(s) = find_strip(model, strip) else { return m };
+    let sends = model.input_sends(&s);
+    if sends.is_empty() {
+        return m;
+    }
+    m.header("COPY MIX TO");
+    let group = |n: &str| n.trim_end_matches(|c: char| c.is_ascii_digit() || c == ' ').to_ascii_uppercase();
+    let mut last: Option<String> = None;
+    for (i, send) in sends.iter().enumerate() {
+        let g = group(&send.name);
+        if last.as_ref().is_some_and(|l| *l != g) {
+            m.separator();
+        }
+        last = Some(g);
+        m.push(PopupItem::new(send.name.to_uppercase(), mid(strip, MenuCmd::CopyMixTo(i as u8))));
+    }
+    m.finish()
+}
+
+/// The MIC / LINE button (`Rack_PreampChannelStripControls::DoInputSourcePopup` 0x181476f00,
+/// capture preamp-mic): SOURCE, then the sources with the current one ticked (or a disabled
+/// Hi-Z while the jack is used).
+pub fn input_source_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(s) = find_strip(model, strip) else { return m };
+    let Some(p) = model.preamp(&s) else { return m };
+    m.header("SOURCE");
+    if model.strip_menu_state(&s).hi_z {
+        m.push(PopupItem { label: "Hi-Z".into(), id: None, toggle: false, enabled: false, ticked: true, shortcut: None, command: None });
+    } else {
+        // MIC, then LINE (preamp-mic). The engine also lists Dante (x4: Line, Mic, Dante) and the
+        // jack selects Hi-Z, so neither is a choice here.
+        let sources = model.input_sources(&s);
+        for want in ["MIC", "LINE"] {
+            if let Some((i, src)) = sources.iter().enumerate().find(|(_, s)| s.eq_ignore_ascii_case(want)) {
+                m.push(PopupItem::new(want, sid(strip, Control::InputSource(i as u8))).ticked(src.eq_ignore_ascii_case(&p.source)));
+            }
+        }
+    }
+    m.finish()
+}
+
+/// The monitor meter (capture monitor-meter): CLEAR Meter / All Meters.
+pub fn monitor_meter_menu() -> PopupMenu {
+    let strip: Arc<str> = "monitor".into();
+    let mut m = PopupMenu::new();
+    m.header("CLEAR");
+    m.push(PopupItem::new("Meter", mid(&strip, MenuCmd::ClearMeter)));
+    m.push(PopupItem::new("All Meters", mid(&strip, MenuCmd::ClearAllMeters)));
+    m.finish()
+}
+
+/// A scene with nothing saved in it (the engine names empty slots "EMPTY SCENE").
+pub fn scene_is_empty(name: &str) -> bool {
+    let n = name.trim();
+    n.is_empty() || n.eq_ignore_ascii_case("EMPTY SCENE")
+}
+
+/// A PLUG-IN SCENES row (captures browser-row / browser-hdr on empty scenes: only Save Scene
+/// is enabled). Rename / Overwrite / Clear / Recall Scene need a saved scene.
+pub fn scene_row_menu(model: &dyn MixerModel, index: u16) -> PopupMenu {
+    let scenes = model.plugin_scenes();
+    let empty = scenes.get(index as usize).is_none_or(|n| scene_is_empty(n));
+    let g = |op: SceneOp| gid(MenuCmd::Scene(op, index));
+    let mut m = PopupMenu::new();
+    m.push(PopupItem::new("Rename", g(SceneOp::Rename)).enabled(!empty));
+    m.push(PopupItem::new("Overwrite", g(SceneOp::Overwrite)).enabled(!empty));
+    m.push(PopupItem::new("Clear", g(SceneOp::Clear)).enabled(!empty));
+    m.push(PopupItem::new("Save Scene", g(SceneOp::Save)).enabled(empty));
+    let recall = ControlId { strip: "global".into(), control: Control::RecallScene(index.min(u8::MAX as u16) as u8) };
+    m.push(PopupItem::new("Recall Scene", recall).enabled(!empty));
     m.finish()
 }
 
@@ -1142,9 +1286,11 @@ impl Ui<'_> {
             match e {
                 PopupEntry::Separator => match look {
                     MenuLook::Plugin => self.fill(Rect::new(row.x + 3.0, row.y, row.w - 6.0, 1.0), Rgba::rgb8(118, 125, 129)),
+                    // pan-in / solo-in: a 0.5-pt dark line over a 1-pt light one, across the
+                    // light line from 1 pt inside the border on each side.
                     _ => {
-                        self.fill(Rect::new(row.x + 1.0, row.y, row.w - 2.0, 1.0), SEP_DARK);
-                        self.fill(Rect::new(row.x + 1.0, row.y + 1.0, row.w - 2.0, 1.0), SEP_LIGHT);
+                        self.fill(Rect::new(row.x - 1.0, row.y, row.w + 2.0, 0.5), SEP_DARK);
+                        self.fill(Rect::new(row.x - 1.0, row.y + 0.5, row.w + 2.0, 1.0), SEP_LIGHT);
                     }
                 },
                 PopupEntry::Header(t) => {
@@ -1268,9 +1414,23 @@ pub fn draw_menu(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: 
             ui.hit(r, ControlId { strip: "menubar".into(), control: Control::Menu(MenuCmd::BarTitle(i as u8)) }, HitKind::Tap);
         }
     }
-    let (origin, min_w) = match state.anchor {
+    let (origin, min_w) = match state.anchor.clone() {
         MenuAnchor::Point(x, y) => ((x, y), 0.0),
         MenuAnchor::Below(r) => ((r.x, r.max_y()), r.w),
+        MenuAnchor::BelowControl(id) => {
+            let r = ui.hit_rect(&id).unwrap_or_else(|| Rect::new(bounds.x, bounds.max_y(), 0.0, 0.0));
+            if &*id.strip == crate::surfaces::status::STATUS_ID {
+                crate::surfaces::popover::status_field_open(ui, r);
+            }
+            let probe = layout_menu(ui, &menu, look, (r.x, r.max_y()), r.w, Rect::new(bounds.x, bounds.y, bounds.w, f32::MAX));
+            let y = if r.max_y() + probe.frame.h <= bounds.max_y() { r.max_y() } else { (r.y - probe.frame.h).max(bounds.y) };
+            ((r.x, y), r.w)
+        }
+        MenuAnchor::Under(r) => {
+            let probe = layout_menu(ui, &menu, look, (r.x, r.max_y()), 0.0, Rect::new(bounds.x, bounds.y, bounds.w, f32::MAX));
+            let y = if r.max_y() + probe.frame.h <= bounds.max_y() { r.max_y() } else { (r.y - probe.frame.h).max(bounds.y) };
+            ((r.x, y), 0.0)
+        }
         MenuAnchor::Bar(i) => {
             let titles: Vec<&str> = menu_bar(model, view, false).iter().map(|b| b.title).collect();
             let r = bar_titles(&titles, BAR_X, crate::geometry::window::CONTENT_TOP).get(i as usize).copied().unwrap_or_default();
@@ -1299,20 +1459,16 @@ pub fn draw_menu(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: 
 impl ViewState {
     /// Opens a context menu for the control at (`x`, `y`) (right click / long press). True when
     /// a menu opened.
-    pub fn open_context_menu(&mut self, hits: &[Hit], x: f32, y: f32) -> bool {
-        let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return false };
-        let strip = hit.id.strip.clone();
-        let target = match &hit.id.control {
-            Control::Insert(slot) => MenuTarget::Insert { strip, slot: *slot },
-            Control::Name => MenuTarget::StripLabel { strip },
-            Control::Solo => MenuTarget::Solo { strip },
-            Control::Fader => MenuTarget::Meter { strip },
-            Control::Preamp(_) | Control::InputSource(_) => MenuTarget::Preamp { strip },
-            Control::BrowserItem(i) => MenuTarget::BrowserItem(*i),
-            _ => return false,
-        };
+    /// A combo-like field's menu (status bar RATE / CLOCK, buffer size) below the field.
+    pub fn open_field_menu(&mut self, target: MenuTarget, id: ControlId) {
         self.popover = None;
-        self.menu = Some(MenuState::at(target, x, y));
+        self.menu = Some(MenuState::below_control(target, id));
+    }
+
+    pub fn open_context_menu(&mut self, hits: &[Hit], x: f32, y: f32) -> bool {
+        let Some(state) = context_menu_at(hits, x, y) else { return false };
+        self.popover = None;
+        self.menu = Some(state);
         true
     }
 
@@ -1469,50 +1625,74 @@ impl ViewState {
             Some((s, h)) => (s, Some(h.parse::<u16>().map_err(|_| format!("--menu {spec}: bad row {h}"))?)),
             None => (spec, None),
         };
-        let popover = |kind: Popover, control: Control| PopoverState { kind, anchor: ControlId { strip: "status".into(), control } };
-        match spec {
-            "rate" => {
-                self.popover = Some(popover(Popover::SampleRate, Control::StatusRate));
-                return Ok(());
-            }
-            "clock" => {
-                self.popover = Some(popover(Popover::ClockSource, Control::StatusClock));
-                return Ok(());
-            }
-            _ => {}
+        let status = |target: MenuTarget, control: Control| MenuState::below_control(target, ControlId { strip: "status".into(), control });
+        let quick = match spec {
+            "rate" => Some(status(MenuTarget::SampleRate, Control::StatusRate)),
+            "clock" => Some(status(MenuTarget::ClockSource, Control::StatusClock)),
+            _ => None,
+        };
+        if let Some(mut m) = quick {
+            m.hover = hover.map(|i| (0, i));
+            self.popover = None;
+            self.menu = Some(m);
+            return Ok(());
         }
         let mut parts = spec.split('>');
         let head = parts.next().unwrap_or_default();
-        let fields: Vec<&str> = head.split(':').collect();
-        let find = |strip: &str, f: &dyn Fn(&Control) -> bool| {
-            hits.iter().rev().find(|h| &*h.id.strip == strip && f(&h.id.control)).map(|h| h.rect.center()).ok_or_else(|| format!("--menu {spec}: no such control on screen"))
+        // `@X,Y`: the click point (pointer-anchored menus open relative to it).
+        let (head, at) = match head.split_once('@') {
+            Some((h, p)) => {
+                let (px, py) = p.split_once(',').ok_or_else(|| format!("--menu {spec}: @X,Y"))?;
+                let n = |v: &str| v.parse::<f32>().map_err(|_| format!("--menu {spec}: bad point"));
+                (h, Some((n(px)?, n(py)?)))
+            }
+            None => (head, None),
         };
-        match fields.as_slice() {
+        let fields: Vec<&str> = head.split(':').collect();
+        let rect = |strip: Option<&str>, f: &dyn Fn(&Control) -> bool| {
+            hits.iter().rev().find(|h| strip.is_none_or(|s| &*h.id.strip == s) && f(&h.id.control)).map(|h| h.rect).ok_or_else(|| format!("--menu {spec}: no such control on screen"))
+        };
+        // The click point for each kind of menu (the control's centre, or `@X,Y`).
+        let point: (f32, f32) = match fields.as_slice() {
             ["bar", n] => {
                 let i: u8 = n.parse().map_err(|_| format!("--menu {spec}: bad menu index"))?;
                 self.menu = Some(self.bar_menu_state(i));
+                (f32::NAN, f32::NAN)
             }
             ["browser", n] => {
                 let i: u16 = n.parse().map_err(|_| format!("--menu {spec}: bad row"))?;
-                let (x, y) = hits.iter().rev().find(|h| h.id.control == Control::BrowserItem(i)).map(|h| h.rect.center()).ok_or_else(|| format!("--menu {spec}: row not shown"))?;
-                self.menu = Some(MenuState::at(MenuTarget::BrowserItem(i), x, y));
+                rect(None, &|c| *c == Control::BrowserItem(i))?.center()
             }
+            ["scene", n] => {
+                let i: u16 = n.parse().map_err(|_| format!("--menu {spec}: bad row"))?;
+                rect(None, &|c| *c == Control::SceneSelect(i))?.center()
+            }
+            ["monitor-meter"] => rect(None, &|c| *c == Control::ShowPanel(crate::settings::Panel::MeterWindow))?.center(),
             [kind, strip, rest @ ..] => {
-                let strip_id: Arc<str> = (*strip).into();
-                let (target, (x, y)) = match (*kind, rest) {
+                let s = Some(*strip);
+                match (*kind, rest) {
                     ("insert", [slot]) => {
                         let slot: u8 = if slot.eq_ignore_ascii_case("unison") { 255 } else { slot.parse().map_err(|_| format!("--menu {spec}: bad slot"))? };
-                        (MenuTarget::Insert { strip: strip_id, slot }, find(strip, &|c| *c == Control::Insert(slot))?)
+                        rect(s, &|c| *c == Control::Insert(slot))?.center()
                     }
-                    ("label", []) => (MenuTarget::StripLabel { strip: strip_id }, find(strip, &|c| *c == Control::Name)?),
-                    ("solo", []) => (MenuTarget::Solo { strip: strip_id }, find(strip, &|c| *c == Control::Solo)?),
-                    ("meter", []) => (MenuTarget::Meter { strip: strip_id }, find(strip, &|c| *c == Control::Fader)?),
-                    ("preamp", []) => (MenuTarget::Preamp { strip: strip_id }, find(strip, &|c| matches!(c, Control::Preamp(_)))?),
+                    ("label", []) => rect(s, &|c| *c == Control::Name)?.center(),
+                    ("solo", []) => rect(s, &|c| *c == Control::Solo)?.center(),
+                    ("fader", []) => rect(s, &|c| *c == Control::Fader)?.center(),
+                    ("pan", []) => rect(s, &|c| matches!(c, Control::PanL | Control::PanR))?.center(),
+                    ("meter", []) => {
+                        let f = rect(s, &|c| *c == Control::Fader)?;
+                        (f.max_x() + METER_W / 2.0, f.y + f.h / 2.0)
+                    }
+                    ("preamp" | "source", []) => rect(s, &|c| matches!(c, Control::Preamp(k) if &**k == "input_source"))?.center(),
                     _ => return Err(format!("--menu {spec}: unknown menu")),
-                };
-                self.menu = Some(MenuState::at(target, x, y));
+                }
             }
             _ => return Err(format!("--menu {spec}: unknown menu")),
+        };
+        if !point.0.is_nan() {
+            let (x, y) = at.unwrap_or(point);
+            self.popover = None;
+            self.menu = Some(context_menu_at(hits, x, y).ok_or_else(|| format!("--menu {spec}: no menu at {x},{y}"))?);
         }
         if let Some(m) = &mut self.menu {
             for p in parts {
@@ -1523,6 +1703,46 @@ impl ViewState {
         Ok(())
     }
 }
+
+/// A PLUG-IN SCENES row's menu opens at this offset from the row's top-left (captures
+/// browser-row and browser-hdr: x 143 in the 288-pt column, 23.5 pt below the 32-pt row's top,
+/// wherever the click was).
+const SCENE_MENU_DX: f32 = 143.0;
+const SCENE_MENU_DY: f32 = 23.5;
+
+/// The context menu Console opens for a secondary click at (`x`, `y`), from the frame's hits
+/// (captures lbl-*, ins-*, unison, solo-*, meter-*, preamp-*, pan-*, fader-*, monitor-*). Aux
+/// and talkback strips (no solo button) have no label or fader menu; the gain knob and gain
+/// field have none either.
+pub fn context_menu_at(hits: &[Hit], x: f32, y: f32) -> Option<MenuState> {
+    let top = hits.iter().rev().find(|h| h.rect.contains(x, y));
+    let channel = |strip: &Arc<str>| hits.iter().any(|h| h.id.strip == *strip && h.id.control == Control::Solo);
+    if let Some(hit) = top {
+        let strip = hit.id.strip.clone();
+        let state = match &hit.id.control {
+            Control::Insert(slot) => Some(MenuState::under(MenuTarget::Insert { strip, slot: *slot }, hit.rect)),
+            Control::Name if channel(&strip) => Some(MenuState::under(MenuTarget::StripLabel { strip }, hit.rect)),
+            Control::Solo => Some(MenuState::under(MenuTarget::Solo { strip }, hit.rect)),
+            Control::Preamp(k) if &**k == "input_source" => Some(MenuState::under(MenuTarget::InputSource { strip }, hit.rect)),
+            Control::InputSource(_) => Some(MenuState::under(MenuTarget::InputSource { strip }, hit.rect)),
+            Control::Fader | Control::PanL | Control::PanR if channel(&strip) => Some(MenuState::pointer(MenuTarget::CopyMix { strip }, x, y)),
+            Control::ShowPanel(crate::settings::Panel::MeterWindow) => Some(MenuState::pointer(MenuTarget::MonitorMeter, x, y)),
+            Control::SceneSelect(i) => Some(MenuState::at(MenuTarget::SceneRow(*i), hit.rect.x + SCENE_MENU_DX, hit.rect.y + SCENE_MENU_DY)),
+            Control::BrowserItem(i) => Some(MenuState::pointer(MenuTarget::BrowserItem(*i), x, y)),
+            _ => None,
+        };
+        if state.is_some() {
+            return state;
+        }
+    }
+    // The fader meter (`Rack_Meter`) has no hit of its own: it is the strip's column right of
+    // the fader, over the fader's height.
+    let meter = hits.iter().find(|h| h.id.control == Control::Fader && y >= h.rect.y && y <= h.rect.max_y() && x >= h.rect.max_x() && x <= h.rect.max_x() + METER_W)?;
+    Some(MenuState::pointer(MenuTarget::Meter { strip: meter.id.strip.clone() }, x, y))
+}
+
+/// The meter column right of a strip's fader hit (fader 48 pt of the 96-pt strip).
+const METER_W: f32 = 46.0;
 
 fn row_id(level: u8, index: u16) -> ControlId {
     ControlId { strip: "menu".into(), control: Control::Menu(MenuCmd::Row { level, index }) }

@@ -35,6 +35,14 @@ struct Field {
     control: Control,
 }
 
+/// A field's component (`Rack_*Info`), relative to the bar: 6 pt left of its label, 140 pt
+/// wide, its bottom 31 pt down. Its menu opens at the component's bottom-left at the
+/// component's width (sb-rate / sb-clock: (155, 1096) and (301, 1096), 140 wide, bar at
+/// 1065); the TEMPO window opens above it at its x (sb-tempo: x 9).
+fn field_rect(label_x: f32) -> Rect {
+    Rect::new((label_x - 6.0).floor(), 9.5, 140.0, 21.5)
+}
+
 pub fn draw_status_bar(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
     draw_status_bar_with(ui, model, true, r);
 }
@@ -74,7 +82,7 @@ pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: boo
             ui.text(&v, v_style, Rect::new(f.value_x, ty, f.arrow_x - f.value_x, th), Align::Left);
             arrow(ui, f.arrow_x);
             sep(ui, f.sep_x);
-            ui.hit(Rect::new(f.label_x - 8.0, 4.0, f.sep_x - f.label_x + 7.0, r.h - 8.0), sid(f.control), HitKind::Tap);
+            ui.hit(field_rect(f.label_x), sid(f.control), HitKind::Tap);
         }
 
         // DSP / PGM / MEM (`Rack_DSPInfo::paint` 0x181549bc0): label right-aligned to the 81 pt

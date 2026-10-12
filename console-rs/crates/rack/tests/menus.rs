@@ -117,21 +117,39 @@ fn context_menus_open_on_their_controls() {
     let model = PreviewMixer::default();
     let view = ViewState::default();
     let hits = hits(&assets, &model, &view);
-    let cases: [(&str, Control, fn(&MenuTarget) -> bool); 4] = [
+    let cases: [(&str, Control, fn(&MenuTarget) -> bool); 5] = [
         ("in0", Control::Insert(0), |t| matches!(t, MenuTarget::Insert { slot: 0, .. })),
         ("in0", Control::Name, |t| matches!(t, MenuTarget::StripLabel { .. })),
         ("in0", Control::Solo, |t| matches!(t, MenuTarget::Solo { .. })),
-        ("in0", Control::Fader, |t| matches!(t, MenuTarget::Meter { .. })),
+        ("in0", Control::Fader, |t| matches!(t, MenuTarget::CopyMix { .. })),
+        ("in0", Control::PanL, |t| matches!(t, MenuTarget::CopyMix { .. })),
     ];
     for (strip, control, is) in cases {
         let mut v = ViewState::default();
-        let (x, y) = find(&hits, strip, &control).unwrap_or_else(|| panic!("{control:?}")).rect.center();
+        let r = find(&hits, strip, &control).unwrap_or_else(|| panic!("{control:?}")).rect;
+        let (x, y) = r.center();
         assert!(v.context_click(&hits, x, y), "{control:?}");
-        assert!(is(&v.menu.as_ref().unwrap().target), "{control:?}");
+        let m = v.menu.as_ref().unwrap();
+        assert!(is(&m.target), "{control:?}");
+        // Components anchor the menu under them; faders and pans at the click (−20, +10).
+        match control {
+            Control::Fader | Control::PanL => assert_eq!(m.anchor, MenuAnchor::Point(x + menu::POINTER_DX, y + menu::POINTER_DY)),
+            _ => assert_eq!(m.anchor, MenuAnchor::Under(r)),
+        }
         // A second right click closes it.
         assert!(v.context_click(&hits, x, y));
         assert!(v.menu.is_none());
     }
+    // The meter right of the fader has no hit of its own: CLEAR / METERING.
+    let f = find(&hits, "in0", &Control::Fader).unwrap().rect;
+    let mut v = ViewState::default();
+    assert!(v.context_click(&hits, f.max_x() + 10.0, f.y + f.h / 2.0));
+    assert!(matches!(v.menu.as_ref().unwrap().target, MenuTarget::Meter { .. }));
+    // Aux labels have no menu (capture lbl-aux).
+    let aux = hits.iter().find(|h| h.id.control == Control::Name && hits.iter().any(|o| o.id.strip == h.id.strip && o.id.control == Control::PrePost)).expect("an aux strip label").rect;
+    let mut v = ViewState::default();
+    assert!(menu::context_menu_at(&hits, aux.center().0, aux.center().1).is_none());
+    assert!(!v.open_context_menu(&hits, aux.center().0, aux.center().1));
 }
 
 #[test]

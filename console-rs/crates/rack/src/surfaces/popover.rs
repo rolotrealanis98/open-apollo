@@ -2,7 +2,6 @@
 //! regions) and the popovers built on it. Drawn last in the frame so they sit on top; a
 //! full-window `PopoverDismiss` hit underneath catches taps outside.
 
-use std::sync::Arc;
 
 use houston::{Rect, Rgba};
 
@@ -187,10 +186,6 @@ impl Ui<'_> {
     }
 }
 
-fn sid(strip: &Arc<str>, control: Control) -> ControlId {
-    ControlId { strip: strip.clone(), control }
-}
-
 fn gid(control: Control) -> ControlId {
     ControlId { strip: "global".into(), control }
 }
@@ -215,22 +210,8 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
     let low = a.y > bounds.h * 0.75;
     match kind {
         Popover::InputSource { strip } => {
-            // `Rack_PreampChannelStripControls::DoInputSourcePopup` 0x181476f00 (context look):
-            // SOURCE, then MIC / LINE (or a disabled Hi-Z while the jack is used).
-            let s = model.inputs().into_iter().find(|s| &s.id == strip);
-            let current = s.as_ref().and_then(|s| model.preamp(s)).map(|p| p.source).unwrap_or_default();
-            let sources = s.as_ref().map(|s| model.input_sources(s)).unwrap_or_default();
-            let hi_z = s.as_ref().map(|s| model.strip_menu_state(s).hi_z).unwrap_or(false);
-            let mut m = PopupMenu::new();
-            m.header("SOURCE");
-            if hi_z {
-                m.push(PopupItem { label: "Hi-Z".into(), id: None, toggle: false, enabled: false, ticked: true, shortcut: None, command: None });
-            } else {
-                for (i, src) in sources.iter().enumerate() {
-                    m.push(PopupItem::new(src.to_uppercase(), sid(strip, Control::InputSource(i as u8))).ticked(src.eq_ignore_ascii_case(&current)));
-                }
-            }
-            anchored_menu(ui, &m.finish(), MenuLook::Context, a, bounds);
+            // The same SOURCE menu as a right click (capture preamp-mic), under the button.
+            anchored_menu(ui, &crate::menu::input_source_menu(model, strip), MenuLook::Context, a, bounds);
         }
         Popover::InsertMenu { strip, slot } => {
             let m = crate::menu::insert_menu(model, strip, *slot);
@@ -253,55 +234,87 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
             }
             anchored_menu(ui, &m, MenuLook::Base, a, bounds);
         }
-        Popover::SampleRate => {
-            // `Rack_*Info` status-bar menus: the choices, the current one ticked.
-            let st = model.engine_settings();
-            let mut m = PopupMenu::new();
-            if st.sample_rates.is_empty() {
-                m.push(PopupItem::new("OFFLINE", gid(Control::SampleRate(0))).enabled(false));
-            }
-            for (i, hz) in st.sample_rates.iter().enumerate() {
-                m.push(PopupItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).ticked(Some(*hz) == st.sample_rate));
-            }
-            anchored_menu(ui, &m, MenuLook::Base, a, bounds);
+        Popover::SampleRate | Popover::ClockSource | Popover::BufferSize => {
+            status_field_open(ui, a);
+            status_menu(ui, model, kind, a, bounds);
         }
-        Popover::ClockSource => {
-            // `Rack_ClockInfo::ShowMenu` 0x181546830.
-            let st = model.engine_settings();
-            let mut m = PopupMenu::new();
-            if st.clock_sources.is_empty() {
-                m.push(PopupItem::new("OFFLINE", gid(Control::ClockSource(0))).enabled(false));
-            }
-            for (i, c) in st.clock_sources.iter().enumerate() {
-                // Console shows the clock sources in capitals (s03: INTERNAL, S/PDIF).
-                m.push(PopupItem::new(c.to_uppercase(), gid(Control::ClockSource(i as u8))).ticked(Some(c) == st.clock_source.as_ref()));
-            }
-            anchored_menu(ui, &m, MenuLook::Base, a, bounds);
-        }
-        Popover::BufferSize => {
-            // `Rack_BufferSizeInfo::BuildBufferSizeMenu` 0x18153f070 (sizes; Windows adds
-            // "Open ASIO Control Panel").
-            let st = model.engine_settings();
-            let mut m = PopupMenu::new();
-            if st.buffer_sizes.is_empty() {
-                m.push(PopupItem::new("Not available", gid(Control::BufferSize(0))).enabled(false));
-            }
-            for (i, b) in st.buffer_sizes.iter().enumerate() {
-                m.push(PopupItem::new(format!("{b}"), gid(Control::BufferSize(i as u8))).ticked(Some(*b) == st.buffer_size));
-            }
-            anchored_menu(ui, &m, MenuLook::Base, a, bounds);
-        }
-        Popover::Scenes => {
-            let scenes = model.plugin_scenes();
-            let current = model.status().scene;
-            let items: Vec<MenuItem> = if scenes.is_empty() {
-                vec![MenuItem::new("No scenes", gid(Control::RecallScene(0))).enabled(false)]
-            } else {
-                scenes.iter().enumerate().map(|(i, n)| MenuItem::new(format!("{}  {n}", i + 1), gid(Control::RecallScene(i as u8))).checked(Some(n) == current.as_ref())).collect()
-            };
-            ui.popover_menu(a, if low { Placement::Above } else { Placement::Right }, bounds, Some("PLUG-IN SCENES"), &items, 170.0);
-        }
+        Popover::Scenes => scenes_popover(ui, model, a, bounds, low),
     }
+}
+
+/// An open status-bar field: a 1-pt amber outline 0.5 pt in from its left, 2.5 pt from its
+/// right, 0.5 pt from its bottom (sb-rate / sb-clock: (175,127,36) from x 155.5 to 292.5 and
+/// y 1074.5 to 1095.5 on the (155, 1074.5, 140, 21.5) field).
+pub fn status_field_open(ui: &mut Ui, a: Rect) {
+    let o = Rect::new(a.x + 0.5, a.y, a.w - 3.0, a.h - 0.5);
+    let amber = Rgba::rgb8(175, 127, 36);
+    ui.fill(Rect::new(o.x, o.y, o.w, 1.0), amber);
+    ui.fill(Rect::new(o.x, o.max_y() - 1.0, o.w, 1.0), amber);
+    ui.fill(Rect::new(o.x, o.y + 1.0, 1.0, o.h - 2.0), amber);
+    ui.fill(Rect::new(o.max_x() - 1.0, o.y + 1.0, 1.0, o.h - 2.0), amber);
+}
+
+/// The status bar's RATE / CLOCK / buffer menus (`Rack_*Info`): the choices, the current one
+/// ticked, under the field at its width.
+fn status_menu(ui: &mut Ui, model: &dyn MixerModel, kind: &Popover, a: Rect, bounds: Rect) {
+    let m = match kind {
+        Popover::SampleRate => sample_rate_menu(model),
+        Popover::ClockSource => clock_source_menu(model),
+        Popover::BufferSize => buffer_size_menu(model),
+        _ => return,
+    };
+    anchored_menu(ui, &m, MenuLook::Base, a, bounds);
+}
+
+/// RATE: the engine's rates, the current one ticked (sb-rate).
+pub fn sample_rate_menu(model: &dyn MixerModel) -> PopupMenu {
+    let st = model.engine_settings();
+    let mut m = PopupMenu::new();
+    if st.sample_rates.is_empty() {
+        m.push(PopupItem::new("OFFLINE", gid(Control::SampleRate(0))).enabled(false));
+    }
+    for (i, hz) in st.sample_rates.iter().enumerate() {
+        m.push(PopupItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).ticked(Some(*hz) == st.sample_rate));
+    }
+    m
+}
+
+/// CLOCK (`Rack_ClockInfo::ShowMenu` 0x181546830): the sources in capitals (s03, sb-clock).
+pub fn clock_source_menu(model: &dyn MixerModel) -> PopupMenu {
+    let st = model.engine_settings();
+    let mut m = PopupMenu::new();
+    if st.clock_sources.is_empty() {
+        m.push(PopupItem::new("OFFLINE", gid(Control::ClockSource(0))).enabled(false));
+    }
+    for (i, c) in st.clock_sources.iter().enumerate() {
+        m.push(PopupItem::new(c.to_uppercase(), gid(Control::ClockSource(i as u8))).ticked(Some(c) == st.clock_source.as_ref()));
+    }
+    m
+}
+
+/// Buffer size (`Rack_BufferSizeInfo::BuildBufferSizeMenu` 0x18153f070; Windows adds "Open
+/// ASIO Control Panel").
+pub fn buffer_size_menu(model: &dyn MixerModel) -> PopupMenu {
+    let st = model.engine_settings();
+    let mut m = PopupMenu::new();
+    if st.buffer_sizes.is_empty() {
+        m.push(PopupItem::new("Not available", gid(Control::BufferSize(0))).enabled(false));
+    }
+    for (i, b) in st.buffer_sizes.iter().enumerate() {
+        m.push(PopupItem::new(format!("{b}"), gid(Control::BufferSize(i as u8))).ticked(Some(*b) == st.buffer_size));
+    }
+    m
+}
+
+fn scenes_popover(ui: &mut Ui, model: &dyn MixerModel, a: Rect, bounds: Rect, low: bool) {
+    let scenes = model.plugin_scenes();
+    let current = model.status().scene;
+    let items: Vec<MenuItem> = if scenes.is_empty() {
+        vec![MenuItem::new("No scenes", gid(Control::RecallScene(0))).enabled(false)]
+    } else {
+        scenes.iter().enumerate().map(|(i, n)| MenuItem::new(format!("{}  {n}", i + 1), gid(Control::RecallScene(i as u8))).checked(Some(n) == current.as_ref())).collect()
+    };
+    ui.popover_menu(a, if low { Placement::Above } else { Placement::Right }, bounds, Some("PLUG-IN SCENES"), &items, 170.0);
 }
 
 /// A Console popup menu for a combo-like control: below `anchor` (at least its width), above it
