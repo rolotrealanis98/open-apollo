@@ -272,11 +272,9 @@ impl EngineMixer {
     }
 }
 
-/// Console's fader readout: `-∞` at the bottom, `0.0` at unity, one signed decimal otherwise.
+/// Console's fader readout ([`tapers::format_db`]): `-∞` at the bottom, the sign of the
+/// unrounded value otherwise ("-0.0" just below unity, "+0.0" just above, "0.0" at it).
 pub fn fader_readout(db: f64) -> String {
-    if !db.is_finite() || db <= tapers::fader::MIN_DB {
-        return "-∞".to_owned();
-    }
     tapers::format_db(db)
 }
 
@@ -491,8 +489,8 @@ impl MixerModel for EngineMixer {
             .unwrap_or(tapers::monitor::MIN_DB);
         MonitorState {
             level: self.f64_at(&m.level()).unwrap_or(0.0),
-            // Console prints -INF at the property floor (CRMonitorLevel −96).
-            readout: if db <= -96.0 { "-INF".into() } else { format!("{db:.1} dB") },
+            // Console prints -INF below −95.9 (CRMonitorLevel floor −96).
+            readout: tapers::format_monitor_db(db),
             mono: self.bool_at(&m.mono()).unwrap_or(false),
             mute: self.bool_at(&m.mute()).unwrap_or(false),
         }

@@ -67,7 +67,7 @@ fn main_strip_state() {
     assert_eq!(a1.name, "Vocal Mic"); // mono: Name, not StereoName
     assert!(a1.mute && !a1.solo);
     assert_eq!((a1.pan_l, a1.pan_r), (0.5, 0.5));
-    assert_eq!(a1.readout, "0.0");
+    assert_eq!(a1.readout, "-0.0"); // FaderLevel −0.01: Console prints the sign (p1 SM7B)
     let pair = m.main(&inputs[2]);
     assert_eq!(pair.name, "Keys"); // pair: StereoName
     assert_eq!((pair.pan_l, pair.pan_r), (0.0, 1.0));
@@ -229,7 +229,10 @@ fn offline_actions_move_local_values() {
 fn readout_format() {
     assert_eq!(fader_readout(-144.0), "-∞");
     assert_eq!(fader_readout(f64::NEG_INFINITY), "-∞");
-    assert_eq!(fader_readout(-0.01), "0.0");
+    // Console keeps the sign of the unrounded value (p1: SM7B −0.01 → "-0.0").
+    assert_eq!(fader_readout(-0.01), "-0.0");
+    assert_eq!(fader_readout(0.047), "+0.0");
+    assert_eq!(fader_readout(0.0), "0.0");
     assert_eq!(fader_readout(3.04), "+3.0");
 }
 

@@ -157,10 +157,22 @@ fn pan_labels() {
 
 #[test]
 fn db_readout() {
-    assert_eq!(tapers::format_db(-144.0), "-inf");
+    // Rack.dll 0x181bb1294: the sign of the unrounded value, `-∞` below −143.9.
+    assert_eq!(tapers::format_db(-144.0), "-\u{221e}");
+    assert_eq!(tapers::format_db(-143.95), "-\u{221e}");
+    assert_eq!(tapers::format_db(-143.8), "-143.8");
     assert_eq!(tapers::format_db(0.0), "0.0");
-    assert_eq!(tapers::format_db(-0.01), "0.0");
+    assert_eq!(tapers::format_db(-0.009_999_999_776_482_582), "-0.0");
+    assert_eq!(tapers::format_db(0.046_993_799_507_617_95), "+0.0");
+    assert_eq!(tapers::format_db(-3.337_860_107_421_875e-6), "-0.0");
     assert_eq!(tapers::format_db(3.04), "+3.0");
+    assert_eq!(tapers::format_db(-9.372_200_012_207_031), "-9.4");
     assert_eq!(tapers::format_db(-12.66), "-12.7");
-    assert_eq!(tapers::format_db_floor(-96.0, -96.0), "-inf");
+    // Rack.dll 0x1811e8800.
+    assert_eq!(tapers::format_monitor_db(-96.0), "-INF");
+    // The engine's float −95.9 is just below the double −95.9.
+    assert_eq!(tapers::format_monitor_db(-95.9), "-INF");
+    assert_eq!(tapers::format_monitor_db(-95.8), "-95.8 dB");
+    assert_eq!(tapers::format_monitor_db(-52.0), "-52.0 dB");
+    assert_eq!(tapers::format_monitor_db(-0.01), "-0.0 dB");
 }

@@ -149,21 +149,27 @@ pub mod pan {
     }
 }
 
-/// dB readout: `-inf` at or below −144, otherwise one decimal with a sign (`0.0` at unity).
+/// Console's fader readout (Rack.dll 0x181bb1294, also aux faders and mini sends): `-∞` below
+/// −143.9 dB, otherwise the engine's 32-bit value to one decimal (`%.1f`), with `+` when it is
+/// above 0. The sign comes from the value before rounding: −0.01 prints `-0.0`, +0.047 `+0.0`,
+/// and only exactly 0 prints `0.0`.
 pub fn format_db(db: f64) -> String {
-    format_db_floor(db, fader::MIN_DB)
+    let v = db as f32;
+    // `(double)v < -143.9`; NaN reads as the floor too.
+    if !(v as f64 >= -143.9) {
+        return "-\u{221e}".to_owned();
+    }
+    format!("{}{:.1}", if v > 0.0 { "+" } else { "" }, v as f64)
 }
 
-/// [`format_db`] with a custom floor (e.g. −96 for the monitor).
-pub fn format_db_floor(db: f64, floor: f64) -> String {
-    if db <= floor {
-        return "-inf".to_owned();
+/// Console's monitor level readout (Rack.dll 0x1811e8800): `-INF` below −95.9 dB, otherwise
+/// `juce::String(v, 1)` + `" dB"` (no `+`).
+pub fn format_monitor_db(db: f64) -> String {
+    let v = db as f32;
+    if !(v as f64 >= -95.9) {
+        return "-INF".to_owned();
     }
-    let r = (db * 10.0).round() / 10.0;
-    if r == 0.0 {
-        return "0.0".to_owned();
-    }
-    format!("{r:+.1}")
+    format!("{:.1} dB", v as f64)
 }
 
 // The engine's 361-point fader sweep (index i → dB at t = i/360), from open-apollo

@@ -40,12 +40,15 @@ pub fn fader_db(t: f64) -> f64 {
     f64::NEG_INFINITY
 }
 
-/// Console readout: one decimal, `+` above 0, `-∞` at the bottom.
+/// Console's fader readout (Rack.dll 0x181bb1294; aux faders and mini sends too): `-∞` below
+/// −143.9 dB, otherwise the 32-bit value to one decimal with `+` when it is above 0. The sign is
+/// the unrounded value's: −0.01 prints "-0.0", +0.047 "+0.0", only exactly 0 prints "0.0".
 pub fn format_db(db: f64) -> String {
-    if !db.is_finite() || db <= -143.0 {
+    let v = db as f32;
+    if !(v as f64 >= -143.9) {
         return "-∞".into();
     }
-    if db > 0.05 { format!("+{db:.1}") } else { format!("{db:.1}") }
+    format!("{}{:.1}", if v > 0.0 { "+" } else { "" }, v as f64)
 }
 
 /// Channel meter law (table 0x184c38508): evenly spaced labels, piecewise linear between them.
@@ -82,6 +85,10 @@ mod tests {
         assert!((fader_db(0.6727) + 6.0).abs() < 1e-3);
         assert_eq!(format_db(fader_db(0.0)), "-∞");
         assert_eq!(format_db(-9.37), "-9.4");
+        assert_eq!(format_db(-0.01), "-0.0");
+        assert_eq!(format_db(0.047), "+0.0");
+        assert_eq!(format_db(0.0), "0.0");
+        assert_eq!(format_db(6.0), "+6.0");
     }
 
     #[test]
