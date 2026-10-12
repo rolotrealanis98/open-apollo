@@ -784,9 +784,13 @@ pub fn command_enabled(c: Command, model: &dyn MixerModel, view: &ViewState) -> 
     match c {
         C::Undo => st.can_undo,
         C::Redo => st.can_redo,
-        // Not built yet: Console's monitor page toggle, monitor correction, compact monitor
-        // fader, channel visibility popover and offline-device list.
-        C::ShowMonitor | C::ShowMonitorCorrection | C::ToggleCompactMonitor | C::ShowHideChannels | C::ShowOfflineDevices => false,
+        // `Rack_ShowSection` 0 / 0xf and `Rack_ShowHideChannels` (window page 8).
+        C::ShowMonitor | C::ShowMonitorCorrection | C::ShowHideChannels => true,
+        // `Rack_ToggleCompactMonitor` ("Compact Monitor Faders", 0x180946500) compacts the
+        // monitor *faders* of the HB/Volt monitor sections; the UAD-2 monitor has a knob.
+        C::ToggleCompactMonitor => false,
+        // `Rack_ShowOfflineDevices`: only meaningful with a unit that is offline.
+        C::ShowOfflineDevices => model.devices().iter().any(|d| !d.online),
         C::ShowMixerNav | C::ShowBrowser => !view.compact,
         C::MixerTabLeft | C::MixerTabRight => false,
         C::ShowPluginScenes => model.status().plugin_scenes,
@@ -802,7 +806,10 @@ pub fn command_ticked(c: Command, view: &ViewState) -> bool {
         C::ShowMixerNav => view.show_navigator && !view.compact,
         C::ShowBuses => view.show_aux,
         C::ShowControlRoom => view.show_ctrl_room,
-        C::ShowMonitor => true,
+        C::ShowMonitor => view.show_monitor,
+        C::ShowMonitorCorrection => view.show_monitor_correction,
+        C::ShowHideChannels => view.show_channels,
+        C::ShowOfflineDevices => view.show_offline_devices,
         C::ShowSettings => view.sheet == Some(Sheet::Settings),
         _ => false,
     }
@@ -1702,6 +1709,10 @@ impl ViewState {
             C::ShowPluginScenes => self.toggle_scenes(model),
             C::ShowBuses => self.show_aux ^= true,
             C::ShowControlRoom => self.show_ctrl_room ^= true,
+            C::ShowMonitor => self.show_monitor ^= true,
+            C::ShowMonitorCorrection => self.show_monitor_correction ^= true,
+            C::ShowHideChannels => self.show_channels ^= true,
+            C::ShowOfflineDevices => self.show_offline_devices ^= true,
             C::ShowSettings => self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) },
             C::MixerScrollLeft => self.first_strip = self.first_strip.saturating_sub(1),
             C::MixerScrollRight => self.first_strip = (self.first_strip + 1).min(model.inputs().len().saturating_sub(1)),
@@ -1872,10 +1883,10 @@ impl ViewState {
 }
 
 /// A PLUG-IN SCENES row's menu opens at this offset from the row's top-left (captures
-/// browser-row and browser-hdr: x 143 in the 288-pt column, 23.5 pt below the 32-pt row's top,
+/// browser-row and browser-hdr: x 143 in the 288-pt column, 26 pt below the 32-pt row's top,
 /// wherever the click was).
 const SCENE_MENU_DX: f32 = 143.0;
-const SCENE_MENU_DY: f32 = 23.5;
+const SCENE_MENU_DY: f32 = 26.0;
 
 /// The context menu Console opens for a secondary click at (`x`, `y`), from the frame's hits
 /// (captures lbl-*, ins-*, unison, solo-*, meter-*, preamp-*, pan-*, fader-*, monitor-*). Aux

@@ -298,8 +298,6 @@ impl Audit {
 /// Control groups that do nothing today (strip class + control shape). A ratchet: the test fails
 /// when a group not listed here does nothing, and prints the listed groups that now work.
 const KNOWN_NOOPS: &[&str] = &[
-    // Control-room SOURCE (MONITOR / CUE n): no engine write (`outputs/<MON>/MixInSource`). Gap.
-    "monitor CrSource(#)",
     // Settings › NETWORK / I/O MATRIX buttons that launch other apps or URLs (Dante Controller,
     // Dante discovery refresh, patent info, CASCADE editor): not implemented. Gap.
     "settings SettingPress(\"launch:dante_controller\")",

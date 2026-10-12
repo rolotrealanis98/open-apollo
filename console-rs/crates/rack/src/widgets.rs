@@ -231,11 +231,14 @@ impl Ui<'_> {
                 if i + 1 < scales::METER_MARKS.len() {
                     ui.fill(Rect::new(g.meter_marks.x, y + (step / 2.0).ceil(), 1.0, 1.0), mcolor);
                 }
-                ui.text(&format!("{}", -db as i32), style.clone(), Rect::new(g.meter_marks.x + 7.0, y - 4.75, 20.0, 10.0), Align::Left);
+                // Numbers centred 10.25 pt right of the tick (p2 / Sends windows: "3" and "12"
+                // share a centre).
+                ui.text(&format!("{}", -db as i32), style.clone(), Rect::new(g.meter_marks.x + 0.25, y - 4.75, 20.0, 10.0), Align::Center);
             }
             ui.background("Fader-Ref-Mark-Dark", g.ref_mark);
             // Fader scale (`Rack_FaderMarks`, 0x1809b1c60), placed with the taper: a 4×1 tick at the
-            // scale's left edge and the number 6 pt right of it.
+            // scale's left edge and the number centred 11 pt right of it ("6" and "12" share a
+            // centre, p2).
             let fskin = ui.skin("faders", fader_key);
             let fcolor = fskin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::BLACK);
             let m = FaderMetrics::from_skin(fskin);
@@ -246,7 +249,7 @@ impl Ui<'_> {
                 // Ticks sit on whole points; the numbers follow the unrounded taper position.
                 let exact = g.fader.y + b - (b - t) * scales::fader_tapered(db) as f32;
                 ui.fill(Rect::new(g.fader_marks.x, exact.floor(), 4.0, 1.0), fcolor);
-                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 6.0, exact - 4.25, 20.0, 10.0), Align::Left);
+                ui.text(label, fstyle.clone(), Rect::new(g.fader_marks.x + 1.0, exact - 4.25, 20.0, 10.0), Align::Center);
             }
             // Gain button separator (0x18141ea20, no polarity toggle): a dotted 1-pt line at
             // (value.x + 6, value.y − 3), value = (well.x, well.bottom − 20); white 0.15 dots every 2 pt.

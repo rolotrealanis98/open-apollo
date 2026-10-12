@@ -289,6 +289,16 @@ pub struct ViewState {
     pub menu_bar: bool,
     /// View > Section > Show Mixer Navigation.
     pub show_navigator: bool,
+    /// View > Section > Show Monitor (`Rack_ShowSection` 0, 0x18091baa0): the monitor column.
+    pub show_monitor: bool,
+    /// View > Section > Show Monitor Correction (`Rack_ShowSection` 0xf): the monitor column's
+    /// MONITOR CORRECTION rows.
+    pub show_monitor_correction: bool,
+    /// View > Show/Hide Channels (⌘I, `Rack_ShowHideChannels` 0x180918150: toggles window
+    /// page 8): the channel list in which hidden strips can be shown again.
+    pub show_channels: bool,
+    /// View > Show Offline Devices (`Rack_ShowOfflineDevices`): device tabs include offline units.
+    pub show_offline_devices: bool,
     /// Shell-scope commands the menus requested (`take_commands`).
     pub commands: Vec<crate::menu::Command>,
     /// Model effects a menu command produced outside `route` (File > Save → the session tap).
@@ -330,6 +340,10 @@ impl Default for ViewState {
             menu: None,
             menu_bar: false,
             show_navigator: true,
+            show_monitor: true,
+            show_monitor_correction: true,
+            show_channels: false,
+            show_offline_devices: false,
             commands: Vec::new(),
             deferred: Vec::new(),
             drag: None,
@@ -352,6 +366,7 @@ pub fn is_view_control(c: &Control) -> bool {
     matches!(
         c,
         C::Section(_)
+            | C::ChannelsClose
             | C::SectionsOpenAll
             | C::SectionsCloseAll
             | C::InsertSize(_)
@@ -605,6 +620,7 @@ impl ViewState {
             }
             // A window over Settings closes alone (its X); Settings' own X closes both.
             C::PanelClose if self.settings.child.is_some() => self.settings.child = None,
+            C::ChannelsClose => self.show_channels = false,
             C::SettingsClose | C::PanelClose => {
                 self.sheet = None;
                 self.settings.child = None;
