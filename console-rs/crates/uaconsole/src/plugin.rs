@@ -6,9 +6,12 @@
 //! writes the slot's `parameters/<k>` through the engine store (writes obey the store's gate,
 //! read-only by default); with preview data it edits local values.
 //!
-//! UA's HTML GUIs (lunacomponents) need a webview and a WebSocket bridge (plugin-ui's `webview`
-//! and `bridge` features, WEBBRIDGE.md); until the app hosts them the window shows the spec panel
-//! for those plug-ins too.
+//! UA's HTML GUIs (lunacomponents) need the `webview` feature. With it, a plug-in that has one
+//! opens UA's GUI in a WebKitGTK top-level window next to our chrome, served by a per-window
+//! UANet bridge on 127.0.0.1 that answers from the engine slot (WEBBRIDGE.md). wgpu and GTK
+//! surfaces cannot share one window portably, and Wayland clients cannot position their own
+//! top-level windows, so the GUI window is placed by the compositor; the chrome's editor area
+//! says where the GUI is. Without the feature, those plug-ins show their spec panel.
 
 use std::sync::Arc;
 
@@ -40,7 +43,7 @@ impl PluginUiHook {
             }
             None => log_line("plug-in specs: none found (generic parameter lists only)"),
         }
-        Self { specs, luna: Arc::new(LunaLibrary::locate()), prefer_web: false }
+        Self { specs, luna: Arc::new(LunaLibrary::locate()), prefer_web: cfg!(feature = "webview") }
     }
 }
 
@@ -99,7 +102,19 @@ impl PluginHook for PluginUiHook {
             (None, Some(e), Some(p)) => ParamSnapshot::capture(&EngineSlot::peek(e.store(), p.clone()).view(e.store())),
             _ => ParamSnapshot::default(),
         };
-        Some(Box::new(WindowPanel { window, pending: paths, engine: None, offline, snapshot, hits: Vec::new(), interaction: Interaction::default(), origin: (0.0, 0.0) }))
+        Some(Box::new(WindowPanel {
+            window,
+            pending: paths,
+            engine: None,
+            offline,
+            snapshot,
+            hits: Vec::new(),
+            interaction: Interaction::default(),
+            origin: (0.0, 0.0),
+            specs: self.specs.clone(),
+            #[cfg(feature = "webview")]
+            web: None,
+        }))
     }
 }
 
@@ -116,6 +131,11 @@ pub struct WindowPanel {
     hits: Vec<Hit>,
     interaction: Interaction,
     origin: (f32, f32),
+    #[cfg_attr(not(feature = "webview"), allow(dead_code))]
+    specs: Option<Arc<PluginSpecLibrary>>,
+    /// UA's HTML GUI, its window and bridge (web content only).
+    #[cfg(feature = "webview")]
+    web: Option<web::WebHost>,
 }
 
 impl WindowPanel {
@@ -137,6 +157,35 @@ impl WindowPanel {
             }
         } else if let Some(m) = &self.offline {
             self.snapshot = ParamSnapshot::capture(m);
+        }
+        #[cfg(feature = "webview")]
+        self.serve_web(model);
+    }
+
+    /// Opens UA's GUI on first use, then services GTK and the bridge (called at 30 Hz: the
+    /// panel is live while a GUI is open).
+    #[cfg(feature = "webview")]
+    fn serve_web(&mut self, model: &mut dyn MixerModel) {
+        let Content::Web(component) = &self.window.content else { return };
+        if self.web.is_none() {
+            match web::WebHost::open(component, &self.window, &self.snapshot, self.specs.as_deref()) {
+                Ok(host) => self.web = Some(host),
+                Err(e) => {
+                    log_line(&format!("{}: web GUI: {e}", self.window.effect_name));
+                    return;
+                }
+            }
+        }
+        let Some(host) = &mut self.web else { return };
+        match (&self.engine, engine_mut(model)) {
+            (Some(slot), Some(e)) => {
+                let writes = e.store().writer().writes_enabled;
+                host.service(&mut slot.view_mut(e.store_mut()), writes);
+            }
+            _ => match &mut self.offline {
+                Some(m) => host.service(m, true),
+                None => host.service(&mut self.snapshot, false),
+            },
         }
     }
 
@@ -167,6 +216,10 @@ impl WindowPanel {
     fn close(&mut self, model: &mut dyn MixerModel) {
         if let (Some(slot), Some(e)) = (&mut self.engine, engine_mut(model)) {
             slot.close(e.store_mut());
+        }
+        #[cfg(feature = "webview")]
+        if let Some(host) = self.web.take() {
+            host.close();
         }
     }
 }
@@ -218,6 +271,75 @@ impl Panel for WindowPanel {
     /// Console's plug-in windows are independent windows: the mixer stays usable.
     fn modal(&self) -> bool {
         false
+    }
+
+    /// A web GUI needs GTK and its bridge serviced every tick.
+    fn live(&self) -> bool {
+        matches!(self.window.content, Content::Web(_))
+    }
+}
+
+#[cfg(feature = "webview")]
+mod web {
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+
+    use plugin_ui::bridge::{BridgeEvent, BridgeServer};
+    use plugin_ui::uanet::{ControlMap, UaNetBridge, scrape_control_ids};
+    use plugin_ui::webview::{self, WebPanelWindow};
+    use plugin_ui::{GuiQuery, LunaComponent, ParamSource, PluginSpecLibrary, PluginWindow};
+
+    /// UA's GUI in a GTK top-level window and the bridge it talks to.
+    pub struct WebHost {
+        window: WebPanelWindow,
+        server: BridgeServer,
+        uanet: UaNetBridge,
+    }
+
+    fn gtk_ready() -> Result<(), String> {
+        static INIT: OnceLock<Result<(), String>> = OnceLock::new();
+        INIT.get_or_init(webview::init).clone()
+    }
+
+    impl WebHost {
+        pub fn open(component: &LunaComponent, window: &PluginWindow, params: &dyn ParamSource, specs: Option<&PluginSpecLibrary>) -> Result<Self, String> {
+            gtk_ready()?;
+            let server = BridgeServer::bind(0).map_err(|e| e.to_string())?;
+            let bundle = std::fs::read_to_string(component.html_dir.join("bundle.js")).unwrap_or_default();
+            let spec = specs.and_then(|l| l.spec_for_effect(&window.effect_name));
+            let meters = spec.as_ref().and_then(|s| s.meter_sources.as_ref()).map(|m| m.keys().cloned().collect()).unwrap_or_default();
+            let map = ControlMap::build(&scrape_control_ids(&bundle), params, &BTreeMap::new(), meters);
+            let mut uanet = UaNetBridge::new(window.slot.to_string(), map);
+            if let Some(s) = &spec {
+                uanet.defaults = s.parameters.iter().map(|p| (p.index, p.default_value.unwrap_or(0.0))).collect();
+            }
+            uanet.effect.preset_name = window.chrome.preset.clone();
+            uanet.effect.power = window.chrome.power;
+            let query = GuiQuery::new("127.0.0.1", server.port(), &window.slot);
+            let gui = WebPanelWindow::open(component, &query, &window.chrome.title, false)?;
+            Ok(Self { window: gui, server, uanet })
+        }
+
+        /// Pumps GTK, answers the GUI's frames and pushes value changes.
+        pub fn service(&mut self, params: &mut dyn ParamSource, writes_enabled: bool) {
+            webview::pump();
+            self.uanet.writes_enabled = writes_enabled;
+            for ev in self.server.poll() {
+                if let BridgeEvent::Text(id, frame) = ev {
+                    for reply in self.uanet.handle(&frame, params) {
+                        self.server.send(id, &reply);
+                    }
+                }
+            }
+            for push in self.uanet.pushes(params) {
+                self.server.broadcast(&push);
+            }
+        }
+
+        pub fn close(self) {
+            self.window.close();
+            webview::pump();
+        }
     }
 }
 

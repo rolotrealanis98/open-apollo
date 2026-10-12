@@ -364,8 +364,9 @@ impl PluginWindow {
         self.header(ui, &l);
         match &self.content {
             Content::Web(c) => {
+                // The shell's webview covers this rect (or, on Wayland, sits in its own window).
                 let style = Ui::plain_style("Helvetica", 11.0, false, LABEL.with_alpha(0.5));
-                ui.text(&c.name, style, l.editor, Align::Center);
+                ui.text(&format!("{}\nUA plug-in GUI", c.name), style, l.editor, Align::Center);
             }
             Content::Spec(p) => p.build(ui, l.editor, params),
             Content::Generic(g) => g.build(ui, l.editor, params),
