@@ -89,16 +89,53 @@ pub struct MeterFrame {
 pub struct PluginEntry {
     /// Catalogue name, as written to an insert's `EffectName` ("UAD 1176LN Rev E").
     pub name: String,
-    /// One of `MixerModel::plugin_categories`.
+    /// First of `categories` (one of `MixerModel::plugin_categories`).
     pub category: String,
-    /// Authorized/usable (false → DISABLED badge).
+    /// Every category the plug-in is listed under (`Categories`, comma separated).
+    pub categories: Vec<String>,
+    /// Licensed or demoing: listed under "Universal Audio"; otherwise under
+    /// "Universal Audio (Inactive)" with `badge`.
     pub enabled: bool,
     pub favorite: bool,
+    /// Badge of an inactive plug-in (`Plugin-Badge-*`).
+    pub badge: Option<PluginBadge>,
+}
+
+/// `Rack_PluginsTreeViewBadgedItem` badges (`Rack_PluginsBrowserManager::_GetRowData`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PluginBadge {
+    Demo,
+    Buy,
+    Activate,
+    Disabled,
+}
+
+impl PluginBadge {
+    /// `views` skin of the badge (55×17 pt).
+    pub fn skin(self) -> &'static str {
+        match self {
+            PluginBadge::Demo => "Plugin-Badge-Demo",
+            PluginBadge::Buy => "Plugin-Badge-Buy",
+            PluginBadge::Activate => "Plugin-Badge-Activate",
+            PluginBadge::Disabled => "Plugin-Badge-Disabled",
+        }
+    }
 }
 
 impl PluginEntry {
     pub fn new(name: &str, category: &str, enabled: bool) -> Self {
-        Self { name: name.into(), category: category.into(), enabled, favorite: false }
+        Self {
+            name: name.into(),
+            category: category.into(),
+            categories: vec![category.into()],
+            enabled,
+            favorite: false,
+            badge: (!enabled).then_some(PluginBadge::Demo),
+        }
+    }
+    /// Listed under `category` (any of its categories).
+    pub fn in_category(&self, category: &str) -> bool {
+        self.categories.iter().any(|c| c == category) || self.category == category
     }
     /// Browser label: the name without the "UAD " prefix.
     pub fn display_name(&self) -> &str {
@@ -178,6 +215,16 @@ pub struct MonitorOptions {
     /// Number of ALT speaker sets (0 hides the MONITOR/ALT rows) and the selection (0 = main).
     pub alt_count: u8,
     pub alt_selection: u8,
+    /// MONITOR CONTROLLER button shown (`Rack_MonitorSection_UAD2::resized`: hidden when the
+    /// mixer reports no controller support; the column then closes up by 40 pt).
+    pub controller: bool,
+    /// MONITOR CORRECTION buttons: `Some(power)` when the device supports headphone
+    /// (`SupportsHeadphoneCorrection`, `HeadphoneCorrectionPower`) / speaker
+    /// (`SupportsSpeakerCorrection`, `SpeakerCorrectionPower`) correction.
+    pub hp_correction: Option<bool>,
+    pub speaker_correction: Option<bool>,
+    /// The hardware monitor knob controls this mixer's monitor level (green `knob_focus` dot).
+    pub knob_focus: bool,
 }
 
 /// A cue output (`outputs/14..17`): what it plays and how.
@@ -449,7 +496,18 @@ impl Default for PreviewMixer {
                 buffer_sizes: vec![32, 64, 128, 256, 512, 1024],
                 writes_enabled: false,
             },
-            monitor_options: MonitorOptions { dim: Some(false), dim_level: 0.3, dim_readout: "-17 dB".into(), talkback: Some(false), alt_count: 0, alt_selection: 0 },
+            monitor_options: MonitorOptions {
+                dim: Some(false),
+                dim_level: 0.3,
+                dim_readout: "-17 dB".into(),
+                talkback: Some(false),
+                alt_count: 0,
+                alt_selection: 0,
+                controller: true,
+                hp_correction: Some(true),
+                speaker_correction: Some(true),
+                knob_focus: true,
+            },
             cues: vec![
                 CueOutput { name: "CUE 1".into(), source_cue: true, mono: false, destination: "LINE 3/4".into() },
                 CueOutput { name: "CUE 2".into(), source_cue: false, mono: true, destination: "HP 2".into() },

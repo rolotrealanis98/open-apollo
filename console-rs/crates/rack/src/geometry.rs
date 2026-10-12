@@ -17,13 +17,17 @@ pub mod window {
     pub const NAV_COLUMN: (f32, f32) = (345.0, 96.0);
     pub const SIDE_SECTION: (f32, f32) = (441.0, 46.5);
     pub const AUX_X: f32 = 1613.5;
-    pub const MONITOR_X: f32 = 1823.5;
+    /// Console 1.3.1 draws the monitor column flush right (1920 − 96): every UA image in it
+    /// matches at x0 = 1824 (p1 refpair), half a point right of the 18-pt gap after the auxes.
+    pub const MONITOR_X: f32 = 1824.0;
     pub const COLUMN: (f32, f32) = (72.0, 1010.0);
     pub const STATUS_BAR: (f32, f32) = (1010.0, 40.0);
     pub const INPUT_CELL_H: f32 = 237.0;
     pub const INSERTS_CELL_H: f32 = 271.0;
     pub const AUX_INSERTS_CELL_H: f32 = 235.0;
-    pub const MONITOR_TOP: f32 = 31.0;
+    /// `Rack_MonitorSection_UAD2` top: the section spans 27…1010 (h 983, G = h − 100 → 910);
+    /// its monitor_meters background starts 4 pt lower, at 31.
+    pub const MONITOR_TOP: f32 = 27.0;
 }
 
 /// `Rack_MainChannelStrip::resized` (0x18144cef0), branch used by UAD Console (§2).

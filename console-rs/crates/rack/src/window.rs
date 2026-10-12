@@ -58,7 +58,7 @@ impl WindowLayout {
         if self.compact { packed } else { packed.max(W::MONITOR_X) }
     }
     pub fn size(&self) -> (f32, f32) {
-        let w = self.monitor_x() + STRIP_W + if self.compact { 4.0 } else { 0.5 };
+        let w = self.monitor_x() + STRIP_W + if self.compact { 4.0 } else { 0.0 };
         (if self.compact { w } else { w.max(W::SIZE.0) }, W::SIZE.1)
     }
     /// Input strips that fit between the side section and the aux section.

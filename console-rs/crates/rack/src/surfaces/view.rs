@@ -116,7 +116,10 @@ pub struct BrowserView {
     pub large_rows: bool,
     /// "DRAG TO AN INSERT TO ASSIGN" hint visible.
     pub hint: bool,
+    /// "Universal Audio" group expanded.
     pub group_open: bool,
+    /// "Universal Audio (Inactive)" group expanded.
+    pub inactive_open: bool,
     /// List scroll, 0…1 of the overflow.
     pub scroll: f32,
     /// Selected catalog index; while set, the next insert tap assigns it (assign mode).
@@ -125,7 +128,7 @@ pub struct BrowserView {
 
 impl Default for BrowserView {
     fn default() -> Self {
-        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, scroll: 0.0, selected: None }
+        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None }
     }
 }
 
@@ -249,6 +252,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::BrowserLargeRows
             | C::BrowserHintClose
             | C::BrowserGroupReveal
+            | C::BrowserInactiveReveal
             | C::BrowserScroll
             | C::BrowserItem(_)
             | C::SessionNavigate(_)
@@ -388,6 +392,7 @@ impl ViewState {
             C::BrowserLargeRows => self.browser.large_rows ^= true,
             C::BrowserHintClose => self.browser.hint = false,
             C::BrowserGroupReveal => self.browser.group_open ^= true,
+            C::BrowserInactiveReveal => self.browser.inactive_open ^= true,
             C::BrowserItem(i) => self.browser.selected = if self.browser.selected == Some(i) { None } else { Some(i) },
             C::SessionNavigate(first) => self.first_strip = first as usize,
             C::StatusTempo => {

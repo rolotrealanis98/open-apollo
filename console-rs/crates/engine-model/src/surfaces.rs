@@ -3,7 +3,7 @@
 //! and the monitor extras; plus the writes their controls make. Paths follow
 //! `console-port/protocol/ui-to-path.md`.
 
-use rack::model::{CueOutput, EngineSettings, HeadphoneOutput, MonitorOptions, PluginEntry, SendState, StatusInfo, StripInfo};
+use rack::model::{CueOutput, EngineSettings, HeadphoneOutput, MonitorOptions, PluginBadge, PluginEntry, SendState, StatusInfo, StripInfo};
 use rack::{Action, Control, ControlId};
 use ua_engine::{InputStrip, Json, SendPaths, Status, Value};
 
@@ -29,14 +29,14 @@ fn hp_label(v: &str) -> String {
     }
 }
 
-fn first_category(v: &Value) -> String {
+fn categories(v: &Value) -> Vec<String> {
     if let Some(s) = v.as_str() {
-        return s.split([',', ';', '|']).next().unwrap_or("").trim().to_owned();
+        return s.split([',', ';', '|']).map(str::trim).filter(|c| !c.is_empty()).map(str::to_owned).collect();
     }
     if let Some(Json::Array(list)) = v.as_json() {
-        return list.first().and_then(|c| c.as_str()).unwrap_or("").to_owned();
+        return list.iter().filter_map(|c| c.as_str()).map(str::to_owned).collect();
     }
-    String::new()
+    Vec::new()
 }
 
 impl EngineMixer {
@@ -86,17 +86,33 @@ impl EngineMixer {
         s.io_type_choices.iter().map(|c| source_label(c)).collect()
     }
 
-    /// `/plugins/P/{Name, Categories, Authorized}` (absent from trimmed snapshots).
+    /// `/plugins/P/{Name, Categories, Authorized, Demoing, …}` in engine order (absent from
+    /// trimmed snapshots). Licensed or demoing plug-ins are active; the rest are listed as
+    /// "Universal Audio (Inactive)" with a badge (`Rack_PluginsBrowserManager::_GetRowData`).
     pub(crate) fn surface_catalog(&self) -> Vec<PluginEntry> {
-        let tree = self.store.tree();
-        tree.indices("/plugins")
+        let mut order = self.store.tree().indices("/plugins");
+        order.sort_unstable();
+        order
             .into_iter()
             .filter_map(|p| {
                 let base = format!("/plugins/{p}");
+                let flag = |k: &str| self.bool_at(&format!("{base}/{k}"));
                 let name = self.str_at(&format!("{base}/Name"))?.to_owned();
-                let category = self.store.value(&format!("{base}/Categories")).map(first_category).unwrap_or_default();
-                let enabled = self.bool_at(&format!("{base}/Authorized")).unwrap_or(false) || self.bool_at(&format!("{base}/Demoing")).unwrap_or(false);
-                Some(PluginEntry { name, category, enabled, favorite: false })
+                let categories = self.store.value(&format!("{base}/Categories")).map(categories).unwrap_or_default();
+                let enabled = flag("Authorized").unwrap_or(false) || flag("Demoing").unwrap_or(false);
+                let badge = (!enabled).then(|| {
+                    if flag("AuthUpdateRequired").unwrap_or(false) {
+                        PluginBadge::Activate
+                    } else if !flag("AuthHardware").unwrap_or(true) {
+                        PluginBadge::Disabled
+                    } else if flag("DemoAvailable").unwrap_or(false) {
+                        PluginBadge::Demo
+                    } else {
+                        PluginBadge::Buy
+                    }
+                });
+                let category = categories.first().cloned().unwrap_or_default();
+                Some(PluginEntry { name, category, categories, enabled, favorite: false, badge })
             })
             .collect()
     }
@@ -157,6 +173,14 @@ impl EngineMixer {
             talkback: self.bool_at(&self.store.topology().talkback.on()),
             alt_count,
             alt_selection: self.store.value(&m.alt_mon_selection()).and_then(Value::as_i64).unwrap_or(0).clamp(0, 2) as u8,
+            // Rack's controller predicate is unresolved; Console 1.3.1 shows the button for an
+            // Apollo x4 with `RemoteMonitorController` false.
+            controller: true,
+            hp_correction: (self.bool_at(&format!("{dev}/SupportsHeadphoneCorrection")) == Some(true))
+                .then(|| self.bool_at(&format!("{dev}/HeadphoneCorrectionPower")).unwrap_or(true)),
+            speaker_correction: (self.bool_at(&format!("{dev}/SupportsSpeakerCorrection")) == Some(true))
+                .then(|| self.bool_at(&format!("{dev}/SpeakerCorrectionPower")).unwrap_or(true)),
+            knob_focus: true,
         }
     }
 

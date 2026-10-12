@@ -47,6 +47,7 @@ store.commit(&strip.mute(), true);                  // a button: its own undo st
 | `SubscriptionPlan` | Console's per-strip `subscribe {"paths":[…]}` batches, filtered to the paths the tree has (48 batches and about 4,650 paths on an x4). |
 | `MockEngine` | A loopback engine with the verified 12.0.0 wire behaviour. `MockOptions { daemon_style: true }` switches it to the open-apollo daemon's behaviour instead. It can also simulate meters. |
 | `discovery::browse` | Bonjour browsing for `_uamixer._tcp` through `mdns-sd`, behind the `mdns` feature. |
+| `HelperStore`, `HelperInfo`, `NativeInsert`, `MockHelper` | The read-only UA Mixer Helper client on 4720 (see [UA Mixer Helper](#ua-mixer-helper-4720)). `Options::helper()` gives `network_id` identity and a 5 s `get /ping`. |
 
 **Live lifecycle.** The connection runs in this order:
 
@@ -69,6 +70,7 @@ After that, pushes are handled like this:
   - The writer's `writes_enabled` gate.
 
   Both default to off.
+- The helper client (`HelperStore`, `Options::helper()`) forces `allow_writes` off. It sends identity, `get`, `subscribe` and `get /ping`, never `post` (not even `command_format`) and no challenge or response.
 - `ua-engine-probe` has no write option. Its live commands send only identity, `get`, `subscribe` and `unsubscribe`.
 - During this work, only those commands were sent to the local daemon on `127.0.0.1:4710`, which drives the real Apollo, and to the real engine on `192.168.1.4:4710`. No `set` or `post` was sent to either. `set /Sleep false`, Console's wake-up call, is a `set`, so it is never sent. Both engines serve read-only clients without it.
 - Writes were tested against `MockEngine` and against a separate software-only daemon:
@@ -124,12 +126,70 @@ The differences are the following, and the Rust Console has to handle each of th
 
 The ConsoleLab findings still hold on 12.0.0. Pushes come in `multi` envelopes, batch unsubscribe is ignored, and `Active` is not visibility for outputs. A pair shows `StereoName` and a mono strip shows `Name`. Sends mute with `Bypass`, meters clip with `MeterClip`, and talkback is `/TalkbackOn` at the root. See ConsoleLab's `UAEngineKit/README.md`.
 
+## UA Mixer Helper (4720)
+
+The helper (`mxhlpr`, Bonjour `_uamixerhelper._tcp`) was mapped read-only on 2026-10-12, on the Mac's helper 1.3.1.1152 (`192.168.1.4:4720`, Console 1.3.1) and on the local open-apollo daemon's helper (`127.0.0.1:4720`). Only identity, `get`, `subscribe` and `get /ping` were sent. No `set`, no `post` (not even `command_format`), and no challenge or response.
+
+**Wire behaviour (Mac).**
+
+- **Framing.** The helper answers text clients in plain NUL-terminated JSON text. UBJSON (`post command_format 2`) is not needed.
+- **No challenge.** A client that sends only identity (`network_id`, `client_id`), `get` and `subscribe` is served without any challenge. The connection stayed up for 40 s with 5 s pings and for 45 s without them. `/status/timeout_ms` reads 25000.
+- **Tree format.** The format differs from the engine's:
+  - node `children` are arrays of `{"path": name, …}`, and a non-recursive `get` returns `{"path"}` stubs;
+  - properties are `{"value", "read_only", "values"?}`, with snake_case names;
+  - nodes carry `commands` lists, including a documented root catalogue (`clear_clips`, `create_emulated_device`, auto-gain, …).
+
+  `helper::tree_from_helper` loads it into a `Tree`.
+- **Replies.** `get` echoes `func_id`/`recursive` in `parameters`, and errors are `uasrv.invalid_object`, also with `func_id`.
+  - `subscribe <property>` is answered with its current value.
+  - A recursive node `subscribe` is answered with `null`.
+  - No value change was pushed during 40 s of watching, so the push format is not yet verified. `MockHelper` assumes `{"path":"<p>/value","data":…}`.
+- **Local daemon.** It replays a 1.2.8.797 capture (`device_maps/helper_tree.json`): 803 nodes, no `/drivers`, no sample rate. Its errors are engine-style and carry no `func_id`; the connection matches them by path.
+
+**What lives there.** A `get /?recursive=1` returns 0.83 MB in 0.17 s: 1,064 nodes and 8,175 properties.
+
+| Node | Content |
+|---|---|
+| `/` | `sample_rate` (+ `values`), `io_buffer_size` 128, `render_buffer_size` 512, `latency` 1024, `num_render_threads`, `driver_status` (`initializing`, `initialized_percent` crept from 29.66 to 72.1 over hours), `active_audio_engine` (`enabled: false`), `peak_hold`, `clip_hold`, `controls_mode`, `post_fader_meters`, `delay_comp_enabled`, `plugin_sdk_version` 5.4.8 |
+| `status` | `name` mxhlpr, `version`, `timeout_ms`, feature keys |
+| `drivers` | every CoreAudio device: the Apollo (`apollo_thunderbolt`, 22 in / 24 out, with Console's I/O names `MIC/LINE/HIZ 1` … `TALKBACK 2`), plus all of the Mac's other audio devices, and their sample rates |
+| `devices/{uid}` | the native "supercore" engine's device: `buses` (CUE 1-4 = `cue_0..3`, MAIN = `master`, each with `controls`, `effects` slots `bus_input`, `console`, `reserved_0`, `effect_0..7`, `sidechain_filter` and `bus_compressor`, `outputs/main`, `meters`), plus `tracks` (empty), `inputs`/`outputs` (empty), `meters` (`render`, `renderio`, `mem`), `midi`, `banks`, `undo_queues` |
+| `auto_gain` | `status` (`stopped`), `status_str`, `channels` |
+| `dante`, `preferences`, `permissions`, `network`, `workspace`, `presets`, `logs`, `analysis`, `recording`, `plugins` (empty), `errors`, `stats` | helper and app state, not mixer state |
+
+**Native inserts.** A native (UADx) plug-in would sit in a supercore effect slot, `devices/{uid}/{tracks|buses}/{uid}/effects/effect_N`. Each slot carries `plugin_name`, `plugin_id`, `plugin_power`, `enabled`, `insert_type`, `track_uid` and `bus_uid`. On the Mac every slot is empty, `tracks` has no children, and the native engine is off (`active_audio_engine.enabled: false`). `NativeInsert::list` reads these slots, and `HelperStore` subscribes their values and re-reads `tracks` every 10 s. engine-model merges them into empty insert slots, with a native flag, on the input strip whose name matches the track's name. That track-to-input mapping is an assumption: no populated track has been seen live, and the tests use a synthetic track copied from a captured bus.
+
+**The "CL 1B mkII" in `refpairs/p1` was a UAD-2 insert on 4710, not a native one.** The UA Mixer Engine log on the Mac (`~/Library/Logs/Universal Audio/UA Mixer Engine_5.log`) shows the whole event:
+
+1. At 22:26:33.306 local: `CMxPluginScenes::AddEffect(): uuid = c6ce2e71-858a-47fe-ad02-8813933d97e4 name = UAD Tube-Tech CL 1B mk II`. That uuid is `/devices/0/inputs/0/effects/0/ScenePluginUuid`, SM7B's insert 1.
+2. At 22:26:36.217: `RemoveEffect`.
+3. At 22:26:37.19: the plug-in is deleted.
+
+The pair's `engine.json` was dumped at 02:26:24Z, nine seconds before the load, and the screenshot was taken at 02:26:37Z, as the plug-in was being removed. The same log shows dozens of `AddEffect`/`RemoveEffect` events on that slot a few seconds apart (another session was cycling plug-ins), and the slot's `ChangeCount` went from 145 to 165. Every slot's `ScenePluginUuid` is stable, which makes it the key for matching engine logs to slots.
+
+**Slot labels in Console 1.3.1.** These come from reference shots:
+
+- With the Apollo online, a UAD-2 plug-in is labelled upright with the catalogue's first short name, `/plugins/P/Name/values[0]` (for example "CL 1B mkII" for `UAD Tube-Tech CL 1B mk II`).
+- With the Apollo offline (`DeviceOnline` false), the label is the engine name without "UAD ", in italics (for example "Millennia NSEQ-2", "SPL Vitalizer MK2-T").
+
+`engine-model`'s `SlotInfo { label, italic, source }` follows these rules.
+
+**Status bar.** Tempo, rate, clock, DSP/PGM/MEM and scene all come from 4710 (`/Tempo`, `/SampleRate`, `/ClockSource`, `/Total{DSP,PGM,MEM}Load`, `/pluginscenes/0/RecalledSceneIndex`). The helper's `meters/{render,renderio,mem}` belong to the native engine. engine-model only takes the helper's sample rate when the engine has none.
+
+**Open questions.**
+
+- The format of a pushed value change on 4720.
+- How a supercore track maps to an Apollo input once the native engine is active.
+- Whether the Windows helper enforces the challenge (it may: `gaps.md` §A).
+- What `io_buffer_size` and `latency` mean for Console's settings sheet.
+
 ## Fixtures
 
 | File | Source |
 |---|---|
 | `tests/fixtures/apollo-x4-12.0.0.snapshot.json` (432 KB) | A live, read-only capture of UA Mixer Engine 12.0.0 with an Apollo x4, taken with ConsoleLab `lab-engine dump` on 2026-10-12. **It has been sanitized:** the user's channel names are replaced (Vocal Mic, Talk HP, Guitar, Keys, DAW 1/2, DAW 3/4), and the MIDI device list, the modified-session list and `DeviceHwID` are cleared. It is trimmed like `Tree::trimmed(true)`: preset lists, `Snapshot` volumes, the plug-in catalogue, scenes, routes and ASIO channels are removed, and emptied catalogues are written as `{"children":{}}` so that they do not read back as stubs. It keeps the plug-in parameters of the loaded slots, the `readonly`/`default`/`enabled` metadata and the root `commands`. With the `bundled-snapshot` feature it is also available as `Snapshot::bundled_x4()`. |
 | `../../../mixer-engine/device_maps/device_map_apollo_{x4,x8p}.json` | open-apollo's committed flat device maps (engine 11.8.2 x4 and 11.9.0 x8p), read in place. |
+| `tests/fixtures/helper-1.3.1.json` (418 KB) | The Mac helper's `get /?recursive=1` reply, in the helper's own format (2026-10-12), sanitized. `drivers` keeps only the Apollo. `status/feature_keys` is cleared. The supercore `midi` and `banks` are dropped. `logs`, `dante`, `presets`, `workspace`, `network`, `permissions`, `preferences` and `analysis` are kept as empty folders. |
 
 ## ua-engine-probe
 
@@ -144,11 +204,12 @@ cargo run -p ua-engine --release --bin ua-engine-probe -- [--host H] [--port P] 
   convert --in map.json --out snap.json [--trim] [--catalogs]
   mock-serve --snapshot f.json [--port N] [--meters]
   browse --seconds N                        (needs --features mdns)
+  helper [--seconds N] [--raw f.json] [--out f.json]   UA Mixer Helper on host:4720 (read-only)
 ```
 
 ## Tests
 
-`cargo test -p ua-engine` runs 66 tests. They cover:
+`cargo test -p ua-engine` runs 70 tests. They cover:
 
 - framing and command text;
 - decoding, trees and snapshot formats;
@@ -157,6 +218,7 @@ cargo run -p ua-engine --release --bin ua-engine-probe -- [--host H] [--port P] 
 - the subscription plan and plug-in parameters;
 - the store (change tracking, topology revisions, meters, snapshots);
 - the writer (the gate, coalescing, gestures, `commit`, integral formatting, companions, auto-flush, the echo hold);
-- end to end against `MockEngine` in both its engine and daemon styles: going live read-only, the write gates, echoes, reconnect, `func_id` correlation, meters, retained subscriptions and the metadata refresh.
+- end to end against `MockEngine` in both its engine and daemon styles: going live read-only, the write gates, echoes, reconnect, `func_id` correlation, meters, retained subscriptions and the metadata refresh;
+- the helper: format conversion, `HelperInfo` on the Mac capture, native-slot extraction, and `HelperStore` against `MockHelper` (read-only verbs only, pings, pushes, polled tracks).
 
 `UA_ENGINE_DAEMON_PORT=14710 cargo test -p ua-engine --test daemon` adds the software-daemon round trip.
