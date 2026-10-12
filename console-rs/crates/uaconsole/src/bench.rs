@@ -78,7 +78,7 @@ pub fn render_png(
     let (w, h) = layout_for(model, &view).size();
     if let Some(spec) = menu {
         let first = build_frame(assets, model, &view, &mut overlays, Rect::new(0.0, 0.0, w, h), None);
-        view.open_menu_spec(&first.hits, spec)?;
+        view.open_menu_spec(&first.hits, spec, model)?;
     }
     let t = Instant::now();
     let frame = build_frame(

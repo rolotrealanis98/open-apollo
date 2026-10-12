@@ -318,14 +318,14 @@ fn menu_spec_opens_menus_for_renders() {
     let model = PreviewMixer::default();
     let mut view = ViewState { menu_bar: true, ..ViewState::default() };
     let h = hits(&assets, &model, &view);
-    view.open_menu_spec(&h, "bar:1>3").unwrap();
+    view.open_menu_spec(&h, "bar:1>3", &model).unwrap();
     assert_eq!(view.menu.as_ref().unwrap().open, vec![3]);
-    view.open_menu_spec(&h, "insert:in0:0").unwrap();
+    view.open_menu_spec(&h, "insert:in0:0", &model).unwrap();
     assert!(matches!(view.menu.as_ref().unwrap().target, MenuTarget::Insert { slot: 0, .. }));
-    view.open_menu_spec(&h, "label:in0").unwrap();
-    assert!(view.open_menu_spec(&h, "insert:in0").is_err());
+    view.open_menu_spec(&h, "label:in0", &model).unwrap();
+    assert!(view.open_menu_spec(&h, "insert:in0", &model).is_err());
     // The submenu is drawn: its rows are hits.
-    view.open_menu_spec(&h, "bar:1>3").unwrap();
+    view.open_menu_spec(&h, "bar:1>3", &model).unwrap();
     let h = hits(&assets, &model, &view);
     assert!(h.iter().any(|x| matches!(&x.id.control, Control::Menu(MenuCmd::App(Command::RemoveAllPlugins)))));
 }

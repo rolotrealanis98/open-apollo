@@ -657,6 +657,8 @@ pub enum MenuTarget {
     MonitorMeter,
     /// A PLUG-IN SCENES row (captures browser-row, browser-hdr).
     SceneRow(u16),
+    /// A Settings combo's dropdown (captures set-d-*), by field key.
+    Setting(Arc<str>),
     /// Status bar RATE / CLOCK and the buffer size (`Rack_*Info`; sb-rate, sb-clock).
     SampleRate,
     ClockSource,
@@ -890,6 +892,7 @@ pub fn build_menu(model: &dyn MixerModel, view: &ViewState, target: &MenuTarget,
         MenuTarget::InputSource { strip } => (input_source_menu(model, strip), MenuLook::Context),
         MenuTarget::MonitorMeter => (monitor_meter_menu(), MenuLook::Context),
         MenuTarget::SceneRow(i) => (scene_row_menu(model, *i), MenuLook::Context),
+        MenuTarget::Setting(key) => (setting_menu(model, key), MenuLook::Base),
         MenuTarget::SampleRate => (crate::surfaces::popover::sample_rate_menu(model), MenuLook::Base),
         MenuTarget::ClockSource => (crate::surfaces::popover::clock_source_menu(model), MenuLook::Base),
         MenuTarget::BufferSize => (crate::surfaces::popover::buffer_size_menu(model), MenuLook::Base),
@@ -1062,6 +1065,25 @@ pub fn input_source_menu(model: &dyn MixerModel, strip: &Arc<str>) -> PopupMenu 
     m.finish()
 }
 
+/// A Settings combo's choices (captures set-d-*: the options, the current one ticked).
+pub fn setting_menu(model: &dyn MixerModel, key: &str) -> PopupMenu {
+    let mut m = PopupMenu::new();
+    let Some(field) = model.properties().and_then(|p| crate::settings::find_field(p, key)) else { return m };
+    let crate::settings::FieldKind::Choice { options, enabled, selected } = field.kind else { return m };
+    let id = |i: usize| ControlId { strip: "settings".into(), control: Control::SettingChoose(key.into(), i as u16) };
+    // MIDI DEVICE: NONE, a separator, then the devices (set-d-mididev); `midi:` keys choose
+    // NONE as 0 and device i as i + 1.
+    let midi = key.starts_with("midi:");
+    if midi {
+        m.push(PopupItem::new("NONE", id(0)).ticked(selected.is_none()));
+        m.separator();
+    }
+    for (i, o) in options.iter().enumerate() {
+        m.push(PopupItem::new(o.clone(), id(i + midi as usize)).ticked(selected == Some(i)).enabled(enabled.get(i).copied().unwrap_or(true)));
+    }
+    m.finish()
+}
+
 /// The monitor meter (capture monitor-meter): CLEAR Meter / All Meters.
 pub fn monitor_meter_menu() -> PopupMenu {
     let strip: Arc<str> = "monitor".into();
@@ -1182,7 +1204,9 @@ fn text_w(style: &crate::draw::TextStyle, text: &str) -> f32 {
 fn measure(style: &crate::draw::TextStyle, look: MenuLook, e: &PopupEntry) -> (f32, f32) {
     let font_h = style.size * 1.15;
     let item_w = |t: &str| match look {
-        MenuLook::Base => text_w(style, t) + 3.0 * font_h,
+        // JUCE `getIdealPopupMenuItemSize`: the text plus twice the item height (set-d-ctlmode,
+        // set-d-iomode, set-d-nin, set-d-tapev: every text-wide combo menu).
+        MenuLook::Base => text_w(style, t) + 2.0 * ITEM_H,
         MenuLook::Plugin => text_w(style, t) + 19.0 + 2.0 * font_h,
         MenuLook::Context => text_w(style, t) + 2.0 * ITEM_H,
     };
@@ -1459,10 +1483,17 @@ pub fn draw_menu(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: 
 impl ViewState {
     /// Opens a context menu for the control at (`x`, `y`) (right click / long press). True when
     /// a menu opened.
-    /// A combo-like field's menu (status bar RATE / CLOCK, buffer size) below the field.
-    pub fn open_field_menu(&mut self, target: MenuTarget, id: ControlId) {
+    /// A combo-like field's menu (status bar RATE / CLOCK, buffer size, Settings combos) below
+    /// the field. A Settings combo (JUCE `ComboBox`) opens with its current item highlighted
+    /// (every set-d-* capture); the status-bar menus open without (sb-rate, sb-clock).
+    pub fn open_field_menu(&mut self, target: MenuTarget, id: ControlId, model: &dyn MixerModel) {
         self.popover = None;
-        self.menu = Some(MenuState::below_control(target, id));
+        let mut state = MenuState::below_control(target, id);
+        if let MenuTarget::Setting(key) = &state.target {
+            let menu = setting_menu(model, key);
+            state.hover = menu.entries.iter().position(|e| matches!(e, PopupEntry::Item(i) if i.ticked)).map(|i| (0, i as u16));
+        }
+        self.menu = Some(state);
     }
 
     pub fn open_context_menu(&mut self, hits: &[Hit], x: f32, y: f32) -> bool {
@@ -1619,12 +1650,21 @@ impl ViewState {
     /// `label:STRIP`, `solo:STRIP`, `meter:STRIP`, `preamp:STRIP` or `browser:N`, optionally
     /// followed by `>I>J…` to open submenu entries. Context menus open at the control's centre
     /// in `hits` (a frame built without the menu).
-    pub fn open_menu_spec(&mut self, hits: &[Hit], spec: &str) -> Result<(), String> {
+    pub fn open_menu_spec(&mut self, hits: &[Hit], spec: &str, model: &dyn MixerModel) -> Result<(), String> {
         // `~N` highlights row N of the innermost menu (renders of a hovered row).
         let (spec, hover) = match spec.split_once('~') {
             Some((s, h)) => (s, Some(h.parse::<u16>().map_err(|_| format!("--menu {spec}: bad row {h}"))?)),
             None => (spec, None),
         };
+        // `setting=KEY`: a Settings combo's dropdown (the window open with `--open settings:TAB`).
+        if let Some(key) = spec.strip_prefix("setting=") {
+            let key: Arc<str> = key.into();
+            self.open_field_menu(MenuTarget::Setting(key.clone()), ControlId { strip: "settings".into(), control: Control::SettingMenu(key) }, model);
+            if let (Some(m), Some(i)) = (&mut self.menu, hover) {
+                m.hover = Some((0, i));
+            }
+            return Ok(());
+        }
         let status = |target: MenuTarget, control: Control| MenuState::below_control(target, ControlId { strip: "status".into(), control });
         let quick = match spec {
             "rate" => Some(status(MenuTarget::SampleRate, Control::StatusRate)),

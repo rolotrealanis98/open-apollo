@@ -570,7 +570,8 @@ impl ViewState {
                 self.settings.scroll = 0.0;
             }
             C::SettingsDevice(d) => self.settings.device = d,
-            C::SettingMenu(k) => self.settings.menu = if self.settings.menu.as_ref() == Some(&k) { None } else { Some(k) },
+            // A Console menu under the combo (captures set-d-*), with hover like any menu.
+            C::SettingMenu(k) => self.open_field_menu(crate::menu::MenuTarget::Setting(k), id, model),
             C::SettingEdit(k) => {
                 let text = model.properties().and_then(|p| crate::settings::find_field(p, &k)).map(|f| f.value_text()).unwrap_or_default();
                 self.text_edit = Some(TextEdit { target: TextTarget::Setting(k), text });
@@ -640,9 +641,9 @@ impl ViewState {
             // TEMPO opens Console's dialog (capture s05).
             C::StatusTempo => self.toggle_panel(Panel::Tempo, model),
             // Console menus under the field (sb-rate / sb-clock), with hover like any menu.
-            C::StatusRate | C::SettingsRate => self.open_field_menu(crate::menu::MenuTarget::SampleRate, id),
-            C::StatusClock | C::SettingsClock => self.open_field_menu(crate::menu::MenuTarget::ClockSource, id),
-            C::SettingsBuffer => self.open_field_menu(crate::menu::MenuTarget::BufferSize, id),
+            C::StatusRate | C::SettingsRate => self.open_field_menu(crate::menu::MenuTarget::SampleRate, id, model),
+            C::StatusClock | C::SettingsClock => self.open_field_menu(crate::menu::MenuTarget::ClockSource, id, model),
+            C::SettingsBuffer => self.open_field_menu(crate::menu::MenuTarget::BufferSize, id, model),
             // The status bar's SCENE opens the PLUG-IN SCENES column (Console 1.3.1 capture).
             C::StatusScene => {
                 if !self.show_scenes {

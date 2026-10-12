@@ -276,10 +276,10 @@ fn settings_tabs_combos_and_text_fields() {
     }
     // SAMPLE RATE: open the dropdown, pick 96 kHz; the dropdown closes and the model follows.
     press(&mut view, &mut model, &hits, "settings", Control::SettingMenu("/SampleRate".into()));
-    assert_eq!(view.settings.menu.as_deref(), Some("/SampleRate"));
+    assert!(matches!(view.menu.as_ref().map(|m| &m.target), Some(rack::menu::MenuTarget::Setting(k)) if &**k == "/SampleRate"));
     let (hits, _) = build(&assets, &model, &view);
     press(&mut view, &mut model, &hits, "settings", Control::SettingChoose("/SampleRate".into(), 3));
-    assert!(view.settings.menu.is_none());
+    assert!(view.menu.is_none());
     assert_eq!(model.props.prop("/SampleRate").and_then(|v| v.as_i64()), Some(96000));
     assert_eq!(model.status.sample_rate, Some(96000));
     // A tap outside an open dropdown closes it and keeps the window.
@@ -288,7 +288,7 @@ fn settings_tabs_combos_and_text_fields() {
     let top = hits.iter().rev().find(|h| h.rect.contains(2.0, 1040.0)).unwrap().clone();
     assert_eq!(top.id.control, Control::PopoverDismiss);
     tap(&hits, &top, &mut view, &mut model);
-    assert!(view.settings.menu.is_none());
+    assert!(view.menu.is_none());
     assert_eq!(view.sheet, Some(rack::surfaces::Sheet::Settings));
     // DEVICE NAME: focus, type, Enter.
     let (hits, _) = build(&assets, &model, &view);
