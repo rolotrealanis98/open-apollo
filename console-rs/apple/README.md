@@ -51,6 +51,7 @@ One opaque `UacContext` per view, used from one thread (the main thread on iOS):
 | `uac_resize`, `uac_needs_frame`, `uac_frame`, `uac_invalidate` | call `uac_needs_frame` every display refresh: it pumps the engine; render only when it says so |
 | `uac_set_window_size(ctx, w_pt, h_pt)` | pin the Console window (e.g. 1920×1050); `<= 0` follows the view (default) |
 | `uac_pointer(ctx, DOWN/MOVE/UP/CANCEL/SECONDARY, x_pt, y_pt, DOUBLE/FINE)` | rack `Interaction` routed through `ViewState`; taps fire on release (so long press = CANCEL + SECONDARY); drags elsewhere pan; `uac_dragging` while a control drag is active |
+| drag and drop (`rack::dnd`) | Mouse: a press on a loaded insert or a plug-in row that moves 4 pt drags it; UP drops (an insert onto a slot posts `/MoveInsert`, a row assigns); `FINE` (Option) copies. Touch: `SECONDARY` with `UAC_POINTER_TOUCH` (long press) picks the item up; the host must keep sending the long press's positions as `MOVE` and its end as `UP`, both with `UAC_POINTER_TOUCH` (UIKit's long-press recognizer otherwise cancels the touch). Released without moving, the long press opens the context menu. |
 | `uac_scroll(ctx, x, y, dx, dy)` | browser list / cells column under the point, else pan |
 | `uac_text_editing`, `uac_key_text`, `uac_key(ENTER/BACKSPACE/ESCAPE)` | rename, tempo, browser search; Escape closes popovers |
 | `uac_set_zoom(ctx, zoom, anchor_x, anchor_y)` | pinch; `zoom <= 0` fits the window |

@@ -1117,6 +1117,19 @@ impl MixerModel for PreviewMixer {
                             _ => {}
                         }
                     }
+                    // Drag and drop (`crate::dnd`): the engine's `MoveInsert`, locally.
+                    Control::InsertMove { slot, from, from_slot, copy } => {
+                        let src = self.inserts.get(from).and_then(|v| v.get(*from_slot as usize)).cloned();
+                        let Some(src @ InsertState::Loaded { .. }) = src else { return };
+                        if let Some(dst) = self.inserts.get_mut(&strip).and_then(|v| v.get_mut(*slot as usize)) {
+                            *dst = src;
+                        }
+                        if !*copy && (*from != strip || from_slot != slot) {
+                            if let Some(old) = self.inserts.get_mut(from).and_then(|v| v.get_mut(*from_slot as usize)) {
+                                *old = InsertState::Empty;
+                            }
+                        }
+                    }
                     Control::Preamp(c) => {
                         if let Some(p) = self.preamps.get_mut(&strip) {
                             match &**c {

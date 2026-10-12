@@ -121,6 +121,8 @@ pub struct App {
     main_focused: bool,
     focus_check: bool,
     pending_menu: Option<String>,
+    /// A press on a drag source (`rack::dnd`): its tap fires on release unless it became a drag.
+    deferred_tap: Option<rack::Hit>,
 }
 
 /// Runs the window until it is closed. Returns an error message if it could not start.
@@ -191,6 +193,7 @@ impl App {
             dirty: true,
             interaction: Interaction::default(),
             clicks: ClickTracker::default(),
+            deferred_tap: None,
             cursor: (0.0, 0.0),
             panning: false,
             mods: ModifiersState::empty(),
@@ -510,10 +513,31 @@ impl App {
         if self.dirty {
             self.rebuild(); // hit values must match what the model holds now
         }
+        // A loaded insert or a browser row: the tap waits for the release (it may be a drag).
+        if self.mixer.drag_press(active_hits!(self), x, y, &*self.model) {
+            self.deferred_tap = active_hits!(self).iter().rev().find(|h| h.rect.contains(x, y)).cloned();
+            return;
+        }
         let actions = self
             .interaction
             .pointer_down(active_hits!(self), x, y, double);
         self.apply(actions);
+    }
+
+    /// Console's copy-drag modifier: Option on macOS, Ctrl or Alt elsewhere.
+    fn copy_modifier(&self) -> bool {
+        if cfg!(target_os = "macos") { self.mods.alt_key() } else { self.mods.control_key() || self.mods.alt_key() }
+    }
+
+    /// Effects of a drop go straight to the model (they are model writes, not taps to route).
+    fn apply_effects(&mut self, effects: Vec<Effect>) {
+        for e in effects {
+            match e {
+                Effect::Model(a) => self.model.apply(&a),
+                Effect::SetText(id, text) => self.model.set_text(&id, &text),
+            }
+        }
+        self.changed();
     }
 
     fn pointer_moved(&mut self, pos: (f64, f64)) {
@@ -540,7 +564,12 @@ impl App {
         }) {
             return;
         }
-        if self.interaction.is_dragging() {
+        if self.mixer.drag_pending.is_some() || self.mixer.dragging() {
+            let copy = self.copy_modifier();
+            if self.mixer.drag_motion(active_hits!(self), x, y, copy, &*self.model) {
+                self.changed();
+            }
+        } else if self.interaction.is_dragging() {
             let actions = self.interaction.pointer_move(x, y, self.fine());
             self.apply(actions);
         } else if self.mixer.menu.is_some() && self.mixer.menu_hover(active_hits!(self), x, y) {
@@ -550,6 +579,19 @@ impl App {
 
     fn pointer_up(&mut self) {
         let (x, y) = self.cursor_pt();
+        let tap = self.deferred_tap.take();
+        match self.mixer.drag_release(&*self.model) {
+            Some(effects) => {
+                self.apply_effects(effects);
+                return;
+            }
+            None => {
+                if let Some(hit) = tap.filter(|h| h.rect.contains(x, y)) {
+                    self.apply(vec![Action::Tap(hit.id)]);
+                    return;
+                }
+            }
+        }
         self.route(PointerEvent::Up { x, y });
         // Always end a mixer gesture, even if an overlay took the release.
         let actions = self.interaction.pointer_up();
@@ -674,7 +716,11 @@ impl App {
                 self.changed();
             }
             Command::Escape => {
-                if self.overlays.dismiss_top() {
+                if self.mixer.drag_pending.is_some() || self.mixer.dragging() {
+                    self.mixer.drag_cancel();
+                    self.deferred_tap = None;
+                    self.changed();
+                } else if self.overlays.dismiss_top() {
                     self.changed();
                 } else if self.mixer.menu.is_some()
                     || self.mixer.popover.is_some()
