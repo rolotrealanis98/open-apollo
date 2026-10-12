@@ -48,30 +48,31 @@ const TEXT_MARGIN: f32 = 20.0;
 /// Current-value bullet (`dropdown_in_use_dot`, 4 pt): 3 pt into the row, centred (s04, s18).
 const BULLET_X: f32 = 3.0;
 const BULLET: f32 = 4.0;
-// Colours from the colour-managed drive captures (`screencapture`, like refpairs p1/p2); the
-// earlier clipboard captures s01–s42 carry no display profile and read 8–10 levels lighter.
+// Colours from the drive captures converted to sRGB through their embedded ICC profile (ASUS
+// PG32); read raw they are about 10 levels dark. The clipboard captures s01–s42 are already
+// sRGB and agree (s01 body (185,194,199)).
 /// Separator: a 1-pt dark line over a 1-pt light one (hov-pan).
-const SEP_DARK: Rgba = Rgba::rgb8(124, 134, 138);
-const SEP_LIGHT: Rgba = Rgba::rgb8(195, 206, 211);
+const SEP_DARK: Rgba = Rgba::rgb8(135, 145, 149);
+const SEP_LIGHT: Rgba = Rgba::rgb8(202, 212, 216);
 /// Highlighted row, the full row (hov-ins / hov-lbl / hov-rate: 22 pt × the inner width).
-const HIGHLIGHT: Rgba = Rgba::rgb8(223, 227, 230);
-const HEADER_BG: Rgba = Rgba::rgb8(156, 164, 170);
-const HEADER_TEXT: Rgba = Rgba::rgb8(29, 77, 115);
+const HIGHLIGHT: Rgba = Rgba::rgb8(227, 231, 233);
+const HEADER_BG: Rgba = Rgba::rgb8(166, 174, 179);
+const HEADER_TEXT: Rgba = Rgba::rgb8(32, 87, 126);
 /// Section header text: the item font, bold (s01/s02: header and item glyph widths match).
 const HEADER_FONT_SCALE: f32 = 1.0;
 /// Window edge, outside in (ins-in-empty at 2 px per pt): a 0.5-pt black outline outside the
 /// window (square), a 1-pt border with 2-pt rounded corners, a 1-pt light line, then the body.
-const WINDOW_OUTLINE: Rgba = Rgba::rgb8(4, 4, 4);
-const WINDOW_BORDER: Rgba = Rgba::rgb8(145, 151, 155);
-const WINDOW_LIGHT: Rgba = Rgba::rgb8(177, 187, 193);
-const WINDOW_BODY: Rgba = Rgba::rgb8(176, 186, 192);
+const WINDOW_OUTLINE: Rgba = Rgba::rgb8(1, 1, 1);
+const WINDOW_BORDER: Rgba = Rgba::rgb8(156, 161, 165);
+const WINDOW_LIGHT: Rgba = Rgba::rgb8(186, 195, 200);
+const WINDOW_BODY: Rgba = Rgba::rgb8(185, 194, 199);
 /// Rounded corner of the border, per half-point row from the top (and mirrored at the bottom):
 /// how far the row starts in from each side (ins-in-empty, 2 px per pt).
 const BORDER_CORNER: [f32; 3] = [1.5, 0.5, 0.5];
 /// The light line's first half-point row starts this much further in.
 const LIGHT_CORNER: [f32; 1] = [0.5];
-/// Disabled text (ins-in-empty "Paste": (124,131,135) on the body = black at 0.3).
-const DISABLED_ALPHA: f32 = 0.3;
+/// Disabled text (ins-in-empty "Paste": (135,142,146) on the body = black at 0.27).
+const DISABLED_ALPHA: f32 = 0.27;
 /// Console menus draw their text 1 pt below the row's centre (every row of lbl-mono and
 /// ins-in-empty: ink 6.0 pt from the row top vs 5.0 centred).
 const TEXT_DY: f32 = 1.0;
@@ -1292,7 +1293,9 @@ fn header_style(item: &crate::draw::TextStyle) -> crate::draw::TextStyle {
 }
 
 fn text_w(style: &crate::draw::TextStyle, text: &str) -> f32 {
-    if style.bold { helvetica_bold_width(text, style.size) } else { helvetica_width(text, style.size) }
+    // Bold menu text measures with macOS Helvetica Bold's own advances and kerning
+    // (`menu_metrics`); the AFM widths differ by a fraction that the width rounding exposes.
+    if style.bold { crate::menu_metrics::helvetica_bold_kerned_width(text, style.size) } else { helvetica_width(text, style.size) }
 }
 
 /// Entry widths and heights per [`MenuLook`].

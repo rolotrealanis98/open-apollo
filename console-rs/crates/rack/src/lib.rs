@@ -8,6 +8,7 @@ pub mod geometry;
 pub mod input;
 pub mod layers;
 pub mod menu;
+mod menu_metrics;
 pub mod model;
 pub mod preamp;
 pub mod scales;
