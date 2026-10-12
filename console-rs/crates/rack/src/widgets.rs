@@ -2,7 +2,7 @@
 
 use houston::{Rect, Rgba};
 
-use crate::draw::{Align, Frame, TextStyle};
+use crate::draw::{Align, Frame};
 use crate::geometry::{FaderAndMetersGeometry, FaderMetrics};
 use crate::input::{ControlId, HitKind};
 use crate::model::{InsertState, MeterFrame};
@@ -215,8 +215,22 @@ impl Ui<'_> {
         self.text(name, style, rect, Align::Center);
     }
 
-    /// Insert slot: `inserts:Small-Normal` art; "+" when empty, plug-in icon + italic name when loaded.
+    /// Insert slot (`Rack_InsertsButton`, LARGE): `inserts:Small-Normal` art; "+" when empty;
+    /// when loaded, the plug-in icon and Console's label (the name without "UAD ").
     pub fn insert_slot(&mut self, state: &InsertState, r: Rect, id: Option<ControlId>) {
+        let label = match state {
+            InsertState::Loaded { name, .. } => Some(name.strip_prefix("UAD ").unwrap_or(name).to_owned()),
+            InsertState::Empty => None,
+        };
+        self.insert_slot_labeled(state, label.as_deref(), false, r, id);
+    }
+
+    /// Insert slot with an explicit label (`Rack_InsertButtonPainter::PaintInsertContent`
+    /// 0x18142c290, measured on p1's "CL 1B mkII", a native UADx insert): icon fitted in
+    /// `(16, 4, 64, 25)` (icons are 400×160 px → 62.5 × 25), label in the `inserts:Small-Normal` font
+    /// (Helvetica bold 9 dyn, white 0.7) centred on y + 37. Native and running UAD-2 plug-ins use
+    /// the upright face; `italic` is Console's offline (Apollo not running) form.
+    pub fn insert_slot_labeled(&mut self, state: &InsertState, label: Option<&str>, italic: bool, r: Rect, id: Option<ControlId>) {
         let Some(skin) = self.skin("inserts", "Small-Normal") else { return };
         let img = match state {
             InsertState::Empty => skin.image("image-empty"),
@@ -235,19 +249,23 @@ impl Ui<'_> {
             InsertState::Loaded { name, power } => {
                 let key = format!("plugin:{name}");
                 if let Some((w, h)) = self.image_size(&key) {
-                    let (fw, fh) = (66.0f32, 27.0f32);
-                    let s = (fw / w).min(fh / h);
-                    let (dw, dh) = (w * s, h * s);
-                    self.image(&key, Rect::new(r.x + (r.w - dw) / 2.0, r.y + 4.0 + (fh - dh) / 2.0, dw, dh), None, None, 1.0);
+                    let b = Rect::new(r.x + 16.0, r.y + 4.0, 64.0, 25.0);
+                    let s = (b.w / w).min(b.h / h);
+                    self.image(&key, snap_centered(b, w * s, h * s), None, None, if *power { 1.0 } else { 0.5 });
                 }
-                let short = name.strip_prefix("UAD ").unwrap_or(name);
-                let style = TextStyle { family: "Helvetica".into(), size: 9.0, bold: false, italic: true, color: Rgba::WHITE.with_alpha(if *power { 0.85 } else { 0.45 }) };
-                let name_r = Rect::new(r.x + 13.0, r.y + 31.0, r.w - 26.0, 12.0);
-                // Long names are clipped to the plate (Console elides with "…").
-                let fits = short.chars().count() <= 16;
-                self.clip(Some(name_r));
-                self.text(short, style, if fits { name_r } else { Rect::new(name_r.x + 1.0, name_r.y, 200.0, name_r.h) }, if fits { Align::Center } else { Align::Left });
-                self.clip(None);
+                if let Some(label) = label {
+                    let mut style = self.style("inserts", "Small-Normal");
+                    style.italic = italic;
+                    if !*power {
+                        style.color.a *= 0.6;
+                    }
+                    let name_r = Rect::new(r.x + 11.0, r.y + 30.0, r.w - 22.0, 14.0);
+                    // Long labels are clipped to the plate (Console elides with "…").
+                    let fits = label.chars().count() <= 14;
+                    self.clip(Some(name_r));
+                    self.text(label, style, if fits { name_r } else { Rect::new(name_r.x + 1.0, name_r.y, 200.0, name_r.h) }, if fits { Align::Center } else { Align::Left });
+                    self.clip(None);
+                }
             }
         }
         if let Some(id) = id {
