@@ -255,17 +255,23 @@ impl Ui<'_> {
         }
     }
 
-    /// `Rack_ChannelStripCell` header: `Mixer-Row-Header` with a centred title.
+    /// `Rack_ChannelStripCell` header (`(0, 0, w, 22)`, paint 0x18149f850): `Mixer-Row-Header`
+    /// (bus cells: `-Bus`) with the title centred on the whole header. `plus` adds the inserts
+    /// header's "+" (a 2-pt cross, 8 × 8, at x 8 / y 7; white 0.6, measured). Bus titles draw at
+    /// 0.62 of the header colour (measured on the dark header).
     pub fn cell_header(&mut self, title: &str, plus: bool, bus: bool, r: Rect) {
         self.background(if bus { "Mixer-Row-Header-Bus" } else { "Mixer-Row-Header" }, r);
-        let style = self.style("fonts", "Channel-Strip-Section-Header");
-        if plus {
-            let big = TextStyle { size: 15.0, ..style.clone() };
-            self.text("+", big, Rect::new(r.x + 14.0, r.y, 14.0, r.h), Align::Center);
-            self.text(title, style, Rect::new(r.x + 24.0, r.y, r.w - 30.0, r.h), Align::Center);
-        } else {
-            self.text(title, style, r, Align::Center);
+        let mut style = self.style("fonts", "Channel-Strip-Section-Header");
+        if bus {
+            style.color.a *= 0.62;
         }
+        if plus {
+            let c = Rgba::WHITE.with_alpha(0.59);
+            self.fill(Rect::new(r.x + 8.0, r.y + 10.0, 8.0, 2.0), c);
+            self.fill(Rect::new(r.x + 11.0, r.y + 7.0, 2.0, 3.0), c);
+            self.fill(Rect::new(r.x + 11.0, r.y + 12.0, 2.0, 3.0), c);
+        }
+        self.text(title, style, r, Align::Center);
     }
 }
 

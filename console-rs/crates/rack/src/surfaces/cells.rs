@@ -158,12 +158,15 @@ fn route_bar(name: &str) -> Rgba {
 /// * route `(0, 0, w, 35)`: `Send-Route-Background` `(4, 0, w−8, 35)`, the `Flex-Route-Focus`
 ///   plate (`slot_bg`, inset-background 10,6,10,6) with the route name (`Flex-Route-Value-Font`)
 ///   and the `Slot-Color` bar at its foot;
-/// * lower plate `(6, 34, w−12, h−34−2)` (`Secondary-Send-Background`);
+/// * slot background `(4, 0, w−8, H)` (`Secondary-Send-Background`) and the lower plate
+///   `(6, 34, w−12, h−34−2)` (`Send-Lower-State-Plate`, as the ref shows);
 /// * knob meter + knob `(7, 35−4, 41, 49)`;
 /// * pre_and_mute `(46, 35+14, L, 19)`: L = mute + 10 with `Send-Mute` centred, or PRE + M
 ///   (`Mini-Send-Pre`, `Mini-Send-Mute`) 2 apart.
 fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option<bool>, sy: f32) {
     let top = 35.0;
+    // Send slot background `(4, y, w−8, H)` (Rack_Overview_Sends::resized 0x18152e670).
+    ui.background("Secondary-Send-Background", Rect::new(4.0, sy, STRIP_W - 8.0, SEND_H));
     ui.background("Send-Route-Background", Rect::new(4.0, sy, STRIP_W - 8.0, top));
     let plate = Rect::new(10.0, sy + 6.0, STRIP_W - 20.0, top - 12.0);
     if let Some(img) = ui.skin("views", "Flex-Route-Focus").and_then(|k| k.image("image")) {
@@ -176,7 +179,7 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
         label.color = c;
     }
     ui.text(&send.name, label, Rect::new(plate.x, plate.y, plate.w, plate.h - 4.0), Align::Center);
-    ui.background("Secondary-Send-Background", Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, SEND_H - top - 1.0));
+    ui.background("Send-Lower-State-Plate", Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, SEND_H - top - 1.0));
     let knob = Rect::new(7.0, sy + top - 4.0, 41.0, 49.0);
     ui.film("meters", "Knob-Meter", "image-film", 0.0, knob);
     ui.knob("Mini-Send-Level", send.level, knob, cid(s, Control::SendLevel(k as u8)), Some(crate::scales::UNITY));
@@ -186,7 +189,7 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
             ui.toggle("Mini-Send-Pre", Some("P"), on, true, Rect::new(46.0, y, 18.0, 19.0), cid(s, Control::SendPre(k as u8)), None);
             ui.toggle("Mini-Send-Mute", Some("M"), send.muted, true, Rect::new(66.0, y, 18.0, 19.0), cid(s, Control::SendMute(k as u8)), None);
         }
-        None => ui.toggle("Send-Mute", Some("M"), send.muted, true, Rect::new(51.0, y, 32.0, 19.0), cid(s, Control::SendMute(k as u8)), None),
+        None => ui.toggle("Send-Mute", Some("M"), send.muted, true, Rect::new(51.0, y, 32.0, 18.0), cid(s, Control::SendMute(k as u8)), None),
     }
 }
 
