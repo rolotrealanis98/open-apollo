@@ -745,6 +745,7 @@ impl ViewState {
             "meters" => Panel::MeterWindow,
             "talkback" => Panel::Sends(crate::settings::SendsOf::Talkback),
             "aux-sends" => Panel::Sends(crate::settings::SendsOf::Aux(tab.parse().unwrap_or(0))),
+            "input-sends" => Panel::Sends(crate::settings::SendsOf::Input(tab.parse().unwrap_or(0))),
             "add-device" => Panel::AddDevice,
             "io-presets" => Panel::IoPresets,
             "input-source" => Panel::RouteSource { route: tab.parse().unwrap_or(0), outputs: false },
@@ -809,6 +810,14 @@ impl ViewState {
         }
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return false };
         let id = hit.id.clone();
+        // A strip's sends cell (its mini send faders): that strip's Sends window (send-cell,
+        // sends-aux).
+        if let Control::SendLevel(_) = id.control {
+            if let Some(of) = sends_of(hits, &id.strip) {
+                self.sheet = Some(Sheet::Panel(Panel::Sends(of)));
+                return true;
+            }
+        }
         match id.control {
             Control::Insert(slot) => {
                 self.open(Popover::InsertMenu { strip: id.strip.clone(), slot }, id);
@@ -887,6 +896,17 @@ impl ViewState {
             self.browser.scroll = 0.0;
         }
     }
+}
+
+/// Which Sends window a strip's sends belong to: the talkback strip's, an aux's (`auxs/N`) or
+/// an input's (`inputs/N`), from its id and the frame's hits.
+fn sends_of(hits: &[Hit], strip: &Arc<str>) -> Option<crate::settings::SendsOf> {
+    use crate::settings::SendsOf;
+    if hits.iter().any(|h| h.id.strip == *strip && h.id.control == Control::ShowPanel(Panel::Sends(SendsOf::Talkback))) {
+        return Some(SendsOf::Talkback);
+    }
+    let n = strip.rsplit('/').next().and_then(|t| t.trim_start_matches(|c: char| !c.is_ascii_digit()).parse::<u8>().ok())?;
+    if strip.contains("aux") { Some(SendsOf::Aux(n)) } else { Some(SendsOf::Input(n)) }
 }
 
 fn apply_effects(effects: Vec<Effect>, model: &mut dyn MixerModel) {

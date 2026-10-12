@@ -15,6 +15,8 @@
 //! route), 0x181145940 (monitor sub-window), 0x181122330 (HP correction), 0x1811f5820 (scenes),
 //! 0x181171db0 (sends popover), 0x180d9e250 (meters window), 0x180a23b90 (About).
 
+use std::sync::Arc;
+
 use houston::{Rect, Rgba};
 
 use crate::draw::Align;
@@ -503,6 +505,7 @@ fn send_nodes(src: &dyn PropertySource, of: SendsOf) -> (String, Vec<(String, St
     let node = match of {
         SendsOf::Talkback => src.indices(&format!("{dev}/inputs")).into_iter().map(|i| format!("{dev}/inputs/{i}")).find(|p| str_at(src, &format!("{p}/IOType")).as_deref() == Some("TalkbackMic")),
         SendsOf::Aux(k) => Some(format!("{dev}/auxs/{k}")),
+        SendsOf::Input(k) => Some(format!("{dev}/inputs/{k}")),
     };
     let Some(node) = node else { return (String::new(), Vec::new()) };
     let active_cues = src.prop("/CueBusCount").and_then(|v| v.as_i64()).unwrap_or(2).max(0) as usize;
@@ -521,7 +524,7 @@ fn send_nodes(src: &dyn PropertySource, of: SendsOf) -> (String, Vec<(String, St
         .collect();
     let title = match of {
         SendsOf::Talkback => "TALKBACK".to_string(),
-        SendsOf::Aux(_) => str_at(src, &format!("{node}/Name")).unwrap_or_else(|| "AUX".into()),
+        SendsOf::Aux(_) | SendsOf::Input(_) => str_at(src, &format!("{node}/Name")).unwrap_or_else(|| "SENDS".into()),
     };
     (title, sends)
 }
@@ -529,18 +532,47 @@ fn send_nodes(src: &dyn PropertySource, of: SendsOf) -> (String, Vec<(String, St
 fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
     let Some(src) = model.properties() else { return };
     let (title, sends) = send_nodes(src, of);
-    // 96-pt columns under a 27-pt title (s50: 386 × 362 for four, s51: 194 for two).
+    // 96-pt columns under a 27-pt title (s50: 386 × 362 for four, s51: 194 for two). Beside
+    // the strip whose sends they are, at its sends cell (send-cell: (584, 583) for the strip at
+    // 488; sends-aux: (1085, 583) for the aux at 989): the strip's right edge, 12.5 pt above
+    // its first mini send fader.
     let col = 96.0;
-    let r = centred(bounds, (2.0 + sends.len().max(1) as f32 * col, 362.0));
+    let size = (2.0 + sends.len().max(1) as f32 * col, 362.0);
+    let strip: Option<Arc<str>> = match of {
+        SendsOf::Aux(k) => Some(format!("/devices/0/auxs/{k}").into()),
+        SendsOf::Input(k) => Some(format!("/devices/0/inputs/{k}").into()),
+        SendsOf::Talkback => ui.hits.iter().find(|h| h.id.control == Control::ShowPanel(Panel::Sends(SendsOf::Talkback))).map(|h| h.id.strip.clone()),
+    };
+    let anchor = strip.and_then(|st| {
+        let name = ui.hit_rect(&ControlId { strip: st.clone(), control: Control::Name })?;
+        let send = ui.hit_rect(&ControlId { strip: st, control: Control::SendLevel(0) })?;
+        Some((name.max_x(), send.y - 12.5))
+    });
+    let r = match anchor {
+        Some((x, y)) => {
+            let x = if x + size.0 <= bounds.max_x() { x } else { (bounds.max_x() - size.0).max(bounds.x) };
+            Rect::new(x, y.min(bounds.max_y() - size.1).max(bounds.y), size.0, size.1)
+        }
+        None => centred(bounds, size),
+    };
     let c = dialog_frame(ui, r, &title, false);
-    if let SendsOf::Aux(k) = of {
-        // ‹ › step through the auxes.
+    // ‹ › step through the auxes, or through the input strips (send-cell shows them on an
+    // input's window too).
+    let step: Option<(u8, &str, fn(u8) -> SendsOf)> = match of {
+        SendsOf::Aux(k) => Some((k, "auxs", SendsOf::Aux)),
+        SendsOf::Input(k) => Some((k, "inputs", SendsOf::Input)),
+        SendsOf::Talkback => None,
+    };
+    if let Some((k, kind, make)) = step {
         let st = Ui::plain_style("Helvetica", 12.0, true, Rgba::WHITE.with_alpha(0.5));
-        for (i, (label, to)) in [("‹", k.checked_sub(1)), ("›", Some(k + 1))].into_iter().enumerate() {
+        let exists = |t: u8| src.prop(&format!("/devices/0/{kind}/{t}/Name")).is_some();
+        let prev = (0..k).rev().find(|t| exists(*t));
+        let next = (k.saturating_add(1)..=u8::MAX).take(64).find(|t| exists(*t));
+        for (i, (label, to)) in [("‹", prev), ("›", next)].into_iter().enumerate() {
             let b = Rect::new(r.max_x() - 50.0 + i as f32 * 22.0, r.y + 3.0, 20.0, 20.0);
             ui.text(label, st.clone(), b, Align::Center);
-            if let Some(to) = to.filter(|t| src.prop(&format!("/devices/0/auxs/{t}/Name")).is_some()) {
-                ui.hit(b, sid(Control::ShowPanel(Panel::Sends(SendsOf::Aux(to)))), HitKind::Tap);
+            if let Some(to) = to {
+                ui.hit(b, sid(Control::ShowPanel(Panel::Sends(make(to)))), HitKind::Tap);
             }
         }
     }
@@ -560,13 +592,22 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
         if let Some(rc) = rule {
             ui.fill(Rect::new(tab.x + 6.0, tab.max_y() - 4.0, tab.w - 12.0, 2.0), rc);
         }
+        // Input sends carry their pan (send-cell: a knob with L / R over the M button).
+        let pan_h = if matches!(of, SendsOf::Input(_)) {
+            let pan = src.prop(&format!("{node}/Pan")).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            // The send pan knob of the strips' sends cells (`Pan-White`, 40 × 46).
+            ui.knob("Pan-White", (pan + 1.0) / 2.0, Rect::new(x + 28.0, c.y + 35.0, 40.0, 46.0), None, Some(0.5));
+            50.0
+        } else {
+            0.0
+        };
         let muted = bool_at(src, &format!("{node}/Bypass")).unwrap_or(false);
-        let mr = Rect::new(x + (col - 26.0) / 2.0, c.y + 42.0, 24.0, 18.0);
+        let mr = Rect::new(x + (col - 26.0) / 2.0, c.y + 42.0 + pan_h, 24.0, 18.0);
         ui.toggle("Switch-Small", Some("M"), muted, true, mr, None, None);
         ui.hit(mr, sid(Control::SettingPress(format!("toggle:{node}/Bypass").into())), HitKind::Toggle);
         let v = src.prop(&format!("{node}/GainTapered")).and_then(|v| v.as_f64()).unwrap_or(0.0);
         let db = src.prop(&format!("{node}/Gain")).and_then(|v| v.as_f64()).unwrap_or(-144.0);
-        let fm = Rect::new(x + 6.0, c.y + 64.0, col - 13.0, c.h - 70.0);
+        let fm = Rect::new(x + 6.0, c.y + 64.0 + pan_h, col - 13.0, c.h - 70.0 - pan_h);
         ui.fader_and_meters("Main-Bus-Fader", false, v, MeterFrame::default(), &db_readout(db), fm, Some(sid(Control::SettingSet(format!("fader:{node}/GainTapered").into()))));
     }
 }

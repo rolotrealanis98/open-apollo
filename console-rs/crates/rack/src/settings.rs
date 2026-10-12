@@ -257,6 +257,9 @@ pub enum SendsOf {
     Talkback,
     /// Aux `.0` (`auxs/N`): its cue sends.
     Aux(u8),
+    /// An input strip (`inputs/N`): AUX 1 / 2, CUE 1 / 2 with their pans (capture send-cell,
+    /// a right click on the strip's sends cell).
+    Input(u8),
 }
 
 impl Panel {
@@ -270,6 +273,7 @@ impl Panel {
             Panel::MeterWindow => "",
             Panel::Sends(SendsOf::Talkback) => "TALKBACK",
             Panel::Sends(SendsOf::Aux(_)) => "AUX",
+            Panel::Sends(SendsOf::Input(_)) => "SENDS",
             Panel::AddDevice => "ADD DEVICE",
             Panel::IoPresets => "I/O PRESETS",
             Panel::RouteSource { .. } => "INPUT",
