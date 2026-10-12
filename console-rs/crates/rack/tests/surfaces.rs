@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use houston::Resources;
 use rack::input::{Action, Control, ControlId, Hit, Interaction, ScrollTarget};
-use rack::surfaces::{Modifier, Popover, PopoverState, Section};
+use rack::surfaces::{Modifier, MonitorPage, Popover, PopoverState, Section};
 use rack::{Assets, MixerModel, PreviewMixer, Ui, ViewState, build_window_with};
 
 const FIXTURE: &str = r#"{
@@ -23,10 +23,15 @@ const FIXTURE: &str = r#"{
 }"#;
 
 fn assets() -> Assets {
-    let dir = std::env::temp_dir().join(format!("rack-surfaces-fixture-{}", std::process::id()));
-    std::fs::create_dir_all(dir.join("appearance")).unwrap();
-    std::fs::write(dir.join("appearance/Appearance.json"), FIXTURE).unwrap();
-    let res = Resources::at(&PathBuf::from(&dir)).expect("fixture resources");
+    // Tests run in parallel threads: write the fixture once, then only read it.
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("rack-surfaces-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("appearance")).unwrap();
+        std::fs::write(dir.join("appearance/Appearance.json"), FIXTURE).unwrap();
+        dir
+    });
+    let res = Resources::at(dir).expect("fixture resources");
     Assets::load(res).expect("fixture appearance")
 }
 
@@ -70,7 +75,10 @@ fn every_surface_registers_its_controls() {
     assert!(find(&hits, "status", &Control::StatusRate).is_some());
     assert!(find(&hits, "session", &Control::SessionNavigate(0)).is_some());
     assert!(find(&hits, "monitor", &Control::CueOutputs).is_some());
-    assert!(find(&hits, "monitor", &Control::MonitorDim).is_some());
+    // Console's monitor column has no DIM / TALK; they are on the CTRL ROOM page.
+    assert!(find(&hits, "monitor", &Control::MonitorDim).is_none());
+    let (cr_hits, _) = build(&assets, &model, &ViewState { monitor_page: MonitorPage::ControlRoom, ..ViewState::default() });
+    assert!(find(&cr_hits, "monitor", &Control::MonitorDim).is_some());
     assert!(find(&hits, "in0", &Control::Name).is_some());
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Browser && s.max > 0.0));
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Cells && s.max > 0.0), "sends overflow the cells column");

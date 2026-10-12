@@ -483,7 +483,8 @@ impl MixerModel for EngineMixer {
             .unwrap_or(tapers::monitor::MIN_DB);
         MonitorState {
             level: self.f64_at(&m.level()).unwrap_or(0.0),
-            readout: format!("{db:.1} dB"),
+            // Console prints -INF at the property floor (CRMonitorLevel −96).
+            readout: if db <= -96.0 { "-INF".into() } else { format!("{db:.1} dB") },
             mono: self.bool_at(&m.mono()).unwrap_or(false),
             mute: self.bool_at(&m.mute()).unwrap_or(false),
         }
