@@ -443,6 +443,11 @@ pub struct HeadphoneOutput {
 
 pub trait MixerModel {
     fn session_name(&self) -> String;
+    /// The open session and the SESSION menu's lists. Default: the name (and `*`) from
+    /// `session_name`, no lists.
+    fn session(&self) -> crate::surfaces::session::SessionInfo {
+        crate::surfaces::session::SessionInfo::from_name(&self.session_name())
+    }
     fn inputs(&self) -> Vec<StripInfo>;
     fn auxes(&self) -> Vec<StripInfo>;
     fn main(&self, s: &StripInfo) -> MainState;
@@ -740,6 +745,15 @@ impl PreviewMixer {
 impl MixerModel for PreviewMixer {
     fn session_name(&self) -> String {
         "Session*".into()
+    }
+    fn session(&self) -> crate::surfaces::session::SessionInfo {
+        use crate::surfaces::session::{SessionFile, SessionInfo};
+        let file = |p: &str| SessionFile { path: p.into(), label: p.into() };
+        SessionInfo {
+            files: vec![file("Session"), file("Tracking"), file("Mix/Rough Mix"), file("Mix/Vocal Comp")],
+            modified: vec!["[Sep 18, 2026 05:14:34 AM] - - New Session -".into()],
+            ..SessionInfo::from_name(&self.session_name())
+        }
     }
     fn inputs(&self) -> Vec<StripInfo> {
         self.inputs.clone()

@@ -167,8 +167,16 @@ pub fn draw_navigator(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: 
         ui.text("SESSION", session, Rect::new(sx, sy + 7.0, sw, 12.0), Align::Center);
         let name = Ui::plain_style("Helvetica", 10.0, true, Rgba::WHITE.with_alpha(0.5));
         ui.clip(Some(Rect::new(sx + 4.0, sy, sw - 8.0, sh)));
-        ui.text(&model.session_name(), name, Rect::new(sx, sy + 20.0, sw, 13.0), Align::Center);
+        // While the engine loads or saves, its progress text replaces the name.
+        let progress = model.session().progress;
+        if progress.is_empty() {
+            ui.text(&model.session_name(), name, Rect::new(sx, sy + 20.0, sw, 13.0), Align::Center);
+        } else {
+            let busy = Ui::plain_style("Helvetica", 9.0, false, Rgba::WHITE.with_alpha(0.7));
+            ui.text(&progress, busy, Rect::new(sx, sy + 21.0, sw, 12.0), Align::Center);
+        }
         ui.clip(None);
+        crate::surfaces::session::session_box_hit(ui, Rect::new(sx, sy, sw, sh));
 
         // Section rows on the Display-Nav plate. Text and dot are lit (Icon-Show-Selected) for
         // the rows the cells viewport shows; the dot is filled while the row is open.

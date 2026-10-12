@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use crate::input::{Action, Control, ControlId, Hit, ScrollRegion, ScrollTarget};
 use crate::model::{MixerModel, StripInfo};
+use crate::surfaces::session::SessionOp;
 
 /// Cell rows toggled by the navigator (and FADER, the main strip's fader area).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -151,6 +152,14 @@ pub enum Popover {
     Scenes,
     /// Tempo editor (uses `ViewState::text_edit`).
     Tempo,
+    /// The navigator SESSION box's menu.
+    Session,
+    /// "SAVE SESSION": the session has unsaved changes; `then` runs after the answer.
+    SaveChanges { then: SessionOp },
+    /// Session name field (Save As; uses `ViewState::text_edit`).
+    SessionSaveAs,
+    /// Session file path field (Open...; uses `ViewState::text_edit`).
+    SessionOpen,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -165,6 +174,9 @@ pub enum TextTarget {
     Rename(Arc<str>),
     Search,
     Tempo,
+    /// Save As; `then` is the session op waiting on the save (from the save-changes question).
+    SessionSaveAs { then: Option<SessionOp> },
+    SessionOpen,
 }
 
 /// A text field with keyboard focus.
@@ -275,6 +287,8 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SettingsRate
             | C::SettingsClock
             | C::SettingsBuffer
+            | C::SessionMenu
+            | C::SessionSaveChoice(_)
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
 }
 
@@ -316,6 +330,9 @@ impl ViewState {
         if !press {
             return vec![Effect::Model(action)];
         }
+        if let C::Session(op) = id.control {
+            return self.route_session(op, model);
+        }
         // A tap on a menu item closes its popover; toggles inside panel popovers keep it open.
         let from_menu = matches!(action, Action::Tap(_)) && self.popover.is_some();
         let insert_menu = matches!(self.popover, Some(PopoverState { kind: Popover::InsertMenu { .. }, .. }));
@@ -347,9 +364,10 @@ impl ViewState {
         use Control as C;
         let mut out = Vec::new();
         let keep_popover = matches!(id.control, C::PopoverDismiss | C::TextCommit | C::TextCancel);
+        let mut closed = None;
         if !keep_popover && self.popover.is_some() {
             // Opening something else (or any view press) replaces the current popover.
-            self.popover = None;
+            closed = self.popover.take();
             self.text_edit = self.text_edit.take().filter(|t| t.target == TextTarget::Search);
         }
         match id.control.clone() {
@@ -414,7 +432,15 @@ impl ViewState {
                 self.popover = None;
                 self.text_edit = self.text_edit.take().filter(|t| t.target == TextTarget::Search);
             }
-            C::TextCommit => out.extend(self.commit_text()),
+            C::TextCommit => out.extend(self.commit_text(model)),
+            C::SessionMenu => self.open_session_menu(id),
+            C::SessionSaveChoice(c) => {
+                // press_view closed the question; reopen it so the answer sees `then`.
+                if let Some(p) = closed.take() {
+                    self.popover = Some(p);
+                }
+                out.extend(self.session_choice(c, model));
+            }
             C::TextCancel => {
                 self.popover = None;
                 self.text_edit = None;
@@ -424,13 +450,14 @@ impl ViewState {
         out
     }
 
-    fn commit_text(&mut self) -> Option<Effect> {
+    fn commit_text(&mut self, model: &dyn MixerModel) -> Vec<Effect> {
         self.popover = None;
-        let edit = self.text_edit.take()?;
+        let Some(edit) = self.text_edit.take() else { return Vec::new() };
         match edit.target {
-            TextTarget::Rename(strip) => Some(Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)),
-            TextTarget::Tempo => Some(Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)),
-            TextTarget::Search => None,
+            TextTarget::Rename(strip) => vec![Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)],
+            TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
+            TextTarget::Search => Vec::new(),
+            t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen) => self.commit_session_text(&t, edit.text, model),
         }
     }
 
@@ -487,7 +514,8 @@ impl ViewState {
 
     pub fn key_enter(&mut self, model: &mut dyn MixerModel) {
         if self.text_edit.is_some() {
-            apply_effects(self.commit_text().into_iter().collect(), model);
+            let effects = self.commit_text(&*model);
+            apply_effects(effects, model);
         }
     }
 

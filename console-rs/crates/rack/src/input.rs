@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use houston::Rect;
 
+use crate::surfaces::session::{SaveChoice, SessionOp};
 use crate::surfaces::{BrowserTab, InsertSize, Modifier, MonitorPage, Section};
 
 /// Which control of which strip ("in0", "aux1", "monitor", …).
@@ -138,6 +139,17 @@ pub enum Control {
     PluginStep(u16, u16),
     /// A button of the plug-in window's chrome (title bar, UAPW toolbar, footer): tap.
     PluginWindow(PluginWindowButton),
+    // Sessions (`surfaces::session`).
+    /// [view] Navigator SESSION box: the session menu.
+    SessionMenu,
+    /// [model] A session request. `ViewState::route` asks about unsaved changes and opens the
+    /// Save As / Open fields first; what is left reaches the model as a tap.
+    Session(SessionOp),
+    /// [view] The save-changes question's buttons.
+    SessionSaveChoice(SaveChoice),
+    /// [model] `set_text` targets: Save As name, Open path (engine host).
+    SessionSaveAsName,
+    SessionOpenPath,
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the

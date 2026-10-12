@@ -25,6 +25,7 @@
 //! [`EngineMixer::insert_slot`] resolves the slot, whose plug-in parameters are at
 //! [`InsertPaths::parameter`](ua_engine::InsertPaths::parameter)).
 
+mod sessions;
 mod slots;
 mod surfaces;
 
@@ -297,12 +298,17 @@ impl MixerModel for EngineMixer {
     }
 
     fn session_name(&self) -> String {
-        let name = self
-            .str_at("/Session")
-            .filter(|s| !s.is_empty())
-            .unwrap_or("Session");
+        // Console's name for the `/Session` value (`- New Session -` when never saved).
+        let name = match self.str_at("/Session") {
+            Some(v) => ua_engine::session::display_name(v),
+            None => "Session".to_owned(),
+        };
         let dirty = self.bool_at("/Dirty").unwrap_or(false);
         format!("{name}{}", if dirty { "*" } else { "" })
+    }
+
+    fn session(&self) -> rack::SessionInfo {
+        self.session_info()
     }
 
     fn inputs(&self) -> Vec<StripInfo> {
@@ -581,10 +587,16 @@ impl MixerModel for EngineMixer {
     }
 
     fn set_text(&mut self, id: &ControlId, text: &str) {
+        if self.session_set_text(id, text) {
+            return;
+        }
         self.surface_set_text(id, text);
     }
 
     fn apply(&mut self, action: &Action) {
+        if self.apply_session(action) {
+            return;
+        }
         if self.apply_surface(action) {
             return;
         }

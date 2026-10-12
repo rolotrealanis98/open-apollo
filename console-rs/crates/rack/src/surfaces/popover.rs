@@ -238,6 +238,11 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
             ui.popover_menu(a, Placement::Right, bounds, Some(&title), &items, 150.0);
         }
         Popover::Rename { .. } => text_popover(ui, a, bounds, "CHANNEL NAME", view.text_edit.as_ref()),
+        Popover::Session | Popover::SaveChanges { .. } => {
+            crate::surfaces::session::draw_session_popover(ui, model, kind, a, bounds);
+        }
+        Popover::SessionSaveAs => text_popover(ui, a, bounds, "SAVE SESSION AS", view.text_edit.as_ref()),
+        Popover::SessionOpen => text_popover(ui, a, bounds, "OPEN SESSION", view.text_edit.as_ref()),
         Popover::Tempo => text_popover(ui, a, bounds, "TEMPO", view.text_edit.as_ref()),
         Popover::CueOutputs => cue_outputs_popover(ui, model, a, bounds),
         Popover::Headphone { output } => {
