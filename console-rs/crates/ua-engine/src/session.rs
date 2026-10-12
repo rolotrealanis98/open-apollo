@@ -131,6 +131,53 @@ impl SessionCommand {
     }
 }
 
+/// Console snapshots (`MxClnt_Snapshots`, the `Rack_SnapshotsSection` panel: FILE SAVE /
+/// SAVE AS... / NEW / RENAME / DELETE / MOVE / IMPORT ALL / EXPORT ALL, FOLDERS, SNAPSHOTS,
+/// CURRENT, PRIMED, RECALL). Argument keys from Rack.dll 0x181972140…0x181970c00; recall and
+/// prime are assumed to be `set`s of `/Snapshot` and `/PrimedSnapshot` (not observed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SnapshotCommand {
+    /// `set /Snapshot/value "<[folder/]name>"` (assumed).
+    Recall(String),
+    /// `set /PrimedSnapshot/value "<[folder/]name>"` (assumed).
+    Prime(String),
+    /// `post /SaveAsSnapshot {"snapshotName":…,"isNew":…}`.
+    SaveAs { name: String, is_new: bool },
+    /// `post /DeleteSnapshot {"snapshotName":…}`.
+    Delete { name: String },
+    /// `post /MoveSnapshot {"origName":…,"newName":…,"shuffle":…}` (rename and reorder).
+    Move { from: String, to: String, shuffle: bool },
+    /// `post /ExportSnapshots {"volume":…,"folder":…}` (`volume` from `/Snapshot`'s `volumes`).
+    Export { volume: String, folder: String },
+    /// `post /ImportSnapshots {"volume":…,"folder":…,"append":…}`.
+    Import { volume: String, folder: String, append: bool },
+}
+
+impl SnapshotCommand {
+    pub fn command(&self) -> Command {
+        let post = |cmd: &str, body: Json| Command::post(format!("/{cmd}"), Some(body.to_string()));
+        match self {
+            SnapshotCommand::Recall(n) => Command::set(SNAPSHOT, &Value::String(n.clone()), false),
+            SnapshotCommand::Prime(n) => Command::set(PRIMED_SNAPSHOT, &Value::String(n.clone()), false),
+            SnapshotCommand::SaveAs { name, is_new } => {
+                post("SaveAsSnapshot", serde_json::json!({ "snapshotName": name, "isNew": is_new }))
+            }
+            SnapshotCommand::Delete { name } => post("DeleteSnapshot", serde_json::json!({ "snapshotName": name })),
+            SnapshotCommand::Move { from, to, shuffle } => post(
+                "MoveSnapshot",
+                serde_json::json!({ "origName": from, "newName": to, "shuffle": shuffle }),
+            ),
+            SnapshotCommand::Export { volume, folder } => {
+                post("ExportSnapshots", serde_json::json!({ "volume": volume, "folder": folder }))
+            }
+            SnapshotCommand::Import { volume, folder, append } => post(
+                "ImportSnapshots",
+                serde_json::json!({ "volume": volume, "folder": folder, "append": append }),
+            ),
+        }
+    }
+}
+
 /// One entry of the `/Session` values tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionEntry {
@@ -249,6 +296,9 @@ pub struct SessionState {
     pub progress: String,
     pub entries: Vec<SessionEntry>,
     pub modified: Vec<ModifiedSession>,
+    /// `/Snapshot` and `/PrimedSnapshot` values (Console snapshots).
+    pub snapshot: String,
+    pub primed_snapshot: String,
 }
 
 impl SessionState {
@@ -261,6 +311,8 @@ impl SessionState {
             progress: s(PROGRESS),
             entries: parse_entries(&list(SESSION)),
             modified: parse_modified(&list(MODIFIED_SESSIONS)),
+            snapshot: s(SNAPSHOT),
+            primed_snapshot: s(PRIMED_SNAPSHOT),
         }
     }
 
@@ -301,6 +353,10 @@ mod tests {
         );
         assert_eq!(t(SessionCommand::SaveLastUsed), "post /SaveLastUsedSession {}");
         assert!(SessionCommand::Save.command().is_write());
+        let snap = |c: SnapshotCommand| c.command().text();
+        assert_eq!(snap(SnapshotCommand::Recall("A".into())), r#"set /Snapshot/value "A""#);
+        assert!(snap(SnapshotCommand::SaveAs { name: "A".into(), is_new: true }).starts_with("post /SaveAsSnapshot {"));
+        assert!(snap(SnapshotCommand::Import { volume: "V".into(), folder: "F".into(), append: false }).contains(r#""append":false"#));
         assert!(SessionCommand::Load("x".into()).replaces_session());
         assert!(!SessionCommand::Save.replaces_session());
     }

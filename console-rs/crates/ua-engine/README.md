@@ -126,6 +126,26 @@ The differences are the following, and the Rust Console has to handle each of th
 
 The ConsoleLab findings still hold on 12.0.0. Pushes come in `multi` envelopes, batch unsubscribe is ignored, and `Active` is not visibility for outputs. A pair shows `StereoName` and a mono strip shows `Name`. Sends mute with `Bypass`, meters clip with `MeterClip`, and talkback is `/TalkbackOn` at the root. See ConsoleLab's `UAEngineKit/README.md`.
 
+## Sessions
+
+`session` covers Console's session handling on 4710: the root properties `/Session`
+(`[folder/]name`; `values` = the Sessions folder tree), `/ModifiedSessions`, `/Dirty` and
+`/Progress`, and the commands that change them (`SessionCommand`, `SnapshotCommand`).
+
+- **Loading** sets `/Session` (`set /Session/value "<[folder/]name>"`). **Restoring** a kept
+  session sets `/ModifiedSessions`.
+- **Everything else is a post:** `NewSession {}`, `OpenSession {"path"}`, `SaveSession {}`,
+  `SaveSessionAs {"name":"….uadmix"}`, `DeleteSession`, `RenameSession`,
+  `NewFolder`/`DeleteFolder`, `SaveLastUsedSession {}`.
+- **Writes are gated.** `Store::session` sends through the writer gate (suppressed while writes
+  are off).
+- **List refresh.** The store re-reads `/Session/values` and `/ModifiedSessions/values` when the
+  session identity changes.
+- **Sources.** Shapes come from engine 12.0.0's `get /?commands=1` and Console 1.2.9 Rack.dll.
+  The catalog with addresses is `console-port/surfaces/sessions.md`.
+- **Session files** are `~/Documents/Universal Audio/Sessions/*.uadmix` on the engine host: XML
+  `uad_mixer_session` / `mixer_tree` / `mixer_object` / `property id="kProp…"`.
+
 ## UA Mixer Helper (4720)
 
 The helper (`mxhlpr`, Bonjour `_uamixerhelper._tcp`) was mapped read-only on 2026-10-12, on the Mac's helper 1.3.1.1152 (`192.168.1.4:4720`, Console 1.3.1) and on the local open-apollo daemon's helper (`127.0.0.1:4720`). Only identity, `get`, `subscribe` and `get /ping` were sent. No `set`, no `post` (not even `command_format`), and no challenge or response.

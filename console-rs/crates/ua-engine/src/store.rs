@@ -893,6 +893,20 @@ impl Store {
         }
     }
 
+    /// Runs a snapshot command through the writer gate.
+    pub fn snapshot_command(&mut self, command: &crate::session::SnapshotCommand) {
+        use crate::session::SnapshotCommand as S;
+        match command {
+            S::Recall(n) => self.commit(session::SNAPSHOT, n.as_str()),
+            S::Prime(n) => self.commit(session::PRIMED_SNAPSHOT, n.as_str()),
+            other => self.writer.send_now(
+                &self.model,
+                sink_of(&self.sink, &self.handle),
+                other.command(),
+            ),
+        }
+    }
+
     /// The open session, the Sessions folder tree and the modified sessions.
     pub fn session_state(&self) -> SessionState {
         SessionState::from_tree(&self.model.tree)

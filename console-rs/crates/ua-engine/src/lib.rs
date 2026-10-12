@@ -58,7 +58,7 @@ pub use error::{Error, Result};
 pub use framing::NulFramer;
 pub use helper::{DriverInfo, HELPER_PORT, HelperInfo, HelperStore, NativeInsert, NativeOwner};
 pub use message::Message;
-pub use session::{ModifiedSession, SessionCommand, SessionEntry, SessionState};
+pub use session::{ModifiedSession, SessionCommand, SessionEntry, SessionState, SnapshotCommand};
 pub use meters::{MeterHandle, MeterProperty, MeterReading, MeterStats, MeterStore};
 pub use mock::{MockEngine, MockHelper, MockOptions};
 pub use store::{Changes, Status, Store};
