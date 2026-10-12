@@ -471,12 +471,75 @@ fn entry_row(ui: &mut Ui, p: &PluginEntry, i: usize, view: &ViewState, row: Rect
     ui.hit(row, bid(Control::BrowserItem(i as u16)), HitKind::Tap);
 }
 
+/// PRESETS tab (`Rack_PresetListBox`, user captures s09/s45): the list well under the search
+/// field, the dismissable "DOUBLE-CLICK OR DRAG / TO ASSIGN CHANNEL PRESET" hint, then the
+/// channel preset tree in 32-pt rows: folders with their reveal chevron and grey name, files
+/// indented under an open folder on a 1-pt tree line, white.
 fn presets_tab(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
+    let b = &view.browser;
     rounded(ui, r, WELL, WELL_EDGE, BG, &UA_CORNER, [true; 4]);
-    let catalog = model.plugin_catalog();
-    let sel = view.browser.selected.and_then(|i| catalog.get(i as usize));
-    let head = bold(11.0, Rgba::rgb8(227, 227, 227));
-    ui.text(sel.map(|p| p.display_name()).unwrap_or("NO PLUG-IN SELECTED"), head, Rect::new(r.x + 10.0, r.y + 4.0, r.w - 20.0, 24.0), Align::Left);
-    let note = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.45));
-    ui.text("Presets: not yet wired (plugins/P/Preset values)", note, Rect::new(r.x + 10.0, r.y + 30.0, r.w - 20.0, 20.0), Align::Left);
+    let mut y = r.y + MARGIN;
+    if b.hint {
+        let hr = Rect::new(r.x + MARGIN, y, r.w - 2.0 * MARGIN, HINT_H);
+        ui.image_stretched("uapw/tag_bg_on.png", hr, 1.0);
+        let hs = bold(11.0, Rgba::rgb8(227, 227, 228));
+        ui.text("DOUBLE-CLICK OR DRAG", hs.clone(), Rect::new(hr.x, hr.y + 5.75, hr.w, 20.0), Align::Center);
+        ui.text("TO ASSIGN CHANNEL PRESET", hs, Rect::new(hr.x, hr.y + 27.75, hr.w, 20.0), Align::Center);
+        let close = Rect::new(hr.max_x() - 20.0, hr.y, 20.0, 20.0);
+        if let Some(x) = ui.skin("views", "Browser-Modal-Close-White").and_then(|s| s.image("image")) {
+            let x = x.to_string();
+            ui.image(&x, Rect::new(close.x + 3.0, close.y + 3.0, 13.0, 13.0), None, None, 1.0);
+        }
+        ui.hit(close, bid(Control::BrowserHintClose), HitKind::Tap);
+        y = hr.max_y() + MARGIN;
+    }
+    let list = Rect::new(r.x, y, r.w, r.max_y() - MARGIN - y);
+    // Lines: (depth, folder index or None, node).
+    let presets = model.channel_presets();
+    let mut lines: Vec<(bool, Option<usize>, &crate::model::PresetNode, bool)> = Vec::new();
+    for (k, f) in presets.iter().enumerate() {
+        let open = f.children.is_some() && b.presets_open.iter().any(|n| *n == f.name);
+        lines.push((false, Some(k), f, open));
+        if open {
+            let kids = f.children.as_deref().unwrap_or_default();
+            for (j, c) in kids.iter().enumerate() {
+                lines.push((true, None, c, j + 1 == kids.len()));
+            }
+        }
+    }
+    let content_h = lines.len() as f32 * GROUP_H;
+    let max = (content_h - list.h).max(0.0);
+    let off = (b.presets_scroll.clamp(0.0, 1.0) * max).round();
+    let content_w = list.w - SCROLLBAR_W;
+    let line_c = Rgba::rgb8(88, 90, 92);
+    ui.clip(Some(list));
+    for (i, &(child, folder, node, flag)) in lines.iter().enumerate() {
+        let row = Rect::new(list.x, list.y - off + i as f32 * GROUP_H, content_w, GROUP_H);
+        if row.max_y() <= list.y || row.y >= list.max_y() {
+            continue;
+        }
+        if child {
+            // Tree line: down the folder's chevron column, a tick to the name (s09).
+            let cx = row.x + 14.0;
+            let end = if flag { row.y + GROUP_H / 2.0 } else { row.max_y() };
+            ui.fill(Rect::new(cx, row.y, 1.0, end - row.y), line_c);
+            ui.fill(Rect::new(cx, row.y + GROUP_H / 2.0, 13.0, 1.0), line_c);
+            ui.text(&node.name, bold(11.0, Rgba::rgb8(235, 236, 236)), Rect::new(row.x + 33.0, row.y + 1.25, row.w - 38.0, 30.0), Align::Left);
+        } else if let Some(k) = folder {
+            reveal(ui, flag, Rect::new(row.x + 4.0, row.y + 6.0, 20.0, 20.0));
+            ui.text(&node.name, bold(11.0, Rgba::rgb8(132, 132, 133)), Rect::new(row.x + 33.0, row.y + 1.25, row.w - 38.0, 30.0), Align::Left);
+            ui.hit(row, bid(Control::BrowserPresetFolder(k as u16)), HitKind::Toggle);
+        }
+    }
+    ui.clip(None);
+    ui.scroll_region(list, ScrollTarget::Browser, max);
+    if max > 0.0 {
+        let track = Rect::new(list.max_x() - SCROLLBAR_W, list.y, SCROLLBAR_W, list.h);
+        let thumb_h = (track.h * list.h / content_h).round().max(SCROLLBAR_W);
+        let ty = (track.y + (track.h - thumb_h) * b.presets_scroll.clamp(0.0, 1.0)).round();
+        if let Some(img) = ui.skin("backgrounds", "Small-Vertical-Scroll-Bar").and_then(|s| s.image("image")) {
+            let img = img.to_string();
+            ui.image_stretched(&img, Rect::new(track.x, ty, track.w, thumb_h), 1.0);
+        }
+    }
 }

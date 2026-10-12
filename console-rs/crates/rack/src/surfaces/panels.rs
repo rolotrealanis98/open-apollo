@@ -40,7 +40,7 @@ pub fn draw_panel(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, panel: 
         Panel::CueOutputs => cue_outputs(ui, model, bounds, &mut drawn),
         Panel::MonitorController => monitor_controller(ui, model, view, bounds, &mut drawn),
         Panel::HeadphoneCorrection => headphone_correction(ui, model, view, bounds, &mut drawn),
-        Panel::PluginScenes => plugin_scenes(ui, model, view, bounds, browser),
+        Panel::PluginScenes => plugin_scenes(ui, model, view, bounds, browser, Control::PanelClose),
         Panel::About => about(ui, model, bounds),
         Panel::MeterWindow => meter_window(ui, model, bounds),
         Panel::Sends(of) => sends(ui, model, of, bounds),
@@ -385,7 +385,9 @@ const SCENE_ROW_H: f32 = 31.75;
 /// header 30, the CURRENT / PRIMED inset (10…280, y 39…186) with RECALL / SAVE / ▲ ▼, then
 /// the scene list from y 195, 31.75 pt rows. [I] Console inserts the column left of the
 /// browser; here it covers the browser's left 290 pt.
-fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect, browser: Option<Rect>) {
+/// PLUG-IN SCENES contents in `browser` (the window's scenes column, or centred in `bounds`);
+/// `close` is what the header's X sends.
+pub fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect, browser: Option<Rect>, close: Control) {
     let full = browser.unwrap_or_else(|| centred(bounds, (290.0, 560.0)));
     let r = Rect::new(full.x, full.y, 290.0f32.min(full.w), full.h);
     // `Scenes-Main-Background` (72, 76, 78); swallows taps.
@@ -402,7 +404,7 @@ fn plugin_scenes(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: 
         let x = x.to_string();
         ui.image(&x, Rect::new(header.x + 262.0, header.y + 9.0, 12.0, 12.0), None, None, 0.9);
     }
-    ui.hit(Rect::new(header.x + 254.0, header.y, 36.0, 30.0), sid(Control::PanelClose), HitKind::Tap);
+    ui.hit(Rect::new(header.x + 254.0, header.y, 36.0, 30.0), sid(close), HitKind::Tap);
 
     let scenes = model.plugin_scenes();
     let current = model.status().scene;

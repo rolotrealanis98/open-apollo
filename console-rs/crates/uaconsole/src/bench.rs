@@ -30,6 +30,7 @@ pub fn render_png(
     scale: f32,
     open_plugin: Option<&(String, u8)>,
     open: Option<&str>,
+    view_spec: Option<&str>,
     menu: Option<&str>,
     menu_bar: bool,
     out: &Path,
@@ -54,6 +55,9 @@ pub fn render_png(
         menu_bar,
         ..ViewState::default()
     };
+    if let Some(spec) = view_spec {
+        view.apply_spec(spec)?;
+    }
     if let Some(name) = open {
         view.open_named(name);
     }

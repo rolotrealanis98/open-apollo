@@ -62,7 +62,9 @@ pub enum BrowserTab {
     Presets,
 }
 
-/// Monitor column SHOW: the bus area shows the aux returns or the control room.
+/// Monitor column SHOW toggles. Console 1.3.1 treats them independently: AUX shows the aux
+/// strips, CTRL ROOM adds the talkback strip to the bus section and the control-room column
+/// before the monitor column (user captures s45–s49: both lit).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum MonitorPage {
     #[default]
@@ -129,11 +131,14 @@ pub struct BrowserView {
     pub selected: Option<u16>,
     /// An insert slot's "Assign...": the next catalog tap loads into this slot.
     pub assign_to: Option<ControlId>,
+    /// PRESETS tab: open preset folders (by name) and the list scroll (0…1 of the overflow).
+    pub presets_open: Vec<String>,
+    pub presets_scroll: f32,
 }
 
 impl Default for BrowserView {
     fn default() -> Self {
-        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None }
+        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None, presets_open: Vec::new(), presets_scroll: 0.0 }
     }
 }
 
@@ -229,9 +234,20 @@ pub struct ViewState {
     pub modifier: Option<Modifier>,
     pub show_browser: bool,
     pub browser: BrowserView,
-    pub monitor_page: MonitorPage,
+    /// SHOW AUX: the aux strips in the bus section.
+    pub show_aux: bool,
+    /// SHOW CTRL ROOM: the talkback strip in the bus section and the control-room column.
+    pub show_ctrl_room: bool,
+    /// The PLUG-IN SCENES panel column, left of the browser (user capture s10).
+    pub show_scenes: bool,
+    /// The status bar has its SCENE field. Console creates it lazily: the 08:27 captures show
+    /// it only after the PLUG-IN SCENES panel was opened (s08 without, s10 with), p1 with, p2
+    /// without.
+    pub scene_info: bool,
     /// Cells column scroll, 0…1 of the overflow.
     pub cells_scroll: f32,
+    /// Bus-section cells scroll, 0…1 of the overflow (its own scrollbar).
+    pub aux_scroll: f32,
     /// First visible input strip (session navigator); clamped when drawn.
     pub first_strip: usize,
     pub popover: Option<PopoverState>,
@@ -264,8 +280,12 @@ impl Default for ViewState {
             modifier: None,
             show_browser: true,
             browser: BrowserView::default(),
-            monitor_page: MonitorPage::Aux,
+            show_aux: true,
+            show_ctrl_room: false,
+            show_scenes: false,
+            scene_info: true,
             cells_scroll: 0.0,
+            aux_scroll: 0.0,
             first_strip: 0,
             popover: None,
             text_edit: None,
@@ -311,12 +331,15 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::BrowserFavorites
             | C::BrowserLargeRows
             | C::BrowserHintClose
+            | C::BrowserAssignClose
+            | C::BrowserPresetFolder(_)
             | C::BrowserGroupReveal
             | C::BrowserInactiveReveal
             | C::BrowserScroll
             | C::BrowserItem(_)
             | C::SessionNavigate(_)
             | C::CellsScroll
+            | C::AuxCellsScroll
             | C::StatusTempo
             | C::StatusRate
             | C::StatusClock
@@ -357,6 +380,70 @@ impl ViewState {
         Self { compact: true, ..Self::default() }
     }
 
+    /// Insert-assign mode for `slot` of `strip` ("Assign..." in the slot's context menu): the
+    /// browser shows its PLUG-INS tab with the "STRIP: INSERT N" header, and the next plug-in
+    /// picked goes into that slot.
+    pub fn begin_assign(&mut self, strip: Arc<str>, slot: u8) {
+        self.show_browser = true;
+        self.browser.tab = BrowserTab::Plugins;
+        self.browser.assign_to = Some(ControlId { strip, control: Control::Insert(slot) });
+    }
+
+    /// Applies a view spec: comma-separated `key=value` items (renders, `--view`, tests).
+    ///
+    /// `inputs|inserts|sends|fader=0|1`, `small` / `large`, `fixed=0|1`, `overview=0|1`,
+    /// `scroll=F`, `aux-scroll=F` (0…1), `browser=0|1`, `tab=plugins|presets`, `hint=0|1`,
+    /// `aux=0|1`, `ctrl=0|1`, `scenes=0|1`, `scene-info=0|1`, `first=N`,
+    /// `presets-open=Folder|Folder`, `presets-scroll=F`,
+    /// `assign=STRIP:SLOT` (slot `u` = Unison), `compact=0|1`.
+    pub fn apply_spec(&mut self, spec: &str) -> Result<(), String> {
+        for item in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let (k, v) = item.split_once('=').unwrap_or((item, "1"));
+            let flag = || match v {
+                "1" | "on" | "true" | "yes" => Ok(true),
+                "0" | "off" | "false" | "no" => Ok(false),
+                _ => Err(format!("view: {k}={v}: expected 0 or 1")),
+            };
+            let frac = || v.parse::<f32>().map(|f| f.clamp(0.0, 1.0)).map_err(|_| format!("view: {k}={v}: expected 0…1"));
+            match k {
+                "inputs" => self.sections.inputs = flag()?,
+                "inserts" => self.sections.inserts = flag()?,
+                "sends" => self.sections.sends = flag()?,
+                "fader" => self.sections.fader = flag()?,
+                "small" => self.insert_size = InsertSize::Small,
+                "large" => self.insert_size = InsertSize::Large,
+                "fixed" => self.fixed_slots = flag()?,
+                "overview" => self.sends_overview = flag()?,
+                "scroll" => self.cells_scroll = frac()?,
+                "aux-scroll" => self.aux_scroll = frac()?,
+                "browser" => self.show_browser = flag()?,
+                "tab" => {
+                    self.browser.tab = match v {
+                        "plugins" => BrowserTab::Plugins,
+                        "presets" => BrowserTab::Presets,
+                        _ => return Err(format!("view: tab={v}: expected plugins or presets")),
+                    }
+                }
+                "hint" => self.browser.hint = flag()?,
+                "presets-open" => self.browser.presets_open = v.split('|').map(str::to_owned).filter(|n| !n.is_empty()).collect(),
+                "presets-scroll" => self.browser.presets_scroll = frac()?,
+                "aux" => self.show_aux = flag()?,
+                "ctrl" => self.show_ctrl_room = flag()?,
+                "scenes" => self.show_scenes = flag()?,
+                "scene-info" => self.scene_info = flag()?,
+                "compact" => self.compact = flag()?,
+                "first" => self.first_strip = v.parse().map_err(|_| format!("view: first={v}: expected a strip index"))?,
+                "assign" => {
+                    let (strip, slot) = v.rsplit_once(':').ok_or_else(|| format!("view: assign={v}: expected STRIP:SLOT"))?;
+                    let slot = if slot.eq_ignore_ascii_case("u") { 255 } else { slot.parse().map_err(|_| format!("view: assign={v}: bad slot"))? };
+                    self.begin_assign(strip.into(), slot);
+                }
+                _ => return Err(format!("view: unknown item {k:?}")),
+            }
+        }
+        Ok(())
+    }
+
     /// A text field has keyboard focus.
     pub fn editing(&self) -> bool {
         self.text_edit.is_some()
@@ -379,6 +466,7 @@ impl ViewState {
                     C::BrowserScroll => self.browser.scroll = frac,
                     C::CellsScroll => self.cells_scroll = frac,
                     C::SettingsScroll => self.settings.scroll = frac,
+                    C::AuxCellsScroll => self.aux_scroll = frac,
                     _ => {}
                 }
             }
@@ -468,7 +556,7 @@ impl ViewState {
             C::SendsOverview => self.sends_overview ^= true,
             C::Modifier(m) => self.modifier = if self.modifier == Some(m) { None } else { Some(m) },
             C::ShowBrowser => self.show_browser ^= true,
-            C::ShowPluginScenes => self.toggle_panel(Panel::PluginScenes, model),
+            C::ShowPluginScenes => self.toggle_scenes(model),
             C::ShowSettings => {
                 self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) };
                 self.settings.scroll = 0.0;
@@ -527,6 +615,16 @@ impl ViewState {
             }
             C::BrowserLargeRows => self.browser.large_rows ^= true,
             C::BrowserHintClose => self.browser.hint = false,
+            C::BrowserAssignClose => self.browser.assign_to = None,
+            C::BrowserPresetFolder(k) => {
+                if let Some(f) = model.channel_presets().get(k as usize) {
+                    if let Some(i) = self.browser.presets_open.iter().position(|n| *n == f.name) {
+                        self.browser.presets_open.remove(i);
+                    } else {
+                        self.browser.presets_open.push(f.name.clone());
+                    }
+                }
+            }
             C::BrowserGroupReveal => self.browser.group_open ^= true,
             C::BrowserInactiveReveal => self.browser.inactive_open ^= true,
             C::BrowserItem(i) => match self.browser.assign_to.take() {
@@ -544,8 +642,14 @@ impl ViewState {
             C::StatusRate | C::SettingsRate => self.open(Popover::SampleRate, id),
             C::StatusClock | C::SettingsClock => self.open(Popover::ClockSource, id),
             C::SettingsBuffer => self.open(Popover::BufferSize, id),
-            C::StatusScene => self.open(Popover::Scenes, id),
-            C::MonitorPage(p) => self.monitor_page = p,
+            // The status bar's SCENE opens the PLUG-IN SCENES column (Console 1.3.1 capture).
+            C::StatusScene => {
+                if !self.show_scenes {
+                    self.toggle_scenes(model);
+                }
+            }
+            C::MonitorPage(MonitorPage::Aux) => self.show_aux ^= true,
+            C::MonitorPage(MonitorPage::ControlRoom) => self.show_ctrl_room ^= true,
             C::CueOutputs => self.toggle_panel(Panel::CueOutputs, model),
             C::HeadphoneMenu(o) => self.open(Popover::Headphone { output: o }, id),
             C::PopoverDismiss => {
@@ -628,6 +732,11 @@ impl ViewState {
             "tempo" => Panel::Tempo,
             _ => return false,
         };
+        if panel == Panel::PluginScenes {
+            self.show_scenes = true;
+            self.scene_info = true;
+            return true;
+        }
         self.sheet = Some(Sheet::Panel(panel));
         self.settings.panel_tab = tab.parse().unwrap_or(0);
         true
@@ -635,6 +744,10 @@ impl ViewState {
 
     /// Opens panel `p` (or closes it when it is already open).
     fn toggle_panel(&mut self, p: Panel, model: &dyn MixerModel) {
+        if p == Panel::PluginScenes {
+            self.toggle_scenes(model);
+            return;
+        }
         if self.sheet == Some(Sheet::Panel(p)) {
             self.sheet = None;
             return;
@@ -646,7 +759,15 @@ impl ViewState {
         if p == Panel::Tempo {
             self.text_edit = Some(TextEdit { target: TextTarget::Tempo, text: format!("{:.2}", model.status().tempo) });
         }
-        if p == Panel::PluginScenes {
+    }
+
+    /// Shows or hides the PLUG-IN SCENES column (s10: 288 pt left of the browser, which moves
+    /// right). Opening it selects the current scene and creates the status bar's SCENE field.
+    pub fn toggle_scenes(&mut self, model: &dyn MixerModel) {
+        self.show_scenes ^= true;
+        if self.show_scenes {
+            self.scene_info = true;
+            self.settings.scroll = 0.0;
             let current = model.status().scene;
             self.settings.scene = current.and_then(|c| model.plugin_scenes().iter().position(|n| *n == c)).map(|i| i as u16);
         }
@@ -689,9 +810,11 @@ impl ViewState {
             return false;
         }
         let slot = match r.target {
+            ScrollTarget::Browser if self.browser.tab == BrowserTab::Presets => &mut self.browser.presets_scroll,
             ScrollTarget::Browser => &mut self.browser.scroll,
             ScrollTarget::Cells => &mut self.cells_scroll,
             ScrollTarget::Settings => &mut self.settings.scroll,
+            ScrollTarget::AuxCells => &mut self.aux_scroll,
         };
         *slot = (*slot + dy / r.max).clamp(0.0, 1.0);
         true

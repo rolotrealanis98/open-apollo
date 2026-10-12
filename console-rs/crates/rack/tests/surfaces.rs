@@ -5,14 +5,14 @@ use std::path::PathBuf;
 
 use houston::Resources;
 use rack::input::{Action, Control, ControlId, Hit, Interaction, ScrollTarget};
-use rack::surfaces::{Modifier, MonitorPage, Popover, PopoverState, Section};
+use rack::surfaces::{Modifier, Popover, PopoverState, Section};
 use rack::{Assets, MixerModel, PreviewMixer, Ui, ViewState, build_window_with};
 
 const FIXTURE: &str = r#"{
     "file_format": "appearance",
     "views": {
         "Switch": {}, "Switch-Small": {}, "Switch-Small-Red": {}, "Switch-Red": {}, "Switch-Large": {},
-        "Switch-Tight-Kerning": {}, "Switch-Red-Tight-Kerning": {}, "Mini-Send-Mute": {}, "Mini-Send-Pre": {},
+        "Switch-Tight-Kerning": {}, "Switch-Red-Tight-Kerning": {}, "Mini-Send-Mute": {}, "Mini-Send-Pre": {}, "Send-Mute": {},
         "Console-Nav-Row-Button-Open": {}, "Console-Nav-Row-Button-Close": {}, "Console-Nav-Row-Button-Large": {},
         "Console-Nav-Row-Button-Small": {}, "Console-Nav-Row-Button-Fixed-Slots": {},
         "Switch-Power-Mode": {}, "Switch-Remove-Mode": {}, "Switch-Copy-Mode": {}, "Switch-Isolate-Mode": {},
@@ -77,8 +77,9 @@ fn every_surface_registers_its_controls() {
     assert!(find(&hits, "monitor", &Control::CueOutputs).is_some());
     // Console's monitor column has no DIM / TALK; they are on the CTRL ROOM page.
     assert!(find(&hits, "monitor", &Control::MonitorDim).is_none());
-    let (cr_hits, _) = build(&assets, &model, &ViewState { monitor_page: MonitorPage::ControlRoom, ..ViewState::default() });
+    let (cr_hits, _) = build(&assets, &model, &ViewState { show_ctrl_room: true, ..ViewState::default() });
     assert!(find(&cr_hits, "monitor", &Control::MonitorDim).is_some());
+    assert!(find(&cr_hits, "tb", &Control::Fader).is_some(), "CTRL ROOM adds the talkback strip");
     assert!(find(&hits, "in0", &Control::Name).is_some());
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Browser && s.max > 0.0));
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Cells && s.max > 0.0), "sends overflow the cells column");
@@ -102,9 +103,10 @@ fn section_toggle_collapses_the_input_row() {
     let slot = find(&hits, "in0", &Control::Insert(0)).unwrap().rect;
     // Collapsed = header only; with Sends open the stack still overflows and scrolls from the top.
     assert_eq!(slot.y, 72.0 + 5.0 + 22.0 + 26.0 + 6.0, "collapsed = header only");
-    // Input sends are reachable now (mini sends of the expanded Sends row).
+    // Input sends are reachable now: full send strips (route, pan, M, fader; 1.3.1 s45).
     assert!(find(&hits, "in0", &Control::SendMute(0)).is_some());
-    assert!(find(&hits, "in0", &Control::SendPre(0)).is_some());
+    assert!(find(&hits, "in0", &Control::SendPan(0)).is_some());
+    assert!(find(&hits, "in0", &Control::SendLevel(0)).is_some());
 }
 
 #[test]
@@ -133,9 +135,15 @@ fn monitor_page_and_settings_sheet() {
     let (hits, _) = build(&assets, &model, &view);
     let ctrl = find(&hits, "monitor", &Control::MonitorPage(rack::surfaces::MonitorPage::ControlRoom)).unwrap().clone();
     tap(&hits, &ctrl, &mut view, &mut model);
+    assert!(view.show_aux && view.show_ctrl_room, "SHOW AUX and CTRL ROOM are independent");
     let (hits, _) = build(&assets, &model, &view);
-    assert!(find(&hits, "monitor", &Control::HeadphoneMenu(1)).is_some());
-    assert!(find(&hits, "aux0", &Control::Fader).is_none(), "aux strips replaced by the control room");
+    assert!(find(&hits, "monitor", &Control::CrSource(0)).is_some());
+    assert!(find(&hits, "aux0", &Control::Fader).is_some(), "the aux strips stay");
+    assert!(find(&hits, "tb", &Control::Fader).is_some());
+    let aux = find(&hits, "monitor", &Control::MonitorPage(rack::surfaces::MonitorPage::Aux)).unwrap().clone();
+    tap(&hits, &aux, &mut view, &mut model);
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "aux0", &Control::Fader).is_none(), "SHOW AUX off hides the aux strips");
 
     view.dispatch(Action::Toggle(ControlId { strip: "nav".into(), control: Control::ShowSettings }), &mut model);
     let (hits, _) = build(&assets, &model, &view);
@@ -345,14 +353,13 @@ fn monitor_buttons_open_their_panels() {
 
 #[test]
 fn plugin_scenes_panel_primes_and_recalls() {
-    use rack::settings::Panel;
-    use rack::surfaces::Sheet;
     let assets = assets();
     let mut model = PreviewMixer::default();
     let mut view = ViewState::default();
     let (hits, _) = build(&assets, &model, &view);
     press(&mut view, &mut model, &hits, "nav", Control::ShowPluginScenes);
-    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::PluginScenes)));
+    assert!(view.show_scenes, "PLUG-IN SCENES is the window's column (s10), not a sheet");
+    assert!(view.sheet.is_none());
     let (hits, _) = build(&assets, &model, &view);
     assert!(find(&hits, "global", &Control::RecallScene(0)).is_none(), "RECALL needs a primed scene");
     press(&mut view, &mut model, &hits, "settings", Control::SceneSelect(1));
@@ -366,5 +373,30 @@ fn plugin_scenes_panel_primes_and_recalls() {
     // The navigator button closes it again.
     let (hits, _) = build(&assets, &model, &view);
     press(&mut view, &mut model, &hits, "nav", Control::ShowPluginScenes);
-    assert!(view.sheet.is_none());
+    assert!(!view.show_scenes);
+}
+
+#[test]
+fn view_specs_and_1_3_1_view_modes() {
+    let assets = assets();
+    let model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    view.apply_spec("ctrl=1,sends=1,overview=1,small,presets-open=Bass|Guitar,tab=presets").unwrap();
+    assert!(view.show_ctrl_room && view.show_aux && view.sends_overview && view.sections.sends);
+    assert_eq!(view.browser.presets_open, vec!["Bass".to_string(), "Guitar".to_string()]);
+    assert!(view.apply_spec("nope=1").is_err());
+    let (hits, _) = build(&assets, &model, &view);
+    // SMALL shrinks the Unison slot with the insert slots (s47/s48).
+    assert_eq!(find(&hits, "in0", &Control::Insert(255)).unwrap().rect.h, 21.0);
+    // CTRL ROOM: the talkback strip and the control-room column's SOURCE buttons.
+    assert!(find(&hits, "tb", &Control::Fader).is_some());
+    assert!(find(&hits, "monitor", &Control::CrSource(1)).is_some());
+    // PRESETS: folders toggle open.
+    let folder = find(&hits, "browser", &Control::BrowserPresetFolder(1)).unwrap().clone();
+    let mut model = model;
+    tap(&hits, &folder, &mut view, &mut model);
+    assert!(view.browser.presets_open.iter().any(|n| n == "Drums"));
+    // Assign mode targets a slot; the next catalog tap loads into it.
+    view.begin_assign("aux0".into(), 1);
+    assert!(view.show_browser && view.browser.assign_to.is_some());
 }

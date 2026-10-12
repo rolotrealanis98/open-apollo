@@ -36,6 +36,11 @@ struct Field {
 }
 
 pub fn draw_status_bar(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
+    draw_status_bar_with(ui, model, true, r);
+}
+
+/// `scene_info`: the window has created its SCENE field ([`crate::ViewState::scene_info`]).
+pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: bool, r: Rect) {
     let st = model.status();
     let key = ui.style("fonts", "Info-Bridge-Label");
     let val = ui.style("fonts", "Info-Bridge-Value");
@@ -88,7 +93,7 @@ pub fn draw_status_bar(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
         // 696). Positions measured on p1, the block's width from its name.
         let scene = st.scene.clone().unwrap_or_else(|| "(NONE)".into());
         let scene_w = helvetica_width(&scene, val.size).round() + 72.0;
-        if st.plugin_scenes && SCENE_X + scene_w <= r.w {
+        if scene_info && st.plugin_scenes && SCENE_X + scene_w <= r.w {
             let end = SCENE_X + scene_w;
             sep(ui, 576.0);
             ui.text("SCENE", key.clone(), Rect::new(587.5, ty, 44.0, th), Align::Left);

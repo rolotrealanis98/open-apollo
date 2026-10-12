@@ -30,9 +30,13 @@ pub enum Control {
     Insert(u8),
     SendLevel(u8),
     SendMute(u8),
+    /// Pan of send k (full send strips: `sends/k/Pan`).
+    SendPan(u8),
     MonitorLevel,
     MonitorMono,
     MonitorMute,
+    /// Control-room SOURCE: 0 = MONITOR, n = CUE n (`outputs/MON/MixInSource`).
+    CrSource(u8),
 
     // ---- UI surfaces (`surfaces/`). [view] = UI-only, consumed by `ViewState::route`;
     // [model] = forwarded to `MixerModel::apply` (or `set_text`). ----
@@ -80,6 +84,10 @@ pub enum Control {
     BrowserFavorites,
     BrowserLargeRows,
     BrowserHintClose,
+    /// [view] The assign header's close button: leave insert-assign mode.
+    BrowserAssignClose,
+    /// [view] PRESETS tab: open / close the k-th top-level preset folder.
+    BrowserPresetFolder(u16),
     BrowserGroupReveal,
     /// The "Universal Audio (Inactive)" group's reveal toggle.
     BrowserInactiveReveal,
@@ -91,6 +99,8 @@ pub enum Control {
     SessionNavigate(u16),
     /// [view] Cells scrollbar thumb (drag; value = 1 − scroll fraction).
     CellsScroll,
+    /// [view] Bus-section cells scrollbar thumb (drag; value = 1 − scroll fraction).
+    AuxCellsScroll,
     /// [view] Status bar fields: open the tempo editor / rate / clock / scene popovers.
     StatusTempo,
     StatusRate,
@@ -255,6 +265,8 @@ pub enum ScrollTarget {
     Cells,
     /// The settings page or panel list.
     Settings,
+    /// The bus section's cells (aux and talkback strips).
+    AuxCells,
 }
 
 /// A wheel/trackpad-scrollable area; `max` is the content overflow in points.

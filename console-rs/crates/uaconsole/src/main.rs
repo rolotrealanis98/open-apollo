@@ -88,6 +88,7 @@ fn main() -> ExitCode {
                 scale,
                 args.open_plugin.as_ref(),
                 args.open.as_deref(),
+                args.view_spec.as_deref(),
                 args.menu.as_deref(),
                 args.menu_bar,
                 out,
@@ -115,6 +116,7 @@ fn main() -> ExitCode {
         stats: args.stats,
         open_plugin: args.open_plugin,
         open: args.open,
+        view_spec: args.view_spec,
         settings,
     };
     match app::run(assets, opts) {

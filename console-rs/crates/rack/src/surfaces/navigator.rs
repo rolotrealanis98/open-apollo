@@ -9,7 +9,6 @@ use houston::{Rect, Rgba};
 use crate::draw::{Align, TextStyle};
 use crate::input::{Control, ControlId, HitKind};
 use crate::model::MixerModel;
-use crate::settings::Panel;
 use crate::surfaces::view::{InsertSize, Modifier, Section, Sheet, ViewState};
 use crate::ui::Ui;
 
@@ -257,7 +256,7 @@ pub fn draw_navigator(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, x: 
 
         // SHOW.
         label(ui, "SHOW", Rect::new(4.0, L::SHOW_Y + 0.5, WIDTH - 8.0, 16.0), Align::Center);
-        let scenes_open = view.sheet == Some(Sheet::Panel(Panel::PluginScenes));
+        let scenes_open = view.show_scenes;
         let shows = [
             ("BROWSER", view.show_browser, Control::ShowBrowser),
             ("PLUG-IN\nSCENES", scenes_open, Control::ShowPluginScenes),

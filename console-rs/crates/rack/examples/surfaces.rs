@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use houston::Resources;
 use rack::geometry::StripKind;
 use rack::model::{InsertState, MainState, StripInfo};
-use rack::surfaces::{InsertSize, Modifier, MonitorPage, Popover, PopoverState, Section, Sheet, TextEdit, TextTarget};
+use rack::surfaces::{InsertSize, Modifier, Popover, PopoverState, Section, Sheet, TextEdit, TextTarget};
 use rack::{Assets, ConsoleModel, Control, ControlId, MixerModel, PreviewMixer, Ui, ViewState, build_window_with};
 
 fn id(strip: &str, control: Control) -> ControlId {
@@ -89,7 +89,7 @@ fn scenarios() -> Vec<(&'static str, Box<dyn Fn() -> (PreviewMixer, ViewState)>)
             Box::new(|| {
                 let v = ViewState {
                     show_browser: false,
-                    monitor_page: MonitorPage::ControlRoom,
+                    show_ctrl_room: true,
                     popover: popover(Popover::CueOutputs, id("monitor", Control::CueOutputs)),
                     ..ViewState::default()
                 };
