@@ -48,16 +48,36 @@ One opaque `UacContext` per view, used from one thread (the main thread on iOS):
 | call | |
 |---|---|
 | `uac_create(resources, CAMetalLayer*, w_px, h_px, scale)` | NULL layer = offscreen (tests) |
-| `uac_resize`, `uac_needs_frame`, `uac_frame`, `uac_invalidate` | render only when dirty |
-| `uac_pointer(ctx, DOWN/MOVE/UP/CANCEL, x_pt, y_pt, DOUBLE/FINE)` | drags controls; drags elsewhere pan |
+| `uac_resize`, `uac_needs_frame`, `uac_frame`, `uac_invalidate` | call `uac_needs_frame` every display refresh: it pumps the engine; render only when it says so |
+| `uac_set_window_size(ctx, w_pt, h_pt)` | pin the Console window (e.g. 1920×1050); `<= 0` follows the view (default) |
+| `uac_pointer(ctx, DOWN/MOVE/UP/CANCEL/SECONDARY, x_pt, y_pt, DOUBLE/FINE)` | rack `Interaction` routed through `ViewState`; drags elsewhere pan |
+| `uac_scroll(ctx, x, y, dx, dy)` | browser list / cells column under the point, else pan |
+| `uac_text_editing`, `uac_key_text`, `uac_key(ENTER/BACKSPACE/ESCAPE)` | rename, tempo, browser search; Escape closes popovers |
 | `uac_set_zoom(ctx, zoom, anchor_x, anchor_y)` | pinch; `zoom <= 0` fits the window |
-| `uac_set_compact`, `uac_set_model_preview` | layout and the offline preview model |
-| `uac_set_model_engine` | **TODO stub** (returns `UAC_ERR_UNSUPPORTED`): ua-engine adapter |
-| `uac_get_stats`, `uac_adapter_name`, `uac_write_png`, `uac_last_error`, `uac_destroy` | |
+| `uac_set_compact` | browser + navigator hidden, aux/monitor packed after the strips |
+| `uac_connect_engine(ctx, host, port, writes)` | `engine_model::EngineMixer` live over ua-engine (+ the 4720 helper); **read-only unless `writes`** |
+| `uac_use_snapshot(ctx, path)`, `uac_set_model_preview` | offline models |
+| `uac_model_state`, `uac_model_status` | `UAC_MODEL_LIVE` …; "Apollo x4 · live · read-only" |
+| `uac_take_plugin_request(ctx, &req)` | a tap on a loaded insert/Unison: strip, slot, engine slot path, `EffectName` for the host's plug-in window |
+| `uac_get_stats`, `uac_adapter_name`, `uac_write_png` (+ `.draws.json`), `uac_last_error`, `uac_destroy` | |
 
 Pointer coordinates are view points. The context owns the zoom and pan that map them to
-Console window points. Rust tests (`cargo test -p uaconsole-ffi`) exercise the C entry points
-offscreen on any GPU (Vulkan on Linux), including the coordinate mapping, a solo tap and zoom.
+Console window points.
+
+Layout follows the view like Console's window does: a 1470×1105 pt view lays out exactly like
+a 1470×1105 pt Console window (zoom 1). Compact takes its width from the strips and its height
+from the window.
+
+Engine connections run on their own threads. `uac_needs_frame` applies queued updates
+(`MixerModel::pump`) and asks for a frame when values change, or at most every 33 ms while
+meters move. Read-only, the connection refuses `set`/`post` and the writer gate stays closed:
+controls move locally and nothing is sent. `uac_set_model_engine(…, UAC_ENGINE_WRITES)` is the
+older flag form of the same call.
+
+Rust tests (`cargo test -p uaconsole-ffi`) exercise the C entry points offscreen on any GPU
+(Vulkan on Linux): coordinate mapping, a solo tap, zoom, window-size following, navigator and
+rename routing through `ViewState`, plug-in requests, a snapshot, and a read-only connection to
+ua-engine's `MockEngine` (a fader drag sends nothing).
 
 ## iPad
 
@@ -138,5 +158,6 @@ file sharing (iPad → Files → uaconsole) as `UADConsoleResources` or `Resourc
 - Landscape orientation on the simulator (screenshots so far are portrait), Stage Manager
   and resizing, and memory pressure on real hardware. Images decode lazily and the art
   folder is about 200 MB on disk.
-- `uac_set_model_engine` is a stub. No engine connection is made from the Apple shells.
+- The UAConsoleiPad sample still shows the preview model; ConsoleLink's Console 1:1 screen
+  (`feat/console-1to1`) is the host that connects to an engine.
 - Only arm64 is built: no x86_64 simulator or Intel Mac slices.
