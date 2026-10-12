@@ -318,8 +318,9 @@ const KNOWN_NOOPS: &[&str] = &[
     // Insert menu Paste is enabled with an empty clipboard; Console greys it out (s01). Gap.
     "menu Insert(aux) Paste",
     "menu Insert(input) Paste",
-    // PLUG-IN SCENES row menu: the `SceneOperation` arguments are unknown, so Clear, Overwrite,
-    // Rename and Recall send nothing. Gap.
+    // PLUG-IN SCENES row menu: Clear, Overwrite, Rename and Recall send nothing. In progress
+    // (rc/wiring, MAP.md P0 #1): post /SceneOperation {"RecallScene"|"StoreScene"|"OverwriteScene"|
+    // "ClearScene": i}; rename = set scenes/i/SceneName.
     "menu SceneRow(popover) Clear",
     "menu SceneRow(popover) Overwrite",
     "menu SceneRow(popover) Recall Scene",
