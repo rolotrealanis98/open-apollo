@@ -210,17 +210,20 @@ pub struct StatusInfo {
     pub sample_rate: Option<u32>,
     /// None → "OFFLINE".
     pub clock_source: Option<String>,
-    /// Loads 0…1.
+    /// Loads in percent (0…100), the engine's latest values as they are (Console shows them raw:
+    /// no smoothing or peak hold).
     pub dsp_load: f32,
     pub pgm_load: f32,
     pub mem_load: f32,
+    /// The engine has plug-in scenes (`/pluginscenes/0`): Console shows the SCENE field only then.
+    pub plugin_scenes: bool,
     /// Recalled plug-in scene; None → "(NONE)".
     pub scene: Option<String>,
 }
 
 impl Default for StatusInfo {
     fn default() -> Self {
-        Self { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 0.0, pgm_load: 0.0, mem_load: 0.0, scene: None }
+        Self { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 0.0, pgm_load: 0.0, mem_load: 0.0, plugin_scenes: true, scene: None }
     }
 }
 
@@ -538,7 +541,7 @@ impl Default for PreviewMixer {
             isolated: HashSet::from([Arc::from("in2")]),
             catalog: demo_catalog(),
             scenes: vec!["Tracking".into(), "Overdubs".into(), "Mix Prep".into()],
-            status: StatusInfo { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 0.42, pgm_load: 0.31, mem_load: 0.18, scene: None },
+            status: StatusInfo { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 42.0, pgm_load: 31.0, mem_load: 18.0, plugin_scenes: true, scene: None },
             settings: EngineSettings {
                 host: "127.0.0.1:4710".into(),
                 connected: false,

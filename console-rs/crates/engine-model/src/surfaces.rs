@@ -127,7 +127,7 @@ impl EngineMixer {
     }
 
     pub(crate) fn surface_status(&self) -> StatusInfo {
-        let load = |p: &str| (self.f64_at(p).unwrap_or(0.0) / 100.0) as f32;
+        let load = |p: &str| self.f64_at(p).unwrap_or(0.0) as f32;
         let scene = self
             .store
             .value("/pluginscenes/0/RecalledSceneIndex")
@@ -142,6 +142,9 @@ impl EngineMixer {
             dsp_load: load("/TotalDSPLoad"),
             pgm_load: load("/TotalPGMLoad"),
             mem_load: load("/TotalMEMLoad"),
+            // `MxClnt_UAD2Paths::ParsePluginScenesPath` (0x181a7c530) flags support when it parses
+            // `/pluginscenes/0` (Type "pluginscenes").
+            plugin_scenes: self.str_at("/pluginscenes/0/Type") == Some("pluginscenes"),
             scene,
         }
     }

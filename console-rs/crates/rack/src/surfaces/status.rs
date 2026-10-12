@@ -10,12 +10,16 @@ use crate::input::{Control, ControlId, HitKind};
 use crate::model::MixerModel;
 use crate::surfaces::popover::sample_rate_label;
 use crate::ui::Ui;
+use crate::window::helvetica_width;
 
 pub const STATUS_ID: &str = "status";
-/// DSP / PGM / MEM bar well and fill (measured).
+/// DSP / PGM / MEM bar well and fill (`Rack_DSPInfo` 0x1815496c0: #0D0D0D and #146392 in the
+/// binary, no hot colour; the fill reads (46, 97, 142) in the colour-managed reference shots).
 const LOAD_WELL: Rgba = Rgba::rgb8(13, 13, 13);
 const LOAD_FILL: Rgba = Rgba::rgb8(46, 97, 142);
-const LOAD_HOT: Rgba = Rgba::rgb8(237, 77, 38);
+/// `Rack_InfoSection::resized` (0x18154e410): SceneInfo at x 581, `textW(name) + 72` wide; the
+/// last separator after it. Console hides the block unless it fits the bar.
+const SCENE_X: f32 = 581.0;
 
 fn sid(control: Control) -> ControlId {
     ControlId { strip: STATUS_ID.into(), control }
@@ -68,22 +72,30 @@ pub fn draw_status_bar(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
             ui.hit(Rect::new(f.label_x - 8.0, 4.0, f.sep_x - f.label_x + 7.0, r.h - 8.0), sid(f.control), HitKind::Tap);
         }
 
-        // DSP / PGM / MEM: label right-aligned to the 81 pt bar, value after it, 7 pt pitch.
+        // DSP / PGM / MEM (`Rack_DSPInfo::paint` 0x181549bc0): label right-aligned to the 81 pt
+        // bar, value after it, 7 pt pitch. The fill is `min(v · 81 / 100, 81)`, the text
+        // `(int)(v + 0.5)` and "%" (v in percent, as the engine sends it).
         for (i, (label, load)) in [("DSP", st.dsp_load), ("PGM", st.pgm_load), ("MEM", st.mem_load)].into_iter().enumerate() {
             let bar = Rect::new(470.0, 10.0 + i as f32 * 7.0, 81.0, 6.0);
             ui.text(label, gas.clone(), Rect::new(bar.x - 30.0, bar.y + 1.0, 30.0, bar.h), Align::Right);
             ui.fill(bar, LOAD_WELL);
-            let c = if load > 0.85 { LOAD_HOT } else { LOAD_FILL };
-            ui.fill(Rect::new(bar.x, bar.y, (bar.w * load.clamp(0.0, 1.0) * 2.0).round() / 2.0, bar.h), c);
-            ui.text(&format!("{:.0}%", load * 100.0), gas.clone(), Rect::new(bar.max_x() + 1.0, bar.y + 1.0, 24.0, bar.h), Align::Left);
+            let fill = (load.max(0.0) * bar.w / 100.0).min(bar.w);
+            ui.fill(Rect::new(bar.x, bar.y, (fill * 2.0).round() / 2.0, bar.h), LOAD_FILL);
+            ui.text(&format!("{}%", (load + 0.5) as i32), gas.clone(), Rect::new(bar.max_x() + 1.0, bar.y + 1.0, 24.0, bar.h), Align::Left);
         }
-        sep(ui, 576.0);
 
+        // SCENE (`SceneInfo`): only with plug-in scenes, and only when it fits ("(NONE)" ends at
+        // 696). Positions measured on p1, the block's width from its name.
         let scene = st.scene.clone().unwrap_or_else(|| "(NONE)".into());
-        ui.text("SCENE", key.clone(), Rect::new(587.5, ty, 44.0, th), Align::Left);
-        ui.text(&scene, val.clone(), Rect::new(631.5, ty, 52.0, th), Align::Left);
-        arrow(ui, 684.0);
-        sep(ui, 697.0);
-        ui.hit(Rect::new(580.0, 4.0, 116.0, r.h - 8.0), sid(Control::StatusScene), HitKind::Tap);
+        let scene_w = helvetica_width(&scene, val.size).round() + 72.0;
+        if st.plugin_scenes && SCENE_X + scene_w <= r.w {
+            let end = SCENE_X + scene_w;
+            sep(ui, 576.0);
+            ui.text("SCENE", key.clone(), Rect::new(587.5, ty, 44.0, th), Align::Left);
+            ui.text(&scene, val.clone(), Rect::new(631.5, ty, end - 13.0 - 631.5, th), Align::Left);
+            arrow(ui, end - 12.0);
+            sep(ui, end + 1.0);
+            ui.hit(Rect::new(580.0, 4.0, end - 580.0, r.h - 8.0), sid(Control::StatusScene), HitKind::Tap);
+        }
     });
 }

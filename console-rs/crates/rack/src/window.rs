@@ -278,6 +278,19 @@ pub fn helvetica_bold_width(text: &str, size: f32) -> f32 {
     text.chars().map(|c| W.get((c as usize).wrapping_sub(32)).copied().unwrap_or(611) as f32).sum::<f32>() * size / 1000.0
 }
 
+/// Approximate advance width of `text` in Helvetica (regular) at `size` pt (Adobe AFM widths).
+pub fn helvetica_width(text: &str, size: f32) -> f32 {
+    const W: [u16; 95] = [
+        278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, // ' '…/
+        556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, // 0…?
+        1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, // @…O
+        667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, // P…_
+        333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, // `…o
+        556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, // p…~
+    ];
+    text.chars().map(|c| W.get((c as usize).wrapping_sub(32)).copied().unwrap_or(556) as f32).sum::<f32>() * size / 1000.0
+}
+
 /// Text with Console's `text-stroke` (a dark outline), approximated by offset copies.
 fn stroked_text(ui: &mut Ui, text: &str, style: crate::draw::TextStyle, stroke: Rgba, r: Rect, align: Align) {
     let shadow = crate::draw::TextStyle { color: stroke, ..style.clone() };

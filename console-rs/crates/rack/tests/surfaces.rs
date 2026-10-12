@@ -211,3 +211,39 @@ fn browser_matches_console_geometry() {
     let thumb = rect(Control::BrowserScroll);
     assert_eq!((thumb.0, thumb.1, thumb.2), (322.0, 330.0, 18.0));
 }
+
+/// Status bar as `Rack_DSPInfo` / `Rack_InfoSection` draw it: loads rounded half up from the raw
+/// percent (p2: 10.70 / 11.24 → 11% / 11%; p2 user shot: 7.21 / 4.55 → 7% / 5%), and SCENE only
+/// with plug-in scenes and room for it.
+#[test]
+fn status_bar_loads_and_scene() {
+    let assets = assets();
+    let texts = |model: &PreviewMixer, view: &ViewState| {
+        let mut ui = Ui::new(&assets);
+        build_window_with(&mut ui, model, view);
+        let texts: Vec<String> = ui
+            .list
+            .items
+            .iter()
+            .filter_map(|d| match d {
+                rack::Draw::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        (texts, ui.hits)
+    };
+    let mut model = PreviewMixer::default();
+    let view = ViewState { window: Some((1470.0, 1105.0)), ..ViewState::default() };
+    (model.status.dsp_load, model.status.pgm_load, model.status.mem_load) = (10.7025, 11.2427, 0.0369);
+    let (t, hits) = texts(&model, &view);
+    assert_eq!(t.iter().filter(|s| *s == "11%").count(), 2);
+    assert!(t.iter().any(|s| s == "0%") && t.iter().any(|s| s == "SCENE"));
+    assert!(find(&hits, "status", &Control::StatusScene).is_some());
+    (model.status.dsp_load, model.status.pgm_load) = (7.2075, 4.5502);
+    let (t, _) = texts(&model, &view);
+    assert!(t.iter().any(|s| s == "7%") && t.iter().any(|s| s == "5%"));
+    model.status.plugin_scenes = false;
+    let (t, hits) = texts(&model, &view);
+    assert!(!t.iter().any(|s| s == "SCENE" || s == "(NONE)"));
+    assert!(find(&hits, "status", &Control::StatusScene).is_none());
+}
