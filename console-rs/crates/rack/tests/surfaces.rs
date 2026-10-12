@@ -23,10 +23,15 @@ const FIXTURE: &str = r#"{
 }"#;
 
 fn assets() -> Assets {
-    let dir = std::env::temp_dir().join(format!("rack-surfaces-fixture-{}", std::process::id()));
-    std::fs::create_dir_all(dir.join("appearance")).unwrap();
-    std::fs::write(dir.join("appearance/Appearance.json"), FIXTURE).unwrap();
-    let res = Resources::at(&PathBuf::from(&dir)).expect("fixture resources");
+    // Tests run in parallel threads: write the fixture once, then only read it.
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("rack-surfaces-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("appearance")).unwrap();
+        std::fs::write(dir.join("appearance/Appearance.json"), FIXTURE).unwrap();
+        dir
+    });
+    let res = Resources::at(dir).expect("fixture resources");
     Assets::load(res).expect("fixture appearance")
 }
 
