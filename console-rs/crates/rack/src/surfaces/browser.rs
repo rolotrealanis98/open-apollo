@@ -48,7 +48,7 @@ const CELL_H: f32 = 23.0;
 const CELL_PITCH: f32 = 27.0;
 const VIEW_BAR_H: f32 = 27.0;
 const HINT_H: f32 = 54.0;
-const GROUP_H: f32 = 30.0;
+const GROUP_H: f32 = 32.0;
 const ROW_H: f32 = 48.0;
 const SMALL_ROW_H: f32 = 24.0;
 /// `Small-Vertical-Scroll-Bar` width.
@@ -266,24 +266,26 @@ fn category_cell(ui: &mut Ui, label: &str, on: bool, r: Rect) {
 }
 
 /// One list line: a group header or a catalog entry.
+#[derive(Clone)]
 enum Line {
     Group { title: &'static str, open: bool, control: Control },
     Entry(usize),
 }
 
-/// The groups ("Universal Audio", then "Universal Audio (Inactive)") with their entries, rows
-/// scrolling inside `r` with the scrollbar at its right edge.
-fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
+/// The list's groups (`Rack_PluginsBrowserManager::_GetRowData`, refpairs/p1 + p2):
+/// "Universal Audio" holds the licensed or demoing plug-ins, then those whose demo can be
+/// started (DEMO badge), each in catalogue order; "Universal Audio (Inactive)" the rest
+/// (BUY / ACTIVATE / DISABLED).
+fn list_lines(catalog: &[PluginEntry], shown: &[usize], view: &ViewState) -> Vec<Line> {
     let b = &view.browser;
-    let catalog = model.plugin_catalog();
-    let shown = filtered(&catalog, &model.plugin_categories(), view);
-    let row_h = if b.large_rows { ROW_H } else { SMALL_ROW_H };
+    let demo = |p: &PluginEntry| !p.enabled && p.badge == Some(crate::model::PluginBadge::Demo);
+    let active: Vec<usize> = shown.iter().copied().filter(|&i| catalog[i].enabled).chain(shown.iter().copied().filter(|&i| demo(&catalog[i]))).collect();
+    let inactive: Vec<usize> = shown.iter().copied().filter(|&i| !catalog[i].enabled && !demo(&catalog[i])).collect();
     let mut lines = Vec::new();
-    for (inactive, title, open, control) in [
-        (false, "Universal Audio", b.group_open, Control::BrowserGroupReveal),
-        (true, "Universal Audio (Inactive)", b.inactive_open, Control::BrowserInactiveReveal),
+    for (members, title, open, control) in [
+        (active, "Universal Audio", b.group_open, Control::BrowserGroupReveal),
+        (inactive, "Universal Audio (Inactive)", b.inactive_open, Control::BrowserInactiveReveal),
     ] {
-        let members: Vec<usize> = shown.iter().copied().filter(|&i| catalog[i].enabled != inactive).collect();
         if members.is_empty() {
             continue;
         }
@@ -292,6 +294,17 @@ fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
             lines.extend(members.into_iter().map(Line::Entry));
         }
     }
+    lines
+}
+
+/// The groups and their entries scrolling inside `r`, the scrollbar at its right edge. The
+/// header of the group at the top stays pinned (pushed up by the next header).
+fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
+    let b = &view.browser;
+    let catalog = model.plugin_catalog();
+    let shown = filtered(&catalog, &model.plugin_categories(), view);
+    let row_h = if b.large_rows { ROW_H } else { SMALL_ROW_H };
+    let lines = list_lines(&catalog, &shown, view);
     let height = |l: &Line| if matches!(l, Line::Group { .. }) { GROUP_H } else { row_h };
     let content_h: f32 = lines.iter().map(height).sum();
     let max = (content_h - r.h).max(0.0);
@@ -302,59 +315,41 @@ fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
         let msg = if catalog.is_empty() { "Plug-in catalog not loaded" } else { "No matching plug-ins" };
         ui.text(msg, Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4)), Rect::new(r.x, r.y, content_w, 30.0), Align::Center);
     }
-    ui.clip(Some(r));
-    let name_style = bold(if b.large_rows { 12.0 } else { 11.0 }, Rgba::rgb8(230, 230, 230));
-    let group_style = bold(12.0, Rgba::rgb8(132, 132, 133));
+    // Line tops in window points, scrolled.
+    let mut tops = Vec::with_capacity(lines.len());
     let mut y = r.y - off;
-    for line in &lines {
+    for l in &lines {
+        tops.push(y);
+        y += height(l);
+    }
+    // Pinned header: the last group whose header has scrolled to or above the top.
+    let groups: Vec<usize> = (0..lines.len()).filter(|&k| matches!(lines[k], Line::Group { .. })).collect();
+    let pinned = groups.iter().rposition(|&k| tops[k] <= r.y).map(|gi| {
+        let k = groups[gi];
+        let y = groups.get(gi + 1).map_or(r.y, |&next| r.y.min(tops[next] - GROUP_H));
+        (k, y)
+    });
+    let rows_top = pinned.map_or(r.y, |(_, y)| (y + GROUP_H).max(r.y));
+    ui.clip(Some(Rect::new(r.x, rows_top, r.w, r.max_y() - rows_top)));
+    for (k, line) in lines.iter().enumerate() {
         let lh = height(line);
-        let row = Rect::new(r.x, y, content_w, lh);
-        y += lh;
-        if row.max_y() < r.y || row.y > r.max_y() {
+        let row = Rect::new(r.x, tops[k], content_w, lh);
+        if row.max_y() <= rows_top || row.y >= r.max_y() || pinned.is_some_and(|(p, _)| p == k) {
             continue;
         }
         match line {
-            Line::Group { title, open, control } => {
-                reveal(ui, *open, Rect::new(row.x + 4.0, row.y + 6.0, 20.0, 20.0));
-                ui.text(title, group_style.clone(), Rect::new(row.x + 34.0, row.y, row.w - 40.0, lh), Align::Left);
-                ui.hit(row, bid(control.clone()), HitKind::Toggle);
-            }
-            &Line::Entry(i) => {
-                let p = &catalog[i];
-                if b.selected == Some(i as u16) {
-                    ui.fill(row, Rgba::rgb8(70, 60, 30));
-                }
-                let text_x = if b.large_rows {
-                    let icon = Rect::new(row.x + 14.0, row.y + 6.5, ICON.0, ICON.1);
-                    let key = p.icon_key();
-                    match ui.image_size(&key) {
-                        Some((iw, ih)) => {
-                            let s = (icon.w / iw).min(icon.h / ih);
-                            ui.image(&key, Rect::new(icon.x, icon.y + (icon.h - ih * s) / 2.0, iw * s, ih * s), None, None, 1.0);
-                        }
-                        None => ui.fill(icon, Rgba::rgb8(60, 63, 66)),
-                    }
-                    row.x + 118.0
-                } else {
-                    row.x + 14.0
-                };
-                let badge = p.badge.filter(|_| !p.enabled);
-                let badge_r = Rect::new(row.max_x() - 8.0 - 55.0, row.y + (lh - 17.0) / 2.0, 55.0, 17.0);
-                let text_right = if badge.is_some() { badge_r.x - 6.0 } else { row.max_x() - 4.0 };
-                ui.clip(Some(Rect::new(text_x, row.y, text_right - text_x, row.h)));
-                ui.text(p.display_name(), name_style.clone(), Rect::new(text_x, row.y + 1.5, 400.0, lh), Align::Left);
-                ui.clip(None);
-                if let Some(badge) = badge {
-                    if let Some(img) = ui.skin("views", badge.skin()).and_then(|s| s.image("image")) {
-                        let img = img.to_string();
-                        ui.image(&img, badge_r, None, None, 1.0);
-                    }
-                }
-                ui.hit(row, bid(Control::BrowserItem(i as u16)), HitKind::Tap);
-            }
+            Line::Group { title, open, control } => group_header(ui, title, *open, control, row),
+            &Line::Entry(i) => entry_row(ui, &catalog[i], i, view, row),
         }
     }
     ui.clip(None);
+    if let Some((k, y)) = pinned {
+        if let Line::Group { title, open, control } = &lines[k] {
+            ui.clip(Some(r));
+            group_header(ui, title, *open, control, Rect::new(r.x, y, content_w, GROUP_H));
+            ui.clip(None);
+        }
+    }
     // `Small-Vertical-Scroll-Bar` thumb (no track art); JUCE sizes it visible/total.
     if max > 0.0 {
         let track = Rect::new(r.max_x() - SCROLLBAR_W, r.y, SCROLLBAR_W, r.h);
@@ -367,6 +362,50 @@ fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
         }
         ui.hit(thumb, bid(Control::BrowserScroll), HitKind::Drag { value: 1.0 - b.scroll as f64, span: track.h - thumb_h, reset: None });
     }
+}
+
+/// Group header (32 pt): reveal toggle centred, title on the upper 30 pt.
+fn group_header(ui: &mut Ui, title: &str, open: bool, control: &Control, row: Rect) {
+    reveal(ui, open, Rect::new(row.x + 4.0, row.y + 6.0, 20.0, 20.0));
+    ui.text(title, bold(12.0, Rgba::rgb8(132, 132, 133)), Rect::new(row.x + 34.0, row.y, row.w - 40.0, 30.0), Align::Left);
+    ui.hit(row, bid(control.clone()), HitKind::Toggle);
+}
+
+/// A catalog row: icon (large rows), name, and the badge 15 pt from the content's right edge.
+fn entry_row(ui: &mut Ui, p: &PluginEntry, i: usize, view: &ViewState, row: Rect) {
+    let b = &view.browser;
+    if b.selected == Some(i as u16) {
+        ui.fill(row, Rgba::rgb8(70, 60, 30));
+    }
+    let text_x = if b.large_rows {
+        let icon = Rect::new(row.x + 14.0, row.y + 4.5, ICON.0, ICON.1);
+        let key = p.icon_key();
+        match ui.image_size(&key) {
+            Some((iw, ih)) => {
+                let s = (icon.w / iw).min(icon.h / ih);
+                ui.image(&key, Rect::new(icon.x, icon.y + (icon.h - ih * s) / 2.0, iw * s, ih * s), None, None, 1.0);
+            }
+            None => ui.fill(icon, Rgba::rgb8(60, 63, 66)),
+        }
+        row.x + 118.0
+    } else {
+        row.x + 14.0
+    };
+    let badge = p.badge.filter(|_| !p.enabled);
+    let badge_r = Rect::new(row.max_x() - 15.0 - 55.0, row.y + ((row.h - 17.0) / 2.0).floor(), 55.0, 17.0);
+    // Names stop 19 pt before the badge (refpairs/p2: "Valley People Dyna-mi").
+    let text_right = if badge.is_some() { badge_r.x - 19.0 } else { row.max_x() - 4.0 };
+    ui.clip(Some(Rect::new(text_x, row.y, text_right - text_x, row.h)));
+    let size = if b.large_rows { 12.0 } else { 11.0 };
+    ui.text(p.display_name(), bold(size, Rgba::rgb8(230, 230, 230)), Rect::new(text_x, row.y - 0.5, 400.0, row.h), Align::Left);
+    ui.clip(None);
+    if let Some(badge) = badge {
+        if let Some(img) = ui.skin("views", badge.skin()).and_then(|s| s.image("image")) {
+            let img = img.to_string();
+            ui.image(&img, badge_r, None, None, 1.0);
+        }
+    }
+    ui.hit(row, bid(Control::BrowserItem(i as u16)), HitKind::Tap);
 }
 
 fn presets_tab(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
