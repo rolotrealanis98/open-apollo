@@ -174,7 +174,7 @@ Checks (pixels whose largest channel differs by more than 24/255):
 | … DFC dot-matrix level/Q readouts, EQ/FLT lamps (≈250 shots) | median 0.00%, worst 2.6% |
 | … polar patterns per mic type and pattern, six mic plug-ins (≈1350 shots) | median 0.9–2.3%, worst 2.7% |
 | … Oxford Dynamic EQ range line (68 shots) | median 0.96%, worst 2.1% |
-| … Softube Amp Room pages at 0.5 / 1 (5 shots) | 41–75%: the spec's page sprites are permuted against the settled live editor (spec content) |
+| … Softube Amp Room pages at 0.5 / 1 (5 shots) | 41–75%: the live references were captured mid-scroll (each sits one ease step toward the spec's page); the spec mapping is correct, so these shots are excluded from parity |
 | UA's 1176 Rev A HTML GUI in our webview, fed by our bridge, on `ua-content://` and on `file://` | 0.000% |
 | header layout vs the 1.3.1 capture (SSL G, 304×710) | every button edge to the point |
 
