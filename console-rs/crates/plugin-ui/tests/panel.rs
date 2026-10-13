@@ -6,7 +6,9 @@ use std::sync::Arc;
 use houston::{Appearance, ImageCache, Rect, Resources};
 use plugin_ui::meters::MeterFeed;
 use plugin_ui::spec::{ElementKind, MeterSource, Row};
-use plugin_ui::{GenericPanel, MockEvent, MockParams, ParamSource, PluginPanel, PluginSpec, PluginSpecLibrary, SlotPath};
+use plugin_ui::{
+    GenericPanel, MockEvent, MockParams, ParamSource, PluginPanel, PluginSpec, PluginSpecLibrary, SlotPath,
+};
 use rack::{Action, Assets, Control, ControlId, HitKind, Interaction, Ui};
 
 const SLOT: &str = "/devices/0/inputs/0/effects/1";
@@ -70,7 +72,8 @@ fn parses_inline_spec_and_boolean_frames() {
     assert_eq!(spec.poll_floats(), vec![162]);
     assert!(spec.sprite_names().contains("bg"));
     // Unknown element kinds and extra keys are tolerated.
-    let lenient = SPEC.replace(r#""id": "readout", "kind": "text""#, r#""id": "readout", "kind": "hologram", "extra": 1"#);
+    let lenient =
+        SPEC.replace(r#""id": "readout", "kind": "text""#, r#""id": "readout", "kind": "hologram", "extra": 1"#);
     assert_eq!(PluginSpec::from_json(&lenient).unwrap().elements[9].kind, ElementKind::Other);
 }
 
@@ -172,7 +175,8 @@ fn actions_round_trip_through_mock() {
     click(&mut panel, &mut params, 360.0, 160.0);
     assert_eq!(params.events, vec![MockEvent::Begin, MockEvent::Set(0, 0.5), MockEvent::Set(4, 0.25), MockEvent::End]);
     // Actions for another slot are ignored.
-    let other = Action::Tap(ControlId { strip: "/devices/0/inputs/1/effects/0".into(), control: Control::PluginElement(2) });
+    let other =
+        Action::Tap(ControlId { strip: "/devices/0/inputs/1/effects/0".into(), control: Control::PluginElement(2) });
     assert!(!panel.apply(&other, &mut params));
 }
 
@@ -243,7 +247,10 @@ fn meters_decode_and_calibrate() {
     assert_eq!(MeterSource::calibrate(1.5, &curve), 0.75);
     assert_eq!(MeterSource::calibrate(9.0, &curve), 1.0);
     let spec = test_spec();
-    assert_eq!(MeterFeed::floats_query(&spec, SLOT).as_deref(), Some("/devices/0/inputs/0/effects/1/VendorSpecific/value?floats=162"));
+    assert_eq!(
+        MeterFeed::floats_query(&spec, SLOT).as_deref(),
+        Some("/devices/0/inputs/0/effects/1/VendorSpecific/value?floats=162")
+    );
     let mut feed = MeterFeed::new();
     feed.ingest_floats(&spec, "3fc00000", |_| 0.0);
     for _ in 0..40 {
@@ -322,7 +329,10 @@ fn image_clips_restore_the_panel_for_later_images_and_controls() {
     let mut ui = Ui::new(&assets);
     panel.build(&mut ui, Rect::new(0.0, 0.0, 400.0, 200.0), &params);
     assert!(ui.current_clip().is_none(), "panel must leave the clip stack balanced");
-    assert!(ui.hits.iter().any(|h| h.id.control == Control::PluginParam(0)), "a toolbar image must not clip controls below it");
+    assert!(
+        ui.hits.iter().any(|h| h.id.control == Control::PluginParam(0)),
+        "a toolbar image must not clip controls below it"
+    );
     let mut clip = None;
     let mut image_clips = Vec::new();
     for draw in &ui.list.items {
@@ -346,7 +356,7 @@ fn slot_paths() {
     assert_eq!(u.param(2).step(), "/devices/0/inputs/0/preamps/0/effects/0/parameters/2/StepValue");
 }
 
-// MARK: fetched ConsoleLink specs
+// MARK: a spec folder ($OA_PLUGIN_SPECS: a development stage or an installed release)
 
 fn library() -> Option<PluginSpecLibrary> {
     let lib = PluginSpecLibrary::locate();
@@ -364,7 +374,7 @@ fn every_spec_in_the_folder_decodes() {
     let mut empty = Vec::new();
     for entry in &lib.entries {
         let spec = lib.spec(entry).unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(spec.schema, 1, "{}", entry.stem());
+        assert!(spec.is_known_schema(), "{}: schema {}", entry.stem(), spec.schema);
         if spec.elements.is_empty() {
             // Upstream specs whose controls were not recovered (Dreamverb, Ocean Way, RealVerb
             // Pro): the window shows the generic list for them.
@@ -372,14 +382,26 @@ fn every_spec_in_the_folder_decodes() {
         }
         assert!(spec.size.w > 0.0 && spec.size.h > 0.0);
         for p in &spec.parameters {
-            assert!(spec.parameters.iter().filter(|q| q.index == p.index).count() == 1, "{} duplicate index {}", entry.stem(), p.index);
+            assert!(
+                spec.parameters.iter().filter(|q| q.index == p.index).count() == 1,
+                "{} duplicate index {}",
+                entry.stem(),
+                p.index
+            );
         }
-        if has_images {
+        // A stage carries every sprite; from a release only the panels that can open do.
+        let complete = if lib.is_legacy() { has_images } else { lib.availability_of(entry.stem(), &spec).is_ready() };
+        if complete {
             let missing: Vec<&str> = spec.sprite_names().into_iter().filter(|n| lib.sprite_key(n).is_none()).collect();
             assert!(missing.is_empty(), "{}: missing sprites {missing:?}", entry.stem());
         }
     }
-    eprintln!("{} specs decoded from {} ({} without elements: {empty:?})", lib.entries.len(), lib.folder.display(), empty.len());
+    eprintln!(
+        "{} specs decoded from {} ({} without elements: {empty:?})",
+        lib.entries.len(),
+        lib.folder.display(),
+        empty.len()
+    );
 }
 
 #[test]
@@ -391,14 +413,21 @@ fn every_catalog_spec_opens_and_builds_its_window() {
         let spec = lib.spec(entry).unwrap();
         let params = MockParams::from_spec(&spec);
         let win = plugin_ui::PluginWindow::open(SLOT, &entry.effect_name, "Software preview", Some(&lib), None, false);
-        assert_eq!(win.content.kind(), if spec.elements.is_empty() { "generic" } else { "spec" }, "{}", entry.stem());
+        // A release folder opens a panel only when its art is all there (availability).
+        let drawable =
+            !spec.elements.is_empty() && (lib.is_legacy() || lib.availability_of(entry.stem(), &spec).is_ready());
+        assert_eq!(win.content.kind(), if drawable { "spec" } else { "generic" }, "{}", entry.stem());
         let mut ui = Ui::new(&assets);
         let layout = win.build(&mut ui, (0.0, 0.0), &params);
         assert!(ui.current_clip().is_none(), "{} leaves an unbalanced clip stack", entry.stem());
         assert!(layout.editor.w > 0.0 && layout.editor.h > 0.0, "{}", entry.stem());
         assert!(!ui.list.is_empty(), "{}", entry.stem());
     }
-    assert!(assets.images.missing().iter().all(|k| !k.starts_with("spec:")), "missing panel sprites: {:?}", assets.images.missing());
+    assert!(
+        assets.images.missing().iter().all(|k| !k.starts_with("spec:")),
+        "missing panel sprites: {:?}",
+        assets.images.missing()
+    );
 }
 
 #[test]
