@@ -5,12 +5,15 @@
 //! reports what it contains, and copies the pieces console-rs needs into
 //! `~/.local/share/open-apollo/`. `oa-assets firmware` likewise extracts the
 //! DSP modules and USB boot images the Apollo needs into
-//! `/lib/firmware/universal-audio/`. `oa-assets plugins` regenerates plug-in
-//! panel art from the install's Powered plug-in DLLs ([`plugins`]).
+//! `/lib/firmware/universal-audio/`, and `oa-assets dsp` collects every
+//! Powered plug-in's DSP modules under its `plugins/` folder ([`dsp`]).
+//! `oa-assets plugins` regenerates plug-in panel art from the install's
+//! Powered plug-in DLLs ([`plugins`]).
 //! Everything is read-only toward the source.
 
 pub mod detect;
 pub mod discover;
+pub mod dsp;
 pub mod firmware;
 pub mod import;
 pub mod pe;
