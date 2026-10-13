@@ -345,3 +345,45 @@ class TestLevelCompanions:
         self.set(d, client, f"{IN}/1/FaderLevel/value", -20.0)
         assert tree.get_value(f"{IN}/1/FaderLevelTapered/value") == \
             pytest.approx(hardware.fader_db_to_tapered(-20.0))
+
+
+class TestHeadphoneSource:
+    """HP 1 / HP 2 take CUE 1 or CUE 2 (other param 0x3f / 0x40 = 0 / 1).
+    MON ("default") and NONE have no known encoding: refused with hardware
+    rather than written as CUE 1 (the console then shows the source in
+    effect again)."""
+
+    HP1 = "/devices/0/outputs/19/MixInSource/value"
+
+    def setup(self, tree, backend):
+        router = HardwareRouter(backend, tree)
+        tree.on_set = router.on_set
+        writer = Writer()
+        return MixerDaemon(tree, router), MixerClient(None, writer), writer
+
+    def test_cue2_is_written(self, tree, backend):
+        d, client, _ = self.setup(tree, backend)
+        d._handle_set(client, Command("set", self.HP1, "cue2",
+                                      raw_params={"func_id": "4"}))
+        assert (2, 1, 0x3f, 1) in backend.mixer_params
+        assert tree.get_value(self.HP1) == "cue2"
+
+    @pytest.mark.parametrize("value", ["default", "none", "cue3"])
+    def test_unverified_sources_are_refused(self, tree, backend, value):
+        d, client, writer = self.setup(tree, backend)
+        before = tree.get_value(self.HP1)
+        d._handle_set(client, Command("set", self.HP1, value,
+                                      raw_params={"func_id": "4"}))
+        assert not [c for c in backend.mixer_params if c[2] in (0x3f, 0x40)]
+        assert tree.get_value(self.HP1) == before
+        reply = json.loads(writer.frames[-1].rstrip(b"\0"))
+        assert "error" in reply
+
+    def test_software_model_keeps_them(self, tree):
+        # ("default" itself is the reset literal on the wire, so a SET of
+        # it is a reset, refused here for want of a known default)
+        d = MixerDaemon(tree, None, software_only=True)
+        writer = Writer()
+        d._handle_set(MixerClient(None, writer),
+                      Command("set", self.HP1, "none"))
+        assert tree.get_value(self.HP1) == "none"

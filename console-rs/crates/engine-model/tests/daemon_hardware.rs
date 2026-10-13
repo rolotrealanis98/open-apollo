@@ -366,6 +366,15 @@ fn monitor_controls_reach_the_mixer() {
         (MONITOR, 1, 0x3f, 1),
     );
     settle(&mut r.m, 400);
+    // HP 1 ← MON: no known hardware encoding; the daemon refuses it and the console shows the
+    // source in effect again (CUE 2), nothing reaches the Apollo.
+    let mark = r.d.mark();
+    let mon_src = hp[0].options.iter().position(|o| o == "MON").unwrap() as u8;
+    r.m.apply(&Action::Tap(mon(Control::HeadphoneSource { output: 0, option: mon_src })));
+    pump_until(&mut r.m, "HP 1 back on CUE 2", |m| {
+        m.headphone_outputs()[0].source == cue2 as usize && m.store().refusals().count() == 1
+    });
+    assert!(r.d.hw_since(mark).iter().all(|(n, a)| mixer_param(n, a).is_none_or(|(_, _, p, _)| p != 0x3f)));
     let o = r.m.monitor_options();
     assert_eq!((o.dim, o.cr_source, o.alt_selection), (Some(true), 1, 1));
     assert_eq!(r.m.headphone_outputs()[0].source, cue2 as usize);
