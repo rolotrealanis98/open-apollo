@@ -145,8 +145,18 @@ fn print_install(i: &Install) {
     if let Some((_, v)) = &i.mixer_engine {
         println!("  Mixer Engine  {}", v.as_deref().unwrap_or("version unknown"));
     }
+    if let Some(v) = &i.uad_version {
+        println!("  UAD software      {v}");
+    }
     println!("  Powered plug-ins  {} DLLs", i.powered_plugins.len());
-    println!("  UADx VST3         {} bundles", i.vst3.len());
+    println!("  VST3 wrappers     {} bundles", i.vst3.len());
+    println!("  DSP programs      {}", if i.sdk_dll.is_some() { "UAD2SDK.dll found" } else { "UAD2SDK.dll missing" });
+    println!("  Firmware          {} files", i.firmware.len());
+    match &i.plugin_icons {
+        Some(oa_assets::detect::PluginIcons::Folder(_)) => println!("  Plug-in icons     installed"),
+        Some(oa_assets::detect::PluginIcons::CachedMsi(_)) => println!("  Plug-in icons     in UA's installer cache"),
+        None => println!("  Plug-in icons     not found"),
+    }
     println!(
         "  Drivers           {}",
         if i.drivers.is_empty() { "none".to_string() } else { format!("{} files", i.drivers.len()) }

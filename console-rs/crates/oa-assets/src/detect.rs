@@ -15,17 +15,33 @@ pub struct Console {
     pub version: Option<String>,
 }
 
+/// Where Console's per-plug-in browser icons (`UAD <Name>.png`) can come from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PluginIcons {
+    /// An installed `Plug-In Icons` folder (UAD installs it only when it detected an Apollo).
+    Folder(PathBuf),
+    /// UA's installer cache keeps `apollo-32bit.msi`, which carries the icons, even without an Apollo.
+    CachedMsi(PathBuf),
+}
+
 #[derive(Clone, Debug)]
 pub struct Install {
     pub root: Root,
     pub console: Option<Console>,
+    /// UAD software release from `UA.xml`, e.g. "12.0.0.602".
+    pub uad_version: Option<String>,
     pub mixer_engine: Option<(PathBuf, Option<String>)>,
     /// UAD-2 Powered plug-in DLLs.
     pub powered_plugins: Vec<PathBuf>,
-    /// UA VST3 bundles (UADx native plug-ins).
+    /// UA's VST3 bundles (wrappers around the Powered DLLs; they carry manifests, not art).
     pub vst3: Vec<PathBuf>,
     /// UA kernel drivers and their DriverStore packages.
     pub drivers: Vec<PathBuf>,
+    /// `UAD2SDK.dll`, which holds the DSP programs the driver loads.
+    pub sdk_dll: Option<PathBuf>,
+    /// Encrypted firmware images under `Powered Plugins\Firmware`.
+    pub firmware: Vec<PathBuf>,
+    pub plugin_icons: Option<PluginIcons>,
 }
 
 impl Install {
@@ -55,6 +71,14 @@ impl Install {
             "powered_plugins": self.powered_plugins.len(),
             "vst3": self.vst3.len(),
             "drivers": self.drivers,
+            "uad_version": self.uad_version,
+            "sdk_dll": self.sdk_dll,
+            "firmware": self.firmware.len(),
+            "plugin_icons": match &self.plugin_icons {
+                Some(PluginIcons::Folder(p)) => json!({"folder": p}),
+                Some(PluginIcons::CachedMsi(p)) => json!({"cached_msi": p}),
+                None => Value::Null,
+            },
         })
     }
 }
@@ -62,13 +86,28 @@ impl Install {
 /// Look for UAD software under a root that stands in for `C:\`.
 pub fn inspect(root: &Root) -> Install {
     let r = &root.path;
+    // UAD's tools folder; Burn is 32-bit, so it lands under Program Files (x86).
+    let tools = ["Program Files (x86)", "Program Files"]
+        .iter()
+        .find_map(|pf| ci_path(r, &[pf, "Universal Audio", "Powered Plugins", "UA.xml"]))
+        .and_then(|x| x.parent().map(Path::to_path_buf));
+    let console = find_console(r);
     Install {
         root: root.clone(),
-        console: find_console(r),
-        mixer_engine: ["Program Files", "Program Files (x86)"].iter().find_map(|pf| {
-            let exe = ci_path(r, &[pf, "Universal Audio", "UAMixerEngine.exe"])?;
-            Some((exe.clone(), crate::pe::file_version(&exe)))
-        }),
+        uad_version: tools.as_ref().and_then(|t| xml_tag(&t.join("UA.xml"), "swReleaseName")),
+        mixer_engine: tools
+            .as_ref()
+            .and_then(|t| ci_path(t, &["UAMixerEngine.exe"]))
+            .or_else(|| ci_path(r, &["Program Files", "Universal Audio", "UAMixerEngine.exe"]))
+            .map(|exe| (exe.clone(), crate::pe::file_version(&exe))),
+        sdk_dll: ci_path(r, &["Windows", "System32", "UAD2SDK.dll"]),
+        firmware: tools
+            .as_ref()
+            .and_then(|t| ci_path(t, &["Firmware"]))
+            .map(|d| walk(&d, 2, &|p| name_lower(p).starts_with("firmware") || has_ext(p, "bin")))
+            .unwrap_or_default(),
+        plugin_icons: find_plugin_icons(r, tools.as_deref(), console.as_ref()),
+        console,
         powered_plugins: ci_path(r, &["Program Files", "Universal Audio", "Powered Plugins"])
             .map(|d| walk(&d, 4, &|p| has_ext(p, "dll")))
             .unwrap_or_default(),
@@ -94,6 +133,33 @@ fn find_console(r: &Path) -> Option<Console> {
         return Some(Console { dir, resources, version });
     }
     None
+}
+
+/// UA's Apollo package in the Burn cache: `ProgramData\Package Cache\{2ADBD732-…}v<version>\apollo-32bit.msi`.
+const APOLLO_MSI_CACHE_ID: &str = "{2adbd732-9983-4171-97c7-1fcfe0d28f81}";
+
+fn find_plugin_icons(r: &Path, tools: Option<&Path>, console: Option<&Console>) -> Option<PluginIcons> {
+    let has_png = |d: &Path| list(d).iter().any(|p| has_ext(p, "png"));
+    let folders = [
+        tools.and_then(|t| ci_path(t, &["Plug-In Icons"])),
+        console.and_then(|c| ci_path(&c.resources, &["Plug-In Icons"])),
+    ];
+    if let Some(dir) = folders.into_iter().flatten().find(|d| has_png(d)) {
+        return Some(PluginIcons::Folder(dir));
+    }
+    let cache = ci_path(r, &["ProgramData", "Package Cache"])?;
+    let mut dirs: Vec<PathBuf> =
+        list(&cache).into_iter().filter(|p| name_lower(p).starts_with(APOLLO_MSI_CACHE_ID)).collect();
+    dirs.sort();
+    dirs.iter().rev().find_map(|d| ci_path(d, &["apollo-32bit.msi"])).map(PluginIcons::CachedMsi)
+}
+
+/// Text of the first `<tag>…</tag>` in a small XML file.
+fn xml_tag(path: &Path, tag: &str) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let start = text.find(&format!("<{tag}>"))? + tag.len() + 2;
+    let end = text[start..].find(&format!("</{tag}>"))?;
+    Some(text[start..start + end].trim().to_string())
 }
 
 fn find_drivers(r: &Path) -> Vec<PathBuf> {
@@ -167,6 +233,15 @@ mod tests {
         let vst = t.join("Program Files/Common Files/VST3/UADx 1176 Compressor.vst3");
         fs::create_dir_all(&vst).unwrap();
         fs::create_dir_all(t.join("Program Files/Common Files/VST3/Other Vendor.vst3")).unwrap();
+        // Same lowercase folder as Console above: NTFS has one "Program Files (x86)", however it is cased.
+        let tools = t.join("program files (x86)/universal audio/Powered Plugins");
+        fs::create_dir_all(tools.join("Firmware/UAD-2")).unwrap();
+        fs::write(tools.join("UA.xml"), "<uadparams><verinfo><swReleaseName>12.0.0.602</swReleaseName></verinfo>")
+            .unwrap();
+        fs::write(tools.join("Firmware/UAD-2/FirmwareUpdateA16.bin"), b"").unwrap();
+        let cache = t.join("ProgramData/Package Cache/{2ADBD732-9983-4171-97C7-1FCFE0D28F81}v12.0.0.602");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("apollo-32bit.msi"), b"").unwrap();
         let drv = t.join("Windows/System32/drivers");
         fs::create_dir_all(&drv).unwrap();
         fs::write(drv.join("UAD2Pcie.sys"), b"").unwrap();
@@ -177,6 +252,9 @@ mod tests {
         assert_eq!(got.powered_plugins.len(), 1);
         assert_eq!(got.vst3.len(), 1);
         assert_eq!(got.drivers.len(), 1);
+        assert_eq!(got.uad_version.as_deref(), Some("12.0.0.602"));
+        assert_eq!(got.firmware.len(), 1);
+        assert!(matches!(got.plugin_icons, Some(PluginIcons::CachedMsi(_))));
         assert!(got.found_anything());
         fs::remove_dir_all(&t).unwrap();
     }
