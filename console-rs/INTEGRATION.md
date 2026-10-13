@@ -529,3 +529,36 @@ fix is isolated on codex/multidevice-test-wait, with 100 repeated runs and
 full workspace 285 tests passing (10 ignored). Locked release build,
 p1 158/158, p2 195/195, windows_check, ledger tests and regeneration pass
 with that fix. Both task histories are merged into feat/rust-console.
+
+## Runtime DSP program-loader validation (2026-10-13)
+
+Pinned Mac and matching Windows12 source establish full normalized Bill
+transfer with a two-word prefix, distinct functional allocation count, and
+16-byte opcode/status/resource-ID reply validation. No signature/decrypt call
+was found in those bounded immutable host paths; firmware enforcement, ISA
+body format and program-entry dispatch remain unknown. Added
+tools/dsp-loader/check_resource_contract.py using the existing pure model:
+four nonexecutable fixtures pass framing, byte preservation, floor conversion,
+chunking, identity/geometry and malformed-reply rejection. No upload capability.
+The existing catalog/upload/kind3 suite passes 19 tests with no skips against
+hash-matching private originals, which remain outside git.
+
+Source-pinned read-only109/112 queries on Mac returned genuine allocator
+capacities for all four DSPs; DSP2/3 report zero code allocation. Property1
+(state1 on all four) is now linked to architecture0/2 compatibility. No pool
+bases are exposed by112. The property6 geometry source reads device registers
+or uses conditional constants selected by a captured driver option. A
+read-only167 query found current option4=0, but its device-construction value
+is unverified; no table is treated as live placement authority.
+
+Before/after pool-query snapshots changed only meters. No resource
+registration, allocation, upload, processing/SYNCH, Console GUI operation or
+security-setting change occurred. Native driver WIP and separate199bb21 are
+untouched. See tools/dsp-loader/README.md for exact pins, addresses, raw
+observation location, Linux gaps and remaining custom-execution requirements.
+
+Validation: four source-owned contract fixtures, 19 private pure-model tests
+(no skips), 285 workspace tests (10 ignored), locked release build, p1
+158/158, p2 195/195, windows_check, ledger tests and regeneration. Cached test
+artifacts referring to the removed temporary worktree were rebuilt from this
+checkout; no source changes were required for that cache issue.
