@@ -270,7 +270,7 @@ fn full_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, sy: f32) {
     // Send pans are white on every strip (s45: `knob_pan_white`); stereo strips have none.
     let ids = FullSendIds {
         bus: false,
-        pan: if s.stereo { None } else { Some((0.5, cid(s, Control::SendPan(k as u8)))) },
+        pan: if s.stereo { None } else { Some((send.pan, cid(s, Control::SendPan(k as u8)))) },
         mute: cid(s, Control::SendMute(k as u8)),
         level: cid(s, Control::SendLevel(k as u8)),
     };

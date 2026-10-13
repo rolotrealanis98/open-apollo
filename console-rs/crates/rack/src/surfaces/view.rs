@@ -331,6 +331,22 @@ pub struct ViewState {
     pub drag: Option<crate::dnd::DragState>,
     /// A press on a drag source, not yet moved far enough to drag.
     pub drag_pending: Option<crate::dnd::PendingDrag>,
+    /// Console's `GUI_BlinkManager` slow flag (a 125 ms timer flipped every fourth tick: 500 ms
+    /// on, 500 ms off; ctor 0x181c345b0, tick 0x181c34850). The status bar's CLOCK outline
+    /// blinks with it while the clock is not locked. Off until the host calls
+    /// [`ViewState::tick_blink`], so one-shot renders are deterministic.
+    pub blink: bool,
+    /// When [`ViewState::tick_blink`] first ran (the blink phase counts from it).
+    pub blink_epoch: Option<std::time::Instant>,
+}
+
+impl ViewState {
+    /// Advances [`ViewState::blink`] to `now`; true when it flipped.
+    pub fn tick_blink(&mut self, now: std::time::Instant) -> bool {
+        let epoch = *self.blink_epoch.get_or_insert(now);
+        let on = (now.saturating_duration_since(epoch).as_millis() / 500) % 2 == 0;
+        std::mem::replace(&mut self.blink, on) != on
+    }
 }
 
 impl Default for ViewState {
@@ -373,6 +389,8 @@ impl Default for ViewState {
             open_urls: Vec::new(),
             modifier_armed: None,
             windowing: None,
+            blink: false,
+            blink_epoch: None,
         }
     }
 }

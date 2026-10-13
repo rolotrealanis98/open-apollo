@@ -72,6 +72,8 @@ struct State {
     meter_state: HashMap<String, f64>,
     daemon_style: bool,
     read_rpc_replies: HashMap<String, Json>,
+    /// `set`s answered with `{"error":"Unable to set value."}` and no change: (property, value).
+    refused: Vec<(String, Value)>,
 }
 
 type Shared = Arc<Mutex<State>>;
@@ -194,6 +196,13 @@ impl MockEngine {
     pub fn push(&self, path: &str, value: impl Into<Value>) {
         let mut s = lock(&self.state);
         change(&mut s, path::property_path(path), value.into());
+    }
+
+    /// Refuses `set <property>/value <value>` as UA Mixer Engine does when the hardware does not
+    /// take it (a sample rate the driver refuses): `{"path", "parameters", "error":"Unable to set
+    /// value."}`, nothing changes, nothing is pushed.
+    pub fn refuse(&self, property: &str, value: impl Into<Value>) {
+        lock(&self.state).refused.push((path::property_path(property).to_owned(), value.into()));
     }
 
     /// Replaces a property's `values` list (no push: clients re-read lists with `get …/values`).
@@ -672,6 +681,13 @@ fn set(s: &mut State, id: u64, raw: &str, value_text: &str, query: &[(String, St
             }
         }
         _ => {}
+    }
+    if s.refused.iter().any(|(p, r)| *p == prop && *r == v) {
+        if let Some(c) = s.clients.get(&id) {
+            let params = if s.daemon_style { Default::default() } else { echo_params(query, false) };
+            reply(c, raw, None, &params, Some("Unable to set value."));
+        }
+        return;
     }
     change(s, &prop, v.clone());
     if prop == crate::session::SESSION || prop == crate::session::MODIFIED_SESSIONS {

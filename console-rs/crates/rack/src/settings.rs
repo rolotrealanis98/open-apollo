@@ -566,6 +566,16 @@ fn engine_choice_with(src: &dyn PropertySource, path: &str, label: &str, row: u8
     Some(f)
 }
 
+/// Whether a combo over the engine enum at `path` offers choice `c`. [`fields`] builds the
+/// options and [`resolve`] indexes them with the same rule, so a pick writes what it shows.
+fn offered(path: &str, c: &Choice) -> bool {
+    match path {
+        // CUE BUS COUNT: 2…4 (capture s20); the engine lists 0…4.
+        "/CueBusCount" => c.value.as_i64().is_some_and(|n| n >= 2),
+        _ => true,
+    }
+}
+
 /// A bool property shown as Console's OFF/ON combo (DIGITAL MIRROR, PT MODE).
 fn bool_choice(src: &dyn PropertySource, path: &str, label: &str, labels: [&str; 2], row: u8) -> Option<SettingField> {
     let on = bool_at(src, path)?;
@@ -758,7 +768,7 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
                 f.extend(bool_choice(src, "/PTMode", "PT MODE", ["OFF", "ON"], 1));
             }
             // CUE BUS COUNT offers 2…4 (capture s20).
-            f.extend(engine_choice_with(src, "/CueBusCount", "CUE BUS COUNT", 1, true, |c| c.value.as_i64().is_some_and(|n| n >= 2)));
+            f.extend(engine_choice_with(src, "/CueBusCount", "CUE BUS COUNT", 1, true, |c| offered("/CueBusCount", c)));
             let max_alt = devs.iter().filter_map(|d| src.prop(&format!("{d}/MaxAltMons")).and_then(|v| v.as_i64())).max().unwrap_or(0);
             if max_alt > 0 {
                 if let Some(d) = devs.first() {
@@ -1049,7 +1059,7 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
     };
     match (kind, op) {
         // A plain engine path: enum choice or text.
-        ("", SettingOp::Choose(i)) => src.choices(rest).get(*i).filter(|c| c.enabled).map(|c| set(rest, c.value.clone())).unwrap_or_default(),
+        ("", SettingOp::Choose(i)) => src.choices(rest).into_iter().filter(|c| offered(rest, c)).nth(*i).filter(|c| c.enabled).map(|c| set(rest, c.value.clone())).unwrap_or_default(),
         ("", SettingOp::Text(t)) => {
             let t = t.trim();
             if t.is_empty() { Vec::new() } else { set(rest, PropValue::Str(t.to_string())) }
@@ -1097,6 +1107,8 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             .map(|c| vec![Write::Helper(rest.to_string(), c.value.clone())])
             .unwrap_or_default(),
         ("fader", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0))),
+        // A send's pan knob (Sends window): knob 0…1 → `Pan` −1…1.
+        ("pan", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0) * 2.0 - 1.0)),
         ("post-text", SettingOp::Text(t)) => {
             // post-text:<Command>[:<orig>]: SAVE AS / RENAME of an I/O preset.
             let t = t.trim();

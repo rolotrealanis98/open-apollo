@@ -293,6 +293,9 @@ pub struct SendState {
     pub name: String,
     pub level: f64,
     pub muted: bool,
+    /// The send's pan knob, 0…1 (0.5 = centre; `sends/k/Pan` −1…1). Sends without a pan
+    /// (aux → cue, stereo strips) read 0.5.
+    pub pan: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -408,11 +411,13 @@ pub struct StatusInfo {
     pub plugin_scenes: bool,
     /// Recalled plug-in scene; None → "(NONE)".
     pub scene: Option<String>,
+    /// `/ClockLocked`: false blinks an outline round CLOCK (`Rack_ClockInfo`); None = unknown.
+    pub clock_locked: Option<bool>,
 }
 
 impl Default for StatusInfo {
     fn default() -> Self {
-        Self { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 0.0, pgm_load: 0.0, mem_load: 0.0, plugin_scenes: true, scene: None }
+        Self { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 0.0, pgm_load: 0.0, mem_load: 0.0, plugin_scenes: true, scene: None, clock_locked: None }
     }
 }
 
@@ -809,7 +814,7 @@ impl Default for PreviewMixer {
         if let Some(InsertState::Loaded { power, .. }) = inserts.get_mut("in1").and_then(|v: &mut Vec<InsertState>| v.get_mut(3)) {
             *power = false;
         }
-        let send = |name: &str, level: f64, muted: bool| SendState { name: name.into(), level, muted };
+        let send = |name: &str, level: f64, muted: bool| SendState { name: name.into(), level, muted, pan: 0.5 };
         let mut sends = HashMap::new();
         for (i, s) in inputs.iter().enumerate() {
             let lvl = 0.25 + 0.08 * i as f64;
@@ -844,7 +849,7 @@ impl Default for PreviewMixer {
             isolated: HashSet::from([Arc::from("in2")]),
             catalog: demo_catalog(),
             scenes: vec!["Tracking".into(), "Overdubs".into(), "Mix Prep".into()],
-            status: StatusInfo { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 42.0, pgm_load: 31.0, mem_load: 18.0, plugin_scenes: true, scene: None },
+            status: StatusInfo { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 42.0, pgm_load: 31.0, mem_load: 18.0, plugin_scenes: true, scene: None, clock_locked: None },
             settings: EngineSettings {
                 host: "127.0.0.1:4710".into(),
                 connected: false,
@@ -1120,10 +1125,19 @@ impl MixerModel for PreviewMixer {
                     self.monitor_options.dim_readout = format!("-{:.0} dB", v * 60.0);
                     return;
                 }
-                if let Control::SendLevel(k) = id.control {
+                if let Control::SendLevel(k) | Control::SendPan(k) = id.control {
                     if let Some((s, _)) = self.sends.get_mut(&id.strip).and_then(|v| v.get_mut(k as usize)) {
-                        s.level = *v;
+                        if let Control::SendPan(_) = id.control {
+                            s.pan = *v;
+                        } else {
+                            s.level = *v;
+                        }
                     }
+                    return;
+                }
+                // TALK released after a long press: momentary.
+                if id.control == Control::Talkback {
+                    self.monitor_options.talkback = self.monitor_options.talkback.map(|_| *v >= 0.5);
                     return;
                 }
                 let Some(m) = self.mains.get_mut(&id.strip) else { return };

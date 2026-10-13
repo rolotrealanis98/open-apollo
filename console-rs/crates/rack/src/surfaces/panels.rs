@@ -705,14 +705,15 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
         let db = src.prop(&format!("{node}/Gain")).and_then(|v| v.as_f64()).unwrap_or(-144.0);
         // Mono input sends carry their pan (send-cell); bus and talkback sends do not (s50/s51).
         let mono_input = of.is_input() && src.prop(&format!("{node}/Pan")).is_some();
-        let pan = mono_input.then(|| ((src.prop(&format!("{node}/Pan")).and_then(|v| v.as_f64()).unwrap_or(0.0) + 1.0) / 2.0, None));
+        let pan_knob = ((src.prop(&format!("{node}/Pan")).and_then(|v| v.as_f64()).unwrap_or(0.0) + 1.0) / 2.0).clamp(0.0, 1.0);
+        let pan = mono_input.then(|| (pan_knob, Some(sid(Control::SettingSet(format!("pan:{node}/Pan").into())))));
         let ids = crate::surfaces::cells::FullSendIds {
             bus: !of.is_input(),
             pan,
             mute: Some(sid(Control::SettingPress(format!("toggle:{node}/Bypass").into()))),
             level: Some(sid(Control::SettingSet(format!("fader:{node}/GainTapered").into()))),
         };
-        let send = crate::model::SendState { name: name.clone(), level, muted };
+        let send = crate::model::SendState { name: name.clone(), level, muted, pan: pan_knob };
         ui.at(x, r.y + 31.0, |ui| crate::surfaces::cells::full_send_strip(ui, "Sends-Input-Fader", &send, &db_readout(db), 0.0, r.h - 36.0, ids));
     }
     // ‹ › step through the auxes, or through the input strips: `Popover-Left` / `-Right`

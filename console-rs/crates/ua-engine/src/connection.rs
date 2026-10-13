@@ -247,6 +247,9 @@ struct Shared {
     state: Mutex<ConnectionState>,
     generation: AtomicU64,
     closed: AtomicBool,
+    /// The write gate: [`Options::allow_writes`] at connect, then
+    /// [`EngineHandle::set_allow_writes`].
+    allow_writes: AtomicBool,
     next_func_id: AtomicU64,
     counters: AtomicCounters,
     waker: Mutex<Option<Waker>>,
@@ -340,6 +343,7 @@ impl Engine {
             state: Mutex::new(ConnectionState::Idle),
             generation: AtomicU64::new(0),
             closed: AtomicBool::new(false),
+            allow_writes: AtomicBool::new(options.allow_writes),
             next_func_id: AtomicU64::new(1),
             counters: AtomicCounters::default(),
             waker: Mutex::new(None),
@@ -400,6 +404,18 @@ impl EngineHandle {
         &self.endpoint
     }
 
+    /// Whether `set`/`post` go out: [`Options::allow_writes`] at connect, then whatever
+    /// [`EngineHandle::set_allow_writes`] made it.
+    pub fn allows_writes(&self) -> bool {
+        self.shared.allow_writes.load(Relaxed)
+    }
+
+    /// Opens or closes the connection's write gate (the user turned engine writes on or off).
+    /// [`EngineHandle::options`] keeps the value the connection was made with.
+    pub fn set_allow_writes(&self, on: bool) {
+        self.shared.allow_writes.store(on, Relaxed);
+    }
+
     pub fn options(&self) -> &Options {
         &self.options
     }
@@ -443,7 +459,7 @@ impl EngineHandle {
     /// Queues a command. `set`/`post` are refused unless `allow_writes`; anything is refused while
     /// disconnected (commands are never replayed into a later connection).
     pub fn send(&self, command: Command) -> Result<()> {
-        if command.is_write() && !command.is_socket_hint() && !self.options.allow_writes {
+        if command.is_write() && !command.is_socket_hint() && !self.allows_writes() {
             self.shared.counters.refused_writes.fetch_add(1, Relaxed);
             log::info!("refused write on read-only connection: {command}");
             return Err(Error::WriteRefused);
@@ -866,7 +882,7 @@ impl Task {
             } => {
                 if g != generation {
                     self.shared.counters.dropped.fetch_add(1, Relaxed);
-                } else if command.is_write() && !command.is_socket_hint() && !self.options.allow_writes {
+                } else if command.is_write() && !command.is_socket_hint() && !self.shared.allow_writes.load(Relaxed) {
                     // Defence in depth: the handle already refuses these.
                     self.shared.counters.refused_writes.fetch_add(1, Relaxed);
                 } else {
