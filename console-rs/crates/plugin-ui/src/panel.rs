@@ -1408,8 +1408,11 @@ impl PluginPanel {
     /// A pointer press at window point (x, y) at time `now` (s). True when the panel takes it.
     pub fn pointer_down_at(&mut self, x: f32, y: f32, double: bool, now: f64, params: &mut dyn ParamSource) -> bool {
         self.advance(now, params);
+        // A gesture whose release never came is cancelled, not completed.
         if let Some(g) = self.gesture.take() {
-            self.finish(g, x, y, params);
+            if g.began {
+                params.end_gesture();
+            }
         }
         let hit = self.hits.lock().iter().rev().find(|h| h.contains(x, y)).cloned();
         let Some(hit) = hit else { return self.contains(x, y) };

@@ -4,7 +4,9 @@
 //! - [`spec`] / [`library`]: ConsoleLink's generated panel specs (`PluginSpec_*.json` plus
 //!   `Images/*@2x.png`), found at runtime (never bundled; see [`SpecLocator`]).
 //! - [`PluginPanel`]: a spec drawn into a `rack::Ui` with hit regions
-//!   (`rack::Control::PluginParam/PluginElement/PluginStep`).
+//!   (`rack::Control::PluginParam/PluginElement/PluginStep`) and its own pointer gestures; a port
+//!   of the Swift spec runtime. [`graph`] evaluates GraphValues and builds graph scenes,
+//!   [`raster`] draws them (and rotated sprites), [`readout`] formats readouts.
 //! - [`GenericPanel`]: a parameter list for plug-ins without a spec.
 //! - [`ParamSource`]: where values come from; [`MockParams`] for renders and tests. The engine
 //!   adapter maps it onto [`paths`].
