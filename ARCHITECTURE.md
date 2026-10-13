@@ -7,36 +7,73 @@ Quick map for developers who want to contribute.
 ```
 open-apollo/
 ├── driver/              # Linux kernel module (C)
-│   ├── ua_audio.c       # ALSA PCM, mixer controls, DMA, transport
 │   ├── ua_core.c        # PCIe probe, ioctls, DSP settings, ACEFACE
+│   ├── ua_audio.c       # ALSA PCM, mixer controls, DMA, transport
 │   ├── ua_dsp.c         # DSP ring buffer, firmware, routing tables
+│   ├── ua_event.c       # Events to the daemon (meters, jack detect, clock)
 │   ├── ua_apollo.h      # Register map, device types, structs
+│   ├── ua_ioctl.h       # The ioctl ABI the daemon uses
+│   ├── ua_models_gen.h  # Per-model data, generated from devices/*.json
 │   └── ua_routing.h     # Static channel routing tables
 │
-├── mixer-engine/        # Userspace daemon (Python)
-│   ├── ua_mixer_daemon.py  # TCP:4710 + TCP:4720 servers
-│   ├── hardware.py      # Hardware backend (ioctl interface)
-│   ├── state_tree.py    # Hierarchical control tree (11K+ nodes)
-│   └── helper_tree.py   # Protocol helper tree
+├── mixer-engine/        # Mixer daemon (Python)
+│   ├── ua_mixer_daemon.py  # TCP 4710 + 4720 servers (WebSocket 4721 with --ws)
+│   ├── hardware.py      # Thunderbolt backend (ioctl interface); hardware_usb.py for USB
+│   ├── state_tree.py    # Hierarchical control tree
+│   ├── console_*.py     # Console host commands: presets, sessions, inserts, network
+│   ├── ua_catalogue.py  # Overlays the UA catalogue imported from the user's install
+│   └── device_maps/     # Per-model control trees (structure only, no UA content)
 │
-├── console-rs/          # Native mixer console, uaconsole (Rust; see console-rs/README.md)
+├── console-rs/          # Rust workspace (see console-rs/README.md, console-rs/ARCHITECTURE.md)
+│   └── crates/
+│       ├── uaconsole/   # The native mixer console
+│       ├── houston, rack, gfx  # Console art, layout and drawing
+│       ├── plugin-ui/   # Plug-in windows drawn from open-apollo-panels specs
+│       ├── ua-engine/   # Mixer Engine protocol and model (TCP 4710)
+│       ├── engine-model/  # The console's mixer model over ua-engine
+│       ├── oa-assets/   # Importer: reads the user's UAD install
+│       └── oa-setup/    # Setup wizard (open-apollo-setup)
 │
-├── configs/             # System configs deployed by installer
-│   ├── wireplumber/     # WirePlumber rules (disable-mmap, etc.)
-│   ├── ucm2/            # ALSA UCM2 profile
-│   ├── udev/            # Auto-detection + profile setup
-│   ├── pipewire/        # Virtual I/O setup script
-│   ├── autostart/       # Desktop autostart + systemd service
-│   └── deploy.sh        # Config deployment script
+├── configs/             # PipeWire, WirePlumber, UCM2, udev, systemd; plugin-panels.conf (the pinned panels release)
 │
 ├── scripts/
-│   ├── install.sh       # One-command installer
-│   ├── install-uaconsole.sh  # Per-user install of the native console
-│   └── check-deps.sh    # Dependency checker
+│   ├── setup.sh         # Builds and starts the setup wizard
+│   ├── setup-root.sh    # The wizard's one privileged run
+│   ├── install.sh       # Thunderbolt driver, DKMS, audio settings, mixer daemon
+│   ├── install-usb.sh   # USB Apollos
+│   ├── install-panels.sh     # Plug-in panel specs (pinned open-apollo-panels release)
+│   ├── install-uaconsole.sh  # Per-user install of the console
+│   └── uninstall.sh     # Removes every trace of an install
 │
-└── tools/               # Utilities
-    └── apollo-init.sh   # Hardware initialization
+├── tools/
+│   ├── uausb/, usb-full-init.py  # USB bring-up, built from the extracted DSP modules
+│   ├── check-clean-repo.py       # Keeps UA files and personal data out of the repository
+│   ├── apollo-report.sh, apollo-selftest.sh  # Device reports (TESTING.md)
+│   └── contribute/      # Device probe and capture scripts
+│
+└── devices/             # Per-model facts (*.json), from UA's own Mixer Engine
 ```
+
+## Setup Flow
+
+```
+scripts/setup.sh ──► open-apollo-setup (as you)
+                        │ finds the UAD install (oa-assets scan), shows the plan
+                        ▼
+                     pkexec scripts/setup-root.sh (as root, one password)
+                        ├─ uninstall.sh --yes --purge        remove the earlier install
+                        ├─ oa-assets import                  Console art (as you)
+                        ├─ install-panels.sh                 plug-in panel specs
+                        ├─ oa-assets plugins                 plug-in panels' art (as you)
+                        ├─ oa-assets firmware, dsp           DSP modules, USB boot images
+                        └─ install.sh --yes                  driver, DKMS, configs, daemon
+                        ▼
+                     install-uaconsole.sh (as you), daemon restart
+```
+
+Nothing from Universal Audio is in this repository: everything on the right-hand side of
+that flow is read from the user's own UAD install on their machine, and
+`tools/check-clean-repo.py` (run in CI) refuses commits that would add UA files.
 
 ## Data Flow
 
@@ -45,7 +82,7 @@ App (PipeWire) → ALSA PCM → ua_audio.c → DMA buffer → Apollo FPGA
                                 ↕
                          ua_core.c (ioctl)
                                 ↕
-                    ua_mixer_daemon.py (TCP:4710/4720)
+                    ua_mixer_daemon.py (TCP 4710/4720) ◄── uaconsole
                                 ↕
                          ua_dsp.c (ring buffer commands)
                                 ↕
@@ -73,4 +110,6 @@ Every register write was traced from the macOS kext via DTrace or Windows via BA
 - **PipeWire config issue?** → `configs/pipewire/setup-apollo-io.sh`
 - **Mixer protocol?** → `mixer-engine/ua_mixer_daemon.py`
 - **Mixer console UI?** → `console-rs/` ([README](console-rs/README.md), [architecture](console-rs/ARCHITECTURE.md))
-- **Install script?** → `scripts/install.sh`
+- **Install script?** → `scripts/install.sh` (driver), `scripts/setup-root.sh` (the wizard's run)
+- **Setup wizard or importer?** → `console-rs/crates/oa-setup/`, `console-rs/crates/oa-assets/`
+- **Plug-in windows?** → `console-rs/crates/plugin-ui/` ([RUNTIME-V2.md](console-rs/crates/plugin-ui/RUNTIME-V2.md))

@@ -259,5 +259,5 @@ None of this was run on hardware. Before you start:
     - OUTPUT REFERENCE LEVELS 1-2 −10 dBV, then +4 dBu.
     - DIGITAL MIRROR ON, then OFF.
     - CLIP HOLD and PEAK HOLD change how long the front-panel meters hold.
-11. **Read-only launch.** Start `open-apollo-console` (no `--writes`) and press MUTE: nothing
+11. **Read-only launch.** Start `uaconsole` (no `--writes`) and press MUTE: nothing
     happens on the Apollo. Turn on Settings › WRITES and press MUTE again: it mutes.
