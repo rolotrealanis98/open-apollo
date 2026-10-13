@@ -306,6 +306,36 @@ int main(void)
 ''')
 
 
+def test_property6_register_order():
+    """tools-wine decode_dsp_pool_properties.py's distinct-register fixture:
+    property 6 lists capacity 0x10/0x18/0x14/0x1c, base 0x184/0x18c/0x188/
+    0x190, scratch 0x198/0x194/0x19c, so pools 1 and 2 must not be swapped:
+    pool n is +0x10 + 4n, +0x184 + 4n, +0x190 + 4n."""
+    run(r'''
+int main(void)
+{
+	static const u32 off[11] = { 0x10, 0x18, 0x14, 0x1c, 0x184, 0x18c, 0x188,
+				     0x190, 0x198, 0x194, 0x19c };
+	static const u32 val[11] = { 0x100, 0x300, 0x200, 0x400, 0x1000, 0x3000,
+				     0x2000, 0x4000, 0x30, 0x20, 0x40 };
+	struct ua_pool_usage u[4];
+
+	setup(true);
+	for (int i = 0; i < 11; i++)
+		regs[2][off[i] / 4] = val[i];
+	start(true);
+	connect_all();
+	assert(ua_pool_read_usage(host.dsp[2].pools, u) == 0);
+	assert(u[0].base == 0x1000 && u[0].total_words == 0x100 && !u[0].scratch_words);
+	assert(u[1].base == 0x2000 && u[1].total_words == 0x200 && u[1].scratch_words == 0x20);
+	assert(u[2].base == 0x3000 && u[2].total_words == 0x300 && u[2].scratch_words == 0x30);
+	assert(u[3].base == 0x4000 && u[3].total_words == 0x400 && u[3].scratch_words == 0x40);
+	setup(true);
+	return 0;
+}
+''')
+
+
 def test_placement_order_and_refusals():
     run(r'''
 int main(void)
