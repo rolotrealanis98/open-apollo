@@ -2439,7 +2439,8 @@ _RE_PREAMP = re.compile(
 
 # Bus send controls: /devices/0/inputs/<ch>/sends/<send>/<control>/value
 _RE_SEND = re.compile(
-    r'^/devices/0/inputs/(\d+)/sends/(\d+)/(Gain|GainTapered|Pan|Bypass)/value$')
+    r'^/devices/0/inputs/(\d+)/sends/(\d+)/'
+    r'(Gain|GainTapered|Pan|Bypass|PostFaderOverride)/value$')
 
 # Output/Monitor controls: /devices/0/outputs/<ch>/<control>/value
 _RE_OUTPUT = re.compile(
@@ -2463,12 +2464,13 @@ _RE_AUX_SEND = re.compile(
 # lives under /devices/0/.
 _RE_DEVICE_GLOBAL = re.compile(
     r'^(?:/devices/0)?/(TalkbackOn|TalkbackInPhysicalCR|TalkbackMaster|'
-    r'Enable24dBMode|ClipHold|PeakHold|TalkbackMicSelect)/value$|'
+    r'Enable24dBMode|ClipHold|PeakHold|TalkbackMicSelect|CueBusCount)'
+    r'/value$|'
     r'^/devices/0/(DimAttenuation|TOSLinkOutput|TOSLink|ConverterMode|'
     r'MultiUnitOrder|DSPSpanning|Identify|'
     r'AltMonSelection|RemoteMonitorController|InputJackSensingDisabled|'
-    r'OutputsAttenuate|CueBusCount|FuncSwitchMode|FuncSwitch2Mode|'
-    r'SurroundMonitorMode)/value$')
+    r'OutputsAttenuate|FuncSwitchMode|FuncSwitch2Mode|'
+    r'SurroundMonitorMode|HP[1-4]SendPostFader)/value$')
 
 # Global driver controls
 _RE_GLOBAL = re.compile(
@@ -2888,6 +2890,84 @@ class HardwareRouter:
                 self._input_send_linear(
                     ch, send_idx, fader_db=fader_db, muted=muted),
                 self._send_pan(f"{base}/sends/{send_idx}"))
+
+    def _solo_muted(self, ch: int) -> bool:
+        """The input is silenced by another channel's solo (the rule of
+        _handle_solo_recalc: a soloed, SoloSafe or Isolate channel is not)."""
+        if not self._solo_engaged():
+            return False
+        base = f"{IN_BASE}/{ch}"
+        return not any(self._truthy(self._tree_value(f"{base}/{n}/value"))
+                       for n in ("Solo", "SoloSafe", "Isolate"))
+
+    def _rewrite_send(self, ch: int, send_idx: int) -> bool:
+        """Write input send `send_idx` of input `ch` from the tree: its
+        gain, bypass, pre/post-fader rule, the fader, the mute and a solo
+        that silences the channel.  False when the send has no bus or
+        sub-param."""
+        base = f"{IN_BASE}/{ch}"
+        sub = self._send_sub(base, send_idx, _SEND_IDX_TO_SUB)
+        bus = self._input_bus(ch)
+        if sub is None or bus is None:
+            return False
+        muted = self._truthy(self._tree_value(f"{base}/Mute/value")) or \
+            self._solo_muted(ch)
+        self._write_send(bus, sub,
+                         self._input_send_linear(ch, send_idx, muted=muted),
+                         self._send_pan(f"{base}/sends/{send_idx}"))
+        return True
+
+    def _rewrite_sends_following(self, send_id: str) -> int:
+        """Rewrite every input send to bus `send_id` ("aux1", "cue2") whose
+        PostFaderOverride is -1 (it follows the bus's pre/post setting);
+        returns how many were written."""
+        count = 0
+        for ch in range(len(self._input_buses())):
+            if self._input_bus(ch) is None:
+                continue
+            base = f"{IN_BASE}/{ch}"
+            for send_idx in range(len(_SEND_IDX_TO_SUB)):
+                sbase = f"{base}/sends/{send_idx}"
+                sid = self._tree_value(f"{sbase}/ID/value")
+                if not isinstance(sid, str) or sid.lower() != send_id:
+                    continue
+                if self._tree_value(f"{sbase}/PostFaderOverride/value") \
+                        in (0, 1):
+                    continue
+                count += self._rewrite_send(ch, send_idx)
+        return count
+
+    def talkback_input(self) -> int | None:
+        """Tree index of the talkback mic input (IOType TalkbackMic; x4 22,
+        x8p 26), None on a model without one."""
+        for ch in range(self.input_count()):
+            if self._tree_value(f"{IN_BASE}/{ch}/IOType/value") == \
+                    "TalkbackMic":
+                return ch
+        return None
+
+    def write_input_sends(self, ch: int) -> int:
+        """Write every send of input `ch` from the tree, except the CUE
+        sends beyond /CueBusCount (init keeps those buses silent).
+        Returns how many were written."""
+        count_value = self._tree_value("/CueBusCount/value")
+        if count_value is None:
+            count_value = self._tree_value("/devices/0/CueBusCount/value")
+        try:
+            cues = int(count_value)
+        except (TypeError, ValueError):
+            cues = 2
+        count = 0
+        for send_idx in range(len(_SEND_IDX_TO_SUB)):
+            sbase = f"{IN_BASE}/{ch}/sends/{send_idx}"
+            if self._tree_value(f"{sbase}/Gain/value") is None:
+                continue
+            sid = str(self._tree_value(f"{sbase}/ID/value") or "").lower()
+            if sid.startswith("cue") and sid[3:].isdigit() and \
+                    int(sid[3:]) > cues:
+                continue
+            count += self._rewrite_send(ch, send_idx)
+        return count
 
     def _get_input_pan(self, ch: int) -> float:
         """Read current Pan value for an input from the state tree."""
@@ -3309,6 +3389,20 @@ class HardwareRouter:
             pan = self._get_input_pan(ch)
             mix = encode_mix_coeff(db, pan)
             mix_r = encode_mix_coeff_r(db, pan)
+            solo_muted = not muted and self._solo_muted(ch)
+            if muted or solo_muted:
+                # A muted strip (or one another channel's solo silences)
+                # keeps its bus silent: writing the fader would make it
+                # audible while Console shows it muted.  The tree holds
+                # the level; the unmute or the solo's end writes it.
+                log.info("HW BUS: input[%d].Fader = %.1f dB held (%s)", ch,
+                         db, "muted" if muted else "silenced by a solo")
+                if solo_muted and self._has_feature(UA_FEAT_BUS_SOLO_FLAG):
+                    self.backend.set_bus_fader(bus, linear, mix, mix_r,
+                                               solo_mute=True)
+                    self._write_partner_bus(ch, db, False, solo_mute=True)
+                self._write_post_fader_sends(ch, bus, db, True)
+                return
             log.info("HW BUS: input[%d].Fader = %.1f dB → linear=%.6f "
                      "mix=%.6f/%.6f (L/R) pan=%.2f (bus=0x%04x)",
                      ch, db, linear, mix, mix_r, pan, bus)
@@ -3360,6 +3454,15 @@ class HardwareRouter:
             fader_db = self._get_input_fader_db(ch)
             mix = encode_mix_coeff(fader_db, pan_f)
             mix_r = encode_mix_coeff_r(fader_db, pan_f)
+            muted = self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Mute/value"))
+            if muted or self._solo_muted(ch):
+                # As for the fader: a silent strip's pan waits in the tree
+                log.info("HW BUS: input[%d].%s = %.3f held (%s)", ch, control,
+                         pan_f, "muted" if muted else "silenced by a solo")
+                if not muted and self._has_feature(UA_FEAT_BUS_SOLO_FLAG):
+                    self.backend.set_bus_fader(bus, 0.0, mix, mix_r,
+                                               solo_mute=True)
+                return
             log.info("HW BUS: input[%d].%s = %.3f → mix=%.6f/%.6f (L/R) "
                      "fader=%.1fdB (bus=0x%04x)",
                      ch, control, pan_f, mix, mix_r, fader_db, bus)
@@ -3718,6 +3821,18 @@ class HardwareRouter:
                      "(bus=0x%04x sub=%d)", ch, send_idx, value, linear,
                      bus, sub)
             self._write_send(bus, sub, linear, self._send_pan(base))
+            return
+
+        if control == "PostFaderOverride":
+            # Pre (0) / post (1) / follow the bus (-1): the engine computes
+            # a post-fader send with the fader added, so switching rewrites
+            # the coefficient (the fader and mute count only when post)
+            log.info("HW BUS: input[%d].send[%d].PostFaderOverride = %r → "
+                     "%s-fader (bus=0x%04x sub=%d)", ch, send_idx, value,
+                     "post" if self._send_is_post_fader(
+                         f"/devices/0/inputs/{ch}", send_idx) else "pre",
+                     bus, sub)
+            self._rewrite_send(ch, send_idx)
             return
 
         log.debug("SET %s = %r (send control, unhandled)", path, value)
@@ -4189,6 +4304,14 @@ class HardwareRouter:
                                          hw_value)
             return
 
+        if control == "SendPostFader":
+            # The bus's PRE / POST: every input send to it that follows the
+            # bus (PostFaderOverride -1) changes its coefficient
+            n = self._rewrite_sends_following(f"aux{bus + 1}")
+            log.info("HW BUS: aux[%d].SendPostFader = %r → %d input sends "
+                     "rewritten", bus, value, n)
+            return
+
         log.debug("SET %s = %r (aux control, software-only)", path, value)
 
     def _handle_aux_send(self, path: str, bus: int, send_idx: int,
@@ -4374,6 +4497,14 @@ class HardwareRouter:
 
         if control in ("FuncSwitchMode", "FuncSwitch2Mode"):
             self._write_func_switch(path, control, value)
+            return
+
+        m = re.fullmatch(r"HP([1-4])SendPostFader", control)
+        if m:
+            # CUE n's pre/post default for the input sends that follow it
+            n = self._rewrite_sends_following(f"cue{m.group(1)}")
+            log.info("HW BUS: %s = %r → %d input sends rewritten", control,
+                     value, n)
             return
 
         if control == "SurroundMonitorMode":

@@ -291,6 +291,12 @@ pub enum PluginWindowButton {
 pub enum HitKind {
     /// Click toggles.
     Toggle,
+    /// Press toggles (on the way down, like [`HitKind::Toggle`]); releasing after holding it
+    /// for [`LATCH_HOLD`] or longer turns it off again with `Action::Set(id, 0.0)`: a click
+    /// latches, a long press is momentary. Console's TALK button (`Rack_Talkback`: mouse down
+    /// 0x1814975b0 writes the opposite value, mouse up 0x1814977a0 writes false after the
+    /// `Rack_ButtonOwner` hold time, 0.5 s at 0x1808f5b90).
+    Latch,
     /// Click activates (e.g. open an insert).
     Tap,
     /// Vertical drag over `span` points covers 0…1; `value` is the current value; double-click
@@ -352,10 +358,15 @@ struct Active {
     span: f32,
 }
 
+/// How long a [`HitKind::Latch`] press is held before its release turns it off.
+pub const LATCH_HOLD: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Pointer state machine. Hits are searched topmost-first (last registered wins).
 #[derive(Default)]
 pub struct Interaction {
     active: Option<Active>,
+    /// The [`HitKind::Latch`] control pressed, and when.
+    latched: Option<(ControlId, std::time::Instant)>,
 }
 
 impl Interaction {
@@ -363,6 +374,10 @@ impl Interaction {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
         match &hit.kind {
             HitKind::Toggle => vec![Action::Toggle(hit.id.clone())],
+            HitKind::Latch => {
+                self.latched = Some((hit.id.clone(), std::time::Instant::now()));
+                vec![Action::Toggle(hit.id.clone())]
+            }
             HitKind::Tap => {
                 let mut id = hit.id.clone();
                 if double {
@@ -399,10 +414,22 @@ impl Interaction {
     }
 
     pub fn pointer_up(&mut self) -> Vec<Action> {
-        match self.active.take() {
+        self.pointer_up_at(std::time::Instant::now())
+    }
+
+    /// [`Interaction::pointer_up`] at `now`: ends a drag; a [`HitKind::Latch`] held for
+    /// [`LATCH_HOLD`] turns off (`Action::Set(id, 0.0)`).
+    pub fn pointer_up_at(&mut self, now: std::time::Instant) -> Vec<Action> {
+        let mut out = match self.active.take() {
             Some(a) => vec![Action::GestureEnd(a.id)],
             None => vec![],
+        };
+        if let Some((id, at)) = self.latched.take()
+            && now.saturating_duration_since(at) >= LATCH_HOLD
+        {
+            out.push(Action::Set(id, 0.0));
         }
+        out
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -427,5 +454,22 @@ mod tests {
         assert_eq!(i.pointer_up(), vec![Action::GestureEnd(id())]);
         let reset = i.pointer_down(&hits, 10.0, 100.0, true);
         assert_eq!(reset[1], Action::Reset(id(), 0.78));
+    }
+
+    /// TALK: a click latches (toggle on press, nothing on release); held for 0.5 s it is
+    /// momentary (released: off).
+    #[test]
+    fn latch_click_toggles_and_a_long_press_is_momentary() {
+        let talk = ControlId { strip: "monitor".into(), control: Control::Talkback };
+        let hits = vec![Hit { rect: Rect::new(0.0, 0.0, 80.0, 40.0), id: talk.clone(), kind: HitKind::Latch }];
+        let mut i = Interaction::default();
+        assert_eq!(i.pointer_down(&hits, 10.0, 10.0, false), vec![Action::Toggle(talk.clone())]);
+        let pressed = std::time::Instant::now();
+        assert_eq!(i.pointer_up_at(pressed + std::time::Duration::from_millis(200)), vec![]);
+        assert_eq!(i.pointer_down(&hits, 10.0, 10.0, false), vec![Action::Toggle(talk.clone())]);
+        let held = std::time::Instant::now() + LATCH_HOLD;
+        assert_eq!(i.pointer_up_at(held), vec![Action::Set(talk.clone(), 0.0)]);
+        // A release with no press does nothing.
+        assert_eq!(i.pointer_up_at(held), vec![]);
     }
 }

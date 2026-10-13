@@ -83,7 +83,9 @@ const STRUCTURAL: [&str; 12] = [
 ];
 /// Properties whose change can change other properties' metadata (`48V/enabled`…). A new
 /// `EffectName` means the slot's `parameters` subtree was replaced.
-const METADATA_TRIGGERS: [&str; 3] = ["Stereo", "IOType", "EffectName"];
+/// A change of these re-reads the node's metadata (`48V/enabled` and the like): the Hi-Z jack
+/// too, which takes the preamp out of Mic.
+const METADATA_TRIGGERS: [&str; 4] = ["Stereo", "IOType", "EffectName", "HiZ"];
 const LOG_CAP: usize = 16_384;
 const REFRESH_DELAY: Duration = Duration::from_millis(100);
 /// `/UndoRedo`: an int whose `values` are `[{type:"undo"…},{type:"current"…},{type:"redo"…}]`.
@@ -193,6 +195,16 @@ impl Drop for Simulation {
     }
 }
 
+/// A write the engine refused.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refusal {
+    /// The property (`/SampleRate`).
+    pub path: String,
+    /// The engine's error text ("Unable to set value.").
+    pub message: String,
+    pub at: Instant,
+}
+
 type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// The engine state the UI binds to. See the module docs.
@@ -217,6 +229,11 @@ pub struct Store {
     refresh_inflight: Vec<(String, PendingReply)>,
     /// `get <property>/values` in flight (session lists).
     values_inflight: Vec<(String, PendingReply)>,
+    /// `get <property>/value` in flight: re-reads after the engine refused a write, with the
+    /// property's revision when the request went out.
+    value_inflight: Vec<(String, u64, PendingReply)>,
+    /// Writes the engine refused (`{"path", "error"}` replies), newest last, at most 16.
+    refusals: VecDeque<Refusal>,
     /// When to re-read `/UndoRedo/values` after a gesture.
     undo_values_due: Option<Instant>,
     /// Next `/MidiInputDevice/values` poll.
@@ -291,6 +308,8 @@ impl Store {
             refresh_due: HashMap::new(),
             refresh_inflight: Vec::new(),
             values_inflight: Vec::new(),
+            value_inflight: Vec::new(),
+            refusals: VecDeque::new(),
             undo_values_due: None,
             midi_poll_due: None,
             last_error: None,
@@ -554,6 +573,7 @@ impl Store {
             .poll(now, &self.model, sink_of(&self.sink, &self.handle));
         self.poll_refresh(now);
         self.poll_values();
+        self.poll_rereads();
         if self.model.topology_dirty {
             self.recompute_topology();
         }
@@ -604,11 +624,90 @@ impl Store {
                     self.apply_push(&p, v, now);
                 }
             }
-            Update::Error { path, message } => {
-                log::debug!("engine error {path}: {message}");
-            }
+            Update::Error { path, message } => self.refused(&path, message),
             Update::Other(_) => {}
         }
+    }
+
+    /// An engine error reply. For a property this client writes (a `set` the engine refused:
+    /// a sample rate the driver does not take, a clock source the unit does not offer), the
+    /// optimistic local value must not stay: the echo hold is dropped (a value the engine pushed
+    /// meanwhile lands at once) and the property is re-read (`get <prop>/value`), so the UI
+    /// shows what the engine has. Console itself only snaps back on a value push; the open-apollo
+    /// daemon sends one before its error, a UA engine may not.
+    fn refused(&mut self, path: &str, message: String) {
+        let prop = path::property_path(path.split('?').next().unwrap_or(path)).to_owned();
+        if !self.model.tree.has_property(&prop) {
+            log::debug!("engine error {path}: {message}");
+            return;
+        }
+        log::info!("engine refused {prop}: {message}");
+        self.refusals.push_back(Refusal { path: prop.clone(), message, at: Instant::now() });
+        while self.refusals.len() > 16 {
+            self.refusals.pop_front();
+        }
+        let mut props = vec![prop.clone()];
+        // The local dB read-out of a tapered control (FaderLevel for FaderLevelTapered).
+        if let Some((companion, _)) = crate::writer::companion(&prop, 0.0) {
+            props.push(companion);
+        }
+        for p in props {
+            if let Some(Hold { latest: Some(v), .. }) = self.model.holds.remove(&p) {
+                self.model.set_value(&p, v);
+            }
+            self.reread(&p);
+        }
+        if self.model.topology_dirty {
+            self.recompute_topology();
+        }
+    }
+
+    /// Re-reads a property's value (read-only `get <prop>/value`); the reply replaces the local
+    /// value in a later [`Store::drain`] unless the property changed since (a newer local write
+    /// or engine push wins). False when not live.
+    pub fn reread(&mut self, property: &str) -> bool {
+        let prop = path::property_path(property).to_owned();
+        if self.status != Status::Live || !self.model.tree.has_property(&prop) {
+            return false;
+        }
+        let Some(handle) = &self.handle else { return false };
+        if !self.value_inflight.iter().any(|(p, _, _)| *p == prop) {
+            let rev = self.path_revision(&prop);
+            let reply = handle.request(&path::value_path(&prop), false);
+            self.value_inflight.push((prop, rev, reply));
+        }
+        true
+    }
+
+    fn poll_rereads(&mut self) {
+        let mut done = Vec::new();
+        self.value_inflight.retain(|(prop, rev, reply)| match reply.try_take() {
+            None => true,
+            Some(Ok(msg)) => {
+                done.push((prop.clone(), *rev, msg.value().unwrap_or(Value::Null)));
+                false
+            }
+            Some(Err(e)) => {
+                log::debug!("re-read of {prop} failed: {e}");
+                false
+            }
+        });
+        for (prop, rev, v) in done {
+            // Replies are read apart from the push stream: a value written or pushed after the
+            // request is newer than the reply.
+            if v != Value::Null && self.path_revision(&prop) == rev {
+                self.model.holds.remove(&prop);
+                self.model.set_value(&prop, v);
+            }
+        }
+        if self.model.topology_dirty {
+            self.recompute_topology();
+        }
+    }
+
+    /// The writes the engine refused, newest last (at most 16).
+    pub fn refusals(&self) -> impl Iterator<Item = &Refusal> {
+        self.refusals.iter()
     }
 
     /// Applies pushed values as if they came from the engine (echo holds apply), then recomputes
@@ -884,6 +983,15 @@ impl Store {
 
     pub fn set_writes_enabled(&mut self, enabled: bool) {
         self.writer.writes_enabled = enabled;
+    }
+
+    /// Opens or closes both write gates: the writer's and the connection's (which
+    /// [`Options::allow_writes`] set at connect). The user's WRITES switch.
+    pub fn set_engine_writes(&mut self, enabled: bool) {
+        self.writer.writes_enabled = enabled;
+        if let Some(h) = &self.handle {
+            h.set_allow_writes(enabled);
+        }
     }
 
     /// Sets a property (`/a/FaderLevelTapered` or `/a/FaderLevelTapered/value`): the local value

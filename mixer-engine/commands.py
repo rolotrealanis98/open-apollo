@@ -710,9 +710,29 @@ class CommandEngine:
             done += self._apply_rel(base, clip["values"])
         return {"applied": done}
 
+    def _set_send_gain(self, send_base: str, db) -> None:
+        """A send's Gain (to the hardware) and its GainTapered companion
+        (tree only), so a client's send knob follows."""
+        from hardware import fader_db_to_tapered
+        tree = self.state
+        tree.set(f"{send_base}/Gain/value", db)
+        tapered = f"{send_base}/GainTapered/value"
+        if tree.path_exists(tapered):
+            try:
+                tree.set(tapered, fader_db_to_tapered(float(db)),
+                         hardware=False)
+            except (TypeError, ValueError):
+                pass
+
     def _copy_to_sends(self, obj: str, params: dict):
         """Copy a channel's fader and pan to its sends (a cue mix that
-        starts as the main mix).  `sends`: the send indexes, default all."""
+        starts as the main mix).  `sends`: the send indexes, default all.
+
+        On the root, Console's form `{"send": i}` (MAP.md, CopyToSends): for
+        every input but the talkback mic, send i gets the input's FaderLevel
+        and, on a mono input, its Pan."""
+        if obj in ("", "/"):
+            return self._copy_mix_to_send(params)
         base, kind, _ = self._channel(obj)
         if kind not in ("inputs", "auxs"):
             raise CommandError("no sends")
@@ -729,10 +749,37 @@ class CommandEngine:
                 continue
             sp = f"{base}/sends/{idx}"
             if fader is not None and tree.path_exists(f"{sp}/Gain/value"):
-                tree.set(f"{sp}/Gain/value", fader)
+                self._set_send_gain(sp, fader)
                 n += 1
             if pan is not None and tree.path_exists(f"{sp}/Pan/value"):
                 tree.set(f"{sp}/Pan/value", pan)
+        return {"sends": n}
+
+    def _copy_mix_to_send(self, params: dict):
+        try:
+            send = int(params.get("send"))
+        except (TypeError, ValueError):
+            raise CommandError("CopyToSends needs a send index")
+        tree = self.state
+        n = 0
+        ch = 0
+        while tree.path_exists(f"/devices/0/inputs/{ch}/Name/value"):
+            base = f"/devices/0/inputs/{ch}"
+            ch += 1
+            if tree.get_value(f"{base}/IOType/value") == "TalkbackMic":
+                continue
+            sp = f"{base}/sends/{send}"
+            fader = tree.get_value(f"{base}/FaderLevel/value")
+            if fader is None or not tree.path_exists(f"{sp}/Gain/value"):
+                continue
+            self._set_send_gain(sp, fader)
+            n += 1
+            pan = tree.get_value(f"{base}/Pan/value")
+            if pan is not None and not tree.get_value(f"{base}/Stereo/value") \
+                    and tree.path_exists(f"{sp}/Pan/value"):
+                tree.set(f"{sp}/Pan/value", pan)
+        if not n:
+            raise CommandError(f"no send {send}")
         return {"sends": n}
 
     # ── Persistent stores ──────────────────────────────────────────

@@ -60,6 +60,7 @@ impl EngineMixer {
                 name: if p.name.is_empty() { p.id.to_uppercase() } else { p.name.to_uppercase() },
                 level: self.f64_at(&p.gain()).unwrap_or(0.0),
                 muted: self.bool_at(&p.bypass()).unwrap_or(false),
+                pan: ua_engine::tapers::pan::knob_from_pan(self.f64_at(&p.pan()).unwrap_or(0.0)),
             })
             .collect()
     }
@@ -148,6 +149,7 @@ impl EngineMixer {
             // `/pluginscenes/0` (Type "pluginscenes").
             plugin_scenes: self.str_at("/pluginscenes/0/Type") == Some("pluginscenes"),
             scene,
+            clock_locked: self.bool_at("/ClockLocked"),
         }
     }
 
@@ -285,6 +287,22 @@ impl EngineMixer {
                     }
                     true
                 }
+                // A mono input's send pan (full send strips): knob 0…1 → `sends/k/Pan` −1…1.
+                Control::SendPan(k) => match self.input(&id.strip).and_then(|s| self.input_send_paths(s).into_iter().nth(*k as usize)) {
+                    Some(p) => {
+                        self.store.set(&p.pan(), ua_engine::tapers::pan::pan_from_knob(*v));
+                        true
+                    }
+                    None => false,
+                },
+                // TALK released after a long press (`HitKind::Latch`): momentary, off again.
+                Control::Talkback => {
+                    let p = self.store.topology().talkback.on();
+                    if self.bool_at(&p) != Some(*v >= 0.5) {
+                        self.store.set_now(&p, *v >= 0.5);
+                    }
+                    true
+                }
                 _ => false,
             };
         }
@@ -369,9 +387,13 @@ impl EngineMixer {
                     self.store.commit(&m.alt_mon_selection(), *k as i64);
                 }
             }
+            // TALK (`Rack_Talkback` mouse down 0x1814975b0): the opposite of the current value
+            // through `UAClnt_Values<bool>::Set`, with no /UndoRecording bracket (Rack.dll RE;
+            // not trace-verified). The engine's echo or push is what the button then shows.
             Control::Talkback => {
                 let p = self.store.topology().talkback.on();
-                self.toggle(&p, false);
+                let on = !self.bool_at(&p).unwrap_or(false);
+                self.store.set_now(&p, on);
             }
             // `Rack_Talkback` talkback_to_mons (0x181497377) → `/TalkbackInPhysicalCR` (registered
             // by MxClnt_UAD2MixerData 0x181b187ca; root on engine 12.0.0).
@@ -382,9 +404,11 @@ impl EngineMixer {
                     self.toggle(&p, false);
                 }
             }
+            // TALKBACK TO MONITOR (0x181489be0): toggles on press, unbracketed like TALK.
             Control::TalkbackToMonitor => {
                 let p = self.store.topology().talkback.in_physical_cr();
-                self.toggle(&p, false);
+                let on = !self.bool_at(&p).unwrap_or(false);
+                self.store.set_now(&p, on);
             }
             // Control-room SOURCE (`Rack_ControlRoom` cue_N/mon_source, 0x181b1fa7b):
             // `outputs/MON/MixInSource` "mon" | "cueN" (values on the x4: mon, cue1…cue4).
@@ -417,9 +441,11 @@ impl EngineMixer {
                     }
                 }
             }
+            // Settings' WRITES switch opens both gates: launched without `--writes` the
+            // connection refuses set / post too, so the writer alone would send nothing.
             Control::WritesEnabled => {
                 let on = self.store.writer().writes_enabled;
-                self.store.set_writes_enabled(!on);
+                self.store.set_engine_writes(!on);
             }
             // No engine path known (clear clips is a helper command; set-default is a preset op).
             Control::ClearClips => self.store.post("/ClearClips", Some(&ua_engine::Json::Object(Default::default()))),
