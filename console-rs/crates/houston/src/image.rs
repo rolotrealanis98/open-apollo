@@ -147,14 +147,51 @@ pub struct ImageCache {
     map: Mutex<HashMap<String, Option<Arc<ImageData>>>>,
     roots: Mutex<HashMap<String, PathBuf>>,
     runtime: Mutex<HashMap<String, (String, (u32, u32), u64)>>,
+    /// Code-drawn images under [`ImageCache::RASTER_SCHEME`]: key → (fingerprint, revision).
+    rasters: Mutex<HashMap<String, (u64, u64)>>,
 }
 
 impl ImageCache {
+    /// Scheme of code-drawn images ([`ImageCache::put_raster`]): plug-in graphs, rotated sprites.
+    pub const RASTER_SCHEME: &'static str = "runtime";
+
     /// Scheme for plug-in panel spec folders (`spec:<path relative to the spec folder>`).
     pub const SPEC_SCHEME: &'static str = "spec";
 
     pub fn new(resources: Resources) -> Self {
-        Self { resources, map: Mutex::new(HashMap::new()), roots: Mutex::new(HashMap::new()), runtime: Mutex::new(HashMap::new()) }
+        Self {
+            resources,
+            map: Mutex::new(HashMap::new()),
+            roots: Mutex::new(HashMap::new()),
+            runtime: Mutex::new(HashMap::new()),
+            rasters: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Stores a code-drawn image under `runtime:<name>` and returns its key. `fingerprint`
+    /// identifies the content: when it matches the stored image's, `draw` is not called and the
+    /// revision stays (renderers re-upload only on a new revision, see
+    /// [`ImageCache::runtime_revision`]). Keys are replaced in place, never accumulated; a None from
+    /// `draw` removes the image.
+    pub fn put_raster(&self, name: &str, fingerprint: u64, draw: impl FnOnce() -> Option<ImageData>) -> Option<String> {
+        let key = format!("{}:{name}", Self::RASTER_SCHEME);
+        let mut rasters = self.rasters.lock();
+        if rasters.get(&key).is_some_and(|(f, _)| *f == fingerprint) {
+            return self.map.lock().get(&key).and_then(|i| i.as_ref()).map(|_| key);
+        }
+        let image = draw().filter(|i| i.width > 0 && i.height > 0 && i.rgba.len() == (i.width * i.height * 4) as usize).map(Arc::new);
+        let good = image.is_some();
+        let revision = rasters.get(&key).map_or(1, |(_, n)| n.wrapping_add(1).max(1));
+        self.map.lock().insert(key.clone(), image);
+        rasters.insert(key.clone(), (fingerprint, revision));
+        good.then_some(key)
+    }
+
+    /// Drops the code-drawn images whose name starts with `prefix` (a closed window's).
+    pub fn drop_rasters(&self, prefix: &str) {
+        let full = format!("{}:{prefix}", Self::RASTER_SCHEME);
+        self.rasters.lock().retain(|k, _| !k.starts_with(&full));
+        self.map.lock().retain(|k, _| !k.starts_with(&full));
     }
 
     /// Bounded in-memory correction SVG; nothing is written to the asset directory.
@@ -176,6 +213,9 @@ impl ImageCache {
     }
 
     pub fn runtime_revision(&self,key:&str)->u64 {
+        if key.starts_with("runtime:") {
+            return self.rasters.lock().get(key).map_or(0, |(_, n)| *n);
+        }
         if !key.starts_with("runtime-correction:") {return 0}
         self.runtime.lock().get(key).map_or(0,|(_,_,n)| *n)
     }
@@ -270,6 +310,30 @@ fn render_correction_svg(svg:&str,size:(u32,u32))->Option<ImageData> {
         if p[3]>0 { for k in 0..3 { p[k]=((p[k] as u32*255+p[3] as u32/2)/p[3] as u32).min(255) as u8; } }
     }
     Some(ImageData{width:size.0,height:size.1,rgba})
+}
+
+#[cfg(test)]
+mod raster_tests {
+    use super::*;
+
+    #[test]
+    fn rasters_redraw_only_on_new_fingerprints() {
+        let cache = ImageCache::new(Resources { root: PathBuf::from("/nonexistent"), console_version: None });
+        let px = |v: u8| Some(ImageData { width: 1, height: 1, rgba: vec![v, v, v, 255] });
+        let key = cache.put_raster("plugin/x/0", 7, || px(10)).unwrap();
+        assert_eq!(key, "runtime:plugin/x/0");
+        assert_eq!(cache.runtime_revision(&key), 1);
+        assert_eq!(cache.get(&key).unwrap().rgba[0], 10);
+        assert_eq!(cache.put_raster("plugin/x/0", 7, || panic!("same fingerprint: no redraw")), Some(key.clone()));
+        assert_eq!(cache.runtime_revision(&key), 1);
+        cache.put_raster("plugin/x/0", 8, || px(20)).unwrap();
+        assert_eq!(cache.runtime_revision(&key), 2);
+        assert_eq!(cache.get(&key).unwrap().rgba[0], 20);
+        assert!(cache.put_raster("plugin/x/1", 1, || Some(ImageData { width: 2, height: 2, rgba: vec![0; 4] })).is_none(), "malformed");
+        cache.drop_rasters("plugin/x/");
+        assert_eq!(cache.runtime_revision(&key), 0);
+        assert!(cache.map.lock().get(&key).is_none());
+    }
 }
 
 #[cfg(test)]
