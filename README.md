@@ -174,6 +174,23 @@ The installer is a guided walkthrough that:
 5. Starts the mixer daemon
 6. Plays a test tone so you can verify audio output
 
+### Setup wizard
+
+`open-apollo-setup` (`console-rs/crates/oa-setup`) does the whole install from a window. It
+finds your own UAD install (a Windows partition, a Windows VM's disk image or a Wine prefix),
+asks for your password **once**, and always reinstalls cleanly: one privileged run
+(`scripts/setup-root.sh`) first checks the UAD install, then removes every trace of an earlier
+open-apollo install (every `ua_apollo` DKMS version, the daemon's units and drop-ins, system and
+user PipeWire/WirePlumber rules, udev rules, the extracted firmware, the imported art and the
+Console), then imports the Console art, extracts the DSP programs and firmware and builds the
+driver fresh. Afterwards it builds the Console as you. If the UAD install can't be used it
+stops before removing anything. "Keep my current install" skips the removal.
+
+```bash
+cargo build --release --manifest-path console-rs/Cargo.toml -p oa-setup -p oa-assets
+console-rs/target/release/open-apollo-setup          # --demo shows the flow and changes nothing
+```
+
 ### NixOS (Thunderbolt)
 
 Add to your `flake.nix` inputs:
@@ -194,10 +211,19 @@ Run `nixos-rebuild switch` — the module handles the kernel module build, `iomm
 ### Uninstall
 
 ```bash
-sudo bash scripts/uninstall.sh
+sudo bash scripts/uninstall.sh            # keeps the extracted firmware and your imported art
+sudo bash scripts/uninstall.sh --purge    # removes everything
 ```
 
-Removes driver, DKMS, all configs, services, and guides you through Apollo power-off for clean module unload.
+Removes every `ua_apollo` DKMS version and the modules they built, the mixer daemon's user units
+and drop-ins, system and per-user PipeWire/WirePlumber rules, the UCM2 profile, udev rules and
+helpers, the Console (`uaconsole`), old tray and launcher files, and a USB install's pieces. It
+stops PipeWire, unloads the driver (the Apollo can stay on), and ends with a check that lists
+anything still there (exit status 1 if a file is left). `--purge` also removes
+`/lib/firmware/universal-audio`, `/lib/firmware/ua_apollo`, `~/.local/share/open-apollo` and
+`~/.cache/open-apollo`. `--yes` asks nothing; `bash scripts/uninstall.sh --list` shows what is
+installed without root. Running it twice is fine. The setup wizard runs
+`uninstall.sh --yes --purge` before every install.
 
 ### Troubleshooting
 

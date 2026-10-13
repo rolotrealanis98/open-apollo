@@ -39,6 +39,22 @@ The script:
 | `--smoke-test` | after installing, render one frame offscreen to check the GPU and art |
 | `--uninstall` | remove the binary, launcher, menu entry and icon (a copied `Resources` folder is kept) |
 
+### With the setup wizard
+
+`open-apollo-setup` (crate `oa-setup`) builds and installs uaconsole for you at the end of a
+full install. Setup always reinstalls cleanly: one privileged run (`scripts/setup-root.sh`,
+one password prompt) removes every trace of an earlier open-apollo install, uaconsole and the
+imported art included (`uninstall.sh --yes --purge`), then imports the art, extracts the firmware
+and installs a freshly built driver; uaconsole is then built as you and the mixer daemon
+restarted so it sees the imported art. To remove everything by hand:
+`sudo bash scripts/uninstall.sh --purge` (`install-uaconsole.sh --uninstall` removes only
+uaconsole).
+
+```bash
+cargo build --release -p oa-setup -p oa-assets
+target/release/open-apollo-setup          # --demo: simulated install, nothing changes
+```
+
 ### Nix
 
 ```bash
