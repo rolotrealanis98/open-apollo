@@ -103,16 +103,23 @@ any package built from it, and uaconsole never downloads them. It reads them at 
 the UAD Console that you installed, in this order:
 
 1. `$CONSOLE_RESOURCES`
-2. a Wine install: `$WINEPREFIX` (default `~/wine-ua`) +
-   `drive_c/Program Files (x86)/Universal Audio/UAD Console/Resources`
+2. an imported or copied folder: `~/.local/share/open-apollo/console-resources`
+   (`oa-assets import` puts it there; see below)
 3. macOS: `/Applications/Universal Audio/UAD Console.app/Contents/Resources`
-4. a copied folder: `~/.local/share/open-apollo/console-resources`
+4. a Wine install: `$WINEPREFIX` (default `~/wine-ua`) +
+   `drive_c/Program Files (x86)/Universal Audio/UAD Console/Resources`
 
 Plug-in icons come from `Resources/Plug-In Icons` (Windows) or
 `/Library/Application Support/Universal Audio/Plug-In Icons` (macOS). They are optional.
 
 If you have none of these, get the `Resources` folder from your own UAD Console install:
 
+- **Windows partition (dual boot):** mount it read-only and let `oa-assets` find UAD Console:
+  `oa-assets scan`, then `oa-assets import`. `oa-assets mount /dev/…` mounts a partition
+  read-only for you.
+- **Windows VM:** install UAD in the VM, shut Windows down, then
+  `oa-assets attach <raw disk image>` (Omarchy: `~/.windows/data.img`), `oa-assets import`, and
+  `oa-assets detach <image>`.
 - **Wine:** install UA's Windows UAD Console into a Wine prefix (open-apollo's Wine tooling uses
   `~/wine-ua`). uaconsole finds it there. For another prefix, set `WINEPREFIX`.
 - **Copy:** copy the `Resources` folder from a Windows computer
@@ -122,6 +129,19 @@ If you have none of these, get the `Resources` folder from your own UAD Console 
 
 The copy is for your own use on your own machine. Don't share it or commit it.
 `bash scripts/install-uaconsole.sh --check` shows what uaconsole will find.
+
+**Firmware.** The driver's input strips and the USB init need UA's Console strip DSP modules,
+and USB Apollos need UA's FX3 boot images. open-apollo ships neither: `sudo oa-assets firmware
+--from <Windows root>` reads them from your UAD install (any root `scan` accepts; without
+`--from` it takes the first one found) and writes `dsp/<id>.bill` (0a5 0c2 0da 0db 0eb 12b
+0c9, the on-disk records unmodified), `ApolloSolo.bin`, `ApolloTwin.bin`, `ApolloTwinX.bin`
+and `manifest.json` to `/lib/firmware/universal-audio` (`--out DIR` puts them elsewhere).
+Only versions whose SHA-256 is in `crates/oa-assets/data/firmware-pins.json` (hashes only, no UA
+bytes) are written unless you pass `--accept-unknown`. Missing USB images are only a warning,
+since PCIe Apollos don't need them. Exit codes: 0 done, 1 a required module missing, 2 an
+unknown module version. Maintainers check a new UAD release with `oa-assets firmware --from
+<root> --verify-golden`, which re-extracts into a temp dir and compares every file with the
+pins. Like the Console art, these files are for your own machine only.
 
 ## Requirements
 

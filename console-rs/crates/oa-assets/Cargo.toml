@@ -1,0 +1,10 @@
+[package]
+name = "oa-assets"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Finds a UAD install on a Windows disk and imports its assets for console-rs"
+
+[dependencies]
+serde_json = "1.0.154"
+sha2 = "0.10.9"
