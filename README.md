@@ -1,7 +1,7 @@
 [![Release](https://img.shields.io/github/v/release/rolotrealanis98/open-apollo?style=flat-square)](https://github.com/rolotrealanis98/open-apollo/releases)
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg?style=flat-square)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04-E95420?style=flat-square&logo=ubuntu&logoColor=white)](https://github.com/rolotrealanis98/open-apollo/wiki/Hardware-Compatibility)
-[![Docs](https://img.shields.io/badge/docs-wiki-blue?style=flat-square)](https://github.com/rolotrealanis98/open-apollo/wiki)
+[![Docs](https://img.shields.io/badge/docs-install_guide-blue?style=flat-square)](docs/README.md)
 [![Installs](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fopen-apollo-api.rolotrealanis.workers.dev%2Fapi%2Fstats%3Fsource%3Duser&query=%24.total_installs&label=installs%20reported&style=flat-square)](https://open-apollo-api.rolotrealanis.workers.dev/)
 [![Issues](https://img.shields.io/github/issues/rolotrealanis98/open-apollo?style=flat-square)](https://github.com/rolotrealanis98/open-apollo/issues)
 
@@ -46,7 +46,8 @@ Each square is one thing UA's own drivers do (left), one task of the work plan (
 - **Desktop audio** — YouTube, system sounds, GNOME volume control all work through Apollo Monitor
 - **WebRTC capture** — clean audio in Chromium-based browsers (webcam mic tests, Discord web)
 - **pw-record/pw-play** — zero-dropout capture and playback verified
-- **Guided installer** — `sudo bash scripts/install.sh` with hardware validation gates + audio test
+- **Setup wizard** — `bash scripts/setup.sh`: finds your UAD install, asks for your password once, installs everything fresh
+- **Mixer console** — `uaconsole`, a native Linux rebuild of UA's UAD Console, drawn with the art from your own install
 
 ## What Works (Apollo Solo USB)
 
@@ -72,7 +73,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 | **DSP init ordering** | Documented | `usb-full-init.py` runs before `modprobe snd_usb_audio`; reversed from previous documentation |
 
 > [!NOTE]
-> USB support uses `sudo bash scripts/install-usb.sh`. See [USB Quick Start](#usb-quick-start-apollo-solo-usb) below.
+> USB support uses `sudo bash scripts/install-usb.sh`. See [USB Apollos](docs/install.md#usb-apollos) in the install guide.
 
 ## Known Issues
 
@@ -105,7 +106,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 ## Not Yet Implemented
 
-Talkback audio routing, virtual/monitor loopback, a complete console UI (a native console is in progress; see [Mixer Console](#mixer-console-experimental)), multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), plugin chain (UAD plugins require PACE licensing — not planned). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
+Talkback audio routing, virtual/monitor loopback, parts of the console (see [console-rs/WIRING.md](console-rs/WIRING.md) for what is wired), multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), and running UAD plug-ins on the Apollo's DSP (not supported). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
 
 ## Supported Devices
 
@@ -149,98 +150,46 @@ The issue is not the driver — it's that **Linux does not enumerate Thunderbolt
 
 If your Apollo uses a Thunderbolt 2 connector (Mini DisplayPort-shaped, not USB-C), you will likely hit this limitation. This project targets **Thunderbolt 3/4 Apollo models** (USB-C connector) on systems with native Thunderbolt 3 or 4 ports.
 
-## Quick Start
+## Install
 
-### Prerequisites
-
-- Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed, Linux Mint 22, Pop!_OS 24.04, Manjaro
-- Linux kernel with headers installed. The driver compiles clean (`W=1`) on 5.15, 6.1, 6.6, 6.8, 6.12, 7.0, 7.2 and 7.3-rc3; hardware testing is on 7.2.x and Ubuntu 24.04's 6.8, so 6.8 or newer is the safe choice
-- Thunderbolt 3 or 4 connection (see [Thunderbolt 2 note](#thunderbolt-2-devices-not-supported) below)
-- GCC, Make
-- Python 3.10+ (for mixer daemon)
-- `iommu=pt` kernel parameter required on most systems (see below)
-
-### Install
+You need a supported Apollo, a Linux distribution with a desktop, [Rust](https://rustup.rs)
+1.89 or newer, and **a UAD install you already have**. That can be Windows on another
+partition, a Windows VM, a Wine prefix or a folder copied from a Windows PC. open-apollo
+includes no Universal Audio files, so it reads what your Apollo needs from that install;
+[Getting a UAD install](docs/uad-install.md) explains each option.
 
 ```bash
 git clone https://github.com/rolotrealanis98/open-apollo.git
 cd open-apollo
-sudo bash scripts/install.sh
+bash scripts/setup.sh
 ```
 
-The installer is a guided walkthrough that:
-1. Installs dependencies, builds the driver, sets up DKMS
-2. Deploys PipeWire/WirePlumber/UCM2 configs
-3. Guides you through an Apollo power cycle for clean Thunderbolt initialization
-4. Loads the driver, verifies DSP handshake, sets up virtual I/O devices
-5. Starts the mixer daemon
-6. Plays a test tone so you can verify audio output
+`scripts/setup.sh` builds and starts the setup wizard. The wizard finds your UAD install and
+shows what it will do. It asks for your password once, removes any earlier open-apollo
+install, and then:
+- imports UAD Console's art and the plug-in panels;
+- extracts the DSP programs and firmware;
+- builds the driver with DKMS, sets up PipeWire and the mixer daemon;
+- builds the mixer console.
 
-### Setup wizard
+`bash scripts/setup.sh --demo` shows every page without changing anything.
 
-`open-apollo-setup` (`console-rs/crates/oa-setup`) does the whole install from a window. It
-finds your own UAD install (a Windows partition, a Windows VM's disk image or a Wine prefix),
-asks for your password **once**, and always reinstalls cleanly: one privileged run
-(`scripts/setup-root.sh`) first checks the UAD install, then removes every trace of an earlier
-open-apollo install (every `ua_apollo` DKMS version, the daemon's units and drop-ins, system and
-user PipeWire/WirePlumber rules, udev rules, the extracted firmware, the imported art, the
-plug-in panel specs and the Console), then imports the Console art, installs the plug-in panel
-specs and makes their art, extracts the DSP programs and firmware and builds the driver fresh.
-Afterwards it builds the Console as you. If the UAD install can't be used it stops before
-removing anything. "Keep my current install" skips the removal.
+The [install guide](docs/install.md) has the details: requirements, each wizard page, the
+command-line install (no desktop, or step by step), **USB Apollos**
+(`sudo bash scripts/install-usb.sh`), NixOS, updating, uninstalling, where every file goes,
+and troubleshooting.
 
-The plug-in panel specs (where each control of a plug-in's editor sits, about 1 MB) come from
-the [open-apollo-panels](https://github.com/rolotrealanis98/open-apollo-panels) release pinned in
-`configs/plugin-panels.conf`; `scripts/install-panels.sh` downloads it and refuses it unless its
-SHA-256 matches. The specs hold no art: `oa-assets plugins` makes that from your UAD install.
-Without the specs or the art, plug-in windows show a plain parameter list.
+## Using open-apollo
 
-```bash
-cargo build --release --manifest-path console-rs/Cargo.toml -p oa-setup -p oa-assets
-console-rs/target/release/open-apollo-setup          # --demo shows the flow and changes nothing
-```
+### Mixer console
 
-### NixOS (Thunderbolt)
-
-Add to your `flake.nix` inputs:
-
-```nix
-inputs.open-apollo.url = "github:rolotrealanis98/open-apollo";
-```
-
-Then in your `configuration.nix`:
-
-```nix
-imports = [ inputs.open-apollo.nixosModules.default ];
-hardware.ua-apollo.enable = true;
-```
-
-Run `nixos-rebuild switch` — the module handles the kernel module build, `iommu=pt`, Thunderbolt (bolt), PipeWire, and required packages.
-
-### Uninstall
-
-```bash
-sudo bash scripts/uninstall.sh            # keeps the extracted firmware and your imported art
-sudo bash scripts/uninstall.sh --purge    # removes everything
-```
-
-Removes every `ua_apollo` DKMS version and the modules they built, the mixer daemon's user units
-and drop-ins, system and per-user PipeWire/WirePlumber rules, the UCM2 profile, udev rules and
-helpers, the Console (`uaconsole`), old tray and launcher files, and a USB install's pieces. It
-stops PipeWire, unloads the driver (the Apollo can stay on), and ends with a check that lists
-anything still there (exit status 1 if a file is left). `--purge` also removes
-`/lib/firmware/universal-audio`, `/lib/firmware/ua_apollo`, `~/.local/share/open-apollo` and
-`~/.cache/open-apollo`. `--yes` asks nothing; `bash scripts/uninstall.sh --list` shows what is
-installed without root. Running it twice is fine. The setup wizard runs
-`uninstall.sh --yes --purge` before every install.
-
-### Troubleshooting
-
-If audio stops working after using a JACK app (Ardour, etc):
-```bash
-systemctl --user restart pipewire wireplumber pipewire-pulse
-apollo-setup-io
-```
+Open **Open Apollo Console** from your app menu. `uaconsole` is a native Linux rebuild of UA's
+UAD Console: the mixer, its windows and menus, meters, and plug-in windows drawn from the
+open-apollo-panels specs. It talks to the mixer daemon on 127.0.0.1:4710. The menu entry
+controls your Apollo (`uaconsole --writes`). Plain `uaconsole` only shows the mixer until you
+turn on Settings › WRITES. See [console-rs/README.md](console-rs/README.md) for options, the Nix package
+and troubleshooting, and [console-rs/WIRING.md](console-rs/WIRING.md) for which controls are
+wired.
 
 ### Virtual I/O devices (Apollo x4)
 
@@ -258,34 +207,19 @@ After running `apollo-setup-io`, these devices are available in PipeWire:
 | Apollo Line Out 1+2 | Sink (playback) | Stereo |
 | Apollo Line Out 3+4 | Sink (playback) | Stereo |
 
-### USB Quick Start (Apollo Solo USB)
+The Apollo Solo USB gets Mic 1, Mic 2, Mic 1+2, Monitor and Headphone devices.
+
+### Mixer daemon
+
+The installer runs the daemon as a systemd user unit (`systemctl --user status ua-mixer-daemon`).
+By hand:
 
 ```bash
-git clone https://github.com/rolotrealanis98/open-apollo.git
-cd open-apollo
-sudo bash scripts/install-usb.sh
+python3 mixer-engine/ua_mixer_daemon.py -v
 ```
 
-The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. It uses the USB boot image and the DSP modules extracted from your own UAD install (by the setup wizard or `oa-assets firmware`) and tells you how to extract them if they're missing.
-
-After install, the following PipeWire devices are available:
-
-| Device | Type | Channels |
-|--------|------|----------|
-| Apollo Solo USB Mic 1 | Source (capture) | Mono |
-| Apollo Solo USB Mic 2 | Source (capture) | Mono |
-| Apollo Solo USB Mic 1+2 | Source (capture) | Stereo |
-| Apollo Solo USB Monitor | Sink (playback) | Stereo |
-| Apollo Solo USB Headphone | Sink (playback) | Stereo |
-
-### Start the Mixer Daemon
-
-```bash
-cd mixer-engine
-python3 ua_mixer_daemon.py -v
-```
-
-The daemon exposes TCP:4710, TCP:4720, and WS:4721 for mixer control from any client application.
+It serves TCP 4710 (Console protocol) and TCP 4720 (mixer protocol). The WebSocket API on 4721
+is off unless you start the daemon with `--ws`.
 
 ### Network and firewall
 
@@ -295,15 +229,27 @@ Console or ConsoleLink on another machine reaches the daemon over the network. O
 |------|-----|
 | TCP 4710 | Console / ConsoleLink |
 | TCP 4720 | Mixer protocol |
-| TCP 4721 | WebSocket (UA Connect) |
+| TCP 4721 | WebSocket (only with `--ws`) |
 | UDP 5353 | mDNS discovery (needs `avahi-daemon` running) |
 
 ```bash
-sudo ufw allow from 192.168.1.0/24 to any port 4710,4720,4721 proto tcp
+sudo ufw allow from 192.168.1.0/24 to any port 4710,4720 proto tcp
 sudo ufw allow from 192.168.1.0/24 to any port 5353 proto udp
 ```
 
 Use your own subnet. Run the daemon with `--no-bonjour` if you do not want it announced on the network.
+
+### Troubleshooting
+
+If audio stops working after using a JACK app (Ardour, etc):
+
+```bash
+systemctl --user restart pipewire wireplumber pipewire-pulse
+apollo-setup-io
+```
+
+More in the [install guide](docs/install.md#troubleshooting) and on the
+[wiki](https://github.com/rolotrealanis98/open-apollo/wiki/Troubleshooting).
 
 ### Debug logging
 
@@ -315,69 +261,78 @@ echo 'module ua_apollo +p' | sudo tee /sys/kernel/debug/dynamic_debug/control
 
 Or enable them from load time with `dyndbg=+p` on the modprobe line (`sudo modprobe ua_apollo dyndbg=+p`, or `options ua_apollo dyndbg=+p` in `/etc/modprobe.d/`).
 
-### Mixer Console (experimental)
-
-`uaconsole` is a native Linux rebuild of UA's UAD Console mixer that talks to the daemon on
-127.0.0.1:4710, so you no longer need to run the Windows Console under Wine. Install it as your
-normal user:
+### Uninstall
 
 ```bash
-bash scripts/install-uaconsole.sh
+sudo bash scripts/uninstall.sh            # keeps the extracted firmware and your imported art
+sudo bash scripts/uninstall.sh --purge    # removes everything
 ```
 
-Then open it from your app menu (**Open Apollo Console**) or with `uaconsole`. It draws UA's art from your own UAD Console install; open-apollo does not
-include it. See [console-rs/README.md](console-rs/README.md) for requirements, Nix and
-troubleshooting.
+See the [install guide](docs/install.md#updating-reinstalling-and-uninstalling) for what it
+removes.
 
 ## Architecture
 
 ```
-┌──────────────┐   ┌──────────────┐
-│ Control App  │   │ Control App  │
-│ (TCP:4710)   │   │ (TCP:4720)   │
-└──────┬───────┘   └──────┬───────┘
-       │                  │
-       └────────┬─────────┘
-                │
-       ┌────────▼────────┐
-       │  Mixer Daemon   │
-       │  (Python)       │
-       └────────┬────────┘
-                │ ioctl
-       ┌────────▼────────┐
-       │  Kernel Driver  │
-       │  (ua_apollo.ko) │
-       └────────┬────────┘
-                │ MMIO
-       ┌────────▼────────┐
-       │  Apollo Hardware │
-       │  (BAR0 regs)    │
-       └─────────────────┘
+  ┌───────────────────┐     ┌──────────────────────────┐
+  │ uaconsole         │     │ Console / ConsoleLink on │
+  │ (native console)  │     │ another machine          │
+  └─────────┬─────────┘     └────────────┬─────────────┘
+            │ TCP 4710                   │ TCP 4710 / 4720
+            └─────────────┬──────────────┘
+                 ┌────────▼────────┐
+                 │  Mixer daemon   │  state tree, routing, meters
+                 │  (Python)       │
+                 └────────┬────────┘
+                          │ ioctl
+  PipeWire / ALSA ──► ┌───▼────────────┐ ◄── /lib/firmware/universal-audio
+                      │ Kernel driver  │     (extracted by oa-assets)
+                      │ (ua_apollo.ko) │
+                      └───────┬────────┘
+                              │ MMIO, DMA, DSP ring
+                      ┌───────▼────────┐
+                      │ Apollo         │
+                      └────────────────┘
 ```
+
+Setup runs on the side: `scripts/setup.sh` starts the wizard (`open-apollo-setup`). The
+wizard runs `scripts/setup-root.sh` once as root, which uses `oa-assets` to read your UAD
+install and `install.sh` to build the driver. More in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Components
 
 | Component | Path | Description |
 |-----------|------|-------------|
-| **Driver** | `driver/` | Linux PCIe kernel module — DMA, ALSA, DSP ring buffer, preamp control |
-| **Mixer Daemon** | `mixer-engine/` | TCP:4710 + TCP:4720 + WS:4721 daemon — state tree, hardware routing, metering |
-| **Console** | `console-rs/` | Native mixer console (`uaconsole`), experimental — see [console-rs/README.md](console-rs/README.md) |
-| **Configs** | `configs/` | PipeWire, WirePlumber, and UCM2 configuration profiles |
-| **Tools** | `tools/contribute/` | Device probe and capture scripts for community contributions |
+| **Driver** | `driver/` | Linux PCIe kernel module: DMA, ALSA, DSP ring buffer, preamp control |
+| **Mixer daemon** | `mixer-engine/` | TCP 4710 + 4720 (WebSocket 4721 with `--ws`): state tree, hardware routing, metering |
+| **Console** | `console-rs/` | `uaconsole`, the native mixer console ([README](console-rs/README.md)) |
+| **Setup wizard** | `console-rs/crates/oa-setup/`, `scripts/setup.sh` | `open-apollo-setup`: the guided install |
+| **Importer** | `console-rs/crates/oa-assets/` | `oa-assets`: reads your UAD install (Console art, plug-in art, firmware, DSP modules) |
+| **Installers** | `scripts/` | `setup-root.sh`, `install.sh`, `install-usb.sh`, `install-panels.sh`, `install-uaconsole.sh`, `uninstall.sh` |
+| **Configs** | `configs/` | PipeWire, WirePlumber, UCM2 and udev configuration |
+| **USB stack** | `tools/uausb/`, `tools/usb-full-init.py` | Apollo USB bring-up, built from your extracted DSP modules |
+| **Tools** | `tools/` | Device reports and self-tests ([TESTING.md](tools/TESTING.md)), the repo guard (`check-clean-repo.py`) |
+
+Plug-in panel specs live in their own repository,
+[open-apollo-panels](https://github.com/rolotrealanis98/open-apollo-panels).
 
 ## Documentation
 
-Full documentation is on the **[GitHub wiki](https://github.com/rolotrealanis98/open-apollo/wiki)**, including:
+In this repository ([docs/README.md](docs/README.md) lists everything):
 
-- [Installation](https://github.com/rolotrealanis98/open-apollo/wiki/Installation) — build, install, configure, USB install
-- [Supported devices](https://github.com/rolotrealanis98/open-apollo/wiki/Supported-Devices) — model compatibility table
-- [Troubleshooting](https://github.com/rolotrealanis98/open-apollo/wiki/Troubleshooting) — symptoms, causes, fixes
-- [Architecture overview](https://github.com/rolotrealanis98/open-apollo/wiki/Architecture-Overview) — how the pieces fit together
-- [Register map](https://github.com/rolotrealanis98/open-apollo/wiki/Register-Map) — BAR0 hardware register documentation
-- [DSP protocol](https://github.com/rolotrealanis98/open-apollo/wiki/DSP-Protocol) — ring buffer commands and settings batch protocol
-- [How to contribute](https://github.com/rolotrealanis98/open-apollo/wiki/How-to-Contribute) — testing, device captures, code contributions
+- [Install guide](docs/install.md): requirements, the setup wizard, command-line and USB installs, NixOS, uninstalling, troubleshooting
+- [Getting a UAD install](docs/uad-install.md): dual boot, a Windows VM, Wine, or a copied folder
+- [Mixer console](console-rs/README.md) and [what it controls](console-rs/WIRING.md)
+- [Testing your Apollo](tools/TESTING.md): device reports for models we haven't verified
+- [Architecture](ARCHITECTURE.md) and [contributing](CONTRIBUTING.md)
+- [Status map](docs/status/): what is done, per area and per model
+- [NOTICE.md](NOTICE.md): what open-apollo contains, and what it reads from your install
 
-The wiki is the only copy of the documentation. Edit pages there directly; no PR needed.
+The [GitHub wiki](https://github.com/rolotrealanis98/open-apollo/wiki) has the hardware
+reference: [register map](https://github.com/rolotrealanis98/open-apollo/wiki/Register-Map),
+[DSP protocol](https://github.com/rolotrealanis98/open-apollo/wiki/DSP-Protocol),
+[supported devices](https://github.com/rolotrealanis98/open-apollo/wiki/Supported-Devices) and
+[how to contribute](https://github.com/rolotrealanis98/open-apollo/wiki/How-to-Contribute).
 
 Install telemetry from the installers' opt-in reports is public at the
 **[install dashboard](https://open-apollo-api.rolotrealanis.workers.dev/)**:
@@ -395,7 +350,7 @@ for that device.
 
 ### Quick contribution path
 
-1. Install the driver (`sudo bash scripts/install.sh`)
+1. Install open-apollo (`bash scripts/setup.sh`, see [Install](#install))
 2. Run `tools/apollo-report.sh`, then `tools/apollo-selftest.sh` (details in [tools/TESTING.md](tools/TESTING.md))
 3. [Submit a device report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml) with the report file attached
 
