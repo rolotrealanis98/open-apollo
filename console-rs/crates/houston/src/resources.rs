@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resources {
     pub root: PathBuf,
-    /// Console version, when an Info.plist sits next to (macOS) or inside (copy) the folder.
+    /// Console version, from an Info.plist next to (macOS) or inside (copy) the folder, or
+    /// from the `manifest.json` that `oa-assets import` writes next to `console-resources`.
     pub console_version: Option<String>,
 }
 
@@ -20,10 +21,15 @@ impl Resources {
             }
         }
         let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
+        let data = std::env::var("XDG_DATA_HOME")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".local/share"));
+        out.push(data.join("open-apollo/console-resources"));
+        out.push(PathBuf::from("/Applications/Universal Audio/UAD Console.app/Contents/Resources"));
         let prefix = std::env::var("WINEPREFIX").map(PathBuf::from).unwrap_or_else(|_| home.join("wine-ua"));
         out.push(prefix.join("drive_c/Program Files (x86)/Universal Audio/UAD Console/Resources"));
-        out.push(PathBuf::from("/Applications/Universal Audio/UAD Console.app/Contents/Resources"));
-        out.push(home.join(".local/share/open-apollo/console-resources"));
         out
     }
 
@@ -39,7 +45,8 @@ impl Resources {
         let version = [path.parent().map(|p| p.join("Info.plist")), Some(path.join("Info.plist"))]
             .into_iter()
             .flatten()
-            .find_map(|plist| plist_short_version(&plist));
+            .find_map(|plist| plist_short_version(&plist))
+            .or_else(|| path.parent().and_then(|p| imported_version(&p.join("manifest.json"))));
         Some(Self { root: path.to_path_buf(), console_version: version })
     }
 
@@ -64,6 +71,12 @@ impl Resources {
         }
         PathBuf::from("/Library/Application Support/Universal Audio/Plug-In Icons")
     }
+}
+
+/// `console.version` from an `oa-assets` manifest (Windows Console has no Info.plist).
+fn imported_version(manifest: &Path) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_slice(&std::fs::read(manifest).ok()?).ok()?;
+    json["console"]["version"].as_str().map(str::to_string)
 }
 
 /// Minimal XML-plist scrape for `CFBundleShortVersionString` (binary plists are skipped).

@@ -103,16 +103,23 @@ any package built from it, and uaconsole never downloads them. It reads them at 
 the UAD Console that you installed, in this order:
 
 1. `$CONSOLE_RESOURCES`
-2. a Wine install: `$WINEPREFIX` (default `~/wine-ua`) +
-   `drive_c/Program Files (x86)/Universal Audio/UAD Console/Resources`
+2. an imported or copied folder: `~/.local/share/open-apollo/console-resources`
+   (`oa-assets import` puts it there; see below)
 3. macOS: `/Applications/Universal Audio/UAD Console.app/Contents/Resources`
-4. a copied folder: `~/.local/share/open-apollo/console-resources`
+4. a Wine install: `$WINEPREFIX` (default `~/wine-ua`) +
+   `drive_c/Program Files (x86)/Universal Audio/UAD Console/Resources`
 
 Plug-in icons come from `Resources/Plug-In Icons` (Windows) or
 `/Library/Application Support/Universal Audio/Plug-In Icons` (macOS). They are optional.
 
 If you have none of these, get the `Resources` folder from your own UAD Console install:
 
+- **Windows partition (dual boot):** mount it read-only and let `oa-assets` find UAD Console:
+  `oa-assets scan`, then `oa-assets import`. `oa-assets mount /dev/…` mounts a partition
+  read-only for you.
+- **Windows VM:** install UAD in the VM, shut Windows down, then
+  `oa-assets attach <raw disk image>` (Omarchy: `~/.windows/data.img`), `oa-assets import`, and
+  `oa-assets detach <image>`.
 - **Wine:** install UA's Windows UAD Console into a Wine prefix (open-apollo's Wine tooling uses
   `~/wine-ua`). uaconsole finds it there. For another prefix, set `WINEPREFIX`.
 - **Copy:** copy the `Resources` folder from a Windows computer
