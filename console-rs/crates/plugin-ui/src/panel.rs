@@ -2596,5 +2596,15 @@ fn draw_text(ui: &mut Ui, text: &str, t: Option<&spec::TextStyle>, r: Rect, opac
     } else {
         (readout::wrap(text, width, size, mono, bold, lines).join("\n"), size)
     };
+    // The renderer centres the block vertically; `valign` top/bottom moves a block of n lines
+    // (one face height each) to the frame's edge.
+    let r = match t.and_then(|t| t.valign.as_deref()) {
+        Some(v @ ("top" | "bottom")) => {
+            let (a, d) = houston::fonts::face_metrics(family, bold, false).unwrap_or((0.8, 0.2));
+            let block = (text.split('\n').count() as f32 * size * (a + d) * scale).min(r.h);
+            if v == "top" { Rect::new(r.x, r.y, r.w, block) } else { Rect::new(r.x, r.max_y() - block, r.w, block) }
+        }
+        _ => r,
+    };
     ui.text(&text, TextStyle { family: family.into(), size: size * scale, bold, italic: false, color }, r, align);
 }

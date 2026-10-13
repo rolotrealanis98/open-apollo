@@ -20,6 +20,7 @@ Everything below is implemented in `plugin-ui` (`spec.rs`, `library.rs`, `recipe
 | `text.stringRef` | `elements[].text` | A texts-recipe id (`dll-string`). The imported text is shown instead of `string`, or `""` until it is imported. `text.string` is limited to short labels (48 characters at most, no newline). |
 | `parameters[].stepCount`, `parameters[].stepsRef` | `parameters[]` | Withheld step labels (`steps: null`). Labels resolve in this order: the spec's labels; the imported `stepsRef` list, padded from the engine's labels; the engine's labels; then `"1"…"N"`. `steps()` is never below `stepCount`. |
 | `text.font` | `text` styles | The font family, a fact such as `"Arial"`. The default is Helvetica, or Menlo for monospaced text. The renderer substitutes a metric-compatible face (Helvetica → Nimbus Sans, Arial → Liberation Sans). |
+| `text.valign` | `text` styles | `top`, `center` (default) or `bottom`: where the block of lines sits in the frame (multi-line `stringRef` descriptions start at the top). |
 | `text.fit` | `text` styles | What a single line wider than its frame does: `shrink` (the default, down to half size) or `squeeze` (JUCE fitted text: compressed horizontally to 70 %, then truncated with "..."). |
 | New element kinds | `elements[].kind` | `toolbar`, `label`, `shape` and `lamp` (§3). A schema-1 runtime ignores them. |
 | Removed | `_images`, `provenance`, `notes`, `todo`, `meters`, `meterSources.*.provenance` | Private metadata, never read. |

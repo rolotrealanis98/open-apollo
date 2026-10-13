@@ -509,3 +509,28 @@ fn manifest_readiness_gates_the_panel() {
     }
     std::fs::remove_dir_all(specs.parent().unwrap()).ok();
 }
+
+#[test]
+fn text_valign_and_squeeze() {
+    let spec = r##"{"schema": 2, "effectName": "UAD T", "namePattern": "T", "size": {"w": 200, "h": 100}, "parameters": [],
+      "elements": [
+        {"id": "top", "kind": "label", "x": 10, "y": 10, "w": 100, "h": 60, "text": {"string": "one two", "size": 10, "lines": 0, "valign": "top", "font": "Helvetica"}},
+        {"id": "sq", "kind": "label", "x": 10, "y": 80, "w": 20, "h": 12, "text": {"string": "a long caption", "size": 10, "fit": "squeeze"}},
+        {"id": "sh", "kind": "label", "x": 100, "y": 80, "w": 20, "h": 12, "text": {"string": "a long caption", "size": 10}}]}"##;
+    let panel = PluginPanel::with_sprites(Arc::new(PluginSpec::from_json(spec).unwrap()), SLOT, |_| None);
+    let params = MockParams::default();
+    let assets = assets();
+    let ui = build(&panel, &assets, &params);
+    let draws: Vec<(String, f32, Rect)> = ui
+        .list
+        .items
+        .iter()
+        .filter_map(|d| {
+            if let Draw::Text { text, style, rect, .. } = d { Some((text.clone(), style.size, *rect)) } else { None }
+        })
+        .collect();
+    let (_, _, top) = &draws[0];
+    assert_eq!((top.y, top.h), (10.0, 10.0), "one Helvetica line (ascent + descent = 1 em) at the top of the frame");
+    assert_eq!(draws[1].1, 10.0, "squeeze keeps the size; the renderer compresses the line");
+    assert!(draws[2].1 < 10.0, "shrink (default) reduces the size");
+}

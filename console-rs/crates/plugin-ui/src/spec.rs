@@ -437,6 +437,9 @@ pub struct TextStyle {
     /// is `squeeze`d horizontally (JUCE's fitted text: down to 70 %, then "...").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<String>,
+    /// Schema 2: `top` | `center` (default) | `bottom`: where a block of lines sits in the frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valign: Option<String>,
     /// With `value`: print `names[round(value)]` (empty out of range).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub names: Option<Vec<String>>,
