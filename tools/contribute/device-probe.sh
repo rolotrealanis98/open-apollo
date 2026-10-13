@@ -6,7 +6,9 @@
 # that you can review. Optionally uploads the report to the Open Apollo API.
 #
 # Usage:
-#   ./device-probe.sh [--output path/to/report.json]
+#   ./device-probe.sh [--output path/to/report.json] [--send]
+#   (--send uploads the report without asking; otherwise it is asked at a
+#   terminal and never sent without one)
 
 set -euo pipefail
 
@@ -33,15 +35,20 @@ echo ""
 # Parse arguments
 # ============================================================================
 OUTPUT=""
+SEND=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --output)
             OUTPUT="$2"
             shift 2
             ;;
+        --send)
+            SEND=1
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--output path/to/report.json]"
+            echo "Usage: $0 [--output path/to/report.json] [--send]"
             exit 1
             ;;
     esac
@@ -258,12 +265,13 @@ echo ""
 # ============================================================================
 # Telemetry — opt-in upload
 # ============================================================================
+# Opt-in only: sent when the user says yes at a terminal or passed --send.
+# No terminal means no.
 ANSWER="n"
-if [ -t 0 ]; then
-    read -rp "Help improve Open Apollo — send this device report anonymously? [y/N] " ANSWER
-else
-    # Non-interactive (piped, SSH, etc.) — auto-send
+if [ "$SEND" = "1" ]; then
     ANSWER="y"
+elif [ -t 0 ]; then
+    read -rp "Help improve Open Apollo — send this device report anonymously? [y/N] " ANSWER
 fi
 
 if [[ "$ANSWER" =~ ^[Yy] ]]; then
@@ -280,6 +288,7 @@ if [[ "$ANSWER" =~ ^[Yy] ]]; then
     fi
 else
     echo "No data sent. Report saved locally at $OUTPUT"
+    [ -t 0 ] || echo "To send it: re-run with --send"
 fi
 
 echo ""

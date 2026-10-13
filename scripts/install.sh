@@ -23,6 +23,7 @@ SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 SKIP_INIT=0
 NO_DKMS=0
 ASSUME_YES=0
+SEND_REPORT=0
 # Only main() parses arguments, so sourcing this file (tests do) is
 # side-effect free.
 parse_args() {
@@ -32,6 +33,7 @@ parse_args() {
             --skip-init) SKIP_INIT=1 ;;
             --no-dkms)   NO_DKMS=1 ;;
             -y|--yes)    ASSUME_YES=1 ;;
+            --send-report) SEND_REPORT=1 ;;
             -h|--help)
                 cat <<EOF
 Usage: sudo bash scripts/install.sh [OPTIONS]
@@ -41,7 +43,12 @@ Options:
   --no-dkms     Skip DKMS setup
   -y, --yes     Ask nothing (for GUIs and scripts): take every question's
                 default answer, skip the power-cycle pause and the audio
-                test, and keep the install report local (never uploaded)
+                test; the install report stays local unless
+                --send-report is given too
+  --send-report Upload the anonymous install report at the end (opt-in).
+                Without it the report is uploaded only if you answer yes
+                when asked at a terminal; otherwise it stays in
+                /tmp/open-apollo-install-report.json
   -h, --help    Show this help
 
 Steps performed:
@@ -53,7 +60,7 @@ Steps performed:
   6. Load/verify the driver if Apollo hardware detected
      and enable the mixer daemon (systemd user unit)
   7. Generate install report
-  8. Opt-in anonymous telemetry
+  8. Opt-in anonymous install report (asked at a terminal, or --send-report)
 EOF
                 exit 0
                 ;;
@@ -1186,21 +1193,20 @@ with open(e["REPORT_FILE"], "w") as f:
 telemetry_prompt() {
     header "Telemetry"
 
+    # Opt-in only: the report is sent when the user says yes at a terminal
+    # or passed --send-report.  No terminal, or --yes, means no.
     local answer="n"
-    if [ "$ASSUME_YES" = "1" ]; then
-        answer="n"    # --yes takes the [y/N] default
-    elif [ -t 0 ]; then
+    if [ "$SEND_REPORT" = "1" ]; then
+        answer="y"
+    elif [ "$ASSUME_YES" != "1" ] && [ -t 0 ]; then
         echo ""
         read -rp "Help improve Open Apollo — send anonymous install report? [y/N] " answer
-    else
-        # Non-interactive (piped sudo, SSH, etc.) — auto-send
-        answer="y"
     fi
 
     if [[ "$answer" =~ ^[Yy] ]]; then
         # Optional GitHub username for follow-up
         local gh_user=""
-        if [ -t 0 ]; then
+        if [ "$ASSUME_YES" != "1" ] && [ -t 0 ]; then
             echo ""
             read -rp "Optional: GitHub username for follow-up if we spot an issue (Enter to skip): " gh_user
         fi
@@ -1227,6 +1233,7 @@ with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
         fi
     else
         info "No data sent. Report saved locally at $REPORT_FILE"
+        [ -t 0 ] || info "To send it: re-run with --send-report"
     fi
 }
 

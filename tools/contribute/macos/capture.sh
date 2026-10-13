@@ -9,7 +9,9 @@
 # See WHAT-THIS-DOES.md for full details on what this captures and why.
 #
 # Usage:
-#   sudo ./capture.sh [--output path/to/capture.json]
+#   sudo ./capture.sh [--output path/to/capture.json] [--seconds N] [--send]
+#   (--send uploads the capture without asking; otherwise it is asked at a
+#   terminal and never sent without one)
 
 set -euo pipefail
 
@@ -80,12 +82,17 @@ echo ""
 # Parse arguments
 # ============================================================================
 OUTPUT=""
+SEND=0
 CAPTURE_SECONDS=30
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --output)
             OUTPUT="$2"
             shift 2
+            ;;
+        --send)
+            SEND=1
+            shift
             ;;
         --seconds)
             CAPTURE_SECONDS="$2"
@@ -331,12 +338,13 @@ echo ""
 # ============================================================================
 # Telemetry — opt-in upload
 # ============================================================================
+# Opt-in only: sent when the user says yes at a terminal or passed --send.
+# No terminal means no.
 ANSWER="n"
-if [ -t 0 ]; then
-    read -rp "Help improve Open Apollo — send this device report anonymously? [y/N] " ANSWER
-else
-    # Non-interactive (piped, SSH, etc.) — auto-send
+if [ "$SEND" = "1" ]; then
     ANSWER="y"
+elif [ -t 0 ]; then
+    read -rp "Help improve Open Apollo — send this device report anonymously? [y/N] " ANSWER
 fi
 
 if [[ "$ANSWER" =~ ^[Yy] ]]; then
@@ -353,6 +361,7 @@ if [[ "$ANSWER" =~ ^[Yy] ]]; then
     fi
 else
     echo "No data sent. Report saved locally at $OUTPUT"
+    [ -t 0 ] || echo "To send it: re-run with --send"
 fi
 
 echo ""

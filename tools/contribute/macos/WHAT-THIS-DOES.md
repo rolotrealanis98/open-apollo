@@ -80,12 +80,11 @@ The capture itself makes no network calls, and every file is written locally
 first. At the very end the script offers to upload the JSON report:
 
 - **Run interactively** (the normal case) it asks first and defaults to **no**.
-- **Run non-interactively** — piped, or over SSH with no TTY — it **uploads
-  without asking**, because there is no way to prompt.
+- **Run non-interactively** — piped, or over SSH with no TTY — it **sends
+  nothing**, because there is no way to ask. Pass `--send` to upload anyway.
 
-If you would rather nothing left the machine at all, answer `n` at the prompt,
-or run with stdin attached to a terminal so the prompt appears. Only the JSON
-report is ever uploaded; the raw selector dumps are never sent automatically.
+Only the JSON report is ever uploaded, and only after a `y` at the prompt or
+with `--send`; the raw selector dumps are never sent.
 
 ## Output
 
