@@ -6,5 +6,10 @@ license.workspace = true
 description = "Finds a UAD install on a Windows disk and imports its assets for console-rs"
 
 [dependencies]
+flate2 = "1.1.10"
+png = "0.18.1"
+# Pinned: SVG recipe hashes depend on the rasterizer's exact output.
+resvg = { version = "=0.48.1", default-features = false }
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.10.9"

@@ -12,6 +12,7 @@ pub mod discover;
 pub mod firmware;
 pub mod import;
 pub mod pe;
+pub mod plugins;
 
 use std::path::{Path, PathBuf};
 

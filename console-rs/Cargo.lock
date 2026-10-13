@@ -2019,6 +2019,10 @@ dependencies = [
 name = "oa-assets"
 version = "0.1.0"
 dependencies = [
+ "flate2",
+ "png",
+ "resvg",
+ "serde",
  "serde_json",
  "sha2",
 ]
