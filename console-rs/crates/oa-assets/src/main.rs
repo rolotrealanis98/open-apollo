@@ -1,0 +1,204 @@
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use oa_assets::detect::{self, Install};
+use oa_assets::discover::{self, Root, Source};
+use oa_assets::import;
+
+const USAGE: &str = "\
+oa-assets: use your own UAD install with open-apollo
+
+USAGE:
+  oa-assets scan   [--from PATH]... [--json]   find UAD installs (Windows volumes, Wine prefixes)
+  oa-assets mount  DEVICE                      mount a Windows partition read-only, then scan it
+  oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs
+  oa-assets status                             show what has been imported
+
+PATH is the folder that holds Windows' C:\\ (e.g. /run/media/you/Windows) or a Wine prefix.
+Nothing is written to the source, and nothing leaves this machine.
+Options: --data DIR  (default ~/.local/share/open-apollo)";
+
+struct Args {
+    cmd: String,
+    from: Vec<PathBuf>,
+    json: bool,
+    dry_run: bool,
+    data: PathBuf,
+    device: Option<String>,
+}
+
+impl Args {
+    fn parse(mut it: impl Iterator<Item = String>) -> Result<Self, String> {
+        let cmd = it.next().ok_or("missing command")?;
+        let mut a =
+            Args { cmd, from: Vec::new(), json: false, dry_run: false, data: oa_assets::data_dir(), device: None };
+        while let Some(arg) = it.next() {
+            match arg.as_str() {
+                "--from" => a.from.push(it.next().ok_or("--from needs a path")?.into()),
+                "--data" => a.data = it.next().ok_or("--data needs a path")?.into(),
+                "--json" => a.json = true,
+                "--dry-run" => a.dry_run = true,
+                "-h" | "--help" => a.cmd = "help".into(),
+                s if !s.starts_with('-') && a.device.is_none() => a.device = Some(s.to_string()),
+                s => return Err(format!("unknown option {s}")),
+            }
+        }
+        Ok(a)
+    }
+}
+
+fn main() -> ExitCode {
+    let args = match Args::parse(std::env::args().skip(1)) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}\n\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    let result = match args.cmd.as_str() {
+        "scan" => scan(&args),
+        "mount" => mount(&args),
+        "import" => run_import(&args),
+        "status" => status(&args),
+        "help" => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        other => Err(format!("unknown command {other}\n\n{USAGE}")),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("oa-assets: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `--from` roots, or every mounted Windows volume and Wine prefix.
+fn roots(args: &Args) -> Vec<Root> {
+    if !args.from.is_empty() {
+        return args.from.iter().map(|p| discover::given(p)).collect();
+    }
+    let mut r = discover::mounted_volumes();
+    r.extend(discover::wine_prefixes());
+    r
+}
+
+fn scan(args: &Args) -> Result<(), String> {
+    let installs: Vec<Install> = roots(args).iter().map(detect::inspect).collect();
+    let unmounted = if args.from.is_empty() { discover::unmounted_partitions() } else { Vec::new() };
+    if args.json {
+        let v = serde_json::json!({
+            "installs": installs.iter().map(Install::to_json).collect::<Vec<_>>(),
+            "unmounted": unmounted.iter().map(|u| serde_json::json!({
+                "device": u.device, "fstype": u.fstype, "label": u.label, "size": u.size,
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+        return Ok(());
+    }
+    let mut any = false;
+    for i in &installs {
+        print_install(i);
+        any |= i.found_anything();
+    }
+    if !unmounted.is_empty() {
+        println!("Windows partitions that aren't mounted:");
+        for u in &unmounted {
+            let label = u.label.as_deref().map(|l| format!(" \"{l}\"")).unwrap_or_default();
+            let size = u.size.as_deref().unwrap_or("?");
+            if u.is_bitlocker() {
+                println!("  {}{label} ({size}): BitLocker-encrypted; unlock it in Windows first", u.device);
+            } else {
+                println!("  {}{label} ({size}): run `oa-assets mount {}` to look inside", u.device, u.device);
+            }
+        }
+    }
+    if !any && unmounted.is_empty() {
+        println!("No UAD install found. Mount your Windows partition, or pass --from PATH.");
+    }
+    Ok(())
+}
+
+fn print_install(i: &Install) {
+    let src = match &i.root.source {
+        Source::Given => "given path".to_string(),
+        Source::Volume { device, fstype } => format!("{device}, {fstype}"),
+        Source::WinePrefix => "Wine prefix".to_string(),
+    };
+    println!("{} ({src})", i.root.path.display());
+    if !i.found_anything() {
+        println!("  no UAD software\n");
+        return;
+    }
+    match &i.console {
+        Some(c) => {
+            println!("  UAD Console   {}  ({})", c.version.as_deref().unwrap_or("version unknown"), c.dir.display())
+        }
+        None => println!("  UAD Console   not installed"),
+    }
+    if let Some((_, v)) = &i.mixer_engine {
+        println!("  Mixer Engine  {}", v.as_deref().unwrap_or("version unknown"));
+    }
+    println!("  Powered plug-ins  {} DLLs", i.powered_plugins.len());
+    println!("  UADx VST3         {} bundles", i.vst3.len());
+    println!(
+        "  Drivers           {}",
+        if i.drivers.is_empty() { "none".to_string() } else { format!("{} files", i.drivers.len()) }
+    );
+    println!();
+}
+
+fn mount(args: &Args) -> Result<(), String> {
+    let dev = args.device.as_deref().ok_or("mount needs a device, e.g. /dev/nvme0n1p3")?;
+    let at = discover::mount_readonly(dev)?;
+    println!("Mounted {dev} read-only at {}\n", at.display());
+    print_install(&detect::inspect(&Root { path: at, source: Source::Given }));
+    Ok(())
+}
+
+fn run_import(args: &Args) -> Result<(), String> {
+    let installs: Vec<Install> = roots(args).iter().map(detect::inspect).collect();
+    let with_console: Vec<&Install> = installs.iter().filter(|i| i.console.is_some()).collect();
+    let Some(chosen) = with_console.first() else {
+        return Err("no UAD Console install found; run `oa-assets scan` to see what was checked".into());
+    };
+    if with_console.len() > 1 && args.from.is_empty() {
+        println!("Several installs have UAD Console; using the first. Pick one with --from:");
+        for i in &with_console {
+            println!("  {}", i.root.path.display());
+        }
+        println!();
+    }
+    let console = chosen.console.as_ref().expect("filtered on console");
+    let version = console.version.as_deref().unwrap_or("version unknown");
+    if args.dry_run {
+        let (files, bytes) = import::measure(&console.resources).map_err(|e| e.to_string())?;
+        println!("Would copy UAD Console {version} resources: {files} files, {:.1} MB", bytes as f64 / 1e6);
+        println!("  from {}\n  to   {}", console.resources.display(), args.data.join(import::CONSOLE_DIR).display());
+        return Ok(());
+    }
+    let done = import::import_console(console, &args.data).map_err(|e| format!("copy failed: {e}"))?;
+    println!(
+        "Imported UAD Console {version} resources: {} files, {:.1} MB -> {}",
+        done.files,
+        done.bytes as f64 / 1e6,
+        done.dest.display()
+    );
+    Ok(())
+}
+
+fn status(args: &Args) -> Result<(), String> {
+    let m = import::read_manifest(&args.data);
+    match m.get("console") {
+        Some(c) => println!(
+            "UAD Console resources: {} ({} files) from {}",
+            c["version"].as_str().unwrap_or("version unknown"),
+            c["files"],
+            c["from"].as_str().unwrap_or("?")
+        ),
+        None => println!("Nothing imported yet. Run `oa-assets scan`, then `oa-assets import`."),
+    }
+    Ok(())
+}
