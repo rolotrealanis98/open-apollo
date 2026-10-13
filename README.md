@@ -181,10 +181,17 @@ finds your own UAD install (a Windows partition, a Windows VM's disk image or a 
 asks for your password **once**, and always reinstalls cleanly: one privileged run
 (`scripts/setup-root.sh`) first checks the UAD install, then removes every trace of an earlier
 open-apollo install (every `ua_apollo` DKMS version, the daemon's units and drop-ins, system and
-user PipeWire/WirePlumber rules, udev rules, the extracted firmware, the imported art and the
-Console), then imports the Console art, extracts the DSP programs and firmware and builds the
-driver fresh. Afterwards it builds the Console as you. If the UAD install can't be used it
-stops before removing anything. "Keep my current install" skips the removal.
+user PipeWire/WirePlumber rules, udev rules, the extracted firmware, the imported art, the
+plug-in panel specs and the Console), then imports the Console art, installs the plug-in panel
+specs and makes their art, extracts the DSP programs and firmware and builds the driver fresh.
+Afterwards it builds the Console as you. If the UAD install can't be used it stops before
+removing anything. "Keep my current install" skips the removal.
+
+The plug-in panel specs (where each control of a plug-in's editor sits, about 1 MB) come from
+the [open-apollo-panels](https://github.com/rolotrealanis98/open-apollo-panels) release pinned in
+`configs/plugin-panels.conf`; `scripts/install-panels.sh` downloads it and refuses it unless its
+SHA-256 matches. The specs hold no art: `oa-assets plugins` makes that from your UAD install.
+Without the specs or the art, plug-in windows show a plain parameter list.
 
 ```bash
 cargo build --release --manifest-path console-rs/Cargo.toml -p oa-setup -p oa-assets

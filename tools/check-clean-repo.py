@@ -24,6 +24,9 @@ breaks that rule or carries personal data:
                 allowlist
   host-name     a machine named after its owner ("<Name>'s Mac Studio")
   large-file    a binary over --max-binary-kib or any file over --max-text-kib
+  panel-spec    a plug-in panel spec (PluginSpec_*.json); the specs live in
+                the open-apollo-panels repository, installed by
+                scripts/install-panels.sh
 
 Reviewed exceptions live in tools/check-clean-repo.allow. Findings print as
 path:line: [rule] message; the exit status is 1 when there are any.
@@ -55,7 +58,7 @@ PINS_PATH = "console-rs/crates/oa-assets/data/firmware-pins.json"
 ALLOW_PATH = "tools/check-clean-repo.allow"
 
 RULES = ("ua-bill", "ua-pinned", "raster-image", "private-ipv4", "home-path",
-         "email", "serial", "host-name", "large-file")
+         "email", "serial", "host-name", "large-file", "panel-spec")
 
 # ---- Bill records -------------------------------------------------------
 
@@ -310,6 +313,11 @@ class Scanner:
         if len(data) > limit and not any(fnmatch.fnmatchcase(path, g) for g in self.allow.large):
             kind = "binary" if binary else "file"
             self.add("large-file", path, "-", f"{kind} of {len(data) // 1024} KiB (limit {limit // 1024} KiB)")
+
+        # (f) plug-in panel specs belong in open-apollo-panels
+        if fnmatch.fnmatchcase(Path(path).name, "PluginSpec_*.json"):
+            self.add("panel-spec", path, "-", "plug-in panel specs live in open-apollo-panels "
+                     "(scripts/install-panels.sh installs them)")
 
         # (b) whole file
         digest = hashlib.sha256(data).hexdigest()

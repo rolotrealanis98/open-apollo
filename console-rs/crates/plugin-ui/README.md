@@ -37,7 +37,7 @@ No UA asset is in this repository: GUIs, specs, sprites and Console art are read
 
 | What | Search order |
 |---|---|
-| Panel specs | first of `$OA_PLUGIN_SPECS` (alias `$UACONSOLE_PLUGIN_SPECS`), `$XDG_DATA_HOME/open-apollo/plugin-specs`, `/usr/share/open-apollo/plugin-specs` (point the variable at a development stage) |
+| Panel specs | first of `$OA_PLUGIN_SPECS` (alias `$UACONSOLE_PLUGIN_SPECS`), `$XDG_DATA_HOME/open-apollo/plugin-specs`, `/usr/share/open-apollo/plugin-specs` (point the variable at a development stage). Release specs come from open-apollo-panels; `scripts/install-panels.sh` installs the pinned release (setup does, as root, into `/usr/share`) |
 | Generated panel art | `$OA_PLUGIN_ART`, else `$XDG_DATA_HOME/open-apollo/generated` (`Images/`, `Text/`, `manifest.json`, written by the importer from the user's install) |
 | Lunacomponents | every existing folder of `$OA_LUNA_COMPONENTS` (alias `$UACONSOLE_LUNA_COMPONENTS`), `$XDG_DATA_HOME/open-apollo/lunacomponents`, `/Library/Application Support/Universal Audio/Plug-Ins` (macOS) |
 | Console skins, `images/uapw` | houston's `Resources` discovery (`$CONSOLE_RESOURCES`, the Wine install, …) |
@@ -48,6 +48,12 @@ open (else the generic list); see [RUNTIME-V2.md](RUNTIME-V2.md), which also doc
 `toolbar`, `label`, `shape` and `lamp` elements and the spec patch format. A legacy stage folder keeps
 its sprites in `Images/<sprite>@2x.png` (or `<sprite>.png`) next to the specs. Either way sprites
 resolve as `spec:Images/…` keys through the image cache's `spec` root (`PluginSpecLibrary::attach`).
+
+Which panels can open from an install, and why the others show the generic list:
+
+```sh
+cargo run -p plugin-ui --example availability -- [--specs DIR] [--art DIR] [--all]
+```
 What the panel draws in code (graph curves, rotated sprites, the "more" button) is rasterised in
 memory under `runtime:` keys; nothing is written to disk.
 

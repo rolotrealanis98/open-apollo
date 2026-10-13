@@ -4,7 +4,8 @@
 # Removes the ua_apollo driver (every DKMS version, their source trees and the
 # modules they built), the mixer daemon's user units and drop-ins, the system
 # and per-user PipeWire/WirePlumber rules, the UCM2 profile, the udev rules and
-# helpers, the Console (uaconsole), old tray and launcher files, and a USB
+# helpers, the Console (uaconsole), the plug-in panel specs, old tray and
+# launcher files, and a USB
 # install's pieces; then checks that nothing is left. Running it twice, or
 # with nothing installed, is fine.
 #
@@ -157,6 +158,9 @@ paths_of() {
             [ -n "$h" ] && PATHS=("$h"/.local/bin/uaconsole "$h"/.local/bin/open-apollo-console
                                   "$h"/.local/share/applications/uaconsole.desktop
                                   "$h"/.local/share/icons/hicolor/scalable/apps/uaconsole.svg) ;;
+        panels)
+            # install-panels.sh (setup's import step)
+            PATHS=("$ROOT"/usr/share/open-apollo/plugin-specs) ;;
         legacy)
             # The old tray indicator, its launcher, and firmware blobs older installers wrote
             PATHS=("$ROOT"/usr/share/applications/open-apollo.desktop
@@ -185,7 +189,7 @@ paths_of() {
     return 0
 }
 
-FILE_KINDS="dkms driver daemon config udev console legacy usb firmware data"
+FILE_KINDS="dkms driver daemon config udev console panels legacy usb firmware data"
 
 # Every ua_apollo version DKMS knows, one per line (both status formats:
 # "ua_apollo/1.0, 6.9, x86_64: installed" and "ua_apollo, 1.0, 6.9, ...").
@@ -328,6 +332,16 @@ remove_console() {
             || warn "install-uaconsole.sh --uninstall failed; removing its files directly"
     fi
     remove_paths console || true
+    return 0
+}
+
+remove_panels() {
+    header "Plug-in panel specs"
+    if remove_paths panels; then
+        rmdir "$ROOT"/usr/share/open-apollo 2>/dev/null || true
+    else
+        info "No plug-in panel specs"
+    fi
     return 0
 }
 
@@ -559,6 +573,7 @@ main() {
         stop_daemon
         unload_driver
         remove_console
+        remove_panels
         remove_audio_config
         remove_udev
         remove_legacy
