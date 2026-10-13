@@ -1,22 +1,29 @@
 //! Headless render of a plug-in panel.
 //!
 //!   cargo run -p plugin-ui --example render -- <spec name> out.png [--scale 2] [--generic]
-//!       [--window [--title "GTR, Insert 4"] [--status "NO UAD-2 DEVICES FOUND"] [--web]]
+//!       [--specs DIR] [--art DIR] [--window [--title "GTR, Insert 4"] [--status "NO UAD-2 DEVICES FOUND"] [--web]]
+//!
+//! `--specs DIR` reads that spec folder (default: [`SpecLocator`]); `--art DIR` the generated art
+//! root (default: [`plugin_ui::ArtLocator`]). The missing-asset report tells ids without a
+//! buildable recipe from ids not generated yet.
 //!
 //! `--window` draws Console's plug-in window chrome around the content (`--web` picks UA's HTML
 //! GUI when a lunacomponent matches; a headless render shows a placeholder where the webview goes).
 //! Writes `out.png` (parameters at their spec defaults) and `out.zero.png` (all parameters 0, the
 //! state the spec pipeline's LUNA references show), and compares the latter with a LUNA reference
-//! (`$PLUGIN_UI_REFS` or `~/wine-ua-work/plugin-specs/render/uaudio_<stem>.ref.png`) when one exists.
-//! Both are also compared with the live AU snapshots of the spec pipeline (agent F:
-//! `$PLUGIN_UI_LIVE_REFS` or `~/wine-ua-work/plugin-specs/agents/F/reference[_zero]/<stem>.png`).
+//! (`$PLUGIN_UI_REFS/uaudio_<stem>.ref.png`) when one exists. Both are also compared with the live
+//! AU snapshots of the spec pipeline (`$PLUGIN_UI_LIVE_REFS/reference[_zero]/<stem>.png`, whose
+//! `params/<stem>.json` also gives the snapshot's parameter state).
 //! `<spec name>` is a file stem (`ua_1176_rev_a`), an effect name or a name pattern.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use houston::{Appearance, ImageCache, ImageData, Rect, Resources};
-use plugin_ui::{GenericPanel, LunaLibrary, MockParams, PluginPanel, PluginSpecLibrary, PluginWindow, SpecLocator};
+use plugin_ui::{
+    ArtLocator, Availability, GenericPanel, LunaLibrary, MockParams, PluginPanel, PluginSpecLibrary, PluginWindow,
+    SpecLocator,
+};
 use rack::{Assets, Ui};
 
 fn arg(name: &str) -> Option<String> {
@@ -34,7 +41,7 @@ fn main() {
         let mut out = Vec::new();
         let mut i = 0;
         while i < args.len() {
-            if ["--scale", "--title", "--status", "--meters"].contains(&args[i].as_str()) {
+            if ["--scale", "--title", "--status", "--meters", "--specs", "--art"].contains(&args[i].as_str()) {
                 i += 2;
                 continue;
             }
@@ -50,13 +57,18 @@ fn main() {
         std::process::exit(64);
     };
     let scale: f32 = arg("--scale").and_then(|s| s.parse().ok()).unwrap_or(2.0);
-    let Some(lib) = PluginSpecLibrary::locate() else {
-        eprintln!("render: no plug-in spec folder. Looked in:");
+    let art = arg("--art").map(PathBuf::from).unwrap_or_else(ArtLocator::locate);
+    let Some(folder) = arg("--specs").map(PathBuf::from).or_else(SpecLocator::locate) else {
+        eprintln!("render: no plug-in spec folder (--specs DIR). Looked in:");
         for c in SpecLocator::candidates() {
             eprintln!("  {}", c.display());
         }
         std::process::exit(2);
     };
+    let lib = PluginSpecLibrary::open_with_art(&folder, &art).unwrap_or_else(|e| {
+        eprintln!("render: {e}");
+        std::process::exit(2);
+    });
     let Some(entry) = lib.entry_named(name) else {
         eprintln!("render: no spec named {name:?} in {} ({} specs)", lib.folder.display(), lib.entries.len());
         std::process::exit(2);
@@ -65,7 +77,15 @@ fn main() {
         eprintln!("render: {e}");
         std::process::exit(2);
     });
-    eprintln!("spec: {} ({}), {}×{} pt, {} elements, {} parameters", spec.effect_name, entry.stem(), spec.size.w, spec.size.h, spec.elements.len(), spec.parameters.len());
+    eprintln!(
+        "spec: {} ({}), {}×{} pt, {} elements, {} parameters",
+        spec.effect_name,
+        entry.stem(),
+        spec.size.w,
+        spec.size.h,
+        spec.elements.len(),
+        spec.parameters.len()
+    );
 
     // UA Console resources give fonts (and, for the window chrome, skins); a panel renders without.
     let assets = match Resources::locate() {
@@ -84,7 +104,8 @@ fn main() {
         eprintln!("render: no GPU adapter");
         std::process::exit(3);
     };
-    let mut renderer = gfx::Renderer::new(&gpu.device, &gpu.queue, gfx::TextureFormat::Rgba8Unorm, assets.images.clone());
+    let mut renderer =
+        gfx::Renderer::new(&gpu.device, &gpu.queue, gfx::TextureFormat::Rgba8Unorm, assets.images.clone());
     let slot = "/devices/0/inputs/0/effects/0";
     let mut panel = PluginPanel::new(spec.clone(), &lib, slot);
     // The live snapshots' state: AU parameter values and display strings (agent F's dumps) and
@@ -116,8 +137,19 @@ fn main() {
             }
         }
     }
+    match lib.availability(&spec) {
+        Availability::Ready => {}
+        Availability::Pending(ids) => eprintln!("not generated yet ({}): {ids:?}", ids.len()),
+        Availability::Unavailable(ids) => {
+            let (none, other): (Vec<_>, Vec<_>) = ids.iter().partition(|id| lib.recipes.status(id).is_none());
+            eprintln!("no buildable recipe ({}): no recipe {none:?}; not buildable {other:?}", ids.len())
+        }
+    }
     if !panel.missing_sprites().is_empty() {
         eprintln!("missing sprites: {:?}", panel.missing_sprites());
+    }
+    if !panel.missing_texts().is_empty() {
+        eprintln!("missing texts: {:?}", panel.missing_texts());
     }
 
     let zero_path = sibling(Path::new(out), "zero");
@@ -138,7 +170,14 @@ fn main() {
         let mut ui = Ui::new(&assets);
         let size = if flag("--window") {
             let luna = LunaLibrary::locate();
-            let mut win = PluginWindow::open(slot, &spec.effect_name, &arg("--title").unwrap_or_else(|| "GTR, Insert 4".into()), Some(&lib), Some(&luna), flag("--web"));
+            let mut win = PluginWindow::open(
+                slot,
+                &spec.effect_name,
+                &arg("--title").unwrap_or_else(|| "GTR, Insert 4".into()),
+                Some(&lib),
+                Some(&luna),
+                flag("--web"),
+            );
             if flag("--generic") {
                 win.content = plugin_ui::Content::Generic(GenericPanel::new(slot));
             }
@@ -167,9 +206,7 @@ fn main() {
             None => eprintln!("no LUNA reference for {}", entry.stem()),
         }
         for (ours, sub) in [(PathBuf::from(out), "reference"), (zero_path.clone(), "reference_zero")] {
-            let dir = std::env::var("PLUGIN_UI_LIVE_REFS")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("wine-ua-work/plugin-specs/agents/F"));
+            let Ok(dir) = std::env::var("PLUGIN_UI_LIVE_REFS").map(PathBuf::from) else { break };
             let r = dir.join(sub).join(format!("{}.png", entry.stem()));
             if r.is_file() {
                 compare(&ours, &r);
@@ -182,10 +219,10 @@ fn main() {
     }
 }
 
-/// `(index, normalized value, display)` per parameter from agent F's AU dump
-/// (`$PLUGIN_UI_LIVE_REFS` or `~/wine-ua-work/plugin-specs/agents/F` + `params/<stem>.json`).
+/// `(index, normalized value, display)` per parameter from the live AU dump
+/// (`$PLUGIN_UI_LIVE_REFS/params/<stem>.json`).
 fn live_state(stem: &str) -> Option<Vec<(u16, f64, String)>> {
-    let dir = std::env::var("PLUGIN_UI_LIVE_REFS").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("wine-ua-work/plugin-specs/agents/F"));
+    let dir = std::env::var("PLUGIN_UI_LIVE_REFS").map(PathBuf::from).ok()?;
     let text = std::fs::read_to_string(dir.join("params").join(format!("{stem}.json"))).ok()?;
     let list: Vec<serde_json::Value> = serde_json::from_str(&text).ok()?;
     Some(
@@ -264,12 +301,13 @@ fn sibling(path: &Path, tag: &str) -> PathBuf {
 
 /// `uaudio_<stem>.ref.png`, matching `-` and `_` loosely (`teletronix_la-2a_silver`).
 fn reference(stem: &str) -> Option<PathBuf> {
-    let dir = std::env::var("PLUGIN_UI_REFS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("wine-ua-work/plugin-specs/render"));
+    let dir = std::env::var("PLUGIN_UI_REFS").map(PathBuf::from).ok()?;
     let norm = |s: &str| s.replace('-', "_").to_lowercase();
     std::fs::read_dir(&dir).ok()?.flatten().map(|e| e.path()).find(|p| {
-        p.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".ref.png")).is_some_and(|n| norm(n.strip_prefix("uaudio_").unwrap_or(n)) == norm(stem))
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".ref.png"))
+            .is_some_and(|n| norm(n.strip_prefix("uaudio_").unwrap_or(n)) == norm(stem))
     })
 }
 
@@ -282,7 +320,14 @@ fn compare(ours: &Path, reference: &Path) {
     if (a.width, a.height) != (b.width, b.height) {
         // Compare the common top-left area (live snapshots may carry a vendor toolbar or the
         // UA wrapper's extra rows).
-        eprintln!("compare: size {}×{} vs reference {}×{} ({}); comparing the common area", a.width, a.height, b.width, b.height, reference.display());
+        eprintln!(
+            "compare: size {}×{} vs reference {}×{} ({}); comparing the common area",
+            a.width,
+            a.height,
+            b.width,
+            b.height,
+            reference.display()
+        );
     }
     let (w, h) = (a.width.min(b.width), a.height.min(b.height));
     let px = |d: &ImageData, x: u32, y: u32| {
@@ -292,6 +337,9 @@ fn compare(ours: &Path, reference: &Path) {
         [p[0] as f32 * a, p[1] as f32 * a, p[2] as f32 * a]
     };
     let n = (w * h) as usize;
-    let off = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| px(&a, x, y).iter().zip(px(&b, x, y)).any(|(p, q)| (p - q).abs() > 24.0)).count();
+    let off = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| px(&a, x, y).iter().zip(px(&b, x, y)).any(|(p, q)| (p - q).abs() > 24.0))
+        .count();
     eprintln!("vs {}: {:.3}% pixels off (>24/255)", reference.display(), off as f64 * 100.0 / n as f64);
 }

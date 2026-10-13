@@ -17,7 +17,7 @@ use houston::{Insets, Rect, Rgba};
 use rack::{Action, Align, Control, ControlId, Hit, HitKind, PluginWindowButton as B, TextStyle, Ui};
 
 use crate::generic::GenericPanel;
-use crate::library::PluginSpecLibrary;
+use crate::library::{Availability, PluginSpecLibrary};
 use crate::panel::{PluginPanel, action_id};
 use crate::params::ParamSource;
 use crate::web::{LunaComponent, LunaLibrary};
@@ -185,7 +185,13 @@ pub fn header_layout(cw: f32, items: &HeaderItems) -> (Vec<(B, Rect)>, u8, Vec<B
         if items.sidechain.is_some() {
             ws.push(if m == 0 { 160.0 } else { 22.0 });
         }
-        for (on, w) in [(items.power, 22.0), (items.in_out, 22.0), (items.compare, 44.0), (items.copy_paste, 80.0), (items.mixer, 102.0)] {
+        for (on, w) in [
+            (items.power, 22.0),
+            (items.in_out, 22.0),
+            (items.compare, 44.0),
+            (items.copy_paste, 80.0),
+            (items.mixer, 102.0),
+        ] {
             if on {
                 ws.push(w);
             }
@@ -285,11 +291,24 @@ pub struct PluginWindow {
     /// turn this off and call [`PluginWindow::build_popover`] unclipped: Console's menus are
     /// their own windows and may leave the plug-in window.
     pub inline_popover: bool,
+    /// The matching spec's [`Availability`] when one exists. `Pending` lists the ids the
+    /// importer can still make: the host may run it (`oa-assets build`) and reopen the window.
+    pub availability: Option<Availability>,
+}
+
+/// `OA_PLUGIN_WIREFRAME=1`: open spec panels even when their art is not all generated
+/// (development; missing sprites draw nothing over the backdrop).
+pub const WIREFRAME_ENV: &str = "OA_PLUGIN_WIREFRAME";
+
+fn wireframe() -> bool {
+    std::env::var(WIREFRAME_ENV).is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
 impl PluginWindow {
     /// Picks the content for `effect_name`: UA's HTML GUI when a lunacomponent with images
-    /// matches (and `prefer_web`), else a panel spec with elements, else the generic list.
+    /// matches (and `prefer_web`), else a panel spec with elements whose art is all present
+    /// ([`PluginSpecLibrary::availability`] is `Ready`; a legacy development folder, or
+    /// [`WIREFRAME_ENV`], opens it regardless), else the generic list.
     pub fn open(
         slot: impl Into<Arc<str>>,
         effect_name: &str,
@@ -299,10 +318,16 @@ impl PluginWindow {
         prefer_web: bool,
     ) -> Self {
         let slot: Arc<str> = slot.into();
-        let web = luna.filter(|_| prefer_web).and_then(|l| l.component_for_effect(effect_name)).filter(|c| c.has_images);
+        let web =
+            luna.filter(|_| prefer_web).and_then(|l| l.component_for_effect(effect_name)).filter(|c| c.has_images);
+        let found =
+            specs.and_then(|l| l.spec_for_effect(effect_name).map(|s| (l, s))).filter(|(_, s)| !s.elements.is_empty());
+        let availability = found.as_ref().map(|(lib, spec)| lib.availability(spec));
         let content = if let Some(c) = web {
             Content::Web(c.clone())
-        } else if let Some((lib, spec)) = specs.and_then(|l| l.spec_for_effect(effect_name).map(|s| (l, s))).filter(|(_, s)| !s.elements.is_empty()) {
+        } else if let Some((lib, spec)) = found.filter(|(lib, _)| {
+            lib.is_legacy() || wireframe() || availability.as_ref().is_some_and(Availability::is_ready)
+        }) {
             Content::Spec(PluginPanel::new(spec, lib, slot.clone()))
         } else {
             Content::Generic(GenericPanel::new(slot.clone()))
@@ -311,7 +336,11 @@ impl PluginWindow {
         Self {
             slot,
             effect_name: effect_name.into(),
-            chrome: ChromeState { title: title.into(), items: HeaderItems { more_label, ..Default::default() }, ..Default::default() },
+            chrome: ChromeState {
+                title: title.into(),
+                items: HeaderItems { more_label, ..Default::default() },
+                ..Default::default()
+            },
             content,
             popover: None,
             insert_menu: None,
@@ -322,6 +351,7 @@ impl PluginWindow {
             help_open: false,
             version: None,
             inline_popover: true,
+            availability,
         }
     }
 
@@ -358,7 +388,8 @@ impl PluginWindow {
         let content = Rect::new(ox + BORDER, title_bar.max_y(), cw, ch);
         let header = Rect::new(content.x, content.y, cw, HEADER_H);
         let editor = Rect::new(content.x + 1.0, content.y + HEADER_H, pw, ph);
-        let footer = self.chrome.status.is_some().then(|| Rect::new(content.x, content.max_y() - FOOTER_H, cw, FOOTER_H));
+        let footer =
+            self.chrome.status.is_some().then(|| Rect::new(content.x, content.max_y() - FOOTER_H, cw, FOOTER_H));
 
         let (items, mode, overflow) = header_layout(cw, &self.chrome.items);
         let mut buttons: Vec<(B, Rect)> = items.into_iter().map(|(b, r)| (b, r.offset(header.x, header.y))).collect();
@@ -421,7 +452,8 @@ impl PluginWindow {
 
     fn title_bar(&self, ui: &mut Ui, l: &WindowLayout) {
         ui.background("Title-Bar", l.title_bar);
-        let style = TextStyle { family: "Helvetica Neue".into(), size: 11.0, bold: true, italic: false, color: TITLE_TEXT };
+        let style =
+            TextStyle { family: "Helvetica Neue".into(), size: 11.0, bold: true, italic: false, color: TITLE_TEXT };
         ui.text(&self.chrome.title, style, l.title_bar, Align::Center);
         if let Some(r) = l.button(B::Close) {
             let skin = if self.chrome.close_on_left { "Window-Button-Close" } else { "Small-Window-Button-Close-Win" };
@@ -472,8 +504,12 @@ impl PluginWindow {
                 ui.text(s, style, r, Align::Center);
             };
             match b {
-                B::RackView => ui.image_centered(&uapw(if on(b) { "plugin_rack_view_on" } else { "plugin_rack_view" }), r, 1.0),
-                B::Assign => ui.image(&uapw("icon_more_vertical"), Rect::new(r.x + 9.0, r.y + 2.0, 5.0, 18.0), None, None, 1.0),
+                B::RackView => {
+                    ui.image_centered(&uapw(if on(b) { "plugin_rack_view_on" } else { "plugin_rack_view" }), r, 1.0)
+                }
+                B::Assign => {
+                    ui.image(&uapw("icon_more_vertical"), Rect::new(r.x + 9.0, r.y + 2.0, 5.0, 18.0), None, None, 1.0)
+                }
                 B::PresetPrev => ui.image_centered(&uapw("icon_prev"), r, 1.0),
                 B::PresetNext => ui.image_centered(&uapw("icon_next"), r, 1.0),
                 B::Presets => text(ui, &self.chrome.preset, false),
@@ -487,7 +523,10 @@ impl PluginWindow {
                 B::CompareB => text(ui, "B", on(b)),
                 B::Copy => text(ui, "COPY", false),
                 B::Paste => {
-                    let style = TextStyle { color: LABEL.with_alpha(if self.paste_enabled { LABEL.a } else { 0.35 }), ..label.clone() };
+                    let style = TextStyle {
+                        color: LABEL.with_alpha(if self.paste_enabled { LABEL.a } else { 0.35 }),
+                        ..label.clone()
+                    };
                     ui.text("PASTE", style, r, Align::Center);
                     if !self.paste_enabled {
                         continue;
@@ -508,9 +547,15 @@ impl PluginWindow {
         let (iw, ih) = ui.image_size(&icon).unwrap_or((16.0, 6.0));
         match &self.chrome.items.more_label {
             Some(text) => {
-                let style = TextStyle { family: "Helvetica".into(), size: 10.0, bold: true, italic: false, color: SHADOW };
+                let style =
+                    TextStyle { family: "Helvetica".into(), size: 10.0, bold: true, italic: false, color: SHADOW };
                 ui.text(text, style.clone(), Rect::new(r.x + 7.0, r.y + 1.0, r.w - 7.0, r.h), Align::Left);
-                ui.text(text, TextStyle { color: LABEL, ..style }, Rect::new(r.x + 6.0, r.y, r.w - 6.0, r.h), Align::Left);
+                ui.text(
+                    text,
+                    TextStyle { color: LABEL, ..style },
+                    Rect::new(r.x + 6.0, r.y, r.w - 6.0, r.h),
+                    Align::Left,
+                );
                 ui.image(&icon, Rect::new(r.max_x() - iw - 4.0, r.y + (r.h - ih) / 2.0, iw, ih), None, None, 1.0);
             }
             None => ui.image_centered(&icon, r, 1.0),
@@ -525,7 +570,12 @@ impl PluginWindow {
             _ => None,
         };
         ui.fill(f, fill.unwrap_or(Rgba::rgb8(85, 85, 85)));
-        for r in [Rect::new(f.x, f.y, f.w, 1.0), Rect::new(f.x, f.max_y() - 1.0, f.w, 1.0), Rect::new(f.x, f.y, 1.0, f.h), Rect::new(f.max_x() - 1.0, f.y, 1.0, f.h)] {
+        for r in [
+            Rect::new(f.x, f.y, f.w, 1.0),
+            Rect::new(f.x, f.max_y() - 1.0, f.w, 1.0),
+            Rect::new(f.x, f.y, 1.0, f.h),
+            Rect::new(f.max_x() - 1.0, f.y, 1.0, f.h),
+        ] {
             ui.fill(r, BLACK);
         }
         let label = TextStyle { family: "Helvetica".into(), size: 10.0, bold: true, italic: false, color: LABEL };
@@ -577,7 +627,10 @@ impl PluginWindow {
                 m.separator();
                 m.header("Resize Plug-In");
                 for pct in [75u16, 100, 125, 150, 175, 200] {
-                    m.push(PopupItem::new(format!("{pct}%"), self.id(Control::PluginWindow(B::Scale(pct)))).ticked(self.scale == pct));
+                    m.push(
+                        PopupItem::new(format!("{pct}%"), self.id(Control::PluginWindow(B::Scale(pct))))
+                            .ticked(self.scale == pct),
+                    );
                 }
                 m.push(PopupItem::new("Apply To All", self.id(Control::PluginWindow(B::ApplyToAll))));
                 m.separator();
@@ -619,7 +672,10 @@ impl PluginWindow {
         let mut index = 0u16;
         let mut item = |m: &mut PopupMenu, label: &str| {
             let value = self.presets.get(index as usize).cloned().unwrap_or_default();
-            m.push(PopupItem::new(label.to_string(), self.id(Control::PluginWindow(B::PresetItem(index)))).ticked(value == current));
+            m.push(
+                PopupItem::new(label.to_string(), self.id(Control::PluginWindow(B::PresetItem(index))))
+                    .ticked(value == current),
+            );
             index += 1;
         };
         if self.preset_tree.is_empty() {
@@ -664,11 +720,21 @@ impl PluginWindow {
         ui.text("Documentation", link.clone(), docs, Align::Left);
         ui.fill(Rect::new(docs.x, docs.max_y() - 2.0, 74.0, 1.0), link.color);
         let v = self.version.clone().map(|v| format!("v{v}")).unwrap_or_else(|| "v1.0.0".into());
-        ui.text(&v, Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE), Rect::new(docs.max_x() + 4.0, docs.y, 50.0, 18.0), Align::Left);
+        ui.text(
+            &v,
+            Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE),
+            Rect::new(docs.max_x() + 4.0, docs.y, 50.0, 18.0),
+            Align::Left,
+        );
         ui.fill(Rect::new(r.x + 6.0, r.y + 33.0, r.w - 12.0, 1.0), Rgba::rgb8(40, 46, 50));
         let thumb = Rect::new(r.x + 13.0, r.y + 43.0, r.w - 26.0, 45.0);
         ui.fill(thumb, Rgba::rgb8(60, 64, 66));
-        ui.text("Quick Tip Video", Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE), Rect::new(r.x, thumb.max_y() + 4.0, r.w, 20.0), Align::Center);
+        ui.text(
+            "Quick Tip Video",
+            Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE),
+            Rect::new(r.x, thumb.max_y() + 4.0, r.w, 20.0),
+            Align::Center,
+        );
         ui.hit(docs, self.id(Control::PluginWindow(B::Help)), HitKind::Tap);
     }
 
@@ -727,11 +793,22 @@ impl PluginWindow {
     /// topmost of `hits` (this frame's hits) there is the panel's, not chrome or a popover.
     /// Follow with [`panel_pointer_move`](Self::panel_pointer_move) /
     /// [`panel_pointer_up`](Self::panel_pointer_up); untaken presses go through `rack`.
-    pub fn panel_pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool, params: &mut dyn ParamSource) -> bool {
+    pub fn panel_pointer_down(
+        &mut self,
+        hits: &[Hit],
+        x: f32,
+        y: f32,
+        double: bool,
+        params: &mut dyn ParamSource,
+    ) -> bool {
         let slot = self.slot.clone();
         let Content::Spec(p) = &mut self.content else { return false };
         if let Some(h) = hits.iter().rev().find(|h| h.rect.contains(x, y)) {
-            let ours = h.id.strip == slot && matches!(h.id.control, Control::PluginParam(_) | Control::PluginElement(_) | Control::PluginStep(..));
+            let ours = h.id.strip == slot
+                && matches!(
+                    h.id.control,
+                    Control::PluginParam(_) | Control::PluginElement(_) | Control::PluginStep(..)
+                );
             if !ours {
                 return false;
             }
@@ -833,8 +910,16 @@ mod tests {
     fn preset_menu_lists_ticks_and_gates_save() {
         use rack::PresetNode;
         use rack::menu::PopupEntry;
-        let mut w = PluginWindow::open("/devices/0/inputs/0/effects/0", "UAD Pultec EQP-1A", "SM7B, Insert 1", None, None, false);
-        w.preset_tree = vec![PresetNode::file("Bright").locked(true), PresetNode::folder("Mine", vec![PresetNode::file("Air")])];
+        let mut w = PluginWindow::open(
+            "/devices/0/inputs/0/effects/0",
+            "UAD Pultec EQP-1A",
+            "SM7B, Insert 1",
+            None,
+            None,
+            false,
+        );
+        w.preset_tree =
+            vec![PresetNode::file("Bright").locked(true), PresetNode::folder("Mine", vec![PresetNode::file("Air")])];
         w.presets = rack::presets::flatten(&w.preset_tree);
         let rows = |w: &PluginWindow| {
             w.preset_menu()
@@ -849,7 +934,10 @@ mod tests {
         };
         w.chrome.preset = "Bright".into();
         let r = rows(&w);
-        assert_eq!(r.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["Bright", "[Mine]", "Air", "Save Preset", "Preset Browser..."]);
+        assert_eq!(
+            r.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(),
+            ["Bright", "[Mine]", "Air", "Save Preset", "Preset Browser..."]
+        );
         assert!(r[0].1 && !r[2].1, "the current preset is ticked");
         assert!(!r[3].2, "a factory preset cannot be saved over");
         w.chrome.preset = "Mine/Air".into();

@@ -1,5 +1,13 @@
-//! Finding and indexing a folder of ConsoleLink plug-in specs
-//! (`PluginSpec_*.json` plus `Images/<sprite>@2x.png`). Port of ConsoleLab's `PluginSpecLibrary`.
+//! Finding and indexing a folder of plug-in panel specs. Port of ConsoleLab's `PluginSpecLibrary`.
+//!
+//! Two folder layouts are read:
+//! - **release (schema 2)**: `PluginSpec_*.json` (plus `recipes/*.json` when the recipes ship next
+//!   to the specs). Sprite fields are recipe ids; the art is generated from the user's own UA
+//!   install by the importer into the art root ([`ArtLocator`]: `Images/<id>@2x.png`,
+//!   `Text/<id>.txt|.json`, `manifest.json`). Nothing UA-made ships.
+//! - **legacy (development)**: `PluginSpec_*.json` plus `Images/<sprite>@2x.png` next to them
+//!   (ConsoleLink's stage). Ids the folder lacks are also looked up in the art root, so a stage
+//!   copy can use generated chrome art.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -8,30 +16,44 @@ use std::sync::Arc;
 use houston::ImageCache;
 use parking_lot::Mutex;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
+use crate::recipes::{Manifest, RecipeStatus, Recipes};
 use crate::spec::PluginSpec;
 
+fn home() -> PathBuf {
+    std::env::var("HOME").map(PathBuf::from).unwrap_or_default()
+}
+
+/// `$XDG_DATA_HOME`, else `~/.local/share`.
+fn data_home() -> PathBuf {
+    match std::env::var("XDG_DATA_HOME") {
+        Ok(p) if !p.is_empty() => PathBuf::from(p),
+        _ => home().join(".local/share"),
+    }
+}
+
+fn env_dir(name: &str) -> Option<PathBuf> {
+    std::env::var(name).ok().filter(|p| !p.is_empty()).map(PathBuf::from)
+}
+
 /// Where plug-in specs are looked for, in order (first folder with a `PluginSpec_*.json` wins):
-/// 1. `$UACONSOLE_PLUGIN_SPECS`
-/// 2. `~/.local/share/open-apollo/plugin-specs`
-/// 3. ConsoleLink's integrated development stage (full catalog and sprites)
-/// 4. `~/wine-ua-work/plugin-specs-local` (small development copy)
+/// 1. `$OA_PLUGIN_SPECS` (or the older `$UACONSOLE_PLUGIN_SPECS`)
+/// 2. `$XDG_DATA_HOME/open-apollo/plugin-specs` (`~/.local/share/open-apollo/plugin-specs`)
+/// 3. `/usr/share/open-apollo/plugin-specs`
+///
+/// A development stage is used by pointing `$OA_PLUGIN_SPECS` at it.
 pub struct SpecLocator;
 
 impl SpecLocator {
-    pub const ENV: &'static str = "UACONSOLE_PLUGIN_SPECS";
+    pub const ENV: &'static str = "OA_PLUGIN_SPECS";
+    /// Accepted until the app is renamed.
+    pub const ENV_ALIAS: &'static str = "UACONSOLE_PLUGIN_SPECS";
 
     pub fn candidates() -> Vec<PathBuf> {
-        let mut out = Vec::new();
-        if let Ok(p) = std::env::var(Self::ENV) {
-            if !p.is_empty() {
-                out.push(PathBuf::from(p));
-            }
-        }
-        let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
-        out.push(home.join(".local/share/open-apollo/plugin-specs"));
-        out.push(home.join("wine-ua-work/plugin-specs/integrate/stage/Console Link/Console Link/PluginSpecs"));
-        out.push(home.join("wine-ua-work/plugin-specs-local"));
+        let mut out: Vec<PathBuf> = [Self::ENV, Self::ENV_ALIAS].iter().filter_map(|e| env_dir(e)).collect();
+        out.push(data_home().join("open-apollo/plugin-specs"));
+        out.push(PathBuf::from("/usr/share/open-apollo/plugin-specs"));
         out
     }
 
@@ -42,6 +64,18 @@ impl SpecLocator {
     /// A folder with at least one `PluginSpec_*.json`.
     pub fn looks_like_specs(dir: &Path) -> bool {
         spec_files(dir).next().is_some()
+    }
+}
+
+/// Where the importer writes the art and texts it regenerates from the user's install:
+/// `$OA_PLUGIN_ART`, else `$XDG_DATA_HOME/open-apollo/generated`.
+pub struct ArtLocator;
+
+impl ArtLocator {
+    pub const ENV: &'static str = "OA_PLUGIN_ART";
+
+    pub fn locate() -> PathBuf {
+        env_dir(Self::ENV).unwrap_or_else(|| data_home().join("open-apollo/generated"))
     }
 }
 
@@ -73,27 +107,70 @@ struct Header {
     name_pattern: String,
 }
 
+/// A text the importer extracted: one string (`dll-string`) or a label list (`dll-string-table`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextValue {
+    Text(String),
+    List(Vec<String>),
+}
+
+/// Whether a spec's art and texts are all present (see [`PluginSpecLibrary::availability`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Availability {
+    /// Every sprite and text the spec references can be drawn.
+    Ready,
+    /// The importer can make these ids but has not yet (run `oa-assets build` and reopen).
+    Pending(Vec<String>),
+    /// These ids have no buildable recipe (needs-tracer, no-recipe, deferred, unknown): the panel
+    /// cannot be drawn from this install; show the generic list.
+    Unavailable(Vec<String>),
+}
+
+impl Availability {
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
 /// The specs in one folder, indexed by effect name. Specs are decoded on first use and cached.
 pub struct PluginSpecLibrary {
     pub folder: PathBuf,
-    /// `Images` (or `images`) under `folder`.
+    /// Where sprites are read: `<folder>/Images` (legacy) or `<art root>/Images` (release).
     pub images_dir: PathBuf,
+    /// The generated-art root ([`ArtLocator`]); the `spec` image scheme's root for a release folder.
+    pub art_root: PathBuf,
+    /// `recipes/*.json` of a release folder (empty for a legacy folder or when the importer
+    /// embeds the recipes).
+    pub recipes: Recipes,
+    /// The importer's `<art root>/manifest.json`, when it has run.
+    pub manifest: Option<Manifest>,
     /// Longest `name_pattern` first, so "LA-2A Silver" wins over "LA-2A".
     pub entries: Vec<Entry>,
     /// Files whose header did not decode, with the error.
     pub failures: BTreeMap<String, String>,
+    legacy: bool,
     cache: Mutex<HashMap<PathBuf, Arc<PluginSpec>>>,
     sprite_keys: Mutex<HashMap<String, Option<Arc<str>>>>,
+    texts: Mutex<HashMap<String, Option<TextValue>>>,
 }
 
 impl PluginSpecLibrary {
-    /// The first folder [`SpecLocator`] finds.
+    /// Image scheme of the art root when the spec folder is a legacy stage.
+    pub const ART_SCHEME: &'static str = "oa-art";
+
+    /// The first folder [`SpecLocator`] finds, with the art root [`ArtLocator`] gives.
     pub fn locate() -> Option<Self> {
         Self::open(&SpecLocator::locate()?).ok()
     }
 
-    /// Scans `folder` (reads each spec's header; ~4.6 MB for ConsoleLink's 208 specs).
+    /// Scans `folder` (reads each spec's header) with the default art root.
     pub fn open(folder: &Path) -> Result<Self, String> {
+        Self::open_with_art(folder, &ArtLocator::locate())
+    }
+
+    /// Scans `folder`; generated art is read from `art_root`. A folder with `recipes/` is a
+    /// release folder (its recipes are loaded; duplicate ids are an error), else a legacy one.
+    pub fn open_with_art(folder: &Path, art_root: &Path) -> Result<Self, String> {
         let mut files: Vec<PathBuf> = spec_files(folder).collect();
         files.sort();
         if files.is_empty() {
@@ -103,7 +180,9 @@ impl PluginSpecLibrary {
         let mut failures = BTreeMap::new();
         for file in files {
             let name = file.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-            let header = std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<Header>(&t).map_err(|e| e.to_string()));
+            let header = std::fs::read_to_string(&file)
+                .map_err(|e| e.to_string())
+                .and_then(|t| serde_json::from_str::<Header>(&t).map_err(|e| e.to_string()));
             match header {
                 Ok(h) => entries.push(Entry { effect_name: h.effect_name, name_pattern: h.name_pattern, file }),
                 Err(e) => {
@@ -112,16 +191,46 @@ impl PluginSpecLibrary {
             }
         }
         entries.sort_by(|a, b| b.name_pattern.len().cmp(&a.name_pattern.len()).then_with(|| a.stem().cmp(b.stem())));
-        let images = folder.join("Images");
-        let images_dir = if images.is_dir() { images } else { folder.join("images") };
+        let recipes_dir = folder.join("recipes");
+        let has_images = folder.join("Images").is_dir() || folder.join("images").is_dir();
+        let legacy = has_images && !recipes_dir.is_dir();
+        let recipes = if recipes_dir.is_dir() { Recipes::load(&recipes_dir)? } else { Recipes::default() };
+        let manifest_path = art_root.join("manifest.json");
+        let manifest = if manifest_path.is_file() {
+            match Manifest::load(&manifest_path) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    eprintln!("plugin-ui: {e}; ignoring the manifest");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let images_dir = if legacy {
+            let images = folder.join("Images");
+            if images.is_dir() { images } else { folder.join("images") }
+        } else {
+            art_root.join("Images")
+        };
         Ok(Self {
             folder: folder.to_path_buf(),
             images_dir,
+            art_root: art_root.to_path_buf(),
+            recipes,
+            manifest,
             entries,
             failures,
+            legacy,
             cache: Mutex::new(HashMap::new()),
             sprite_keys: Mutex::new(HashMap::new()),
+            texts: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// A legacy (development) folder: sprites next to the specs, no recipes.
+    pub fn is_legacy(&self) -> bool {
+        self.legacy
     }
 
     /// The entry for an engine `EffectName` ("UAD SPL Vitalizer MK2-T"): an exact
@@ -130,10 +239,9 @@ impl PluginSpecLibrary {
         if effect_name.is_empty() {
             return None;
         }
-        self.entries
-            .iter()
-            .find(|e| e.effect_name == effect_name)
-            .or_else(|| self.entries.iter().find(|e| !e.name_pattern.is_empty() && effect_name.contains(&e.name_pattern)))
+        self.entries.iter().find(|e| e.effect_name == effect_name).or_else(|| {
+            self.entries.iter().find(|e| !e.name_pattern.is_empty() && effect_name.contains(&e.name_pattern))
+        })
     }
 
     /// An entry by file stem (`spl_vitalizer_mk2_t`), effect name or name pattern.
@@ -160,23 +268,165 @@ impl PluginSpecLibrary {
         self.entry_for_effect(effect_name).and_then(|e| self.spec(e).ok())
     }
 
-    /// Lets `cache` (and so `gfx`, which draws through it) resolve this library's sprite keys.
+    /// Lets `cache` (and so `gfx`, which draws through it) resolve this library's sprite keys:
+    /// `spec:` is the art root (release) or the spec folder (legacy, plus `oa-art:` for the art
+    /// root).
     pub fn attach(&self, cache: &ImageCache) {
-        cache.register_root(ImageCache::SPEC_SCHEME, &self.folder);
+        if self.legacy {
+            cache.register_root(ImageCache::SPEC_SCHEME, &self.folder);
+            cache.register_root(Self::ART_SCHEME, &self.art_root);
+        } else {
+            cache.register_root(ImageCache::SPEC_SCHEME, &self.art_root);
+        }
     }
 
-    /// Image key for a sprite name: `spec:Images/<name>@2x.png`, else `spec:Images/<name>.png`;
-    /// None when neither file exists. Resolved once per name.
+    /// Image key for a sprite (recipe) id: `spec:Images/<id>@2x.png`, else `…/<id>.png`; a
+    /// legacy folder then tries the art root (`oa-art:Images/…`). None when no file exists, or
+    /// when the id's recipe says it cannot be made (no-recipe, deferred). Resolved once per id.
     pub fn sprite_key(&self, name: &str) -> Option<Arc<str>> {
         if let Some(hit) = self.sprite_keys.lock().get(name) {
             return hit.clone();
         }
-        let dir = self.images_dir.file_name().and_then(|n| n.to_str()).unwrap_or("Images").to_string();
-        let key = [format!("{name}@2x.png"), format!("{name}.png")]
-            .into_iter()
-            .find(|f| self.images_dir.join(f).is_file())
-            .map(|f| Arc::<str>::from(format!("{}:{dir}/{f}", ImageCache::SPEC_SCHEME)));
+        let blocked =
+            self.recipes.status(name).is_some_and(|s| matches!(s, RecipeStatus::NoRecipe | RecipeStatus::Deferred));
+        let files = [format!("{name}@2x.png"), format!("{name}.png")];
+        let mut key = None;
+        if !blocked && valid_id(name) {
+            let dir = self.images_dir.file_name().and_then(|n| n.to_str()).unwrap_or("Images").to_string();
+            key = files
+                .iter()
+                .find(|f| self.images_dir.join(f).is_file())
+                .map(|f| Arc::<str>::from(format!("{}:{dir}/{f}", ImageCache::SPEC_SCHEME)));
+            if key.is_none() && self.legacy {
+                let art = self.art_root.join("Images");
+                key = files
+                    .iter()
+                    .find(|f| art.join(f).is_file())
+                    .map(|f| Arc::<str>::from(format!("{}:Images/{f}", Self::ART_SCHEME)));
+            }
+        }
         self.sprite_keys.lock().insert(name.to_string(), key.clone());
         key
     }
+
+    /// A text the importer extracted (`Text/<id>.txt` or `Text/<id>.json` under the art root).
+    /// With a recipe that pins `output.sha256`, the text must match it (bytes of the `.txt`; the
+    /// compact UTF-8 JSON of the list); a mismatch reads as not imported.
+    pub fn text(&self, id: &str) -> Option<TextValue> {
+        if let Some(hit) = self.texts.lock().get(id) {
+            return hit.clone();
+        }
+        let value = self.read_text(id);
+        self.texts.lock().insert(id.to_string(), value.clone());
+        value
+    }
+
+    fn read_text(&self, id: &str) -> Option<TextValue> {
+        if !valid_id(id) {
+            return None;
+        }
+        let dir = self.art_root.join("Text");
+        let recipe = self.recipes.texts.get(id);
+        if recipe.is_some_and(|r| !r.status.is_buildable()) {
+            return None;
+        }
+        let expect = recipe.and_then(|r| r.output.as_ref()).and_then(|o| o.sha256.clone());
+        let hex = |bytes: &[u8]| Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        if let Ok(bytes) = std::fs::read(dir.join(format!("{id}.txt"))) {
+            if expect.as_ref().is_some_and(|e| *e != hex(&bytes)) {
+                eprintln!("plugin-ui: Text/{id}.txt does not match its recipe; ignored");
+                return None;
+            }
+            return String::from_utf8(bytes).ok().map(TextValue::Text);
+        }
+        if let Ok(text) = std::fs::read_to_string(dir.join(format!("{id}.json"))) {
+            let list: Vec<String> = serde_json::from_str(&text).ok()?;
+            let canonical = serde_json::to_string(&list).ok()?;
+            if expect.as_ref().is_some_and(|e| *e != hex(canonical.as_bytes())) {
+                eprintln!("plugin-ui: Text/{id}.json does not match its recipe; ignored");
+                return None;
+            }
+            return Some(TextValue::List(list));
+        }
+        None
+    }
+
+    /// Whether `spec` can be drawn from this install (see [`availability_of`](Self::availability_of));
+    /// the spec's stem is found through its effect name.
+    pub fn availability(&self, spec: &PluginSpec) -> Availability {
+        let stem = self
+            .entries
+            .iter()
+            .find(|e| e.effect_name == spec.effect_name)
+            .map(|e| e.stem().to_string())
+            .unwrap_or_default();
+        self.availability_of(&stem, spec)
+    }
+
+    /// Whether `spec` (file stem `stem`) can be drawn from this install:
+    /// - **with the importer's manifest** (release folders): the importer must call the spec ready
+    ///   (`specs.<stem>.ready`: every used sprite built or runtime, none deferred) *and* every sprite
+    ///   the spec references must be built. A sprite the spec still names that was not built is a
+    ///   runtime id our patches did not replace, or art the importer could not make: the panel
+    ///   would have a hole, so it is [`Availability::Unavailable`]. Ids the importer can still
+    ///   make (a spec it has not processed, `missing` art, buildable recipes) are
+    ///   [`Availability::Pending`].
+    /// - **with recipes only**: an id without a buildable recipe is unavailable, one not generated
+    ///   yet is pending.
+    /// - **legacy folders**: missing files are pending.
+    pub fn availability_of(&self, stem: &str, spec: &PluginSpec) -> Availability {
+        let mut pending = Vec::new();
+        let mut unavailable = Vec::new();
+        let manifest = self.manifest.as_ref().filter(|_| !self.legacy);
+        let entry = manifest.and_then(|m| m.specs.get(stem));
+        // Built: the file exists and the importer lists it (manifest), or its recipe can make it
+        // (recipes only: a stray file for an id no recipe makes does not count).
+        let built = |id: &str| {
+            self.sprite_key(id).is_some()
+                && match manifest {
+                    Some(m) => m.sprites.is_empty() || m.sprites.contains_key(id),
+                    None => self.legacy || self.recipes.is_empty() || self.recipes.is_buildable(id),
+                }
+        };
+        for id in spec.sprite_names() {
+            if built(id) {
+                continue;
+            }
+            let makeable = match self.recipes.status(id) {
+                Some(s) => s.is_buildable(),
+                None => manifest.is_some() && entry.is_none(),
+            };
+            if self.legacy || makeable { pending.push(id.to_string()) } else { unavailable.push(id.to_string()) }
+        }
+        for id in spec.text_refs() {
+            if self.text(id).is_some() {
+                continue;
+            }
+            let makeable = self.recipes.status(id).map(RecipeStatus::is_buildable).unwrap_or(false)
+                || manifest.is_some_and(|m| m.texts.contains_key(id) || entry.is_none());
+            if self.legacy || makeable { pending.push(id.to_string()) } else { unavailable.push(id.to_string()) }
+        }
+        if let Some(e) = entry {
+            if e.deferred > 0 && unavailable.is_empty() {
+                unavailable.push(format!("{stem}: {} deferred sprites", e.deferred));
+            } else if !e.ready && e.missing > 0 && unavailable.is_empty() && pending.is_empty() {
+                pending.push(format!("{stem}: {} sprites missing", e.missing));
+            } else if !e.ready && unavailable.is_empty() && pending.is_empty() {
+                unavailable.push(format!("{stem}: not ready"));
+            }
+        }
+        if !unavailable.is_empty() {
+            Availability::Unavailable(unavailable)
+        } else if !pending.is_empty() {
+            Availability::Pending(pending)
+        } else {
+            Availability::Ready
+        }
+    }
+}
+
+/// Recipe ids (`^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$`) never name a path outside their folder.
+/// Legacy sprite names are looser (spaces, `@`), so only separators and a leading dot are refused.
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 160 && !id.contains(['/', '\\', '\0']) && !id.starts_with('.')
 }

@@ -105,7 +105,7 @@ fn exercise(spec: &Arc<PluginSpec>, lib: &PluginSpecLibrary, assets: &Assets, st
 #[test]
 fn every_catalog_spec_builds_and_survives_every_gesture() {
     let Some(lib) = PluginSpecLibrary::locate() else {
-        eprintln!("skipped: no plug-in spec folder (set UACONSOLE_PLUGIN_SPECS)");
+        eprintln!("skipped: no plug-in spec folder (set OA_PLUGIN_SPECS)");
         return;
     };
     let assets = assets();
