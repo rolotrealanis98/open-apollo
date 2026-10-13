@@ -95,6 +95,7 @@ case "\$1" in
         echo "  oa-assets scan   [--from PATH]... [--json]"
         echo "  oa-assets import [--from PATH] [--dry-run]"
         [ -e "\$st/plugins" ] && echo "  oa-assets plugins [--from PATH]   plug-in art"
+        [ -e "\$st/dsp" ] && echo "  oa-assets dsp [--from PATH] [--out DIR]   plug-in DSP modules"
         echo "  oa-assets firmware [--from PATH] [--out DIR]" ;;
     scan)
         kind=\$(cat "\$st/scan" 2>/dev/null || echo good)
@@ -115,6 +116,7 @@ case "\$1" in
         [ -e "\$st/import_fails" ] && exit 1
         echo "Imported UAD Console 1.3.1.120 resources: 10 files, 1.0 MB" ;;
     plugins) echo "[ OK ]  plug-in art" ;;
+    dsp) exit "\$(cat "\$st/dsp_rc" 2>/dev/null || echo 0)" ;;
     firmware)
         echo "── DSP modules ──"
         echo "dsp/0c2.bill     ok       sha256 abc  (x)"
@@ -183,6 +185,20 @@ run -- --user tester --from "$win" --oa-assets "$oa" --send-report
 check "--send-report reaches install.sh" has "$log" "install.sh --yes --send-report"
 check "with a plugins command it makes the plug-in art" has "$log" "oa-assets plugins --from $win"
 check "the plug-in art is made as the user too" test "$(grep -c '^runuser -u tester' "$log")" = 2
+
+reset
+check "without a dsp command no DSP modules are collected" hasnt "$log" "oa-assets dsp"
+touch "$state/dsp"
+run -- --user tester --from "$win" --oa-assets "$oa"
+check "with a dsp command the plug-in DSP modules are collected" \
+    has "$log" "oa-assets dsp --from $win --out /lib/firmware/universal-audio/plugins"
+check "the DSP modules come after the firmware" before "oa-assets firmware" "oa-assets dsp"
+reset
+touch "$state/dsp"; echo 1 > "$state/dsp_rc"
+run -- --user tester --from "$win" --oa-assets "$oa"
+check "a failed DSP collection doesn't fail setup" test $? = 0
+check "a failed DSP collection only warns" has "$tmp_dir/out" "Couldn't collect the plug-in DSP modules"
+check "a failed DSP collection keeps every step" test "$(markers)" = "$ALL"
 
 reset
 echo old > "$state/scan"

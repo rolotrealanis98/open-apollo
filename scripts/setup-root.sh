@@ -262,6 +262,12 @@ step_firmware() {
         2) marker firmware failed "A DSP program in your install is a version open-apollo doesn't know yet" ;;
         *) marker firmware failed "oa-assets firmware stopped (exit $rc)" ;;
     esac
+    # Every plug-in's DSP modules, for plug-in hosting later.  Optional: a
+    # failure here only warns.
+    if [ "$rc" = 0 ] && oa_has dsp; then
+        "$OA_ASSETS" dsp --from "$FROM" --out "$FIRMWARE_DIR/plugins" \
+            || warn "Couldn't collect the plug-in DSP modules (only needed for future plug-in hosting)"
+    fi
     [ "$rc" = 0 ]
 }
 
