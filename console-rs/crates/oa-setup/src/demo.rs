@@ -145,29 +145,41 @@ pub fn console(home: &Path, resources: &Path) -> Vec<(Duration, String)> {
     s.lines
 }
 
-/// The firmware extractor reading `root`.
-pub fn firmware(root: &Path, powered: usize, drivers: usize, out: &str) -> Vec<(Duration, String)> {
+/// `oa-assets firmware` reading `root`: the real command's headers and file
+/// names (`dsp/<id>.bill` DSP modules, `Apollo*.bin` USB boot images).
+pub fn firmware(root: &Path, powered: usize, out: &str) -> Vec<(Duration, String)> {
     let mut s = Script::new(true);
     s.header(200, "Reading your UAD install");
     s.info(300, &format!("From {} (read-only)", root.display()));
-    s.info(200, &format!("{powered} Powered plug-in DLLs, {drivers} UA driver files"));
-    s.header(300, "Extracting");
-    let files = [
-        ("ua-dsp-programs.bin", "5 programs from 118 DLLs"),
-        ("ua-apollo-mixer.bin", "mixer DSP image"),
-        ("ua-apollo-plugin-chain.bin", "plug-in chain loader"),
-        ("ua-usb-apollo-solo.bin", "Apollo Solo USB"),
-        ("ua-usb-twin.bin", "Twin USB"),
-        ("ua-usb-twin-x.bin", "Twin X USB"),
+    s.info(150, "UAD software 12.0.0.602");
+    s.info(150, &format!("To {out}"));
+    s.header(300, "DSP modules");
+    s.info(400, &format!("Looking for module 12b in the other Powered plug-ins ({powered} DLLs)"));
+    let modules = [
+        ("dsp/0a5.bill", "(UAD Mic Input Strip Header.dll +0x2e1c0)"),
+        ("dsp/0c2.bill", "(UAD Input Strip Header.dll +0x1b9a0)"),
+        ("dsp/0da.bill", "(UAD Mic Input Strip Header.dll +0x2e960)"),
+        ("dsp/0db.bill", "(UAD Input Strip Header.dll +0x1ba60)"),
+        ("dsp/0eb.bill", "(UAD Input Strip Header.dll +0x1c650)"),
+        ("dsp/12b.bill", "(UAD 1176 Classic.dll +0x3c4a0)"),
+        ("dsp/0c9.bill", "(UAD Talkback Input Strip Header.dll +0x1f3e0)"),
     ];
-    let width = files.iter().map(|(n, _)| n.len()).max().unwrap_or(0) + 2;
-    for (name, note) in files {
-        s.raw(650, format!("{name:<width$}ok  sha256 {}  {note}", fake_sha256(name)));
+    let images = ["ApolloSolo.bin", "ApolloTwin.bin", "ApolloTwinX.bin"];
+    for (name, note) in modules {
+        s.raw(450, file_line(name, note));
     }
-    s.header(300, "Writing");
-    s.ok(400, &format!("Wrote {} files to {out}", files.len()));
-    s.ok(200, "manifest.json (source install, versions, sha256 of every file)");
+    s.header(300, "USB boot images");
+    for name in images {
+        s.raw(350, file_line(name, "(Firmware/USB)"));
+    }
+    s.header(300, "Manifest");
+    s.ok(400, &format!("Wrote {} files and manifest.json to {out}", modules.len() + images.len()));
     s.lines
+}
+
+/// One file row as `oa-assets firmware` prints it: `NAME  STATUS  sha256 HEX  note`.
+fn file_line(name: &str, note: &str) -> String {
+    format!("{name:<16} {:<7}  sha256 {}  {note}", "ok", fake_sha256(name))
 }
 
 /// A stable 64-hex-digit stand-in for a hash (FNV-1a, stretched); demo only.
@@ -212,10 +224,27 @@ mod tests {
 
     #[test]
     fn demo_firmware_lines_parse_as_files() {
-        let lines = firmware(Path::new("/mnt/w"), 223, 4, crate::firmware::FIRMWARE_DIR);
+        let lines = firmware(Path::new("/mnt/w"), 223, crate::firmware::FIRMWARE_DIR);
         let files: Vec<_> = lines.iter().filter_map(|(_, l)| crate::firmware::parse_file_line(l)).collect();
-        assert_eq!(files.len(), 6);
+        let names: Vec<_> = files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "dsp/0a5.bill",
+                "dsp/0c2.bill",
+                "dsp/0da.bill",
+                "dsp/0db.bill",
+                "dsp/0eb.bill",
+                "dsp/12b.bill",
+                "dsp/0c9.bill",
+                "ApolloSolo.bin",
+                "ApolloTwin.bin",
+                "ApolloTwinX.bin"
+            ]
+        );
         assert!(files.iter().all(|f| f.status == Status::Done && f.sha256.as_ref().is_some_and(|h| h.len() == 64)));
-        assert_eq!(crate::firmware::outcome(Some(0), &files), Status::Done);
+        assert_eq!(crate::firmware::outcome(Some(0), &files, true), Status::Done);
+        let summary = crate::installlog::strip_ansi(&lines.last().unwrap().1);
+        assert_eq!(summary, format!("[ OK ]  Wrote 10 files and manifest.json to {}", crate::firmware::FIRMWARE_DIR));
     }
 }

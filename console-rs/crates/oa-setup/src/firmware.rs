@@ -76,6 +76,8 @@ pub fn shell_quote(s: &str) -> String {
 pub struct FileLine {
     pub name: String,
     pub status: Status,
+    /// The extractor said `missing` (not in the install), not `warn`.
+    pub missing: bool,
     pub sha256: Option<String>,
     pub note: Option<String>,
 }
@@ -88,7 +90,8 @@ pub fn parse_file_line(line: &str) -> Option<FileLine> {
     if !name.contains('.') || name.starts_with('[') {
         return None;
     }
-    let status = match tok.next()?.to_ascii_lowercase().as_str() {
+    let word = tok.next()?.to_ascii_lowercase();
+    let status = match word.as_str() {
         "ok" => Status::Done,
         "skip" | "skipped" | "unchanged" => Status::Skipped,
         "missing" | "warn" => Status::Warning,
@@ -102,7 +105,7 @@ pub fn parse_file_line(line: &str) -> Option<FileLine> {
         rest.drain(..2);
     }
     let note = (!rest.is_empty()).then(|| rest.join(" "));
-    Some(FileLine { name: name.to_string(), status, sha256, note })
+    Some(FileLine { name: name.to_string(), status, missing: word == "missing", sha256, note })
 }
 
 /// What a previous extraction left in `dir`.
@@ -125,10 +128,23 @@ pub fn existing(dir: &Path) -> Option<Existing> {
     Some(Existing { files, source })
 }
 
+/// A USB Apollo's boot image (`ApolloSolo.bin`, `ApolloTwin.bin`, `ApolloTwinX.bin`).
+pub fn is_usb_image(name: &str) -> bool {
+    !name.contains('/') && name.starts_with("Apollo") && name.ends_with(".bin")
+}
+
+/// A missing USB boot image on a computer without a USB Apollo: nothing needs it.
+pub fn not_needed(f: &FileLine, usb_apollo: bool) -> bool {
+    !usb_apollo && f.missing && is_usb_image(&f.name)
+}
+
 /// The overall result of an extractor run from its exit code and file lines.
-pub fn outcome(exit: Option<i32>, files: &[FileLine]) -> Status {
+/// `usb_apollo`: a USB Apollo (vendor 2b5a) is connected, so its boot image
+/// matters; without one a missing `Apollo*.bin` doesn't make it a warning.
+pub fn outcome(exit: Option<i32>, files: &[FileLine], usb_apollo: bool) -> Status {
+    let bad = |f: &FileLine| (f.status == Status::Failed || f.status == Status::Warning) && !not_needed(f, usb_apollo);
     match exit {
-        Some(0) if files.iter().any(|f| f.status == Status::Failed || f.status == Status::Warning) => Status::Warning,
+        Some(0) if files.iter().any(bad) => Status::Warning,
         Some(0) if files.is_empty() => Status::Warning,
         Some(0) => Status::Done,
         _ => Status::Failed,
@@ -146,6 +162,7 @@ mod tests {
             Some(FileLine {
                 name: "ua-dsp-programs.bin".into(),
                 status: Status::Done,
+                missing: false,
                 sha256: Some("3f1a9c".into()),
                 note: Some("(5 programs from 118 DLLs)".into()),
             })
@@ -165,11 +182,28 @@ mod tests {
     fn outcome_from_exit_and_files() {
         let ok = parse_file_line("a.bin ok sha256 00").unwrap();
         let miss = parse_file_line("b.bin missing").unwrap();
-        assert_eq!(outcome(Some(0), std::slice::from_ref(&ok)), Status::Done);
-        assert_eq!(outcome(Some(0), &[ok.clone(), miss]), Status::Warning);
-        assert_eq!(outcome(Some(0), &[]), Status::Warning, "nothing reported is suspicious");
-        assert_eq!(outcome(Some(2), &[ok]), Status::Failed);
-        assert_eq!(outcome(None, &[]), Status::Failed);
+        assert_eq!(outcome(Some(0), std::slice::from_ref(&ok), true), Status::Done);
+        assert_eq!(outcome(Some(0), &[ok.clone(), miss], true), Status::Warning);
+        assert_eq!(outcome(Some(0), &[], true), Status::Warning, "nothing reported is suspicious");
+        assert_eq!(outcome(Some(2), &[ok], true), Status::Failed);
+        assert_eq!(outcome(None, &[], true), Status::Failed);
+    }
+
+    #[test]
+    fn missing_usb_images_are_fine_without_a_usb_apollo() {
+        let line = |l: &str| parse_file_line(l).unwrap();
+        let dsp = line("dsp/0da.bill     ok       sha256 37cd  (UAD Mic Input Strip Header.dll +0x2e960)");
+        let solo = line("ApolloSolo.bin   missing  not in this install (only USB Apollos need it)");
+        let twin_x = line("ApolloTwinX.bin  missing  not in this install (only USB Apollos need it)");
+        let files = [dsp.clone(), solo.clone(), twin_x];
+        assert_eq!(outcome(Some(0), &files, false), Status::Done, "no USB Apollo: nothing needs the images");
+        assert_eq!(outcome(Some(0), &files, true), Status::Warning, "a USB Apollo needs its image");
+        // Only `missing` USB images are excused: not a `warn` one, not a DSP module.
+        let unknown = line("ApolloTwin.bin   warn     sha256 ab12  (Firmware/USB) not a known version; written anyway");
+        assert_eq!(outcome(Some(0), &[dsp.clone(), unknown], false), Status::Warning);
+        let module = line("dsp/0eb.bill     missing  not in this install");
+        assert_eq!(outcome(Some(0), &[dsp, module, solo], false), Status::Warning);
+        assert_eq!(outcome(Some(1), &files, false), Status::Failed);
     }
 
     #[test]

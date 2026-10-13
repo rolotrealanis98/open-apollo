@@ -249,13 +249,24 @@ impl App {
             self.handle(m);
         }
         if let Some(o) = self.firmware.as_mut().and_then(Run::pump) {
+            // Without a USB Apollo (system check) nothing needs its boot image;
+            // before the check has run, assume one might be there.
+            let usb_apollo = self.sys.as_ref().is_none_or(|s| !s.apollo.usb.is_empty());
             let fw = self.firmware.as_mut().expect("pumped");
-            let status =
-                if o.status == Status::Failed { Status::Failed } else { firmware::outcome(Some(0), &fw.files) };
+            let status = if o.status == Status::Failed {
+                Status::Failed
+            } else {
+                firmware::outcome(Some(0), &fw.files, usb_apollo)
+            };
             if status != o.status && status != Status::Failed {
+                let skipped_images = fw.files.iter().any(|f| firmware::not_needed(f, usb_apollo));
                 fw.progress.outcome = Some(Outcome {
                     status,
                     message: match status {
+                        Status::Done if skipped_images => {
+                            "Extracted everything this computer needs (the USB boot images are only for USB Apollos)."
+                                .into()
+                        }
                         Status::Done => "All files extracted.".into(),
                         _ => "Finished, but some files are missing: see the list.".into(),
                     },
@@ -624,7 +635,7 @@ impl App {
         let out = Path::new(firmware::FIRMWARE_DIR);
         let run = if self.opts.demo {
             let i = &found.install;
-            let script = crate::demo::firmware(&root, i.powered_plugins.len(), i.drivers.len(), firmware::FIRMWARE_DIR);
+            let script = crate::demo::firmware(&root, i.powered_plugins.len(), firmware::FIRMWARE_DIR);
             let command = format!(
                 "pkexec oa-assets firmware --from {} --out {}",
                 firmware::shell_quote(&root.to_string_lossy()),
