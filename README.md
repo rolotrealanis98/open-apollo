@@ -10,9 +10,11 @@
 **Open-source Linux driver and tools for Universal Audio Apollo Thunderbolt and USB interfaces**
 
 Open Apollo brings Linux support to Universal Audio's Apollo audio interfaces.
-Built through clean-room reverse engineering, this community-driven project
-provides a native kernel driver for Thunderbolt models and a pure-userspace
-stack for USB models, along with a mixer daemon and a native mixer console (console-rs).
+Built by reverse engineering the hardware and drivers for interoperability, this
+community-driven project provides a native kernel driver for Thunderbolt models and a
+pure-userspace stack for USB models, along with a mixer daemon and a native mixer console
+(console-rs). It ships no Universal Audio files: setup reads what your Apollo needs from
+your own UAD install (see [NOTICE.md](NOTICE.md)).
 
 > **⚠️ Experimental** — This project is under active development and not yet ready
 > for production use. Expect rough edges, kernel stability issues on some
