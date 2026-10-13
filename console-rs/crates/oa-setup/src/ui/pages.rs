@@ -348,7 +348,7 @@ impl App {
                             .unwrap_or_else(|| "not installed".into()),
                     ),
                     ("Powered plug-ins", n(i.powered_plugins.len())),
-                    ("UADx plug-ins", n(i.vst3.len())),
+                    ("VST3 plug-ins", n(i.vst3.len())),
                     ("UA driver files", n(i.drivers.len())),
                 ],
             );
