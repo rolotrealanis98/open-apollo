@@ -70,6 +70,8 @@ void ua_plugin_disown(struct ua_device *ua, unsigned int dsp, const char *why)
 	if (d->owned)
 		dev_info(&ua->pdev->dev,
 			 "plug-in host: DSP %u no longer used: %s\n", dsp, why);
+	/* its instances go with it (their leases with the ledger) */
+	ua_instances_dsp_gone(ua, dsp);
 	d->owned = false;
 	d->geom_read = false;
 	if (d->pools) {

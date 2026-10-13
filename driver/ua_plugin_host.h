@@ -332,6 +332,40 @@ int ua_plugin_upload(struct ua_device *ua, unsigned int dsp,
 		     struct ua_cat_entry *e, u32 dest, enum ua_bill_form form,
 		     u64 epoch);			/* host->mutex, no ua->lock */
 
+/* ---- the device's authorization answer (ua_plugin_license.c) ----
+ *
+ * The board query, as UA's PCIe driver makes it (refresh 108f8): TX
+ * {0x00100002, date} and {0x00110002, low32 of the owned request}, RX one
+ * 0xc08-byte reply descriptor (0x80000302) prefilled with the unfilled-table
+ * sentinel 0x83000000, accepted only after the response ring retired it and
+ * only when word 0 is 0x80030302 and word 1 echoes the request; words 2..769
+ * are the 768-word table, index render id - 0x800.  The decision is the
+ * SDK's (CUADPlug topology 1951b0 over PCIe's records f640).  Nothing is
+ * cached: every query and every CREATE asks the device again.
+ */
+#define UA_BQ_CMD_DATE		0x00100002
+#define UA_BQ_CMD_QUERY		0x00110002
+#define UA_BQ_REPLY		0x80030302
+#define UA_BQ_WORDS		768
+#define UA_BQ_RX_WORDS		(UA_BQ_WORDS + 2)
+#define UA_BQ_SENTINEL		0x83000000
+#define UA_BQ_BASE		0x800
+#define UA_BQ_WAIT_MS		2000	/* the original: 20 x 100 ms */
+#define UA_DATE_EPOCH		1167609600LL	/* 2007-01-01 00:00:00 UTC */
+
+int ua_plugin_date(s64 unix_seconds, u32 *date);
+u32 ua_plugin_license_state(u32 word);
+bool ua_plugin_license_admits(u32 state);
+int ua_plugin_board_query(struct ua_device *ua, u32 *words, u32 *date,
+			  u64 *epoch);		/* host->mutex, no ua->lock */
+int ua_plugin_admit(struct ua_device *ua, u32 render_id, u32 *state,
+		    u32 *word, u64 *epoch);	/* host->mutex, no ua->lock */
+
+/* ---- plug-in instances (ua_plugin_instance.c) ---- */
+void ua_instances_teardown(struct ua_device *ua, const char *why); /* ua->lock */
+void ua_instances_dsp_gone(struct ua_device *ua, unsigned int dsp); /* ua->lock */
+void ua_plugin_file_release(struct ua_file *uf);	/* no lock */
+
 /* ---- Console input strips on DSP 0 (ua_strips.c, input_strips=1) ---- */
 bool ua_strips_wanted(void);
 void ua_strips_init(struct ua_device *ua);		/* probe */

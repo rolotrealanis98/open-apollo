@@ -540,9 +540,9 @@ HOST_FAKE = r'''
 #define UA_PLUGIN_STATE_STRIPS (1u << 5)
 struct work_struct { int unused; };
 struct delayed_work { struct work_struct work; };
-static int queued, cancels;
-static unsigned long queued_delay;
-static void *system_wq;
+static int queued __maybe_unused, cancels __maybe_unused;
+static unsigned long queued_delay __maybe_unused;
+static void *system_wq __maybe_unused;
 static bool queue_delayed_work(void *wq, struct delayed_work *w, unsigned long d)
 { (void)wq; (void)w; queued++; queued_delay = d; return true; }
 static bool cancel_delayed_work_sync(struct delayed_work *w) { (void)w; cancels++; return false; }
@@ -610,10 +610,13 @@ struct firmware { size_t size; const u8 *data; };
 struct disk { const char *name; const u8 *data; size_t len; };
 static struct disk disk[8];
 static unsigned int ndisk;
+static void (*on_fw_read)(void) __maybe_unused;
 static int firmware_request_nowarn(const struct firmware **fw, const char *name,
 				   struct device *d)
 {
 	(void)d;
+	if (on_fw_read)
+		on_fw_read();
 	for (unsigned int i = 0; i < ndisk; i++) {
 		if (strcmp(disk[i].name, name))
 			continue;
@@ -645,7 +648,8 @@ static char *bin2hex(char *dst, const void *src, size_t n)
 static int snd_card_ro_proc_new(struct snd_card *c, const char *n, void *p,
 				void (*fn)(struct snd_info_entry *, struct snd_info_buffer *))
 { (void)c; (void)n; (void)p; (void)fn; return 0; }
-bool ua_plugin_host_enabled(void) { return false; }
+
+
 
 /* The route defaults on DSPs 1-3 (inline, no wait) */
 static u32 raw[4096][5];
@@ -665,6 +669,14 @@ static int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp, u32 w0,
 '''
 
 
+STRIPS_ONLY = r'''
+bool ua_plugin_host_enabled(void) { return false; }
+/* No plug-in instances in these tests (test_plugin_license.py has them) */
+void ua_instances_teardown(struct ua_device *ua, const char *why) { (void)ua; (void)why; }
+void ua_instances_dsp_gone(struct ua_device *ua, unsigned int dsp) { (void)ua; (void)dsp; }
+'''
+
+
 def host_source():
     host = csrc.source('ua_plugin_host.c')
     fns = '\n'.join(csrc.extract(host, sig) for sig in (
@@ -681,7 +693,7 @@ def build_host(main):
     code = ('#define UA_REAL_QUARANTINE 1\n' + khost.PREFIX + HOST_FAKE +
             khost.header('ua_resource_pool.h') +
             khost.header('ua_plugin_host.h') + STRIPS_STUBS + HOST_STUBS +
-            fake.FPGA + blob_arrays() +
+            STRIPS_ONLY + fake.FPGA + blob_arrays() +
             khost.body('ua_resource_pool.c') + xact +
             khost.body('ua_plugin_catalog.c') + khost.body('ua_plugin_upload.c') +
             khost.body('ua_plugin_place.c') + host_source() +
@@ -832,6 +844,8 @@ int main(void)
 	assert(st->state == UA_STRIPS_LIVE);
 	assert(HAS("DSP0 pools empty, creating 4 Mic Input Strip(s) at 48000 Hz"));
 	assert(replies_made == 5);
+	/* not plug-ins: the strips never ask for the authorization table */
+	assert(!host.board_queries && !bq_answered);
 	assert(host.dsp[0].uploads == 5 && host.dsp[0].replies_ok == 5);
 	assert(host.dsp[0].tx_xacts == 5 + 4);
 	for (int j = 0; j < 5; j++)

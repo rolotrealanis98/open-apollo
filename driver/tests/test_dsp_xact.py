@@ -52,22 +52,34 @@ FPGA = r'''
 static struct ua_device dev;
 static struct ua_plugin_host host;
 static struct pci_dev pci;
-static u32 slots[2][1024][4];		/* [0] cmd, [1] resp */
-static unsigned int target[2];		/* doorbell values */
+static u32 slots[8][1024][4];		/* [2n] DSP n's cmd, [2n + 1] its resp */
+static unsigned int target[8];		/* doorbell values */
 static unsigned int per_tick = 1000;	/* entries consumed per sleep */
 static bool stalled;
 static unsigned int bells[16], nbells;	/* 0 cmd, 1 resp, in order */
 static unsigned int nputs, fail_put_at = ~0u;
-static unsigned int cmd_left;		/* dwords left of the current command */
+static unsigned int cmd_left_[4];	/* dwords left of the current command */
 static unsigned int replies_made;
 static u32 reply_status;		/* word 1 of upload replies */
 static unsigned int sleeps_locked;
 static unsigned int dma_live, dma_allocs;
 static unsigned int consumed, consume_limit = ~0u;	/* stall after N entries */
+/* The board query's answer (a synthetic table: it tests the parser only) */
+enum { BQ_OK, BQ_BAD_HEADER, BQ_BAD_ECHO, BQ_SILENT };
+static int bq_mode __maybe_unused;
+static u32 bq_table[768] __maybe_unused;
+static u32 bq_dates[8] __maybe_unused;
+static unsigned int bq_ndates __maybe_unused, bq_answered __maybe_unused;
 
 static int ringi(const struct ua_dsp_ring *r)
 {
-	return r == &dev.dsp[0].cmd ? 0 : r == &dev.dsp[0].resp ? 1 : -1;
+	for (int n = 0; n < 4; n++) {
+		if (r == &dev.dsp[n].cmd)
+			return 2 * n;
+		if (r == &dev.dsp[n].resp)
+			return 2 * n + 1;
+	}
+	return -1;
 }
 
 static void *dma_alloc_coherent(struct device *d, size_t n, dma_addr_t *dma, int f)
@@ -100,7 +112,7 @@ unsigned int ua_dsp_ring_pending(const struct ua_dsp_ring *r)
 {
 	return (r->write_ptr - r->hw_pos) & (r->capacity - 1);
 }
-static unsigned int pos[2];
+static unsigned int pos[8];
 int ua_dsp_ring_update_pos(struct ua_device *ua, struct ua_dsp_ring *r)
 {
 	assert(ua->lock.held);
@@ -146,28 +158,30 @@ int ua_dsp_ring_resync_now(struct ua_device *ua, struct ua_dsp_ring *r)
 
 static u32 *bus(u32 lo, u32 hi) { return (u32 *)(uintptr_t)(((u64)hi << 32) | lo); }
 
-/* The next reply descriptor gets @n words */
-static void reply(const u32 *w, unsigned int n)
+/* DSP @d's next reply descriptor gets @n words */
+static void reply_on(unsigned int d, const u32 *w, unsigned int n)
 {
-	u32 *e = slots[1][pos[1]];
+	unsigned int r = 2 * d + 1;
+	u32 *e = slots[r][pos[r]];
 
-	assert(pos[1] != target[1]);		/* a descriptor was waiting */
+	assert(pos[r] != target[r]);		/* a descriptor was waiting */
 	assert(e[0] == (UA_RING_DMA_REF | n));
 	memcpy(bus(e[2], e[3]), w, n * 4);
-	pos[1] = (pos[1] + 1) & 1023;
+	pos[r] = (pos[r] + 1) & 1023;
 	replies_made++;
 }
 
-/* Consume command entries; commands that answer get their reply */
-static void fpga_tick(void)
+/* DSP @d consumes command entries; commands that answer get their reply */
+static void fpga_tick_dsp(unsigned int d)
 {
-	unsigned int n = 0;
+	unsigned int n = 0, c = 2 * d;
+	unsigned int *cmd_left = &cmd_left_[d];
 
-	while (!stalled && pos[0] != target[0] && n++ < per_tick &&
+	while (!stalled && pos[c] != target[c] && n++ < per_tick &&
 	       consumed < consume_limit) {
-		consumed++;
-		u32 *e = slots[0][pos[0]];
+		u32 *e = slots[c][pos[c]];
 
+		consumed++;
 		if (e[0] & UA_RING_DMA_REF) {
 			unsigned int dw = e[0] & 0xffff;
 			u32 *p = bus(e[2], e[3]);
@@ -177,32 +191,45 @@ static void fpga_tick(void)
 			assert(dw && dw <= 1024 && a / 4096 == (a + dw * 4 - 1) / 4096);
 			/* the commands in it, one after the other */
 			for (unsigned int i = 0, take; i < dw; i += take) {
-				if (!cmd_left) {
+				if (!*cmd_left) {
 					unsigned int op = p[i] >> 16;
 
-					cmd_left = p[i] & 0xffff;
-					assert(cmd_left);
+					*cmd_left = p[i] & 0xffff;
+					assert(*cmd_left);
 					if (op == 0x1 || op == 0x4) {
 						u32 r[4] = { 0x80070004, reply_status,
 							     p[i + 3], p[i] };
 
-						reply(r, 4);
+						reply_on(d, r, 4);
 					}
 				}
-				take = min(cmd_left, dw - i);
-				cmd_left -= take;
+				take = min(*cmd_left, dw - i);
+				*cmd_left -= take;
 			}
-		} else if (e[0] == 0x00110002) {
+		} else if (e[0] == 0x00100002) {
+			bq_dates[bq_ndates++ & 7] = e[1];
+		} else if (e[0] == 0x00110002 && bq_mode != BQ_SILENT) {
 			static u32 table[770];
 
-			table[0] = 0x80030302;
-			table[1] = e[1];
+			table[0] = bq_mode == BQ_BAD_HEADER ? 0x80030303 : 0x80030302;
+			table[1] = bq_mode == BQ_BAD_ECHO ? e[1] ^ 1 : e[1];
 			for (unsigned int i = 2; i < 770; i++)
-				table[i] = 0x81000000;
-			reply(table, 770);
+				table[i] = bq_table[i - 2];
+			reply_on(d, table, 770);
+			bq_answered++;
 		}
-		pos[0] = (pos[0] + 1) & 1023;
+		pos[c] = (pos[c] + 1) & 1023;
 	}
+}
+
+/* Consume command entries; commands that answer get their reply */
+static void (*on_tick)(void) __maybe_unused;
+static void fpga_tick(void)
+{
+	if (on_tick)
+		on_tick();
+	for (unsigned int d = 0; d < 4; d++)
+		fpga_tick_dsp(d);
 }
 
 static void usleep_range(unsigned long a, unsigned long b)
@@ -226,6 +253,18 @@ void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
 }
 #endif
 
+/* DSPs 1-3 get live rings too (placement tests) */
+static void rings_all(void)
+{
+	for (unsigned int d = 1; d < 4; d++) {
+		dev.dsp[d].rings_allocated = true;
+		dev.dsp[d].cmd = (struct ua_dsp_ring){ .capacity = 1024,
+			.reg_base = 0x800 * d + 0x20, .live = true };
+		dev.dsp[d].resp = (struct ua_dsp_ring){ .capacity = 1024,
+			.reg_base = 0x800 * d + 0x60, .live = true };
+	}
+}
+
 static void reset(void)
 {
 	memset(&dev, 0, sizeof(dev));
@@ -242,15 +281,22 @@ static void reset(void)
 					       .live = true, .write_ptr = 1000, .hw_pos = 1000 };
 	dev.dsp[0].resp = (struct ua_dsp_ring){ .capacity = 1024, .reg_base = 0x60,
 						.live = true, .write_ptr = 7, .hw_pos = 7 };
+	memset(pos, 0, sizeof(pos));
+	memset(target, 0, sizeof(target));
 	pos[0] = target[0] = 1000;
 	pos[1] = target[1] = 7;
 	stalled = false;
 	per_tick = 1000;
 	consumed = 0;
 	consume_limit = ~0u;
+	bq_mode = BQ_OK;
+	on_tick = NULL;
+	bq_ndates = bq_answered = 0;
+	for (unsigned int i = 0; i < 768; i++)
+		bq_table[i] = 0x83000000;
 	nbells = nputs = replies_made = sleeps_locked = 0;
 	fail_put_at = ~0u;
-	cmd_left = 0;
+	memset(cmd_left_, 0, sizeof(cmd_left_));
 	reply_status = 0;
 	memset(quarantined, 0, sizeof(quarantined));
 }

@@ -74,6 +74,7 @@ void ua_plugin_epoch_bump(struct ua_device *ua, const char *why)
 	ua->host->epoch++;
 	epochs++;
 }
+void ua_instances_dsp_gone(struct ua_device *ua, unsigned int dsp) { (void)ua; (void)dsp; }
 bool ua_catalog_resident(const struct ua_cat_entry *e, unsigned int dsp, u64 epoch)
 {
 	(void)e; (void)dsp; (void)epoch;

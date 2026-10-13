@@ -22,6 +22,7 @@
 #include <linux/uaccess.h>
 
 #include "ua_apollo.h"
+#include "ua_plugin_host.h"
 #include "ua_ioctl.h"
 
 #define UA_EVENT_READ_BATCH	8
@@ -153,6 +154,8 @@ int ua_event_release(struct inode *inode, struct file *filp)
 	struct ua_device *ua = uf->ua;
 	unsigned long flags;
 
+	/* the plug-in instances this file created come down with it */
+	ua_plugin_file_release(uf);
 	fasync_helper(-1, filp, 0, &uf->fasync);
 
 	spin_lock_irqsave(&ua->event_lock, flags);

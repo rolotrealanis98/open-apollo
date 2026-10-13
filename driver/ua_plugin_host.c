@@ -182,6 +182,7 @@ void ua_plugin_teardown(struct ua_device *ua, const char *why)
 	lockdep_assert_held(&ua->lock);
 	if (!ua->host || !ua->host->active)
 		return;
+	ua_instances_teardown(ua, why);
 	ua_strips_teardown(ua, why);
 }
 
@@ -333,13 +334,29 @@ void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
  * ua_plugin_host_ops - UA_PLUGIN_OP_* accepted right now
  * @ua: device (ua->lock held)
  *
- * A bit is reported only for an operation that would be accepted: no
- * operation exists yet in this build, so this is 0.
+ * A bit only for an operation that would be accepted now: none with
+ * plugin_host=0; BOARD_QUERY while DSP 0's rings run on a connected
+ * device; CREATE when, on top of that, a DSP is the host's to place on;
+ * DESTROY always (it never needs the device).
  */
 u64 ua_plugin_host_ops(struct ua_device *ua)
 {
+	struct ua_dsp_state *ds = &ua->dsp[0];
+	u64 ops;
+	unsigned int i;
+
 	lockdep_assert_held(&ua->lock);
-	return 0;
+	if (!plugin_host || !ua->host)
+		return 0;
+	ops = UA_PLUGIN_OP_DESTROY;
+	if (atomic_read(&ua->shutdown) || !ua->num_dsps || !ua->audio.connected ||
+	    !ds->rings_allocated || !ds->cmd.live || !ds->resp.live)
+		return ops;
+	ops |= UA_PLUGIN_OP_BOARD_QUERY;
+	for (i = 0; i < ua->num_dsps && i < UA_HOST_DSPS; i++)
+		if (ua_plugin_dsp_admitted(ua, i))
+			return ops | UA_PLUGIN_OP_CREATE;
+	return ops;
 }
 
 /* GET_PLUGIN_CAPS' host fields (ua->lock held) */
@@ -364,20 +381,4 @@ void ua_plugin_host_caps(struct ua_device *ua, u32 *state, u32 *owned,
 			*quarantined |= BIT(i);
 	}
 	*instances = h->n_instances;
-}
-
-long ua_plugin_ioctl_board_query(struct ua_device *ua, unsigned long arg)
-{
-	(void)ua;
-	(void)arg;
-	return -EOPNOTSUPP;
-}
-
-long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
-			      unsigned long arg)
-{
-	(void)ua;
-	(void)uf;
-	(void)arg;
-	return -EOPNOTSUPP;
 }
