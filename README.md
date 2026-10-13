@@ -53,7 +53,7 @@ Each square is one thing UA's own drivers do (left), one task of the work plan (
 Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @stoneiboyz-sys:
 
 - **6ch playback** — S32_LE 48kHz, confirmed on Ubuntu Studio 24.04 (Intel) and CachyOS (AMD)
-- **10ch capture** — confirmed working; one-shot `usb-full-init.py` (38 packets, includes DSP program load), then `modprobe snd_usb_audio`
+- **10ch capture** — confirmed working; one-shot `usb-full-init.py` (38 packets, includes DSP program load), then `modprobe snd_usb_audio`. It was confirmed with the replayed Windows capture; `usb-full-init.py` now builds the same bytes from the DSP modules extracted from your own UAD install (that path is untested on hardware)
 - **PipeWire capture** — mic input working end-to-end; Discord voice calls, `pw-record`, browser tabs confirmed
 - **Hardware monitoring** — mic → headphones simultaneous with active PipeWire streams
 - **Preamp control** — gain, 48V phantom power, mic/line switching via vendor control
@@ -266,7 +266,7 @@ cd open-apollo
 sudo bash scripts/install-usb.sh
 ```
 
-The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
+The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. It uses the USB boot image and the DSP modules extracted from your own UAD install (by the setup wizard or `oa-assets firmware`) and tells you how to extract them if they're missing.
 
 After install, the following PipeWire devices are available:
 

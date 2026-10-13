@@ -44,8 +44,11 @@ pkill -f "usb-dsp-init.py --daemon" 2>/dev/null || true
 # look successful even on a Python traceback.  The second attempt's failure
 # must propagate out of this script so callers (udev, install-usb.sh) can
 # see it; earlier versions masked it with `|| log ...` and exit 0.
-# The retry replays the captured stream with the old fixed timing (--replay)
-# in case the generated stream or its DSP-ready waits are what failed.
+# The retry sends the 48 kHz stream with the old fixed timing (--replay)
+# in case the DSP-ready waits or another rate are what failed.  Both need
+# the DSP modules extracted from the user's UAD install
+# (/lib/firmware/universal-audio/dsp); without them usb-full-init.py logs
+# how to extract them and fails.
 run_init() {
     python3 /usr/local/lib/ua-usb/usb-full-init.py "$@" 2>&1 | while read -r line; do
         log "$line"
@@ -54,7 +57,7 @@ run_init() {
 
 log "Running full DSP init"
 if ! run_init; then
-    log "First init attempt failed — retrying after 3s with the captured replay"
+    log "First init attempt failed — retrying after 3s with the old fixed timing"
     sleep 3
     if ! run_init --replay; then
         log "Second init attempt failed — power-cycle the Apollo (unplug USB, wait 5s, replug)"

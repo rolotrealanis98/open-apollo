@@ -19,7 +19,7 @@ log() { logger -t "$LOG_TAG" -- "$*"; }
 FW_PATH="$FW_DIR/$FIRMWARE"
 if [ ! -f "$FW_PATH" ]; then
     log "ERROR: Firmware not found: $FW_PATH"
-    log "Download from UA Connect and place in $FW_DIR/"
+    log "Extract it from your own UAD install: the setup wizard (open-apollo-setup) or 'oa-assets firmware --out $FW_DIR'"
     exit 1
 fi
 
