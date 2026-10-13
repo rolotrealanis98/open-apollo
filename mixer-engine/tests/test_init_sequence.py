@@ -7,6 +7,9 @@ deliberate change since: the linked S/PDIF pair is one pan pair on two
 buses, as the Mixer Engine writes it, so S/PDIF R's main-mix bus (9) is
 written with S/PDIF L's (hard right, Pan2 +1) instead of centred in its
 own turn; those bus-9 entries were re-captured, the rest is unchanged.
+And the talkback mic (input 22, bus 10) is no longer muted like the other
+inputs: it keeps the device map's -6 dB and its CUE 1/2 sends are written
+at the end (TALK gates it; a muted talkback bus left TALK silent).
 """
 
 import json

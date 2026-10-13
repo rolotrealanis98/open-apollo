@@ -147,8 +147,13 @@ class ConsoleControls(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_default_is_refused_without_mutation(self):
         path = "/SampleRate/value"
         before = self.state.get_value(path)
-        response = await self.command(f'set {path}?func_id=8 "default"', path)
+        # The value in effect first (Console snaps back on a value push,
+        # not on an error), then the error
+        restored = await self.command(f'set {path}?func_id=8 "default"', path)
+        self.assertEqual(restored, {"path": path, "data": before})
+        response = await self.command("get /ping", path)
         self.assertIn("error", response)
+        self.assertEqual(response["parameters"]["func_id"], 8)
         self.assertEqual(self.state.get_value(path), before)
         self.hardware.assert_not_called()
 

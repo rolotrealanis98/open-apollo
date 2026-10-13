@@ -603,6 +603,11 @@ class MixerDaemon:
         self._latency_key = None
         self._latency_fig: dict | None = None
         self._adc_comp_sent: tuple | None = None
+        # Root /CueBusCount (Settings > CUE BUS COUNT) drives the device's
+        # read-only CueBusCount and which CUE outputs are Active
+        self.state.register_change_observer(
+            "openapollo.cue_bus_count", self._on_cue_bus_count)
+        self._apply_cue_bus_count(self.state.get_value("/CueBusCount/value"))
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -1096,6 +1101,31 @@ class MixerDaemon:
                 return True
             del self._readback_suppress[path]
         return False
+
+    def _on_cue_bus_count(self, path: str, value):
+        if path == "/CueBusCount/value":
+            self._apply_cue_bus_count(value)
+
+    def _apply_cue_bus_count(self, value):
+        """The state a CUE BUS COUNT implies: the device's read-only
+        CueBusCount follows the root one, and the CUE outputs beyond it are
+        not Active (x4 map: count 2, CUE 3/4 inactive), which is what hides
+        the CUE 3/4 sends in Console.  The DSP buses are the hardware
+        router's (CueBusCount on the root or the device)."""
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            return
+        self._push_if_present("/devices/0/CueBusCount", count)
+        k = 0
+        for n in range(64):
+            base = f"/devices/0/outputs/{n}"
+            if not self.state.path_exists(f"{base}/Name/value"):
+                break
+            if self.state.get_value(f"{base}/IOType/value") != "Cue":
+                continue
+            self._push_if_present(f"{base}/Active", k < count)
+            k += 1
 
     def _push_if_present(self, path: str, value, force: bool = False):
         """Push a readback-derived value to a control this model's device
@@ -2016,11 +2046,28 @@ class MixerDaemon:
         # Push every input fader (x4: 24) via the state tree path (the
         # proven FaderLevel→bus coefficient pipeline).
         saved = self.state._dirty
+        talkback = self.hw_router.talkback_input()
         for i in range(self.hw_router.input_count()):
             base = f"/devices/0/inputs/{i}"
             fader = f"{base}/FaderLevel/value"
             tapered = f"{base}/FaderLevelTapered/value"
             mute = f"{base}/Mute/value"
+            if i == talkback:
+                # The talkback mic is not muted like the other inputs:
+                # TALK (/TalkbackOn, other param 0x46) gates it, Console
+                # offers no mute for it, and the Mixer Engine runs it
+                # unmuted (device map: -6 dB, CUE sends -6 dB).  A muted
+                # talkback bus left TALK silent.  A Mute saved by a daemon
+                # that muted it at first start is dropped.
+                if fader in saved:
+                    defaults[fader] = saved[fader]
+                elif tapered in saved:
+                    defaults[tapered] = saved[tapered]
+                elif self.state.get_value(fader) is not None:
+                    defaults[fader] = self.state.get_value(fader)
+                if self.state.get_value(mute):
+                    self._push_to_clients(mute, False)
+                continue
             if fader in saved:
                 defaults[fader] = saved[fader]
             elif tapered in saved:
@@ -2261,6 +2308,13 @@ class MixerDaemon:
                     be.set_mixer_bus_param(bus, sub, 0.0, side=1)
             log.info("Sent CUE 3/4 sends (sub=5/6, both sides) silent for "
                      "%d buses", len(all_buses))
+
+        # The talkback mic's sends (CUE 1/2 at -6 dB in the device map):
+        # what TALK is heard through in the headphones
+        if self.hw_router and self.hw_router.backend and talkback is not None:
+            n = self.hw_router.write_input_sends(talkback)
+            log.info("Talkback input %d: fader and %d sends written",
+                     talkback, n)
 
         # A6: what the hardware cannot report back (sends, aux, CUE, mirror,
         # alt monitors, talkback configuration, solo) comes from the saved
@@ -2796,6 +2850,13 @@ class MixerDaemon:
         if result is None or not result.accepted:
             log.info("%s: SET %s = %r refused (%s)", client.id, path, value,
                      result.reason if result else "no route")
+            # Console shows the value it asked for as soon as it asks
+            # (UAClnt_Values::Set) and an error reply does not undo that:
+            # only a value push does.  So the client that asked gets the
+            # value in effect first, then the error.
+            current = self.commands.value_of(canonical)
+            if current is not None:
+                self._send_response(client, canonical, current)
             self._send_engine_error(client, path, "Unable to set value.",
                                     params)
             return True
