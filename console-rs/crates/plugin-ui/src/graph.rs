@@ -1076,6 +1076,7 @@ impl Scene {
         let y_top = pm.top.as_ref().map(|v| axes.py(limit(v.resolve(ctx)))).unwrap_or(0.0);
         let y_bottom = axes.py(axes.y_min).max(axes.py(axes.y_max));
         if y_bottom > y_top {
+            // SwiftUI's `.red` (system red).
             let color = parse_hex(pm.stroke.as_deref()).unwrap_or(Rgba::rgb8(255, 59, 48));
             self.overlays.push(FillItem { path: Path::rect(x - w / 2.0, y_top, w, y_bottom - y_top), paint: Paint::Solid(color) });
         }
@@ -1084,7 +1085,8 @@ impl Scene {
                 text: crate::readout::format_number(l.format.as_deref().unwrap_or("%.0f Hz"), f),
                 x: x + w / 2.0 + l.dx.unwrap_or(3.0),
                 y: l.y,
-                color: parse_hex(l.color.as_deref()).unwrap_or(Rgba::rgb8(255, 255, 0)),
+                // SwiftUI's `.yellow` (system yellow).
+                color: parse_hex(l.color.as_deref()).unwrap_or(Rgba::rgb8(255, 204, 0)),
                 size: l.size.unwrap_or(10.0),
             });
         }
@@ -1231,7 +1233,8 @@ impl Scene {
             if !on(h.visible.as_ref(), ctx) {
                 continue;
             }
-            let (Some(x), Some(t)) = (h.x.as_ref().map(|v| v.resolve(ctx)), traces.iter().find(|t| t.id.is_some() && t.id == h.trace)) else { continue };
+            // Swift compares optionals: a handle without `trace` matches the first trace without `id`.
+            let (Some(x), Some(t)) = (h.x.as_ref().map(|v| v.resolve(ctx)), traces.iter().find(|t| t.id == h.trace)) else { continue };
             let mut y = h.y.as_ref().map(|v| v.resolve(ctx)).unwrap_or_else(|| transfer(t, x, ctx));
             if h.clamp.unwrap_or(true) {
                 y = axes.clamp_y(y);

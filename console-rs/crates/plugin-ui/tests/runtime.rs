@@ -559,3 +559,23 @@ fn graphs_draw_code_rasters_and_meters_feed_the_panel() {
     drop(p);
     assert_eq!(assets.images.runtime_revision(&key), 0);
 }
+
+#[test]
+fn meter_queries_and_replies() {
+    let mut p = panel();
+    let params = MockParams::from_spec(&p.spec);
+    assert_eq!(p.meter_queries(), vec![format!("{SLOT}/VendorSpecific/value?floats=1,2")]);
+    let q = p.meter_queries()[0].clone();
+    assert!(p.ingest_reply(&q, &serde_json::Value::String("3f800000,3e800000".into()), &params));
+    assert_eq!((p.meters.raw("vu"), p.meters.raw("lvl")), (Some(1.0), Some(0.25)));
+    assert!(!p.ingest_reply("/x/VendorSpecific/value?other=1", &serde_json::Value::Null, &params));
+    // An analyser spec polls one opcode range and keeps the block for its graph.
+    let mut json: serde_json::Value = serde_json::from_str(SPEC).unwrap();
+    json["elements"][21]["graph"]["spectrum"] = serde_json::json!({"first": 12, "count": 3, "hz0": 100, "hzStep": 100, "db": 20, "stroke": "#FFFFFF"});
+    let spec = Arc::new(PluginSpec::from_json(&json.to_string()).unwrap());
+    let mut q = PluginPanel::with_sprites(spec, SLOT, |_| None);
+    let queries = q.meter_queries();
+    assert_eq!(queries[1], format!("{SLOT}/VendorSpecific/value?opcode=519&p0=12&p1=3&p2=1"));
+    assert!(q.ingest_reply(&queries[1], &serde_json::Value::String("[\"3f800000\", \"3f000000\", \"0\"]".into()), &params));
+    assert_eq!(q.meters.block(13), Some(0.5));
+}

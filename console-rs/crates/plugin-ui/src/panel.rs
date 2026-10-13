@@ -1719,6 +1719,36 @@ impl PluginPanel {
         })
     }
 
+    /// The read-only `get`s that feed this panel's meters while it is open (Swift's polling
+    /// descriptor): `floats=` for the plain variables, one `opcode=` range for the tagged ones and
+    /// the analyser bins. Answer each with [`ingest_reply`](Self::ingest_reply).
+    pub fn meter_queries(&self) -> Vec<String> {
+        [MeterFeed::floats_query(&self.spec, &self.target), MeterFeed::opcode_query(&self.spec, &self.target)].into_iter().flatten().collect()
+    }
+
+    /// A reply to one of [`meter_queries`](Self::meter_queries): `floats=` replies carry a string
+    /// of hex bit patterns, `opcode=` replies an array (or a string holding one) starting at the
+    /// query's `p0`. False when the reply does not fit the query.
+    pub fn ingest_reply(&mut self, query: &str, reply: &serde_json::Value, params: &dyn ParamSource) -> bool {
+        let q = query.split_once('?').map(|(_, q)| q).unwrap_or("");
+        let arg = |name: &str| q.split('&').find_map(|kv| kv.strip_prefix(name).and_then(|v| v.strip_prefix('=')));
+        if arg("floats").is_some() {
+            let text = match reply {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            self.ingest_floats(&text, params);
+            return true;
+        }
+        if let (Some(_), Some(p0)) = (arg("opcode"), arg("p0").and_then(|v| v.parse::<i64>().ok())) {
+            let Some(values) = MeterFeed::parse_array(reply) else { return false };
+            // p0 is sent unsigned; the spec's ids are the same 32-bit values.
+            self.ingest_opcode(p0 as u32 as i64, &values, params);
+            return true;
+        }
+        false
+    }
+
     /// The meter readouts' modes need parameter values: these feed the meter model.
     pub fn ingest_floats(&mut self, raw: &str, params: &dyn ParamSource) {
         let modes = self.mode_values(params);
@@ -1818,7 +1848,9 @@ fn draw_text(ui: &mut Ui, text: &str, t: Option<&spec::TextStyle>, r: Rect, opac
     let size = t.and_then(|t| t.size).unwrap_or(10.0) as f32;
     let mut color = parse_hex(t.and_then(|t| t.color.as_deref())).unwrap_or(Rgba::WHITE);
     color.a *= opacity;
-    let bold = t.and_then(|t| t.weight.as_deref()).is_some_and(|w| matches!(w, "bold" | "semibold" | "heavy" | "black"));
+    // Swift maps "bold" → bold, "medium" → medium, anything else ("semibold" too) → regular;
+    // rack has bold or regular, and medium draws regular.
+    let bold = t.and_then(|t| t.weight.as_deref()) == Some("bold");
     let mono = t.and_then(|t| t.monospaced) == Some(true);
     let family = if mono { "Menlo" } else { "Helvetica" };
     let align = match t.and_then(|t| t.align.as_deref()) {

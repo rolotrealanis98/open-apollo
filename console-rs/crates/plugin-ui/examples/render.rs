@@ -34,7 +34,7 @@ fn main() {
         let mut out = Vec::new();
         let mut i = 0;
         while i < args.len() {
-            if ["--scale", "--title", "--status"].contains(&args[i].as_str()) {
+            if ["--scale", "--title", "--status", "--meters"].contains(&args[i].as_str()) {
                 i += 2;
                 continue;
             }
@@ -91,6 +91,31 @@ fn main() {
     // meters running in silence (every polled variable reads 0).
     let live = live_state(entry.stem());
     silence(&mut panel, &MockParams::from_spec(&spec));
+    // `--meters L`: every needle at L, raw values at L/2, analyser bins on a slope with a peak.
+    if let Some(level) = arg("--meters").and_then(|v| v.parse::<f64>().ok()) {
+        for id in spec.meter_sources.iter().flatten().map(|(k, _)| k.clone()) {
+            panel.meters.set_needle(&id, level);
+            panel.meters.set_raw(&id, level * 0.5);
+        }
+        for g in spec.elements.iter().filter_map(|e| e.graph.as_ref()) {
+            if let Some(sp) = &g.spectrum {
+                let n = sp.count.max(0) as usize;
+                let bins: Vec<f64> = (0..n)
+                    .map(|i| {
+                        let peak = (-((i as f64 - n as f64 * 0.3) / (n as f64 * 0.05)).powi(2)).exp();
+                        let v = level * (1e-4 / (1.0 + i as f64) + 3e-3 * peak);
+                        if sp.decode.as_deref() == Some("fp16x2") {
+                            let h = half_bits(v as f32);
+                            f32::from_bits((h as u32) | ((h as u32) << 16)) as f64
+                        } else {
+                            v
+                        }
+                    })
+                    .collect();
+                panel.meters.set_block(sp.first, &bins);
+            }
+        }
+    }
     if !panel.missing_sprites().is_empty() {
         eprintln!("missing sprites: {:?}", panel.missing_sprites());
     }
@@ -173,6 +198,20 @@ fn live_state(stem: &str) -> Option<Vec<(u16, f64, String)>> {
             })
             .collect(),
     )
+}
+
+/// An IEEE half float's bits (round toward zero; renders only).
+fn half_bits(v: f32) -> u16 {
+    let b = v.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let e = ((b >> 23) & 0xff) as i32 - 127 + 15;
+    if e <= 0 {
+        return sign;
+    }
+    if e >= 31 {
+        return sign | 0x7c00;
+    }
+    sign | ((e as u16) << 10) | ((b >> 13) & 0x3ff) as u16
 }
 
 /// Every meter source reads 0 (a running plug-in in silence), settled.
