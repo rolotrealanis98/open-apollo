@@ -70,6 +70,8 @@ jobs:
         run: bash tests/test-install-module-binding.sh
       - name: Host check unit tests (Thunderbolt, Secure Boot, setup worker)
         run: bash tests/test-host-checks.sh
+      - name: Installer --yes (setup GUI) and report opt-in
+        run: bash tests/test-install-yes.sh
 
   console-web:
     runs-on: ubuntu-latest

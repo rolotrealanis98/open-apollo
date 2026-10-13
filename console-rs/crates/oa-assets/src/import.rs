@@ -24,13 +24,24 @@ pub struct Copied {
 /// Copies into a sibling `.partial` folder first and swaps it in at the end, so
 /// an interrupted import leaves the previous one intact.
 pub fn import_console(console: &Console, data: &Path) -> io::Result<Copied> {
+    import_console_with(console, data, &mut |_, _| {})
+}
+
+/// [`import_console`], calling `progress(files, bytes)` with running totals after
+/// each copied file; pair it with [`measure`] for a progress bar.
+pub fn import_console_with(console: &Console, data: &Path, progress: &mut dyn FnMut(u64, u64)) -> io::Result<Copied> {
     std::fs::create_dir_all(data)?;
     let dest = data.join(CONSOLE_DIR);
     let partial = data.join(format!(".{CONSOLE_DIR}.partial"));
     if partial.exists() {
         std::fs::remove_dir_all(&partial)?;
     }
-    let (files, bytes) = copy_tree(&console.resources, &partial)?;
+    let (mut files, mut bytes) = (0, 0);
+    copy_tree(&console.resources, &partial, &mut |len| {
+        files += 1;
+        bytes += len;
+        progress(files, bytes);
+    })?;
     if dest.exists() {
         std::fs::remove_dir_all(&dest)?;
     }
@@ -68,24 +79,20 @@ pub fn measure(dir: &Path) -> io::Result<(u64, u64)> {
     Ok((files, bytes))
 }
 
-fn copy_tree(from: &Path, to: &Path) -> io::Result<(u64, u64)> {
+/// Copy `from` into `to`, calling `copied(len)` after each file.
+fn copy_tree(from: &Path, to: &Path, copied: &mut dyn FnMut(u64)) -> io::Result<()> {
     std::fs::create_dir_all(to)?;
-    let mut files = 0;
-    let mut bytes = 0;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let ty = entry.file_type()?;
         let target = to.join(entry.file_name());
         if ty.is_dir() {
-            let (f, b) = copy_tree(&entry.path(), &target)?;
-            files += f;
-            bytes += b;
+            copy_tree(&entry.path(), &target, copied)?;
         } else if ty.is_file() {
-            bytes += std::fs::copy(entry.path(), &target)?;
-            files += 1;
+            copied(std::fs::copy(entry.path(), &target)?);
         }
     }
-    Ok((files, bytes))
+    Ok(())
 }
 
 /// Read `<data>/manifest.json`, or an empty object.
@@ -128,8 +135,11 @@ mod tests {
         fs::create_dir_all(data.join(CONSOLE_DIR)).unwrap();
         fs::write(data.join(CONSOLE_DIR).join("stale.txt"), "old").unwrap();
 
-        let got = import_console(&console, &data).unwrap();
+        let mut ticks = Vec::new();
+        let got = import_console_with(&console, &data, &mut |f, b| ticks.push((f, b))).unwrap();
         assert_eq!((got.files, got.bytes), (2, 12));
+        assert_eq!(ticks.len(), 2);
+        assert_eq!(ticks.last(), Some(&(2, 12)));
         assert!(data.join(CONSOLE_DIR).join("appearance/Appearance.json").is_file());
         assert!(!data.join(CONSOLE_DIR).join("stale.txt").exists());
         assert!(!data.join(format!(".{CONSOLE_DIR}.partial")).exists());
