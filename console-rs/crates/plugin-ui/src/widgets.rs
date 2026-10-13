@@ -181,10 +181,11 @@ pub fn glyph_image(name: &str, w: f64, h: f64, ink: Rgba, px: f64) -> Option<Ima
         }
         "gear" => {
             let outer = s * 0.5;
-            if let Some(p) = gear_path(cx, cy, outer, 8, 0.76) {
+            // The Softube shell's settings gear: 8 tapered teeth turned a quarter pitch, a wide hole.
+            if let Some(p) = gear_path(cx, cy, outer, 8, 0.74, 11.25) {
                 fill_with(&mut pm, &p, Shader::SolidColor(color(ink)), t);
             }
-            let hole = PathBuilder::from_circle(cx as f32, cy as f32, (outer * 0.3) as f32);
+            let hole = PathBuilder::from_circle(cx as f32, cy as f32, (outer * 0.42) as f32);
             if let Some(p) = hole {
                 let paint = Paint {
                     shader: Shader::SolidColor(Color::TRANSPARENT),
@@ -200,16 +201,17 @@ pub fn glyph_image(name: &str, w: f64, h: f64, ink: Rgba, px: f64) -> Option<Ima
     Some(image(pm))
 }
 
-/// A gear outline: `teeth` flat-topped teeth between `outer` and `outer × inner`.
-fn gear_path(cx: f64, cy: f64, outer: f64, teeth: u32, inner: f64) -> Option<tiny_skia::Path> {
-    let n = teeth.max(3) as f64;
+/// A gear outline: `teeth` tapered teeth (tops 30 % of the pitch, roots 50 %) between `outer` and
+/// `outer × inner`, the first centred `phase` degrees clockwise from up.
+fn gear_path(cx: f64, cy: f64, outer: f64, teeth: u32, inner: f64, phase: f64) -> Option<tiny_skia::Path> {
+    let n = teeth.max(3);
     let root = outer * inner.clamp(0.2, 0.98);
-    let step = 360.0 / n;
+    let step = 360.0 / n as f64;
     let mut b = PathBuilder::new();
-    for i in 0..teeth.max(3) {
-        let a = i as f64 * step;
-        // Tooth top spans 40 % of the pitch, flanks 10 % each, the root 40 %.
-        let pts = [(root, a - step * 0.3), (outer, a - step * 0.2), (outer, a + step * 0.2), (root, a + step * 0.3)];
+    for i in 0..n {
+        let a = phase + i as f64 * step;
+        let pts =
+            [(root, a - step * 0.25), (outer, a - step * 0.15), (outer, a + step * 0.15), (root, a + step * 0.25)];
         for (k, (r, d)) in pts.iter().enumerate() {
             let (x, y) = polar(cx, cy, *r, *d);
             if i == 0 && k == 0 { b.move_to(x, y) } else { b.line_to(x, y) }
@@ -307,7 +309,7 @@ fn shape_path(s: &Shape, w: f64, h: f64, from: f64, to: f64) -> Option<tiny_skia
             b.finish()
         }
         ShapeKind::Arc => arc_path(cx, cy, w.min(h) / 2.0, from, to),
-        ShapeKind::Gear => gear_path(cx, cy, w.min(h) / 2.0, s.teeth.unwrap_or(8), s.inner.unwrap_or(0.72)),
+        ShapeKind::Gear => gear_path(cx, cy, w.min(h) / 2.0, s.teeth.unwrap_or(8), s.inner.unwrap_or(0.72), 0.0),
         ShapeKind::Hexagon => {
             let r = w.min(h) / 2.0;
             let mut b = PathBuilder::new();
