@@ -202,7 +202,7 @@ impl App {
     fn waiting_for(&self, step: StepId) -> &'static str {
         match step {
             StepId::Import => "Import, or skip, to continue",
-            StepId::Firmware => "Extract the files to continue",
+            StepId::Firmware => "Extract the files, or skip, to continue",
             StepId::Driver => "Install the driver, or skip, to continue",
             StepId::Console => "Install or launch the Console, or skip",
             _ => "",

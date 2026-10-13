@@ -116,6 +116,7 @@ pub(super) enum Action {
     SkipImport,
     StartFirmware,
     KeepFirmware,
+    SkipFirmware,
     StartDriver,
     SkipDriver,
     StartConsole,
@@ -232,6 +233,11 @@ impl App {
         importer::previous(&self.opts.data)
     }
 
+    /// An import or extraction is reading the selected install, so it can't change.
+    pub(super) fn selection_locked(&self) -> bool {
+        self.importing || self.firmware.as_ref().is_some_and(Run::running)
+    }
+
     pub(super) fn privileged_job_running(&self) -> bool {
         [&self.firmware, &self.driver].into_iter().flatten().any(|r| r.running() && !r.demo)
     }
@@ -298,7 +304,12 @@ impl App {
             Msg::Scanned(s) => {
                 self.scanning = false;
                 let usable = |p: &PathBuf| s.found.iter().any(|f| f.path() == p && f.install.found_anything());
-                let pick = [self.prefer.take(), self.selected.clone()]
+                let candidates = match self.selection_locked() {
+                    // An import or extraction is reading the current install: keep it.
+                    true => [None, self.selected.clone()],
+                    false => [self.prefer.take(), self.selected.clone()],
+                };
+                let pick = candidates
                     .into_iter()
                     .flatten()
                     .find(usable)
@@ -467,7 +478,8 @@ impl App {
             }
             Action::RunSystem => self.start_system(),
             Action::Rescan => self.start_scan(),
-            Action::Select(p) => self.set_selection(Some(p)),
+            Action::Select(p) if !self.selection_locked() => self.set_selection(Some(p)),
+            Action::Select(_) => {}
             Action::Mount(device) => {
                 self.busy = Some(format!("Opening {device} read-only (your password may be asked)…"));
                 self.find_note = None;
@@ -516,6 +528,7 @@ impl App {
                 self.kept_firmware = true;
                 self.steps.set(StepId::Firmware, Status::Done);
             }
+            Action::SkipFirmware => self.steps.set(StepId::Firmware, Status::Skipped),
             Action::StartDriver => self.start_driver(),
             Action::SkipDriver => self.steps.set(StepId::Driver, Status::Skipped),
             Action::StartConsole => self.start_console(),

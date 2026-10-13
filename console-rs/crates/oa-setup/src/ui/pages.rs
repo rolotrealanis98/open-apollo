@@ -316,9 +316,11 @@ impl App {
                     badge(ui, "opened by setup", WEAK);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.radio(selected, if selected { "Using this one" } else { "Use this one" }).clicked()
-                        && !selected
-                    {
+                    let r = ui.add_enabled(
+                        selected || !self.selection_locked(),
+                        egui::RadioButton::new(selected, if selected { "Using this one" } else { "Use this one" }),
+                    );
+                    if r.clicked() && !selected {
                         act.push(Action::Select(f.path().to_path_buf()));
                     }
                 });
@@ -493,6 +495,9 @@ impl App {
                 act,
                 "The driver loads DSP programs and firmware that come from your own UAD install, and no install is picked.",
             );
+            if self.steps.status(StepId::Firmware) == Status::Pending && ui.link("Skip this for now").clicked() {
+                act.push(Action::SkipFirmware);
+            }
             return;
         };
         ui.add(
@@ -588,6 +593,9 @@ impl App {
                     && secondary(ui, "Keep the earlier files", true).clicked()
                 {
                     act.push(Action::KeepFirmware);
+                }
+                if status == Status::Pending && secondary(ui, "Skip for now", true).clicked() {
+                    act.push(Action::SkipFirmware);
                 }
             }
         });
