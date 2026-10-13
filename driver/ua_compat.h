@@ -19,6 +19,12 @@
 #include <asm/unaligned.h>
 #endif
 
+/* bin2hex(): <linux/hex.h> once it was split out of <linux/kernel.h> */
+#include <linux/kernel.h>
+#if __has_include(<linux/hex.h>)
+#include <linux/hex.h>
+#endif
+
 /* sha256(): <crypto/sha2.h> since 5.11 */
 #include <crypto/sha2.h>
 

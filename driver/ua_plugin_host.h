@@ -176,6 +176,66 @@ void ua_xact_ring_abandon(struct ua_device *ua, struct ua_dsp_ring *ring,
 			  u32 next);					/* ua->lock */
 void ua_xact_fini(struct ua_device *ua, bool dma_quiet);	/* rings fini */
 
+/* ---- the module catalog (ua_plugin_catalog.c) ----
+ *
+ * DSP modules ("Bill" records) as the user's own UA install carries them,
+ * read by the driver itself from the module store (never from user space):
+ *   universal-audio/plugins/modules/<sha256>.bill   any plug-in's module
+ *   universal-audio/dsp/<id>.bill                   the Console strip modules
+ * (/lib/firmware; `oa-assets dsp` and `oa-assets firmware` write them).
+ * Each copy is checked as UAD2System's IsValid does before anything else
+ * looks at it, and a store file whose SHA-256 is not its name is refused.
+ * Entries are keyed (id, arch, sha256); where an entry is resident is kept
+ * per DSP together with the epoch it was uploaded in, so after an epoch
+ * change it is uploaded again (overlay review finding 14).
+ */
+#define UA_BILL_HDR		20	/* "Bill", id, w2, payload bytes, w4 */
+#define UA_BILL_MAGIC		0x6c6c6942
+#define UA_BILL_MAX		(128u << 10)
+#define UA_CATALOG_MAX		256
+#define UA_CATALOG_BYTES	(32u << 20)
+
+struct ua_bill_info {
+	u32 id;			/* the record's id word: 24 bits on disk */
+	u32 w2;			/* kind (7:0), flags (23:8), architecture (31:24) */
+	u32 kind, flags, arch;
+	u32 w4;			/* functional words */
+	u32 words;		/* pool words: floor(2 * w4 / 3) for code, else w4 */
+	u32 pool;		/* 0 code, 1 data (kinds 1 and 4), 2, 3 */
+};
+
+enum ua_res_state {
+	UA_RES_NONE,		/* not on that DSP (or from an earlier epoch) */
+	UA_RES_RESIDENT,	/* uploaded, the DSP's reply validated */
+	UA_RES_UNKNOWN,		/* an upload or release ended unproven */
+};
+
+struct ua_cat_res {
+	u64 epoch;		/* the epoch the state belongs to */
+	u8 state;		/* enum ua_res_state */
+	u32 base;		/* where it is */
+};
+
+struct ua_cat_entry {
+	struct list_head node;	/* host->catalog */
+	u8 sha256[32];
+	struct ua_bill_info info;
+	size_t len;
+	u8 *blob;		/* the record as stored on disk */
+	unsigned int users;	/* strips and instances holding it (ua->lock) */
+	struct ua_cat_res res[UA_HOST_DSPS];	/* ua->lock */
+};
+
+int ua_bill_check(const u8 *data, size_t len, struct ua_bill_info *out);
+int ua_catalog_get(struct ua_device *ua, const u8 sha256[32],
+		   struct ua_cat_entry **out);			/* no lock */
+int ua_catalog_get_system(struct ua_device *ua, u32 id,
+			  struct ua_cat_entry **out);		/* no lock */
+void ua_catalog_put(struct ua_device *ua, struct ua_cat_entry *e); /* ua->lock */
+bool ua_catalog_resident(const struct ua_cat_entry *e, unsigned int dsp,
+			 u64 epoch);
+void ua_catalog_free_all(struct ua_device *ua);			/* exclusive */
+
 /* ---- epoch and quarantine (ua_plugin_host.c) ---- */
 void ua_plugin_epoch_bump(struct ua_device *ua, const char *why); /* ua->lock */
 void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,

@@ -59,6 +59,7 @@ void ua_plugin_host_free(struct ua_device *ua)
 
 	if (!h)
 		return;
+	ua_catalog_free_all(ua);
 	kfree(h);
 	ua->host = NULL;
 }
