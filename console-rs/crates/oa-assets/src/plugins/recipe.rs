@@ -2,7 +2,7 @@
 //! A recipe holds only facts about UA's files (names, SHA-256 hashes,
 //! resource ids, offsets) and our operations: never pixels or UA text.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,13 @@ pub struct RecipeFile {
     /// Coverage tier of the spec (0 best .. 4 code-drawn), for reports.
     #[serde(default)]
     pub tier: Option<u8>,
+    /// Not a spec: art and texts plugin-ui draws with (e.g. the "chrome" group).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shared: bool,
+    /// Shared groups: the ids a spec also needs (built with it, counted for its
+    /// readiness). Ids attached to no spec are built with every spec.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attach: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub inputs: BTreeMap<String, Input>,
     /// Every sprite id the spec draws, including ids defined by other groups.
@@ -307,6 +314,10 @@ impl Book {
         Ok(b)
     }
 
+    pub fn text(&self, id: &str) -> Option<&Text> {
+        self.files[*self.text_at.get(id)?].texts.get(id)
+    }
+
     pub fn sprite(&self, id: &str) -> Option<(&RecipeFile, &Sprite)> {
         let f = &self.files[*self.sprite_at.get(id)?];
         Some((f, &f.sprites[id]))
@@ -314,6 +325,18 @@ impl Book {
 
     pub fn group(&self, id: &str) -> Option<&RecipeFile> {
         self.files.iter().find(|f| f.group == id)
+    }
+
+    /// The sprite and text ids spec `spec` needs from shared groups: those
+    /// attached to it, plus those attached to no spec.
+    pub fn shared_for(&self, spec: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for f in self.files.iter().filter(|f| f.shared) {
+            let attached: BTreeSet<&String> = f.attach.values().flatten().collect();
+            out.extend(f.attach.get(spec).into_iter().flatten().cloned());
+            out.extend(f.sprites.keys().chain(f.texts.keys()).filter(|id| !attached.contains(id)).cloned());
+        }
+        out
     }
 }
 
