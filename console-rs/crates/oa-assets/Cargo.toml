@@ -7,3 +7,4 @@ description = "Finds a UAD install on a Windows disk and imports its assets for 
 
 [dependencies]
 serde_json = "1.0.154"
+sha2 = "0.10.9"

@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use oa_assets::detect::{self, Install};
 use oa_assets::discover::{self, Root, Source};
+use oa_assets::firmware::{self, Event, Pins};
 use oa_assets::import;
 
 const USAGE: &str = "\
@@ -15,10 +16,16 @@ USAGE:
   oa-assets detach IMAGE|LOOPDEVICE            unmount an attached image and release it
   oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs
   oa-assets status                             show what has been imported
+  oa-assets firmware [--from PATH] [--out DIR] [--accept-unknown] [--verify-golden] [--json]
+                                               extract the DSP modules and USB boot images the Apollo
+                                               needs (default --out /lib/firmware/universal-audio)
 
 PATH is the folder that holds Windows' C:\\ (e.g. /run/media/you/Windows) or a Wine prefix.
 Nothing is written to the source, and nothing leaves this machine.
-Options: --data DIR  (default ~/.local/share/open-apollo)";
+Options: --data DIR  (default ~/.local/share/open-apollo)
+firmware: only versions this oa-assets knows are written; --accept-unknown writes others too.
+  --verify-golden re-extracts into a temp dir and checks every pinned hash (without --out it
+  writes nothing else). Exit: 0 done, 1 a required module missing, 2 an unknown module version.";
 
 struct Args {
     cmd: String,
@@ -27,17 +34,32 @@ struct Args {
     dry_run: bool,
     data: PathBuf,
     device: Option<String>,
+    out: Option<PathBuf>,
+    accept_unknown: bool,
+    verify_golden: bool,
 }
 
 impl Args {
     fn parse(mut it: impl Iterator<Item = String>) -> Result<Self, String> {
         let cmd = it.next().ok_or("missing command")?;
-        let mut a =
-            Args { cmd, from: Vec::new(), json: false, dry_run: false, data: oa_assets::data_dir(), device: None };
+        let mut a = Args {
+            cmd,
+            from: Vec::new(),
+            json: false,
+            dry_run: false,
+            data: oa_assets::data_dir(),
+            device: None,
+            out: None,
+            accept_unknown: false,
+            verify_golden: false,
+        };
         while let Some(arg) = it.next() {
             match arg.as_str() {
                 "--from" => a.from.push(it.next().ok_or("--from needs a path")?.into()),
                 "--data" => a.data = it.next().ok_or("--data needs a path")?.into(),
+                "--out" => a.out = Some(it.next().ok_or("--out needs a path")?.into()),
+                "--accept-unknown" => a.accept_unknown = true,
+                "--verify-golden" => a.verify_golden = true,
                 "--json" => a.json = true,
                 "--dry-run" => a.dry_run = true,
                 "-h" | "--help" => a.cmd = "help".into(),
@@ -64,6 +86,7 @@ fn main() -> ExitCode {
         "detach" => detach(&args),
         "import" => run_import(&args),
         "status" => status(&args),
+        "firmware" => return run_firmware(&args),
         "help" => {
             println!("{USAGE}");
             Ok(())
@@ -241,4 +264,79 @@ fn status(args: &Args) -> Result<(), String> {
         None => println!("Nothing imported yet. Run `oa-assets scan`, then `oa-assets import`."),
     }
     Ok(())
+}
+
+/// `oa-assets firmware`: exit 0 done, 1 something required missing (or an
+/// error), 2 a required module isn't a known version.
+fn run_firmware(args: &Args) -> ExitCode {
+    match firmware_cmd(args) {
+        Ok(code) => ExitCode::from(code),
+        Err(e) => {
+            if args.json {
+                println!("{}", serde_json::json!({"exit": 1, "error": e}));
+            }
+            eprintln!("[FAIL]  {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn firmware_cmd(args: &Args) -> Result<u8, String> {
+    if let Some(stray) = &args.device {
+        return Err(format!("unexpected {stray}; pass the install with --from PATH"));
+    }
+    let pins = Pins::builtin();
+    let mut log = |e: Event| {
+        if !args.json {
+            println!("{}", e.render());
+        }
+    };
+    let root = firmware_root(args, &pins, &mut log)?;
+    let out = args.out.clone().or_else(|| (!args.verify_golden).then(|| PathBuf::from(firmware::DEFAULT_OUT)));
+    if let Some(o) = &out
+        && firmware::inside(o, &root.path)
+    {
+        return Err(format!("--out {} is inside the UAD install; pick a folder outside it", o.display()));
+    }
+    let opts = firmware::Options { accept_unknown: args.accept_unknown };
+    let report = match &out {
+        Some(o) => Some(firmware::extract(&root.path, o, &pins, opts, &mut log).map_err(|e| e.to_string())?),
+        None => None,
+    };
+    let golden = if args.verify_golden {
+        Some(firmware::verify_golden(&root.path, &pins, out.as_deref(), &mut log).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let exit = report.as_ref().map_or(0, |r| r.exit).max(golden.as_ref().map_or(0, |g| g.exit));
+    if args.json {
+        let v = serde_json::json!({
+            "exit": exit,
+            "from": root.path,
+            "out": out,
+            "files": report.as_ref().map(|r| r.files.iter().map(|f| f.to_json()).collect::<Vec<_>>()),
+            "manifest": report.as_ref().map(|r| &r.manifest),
+            "golden": golden.as_ref().map(|g| g.to_json()),
+        });
+        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+    }
+    Ok(exit)
+}
+
+/// `--from`, or the first scanned install that has the strip plug-ins or UAD2SDK.dll.
+fn firmware_root(args: &Args, pins: &Pins, log: &mut dyn FnMut(Event)) -> Result<Root, String> {
+    match args.from.as_slice() {
+        [] => {}
+        [one] if one.is_dir() => return Ok(discover::given(one)),
+        [one] => return Err(format!("{} isn't a folder", one.display())),
+        _ => return Err("firmware takes one --from".into()),
+    }
+    let mut candidates = discover::mounted_volumes();
+    candidates.extend(discover::wine_prefixes());
+    let chosen = candidates.into_iter().find(|r| firmware::has_inputs(&r.path, pins)).ok_or(
+        "no UAD install with the Console strip plug-ins or UAD2SDK.dll found; mount your Windows \
+         partition (oa-assets scan) or pass --from PATH",
+    )?;
+    log(Event::Info(format!("Using {} (pick another with --from PATH)", chosen.path.display())));
+    Ok(chosen)
 }

@@ -86,11 +86,7 @@ impl Install {
 /// Look for UAD software under a root that stands in for `C:\`.
 pub fn inspect(root: &Root) -> Install {
     let r = &root.path;
-    // UAD's tools folder; Burn is 32-bit, so it lands under Program Files (x86).
-    let tools = ["Program Files (x86)", "Program Files"]
-        .iter()
-        .find_map(|pf| ci_path(r, &[pf, "Universal Audio", "Powered Plugins", "UA.xml"]))
-        .and_then(|x| x.parent().map(Path::to_path_buf));
+    let tools = tools_dir(r);
     let console = find_console(r);
     Install {
         root: root.clone(),
@@ -116,6 +112,19 @@ pub fn inspect(root: &Root) -> Install {
             .unwrap_or_default(),
         drivers: find_drivers(r),
     }
+}
+
+/// UAD's tools folder (the one with `UA.xml`); Burn is 32-bit, so it lands under Program Files (x86).
+fn tools_dir(r: &Path) -> Option<PathBuf> {
+    ["Program Files (x86)", "Program Files"]
+        .iter()
+        .find_map(|pf| ci_path(r, &[pf, "Universal Audio", "Powered Plugins", "UA.xml"]))
+        .and_then(|x| x.parent().map(Path::to_path_buf))
+}
+
+/// The UAD software release under a root, from `UA.xml`, e.g. "12.0.0.602".
+pub fn uad_version(r: &Path) -> Option<String> {
+    tools_dir(r).and_then(|t| xml_tag(&t.join("UA.xml"), "swReleaseName"))
 }
 
 fn find_console(r: &Path) -> Option<Console> {
@@ -180,7 +189,7 @@ fn list(dir: &Path) -> Vec<PathBuf> {
 
 /// Files (and bundle directories) matching `want`, at most `depth` levels down.
 /// A matched directory, such as a `.vst3` bundle, isn't descended into.
-fn walk(dir: &Path, depth: usize, want: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
+pub(crate) fn walk(dir: &Path, depth: usize, want: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for p in list(dir) {
         if want(&p) {
@@ -197,7 +206,7 @@ fn name_lower(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
 }
 
-fn has_ext(p: &Path, ext: &str) -> bool {
+pub(crate) fn has_ext(p: &Path, ext: &str) -> bool {
     name_lower(p).ends_with(&format!(".{ext}"))
 }
 

@@ -3,10 +3,13 @@
 //! open-apollo ships no UA art. `oa-assets` finds the user's own UAD install
 //! (a dual-boot Windows partition, a mounted Windows volume, or a Wine prefix),
 //! reports what it contains, and copies the pieces console-rs needs into
-//! `~/.local/share/open-apollo/`. Everything is read-only toward the source.
+//! `~/.local/share/open-apollo/`. `oa-assets firmware` likewise extracts the
+//! DSP modules and USB boot images the Apollo needs into
+//! `/lib/firmware/universal-audio/`. Everything is read-only toward the source.
 
 pub mod detect;
 pub mod discover;
+pub mod firmware;
 pub mod import;
 pub mod pe;
 
