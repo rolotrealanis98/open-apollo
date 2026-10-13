@@ -120,7 +120,6 @@ def test_func_id_ack_keeps_binary_framing():
 
 @pytest.mark.parametrize("path", [
     f"{BASE}/GainUnknown/value",
-    "/devices/0/inputs/0/sends/0/Gain/value",
 ])
 def test_no_companion_for_other_gain_paths(path):
     daemon, state, client, writer, writes = connection(True, subscribe=())
@@ -128,6 +127,18 @@ def test_no_companion_for_other_gain_paths(path):
     assert writer.frames == []
     assert not any("GainTapered" in p or p.endswith("preamps/0/Gain/value")
                    for p, _ in writes)
+
+
+def test_send_gain_companion_uses_the_fader_taper():
+    """A send's Gain has a companion too, but on the fader taper (sends
+    use the fader curve), never the preamp's."""
+    from hardware import fader_db_to_tapered
+    daemon, state, client, writer, writes = connection(True, subscribe=())
+    path = "/devices/0/inputs/0/sends/0/Gain/value"
+    daemon._handle_set(client, Command("set", path, -6.0))
+    tapered = "/devices/0/inputs/0/sends/0/GainTapered/value"
+    assert state.get_value(tapered) == pytest.approx(fader_db_to_tapered(-6.0))
+    assert not any(p.endswith("preamps/0/Gain/value") for p, _ in writes)
 
 
 def test_companion_survives_without_value_suffix():

@@ -285,3 +285,63 @@ class TestMutedStripHoldsItsLevel:
         tree.set(f"{IN}/0/FaderLevel/value", -10.0)
         assert self.main_mix(backend) == [pytest.approx(
             encode_input_fader(-10.0))]
+
+
+class TestLevelCompanions:
+    """Console writes FaderLevelTapered and a send's GainTapered; the dB
+    values the router reads later (unmute, solo, pre/post, bypass) used to
+    stay stale, so an unmute played the old level and a send's M off
+    restored silence."""
+
+    def setup(self, tree, backend):
+        router = HardwareRouter(backend, tree)
+        tree.on_set = router.on_set
+        return MixerDaemon(tree, router), MixerClient(None, Writer())
+
+    def set(self, d, client, path, value):
+        d._handle_set(client, Command("set", path, value,
+                                      raw_params={"func_id": "3"}))
+
+    def test_fader_tapered_moves_fader_level(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        tapered = hardware.fader_db_to_tapered(-10.0)
+        self.set(d, client, f"{IN}/0/FaderLevelTapered/value", tapered)
+        assert tree.get_value(f"{IN}/0/FaderLevel/value") == pytest.approx(
+            -10.0, abs=0.01)
+        # the sender hears the companion too
+        echoes = [json.loads(f.rstrip(b"\0")) for f in client.writer.frames]
+        assert any(e["path"] == f"{IN}/0/FaderLevel/value" for e in echoes)
+        tree.set(f"{IN}/0/Mute/value", True)
+        backend.clear()
+        tree.set(f"{IN}/0/Mute/value", False)
+        main = [v for b, s, v in backend.bus_params if (b, s) == (0, 0)]
+        assert main[-1] == pytest.approx(encode_input_fader(-10.0), abs=1e-4)
+
+    def test_send_gain_tapered_moves_gain(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        tree.set_value(f"{IN}/0/sends/0/PostFaderOverride/value", 0)
+        self.set(d, client, f"{IN}/0/sends/0/GainTapered/value",
+                 hardware.fader_db_to_tapered(-6.0))
+        assert tree.get_value(f"{IN}/0/sends/0/Gain/value") == pytest.approx(
+            -6.0, abs=0.01)
+        self.set(d, client, f"{IN}/0/sends/0/Bypass/value", True)
+        backend.clear()
+        self.set(d, client, f"{IN}/0/sends/0/Bypass/value", False)
+        assert sends(backend, 0, SUB_AUX1)[-1] == pytest.approx(
+            encode_input_fader(-6.0), abs=1e-4)
+
+    def test_aux_fader_and_aux_send(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{AUX}/0/FaderLevelTapered/value",
+                 hardware.fader_db_to_tapered(-3.0))
+        assert tree.get_value(f"{AUX}/0/FaderLevel/value") == pytest.approx(
+            -3.0, abs=0.01)
+        self.set(d, client, f"{AUX}/0/sends/0/GainTapered/value", 0.5)
+        assert tree.get_value(f"{AUX}/0/sends/0/Gain/value") == pytest.approx(
+            hardware.fader_tapered_to_db(0.5))
+
+    def test_db_set_moves_the_tapered_value(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{IN}/1/FaderLevel/value", -20.0)
+        assert tree.get_value(f"{IN}/1/FaderLevelTapered/value") == \
+            pytest.approx(hardware.fader_db_to_tapered(-20.0))

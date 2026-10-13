@@ -176,6 +176,17 @@ _RE_RECALL_SET = re_mod.compile(
 _RE_PREAMP_GAIN = re_mod.compile(
     r"^(/devices/0/inputs/\d+/preamps/0)/(GainTapered|Gain)(?:/value)?$")
 
+# Fader and send levels and their dB / tapered companion: a strip's
+# FaderLevelTapered <-> FaderLevel, a send's GainTapered <-> Gain
+_RE_LEVEL = re_mod.compile(
+    r"^(/devices/\d+/(?:inputs|auxs)/\d+)/(FaderLevelTapered|FaderLevel)"
+    r"(?:/value)?$|"
+    r"^(/devices/\d+/(?:inputs|auxs)/\d+/sends/\d+)/(GainTapered|Gain)"
+    r"(?:/value)?$")
+_LEVEL_COMPANION = {"FaderLevelTapered": "FaderLevel",
+                    "FaderLevel": "FaderLevelTapered",
+                    "GainTapered": "Gain", "Gain": "GainTapered"}
+
 
 # NOTE: Do NOT add "/BufferSize/values" or other "/Foo/values" paths here!
 # set_value("/Foo/values", x) resolves to the /Foo property and overwrites its
@@ -2716,6 +2727,30 @@ class MixerDaemon:
                 self.state.set(companion, value, source_client=client.id,
                                hardware=False)
                 self._send_response(client, companion, value)
+
+        # Fader and send levels: Console writes the tapered value, but the
+        # hardware router's later writes read the dB one (unmute, a solo,
+        # a send's pre/post or bypass, an aux unmute): keep them in step,
+        # as the Mixer Engine's echo of both shows.  From the tree's
+        # (clamped) value; no second hardware write.
+        m = _RE_LEVEL.match(path)
+        if m:
+            from hardware import fader_db_to_tapered, fader_tapered_to_db
+            base = m.group(1) or m.group(3)
+            ctrl = m.group(2) or m.group(4)
+            stored = self.state.get_value(f"{base}/{ctrl}/value")
+            companion = f"{base}/{_LEVEL_COMPANION[ctrl]}/value"
+            try:
+                v = float(stored)
+            except (TypeError, ValueError):
+                v = None
+            if v is not None and self.state.path_exists(companion):
+                value = fader_tapered_to_db(v) if ctrl.endswith("Tapered") \
+                    else fader_db_to_tapered(v)
+                if self.state.get_value(companion) != value:
+                    self.state.set(companion, value, source_client=client.id,
+                                   hardware=False)
+                    self._send_response(client, companion, value)
 
         # Monitor level SETs: keep the dB and tapered values in step (as
         # for gain), or a later readback push to the companion's stale
