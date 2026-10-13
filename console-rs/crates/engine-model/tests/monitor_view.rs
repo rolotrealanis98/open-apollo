@@ -127,3 +127,27 @@ fn view_menu_monitor_sections_toggle_the_layout() {
     assert!(v.run_command_id("show_offline_devices", &mut m));
     assert!(v.show_offline_devices);
 }
+
+/// The front Hi-Z jack (`preamps/0/HiZ`, a hardware read-back) shows on the source button as
+/// HI-Z, and the SOURCE menu shows it ticked and disabled.
+#[test]
+fn hi_z_jack_shows_on_the_source_button() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let s = m.inputs().into_iter().find(|s| &*s.id == "/devices/0/inputs/0").unwrap();
+    assert_ne!(m.preamp(&s).unwrap().source, "HI-Z");
+    server.push("/devices/0/inputs/0/preamps/0/HiZ", true);
+    let end = Instant::now() + Duration::from_secs(10);
+    while m.preamp(&s).unwrap().source != "HI-Z" {
+        assert!(Instant::now() < end, "HI-Z never shown");
+        m.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(m.strip_menu_state(&s).hi_z);
+    server.push("/devices/0/inputs/0/preamps/0/HiZ", false);
+    while m.preamp(&s).unwrap().source == "HI-Z" {
+        assert!(Instant::now() < end, "HI-Z never cleared");
+        m.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}

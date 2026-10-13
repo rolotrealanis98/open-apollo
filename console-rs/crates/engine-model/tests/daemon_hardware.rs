@@ -227,6 +227,12 @@ fn preamp_and_input_strip_controls_reach_the_mixer() {
     let line = r.m.input_sources(&s).iter().position(|x| x == "LINE").unwrap() as u8;
     r.mixer("MIC → LINE", |m| m.apply(&Action::Tap(id(IN0, Control::InputSource(line)))), (PREAMP, 0, 0x00, 1));
     assert_eq!(r.m.preamp(&s).unwrap().source, "LINE");
+    // S/PDIF input SR CONVERT (preamp menu "Sample Rate Conversion").
+    r.mixer(
+        "SR CONVERT",
+        |m| m.apply(&Action::Tap(id("/devices/0/inputs/12", Control::Menu(MenuCmd::SrConvert(true))))),
+        (MONITOR, 1, 0x1f, 1),
+    );
     r.mixer("Link", |m| m.apply(&Action::Tap(id(IN0, Control::Menu(MenuCmd::Link)))), (PREAMP, 0, 0x02, 1));
     settle(&mut r.m, 400);
     r.mixer("Unlink", |m| m.apply(&Action::Tap(id(IN0, Control::Menu(MenuCmd::Link)))), (PREAMP, 0, 0x02, 0));
