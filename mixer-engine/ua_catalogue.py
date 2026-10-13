@@ -19,6 +19,11 @@ user's own Windows UAD install into
 and the daemon applies them at start-up (apply()).  Without an import the
 trees stay as shipped: an empty /plugins, empty factory preset menus, empty
 help strings.  Nothing here reaches the hardware.
+
+Which plug-ins run in a Unison preamp slot is in none of the install's
+files, so the import cannot say; open-apollo ships that capability as a
+list of plug-in ids (device_maps/unison_plugin_ids.json, no names) and the
+overlay sets /plugins/N/Unison from it.
 """
 
 import copy
@@ -34,6 +39,10 @@ log = logging.getLogger(__name__)
 FORMAT = "open-apollo-ua-catalogue"
 VERSION = 1
 PINS_FORMAT = "open-apollo-helper-text-pins"
+UNISON_FORMAT = "open-apollo-unison-plugins"
+# The plug-ins (by plugin_id) that load in a Unison preamp slot
+DEFAULT_UNISON = Path(__file__).resolve().parent / "device_maps" / \
+    "unison_plugin_ids.json"
 
 _RE_CHANNEL_PRESET = re.compile(r"^/devices/\d+/(inputs|auxs)/\d+/Preset$")
 _RE_PLUGIN_ENTRY = re.compile(r"^/plugins/\d+/")
@@ -143,9 +152,34 @@ def factory_trees(cat: Catalogue | None,
     return {name: tree for name, tree in out.items() if tree}
 
 
+def load_unison(path: str | Path = DEFAULT_UNISON) -> frozenset:
+    """The plug-in ids the shipped Unison list names (empty, with a
+    warning, when it is missing or malformed)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        log.warning("Unison plug-in list unavailable (%s): %s", path, e)
+        return frozenset()
+    if not isinstance(doc, dict) or doc.get("format") != UNISON_FORMAT \
+            or doc.get("version") != 1 or not isinstance(doc.get("plugin_ids"), list):
+        log.warning("%s is not a %s v1 file", path, UNISON_FORMAT)
+        return frozenset()
+    return frozenset(i for i in doc["plugin_ids"] if isinstance(i, str) and i)
+
+
+def is_unison(plugin: dict, unison_ids=frozenset()) -> bool:
+    """The import's own Unison flag when it has one, else whether the
+    plug-in's id is on the shipped list (an import never knows it)."""
+    flag = plugin.get("unison")
+    if isinstance(flag, bool):
+        return flag
+    return plugin.get("plugin_id") in unison_ids
+
+
 # ── Device map (4710) ───────────────────────────────────────────────
 
-def plugin_controls(plugins: list) -> list[tuple[str, dict]]:
+def plugin_controls(plugins: list, unison_ids=frozenset()) -> list[tuple[str, dict]]:
     """The engine's /plugins/N controls for a catalogue, in the engine's
     field order.  Licence state is never invented: Status stays empty and
     no Authorized/Demo property is created."""
@@ -163,7 +197,8 @@ def plugin_controls(plugins: list) -> list[tuple[str, dict]]:
                                 "values": _tree(p.get("presets"))}),
             (base + "/Status", {"type": "string", "value": ""}),
             (base + "/Categories", {"type": "string", "value": ",".join(cats)}),
-            (base + "/Unison", {"type": "bool", "value": bool(p.get("unison"))}),
+            (base + "/Unison", {"type": "bool",
+                                "value": is_unison(p, unison_ids)}),
             (base + "/RemoteGUI", {"type": "string", "value": ""}),
             (base + "/VstID", {"type": "string",
                                "value": str(p.get("vst_id") or "")}),
@@ -172,14 +207,17 @@ def plugin_controls(plugins: list) -> list[tuple[str, dict]]:
     return out
 
 
-def apply_to_state(state, cat: Catalogue) -> dict:
+def apply_to_state(state, cat: Catalogue, unison_ids=None) -> dict:
     """Overlay the catalogue on a loaded StateTree.  Only fills what the
     shipped map leaves empty, so a map that still carries its own lists
-    (an old capture) is not changed."""
+    (an old capture) is not changed.  `unison_ids` defaults to the shipped
+    Unison list."""
     done = {"plugins": 0, "channel_presets": 0, "io_presets": 0}
     paths = state.all_paths()
     if cat.plugins and not any(_RE_PLUGIN_ENTRY.match(p) for p in paths):
-        for path, ctrl in plugin_controls(cat.plugins):
+        if unison_ids is None:
+            unison_ids = load_unison()
+        for path, ctrl in plugin_controls(cat.plugins, unison_ids):
             state.add_runtime_property(path, ctrl)
         done["plugins"] = len(cat.plugins)
     if cat.channel_presets:

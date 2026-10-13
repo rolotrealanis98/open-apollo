@@ -166,6 +166,26 @@ def test_io_presets_come_first_and_saved_ones_follow(tmp_path):
         == ["Map A", "mine"]
 
 
+def test_unison_comes_from_the_shipped_list(tmp_path, caplog):
+    ids = uac.load_unison()
+    assert ids, "the shipped Unison list is missing or malformed"
+    listed_id = sorted(ids)[0]
+    t = x4()
+    uac.apply_to_state(t, uac.Catalogue(directory=None, plugins=[
+        {"name": "Test Uni", "plugin_id": listed_id, "unison": None},
+        {"name": "Test Off", "plugin_id": listed_id, "unison": False},
+        {"name": "Test Other", "plugin_id": "test_other", "unison": None}]))
+    # the import's own flag wins; without one the shipped list decides
+    assert [t.get_value(f"/plugins/{i}/Unison/value") for i in range(3)] \
+        == [True, False, False]
+    bad = tmp_path / "unison.json"
+    bad.write_text(json.dumps({"format": "other", "plugin_ids": [listed_id]}))
+    with caplog.at_level(logging.WARNING):
+        assert uac.load_unison(bad) == frozenset()
+        assert uac.load_unison(tmp_path / "missing.json") == frozenset()
+    assert "Unison" in caplog.text or uac.UNISON_FORMAT in caplog.text
+
+
 def test_a_map_with_its_own_lists_is_left_alone():
     t = StateTree()
     t.add_runtime_property("/plugins/0/Name", {"type": "string", "value": "Own"})
@@ -336,3 +356,31 @@ def test_console_without_an_import(tmp_path):
     assert t.get_prop_dict(SLOT + "/Preset")["values"] == []
     with pytest.raises(ValueError, match="does not exist"):
         d.console.set("c", STRIP + "/Preset/value", "Strips/Strip 1")
+
+
+UNI = STRIP + "/preamps/0/effects/0"
+
+
+def test_console_unison_assignment_follows_the_shipped_list(tmp_path):
+    listed_id = sorted(uac.load_unison())[0]
+    d = console_daemon(tmp_path, uac.Catalogue(directory=None, plugins=[
+        {"name": "Test Pre", "plugin_id": listed_id, "unison": None},
+        {"name": "Test Comp", "plugin_id": "test_comp", "unison": None}]))
+    assert d.state.get_value("/plugins/0/Unison") is True
+    d.console.set("c", UNI + "/EffectName/value", "Test Pre")
+    assert d.state.get_value(UNI + "/EffectName") == "Test Pre"
+    # not Unison, or not in the import: refused, the slot is unchanged
+    for name in ("Test Comp", "Not Imported"):
+        with pytest.raises(ValueError, match="Unison"):
+            d.console.set("c", UNI + "/EffectName/value", name)
+    assert d.state.get_value(UNI + "/EffectName") == "Test Pre"
+
+
+def test_console_unison_assignment_without_an_import(tmp_path):
+    d = console_daemon(tmp_path, None)
+    d.console.set("c", UNI + "/EffectName/value", "Any Preamp")
+    assert d.state.get_value(UNI + "/EffectName") == "Any Preamp"
+    other = "/devices/0/inputs/1/preamps/0/effects/0"
+    d.console.post("/CopyInsert", {"effectPath": UNI})
+    d.console.post("/PasteInsert", {"effectPaths": [other]})
+    assert d.state.get_value(other + "/EffectName") == "Any Preamp"

@@ -18,6 +18,7 @@ from conftest import ENGINE_DIR
 MAPS = sorted((ENGINE_DIR / "device_maps").glob("device_map_*.json"))
 HELPER = ENGINE_DIR / "device_maps" / "helper_tree.json"
 PINS = ENGINE_DIR / "device_maps" / "helper_tree.pins.json"
+UNISON = ENGINE_DIR / "device_maps" / "unison_plugin_ids.json"
 
 IPV4 = re.compile(r"(?<![\d.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\d.])")
 HOME = re.compile(r"/Users/(?!Shared/)[^/\s\"]+|/home/[^/\s\"]+|[A-Za-z]:\\+Users\\+", re.I)
@@ -111,3 +112,14 @@ def test_helper_pins_point_at_empty_strings():
             t = t.replace("~1", "/").replace("~0", "~")
             node = node[int(t)] if isinstance(node, list) else node[t]
         assert node == "" and re.fullmatch(r"[0-9a-f]{64}", sha), pointer
+
+
+def test_unison_list_is_plugin_ids_only():
+    """The Unison capability ships as plug-in ids: no names, no text."""
+    doc = json.loads(UNISON.read_text())
+    assert set(doc) == {"format", "version", "plugin_ids"}
+    assert doc["format"] == "open-apollo-unison-plugins" and doc["version"] == 1
+    ids = doc["plugin_ids"]
+    assert ids and ids == sorted(set(ids))
+    assert all(re.fullmatch(r"[a-z0-9]+(?:[_.-][a-z0-9]+)*", i) for i in ids), ids
+    assert host_data(doc) == []

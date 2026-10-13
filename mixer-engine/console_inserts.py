@@ -29,13 +29,23 @@ class Inserts:
         if not self.software_only:
             raise ValueError("DSP plugin backend unavailable; use --no-hardware for software slot tests")
         name = data.get("properties", {}).get("EffectName", {}).get("value", "")
-        if "/preamps/" in path and name:
-            candidates = [m for p, m in self.state._props.items()
-                          if re.fullmatch(r"/plugins/\d+/Name", p) and m.get("value") == name]
-            entry = next((p.rsplit("/", 1)[0] for p, m in self.state._props.items()
-                          if re.fullmatch(r"/plugins/\d+/Name", p) and m.get("value") == name), None)
-            if not candidates or self.state.get_value(entry + "/Unison") is not True:
-                raise ValueError("plugin is not Unison-capable")
+        if "/preamps/" in path and name and self.unison(name) is False:
+            raise ValueError("plugin is not Unison-capable")
+
+    def unison(self, name):
+        """Whether `name` loads in a Unison preamp slot: the catalogue's
+        /plugins/N/Unison (the user's UA import, its Unison flags from the
+        shipped list of plug-in ids), False for a plug-in it does not list.
+        None when there is no catalogue at all (nothing imported): the
+        daemon cannot tell, and like the console's paste check
+        (engine-model inserts.rs can_paste) it does not refuse what it
+        cannot judge."""
+        entries = [p.removesuffix("/Name") for p in self.state._props
+                   if re.fullmatch(r"/plugins/\d+/Name", p)]
+        if not entries:
+            return None
+        entry = next((e for e in entries if self.state.get_value(e + "/Name") == name), None)
+        return entry is not None and self.state.get_value(entry + "/Unison") is True
 
     def apply(self, replacements):
         # Validate every target before making any change; one undo step.
