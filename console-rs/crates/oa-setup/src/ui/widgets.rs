@@ -165,14 +165,21 @@ pub fn command(ui: &mut Ui, cmd: &str) {
 }
 
 /// Two-column facts: label on the left, value on the right.
-pub fn facts(ui: &mut Ui, id: &str, rows: &[(&str, String)]) {
-    egui::Grid::new(id).num_columns(2).spacing([18.0, 4.0]).show(ui, |ui| {
-        for (k, v) in rows {
-            ui.label(RichText::new(*k).color(WEAK));
-            ui.label(RichText::new(v).color(TEXT));
-            ui.end_row();
-        }
-    });
+/// Values wrap; the label column is as wide as the widest label.
+pub fn facts(ui: &mut Ui, rows: &[(&str, String)]) {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let key_width = rows
+        .iter()
+        .map(|(k, _)| ui.fonts_mut(|f| f.layout_no_wrap(k.to_string(), font.clone(), WEAK).size().x))
+        .fold(0.0, f32::max)
+        + 18.0;
+    ui.spacing_mut().item_spacing.y = 5.0;
+    for (k, v) in rows {
+        ui.horizontal_top(|ui| {
+            fixed_label(ui, key_width, RichText::new(*k).color(WEAK));
+            ui.add(egui::Label::new(RichText::new(v).color(TEXT)).wrap());
+        });
+    }
 }
 
 /// The sub-steps of a script run, one row each.
@@ -209,28 +216,31 @@ pub fn log_view(ui: &mut Ui, id: &str, lines: &[Line], height: f32) {
             .stick_to_bottom(true)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 1.0;
-                for l in lines {
-                    let (text, color) = match l {
-                        Line::Header(h) => (format!("── {h} ──"), STRONG),
-                        Line::Ok(m) => (format!("[ OK ]  {m}"), ACCENT),
-                        Line::Info(m) => (format!("[INFO]  {m}"), INFO),
-                        Line::Warn(m) => (format!("[WARN]  {m}"), WARN),
-                        Line::Fail(m) => (format!("[FAIL]  {m}"), FAIL),
-                        Line::Command(c) => (format!("        {c}"), STRONG),
-                        Line::Summary { key, status, detail } => {
-                            let tag = match status {
-                                Status::Done => "[OK]  ",
-                                Status::Failed => "[FAIL]",
-                                _ => "[SKIP]",
-                            };
-                            let d = detail.as_ref().map(|d| format!(" — {d}")).unwrap_or_default();
-                            (format!("  {tag}  {key}{d}"), status_color(*status))
-                        }
-                        Line::Plain(t) => (t.clone(), WEAK),
-                    };
-                    ui.add(egui::Label::new(RichText::new(text).monospace().color(color)).wrap());
-                }
+                // Not justified, even inside ui.columns (which justifies).
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    for l in lines {
+                        let (text, color) = match l {
+                            Line::Header(h) => (format!("── {h} ──"), STRONG),
+                            Line::Ok(m) => (format!("[ OK ]  {m}"), ACCENT),
+                            Line::Info(m) => (format!("[INFO]  {m}"), INFO),
+                            Line::Warn(m) => (format!("[WARN]  {m}"), WARN),
+                            Line::Fail(m) => (format!("[FAIL]  {m}"), FAIL),
+                            Line::Command(c) => (format!("        {c}"), STRONG),
+                            Line::Summary { key, status, detail } => {
+                                let tag = match status {
+                                    Status::Done => "[OK]  ",
+                                    Status::Failed => "[FAIL]",
+                                    _ => "[SKIP]",
+                                };
+                                let d = detail.as_ref().map(|d| format!(" — {d}")).unwrap_or_default();
+                                (format!("  {tag}  {key}{d}"), status_color(*status))
+                            }
+                            Line::Plain(t) => (t.clone(), WEAK),
+                        };
+                        ui.add(egui::Label::new(RichText::new(text).monospace().color(color)).wrap());
+                    }
+                });
             });
     });
 }
@@ -258,4 +268,31 @@ pub fn sidebar_row(ui: &mut Ui, selected: bool, enabled: bool, add: impl FnOnce(
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
     add(&mut child);
     if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
+}
+
+/// A left-aligned label in a fixed-width column.
+pub fn fixed_label(ui: &mut Ui, width: f32, text: RichText) {
+    ui.allocate_ui_with_layout(vec2(width, 0.0), Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_width(width);
+        ui.label(text);
+    });
+}
+
+/// A row of small tiles: label above, value below.
+pub fn stats(ui: &mut Ui, items: &[(&str, String)]) {
+    ui.horizontal_wrapped(|ui| {
+        for (k, v) in items {
+            Frame::new().fill(DEEP).corner_radius(CornerRadius::same(8)).inner_margin(Margin::symmetric(12, 7)).show(
+                ui,
+                |ui| {
+                    ui.set_min_width(118.0);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        ui.label(RichText::new(*k).small().color(WEAK));
+                        ui.label(RichText::new(v).strong().color(STRONG));
+                    });
+                },
+            );
+        }
+    });
 }

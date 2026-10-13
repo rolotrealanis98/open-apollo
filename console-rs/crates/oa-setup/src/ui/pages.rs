@@ -162,7 +162,7 @@ impl App {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 3.0;
                         ui.horizontal(|ui| {
-                            ui.add_sized([170.0, 18.0], egui::Label::new(RichText::new(c.title).strong().color(TEXT)));
+                            fixed_label(ui, 170.0, RichText::new(c.title).strong().color(TEXT));
                             ui.add(
                                 egui::Label::new(RichText::new(&c.value).color(if c.level == Level::Warn {
                                     WARN
@@ -333,9 +333,9 @@ impl App {
             }
             ui.add_space(2.0);
             let i = &f.install;
-            facts(
+            let n = |v: usize| if v == 0 { "none".to_string() } else { v.to_string() };
+            stats(
                 ui,
-                &format!("facts-{}", f.path().display()),
                 &[
                     (
                         "UAD Console",
@@ -344,9 +344,9 @@ impl App {
                             .map(|c| c.version.clone().unwrap_or_else(|| "installed".into()))
                             .unwrap_or_else(|| "not installed".into()),
                     ),
-                    ("Powered plug-ins", count(i.powered_plugins.len(), "plug-in file")),
-                    ("UADx plug-ins", count(i.vst3.len(), "VST3 bundle")),
-                    ("UA drivers", if i.drivers.is_empty() { "none".into() } else { count(i.drivers.len(), "file") }),
+                    ("Powered plug-ins", n(i.powered_plugins.len())),
+                    ("UADx plug-ins", n(i.vst3.len())),
+                    ("UA driver files", n(i.drivers.len())),
                 ],
             );
             if i.console.is_none() {
@@ -377,19 +377,14 @@ impl App {
         };
         card(ui, false, |ui| {
             let from = match &found.install.console {
-                Some(c) => format!(
-                    "UAD Console {} on {}",
-                    c.version.as_deref().unwrap_or(""),
-                    found.origin.label().to_lowercase()
-                ),
-                None => format!("{} (no UAD Console)", found.origin.label()),
+                Some(c) => format!("UAD Console {}", c.version.as_deref().unwrap_or("(version unknown)")),
+                None => "No UAD Console in this install".into(),
             };
             facts(
                 ui,
-                "import-facts",
                 &[
                     ("From", from),
-                    ("", tilde(found.path())),
+                    ("", format!("{}: {}", found.origin.label(), tilde(found.path()))),
                     ("To", tilde(&self.opts.data.join(oa_assets::import::CONSOLE_DIR))),
                 ],
             );
@@ -513,9 +508,8 @@ impl App {
             let i = &found.install;
             facts(
                 ui,
-                "fw-facts",
                 &[
-                    ("From", format!("{} ({})", tilde(found.path()), found.origin.label().to_lowercase())),
+                    ("From", format!("{}: {}", found.origin.label(), tilde(found.path()))),
                     ("Plug-in files", count(i.powered_plugins.len(), "Powered plug-in DLL")),
                     ("UA drivers", count(i.drivers.len(), "file")),
                     ("To", format!("{}  (read by the driver)", firmware::FIRMWARE_DIR)),
@@ -820,7 +814,7 @@ impl App {
             for step in &StepId::ALL[1..StepId::ALL.len() - 1] {
                 ui.horizontal(|ui| {
                     status_icon(ui, self.steps.status(*step), 18.0);
-                    ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new(step.title()).strong().color(TEXT)));
+                    fixed_label(ui, 190.0, RichText::new(step.title()).strong().color(TEXT));
                     ui.add(egui::Label::new(RichText::new(self.result_of(*step)).color(WEAK)).wrap());
                 });
             }
@@ -869,7 +863,7 @@ impl App {
             if rows.is_empty() {
                 ui.label(RichText::new("Nothing was installed or copied.").color(WEAK));
             } else {
-                facts(ui, "where", &rows);
+                facts(ui, &rows);
             }
         });
         section(ui, "Your Windows disk");
@@ -1049,7 +1043,6 @@ fn vm_help(ui: &mut Ui) {
     }
     facts(
         ui,
-        "vm-paths",
         &[
             ("Omarchy", "~/.windows/data.img".into()),
             ("GNOME Boxes", "~/.local/share/gnome-boxes/images/".into()),

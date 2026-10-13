@@ -134,25 +134,34 @@ impl App {
                 act.push(Action::Goto(step));
             }
         }
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.label(RichText::new(format!("oa-setup {}", env!("CARGO_PKG_VERSION"))).small().color(FAINT));
-            if !self.opts.data_is_default {
-                ui.label(RichText::new(format!("Data: {}", pages::tilde(&self.opts.data))).small().color(FAINT));
-            }
-            if self.opts.demo {
-                Frame::new()
-                    .fill(tint(INFO, 30))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(Margin::same(8))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.label(RichText::new("DEMO MODE").small().strong().color(INFO));
-                        ui.label(
-                            RichText::new("Firmware, driver and Console steps are simulated.").small().color(TEXT),
-                        );
-                    });
-            }
-        });
+        // Footer: demo notice, data folder, version, pinned to the bottom.
+        egui::Panel::bottom("sidebar-footer").frame(Frame::new()).resizable(false).show_separator_line(false).show(
+            ui,
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                if self.opts.demo {
+                    Frame::new()
+                        .fill(tint(INFO, 30))
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(RichText::new("DEMO MODE").small().strong().color(INFO));
+                            ui.label(
+                                RichText::new("Firmware, driver and Console steps are simulated.").small().color(TEXT),
+                            );
+                        });
+                }
+                if !self.opts.data_is_default {
+                    let data = pages::tilde(&self.opts.data);
+                    ui.add(
+                        egui::Label::new(RichText::new(format!("Importing to {data}")).small().color(FAINT)).truncate(),
+                    )
+                    .on_hover_text(data);
+                }
+                ui.label(RichText::new(format!("oa-setup {}", env!("CARGO_PKG_VERSION"))).small().color(FAINT));
+            },
+        );
     }
 
     fn nav(&self, ui: &mut Ui, act: &mut Vec<Action>) {
@@ -177,7 +186,7 @@ impl App {
                     _ => "Next",
                 };
                 let enabled = cur == StepId::Welcome || cur == StepId::Done || self.steps.can_advance();
-                let r = primary(ui, &format!("{label}  →"), enabled);
+                let r = primary(ui, label, enabled);
                 if r.clicked() {
                     act.push(Action::Next);
                 }

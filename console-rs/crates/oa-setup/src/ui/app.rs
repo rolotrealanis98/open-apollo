@@ -414,13 +414,15 @@ impl App {
             if ready {
                 self.auto_kicked = true;
                 self.primary(cur);
+                if cur == until {
+                    // Started the last step's action; the rest is up to the user.
+                    self.auto_until = None;
+                    return;
+                }
             }
         }
         if cur != until && self.auto_since.elapsed() > Duration::from_millis(1600) && self.steps.can_advance() {
             self.apply(Action::Next, ctx);
-        }
-        if cur == until {
-            self.auto_until = None;
         }
         ctx.request_repaint_after(Duration::from_millis(150));
     }
