@@ -63,6 +63,7 @@ static unsigned int replies_made;
 static u32 reply_status;		/* word 1 of upload replies */
 static unsigned int sleeps_locked;
 static unsigned int dma_live, dma_allocs;
+static unsigned int consumed, consume_limit = ~0u;	/* stall after N entries */
 
 static int ringi(const struct ua_dsp_ring *r)
 {
@@ -162,7 +163,9 @@ static void fpga_tick(void)
 {
 	unsigned int n = 0;
 
-	while (!stalled && pos[0] != target[0] && n++ < per_tick) {
+	while (!stalled && pos[0] != target[0] && n++ < per_tick &&
+	       consumed < consume_limit) {
+		consumed++;
 		u32 *e = slots[0][pos[0]];
 
 		if (e[0] & UA_RING_DMA_REF) {
@@ -172,18 +175,23 @@ static void fpga_tick(void)
 
 			/* one piece never crosses a 4 KiB page, never 1 KiB pieces */
 			assert(dw && dw <= 1024 && a / 4096 == (a + dw * 4 - 1) / 4096);
-			if (!cmd_left) {
-				unsigned int op = p[0] >> 16;
+			/* the commands in it, one after the other */
+			for (unsigned int i = 0, take; i < dw; i += take) {
+				if (!cmd_left) {
+					unsigned int op = p[i] >> 16;
 
-				cmd_left = p[0] & 0xffff;
-				if (op == 0x1 || op == 0x4) {
-					u32 r[4] = { 0x80070004, reply_status, p[3], p[0] };
+					cmd_left = p[i] & 0xffff;
+					assert(cmd_left);
+					if (op == 0x1 || op == 0x4) {
+						u32 r[4] = { 0x80070004, reply_status,
+							     p[i + 3], p[i] };
 
-					reply(r, 4);
+						reply(r, 4);
+					}
 				}
+				take = min(cmd_left, dw - i);
+				cmd_left -= take;
 			}
-			assert(dw <= cmd_left);
-			cmd_left -= dw;
 		} else if (e[0] == 0x00110002) {
 			static u32 table[770];
 
@@ -206,7 +214,8 @@ static void usleep_range(unsigned long a, unsigned long b)
 	fpga_tick();
 }
 
-static int quarantined[8], quarantine_err;
+static int quarantined[8] __maybe_unused, quarantine_err __maybe_unused;
+#ifndef UA_REAL_QUARANTINE
 void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
 			  const char *why, int err)
 {
@@ -215,6 +224,7 @@ void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
 	quarantined[dsp]++;
 	quarantine_err = err;
 }
+#endif
 
 static void reset(void)
 {
@@ -236,6 +246,8 @@ static void reset(void)
 	pos[1] = target[1] = 7;
 	stalled = false;
 	per_tick = 1000;
+	consumed = 0;
+	consume_limit = ~0u;
 	nbells = nputs = replies_made = sleeps_locked = 0;
 	fail_put_at = ~0u;
 	cmd_left = 0;

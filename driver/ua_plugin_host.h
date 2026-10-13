@@ -29,6 +29,7 @@
 struct ua_device;
 struct ua_file;
 struct snd_info_buffer;
+struct ua_strips;
 
 #define UA_HOST_DSPS		8	/* UA_MAX_DSPS */
 
@@ -77,8 +78,15 @@ struct ua_plugin_host {
 	/* ua_plugin_license.c: queries and decisions since probe */
 	u32 board_queries, board_query_failures, admitted, refused;
 
+	/*
+	 * The last teardown published on each DSP and not yet proven taken
+	 * (ua->lock).  Nothing new is placed on a DSP before its fence is
+	 * proven (ua_plugin_fence_wait()); one that is not, quarantines it.
+	 */
+	struct ua_xact *fence[UA_HOST_DSPS];
+
+	struct ua_strips *strips;	/* ua_strips.c, input_strips=1 only */
 	struct delayed_work work;	/* strip passes */
-	bool work_ready;
 };
 
 /* ---- ring primitives exported by ua_dsp.c for ua_dsp_xact.c ---- */
@@ -324,6 +332,17 @@ int ua_plugin_upload(struct ua_device *ua, unsigned int dsp,
 		     struct ua_cat_entry *e, u32 dest, enum ua_bill_form form,
 		     u64 epoch);			/* host->mutex, no ua->lock */
 
+/* ---- Console input strips on DSP 0 (ua_strips.c, input_strips=1) ---- */
+bool ua_strips_wanted(void);
+void ua_strips_init(struct ua_device *ua);		/* probe */
+void ua_strips_free(struct ua_device *ua);		/* host free */
+void ua_strips_connected(struct ua_device *ua);	/* ua->lock */
+void ua_strips_run(struct ua_device *ua);		/* host work */
+void ua_strips_teardown(struct ua_device *ua, const char *why); /* ua->lock */
+void ua_strips_service(struct ua_device *ua);		/* ua->lock */
+bool ua_strips_live(struct ua_device *ua);		/* ua->lock */
+void ua_strips_proc(struct ua_device *ua, struct snd_info_buffer *buf);
+
 /* ---- epoch and quarantine (ua_plugin_host.c) ---- */
 void ua_plugin_epoch_bump(struct ua_device *ua, const char *why); /* ua->lock */
 void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
@@ -332,6 +351,14 @@ void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
 /* ---- ua_plugin_host.c ---- */
 int ua_plugin_host_init(struct ua_device *ua);		/* probe */
 void ua_plugin_connected(struct ua_device *ua);		/* ua->lock */
+void ua_plugin_teardown(struct ua_device *ua, const char *why); /* ua->lock */
+void ua_plugin_host_quiesce(struct ua_device *ua, const char *why,
+			    bool present);			/* no lock */
+void ua_plugin_service(struct ua_device *ua);		/* ua->lock, 10 ms */
+int ua_plugin_publish_now(struct ua_device *ua, struct ua_xact *x); /* ua->lock */
+void ua_plugin_fence_set(struct ua_device *ua, unsigned int dsp,
+			 struct ua_xact *x);			/* ua->lock */
+int ua_plugin_fence_wait(struct ua_device *ua, unsigned int dsp); /* host->mutex */
 void ua_plugin_host_free(struct ua_device *ua);		/* chardev release */
 u64 ua_plugin_host_ops(struct ua_device *ua);		/* ua->lock */
 void ua_plugin_host_caps(struct ua_device *ua, u32 *state, u32 *owned,

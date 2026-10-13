@@ -323,10 +323,13 @@ int ua_pool_reserve(struct ua_pool_owner *o, unsigned int kind, u32 words,
 }
 
 static int ua_pool_release_locked(struct ua_pool_owner *o,
-				  const struct ua_pool_lease *lease)
+				  const struct ua_pool_lease *lease, bool *last)
 {
 	struct ua_pool_extent *e, *p, *next, **pp;
 	struct ua_pool_hold **hp, *h;
+
+	if (last)
+		*last = false;
 
 	if (!lease || lease->kind >= UA_POOLS || !lease->cookie ||
 	    lease->owner != o)
@@ -348,6 +351,8 @@ static int ua_pool_release_locked(struct ua_pool_owner *o,
 		kfree(h);
 		if (--e->refs)
 			return 0;
+		if (last)
+			*last = true;
 		e->cookie = 0;
 		e->identity = NULL;
 		e->requested = 0;
@@ -381,12 +386,21 @@ static int ua_pool_release_locked(struct ua_pool_owner *o,
 
 int ua_pool_release(struct ua_pool_owner *o, const struct ua_pool_lease *lease)
 {
+	return ua_pool_release_last(o, lease, NULL);
+}
+
+/* ua_pool_release(); @last says whether the extent itself went back */
+int ua_pool_release_last(struct ua_pool_owner *o,
+			 const struct ua_pool_lease *lease, bool *last)
+{
 	int ret;
 
+	if (last)
+		*last = false;
 	if (!o)
 		return -EINVAL;
 	mutex_lock(&o->lock);
-	ret = ua_pool_release_locked(o, lease);
+	ret = ua_pool_release_locked(o, lease, last);
 	mutex_unlock(&o->lock);
 	return ret;
 }
@@ -419,7 +433,7 @@ int ua_pool_reserve_batch(struct ua_pool_owner *o,
 	}
 	if (ret) {
 		while (i)
-			WARN_ON_ONCE(ua_pool_release_locked(o, &out[--i]));
+			WARN_ON_ONCE(ua_pool_release_locked(o, &out[--i], NULL));
 		memset(out, 0, sizeof(*out) * count);
 	}
 	mutex_unlock(&o->lock);

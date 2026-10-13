@@ -13,6 +13,7 @@
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
 
 #include "ua_apollo.h"
 #include "ua_plugin_host.h"
@@ -27,11 +28,21 @@ bool ua_plugin_host_enabled(void)
 	return plugin_host;
 }
 
+/* The host's work: strip passes (they wait for the DSP, off-lock) */
+static void ua_plugin_work(struct work_struct *work)
+{
+	struct ua_plugin_host *h = container_of(to_delayed_work(work),
+						struct ua_plugin_host, work);
+
+	ua_strips_run(h->ua);
+}
+
 /**
  * ua_plugin_host_init - allocate the host state at probe
  * @ua: device (probe, exclusive)
  *
  * Always allocated: the epoch counter is kept even when nothing is hosted.
+ * The input strips (input_strips=1) read their modules here.
  */
 int ua_plugin_host_init(struct ua_device *ua)
 {
@@ -43,10 +54,11 @@ int ua_plugin_host_init(struct ua_device *ua)
 	h->ua = ua;
 	mutex_init(&h->mutex);
 	h->epoch = 1;
-	h->active = plugin_host;
+	h->active = plugin_host || ua_strips_wanted();
 	INIT_LIST_HEAD(&h->xacts);
 	INIT_LIST_HEAD(&h->catalog);
 	INIT_LIST_HEAD(&h->instances);
+	INIT_DELAYED_WORK(&h->work, ua_plugin_work);
 	h->next_handle = 1;
 	ua->host = h;
 	return 0;
@@ -56,12 +68,165 @@ int ua_plugin_host_init(struct ua_device *ua)
 void ua_plugin_host_free(struct ua_device *ua)
 {
 	struct ua_plugin_host *h = ua->host;
+	unsigned int i;
 
 	if (!h)
 		return;
+	cancel_delayed_work_sync(&h->work);
+	mutex_lock(&ua->lock);
+	ua_strips_free(ua);
+	for (i = 0; i < UA_HOST_DSPS; i++) {
+		if (h->fence[i])
+			ua_xact_done(ua, h->fence[i]);
+		h->fence[i] = NULL;
+		if (h->dsp[i].pools)
+			ua_pool_owner_destroy(h->dsp[i].pools);
+		h->dsp[i].pools = NULL;
+	}
+	mutex_unlock(&ua->lock);
 	ua_catalog_free_all(ua);
 	kfree(h);
 	ua->host = NULL;
+}
+
+/**
+ * ua_plugin_publish_now - publish a transaction built under ua->lock
+ * @ua: device (ua->lock held)
+ * @x: an inline-only transaction (no DMA payload, no replies)
+ *
+ * For teardowns, which run where the lock is already held and must not
+ * wait.  The ring being full is not retried: -EBUSY.  On an error the
+ * transaction is freed; on success the caller keeps it (a fence).
+ */
+int ua_plugin_publish_now(struct ua_device *ua, struct ua_xact *x)
+{
+	int ret;
+
+	lockdep_assert_held(&ua->lock);
+	if (x->len || x->n_rx) {
+		ua_xact_discard(ua, x);
+		return -EINVAL;
+	}
+	ret = ua_xact_map(ua, x);
+	if (!ret)
+		ret = ua_xact_submit(ua, x);
+	if (ret) {
+		ua_xact_discard(ua, x);
+		return ret == -EAGAIN ? -EBUSY : ret;
+	}
+	return 0;
+}
+
+/**
+ * ua_plugin_fence_set - @x is the latest teardown published on DSP @dsp
+ * @ua: device (ua->lock held)
+ * @dsp: DSP index
+ * @x: published transaction (the host keeps it until it is proven)
+ */
+void ua_plugin_fence_set(struct ua_device *ua, unsigned int dsp,
+			 struct ua_xact *x)
+{
+	struct ua_plugin_host *h = ua->host;
+
+	lockdep_assert_held(&ua->lock);
+	if (h->fence[dsp])
+		ua_xact_done(ua, h->fence[dsp]);
+	h->fence[dsp] = x;
+}
+
+/**
+ * ua_plugin_fence_wait - prove DSP @dsp took its last teardown
+ * @ua: device (host->mutex held, ua->lock NOT held)
+ * @dsp: DSP index
+ *
+ * Waits up to UA_XACT_WAIT_MS with the lock released.  A teardown the
+ * ring did not take, or that a resync abandoned, quarantines the DSP:
+ * what it holds is no longer known.
+ */
+int ua_plugin_fence_wait(struct ua_device *ua, unsigned int dsp)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_xact *x;
+	int ret;
+
+	lockdep_assert_held(&h->mutex);
+	mutex_lock(&ua->lock);
+	x = h->fence[dsp];
+	mutex_unlock(&ua->lock);
+	if (!x)
+		return 0;
+	ret = ua_xact_wait(ua, x, UA_XACT_WAIT_MS);
+	mutex_lock(&ua->lock);
+	if (ret && ret != -ENODEV)
+		ua_plugin_quarantine(ua, dsp, "a teardown was not taken", ret);
+	if (h->fence[dsp] == x) {
+		h->fence[dsp] = NULL;
+		ua_xact_done(ua, x);
+	}
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
+/**
+ * ua_plugin_teardown - take down everything the host placed, now
+ * @ua: device (ua->lock held)
+ * @why: for the log
+ *
+ * Before every disconnect, reconnect and rate change, and in the quiesce
+ * of suspend, shutdown and remove.  Publishes the teardown (no wait: the
+ * lock is held); the next operation on that DSP proves it first, or
+ * quarantines the DSP (ua_plugin_fence_wait()).
+ */
+void ua_plugin_teardown(struct ua_device *ua, const char *why)
+{
+	lockdep_assert_held(&ua->lock);
+	if (!ua->host || !ua->host->active)
+		return;
+	ua_strips_teardown(ua, why);
+}
+
+/**
+ * ua_plugin_host_quiesce - teardown before the device stops, and wait for it
+ * @ua: device (no lock held)
+ * @why: for the log
+ * @present: the device can still take commands
+ *
+ * Stops the host's work (a strip pass in progress ends first), publishes
+ * the teardown and waits for each DSP to take it with the lock released.
+ * With the device gone nothing is sent and nothing is owned any more.
+ */
+void ua_plugin_host_quiesce(struct ua_device *ua, const char *why,
+			    bool present)
+{
+	struct ua_plugin_host *h = ua->host;
+	unsigned int i;
+
+	if (!h)
+		return;
+	cancel_delayed_work_sync(&h->work);
+	if (!h->active)
+		return;
+	mutex_lock(&h->mutex);
+	mutex_lock(&ua->lock);
+	if (present && !atomic_read(&ua->shutdown)) {
+		ua_plugin_teardown(ua, why);
+	} else {
+		for (i = 0; i < UA_HOST_DSPS; i++)
+			if (h->dsp[i].owned)
+				ua_plugin_disown(ua, i, "the device is gone");
+		ua_plugin_epoch_bump(ua, why);
+	}
+	mutex_unlock(&ua->lock);
+	for (i = 0; i < ua->num_dsps && i < UA_HOST_DSPS; i++)
+		(void)ua_plugin_fence_wait(ua, i);
+	mutex_unlock(&h->mutex);
+}
+
+/* The DSP service loop's share (ua->lock held, every 10 ms) */
+void ua_plugin_service(struct ua_device *ua)
+{
+	if (ua->host && ua->host->active)
+		ua_strips_service(ua);
 }
 
 /**
@@ -82,6 +247,7 @@ void ua_plugin_connected(struct ua_device *ua)
 	for (i = 0; i < ua->num_dsps && i < UA_HOST_DSPS; i++)
 		if (h->dsp[i].owned)
 			(void)ua_plugin_read_geometry(ua, i);
+	ua_strips_connected(ua);
 }
 
 /**
@@ -156,6 +322,8 @@ void ua_plugin_host_caps(struct ua_device *ua, u32 *state, u32 *owned,
 		*state |= UA_PLUGIN_STATE_HOST;
 	if (!h)
 		return;
+	if (ua_strips_live(ua))
+		*state |= UA_PLUGIN_STATE_STRIPS;
 	for (i = 0; i < ua->num_dsps && i < UA_HOST_DSPS; i++) {
 		if (h->dsp[i].owned)
 			*owned |= BIT(i);

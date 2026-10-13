@@ -1658,6 +1658,12 @@ static void ua_hw_quiesce_locked(struct ua_device *ua)
 	ua_write(ua, UA_REG_AX_CONTROL, 0);
 	audio->transport_running = false;
 
+	/*
+	 * 3a. plug-in host: strips and instances down while the rings still
+	 * run (a no-op when ua_plugin_host_quiesce() already did it)
+	 */
+	ua_plugin_teardown(ua, "quiesce");
+
 	/* 3b. Nothing left queued on the DSP rings */
 	ua_dsp_rings_quiesce(ua);
 
@@ -4573,6 +4579,9 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	irq_req_ns = ktime_get_ns();
 
+	/* input_strips=1: model check and the strip modules (no-op when 0) */
+	ua_strips_init(ua);
+
 	ret = ua_dsp_init_and_load(ua, false, !ua_mixer_dsp_alive(ua));
 	if (ret)
 		goto err_dsp;
@@ -4671,6 +4680,12 @@ static void ua_remove(struct pci_dev *pdev)
 	ua_dsp_service_stop(ua);
 	ua_audio_period_wd_cancel(ua);
 	ua_audio_stop_period_timer(ua);
+
+	/*
+	 * 1b. The plug-in host's strips and instances come down first, each
+	 *     DSP's teardown waited for with ua->lock released
+	 */
+	ua_plugin_host_quiesce(ua, "remove", !dead && !atomic_read(&ua->shutdown));
 
 	/*
 	 * 2. If the device is still present (unbind / rmmod), run the
@@ -4915,6 +4930,12 @@ static void ua_quiesce_device(struct ua_device *ua, const char *why,
 		ua_audio_period_wd_cancel(ua);
 		ua_audio_stop_period_timer(ua);
 	}
+
+	/*
+	 * Plug-in host: strips and instances down, each DSP's teardown
+	 * waited for with ua->lock released (1 s at most per DSP)
+	 */
+	ua_plugin_host_quiesce(ua, why, present && !atomic_read(&ua->shutdown));
 
 	mutex_lock(&ua->lock);
 	ua->resume_pending = false;

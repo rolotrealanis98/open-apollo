@@ -65,10 +65,14 @@ int main(void)
 	       usage[0].unique_allocations == 1 && usage[0].holds == 2);
 	/* the same identity with another size is a conflict */
 	assert(ua_pool_reserve(o, 0, 4, &identity, true, &c) == -EEXIST);
-	assert(ua_pool_release(o, &a) == 0);
-	assert(ua_pool_release(o, &a) == -ESTALE);
-	assert(o->pool[0]->refs == 1);
-	assert(ua_pool_release(o, &b) == 0);
+	{
+		bool last = true;
+
+		assert(ua_pool_release_last(o, &a, &last) == 0 && !last);
+		assert(ua_pool_release_last(o, &a, &last) == -ESTALE && !last);
+		assert(o->pool[0]->refs == 1);
+		assert(ua_pool_release_last(o, &b, &last) == 0 && last);
+	}
 	assert(ua_pool_read_usage(o, usage) == 0 &&
 	       !memcmp(usage, baseline, sizeof(usage)));
 	assert(o->pool[0]->terminal && o->pool[0]->words == 100 && !o->pool[0]->next);

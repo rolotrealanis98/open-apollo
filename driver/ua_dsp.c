@@ -5217,6 +5217,9 @@ static void ua_dsp_state_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "  service passes: %u interrupt-driven, %u polled (10 ms)\n",
 		    ua->audio.notif_irq_passes, ua->audio.notif_poll_passes);
 
+	/* Console input strips (input_strips): state, pools, strips, modules */
+	ua_strips_proc(ua, buf);
+
 	mutex_unlock(&ua->lock);
 }
 

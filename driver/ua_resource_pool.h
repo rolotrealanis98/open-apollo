@@ -59,6 +59,8 @@ int ua_pool_reserve_batch(struct ua_pool_owner *owner,
 			  unsigned int count, struct ua_pool_lease *out);
 int ua_pool_release(struct ua_pool_owner *owner,
 		    const struct ua_pool_lease *lease);
+int ua_pool_release_last(struct ua_pool_owner *owner,
+			 const struct ua_pool_lease *lease, bool *last);
 int ua_pool_set_scratch(struct ua_pool_owner *owner, unsigned int kind,
 			u32 words);
 int ua_pool_read_usage(struct ua_pool_owner *owner,
