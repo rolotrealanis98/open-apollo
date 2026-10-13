@@ -53,8 +53,13 @@ fn second_unit_writes_and_live_order_online_pushes_keep_identity() {
     wait(&mut m, &|m| *m.store().status()==Status::Live);
     m.apply(&Action::Toggle(ControlId { strip:"/devices/7/inputs/0".into(),control:Control::Mute }));
     let end = Instant::now()+Duration::from_secs(10);
-    while server.write_commands().is_empty() { assert!(Instant::now()<end); std::thread::sleep(Duration::from_millis(5)); }
-    assert!(server.write_commands().iter().any(|w| w == "set /devices/7/inputs/0/Mute/value true"));
+    // A commit first sends UndoRecording=true; wait for the target write,
+    // not just the first command in that transaction.
+    while !server.write_commands().iter().any(|w| w == "set /devices/7/inputs/0/Mute/value true") {
+        assert!(Instant::now()<end, "mute write timed out: {:?}", server.write_commands());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(server.write_commands().iter().any(|w| w == "set /devices/7/inputs/0/Mute/value true"), "recorded writes: {:?}", server.write_commands());
     assert_eq!(server.value("/devices/2/inputs/0/Mute").and_then(|v| v.as_bool()), Some(false));
     let rev = m.store().topology_revision();
     server.push("/devices/7/DeviceOnline", true);

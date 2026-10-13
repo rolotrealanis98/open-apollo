@@ -483,3 +483,16 @@ p1 158/158, p2 195/195, windows_check, ledger tests and regeneration. Updated
 DTrace scripts compile and pass both fixture modes on the Mac. Source-owned
 probe builds warning-clean and its ABI check passes. Full captured buffers
 were checked offline, including the native getter's all-zero 304-byte packet.
+
+## Multi-Apollo test transaction wait
+
+The required workspace checks exposed an asynchronous test race: the sparse
+unit mute test waited for any write, but commits first enqueue UndoRecording.
+The assertion could run before the target mute frame arrived. It now waits
+for that exact frame with the existing timeout and reports recorded writes
+on failure. Production behavior is unchanged; no real engine was contacted
+for this fix. The failure reproduced at repetition 33 before the change.
+
+Validation: four multi-device tests and 100 repeated target runs pass; full
+workspace 285 tests pass (10 ignored), locked release build, p1 158/158,
+p2 195/195, windows_check, ledger tests and regeneration.
