@@ -33,6 +33,15 @@
 
 /* UA_INSTANCE_BEGIN: the host tests build everything up to the end mark */
 
+/* Ring words for UA_PLUGIN_CREATE_F_START (same as the input strips') */
+#define UA_INST_CMD_SYNCH	0x001F0004	/* {.., in2 << 16 | in1, head, 0} */
+#define UA_INST_CMD_INPUT	0x001E0004	/* {.., input, param, value} */
+#define UA_INST_CMD_WRITE1	0x00140003	/* {.., addr, one word} */
+#define UA_INST_INPUT_ROUTE	7
+#define UA_INST_INPUT_SPAN	8
+#define UA_INST_SPAN_NONE	0x20
+#define UA_INST_ROUTE_NONE	0x1ffff
+
 struct ua_plugin_inst {
 	struct list_head node;		/* host->instances (ua->lock) */
 	struct ua_file *owner;
@@ -43,6 +52,8 @@ struct ua_plugin_inst {
 	bool placed;			/* leases taken */
 	bool loaded;			/* everything taken by the DSP */
 	bool lost;			/* taken down by the host, or the DSP gone */
+	bool started;			/* SYNCH'd on a DSP input (F_START) */
+	u32 synch;			/* in1 | in2 << 16 */
 	unsigned int n_res, n_priv;
 	struct ua_cat_entry **res;	/* catalog references */
 	struct ua_pool_lease *lease;	/* n_res modules, then n_priv rows */
@@ -76,6 +87,7 @@ static unsigned int ua_inst_unplace(struct ua_device *ua,
 	struct ua_host_dsp *d = &h->dsp[in->dsp];
 	struct ua_xact *x = NULL;
 	unsigned int i, rels = 0;
+	bool stops;
 
 	if (!in->placed)
 		return 0;
@@ -86,6 +98,11 @@ static unsigned int ua_inst_unplace(struct ua_device *ua,
 		x = ua_xact_alloc(in->dsp, 0);
 	if (x)
 		x->epoch = h->epoch;
+	/* a started instance stops before anything of it is released */
+	if (x && in->started && !in->lost)
+		ua_xact_inline(x, UA_INST_CMD_SYNCH, in->synch, 0, 0);
+	stops = x && in->started && !in->lost;
+	in->started = false;
 	for (i = 0; i < in->n_res; i++) {
 		struct ua_cat_entry *e = in->res[i];
 		bool last = false;
@@ -107,7 +124,7 @@ static unsigned int ua_inst_unplace(struct ua_device *ua,
 	memset(in->lease + in->n_res, 0, in->n_priv * sizeof(*in->lease));
 	if (!x)
 		return 0;
-	if (!rels) {
+	if (!rels && !stops) {
 		ua_xact_discard(ua, x);
 		return 0;
 	}
@@ -303,6 +320,58 @@ out:
 	return ret;
 }
 
+/*
+ * UA_PLUGIN_CREATE_F_START: stop what runs on the input, write the
+ * parameter words (one WRITE each, one DMA page), start the instance on
+ * the input and send its span and route words, as the kext does after a
+ * strip is placed.  Marked started before the run, so a failure still stops
+ * it at the takedown.
+ */
+static int ua_inst_start(struct ua_device *ua, struct ua_plugin_inst *in,
+			 const struct ua_plugin_word *pw, unsigned int n,
+			 u32 synch)
+{
+	struct ua_plugin_host *h = ua->host;
+	u32 in1 = synch & 0xffff;
+	struct ua_xact *x;
+	unsigned int i;
+	__le32 *d;
+	int ret;
+
+	for (i = 0; i < n; i++)
+		if (pw[i].row >= in->n_priv ||
+		    pw[i].offset >= in->lease[in->n_res + pw[i].row].words)
+			return -EINVAL;
+	x = ua_xact_alloc(in->dsp, UA_XACT_PIECE);
+	if (!x)
+		return -ENOMEM;
+	x->epoch = in->epoch;
+	ua_xact_inline(x, UA_INST_CMD_SYNCH, synch, 0, 0);
+	d = ua_xact_cmd(x, 3 * n);
+	if (d)
+		for (i = 0; i < n; i++) {
+			d[3 * i] = cpu_to_le32(UA_INST_CMD_WRITE1);
+			d[3 * i + 1] = cpu_to_le32(in->lease[in->n_res + pw[i].row].base +
+						   pw[i].offset);
+			d[3 * i + 2] = cpu_to_le32(pw[i].value);
+		}
+	ua_xact_inline(x, UA_INST_CMD_SYNCH, synch, in->lease[in->n_res].base, 0);
+	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_SPAN, UA_INST_SPAN_NONE);
+	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_SPAN, UA_INST_SPAN_NONE);
+	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_ROUTE, UA_INST_ROUTE_NONE);
+	mutex_lock(&ua->lock);
+	in->started = true;
+	in->synch = synch;
+	mutex_unlock(&ua->lock);
+	ret = ua_xact_run(ua, x, UA_XACT_WAIT_MS);
+	mutex_lock(&ua->lock);
+	if (x->state >= UA_XACT_PUBLISHED)
+		h->dsp[in->dsp].writes += n;
+	ua_xact_done(ua, x);
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
 /**
  * ua_plugin_create - UA_PLUGIN_INST_CREATE
  * @ua: device (no lock held)
@@ -316,7 +385,8 @@ out:
  */
 static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 			    struct ua_plugin_instance *req, const u8 (*sha)[32],
-			    const struct ua_memspec_row *rows)
+			    const struct ua_memspec_row *rows,
+			    const struct ua_plugin_word *pw)
 {
 	struct ua_plugin_host *h = ua->host;
 	struct ua_pool_request *rq = NULL;
@@ -420,6 +490,13 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 	if (ret)
 		goto takedown;
 
+	/* 7. Bring-up only: parameters, then started on the DSP input */
+	if (req->flags & UA_PLUGIN_CREATE_F_START) {
+		ret = ua_inst_start(ua, in, pw, req->reserved[1], req->reserved[0]);
+		if (ret)
+			goto takedown;
+	}
+
 	mutex_lock(&ua->lock);
 	if (in->lost) {
 		ret = -ESTALE;
@@ -432,8 +509,9 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 	if (ret)
 		goto takedown;
 	dev_info(&ua->pdev->dev,
-		 "plug-in host: plug-in 0x%03x instance %u placed on DSP %u (not routed)\n",
-		 in->render_id, in->handle, dsp);
+		 "plug-in host: plug-in 0x%03x instance %u placed on DSP %u (%s)\n",
+		 in->render_id, in->handle, dsp,
+		 in->started ? "started on its DSP input" : "not routed");
 	kfree(rq);
 	mutex_unlock(&h->mutex);
 	return 0;
@@ -533,16 +611,25 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 	struct ua_plugin_instance req;
 	struct ua_plugin_private *priv = NULL;
 	struct ua_memspec_row *rows = NULL;
+	struct ua_plugin_word *pw = NULL;
 	u8 (*sha)[32] = NULL;
-	unsigned int i;
+	unsigned int i, nw = 0;
 	long ret;
 
 	if (!ua_plugin_host_enabled())
 		return -EOPNOTSUPP;
 	if (copy_from_user(&req, (void __user *)arg, sizeof(req)))
 		return -EFAULT;
+	if (req.op == UA_PLUGIN_INST_CREATE &&
+	    (req.flags & UA_PLUGIN_CREATE_F_START)) {
+		nw = req.reserved[1];
+		if (!nw || nw > UA_PLUGIN_WORDS_MAX ||
+		    memchr_inv(req.reserved + 4, 0, 2 * sizeof(req.reserved[0])))
+			return -EINVAL;
+	} else if (memchr_inv(req.reserved, 0, sizeof(req.reserved))) {
+		return -EINVAL;
+	}
 	if (req.struct_size != sizeof(req) ||
-	    memchr_inv(req.reserved, 0, sizeof(req.reserved)) ||
 	    req.epoch || req.license_state || req.license_word)
 		return -EINVAL;
 
@@ -557,7 +644,8 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 		return -EINVAL;
 	}
 
-	if (req.handle || (req.flags & ~UA_PLUGIN_CREATE_F_CHECK) ||
+	if (req.handle ||
+	    (req.flags & ~(UA_PLUGIN_CREATE_F_CHECK | UA_PLUGIN_CREATE_F_START)) ||
 	    (req.dsp != UA_PLUGIN_DSP_ANY && req.dsp >= ua->num_dsps))
 		return -EINVAL;
 	if (!(req.flags & UA_PLUGIN_CREATE_F_CHECK) &&
@@ -587,9 +675,20 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 		ret = ua_inst_check_rows(rows, req.n_private);
 		if (ret)
 			goto out;
+		if (nw) {
+			ret = -ENOMEM;
+			pw = kvmalloc_array(nw, sizeof(*pw), GFP_KERNEL);
+			if (!pw)
+				goto out;
+			ret = -EFAULT;
+			if (copy_from_user(pw, u64_to_user_ptr((u64)req.reserved[3] << 32 |
+							       req.reserved[2]),
+					   nw * sizeof(*pw)))
+				goto out;
+		}
 	}
 
-	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows);
+	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows, pw);
 	if ((!ret || ret == -EACCES) &&
 	    copy_to_user((void __user *)arg, &req, sizeof(req)))
 		ret = -EFAULT;
@@ -597,5 +696,6 @@ out:
 	kvfree(sha);
 	kvfree(priv);
 	kvfree(rows);
+	kvfree(pw);
 	return ret;
 }

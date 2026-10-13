@@ -1082,6 +1082,25 @@ struct ua_plugin_private {
 	__u32 flags;		/* 0 or 2 */
 };
 
+/*
+ * UA_PLUGIN_CREATE_F_START (bring-up, experimental): after the rows are
+ * zero-filled and linked, one transaction stops whatever runs on the DSP
+ * input, writes the parameter words, starts the instance there (SYNCH with
+ * the head row) and sends the input's span and route words.
+ * reserved[0] = in1 | in2 << 16 (in2 0x20 = mono), reserved[1] = word
+ * count (1..UA_PLUGIN_WORDS_MAX), reserved[2] / [3] = low / high half of a
+ * user pointer to struct ua_plugin_word[].  DESTROY and close stop it
+ * before anything is released.
+ */
+#define UA_PLUGIN_CREATE_F_START	(1u << 1)
+#define UA_PLUGIN_WORDS_MAX		341	/* 3 dwords each in one 4 KiB DMA page */
+
+struct ua_plugin_word {
+	__u32 row;		/* private row index */
+	__u32 offset;		/* dword offset in the row */
+	__u32 value;
+};
+
 struct ua_plugin_instance {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_instance) */
 	__u32 op;		/* UA_PLUGIN_INST_* */
