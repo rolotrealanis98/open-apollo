@@ -120,3 +120,41 @@ fn every_catalog_spec_builds_and_survives_every_gesture() {
     assert!(assets.images.missing().iter().all(|k| !k.starts_with("spec:")), "missing panel sprites: {:?}", assets.images.missing());
     eprintln!("{} specs built and exercised ({} gestures, {} graph elements)", lib.entries.len(), total, graphs);
 }
+
+/// Auto-Tune's detected-note readout (agent R round 16): one note element per pitch class, each
+/// shown by a `visibleWhen` step window over meter values. Sweeping the detected period over two
+/// octaves must show exactly one note at a time and every pitch class somewhere.
+#[test]
+fn auto_tune_note_windows_show_one_note_at_a_time() {
+    let Some(lib) = PluginSpecLibrary::locate() else { return };
+    for stem in ["auto_tune_realtime_x", "auto_tune_realtime_advanced"] {
+        let Some(entry) = lib.entry_named(stem) else { continue };
+        let spec = lib.spec(entry).unwrap();
+        let notes: Vec<usize> = spec.elements.iter().enumerate().filter(|(_, e)| e.id.starts_with("R-pitch-note-")).map(|(i, _)| i).collect();
+        if notes.is_empty() {
+            continue;
+        }
+        let params = MockParams::from_spec(&spec);
+        let mut panel = PluginPanel::new(spec.clone(), &lib, SLOT);
+        panel.meters.set_raw("pitch_correction", 1.0);
+        // A signal is present: the period meter's needle is up (the elements' visibility table).
+        panel.meters.set_needle("pitch_period", 0.5);
+        let mut seen = std::collections::BTreeSet::new();
+        let mut empty = 0;
+        // Period in samples at 48 kHz, 55 Hz … 220 Hz (geometric, 400 steps).
+        for i in 0..400 {
+            let period = 48000.0 / (55.0 * 4f64.powf(i as f64 / 400.0));
+            panel.meters.set_raw("pitch_period", period);
+            let shown: Vec<usize> = notes.iter().copied().filter(|&n| panel.opacity(&spec.elements[n], &params) > 0.01).collect();
+            assert!(shown.len() <= 1, "{stem}: period {period:.2} shows {shown:?}");
+            match shown.first() {
+                Some(&n) => {
+                    seen.insert(n);
+                }
+                None => empty += 1,
+            }
+        }
+        assert_eq!(seen.len(), notes.len(), "{stem}: every pitch class appears");
+        assert!(empty < 10, "{stem}: {empty} sweep points show no note");
+    }
+}
