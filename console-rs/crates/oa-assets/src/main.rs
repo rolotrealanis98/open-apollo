@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use oa_assets::detect::{self, Install};
 use oa_assets::discover::{self, Root, Source};
+use oa_assets::dsp;
 use oa_assets::firmware::{self, Event, Pins};
 use oa_assets::import;
 
@@ -19,6 +20,10 @@ USAGE:
   oa-assets firmware [--from PATH] [--out DIR] [--accept-unknown] [--verify-golden] [--json]
                                                extract the DSP modules and USB boot images the Apollo
                                                needs (default --out /lib/firmware/universal-audio)
+  oa-assets dsp [--from PATH] [--out DIR] [--dry-run] [--json] [--jobs N]
+                                               collect every Powered plug-in's DSP modules, for
+                                               plug-in hosting (default --out
+                                               /lib/firmware/universal-audio/plugins)
   oa-assets plugins [--from PATH] [--out DIR] [--spec ID]... [--verify] [--report FILE]
                                                regenerate plug-in panel art from the Powered plug-in
                                                DLLs (default --out ~/.local/share/open-apollo/generated)
@@ -29,6 +34,10 @@ Options: --data DIR  (default ~/.local/share/open-apollo)
 firmware: only versions this oa-assets knows are written; --accept-unknown writes others too.
   --verify-golden re-extracts into a temp dir and checks every pinned hash (without --out it
   writes nothing else). Exit: 0 done, 1 a required module missing, 2 an unknown module version.
+dsp: stores each distinct Bill record once as modules/<sha256>.bill (unmodified) and writes
+  manifest.json: plug-in (DLL, UA.xml entry, plugin_id, VST3 bundle, version, SHA-256) -> its
+  modules. A rerun rewrites nothing that is already right and drops modules no plug-in uses any
+  more. --dry-run only reports. Exit: 0 done, 1 no Powered plug-ins found (or an error).
 plugins: every image is checked against the recipe's RGBA SHA-256; --verify prints the result per
   spec and tier and exits 1 if anything failed. --spec limits the build to the panels named.
   --recipes DIR uses recipe files from DIR instead of the built-in ones; --jobs N sets threads.";
@@ -108,6 +117,7 @@ fn main() -> ExitCode {
         "import" => run_import(&args),
         "status" => status(&args),
         "firmware" => return run_firmware(&args),
+        "dsp" => return run_dsp(&args),
         "plugins" => return run_plugins(&args),
         "help" => {
             println!("{USAGE}");
@@ -383,6 +393,67 @@ fn firmware_root(args: &Args, pins: &Pins, log: &mut dyn FnMut(Event)) -> Result
     )?;
     log(Event::Info(format!("Using {} (pick another with --from PATH)", chosen.path.display())));
     Ok(chosen)
+}
+
+/// `oa-assets dsp`: exit 0 done, 1 no Powered plug-ins found or an error.
+fn run_dsp(args: &Args) -> ExitCode {
+    match dsp_cmd(args) {
+        Ok(code) => ExitCode::from(code),
+        Err(e) => {
+            if args.json {
+                println!("{}", serde_json::json!({"exit": 1, "error": e}));
+            }
+            eprintln!("[FAIL]  {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dsp_cmd(args: &Args) -> Result<u8, String> {
+    if let Some(stray) = &args.device {
+        return Err(format!("unexpected {stray}; pass the install with --from PATH"));
+    }
+    let mut log = |e: Event| {
+        if !args.json {
+            println!("{}", e.render());
+        }
+    };
+    let root = match args.from.as_slice() {
+        [one] if one.is_dir() => discover::given(one),
+        [one] => return Err(format!("{} isn't a folder", one.display())),
+        [] => {
+            let mut c = discover::mounted_volumes();
+            c.extend(discover::wine_prefixes());
+            let r = c.into_iter().find(|r| dsp::has_inputs(&r.path)).ok_or(
+                "no UAD install with Powered plug-ins found; mount your Windows partition (oa-assets scan) \
+                 or pass --from PATH",
+            )?;
+            log(Event::Info(format!("Using {} (pick another with --from PATH)", r.path.display())));
+            r
+        }
+        _ => return Err("dsp takes one --from".into()),
+    };
+    let out = args.out.clone().unwrap_or_else(|| PathBuf::from(dsp::DEFAULT_OUT));
+    if firmware::inside(&out, &root.path) {
+        return Err(format!("--out {} is inside the UAD install; pick a folder outside it", out.display()));
+    }
+    let opts = dsp::Options { dry_run: args.dry_run, jobs: args.jobs };
+    let report = dsp::collect(&root.path, &out, &Pins::builtin(), opts, &mut log).map_err(|e| e.to_string())?;
+    if args.json {
+        let v = serde_json::json!({
+            "exit": report.exit,
+            "from": root.path,
+            "out": out,
+            "dry_run": args.dry_run,
+            "totals": report.totals(),
+            "written": report.written,
+            "kept": report.kept,
+            "removed": report.removed,
+            "manifest": (!args.dry_run && report.exit == 0).then(|| out.join(dsp::MANIFEST)),
+        });
+        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+    }
+    Ok(report.exit)
 }
 
 /// `oa-assets plugins`: exit 0 done, 1 failures (with --verify) or an error.

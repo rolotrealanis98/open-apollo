@@ -172,7 +172,21 @@ pub struct BillRecord {
     pub id: u32,
     /// Whole record: header + payload.
     pub len: usize,
+    /// Word 2: kind (low byte), flags (middle 16 bits), DSP architecture (high byte).
+    pub w2: u32,
     pub w4: u32,
+}
+
+impl BillRecord {
+    /// 0 for code; 1–4 for the other resource kinds.
+    pub fn kind(&self) -> u32 {
+        self.w2 & 0xff
+    }
+
+    /// The DSP architecture a code module is built for (1 or 2); 0 for the other kinds.
+    pub fn arch(&self) -> u32 {
+        self.w2 >> 24
+    }
 }
 
 fn le32(b: &[u8], at: usize) -> u32 {
@@ -186,16 +200,30 @@ fn bill_w4(rec: &[u8]) -> Option<u32> {
 /// Every on-disk Bill record in `data`: 4-byte aligned, `Bill`, an id whose arch
 /// byte (offset 7) is 0, word 2 `0x02000000`, and a payload that fits.
 pub fn bill_records(data: &[u8]) -> impl Iterator<Item = BillRecord> + '_ {
+    scan_bills(data, |w2| w2 == BILL_W2)
+}
+
+/// Every on-disk Bill record of any kind, as UAD2SDK's own validator bounds
+/// them: kind at most 4, no flags, architecture at most 2, a whole number of
+/// words, and w4 at most the record's word count minus 13. The Console strip
+/// modules are the kind-0 (code), architecture-2 subset [`bill_records`] finds.
+pub fn all_bill_records(data: &[u8]) -> impl Iterator<Item = BillRecord> + '_ {
+    let header_ok = |w2: u32| w2 & 0xff <= 4 && (w2 >> 8) & 0xffff == 0 && w2 >> 24 <= 2;
+    scan_bills(data, header_ok).filter(|r| r.len % 4 == 0 && (r.w4 as usize).saturating_add(13) <= r.len / 4)
+}
+
+fn scan_bills<'a>(data: &'a [u8], w2_ok: impl Fn(u32) -> bool + 'a) -> impl Iterator<Item = BillRecord> + 'a {
     (0..data.len().saturating_sub(BILL_HDR - 1)).step_by(4).filter_map(move |i| {
         if &data[i..i + 4] != BILL_MAGIC {
             return None;
         }
         let id = le32(data, i + 4);
-        if id >> 24 != 0 || le32(data, i + 8) != BILL_W2 {
+        let w2 = le32(data, i + 8);
+        if id >> 24 != 0 || !w2_ok(w2) {
             return None;
         }
         let len = BILL_HDR.checked_add(le32(data, i + 12) as usize)?;
-        (i.checked_add(len)? <= data.len()).then(|| BillRecord { offset: i, id, len, w4: le32(data, i + 16) })
+        (i.checked_add(len)? <= data.len()).then(|| BillRecord { offset: i, id, len, w2, w4: le32(data, i + 16) })
     })
 }
 
@@ -439,12 +467,12 @@ impl Search<'_> {
     }
 }
 
-fn file_label(p: &Path) -> String {
+pub(crate) fn file_label(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// `p` relative to the root, with `/` separators.
-fn rel(root: &Path, p: &Path) -> String {
+pub(crate) fn rel(root: &Path, p: &Path) -> String {
     p.strip_prefix(root)
         .unwrap_or(p)
         .components()
@@ -639,7 +667,7 @@ fn written_any(manifest: &Value) -> bool {
 }
 
 /// Write `bytes` to `dir/rel` through a temp file and a rename: 0644 files, 0755 directories.
-fn write_atomic(dir: &Path, rel: &str, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomic(dir: &Path, rel: &str, bytes: &[u8]) -> io::Result<()> {
     let dest = dir.join(rel);
     let parent = dest.parent().unwrap_or(dir).to_path_buf();
     fs::DirBuilder::new().recursive(true).mode(0o755).create(&parent)?;
@@ -797,7 +825,7 @@ fn golden_in(
 // ---- misc ----
 
 /// Now, as `YYYY-MM-DDTHH:MM:SSZ`.
-fn utc_now() -> String {
+pub(crate) fn utc_now() -> String {
     utc_string(SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0))
 }
 
@@ -944,7 +972,7 @@ mod tests {
         cut.truncate(40); // size runs past the end of the file
         data.extend_from_slice(&cut);
         let got: Vec<BillRecord> = bill_records(&data).collect();
-        assert_eq!(got, [BillRecord { offset: 4, id: 0x0da, len: BILL_HDR + 12, w4: 7 }]);
+        assert_eq!(got, [BillRecord { offset: 4, id: 0x0da, len: BILL_HDR + 12, w2: BILL_W2, w4: 7 }]);
         assert_eq!(bill_records(b"Bil").count(), 0);
     }
 

@@ -115,7 +115,7 @@ pub fn inspect(root: &Root) -> Install {
 }
 
 /// UAD's tools folder (the one with `UA.xml`); Burn is 32-bit, so it lands under Program Files (x86).
-fn tools_dir(r: &Path) -> Option<PathBuf> {
+pub(crate) fn tools_dir(r: &Path) -> Option<PathBuf> {
     ["Program Files (x86)", "Program Files"]
         .iter()
         .find_map(|pf| ci_path(r, &[pf, "Universal Audio", "Powered Plugins", "UA.xml"]))
@@ -216,7 +216,7 @@ fn starts_with_ci(p: &Path, prefix: &str) -> bool {
 
 /// UA's bundles are named "UAD ...", or sit in a "Universal Audio"/"UADx" folder.
 /// `p` is relative to the VST3 folder.
-fn is_ua_name(p: &Path) -> bool {
+pub(crate) fn is_ua_name(p: &Path) -> bool {
     p.components().any(|c| {
         let s = c.as_os_str().to_string_lossy().to_ascii_lowercase();
         s.starts_with("uad") || s.contains("universal audio")
