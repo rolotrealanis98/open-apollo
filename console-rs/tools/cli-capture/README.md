@@ -100,3 +100,13 @@ same fixture with SIP enabled, including command/reply text and send stack.
 This does not establish access to protected UA processes or full packet reads. Security
 settings and UA apps were unchanged. The selected mode’s fixture must pass before live tracing. The runner
 defaults to text mode; `packets` selects the still-unvalidated full-byte mode.
+
+## SIP-disabled continuation, 2026-10-13
+
+See [MAC-NOSIP-RESULTS.md](MAC-NOSIP-RESULTS.md). Both fixtures pass; the full
+raw packets match expected bytes. A pinned loaded-engine idle trace observed
+3047 native calls and no CLI requests. A real response-only query traced one
+175 packet of 304 zero bytes. No enable/send occurred, and engine snapshots
+changed only in meters. Genuine CLI command grammar and a jailbreak remain
+unproved. All-selector size/count aggregates now distinguish working native
+traffic observation from an idle CLI window. Raw captures remain outside git.

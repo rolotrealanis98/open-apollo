@@ -456,3 +456,30 @@ release build, p1 158/158, p2 195/195, windows_check, ledger tests and ledger
 regeneration. Fixture C builds are warning-clean on Linux and Mac; runner
 shell syntax checks pass on both. Prepared sources are staged on Mac at
 ~/Library/Caches/apollo-cli-investigation/prepared-20261012/. SIP remains on.
+
+## SIP-disabled Mac CLI continuation (2026-10-13)
+
+The user disabled SIP, connected Apollo to Mac Studio, and approved the UA
+driver after boot logs reported missing kext approval. Following their restart
+the driver is 12.0.0 build 464 and DeviceOnline=true. Both tracer fixtures pass;
+full packet bytes match the mock buffers exactly. Added metadata-only counts
+for all StructMethod selectors to establish observer coverage.
+
+The pinned idle engine capture saw 3047 native calls across six selectors, no
+CLI requests and no faults. Idle Console and native CLI-wrapper observations
+also found no CLI activity. A single guarded response-only helper query traced
+a real 175 call and 304 zero output bytes; no enable/send was issued. Snapshot
+comparisons differ only in meters. Native wrapper probes are available, but no
+UAD2System FBT kernel probes were exposed. No GUI operation or agent security
+change occurred. Raw captures remain outside git; native driver WIP is intact.
+
+The offline search now identifies actual CLI vtable slots and qualified engine
+driver receivers. No genuine command producer was found in the bounded search.
+See tools/cli-capture/MAC-NOSIP-RESULTS.md for pins, addresses and coverage limits.
+Firmware memory reading, plaintext/key extraction and a jailbreak remain open.
+
+Validation: 285 workspace tests pass (10 ignored), locked release build,
+p1 158/158, p2 195/195, windows_check, ledger tests and regeneration. Updated
+DTrace scripts compile and pass both fixture modes on the Mac. Source-owned
+probe builds warning-clean and its ABI check passes. Full captured buffers
+were checked offline, including the native getter's all-zero 304-byte packet.

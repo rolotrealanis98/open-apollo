@@ -10,6 +10,12 @@ dtrace:::BEGIN
     printf("TRACE_READY target=%d duration_seconds=10 abi=ua12-arm64\n", $target);
 }
 
+/* Metadata-only coverage evidence for all StructMethod selectors. */
+pid$target::IOConnectCallStructMethod:entry
+{
+    @selector_counts[(uint32_t)arg1, (uint64_t)arg3] = count();
+}
+
 pid$target::IOConnectCallStructMethod:entry
 /arg1 >= 173 && arg1 <= 175/
 {
@@ -85,4 +91,5 @@ dtrace:::END
 {
     printf("TRACE_END enables=%d sends=%d gets=%d returns=%d faults=%d\n",
         enables, sends, receives, returns, faults);
+    printa("SELECTOR selector=%u input_size=%llu calls=%@d\n", @selector_counts);
 }
