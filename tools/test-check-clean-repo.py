@@ -229,6 +229,10 @@ class PersonalData(unittest.TestCase):
         self.assertEqual(rules("t.rs", f'"{HOST}"'.encode()), ["host-name"])
         self.assertEqual(rules("t.rs", b'"Studio Mac" "Network RTP MIDI Session"'), [])
 
+    def test_panel_specs_stay_out(self):
+        self.assertEqual(rules("specs/PluginSpec_ua_1176.json", b'{"schema": 2}\n'), ["panel-spec"])
+        self.assertEqual(rules("console-rs/tests/spec.json", b'{"schema": 2}\n'), [])
+
     def test_binary_files_are_not_read_as_text(self):
         self.assertEqual(rules("x.bin", b"\0" + LAN.encode()), [])
 

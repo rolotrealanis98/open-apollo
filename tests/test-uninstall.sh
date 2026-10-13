@@ -137,7 +137,8 @@ populate() {
              lib/firmware/ua-apollo-plugin-chain.bin lib/firmware/other.bin \
              etc/udev/rules.d/99-apollo-usb.rules usr/local/lib/ua-usb/fx3-load \
              lib/firmware/universal-audio/manifest.json lib/firmware/universal-audio/dsp/0c2.bill \
-             lib/firmware/ua_apollo/0c2.bill tmp/open-apollo-install-report.json; do
+             lib/firmware/ua_apollo/0c2.bill tmp/open-apollo-install-report.json \
+             usr/share/open-apollo/plugin-specs/PluginSpec_a.json usr/share/open-apollo/plugin-specs/.source; do
         mkdir -p "$(dirname "$R/$f")"
         echo x > "$R/$f"
     done
@@ -206,7 +207,7 @@ removed_all_but_data() {
              "$H"/.config/autostart/open-apollo-tray.desktop "$R"/usr/share/applications/open-apollo.desktop \
              "$R"/lib/firmware/ua-apollo-plugin-chain.bin \
              "$R"/etc/udev/rules.d/99-apollo-usb.rules "$R"/usr/local/lib/ua-usb \
-             "$R"/tmp/open-apollo-install-report.json; do
+             "$R"/tmp/open-apollo-install-report.json "$R"/usr/share/open-apollo; do
         if exists "$f"; then echo "    left: ${f#"$R"}"; bad=1; fi
     done
     for f in "$R"/etc/udev/rules.d/50-other.rules "$R"/usr/local/bin/other-tool "$R"/lib/firmware/other.bin \
@@ -230,6 +231,7 @@ check "--list shows the user's daemon drop-in" \
 check "--list shows extracted firmware" has "$tmp_dir/out" "$(printf 'firmware\t/lib/firmware/universal-audio')"
 check "--list shows imported art" has "$tmp_dir/out" "$(printf 'data\t/home/tester/.local/share/open-apollo')"
 check "--list shows uaconsole" has "$tmp_dir/out" "$(printf 'console\t/home/tester/.local/bin/uaconsole')"
+check "--list shows the plug-in panel specs" has "$tmp_dir/out" "$(printf 'panels\t/usr/share/open-apollo/plugin-specs')"
 check "--list changes nothing" test -e "$R/etc/udev/rules.d/91-ua-apollo.rules" -a -e "$state/loaded"
 check "--list calls no privileged command" test ! -e "$log" -o -z "$(grep -E '^(rmmod|systemctl|runuser|udevadm)' "$log" 2>/dev/null)"
 

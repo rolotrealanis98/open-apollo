@@ -44,7 +44,10 @@ impl App {
                     .into(),
             ),
             StepId::Import => {
-                ("Import assets", format!("The Console art is copied from your UAD install to {}.", tilde(&self.opts.data)))
+                ("Import assets", format!(
+                    "The Console art is copied from your UAD install to {}. The plug-in panel specs (about 1 MB) are downloaded from GitHub, and the plug-in panels' art is made from your UAD install.",
+                    tilde(&self.opts.data)
+                ))
             }
             StepId::Firmware => (
                 "DSP programs & firmware",
@@ -89,7 +92,7 @@ impl App {
                 (StepId::Find, "Your UAD install on a Windows partition, a Windows VM's disk, or a Wine prefix."),
                 (StepId::Review, "See what will happen, then install. Asks for your password once."),
                 (StepId::Remove, "Remove everything an earlier open-apollo install left, so the rest is fresh."),
-                (StepId::Import, "Copy the Console art to this computer."),
+                (StepId::Import, "Copy the Console art, fetch the plug-in panel specs and make their art."),
                 (StepId::Firmware, "Extract the DSP programs and firmware the driver loads."),
                 (StepId::Driver, "Build and install the driver and audio settings."),
                 (StepId::Console, "Build and start the open-apollo Console. No password needed."),
@@ -461,6 +464,7 @@ impl App {
                 &[
                     ("From", source),
                     ("Console art to", tilde(&self.opts.data.join(oa_assets::import::CONSOLE_DIR))),
+                    ("Plug-in panel specs to", setuprun::PANEL_SPECS_DIR.to_string()),
                     ("Firmware to", firmware::FIRMWARE_DIR.to_string()),
                 ],
             );
@@ -470,12 +474,12 @@ impl App {
             let remove = if self.keep_current {
                 "Skipped: your current install stays, and the rest is installed over it."
             } else {
-                "Everything an earlier open-apollo install left is removed: driver, DKMS builds, settings, extracted firmware, imported art, the Console."
+                "Everything an earlier open-apollo install left is removed: driver, DKMS builds, settings, extracted firmware, imported art, plug-in panel specs, the Console."
             };
             let rows: Vec<(&str, String)> = vec![
                 ("1", "Your UAD install is checked. If it can't be used, setup stops here and nothing is changed.".into()),
                 ("2", remove.into()),
-                ("3", "The Console art is copied fresh from your UAD install.".into()),
+                ("3", "The Console art is copied fresh from your UAD install. The plug-in panel specs (about 1 MB) are downloaded from GitHub and checked against a pinned SHA-256, and the panels' art is made from your UAD install.".into()),
                 ("4", "The DSP programs and firmware are extracted fresh.".into()),
                 ("5", "The driver is built fresh and installed with DKMS, PipeWire, WirePlumber and UCM2 settings and the mixer daemon.".into()),
                 ("6", "Then, without a password: the Console is built, the mixer daemon restarted, and you can launch it.".into()),

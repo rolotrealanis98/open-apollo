@@ -408,6 +408,11 @@ main() {
         fi
     fi
 
+    if [[ ! -d "${XDG_DATA_HOME:-$HOME/.local/share}/open-apollo/plugin-specs" && ! -d /usr/share/open-apollo/plugin-specs ]]; then
+        info "No plug-in panel specs: plug-in windows show a parameter list. Setup installs them;"
+        info "  without it: bash $REPO/scripts/install-panels.sh, then oa-assets plugins for their art"
+    fi
+
     header "Done"
     echo "  Start the mixer daemon:  python3 $REPO/mixer-engine/ua_mixer_daemon.py"
     echo "  Open the console:        uaconsole   (or 'Open Apollo Console' in your menu)"

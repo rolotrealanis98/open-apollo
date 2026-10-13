@@ -7,8 +7,10 @@
 #             usable UAD install is there; nothing is changed before this passes
 #   remove    remove the earlier install: uninstall.sh --yes --purge
 #             (skipped with --keep-current)
-#   import    copy the Console art (and plug-in art) as the desktop user:
-#             oa-assets import [, oa-assets plugins]
+#   import    copy the Console art as the desktop user (oa-assets import),
+#             install the plug-in panel specs (install-panels.sh: the pinned
+#             open-apollo-panels release, about 1 MB from GitHub) and make
+#             the plug-in art (oa-assets plugins); the last two only warn
 #   firmware  extract the DSP programs and firmware: oa-assets firmware
 #   driver    build and install the driver: install.sh --yes
 #   unmount   close the partition again (only when this run opened it)
@@ -26,6 +28,9 @@
 #   --oa-assets PATH  the oa-assets program (root's PATH usually lacks it)
 #   --data DIR        import into DIR instead of ~/.local/share/open-apollo
 #   --keep-current    don't remove the earlier install first
+#   --panels TARBALL  install these plug-in panel specs instead of downloading
+#                     the pinned release (see install-panels.sh)
+#   --panels-sha256 HEX  the SHA-256 --panels must have, when not the pinned one
 #   --send-report     upload install.sh's anonymous report (opt-in)
 #   -h, --help        show this help
 #
@@ -45,6 +50,8 @@ OA_ASSETS=""
 DATA_DIR=""
 KEEP_CURRENT=0
 SEND_REPORT=0
+PANELS_FROM=""
+PANELS_SHA=""
 
 if [ -t 1 ]; then
     RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' CYAN='\033[0;36m' BOLD='\033[1m' NC='\033[0m'
@@ -64,7 +71,7 @@ bad_usage() { echo "setup-root.sh: $* (try --help)" >&2; exit 2; }
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --user|--from|--mount|--oa-assets|--data)
+            --user|--from|--mount|--oa-assets|--data|--panels|--panels-sha256)
                 [ $# -ge 2 ] && [ -n "$2" ] || bad_usage "$1 needs a value"
                 case "$1" in
                     --user) TARGET_USER="$2" ;;
@@ -72,6 +79,8 @@ parse_args() {
                     --mount) MOUNT_DEV="$2" ;;
                     --oa-assets) OA_ASSETS="$2" ;;
                     --data) DATA_DIR="$2" ;;
+                    --panels) PANELS_FROM="$2" ;;
+                    --panels-sha256) PANELS_SHA="$2" ;;
                 esac
                 shift 2 ;;
             --keep-current) KEEP_CURRENT=1; shift ;;
@@ -238,6 +247,13 @@ step_import() {
         marker import failed "Couldn't copy the Console art"
         return 1
     fi
+    # Plug-in panels need both the specs and the art; either missing only
+    # means plug-in windows show a plain parameter list.
+    local panels=1
+    if ! install_panels; then
+        warn "Couldn't install the plug-in panel specs; plug-in windows show a plain panel"
+        panels=0
+    fi
     if ! oa_has plugins; then
         info "Plug-in art: this oa-assets can't generate it yet; plug-in windows show a plain panel"
         marker import "done" "Console art imported"
@@ -248,7 +264,19 @@ step_import() {
         marker import warn "Console art imported; plug-in art failed"
         return 0
     fi
-    marker import "done" "Console and plug-in art imported"
+    if [ "$panels" = 0 ]; then
+        marker import warn "Console and plug-in art imported; plug-in panel specs not installed"
+        return 0
+    fi
+    marker import "done" "Console art, plug-in panels and their art imported"
+}
+
+# The pinned plug-in panel specs into /usr/share/open-apollo/plugin-specs.
+install_panels() {
+    local -a args=()
+    [ -n "$PANELS_FROM" ] && args+=(--from "$PANELS_FROM")
+    [ -n "$PANELS_SHA" ] && args+=(--sha256 "$PANELS_SHA")
+    bash "$SCRIPT_DIR/install-panels.sh" "${args[@]}"
 }
 
 step_firmware() {
