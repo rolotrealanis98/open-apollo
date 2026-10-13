@@ -36,7 +36,6 @@
 /* Ring words for UA_PLUGIN_CREATE_F_START (same as the input strips') */
 #define UA_INST_CMD_SYNCH	0x001F0004	/* {.., in2 << 16 | in1, head, 0} */
 #define UA_INST_CMD_INPUT	0x001E0004	/* {.., input, param, value} */
-#define UA_INST_CMD_WRITE1	0x00140003	/* {.., addr, one word} */
 #define UA_INST_INPUT_ROUTE	7
 #define UA_INST_INPUT_SPAN	8
 #define UA_INST_SPAN_NONE	0x20
@@ -54,6 +53,8 @@ struct ua_plugin_inst {
 	bool lost;			/* taken down by the host, or the DSP gone */
 	bool started;			/* SYNCH'd on a DSP input (F_START) */
 	u32 synch;			/* in1 | in2 << 16 */
+	u32 scratch_prev[UA_POOLS];	/* scratch before F_START raised it */
+	u8 scratch_raised;		/* bit p: pool p raised by this instance */
 	unsigned int n_res, n_priv;
 	struct ua_cat_entry **res;	/* catalog references */
 	struct ua_pool_lease *lease;	/* n_res modules, then n_priv rows */
@@ -71,6 +72,48 @@ static void ua_inst_free(struct ua_device *ua, struct ua_plugin_inst *in)
 	kfree(in->lease);
 	kfree(in->ident);
 	kfree(in);
+}
+
+/* Put back the scratch @in raised (ua->lock held) */
+static void ua_inst_scratch_restore(struct ua_pool_owner *o,
+				    struct ua_plugin_inst *in)
+{
+	unsigned int p;
+
+	for (p = 1; p < UA_POOLS; p++)
+		if (o && (in->scratch_raised & (1u << p)))
+			ua_pool_set_scratch(o, p, in->scratch_prev[p]);
+	in->scratch_raised = 0;
+}
+
+/*
+ * F_START: raise the DSP's scratch to what the chain needs before anything
+ * is placed there, as CResourcePool::ChangeScratchSize does (nothing is
+ * sent: the DSP has no scratch register).  ua->lock held.
+ */
+static int ua_inst_scratch_raise(struct ua_pool_owner *o,
+				 struct ua_plugin_inst *in,
+				 const u32 need[UA_POOLS])
+{
+	struct ua_pool_usage u[UA_POOLS];
+	unsigned int p;
+	int ret;
+
+	if (!o)
+		return -ENODEV;
+	ret = ua_pool_read_usage(o, u);
+	for (p = 1; !ret && p < UA_POOLS; p++) {
+		if (need[p] <= u[p].scratch_words)
+			continue;
+		ret = ua_pool_set_scratch(o, p, need[p]);
+		if (!ret) {
+			in->scratch_prev[p] = u[p].scratch_words;
+			in->scratch_raised |= 1u << p;
+		}
+	}
+	if (ret)
+		ua_inst_scratch_restore(o, in);
+	return ret;
 }
 
 /*
@@ -122,6 +165,7 @@ static unsigned int ua_inst_unplace(struct ua_device *ua,
 	}
 	ua_plugin_unplace(ua, in->dsp, in->lease + in->n_res, in->n_priv);
 	memset(in->lease + in->n_res, 0, in->n_priv * sizeof(*in->lease));
+	ua_inst_scratch_restore(d->pools, in);
 	if (!x)
 		return 0;
 	if (!rels && !stops) {
@@ -224,6 +268,55 @@ static int ua_inst_check_rows(const struct ua_memspec_row *rows,
 	return ret;
 }
 
+/* Does a row link into word @w of row @r (a pointer the memspec owns)? */
+static bool ua_inst_link_word(const struct ua_memspec_row *rows,
+			      unsigned int n, unsigned int r, u32 w)
+{
+	unsigned int j;
+
+	for (j = 1; j < n; j++)
+		if (rows[j].link != 0xffffffff && rows[j].link >> 24 == r &&
+		    (rows[j].link & 0xffffff) == w)
+			return true;
+	return false;
+}
+
+/*
+ * Are the F_START parameter commands UA's WRITEs, each inside its row and
+ * clear of every linked word (see ua_ioctl.h)?  Returns the number of
+ * commands, or -EINVAL.
+ */
+static int ua_inst_check_cmds(const struct ua_memspec_row *rows,
+			      unsigned int n_rows, const u32 *c,
+			      unsigned int nw)
+{
+	unsigned int i = 0, k, cmds = 0;
+
+	while (i < nw) {
+		u32 len = c[i] & 0xffff, row, word, mask, pos;
+
+		if (c[i] >> 16 != UA_PLUGIN_CMD_WRITE || len < 4 ||
+		    len > nw - i)
+			return -EINVAL;
+		row = c[i + 1] >> 24;
+		word = c[i + 1] & 0xffffff;
+		mask = c[i + 2];
+		if (row >= n_rows || word >= rows[row].dwords ||
+		    len - 3 + hweight32(mask) > rows[row].dwords - word)
+			return -EINVAL;
+		for (k = 0, pos = word; k < len - 3; k++, pos++) {
+			while (pos > word && pos - word - 1 < 32 &&
+			       (mask >> (pos - word - 1)) & 1)
+				pos++;
+			if (ua_inst_link_word(rows, n_rows, row, pos))
+				return -EINVAL;
+		}
+		i += len;
+		cmds++;
+	}
+	return cmds;
+}
+
 /*
  * A module with the same id and architecture but other bytes than one the
  * host already uses (the strips' or another instance's): the DSP knows a
@@ -291,7 +384,8 @@ static int ua_inst_privates(struct ua_device *ua, struct ua_plugin_inst *in,
 	x->epoch = in->epoch;
 	for (i = 0; i < in->n_priv; i++) {
 		addr[i] = in->lease[in->n_res + i].base;
-		ua_xact_inline(x, UA_CMD_ZERO, addr[i], 0, rows[i].dwords);
+		ua_xact_inline(x, UA_CMD_ZERO, addr[i], 0,
+			       rows[i].dwords + (rows[i].dwords & 1));
 	}
 	if (in->n_priv > 1) {
 		n = ua_memspec_compile(rows, in->n_priv, desc, 1, addr, words);
@@ -321,40 +415,52 @@ out:
 }
 
 /*
- * UA_PLUGIN_CREATE_F_START: stop what runs on the input, write the
- * parameter words (one WRITE each, one DMA page), start the instance on
- * the input and send its span and route words, as the kext does after a
- * strip is placed.  Marked started before the run, so a failure still stops
- * it at the takedown.
+ * Copy checked F_START commands (ua_inst_check_cmds()) to @d with word 1
+ * relocated from row << 24 | word to the row's DSP address, as UAD2System's
+ * _fixParameterAddresses does.  Returns the number of commands.
+ */
+static unsigned int ua_inst_cmd_copy(__le32 *d, const u32 *cmd,
+				     unsigned int nw,
+				     const struct ua_pool_lease *rows)
+{
+	unsigned int i, j, len, n = 0;
+
+	for (i = 0; i < nw; i += len, n++) {
+		len = cmd[i] & 0xffff;
+		for (j = 0; j < len; j++)
+			d[i + j] = cpu_to_le32(cmd[i + j]);
+		d[i + 1] = cpu_to_le32(rows[cmd[i + 1] >> 24].base +
+				       (cmd[i + 1] & 0xffffff));
+	}
+	return n;
+}
+
+/*
+ * UA_PLUGIN_CREATE_F_START: stop what runs on the input, send the
+ * parameter WRITEs (UA's blocks, checked by ua_inst_check_cmds(), word 1
+ * relocated to the row's address; one DMA page), start the instance on the
+ * input and send its span and route words, as the kext does after a chain
+ * is placed (EnableSynchProcessing, MoveInputToDSP).  Marked started
+ * before the run, so a failure still stops it at the takedown.
  */
 static int ua_inst_start(struct ua_device *ua, struct ua_plugin_inst *in,
-			 const struct ua_plugin_word *pw, unsigned int n,
-			 u32 synch)
+			 const u32 *cmd, unsigned int nw, u32 synch)
 {
 	struct ua_plugin_host *h = ua->host;
 	u32 in1 = synch & 0xffff;
+	unsigned int n = 0;
 	struct ua_xact *x;
-	unsigned int i;
 	__le32 *d;
 	int ret;
 
-	for (i = 0; i < n; i++)
-		if (pw[i].row >= in->n_priv ||
-		    pw[i].offset >= in->lease[in->n_res + pw[i].row].words)
-			return -EINVAL;
 	x = ua_xact_alloc(in->dsp, UA_XACT_PIECE);
 	if (!x)
 		return -ENOMEM;
 	x->epoch = in->epoch;
 	ua_xact_inline(x, UA_INST_CMD_SYNCH, synch, 0, 0);
-	d = ua_xact_cmd(x, 3 * n);
+	d = ua_xact_cmd(x, nw);
 	if (d)
-		for (i = 0; i < n; i++) {
-			d[3 * i] = cpu_to_le32(UA_INST_CMD_WRITE1);
-			d[3 * i + 1] = cpu_to_le32(in->lease[in->n_res + pw[i].row].base +
-						   pw[i].offset);
-			d[3 * i + 2] = cpu_to_le32(pw[i].value);
-		}
+		n = ua_inst_cmd_copy(d, cmd, nw, in->lease + in->n_res);
 	ua_xact_inline(x, UA_INST_CMD_SYNCH, synch, in->lease[in->n_res].base, 0);
 	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_SPAN, UA_INST_SPAN_NONE);
 	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_SPAN, UA_INST_SPAN_NONE);
@@ -386,7 +492,7 @@ static int ua_inst_start(struct ua_device *ua, struct ua_plugin_inst *in,
 static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 			    struct ua_plugin_instance *req, const u8 (*sha)[32],
 			    const struct ua_memspec_row *rows,
-			    const struct ua_plugin_word *pw)
+			    const u32 *cmd)
 {
 	struct ua_plugin_host *h = ua->host;
 	struct ua_pool_request *rq = NULL;
@@ -453,7 +559,16 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 	} else if (h->epoch != epoch) {
 		ret = -ESTALE;
 	} else {
-		ret = ua_plugin_place(ua, req->dsp, rq, n, &dsp, in->lease);
+		u32 need[UA_POOLS] = { 0, req->reserved[4] & 0xffff,
+				       req->reserved[4] >> 16, req->reserved[5] };
+
+		ret = 0;
+		if (need[1] || need[2] || need[3])
+			ret = ua_inst_scratch_raise(h->dsp[req->dsp].pools, in, need);
+		if (!ret)
+			ret = ua_plugin_place(ua, req->dsp, rq, n, &dsp, in->lease);
+		if (ret && in->scratch_raised)
+			ua_inst_scratch_restore(h->dsp[req->dsp].pools, in);
 		if (!ret) {
 			in->dsp = dsp;
 			in->placed = true;
@@ -492,7 +607,7 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 
 	/* 7. Bring-up only: parameters, then started on the DSP input */
 	if (req->flags & UA_PLUGIN_CREATE_F_START) {
-		ret = ua_inst_start(ua, in, pw, req->reserved[1], req->reserved[0]);
+		ret = ua_inst_start(ua, in, cmd, req->reserved[1], req->reserved[0]);
 		if (ret)
 			goto takedown;
 	}
@@ -611,7 +726,7 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 	struct ua_plugin_instance req;
 	struct ua_plugin_private *priv = NULL;
 	struct ua_memspec_row *rows = NULL;
-	struct ua_plugin_word *pw = NULL;
+	u32 *cmd = NULL;
 	u8 (*sha)[32] = NULL;
 	unsigned int i, nw = 0;
 	long ret;
@@ -623,8 +738,9 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 	if (req.op == UA_PLUGIN_INST_CREATE &&
 	    (req.flags & UA_PLUGIN_CREATE_F_START)) {
 		nw = req.reserved[1];
-		if (!nw || nw > UA_PLUGIN_WORDS_MAX ||
-		    memchr_inv(req.reserved + 4, 0, 2 * sizeof(req.reserved[0])))
+		if (nw < 4 || nw > UA_PLUGIN_CMD_WORDS_MAX ||
+		    ((req.reserved[4] || req.reserved[5]) &&
+		     req.dsp == UA_PLUGIN_DSP_ANY))
 			return -EINVAL;
 	} else if (memchr_inv(req.reserved, 0, sizeof(req.reserved))) {
 		return -EINVAL;
@@ -677,18 +793,22 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 			goto out;
 		if (nw) {
 			ret = -ENOMEM;
-			pw = kvmalloc_array(nw, sizeof(*pw), GFP_KERNEL);
-			if (!pw)
+			cmd = kvmalloc_array(nw, sizeof(*cmd), GFP_KERNEL);
+			if (!cmd)
 				goto out;
 			ret = -EFAULT;
-			if (copy_from_user(pw, u64_to_user_ptr((u64)req.reserved[3] << 32 |
+			if (copy_from_user(cmd, u64_to_user_ptr((u64)req.reserved[3] << 32 |
 							       req.reserved[2]),
-					   nw * sizeof(*pw)))
+					   nw * sizeof(*cmd)))
+				goto out;
+			/* UA's WRITEs, inside their rows, clear of the links */
+			ret = ua_inst_check_cmds(rows, req.n_private, cmd, nw);
+			if (ret < 0)
 				goto out;
 		}
 	}
 
-	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows, pw);
+	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows, cmd);
 	if ((!ret || ret == -EACCES) &&
 	    copy_to_user((void __user *)arg, &req, sizeof(req)))
 		ret = -EFAULT;
@@ -696,6 +816,6 @@ out:
 	kvfree(sha);
 	kvfree(priv);
 	kvfree(rows);
-	kvfree(pw);
+	kvfree(cmd);
 	return ret;
 }

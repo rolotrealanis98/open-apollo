@@ -1085,21 +1085,29 @@ struct ua_plugin_private {
 /*
  * UA_PLUGIN_CREATE_F_START (bring-up, experimental): after the rows are
  * zero-filled and linked, one transaction stops whatever runs on the DSP
- * input, writes the parameter words, starts the instance there (SYNCH with
- * the head row) and sends the input's span and route words.
- * reserved[0] = in1 | in2 << 16 (in2 0x20 = mono), reserved[1] = word
- * count (1..UA_PLUGIN_WORDS_MAX), reserved[2] / [3] = low / high half of a
- * user pointer to struct ua_plugin_word[].  DESTROY and close stop it
- * before anything is released.
+ * input, sends the parameter commands, starts the instance there (SYNCH
+ * with the head row) and sends the input's span and route words.
+ * reserved[0] = in1 | in2 << 16 (in2 0x20 = mono).
+ * reserved[1] = command word count (4..UA_PLUGIN_CMD_WORDS_MAX),
+ * reserved[2] / [3] = low / high half of a user pointer to the __u32
+ * command words: UA's parameter-block WRITEs, as UA Mixer Engine leaves
+ * them in the ParamBuffer (Mac E7 capture, UAD2System _setParamsAux):
+ *   {0x0014LLLL, row << 24 | word, skip mask, L - 3 values}, L >= 4.
+ * Row is a private row index.  The run starts at the word and spans
+ * L - 3 + popcount(mask) words of the row; bit i of the mask leaves word
+ * + i + 1 untouched (the masks UA sends skip exactly the words the memspec
+ * links), so no value may land on a word a row links into.  Each goes out
+ * with word 1 relocated to the row's DSP address (UAD2System
+ * _fixParameterAddresses).
+ * reserved[4] = pool 1 | pool 2 << 16 scratch words, reserved[5] = pool 3
+ * (0: none): the chain's scratch (the largest of its descriptors'
+ * AllocInfo 0xa9c / 0xa98 / 0xaa0), raised on the DSP before placement and
+ * put back when the instance goes; needs an explicit dsp.
+ * DESTROY and close stop it before anything is released.
  */
 #define UA_PLUGIN_CREATE_F_START	(1u << 1)
-#define UA_PLUGIN_WORDS_MAX		341	/* 3 dwords each in one 4 KiB DMA page */
-
-struct ua_plugin_word {
-	__u32 row;		/* private row index */
-	__u32 offset;		/* dword offset in the row */
-	__u32 value;
-};
+#define UA_PLUGIN_CMD_WORDS_MAX		1016	/* one 4 KiB DMA page, room left */
+#define UA_PLUGIN_CMD_WRITE		0x0014	/* opcode half of a parameter WRITE */
 
 struct ua_plugin_instance {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_instance) */

@@ -52,6 +52,7 @@ typedef uint64_t dma_addr_t;
 #define PAGE_SIZE 4096
 #define PAGE_ALIGN(x) (((x) + 4095) & ~(size_t)4095)
 #define cpu_to_le32(x) (x)
+#define hweight32(x) ((unsigned int)__builtin_popcount((unsigned int)(x)))
 #define le32_to_cpu(x) (x)
 #define lower_32_bits(x) ((u32)(x))
 #define upper_32_bits(x) ((u32)((u64)(x) >> 32))
