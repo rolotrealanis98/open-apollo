@@ -17,7 +17,8 @@ Every hardware write and every change the daemon publishes is appended to
 Driver behaviour can be scripted: --refuse-rate HZ makes the driver refuse
 that sample rate, --refuse-clock NAME that clock source, and a non-internal
 clock source reports the clock unlocked (UA_EVT_CLOCK_LOCK 0) unless
---external-locks is given.
+--external-locks is given.  --stereo-sends is the daemon's option (send
+pans move a left/right pair).
 """
 
 import argparse
@@ -150,6 +151,7 @@ def main():
                         default=[])
     parser.add_argument("--refuse-clock", action="append", default=[])
     parser.add_argument("--external-locks", action="store_true")
+    parser.add_argument("--stereo-sends", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     if args.port in FORBIDDEN_PORTS:
@@ -171,7 +173,7 @@ def main():
     state.load_device_map(DEVICE_MAP)
     apply_runtime_properties(state)
     backend = RecordingBackend(log, args.refuse_rate, args.refuse_clock)
-    router = HardwareRouter(backend, state,
+    router = HardwareRouter(backend, state, stereo_sends=args.stereo_sends,
                             input_buses=descriptor_input_buses(MODEL),
                             model=descriptor_model(MODEL))
     router.set_model_data(load_descriptor(MODEL))

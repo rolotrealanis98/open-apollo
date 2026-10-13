@@ -236,3 +236,52 @@ class TestRefusedClockSet:
         assert replies[-1]["error"] == "Unable to set value."
         assert replies[-1]["parameters"]["func_id"] == 9
         assert tree.get_value("/SampleRate/value") == 48000
+
+
+class TestMutedStripHoldsItsLevel:
+    """Moving the fader or pan of a muted strip (or one a solo silences)
+    used to write its live coefficient: the input became audible while
+    Console showed it muted."""
+
+    def main_mix(self, backend, bus=0):
+        return [v for b, s, v in backend.bus_params if (b, s) == (bus, 0)]
+
+    def test_fader_of_a_muted_input_stays_silent(self, router, backend,
+                                                 tree):
+        tree.on_set = router.on_set
+        tree.set(f"{IN}/0/Mute/value", True)
+        backend.clear()
+        tree.set(f"{IN}/0/FaderLevel/value", -10.0)
+        assert all(v == 0.0 for v in self.main_mix(backend))
+        backend.clear()
+        tree.set(f"{IN}/0/Mute/value", False)
+        assert self.main_mix(backend)[-1] == pytest.approx(
+            encode_input_fader(-10.0))
+
+    def test_pan_of_a_muted_input_stays_silent(self, router, backend, tree):
+        tree.on_set = router.on_set
+        tree.set(f"{IN}/0/Mute/value", True)
+        backend.clear()
+        tree.set(f"{IN}/0/Pan/value", -0.5)
+        assert self.main_mix(backend) == []
+
+    def test_fader_of_a_solo_silenced_input_stays_silent(self, router,
+                                                         backend, tree):
+        tree.on_set = router.on_set
+        tree.set(f"{IN}/0/Mute/value", False)
+        tree.set(f"{IN}/1/Solo/value", True)
+        backend.clear()
+        tree.set(f"{IN}/0/FaderLevel/value", -5.0)
+        assert self.main_mix(backend) == []
+        backend.clear()
+        tree.set(f"{IN}/1/Solo/value", False)
+        assert self.main_mix(backend)[-1] == pytest.approx(
+            encode_input_fader(-5.0))
+
+    def test_fader_of_a_live_input_is_written(self, router, backend, tree):
+        tree.on_set = router.on_set
+        tree.set(f"{IN}/0/Mute/value", False)
+        backend.clear()
+        tree.set(f"{IN}/0/FaderLevel/value", -10.0)
+        assert self.main_mix(backend) == [pytest.approx(
+            encode_input_fader(-10.0))]

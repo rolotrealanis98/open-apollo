@@ -3389,6 +3389,20 @@ class HardwareRouter:
             pan = self._get_input_pan(ch)
             mix = encode_mix_coeff(db, pan)
             mix_r = encode_mix_coeff_r(db, pan)
+            solo_muted = not muted and self._solo_muted(ch)
+            if muted or solo_muted:
+                # A muted strip (or one another channel's solo silences)
+                # keeps its bus silent: writing the fader would make it
+                # audible while Console shows it muted.  The tree holds
+                # the level; the unmute or the solo's end writes it.
+                log.info("HW BUS: input[%d].Fader = %.1f dB held (%s)", ch,
+                         db, "muted" if muted else "silenced by a solo")
+                if solo_muted and self._has_feature(UA_FEAT_BUS_SOLO_FLAG):
+                    self.backend.set_bus_fader(bus, linear, mix, mix_r,
+                                               solo_mute=True)
+                    self._write_partner_bus(ch, db, False, solo_mute=True)
+                self._write_post_fader_sends(ch, bus, db, True)
+                return
             log.info("HW BUS: input[%d].Fader = %.1f dB → linear=%.6f "
                      "mix=%.6f/%.6f (L/R) pan=%.2f (bus=0x%04x)",
                      ch, db, linear, mix, mix_r, pan, bus)
@@ -3440,6 +3454,15 @@ class HardwareRouter:
             fader_db = self._get_input_fader_db(ch)
             mix = encode_mix_coeff(fader_db, pan_f)
             mix_r = encode_mix_coeff_r(fader_db, pan_f)
+            muted = self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Mute/value"))
+            if muted or self._solo_muted(ch):
+                # As for the fader: a silent strip's pan waits in the tree
+                log.info("HW BUS: input[%d].%s = %.3f held (%s)", ch, control,
+                         pan_f, "muted" if muted else "silenced by a solo")
+                if not muted and self._has_feature(UA_FEAT_BUS_SOLO_FLAG):
+                    self.backend.set_bus_fader(bus, 0.0, mix, mix_r,
+                                               solo_mute=True)
+                return
             log.info("HW BUS: input[%d].%s = %.3f → mix=%.6f/%.6f (L/R) "
                      "fader=%.1fdB (bus=0x%04x)",
                      ch, control, pan_f, mix, mix_r, fader_db, bus)
