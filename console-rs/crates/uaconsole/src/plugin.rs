@@ -695,6 +695,11 @@ mod tests {
 
     #[test]
     fn resize_scales_the_window_and_is_remembered() {
+        // Spec panels scale; the generic list does not, so this needs a spec folder.
+        if plugin_ui::PluginSpecLibrary::locate().is_none() {
+            eprintln!("skipped: no plug-in spec folder (set OA_PLUGIN_SPECS)");
+            return;
+        }
         let assets = assets();
         let mut hook = PluginUiHook::new(&assets.images);
         hook.scales = Rc::new(RefCell::new(PluginScales::default()));
