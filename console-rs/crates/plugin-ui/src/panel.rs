@@ -203,8 +203,11 @@ pub struct PluginPanel {
     popup: Option<Popup>,
     placement: Mutex<Option<Placement>>,
     hits: Mutex<Vec<PanelHit>>,
-    /// Prefix of this panel's code-drawn images (`runtime:plugin/<n>/…`).
+    /// Prefix of this panel's code-drawn images (`runtime:plugin/<slot>/<effect>/…`): stable per
+    /// slot and plug-in, so a window opened again reuses its images (and the renderer's textures).
     raster_prefix: String,
+    /// The image cache the panel drew into, to release its images when it closes.
+    cache: Mutex<Option<std::sync::Weak<houston::ImageCache>>>,
 }
 
 static PANELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -254,9 +257,11 @@ impl PluginPanel {
         let ui_state = spec.states.clone().unwrap_or_default();
         let unbound = spec.unbound_parameters();
         let n = PANELS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let target: Arc<str> = target.into();
+        let raster_prefix = format!("plugin/{}/{}/", target, spec.effect_name);
         Self {
             spec,
-            target: target.into(),
+            target,
             sprites,
             missing,
             local,
@@ -274,7 +279,8 @@ impl PluginPanel {
             popup: None,
             placement: Mutex::new(None),
             hits: Mutex::new(Vec::new()),
-            raster_prefix: format!("plugin/{n}/"),
+            raster_prefix,
+            cache: Mutex::new(None),
         }
     }
 
@@ -576,6 +582,12 @@ impl PluginPanel {
         let s = if origin.w > 0.0 && origin.h > 0.0 && sw > 0.0 && sh > 0.0 { (origin.w / sw).min(origin.h / sh) } else { 1.0 };
         let place = Placement { x: origin.x, y: origin.y, scale: s, w: sw, h: sh };
         *self.placement.lock() = Some(place);
+        {
+            let mut cache = self.cache.lock();
+            if cache.as_ref().and_then(|w| w.upgrade()).is_none_or(|c| !Arc::ptr_eq(&c, &ui.assets.images)) {
+                *cache = Some(Arc::downgrade(&ui.assets.images));
+            }
+        }
         let panel = place.rect();
         let mut hits = Vec::new();
 
@@ -1457,20 +1469,17 @@ impl PluginPanel {
         g.last = (x, y);
         match &g.target {
             Target::Knob { el, param, horizontal } => {
+                // SwiftUI's binding setter touches the element on every drag event.
                 let touch = self.spec.elements[*el].touch_state.clone();
                 let travel = if *horizontal { dx } else { -dy } / s;
                 let v = clamp01(g.start_value + travel as f64 / DRAG_SPAN as f64);
-                if v != self.value(*param, params) {
-                    self.touch(touch.as_ref());
-                }
+                self.touch(touch.as_ref());
                 self.drag_write(*param, v, params);
             }
             Target::DragZone { el, param } => {
                 let touch = self.spec.elements[*el].touch_state.clone();
                 let v = clamp01(g.start_value - (dy / s) as f64 / DRAG_SPAN as f64);
-                if v != self.value(*param, params) {
-                    self.touch(touch.as_ref());
-                }
+                self.touch(touch.as_ref());
                 self.drag_write(*param, v, params);
             }
             Target::Handle(h) => {
@@ -1739,10 +1748,18 @@ impl PluginPanel {
 }
 
 impl PluginPanel {
-    /// The prefix of this panel's code-drawn image names in the image cache
-    /// (`ImageCache::drop_rasters` releases them when the window closes).
+    /// The prefix of this panel's code-drawn image names in the image cache.
     pub fn raster_prefix(&self) -> &str {
         &self.raster_prefix
+    }
+}
+
+impl Drop for PluginPanel {
+    /// Releases the panel's code-drawn images (graphs, rotated sprites) from the image cache.
+    fn drop(&mut self) {
+        if let Some(cache) = self.cache.lock().take().and_then(|w| w.upgrade()) {
+            cache.drop_rasters(&self.raster_prefix);
+        }
     }
 }
 

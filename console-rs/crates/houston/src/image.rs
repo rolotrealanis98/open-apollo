@@ -181,7 +181,10 @@ impl ImageCache {
         }
         let image = draw().filter(|i| i.width > 0 && i.height > 0 && i.rgba.len() == (i.width * i.height * 4) as usize).map(Arc::new);
         let good = image.is_some();
-        let revision = rasters.get(&key).map_or(1, |(_, n)| n.wrapping_add(1).max(1));
+        // Revisions come from one global counter, so a key dropped and drawn again never repeats
+        // a revision a renderer already uploaded.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let revision = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.map.lock().insert(key.clone(), image);
         rasters.insert(key.clone(), (fingerprint, revision));
         good.then_some(key)
@@ -322,17 +325,21 @@ mod raster_tests {
         let px = |v: u8| Some(ImageData { width: 1, height: 1, rgba: vec![v, v, v, 255] });
         let key = cache.put_raster("plugin/x/0", 7, || px(10)).unwrap();
         assert_eq!(key, "runtime:plugin/x/0");
-        assert_eq!(cache.runtime_revision(&key), 1);
+        let first = cache.runtime_revision(&key);
+        assert_ne!(first, 0);
         assert_eq!(cache.get(&key).unwrap().rgba[0], 10);
         assert_eq!(cache.put_raster("plugin/x/0", 7, || panic!("same fingerprint: no redraw")), Some(key.clone()));
-        assert_eq!(cache.runtime_revision(&key), 1);
+        assert_eq!(cache.runtime_revision(&key), first);
         cache.put_raster("plugin/x/0", 8, || px(20)).unwrap();
-        assert_eq!(cache.runtime_revision(&key), 2);
+        let second = cache.runtime_revision(&key);
+        assert!(second > first);
         assert_eq!(cache.get(&key).unwrap().rgba[0], 20);
         assert!(cache.put_raster("plugin/x/1", 1, || Some(ImageData { width: 2, height: 2, rgba: vec![0; 4] })).is_none(), "malformed");
         cache.drop_rasters("plugin/x/");
         assert_eq!(cache.runtime_revision(&key), 0);
         assert!(cache.map.lock().get(&key).is_none());
+        cache.put_raster("plugin/x/0", 7, || px(30)).unwrap();
+        assert!(cache.runtime_revision(&key) > second, "a redrawn key never reuses a revision");
     }
 }
 
