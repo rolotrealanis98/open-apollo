@@ -7,6 +7,7 @@
 # Usage:
 #   sudo bash scripts/install.sh
 #   sudo bash scripts/install.sh --skip-init --no-dkms
+#   pkexec bash scripts/install.sh --yes      (no questions; the setup GUI uses this)
 #   bash scripts/install.sh --help
 
 set -uo pipefail
@@ -21,6 +22,7 @@ SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 # --- Flags ---
 SKIP_INIT=0
 NO_DKMS=0
+ASSUME_YES=0
 # Only main() parses arguments, so sourcing this file (tests do) is
 # side-effect free.
 parse_args() {
@@ -29,6 +31,7 @@ parse_args() {
         case "$arg" in
             --skip-init) SKIP_INIT=1 ;;
             --no-dkms)   NO_DKMS=1 ;;
+            -y|--yes)    ASSUME_YES=1 ;;
             -h|--help)
                 cat <<EOF
 Usage: sudo bash scripts/install.sh [OPTIONS]
@@ -36,6 +39,9 @@ Usage: sudo bash scripts/install.sh [OPTIONS]
 Options:
   --skip-init   Skip hardware init (apollo-init.sh)
   --no-dkms     Skip DKMS setup
+  -y, --yes     Ask nothing (for GUIs and scripts): take every question's
+                default answer, skip the power-cycle pause and the audio
+                test, and keep the install report local (never uploaded)
   -h, --help    Show this help
 
 Steps performed:
@@ -1026,7 +1032,9 @@ telemetry_prompt() {
     header "Telemetry"
 
     local answer="n"
-    if [ -t 0 ]; then
+    if [ "$ASSUME_YES" = "1" ]; then
+        answer="n"    # --yes takes the [y/N] default
+    elif [ -t 0 ]; then
         echo ""
         read -rp "Help improve Open Apollo — send anonymous install report? [y/N] " answer
     else
@@ -1072,6 +1080,12 @@ with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
 # ================================================================
 main() {
     parse_args "$@"
+    # --yes: every read sees EOF and takes its default; [ -t 0 ] is false.
+    [ "$ASSUME_YES" = "1" ] && exec </dev/null
+    # pkexec (the setup GUI) sets PKEXEC_UID instead of SUDO_USER.
+    if [ -z "${SUDO_USER:-}" ] && [ -n "${PKEXEC_UID:-}" ]; then
+        SUDO_USER=$(id -nu "$PKEXEC_UID" 2>/dev/null || echo "")
+    fi
 
     echo ""
     echo -e "${BOLD}Open Apollo — Installer${NC}"
