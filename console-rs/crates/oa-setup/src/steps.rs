@@ -3,12 +3,18 @@
 //! Pure state: the UI decides when a step starts and how it ends, this module
 //! keeps the rules (forward only through finished steps, back anywhere already
 //! reached, prerequisites, and resetting what depends on a changed choice).
+//!
+//! Remove previous install, Import assets, DSP programs & firmware and Driver
+//! are the sections of one privileged run (scripts/setup-root.sh), started from
+//! Review and install; their pages show its progress.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StepId {
     Welcome,
     System,
     Find,
+    Review,
+    Remove,
     Import,
     Firmware,
     Driver,
@@ -17,10 +23,12 @@ pub enum StepId {
 }
 
 impl StepId {
-    pub const ALL: [StepId; 8] = [
+    pub const ALL: [StepId; 10] = [
         StepId::Welcome,
         StepId::System,
         StepId::Find,
+        StepId::Review,
+        StepId::Remove,
         StepId::Import,
         StepId::Firmware,
         StepId::Driver,
@@ -38,6 +46,8 @@ impl StepId {
             StepId::Welcome => "Welcome",
             StepId::System => "System check",
             StepId::Find => "Find your UAD install",
+            StepId::Review => "Review and install",
+            StepId::Remove => "Remove previous install",
             StepId::Import => "Import assets",
             StepId::Firmware => "DSP programs & firmware",
             StepId::Driver => "Driver",
@@ -52,6 +62,8 @@ impl StepId {
             StepId::Welcome => "welcome",
             StepId::System => "system",
             StepId::Find => "find",
+            StepId::Review => "review",
+            StepId::Remove => "remove",
             StepId::Import => "import",
             StepId::Firmware => "firmware",
             StepId::Driver => "driver",
@@ -75,11 +87,26 @@ impl StepId {
     /// Steps that must have succeeded before this one can run.
     pub fn prerequisites(self) -> &'static [StepId] {
         match self {
-            StepId::Import | StepId::Firmware => &[StepId::Find],
+            // The install reads the UAD install picked in Find.
+            StepId::Review => &[StepId::Find],
+            StepId::Remove => &[StepId::Review],
+            // Nothing is imported, extracted or installed over an earlier install
+            // that is still there (unless the user keeps it, see skip_satisfies).
+            StepId::Import => &[StepId::Remove],
+            StepId::Firmware => &[StepId::Import],
             // The driver loads the DSP programs extracted from the user's install.
             StepId::Driver => &[StepId::Firmware],
+            // Built after the driver: the removal would take an earlier build away.
+            StepId::Console => &[StepId::Driver],
             _ => &[],
         }
+    }
+
+    /// Skipping this step still lets the steps after it run: skipping Remove
+    /// means keeping the current install, skipping Driver (the whole install)
+    /// still allows building the Console.
+    pub fn skip_satisfies(self) -> bool {
+        matches!(self, StepId::Remove | StepId::Driver)
     }
 }
 
@@ -147,9 +174,24 @@ impl Steps {
         self.status[step.index()] = status;
     }
 
+    /// `step` ended in a way later steps can build on.
+    pub fn satisfied(&self, step: StepId) -> bool {
+        let st = self.status(step);
+        st.is_success() || (st == Status::Skipped && step.skip_satisfies())
+    }
+
     /// The first unmet prerequisite of `step`, if any.
     pub fn blocker(&self, step: StepId) -> Option<StepId> {
-        step.prerequisites().iter().copied().find(|p| !self.status(*p).is_success())
+        step.prerequisites().iter().copied().find(|p| !self.satisfied(*p))
+    }
+
+    /// The earliest unmet step behind `step`'s blocker (what the user has to do first).
+    pub fn root_blocker(&self, step: StepId) -> Option<StepId> {
+        let mut b = self.blocker(step)?;
+        while let Some(next) = self.blocker(b) {
+            b = next;
+        }
+        Some(b)
     }
 
     /// Steps can be revisited from the sidebar once reached.
@@ -179,6 +221,12 @@ impl Steps {
         self.current = next;
         self.reached = self.reached.max(next);
         Some(next)
+    }
+
+    /// Make `step` reachable and show it (the install's progress moves the wizard along).
+    pub fn reach(&mut self, step: StepId) {
+        self.reached = self.reached.max(step);
+        self.current = step;
     }
 
     pub fn back(&mut self) -> Option<StepId> {
@@ -219,7 +267,7 @@ mod tests {
         s.set(StepId::System, Status::Warning);
         assert_eq!(s.advance(), Some(StepId::Find));
         assert!(s.can_visit(StepId::Welcome) && s.can_visit(StepId::Find));
-        assert!(!s.can_visit(StepId::Import));
+        assert!(!s.can_visit(StepId::Review));
     }
 
     #[test]
@@ -229,18 +277,64 @@ mod tests {
             s.set(st, Status::Done);
             s.advance();
         }
-        assert_eq!(s.current(), StepId::Import);
+        assert_eq!(s.current(), StepId::Review);
         assert!(s.goto(StepId::System));
-        assert!(s.goto(StepId::Import), "a reached step stays reachable after going back");
-        assert!(!s.goto(StepId::Driver));
+        assert!(s.goto(StepId::Review), "a reached step stays reachable after going back");
+        assert!(!s.goto(StepId::Remove));
         assert_eq!(s.back(), Some(StepId::Find));
         assert_eq!(Steps::new(StepId::Welcome).back(), None);
     }
 
     #[test]
+    fn the_install_reaches_its_sections_as_they_start() {
+        let mut s = Steps::new(StepId::Review);
+        assert!(!s.can_visit(StepId::Firmware));
+        s.reach(StepId::Firmware);
+        assert_eq!(s.current(), StepId::Firmware);
+        assert!(s.can_visit(StepId::Remove) && s.can_visit(StepId::Firmware));
+        assert!(!s.can_visit(StepId::Driver));
+        s.reach(StepId::Remove);
+        assert!(s.can_visit(StepId::Firmware), "reaching an earlier step keeps the later ones");
+    }
+
+    #[test]
+    fn steps_after_remove_wait_for_it() {
+        let mut s = Steps::new(StepId::Review);
+        for st in [StepId::Find, StepId::Review] {
+            s.set(st, Status::Done);
+        }
+        for st in [StepId::Import, StepId::Firmware, StepId::Driver, StepId::Console] {
+            assert_eq!(s.root_blocker(st), Some(StepId::Remove), "{st:?}");
+        }
+        s.set(StepId::Remove, Status::Running);
+        assert_eq!(s.blocker(StepId::Import), Some(StepId::Remove));
+        s.set(StepId::Remove, Status::Failed);
+        assert_eq!(s.root_blocker(StepId::Driver), Some(StepId::Remove), "a failed removal blocks the rest");
+        s.set(StepId::Remove, Status::Done);
+        assert_eq!(s.blocker(StepId::Import), None);
+        assert_eq!(s.root_blocker(StepId::Driver), Some(StepId::Import), "now the import comes first");
+    }
+
+    #[test]
+    fn keeping_the_current_install_unblocks_like_removing_it() {
+        let mut s = Steps::new(StepId::Review);
+        s.set(StepId::Find, Status::Done);
+        s.set(StepId::Review, Status::Done);
+        s.set(StepId::Remove, Status::Skipped);
+        assert!(s.satisfied(StepId::Remove));
+        assert_eq!(s.blocker(StepId::Import), None);
+        // Skipping other steps doesn't count as done.
+        s.set(StepId::Import, Status::Skipped);
+        assert_eq!(s.blocker(StepId::Firmware), Some(StepId::Import));
+        // Skipping the whole install still lets the Console be built.
+        s.set(StepId::Driver, Status::Skipped);
+        assert_eq!(s.blocker(StepId::Console), None);
+    }
+
+    #[test]
     fn a_failed_step_can_be_continued_past_but_blocks_dependents() {
         let mut s = Steps::new(StepId::Firmware);
-        s.set(StepId::Find, Status::Done);
+        s.set(StepId::Import, Status::Done);
         assert_eq!(s.blocker(StepId::Driver), Some(StepId::Firmware));
         s.set(StepId::Firmware, Status::Failed);
         assert!(s.can_advance());
@@ -251,14 +345,13 @@ mod tests {
     }
 
     #[test]
-    fn nothing_found_blocks_import_and_firmware() {
+    fn nothing_found_blocks_the_install() {
         let mut s = Steps::new(StepId::Find);
         s.set(StepId::Find, Status::Warning);
-        assert_eq!(s.blocker(StepId::Import), None, "a warning still counts as found");
+        assert_eq!(s.blocker(StepId::Review), None, "a warning still counts as found");
         s.set(StepId::Find, Status::Skipped);
-        assert_eq!(s.blocker(StepId::Import), Some(StepId::Find));
-        assert_eq!(s.blocker(StepId::Firmware), Some(StepId::Find));
-        assert_eq!(s.blocker(StepId::Console), None);
+        assert_eq!(s.blocker(StepId::Review), Some(StepId::Find));
+        assert_eq!(s.root_blocker(StepId::Firmware), Some(StepId::Find));
     }
 
     #[test]
@@ -269,11 +362,13 @@ mod tests {
         }
         s.set(StepId::Firmware, Status::Running);
         s.invalidate_dependents(StepId::Find);
-        assert_eq!(s.status(StepId::Import), Status::Pending);
+        assert_eq!(s.status(StepId::Review), Status::Pending);
+        assert_eq!(s.status(StepId::Remove), Status::Pending);
         assert_eq!(s.status(StepId::Firmware), Status::Running, "a running job is left alone");
-        assert_eq!(s.status(StepId::Driver), Status::Pending, "transitively through firmware");
+        assert_eq!(s.status(StepId::Driver), Status::Pending, "transitively");
+        assert_eq!(s.status(StepId::Console), Status::Pending);
         assert_eq!(s.status(StepId::Find), Status::Done);
-        assert_eq!(s.status(StepId::Console), Status::Done);
+        assert_eq!(s.status(StepId::System), Status::Done);
     }
 
     #[test]
@@ -282,8 +377,13 @@ mod tests {
         assert_eq!(Status::Failed.worst(Status::Warning), Status::Failed);
         assert_eq!(Status::Pending.worst(Status::Done), Status::Done);
         assert_eq!(StepId::parse("Firmware"), Some(StepId::Firmware));
+        assert_eq!(StepId::parse("remove"), Some(StepId::Remove));
+        assert_eq!(StepId::parse("review"), Some(StepId::Review));
         assert_eq!(StepId::parse("nope"), None);
         assert_eq!(StepId::Done.next(), None);
+        assert_eq!(StepId::Find.next(), Some(StepId::Review));
+        assert_eq!(StepId::Review.next(), Some(StepId::Remove));
+        assert_eq!(StepId::Remove.next(), Some(StepId::Import));
         assert!(StepId::ALL.iter().enumerate().all(|(i, s)| s.index() == i));
     }
 }

@@ -323,8 +323,9 @@ install_files() {
         strip --strip-debug -- "$BINDIR/uaconsole" 2>/dev/null || true
     fi
     ok "$BINDIR/uaconsole"
-    install -Dm755 -- "$REPO/tools/open-apollo-console.sh" "$BINDIR/open-apollo-console"
-    ok "$BINDIR/open-apollo-console (opens uaconsole, or the Wine Console if uaconsole is missing)"
+    # open-apollo-console (the tray's launcher with a Wine fallback) is gone;
+    # remove a copy an older install left behind.
+    rm -f -- "$BINDIR/open-apollo-console"
 
     install -Dm644 -- "$CRATES/packaging/uaconsole.svg" "$ICON_DIR/uaconsole.svg"
     local exec_value icon_value line
@@ -407,7 +408,7 @@ main() {
 
     header "Done"
     echo "  Start the mixer daemon:  python3 $REPO/mixer-engine/ua_mixer_daemon.py"
-    echo "  Open the console:        uaconsole   (or open-apollo-console, or 'Open Apollo Console' in your menu)"
+    echo "  Open the console:        uaconsole   (or 'Open Apollo Console' in your menu)"
     echo "  It connects to the daemon on 127.0.0.1:4710; another engine: uaconsole --engine HOST[:PORT]"
     echo "  Remove it:               bash $REPO/scripts/install-uaconsole.sh --uninstall"
 }

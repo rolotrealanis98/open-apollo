@@ -21,8 +21,6 @@ __pycache__/
 node_modules/
 .next/
 out/
-console-web/node_modules/
-console-web/dist/
 
 # OS
 .DS_Store

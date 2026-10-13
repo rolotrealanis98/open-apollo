@@ -10,21 +10,25 @@ open-apollo-setup: set up open-apollo with your own UAD install
 USAGE:
   open-apollo-setup [--demo] [--data DIR] [--repo DIR] [--step STEP] [--auto] [--window-size WxH]
 
-  --demo        Simulate the privileged steps (DSP programs & firmware, driver)
-                and the Console build: fake log lines, no pkexec, no builds.
-                Scanning and the Console art import still run for real (read-only
-                toward your UAD install; the import writes only to --data).
+  Setup always installs fresh: one privileged run (scripts/setup-root.sh, one
+  password prompt) removes any earlier open-apollo install, imports the art,
+  extracts the firmware and installs the driver; then the Console is built.
+
+  --demo        Simulate the install and the Console build: fake log lines, no
+                pkexec, no builds, nothing removed or written. Scanning still runs
+                for real (read-only toward your UAD install).
   --data DIR    Import Console art into DIR instead of ~/.local/share/open-apollo
-  --repo DIR    The open-apollo checkout holding scripts/install.sh
+  --repo DIR    The open-apollo checkout holding scripts/setup-root.sh
                 (default: found from this program's or the current folder)
-  --step STEP   Open on STEP: welcome, system, find, import, firmware, driver,
-                console, done
+  --step STEP   Open on STEP: welcome, system, find, review, remove, import,
+                firmware, driver, console, done
   --auto        With --demo: walk through the steps by itself, stopping at --step
                 (default: done). For showing the flow and taking screenshots.
   --window-size WxH  Initial window size in points (default 1040x720)
   -h, --help    Show this help
 
-Environment: OA_SETUP_EXTRACTOR  the firmware extractor program (default: oa-assets)";
+Environment: OA_SETUP_EXTRACTOR  the oa-assets program the install runs (default:
+             oa-assets next to this program, else on PATH)";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -84,7 +88,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
     let data_is_default = data == default_data;
     let repo = match repo {
         Some(r) if is_repo(&r) => Some(absolute(r)),
-        Some(r) => return Err(format!("{} isn't an open-apollo checkout (no scripts/install.sh)", r.display())),
+        Some(r) => return Err(format!("{} isn't an open-apollo checkout (no scripts/setup-root.sh)", r.display())),
         None => find_repo(),
     };
     let (start, auto_until) = match auto {
@@ -106,7 +110,7 @@ fn absolute(p: PathBuf) -> PathBuf {
 }
 
 pub fn is_repo(p: &Path) -> bool {
-    p.join("scripts/install.sh").is_file() && p.join("console-rs").is_dir()
+    p.join("scripts/setup-root.sh").is_file() && p.join("console-rs").is_dir()
 }
 
 /// `$OPEN_APOLLO_REPO`, else the checkout this program was built in or run from.
@@ -137,6 +141,7 @@ mod tests {
     #[test]
     fn parses_flags() {
         let Parsed::Run(o) = run(&["--demo", "--data", "/tmp/x", "--step", "driver"]).unwrap() else { panic!() };
+        assert!(USAGE.contains("review, remove, import"), "every step is listed");
         assert!(o.demo && o.auto_until.is_none());
         assert_eq!(o.data, PathBuf::from("/tmp/x"));
         assert!(!o.data_is_default);

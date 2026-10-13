@@ -138,8 +138,16 @@ fn scan(args: &Args) -> Result<(), String> {
     let installs: Vec<Install> = roots(args).iter().map(detect::inspect).collect();
     let unmounted = if args.from.is_empty() { discover::unmounted_partitions() } else { Vec::new() };
     if args.json {
+        // firmware_inputs: the Console strip-header plug-ins or UAD2SDK.dll are
+        // there, so `oa-assets firmware` has something to read (setup-root.sh).
+        let pins = Pins::builtin();
+        let with_inputs = |i: &Install| {
+            let mut v = i.to_json();
+            v["firmware_inputs"] = firmware::has_inputs(&i.root.path, &pins).into();
+            v
+        };
         let v = serde_json::json!({
-            "installs": installs.iter().map(Install::to_json).collect::<Vec<_>>(),
+            "installs": installs.iter().map(with_inputs).collect::<Vec<_>>(),
             "unmounted": unmounted.iter().map(|u| serde_json::json!({
                 "device": u.device, "fstype": u.fstype, "label": u.label, "size": u.size,
             })).collect::<Vec<_>>(),

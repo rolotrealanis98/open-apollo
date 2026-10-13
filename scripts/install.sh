@@ -162,7 +162,7 @@ NEEDS_REBOOT=0
 DMESG_APOLLO="" DMESG_TB="" DMESG_IOMMU=""
 DEPS_INSTALLED=""
 BUILD_WARNINGS=0
-DMESG_FULL="" IOMMU_GROUPS="" AUDIO_APLAY="" AUDIO_ARECORD="" AUDIO_PWDUMP=""
+DMESG_FULL="" IOMMU_GROUPS="" AUDIO_APLAY="" AUDIO_ARECORD=""
 
 # ================================================================
 # Step 1: Detect distro
@@ -405,18 +405,6 @@ check_install_deps() {
         esac
     else
         ok "python zeroconf"
-    fi
-    # AppIndicator3 for tray indicator
-    if ! python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
-        missing+=("appindicator")
-        case "$PKG_MGR" in
-            dnf)    missing_pkgs+=("libappindicator-gtk3") ;;
-            apt)    missing_pkgs+=("gir1.2-appindicator3-0.1") ;;
-            pacman) missing_pkgs+=("libappindicator-gtk3") ;;
-            zypper) missing_pkgs+=("typelib-1_0-AppIndicator3-0_1") ;;
-        esac
-    else
-        ok "appindicator"
     fi
 
     if [ ${#missing[@]} -eq 0 ]; then
@@ -1074,9 +1062,14 @@ generate_report() {
     fi
     AUDIO_APLAY=$(aplay -l 2>/dev/null || echo "not available")
     AUDIO_ARECORD=$(arecord -l 2>/dev/null || echo "not available")
-    AUDIO_PWDUMP=""
+    # pw-dump as the desktop user (root has no PipeWire session), into a file:
+    # the whole dump is too big for an environment variable.  The report keeps
+    # only the Apollo's own nodes, with an allowlist of their properties.
+    local pwdump_file
+    pwdump_file=$(mktemp)
     if command -v pw-dump &>/dev/null; then
-        AUDIO_PWDUMP=$(pw-dump --no-colors 2>/dev/null | head -500 || echo "")
+        as_desktop_user pw-dump --no-colors > "$pwdump_file" 2>/dev/null \
+            || pw-dump --no-colors > "$pwdump_file" 2>/dev/null || true
     fi
 
     REPORT_DISTRO="$DISTRO" \
@@ -1103,9 +1096,10 @@ generate_report() {
     REPORT_IOMMU_GROUPS="$IOMMU_GROUPS" \
     REPORT_AUDIO_APLAY="$AUDIO_APLAY" \
     REPORT_AUDIO_ARECORD="$AUDIO_ARECORD" \
-    REPORT_AUDIO_PWDUMP="$AUDIO_PWDUMP" \
+    REPORT_AUDIO_PWDUMP_FILE="$pwdump_file" \
+    REPORT_USER="$(desktop_user)" \
     python3 -c '
-import json, subprocess, os, datetime
+import json, subprocess, os, datetime, re, socket, pwd
 
 def dmesg_grep(pattern, lines=10):
     try:
@@ -1137,6 +1131,70 @@ def parse_iommu_groups(s):
             groups.append({"group": parts[0], "device": parts[1], "description": parts[2]})
     return groups
 
+# Properties of Apollo PipeWire objects that may go in the report.
+PW_KEEP = {"media.class", "node.name", "node.description", "audio.channels", "audio.position",
+           "audio.rate", "audio.format", "api.alsa.path", "api.alsa.pcm.card", "alsa.card",
+           "alsa.card_name", "alsa.id", "device.api", "device.profile.name",
+           "device.profile.description", "factory.name", "priority.session"}
+
+def apollo_pw_nodes(path):
+    """Apollo nodes and devices (allowlisted properties), plus a count of
+    every other audio object by media class.  Nothing about other devices,
+    clients, users or hosts."""
+    try:
+        with open(path) as f:
+            objs = json.load(f)
+    except Exception:
+        return ""
+    kept, others = [], {}
+    for o in objs:
+        props = (o.get("info") or {}).get("props") or {}
+        names = " ".join(str(props.get(k, "")) for k in ("node.name", "device.name", "alsa.card_name"))
+        if "apollo" in names.lower():
+            kept.append({"type": str(o.get("type", "")).rsplit(":", 1)[-1],
+                         "props": {k: v for k, v in props.items() if k in PW_KEEP}})
+        elif props.get("media.class"):
+            cls = props["media.class"]
+            others[cls] = others.get(cls, 0) + 1
+    return json.dumps({"apollo": kept, "other_media_classes": others}, sort_keys=True)
+
+# Serial numbers (the driver logs the Apollo serial) and the machine identity are
+# removed from every string in the report.
+SERIAL_RE = re.compile(r"((?:serial(?:\s+number)?|s/n)\s*[:=#]?\s*)[0-9A-Za-z][0-9A-Za-z-]{5,}", re.I)
+
+def identity_words():
+    words = []
+    user = os.environ.get("REPORT_USER") or ""
+    if user:
+        try:
+            words.append((re.escape(pwd.getpwnam(user).pw_dir), "<home>"))
+        except KeyError:
+            pass
+    try:
+        with open("/etc/machine-id") as f:
+            mid = f.read().strip()
+        if mid:
+            words.append((re.escape(mid), "<machine-id>"))
+    except OSError:
+        pass
+    for host in {socket.gethostname(), socket.gethostname().split(".")[0]}:
+        if len(host) >= 2:
+            words.append((r"(?<![A-Za-z0-9])" + re.escape(host) + r"(?![A-Za-z0-9])", "<host>"))
+    if len(user) >= 2:
+        words.append((r"(?<![A-Za-z0-9])" + re.escape(user) + r"(?![A-Za-z0-9])", "<user>"))
+    return [(re.compile(p), r) for p, r in words]
+
+def scrub(obj, words):
+    if isinstance(obj, dict):
+        return {k: scrub(v, words) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [scrub(v, words) for v in obj]
+    if isinstance(obj, str):
+        obj = SERIAL_RE.sub(lambda m: m.group(1) + "<redacted>", obj)
+        for pat, repl in words:
+            obj = pat.sub(repl, obj)
+    return obj
+
 e = os.environ
 report = {
     "version": 2,
@@ -1164,7 +1222,7 @@ report = {
     "audio_state": {
         "aplay": e.get("REPORT_AUDIO_APLAY", ""),
         "arecord": e.get("REPORT_AUDIO_ARECORD", ""),
-        "pw_dump": e.get("REPORT_AUDIO_PWDUMP", ""),
+        "pw_dump": apollo_pw_nodes(e.get("REPORT_AUDIO_PWDUMP_FILE", "")),
     },
     "apollo": {
         "detected": e["REPORT_APOLLO_DET"] == "true",
@@ -1180,9 +1238,11 @@ report = {
         "dmesg_iommu": dmesg_grep("iommu", 5),
     },
 }
+report = scrub(report, identity_words())
 with open(e["REPORT_FILE"], "w") as f:
     json.dump(report, f, indent=2)
 '
+    rm -f "$pwdump_file"
 
     ok "Report saved: $REPORT_FILE"
 }
@@ -1383,18 +1443,6 @@ main() {
                     AUDIO_VERIFIED="fail"
                 fi
             fi
-        fi
-    fi
-
-    # Launch tray indicator
-    pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-    tray_script="$PROJECT_DIR/tools/open-apollo-tray.py"
-    if [ -n "$pw_user" ] && [ -f "$tray_script" ] && python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
-        if ! pgrep -f "open-apollo-tray" > /dev/null 2>&1; then
-            info "Starting Open Apollo tray indicator..."
-            sudo -u "$pw_user" python3 "$tray_script" &>/dev/null &
-            disown
-            ok "Tray indicator running"
         fi
     fi
 

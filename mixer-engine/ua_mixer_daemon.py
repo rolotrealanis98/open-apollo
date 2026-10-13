@@ -7,7 +7,7 @@ Serves two TCP protocols:
   - TCP:4720 — UA Mixer Helper (text commands in, UBJS-framed UBJSON out,
                for UAD Console)
 
-Optionally serves WebSocket for UA Connect on a separate port (default 4721).
+With --ws, also serves a WebSocket API for UA Connect-style clients (port 4721; off by default).
 
 Usage:
     # Run with default device map (Apollo x4)
@@ -3375,8 +3375,8 @@ Examples:
 
 Two or more Apollos: one daemon per device.  Ports default to the base
 port + 100 x the device index, so --device /dev/ua_apollo1 serves TCP 4810,
-helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
---ws-port to override, and --name to tell the Bonjour entries apart.
+helper 4820 (and WS 4821 with --ws) with its own state file; pass
+--port/--helper-port/--ws-port to override, and --name to tell the Bonjour entries apart.
 """)
     parser.add_argument("--device-map", "-m", type=Path,
                         help="Path to device map JSON")
@@ -3419,11 +3419,15 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                              "capture or readback); meters read silence")
     parser.add_argument("--safe-mode", action="store_true",
                         help="Enable safe mode (block unmapped DSP writes)")
+    parser.add_argument("--ws", action="store_true",
+                        help=f"Serve the WebSocket API for UA Connect-style clients "
+                             f"(off by default; port {DEFAULT_WS_PORT} + {PORT_STRIDE} x "
+                             f"device index)")
     parser.add_argument("--ws-port", type=int, default=None,
-                        help=f"WebSocket port for UA Connect (default: {DEFAULT_WS_PORT} "
-                             f"+ {PORT_STRIDE} x device index)")
+                        help="Serve the WebSocket API on this port (implies --ws)")
     parser.add_argument("--no-ws", action="store_true",
-                        help="Disable WebSocket server")
+                        help="Never serve the WebSocket API (the default; kept for "
+                             "older service files)")
     parser.add_argument("--no-bonjour", action="store_true",
                         help="Disable Bonjour/mDNS announcement")
     parser.add_argument("--alsa-device",
@@ -3514,6 +3518,9 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         args.port = DEFAULT_PORT + PORT_STRIDE * index
     if args.helper_port is None:
         args.helper_port = DEFAULT_HELPER_PORT + PORT_STRIDE * index
+    # Nothing in open-apollo uses the WebSocket API since the web console was
+    # removed, so it stays closed unless asked for.
+    ws_enabled = (args.ws or args.ws_port is not None) and not args.no_ws
     if args.ws_port is None:
         args.ws_port = DEFAULT_WS_PORT + PORT_STRIDE * index
 
@@ -3628,7 +3635,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None
-    if not args.no_ws and WsServer and HAS_WEBSOCKETS:
+    if ws_enabled and WsServer and HAS_WEBSOCKETS:
         ws_server = WsServer(
             state, hw_router,
             host=args.host, port=args.ws_port,
@@ -3637,7 +3644,7 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
             process_id=daemon.process_id,
             commands=daemon.commands,
         )
-    elif not args.no_ws and not HAS_WEBSOCKETS:
+    elif ws_enabled and not HAS_WEBSOCKETS:
         log.warning("websockets package not installed — WS server disabled "
                      "(pip install websockets)")
 

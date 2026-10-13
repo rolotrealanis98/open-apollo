@@ -19,6 +19,8 @@
 # Usage:
 #   sudo bash scripts/uninstall-usb.sh            # keep firmware
 #   sudo bash scripts/uninstall-usb.sh --purge    # also delete firmware
+#   sudo bash scripts/uninstall-usb.sh --yes      # same; it never asks anything
+#                                                 # (accepted for scripts/uninstall.sh)
 
 set -uo pipefail
 
@@ -39,9 +41,11 @@ PURGE=0
 for arg in "$@"; do
     case "$arg" in
         --purge) PURGE=1 ;;
+        -y|--yes) ;;  # nothing is ever asked
         -h|--help)
-            echo "Usage: sudo bash scripts/uninstall-usb.sh [--purge]"
+            echo "Usage: sudo bash scripts/uninstall-usb.sh [--purge] [--yes]"
             echo "  --purge   Also delete firmware from /lib/firmware/universal-audio/"
+            echo "  -y, --yes Accepted for scripts; this uninstaller never asks anything"
             exit 0
             ;;
         *) warn "Unknown argument: $arg" ;;
