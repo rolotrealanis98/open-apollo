@@ -101,6 +101,10 @@ Final locked all-target workspace build passed; workspace tests passed
 30 tests before the final clipping regression was added; the final workspace
 suite includes that regression. The checkpoint was subsequently committed through HANDOFF-CODEX.md; see INTEGRATION.md for the connected branch history and final validation.
 
+**Update (rc/plugin-spec-v2):** the Swift panel runtime is now ported in full — see
+`crates/plugin-ui/README.md` ("Spec runtime") and its coverage, runtime and catalog tests; the
+gap list below is historical.
+
 Opening a panel is not full runtime parity. A source-key audit found 75 specs
 using additional unported features, including local state and state/meter
 lookup keys, graphs, sprite-font/meter readouts, touch/held/blink/segment looks,

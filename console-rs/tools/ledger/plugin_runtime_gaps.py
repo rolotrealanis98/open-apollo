@@ -3,6 +3,10 @@
 Reads local JSON only; never connects to an engine or copies proprietary assets.
 Usage: python3 plugin_runtime_gaps.py SPEC_FOLDER > report.json
 This is a feature inventory, not a visual or DSP acceptance test.
+
+Superseded on branch rc/plugin-spec-v2: plugin-ui now ports every feature listed here (see
+crates/plugin-ui/README.md, "Spec runtime"); crates/plugin-ui/tests/coverage.rs checks the whole
+spec contract key by key and tests/catalog.rs builds and exercises every spec.
 """
 import json
 import sys

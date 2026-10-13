@@ -8,6 +8,8 @@
 //! Writes `out.png` (parameters at their spec defaults) and `out.zero.png` (all parameters 0, the
 //! state the spec pipeline's LUNA references show), and compares the latter with a LUNA reference
 //! (`$PLUGIN_UI_REFS` or `~/wine-ua-work/plugin-specs/render/uaudio_<stem>.ref.png`) when one exists.
+//! Both are also compared with the live AU snapshots of the spec pipeline (agent F:
+//! `$PLUGIN_UI_LIVE_REFS` or `~/wine-ua-work/plugin-specs/agents/F/reference[_zero]/<stem>.png`).
 //! `<spec name>` is a file stem (`ua_1176_rev_a`), an effect name or a name pattern.
 
 use std::path::{Path, PathBuf};
@@ -32,7 +34,7 @@ fn main() {
         let mut out = Vec::new();
         let mut i = 0;
         while i < args.len() {
-            if ["--scale", "--title", "--status"].contains(&args[i].as_str()) {
+            if ["--scale", "--title", "--status", "--meters"].contains(&args[i].as_str()) {
                 i += 2;
                 continue;
             }
@@ -84,17 +86,55 @@ fn main() {
     };
     let mut renderer = gfx::Renderer::new(&gpu.device, &gpu.queue, gfx::TextureFormat::Rgba8Unorm, assets.images.clone());
     let slot = "/devices/0/inputs/0/effects/0";
-    let panel = PluginPanel::new(spec.clone(), &lib, slot);
+    let mut panel = PluginPanel::new(spec.clone(), &lib, slot);
+    // The live snapshots' state: AU parameter values and display strings (agent F's dumps) and
+    // meters running in silence (every polled variable reads 0).
+    let live = live_state(entry.stem());
+    silence(&mut panel, &MockParams::from_spec(&spec));
+    // `--meters L`: every needle at L, raw values at L/2, analyser bins on a slope with a peak.
+    if let Some(level) = arg("--meters").and_then(|v| v.parse::<f64>().ok()) {
+        for id in spec.meter_sources.iter().flatten().map(|(k, _)| k.clone()) {
+            panel.meters.set_needle(&id, level);
+            panel.meters.set_raw(&id, level * 0.5);
+        }
+        for g in spec.elements.iter().filter_map(|e| e.graph.as_ref()) {
+            if let Some(sp) = &g.spectrum {
+                let n = sp.count.max(0) as usize;
+                let bins: Vec<f64> = (0..n)
+                    .map(|i| {
+                        let peak = (-((i as f64 - n as f64 * 0.3) / (n as f64 * 0.05)).powi(2)).exp();
+                        let v = level * (1e-4 / (1.0 + i as f64) + 3e-3 * peak);
+                        if sp.decode.as_deref() == Some("fp16x2") {
+                            let h = half_bits(v as f32);
+                            f32::from_bits((h as u32) | ((h as u32) << 16)) as f64
+                        } else {
+                            v
+                        }
+                    })
+                    .collect();
+                panel.meters.set_block(sp.first, &bins);
+            }
+        }
+    }
     if !panel.missing_sprites().is_empty() {
         eprintln!("missing sprites: {:?}", panel.missing_sprites());
     }
 
     let zero_path = sibling(Path::new(out), "zero");
     for (path, zero) in [(PathBuf::from(out), false), (zero_path.clone(), true)] {
-        let mut params = MockParams::from_spec(&spec);
+        let mut mock = MockParams::from_spec(&spec);
+        let mut strings = std::collections::HashMap::new();
         if zero {
-            params.set_all(0.0);
+            mock.set_all(0.0);
+        } else if let Some(live) = &live {
+            for (k, v, display) in live {
+                if let Some(p) = mock.params.get_mut(*k as usize) {
+                    p.value = *v;
+                }
+                strings.insert(*k, display.clone());
+            }
         }
+        let params = Strings { inner: mock, strings };
         let mut ui = Ui::new(&assets);
         let size = if flag("--window") {
             let luna = LunaLibrary::locate();
@@ -126,11 +166,94 @@ fn main() {
             Some(r) => compare(&zero_path, &r),
             None => eprintln!("no LUNA reference for {}", entry.stem()),
         }
+        for (ours, sub) in [(PathBuf::from(out), "reference"), (zero_path.clone(), "reference_zero")] {
+            let dir = std::env::var("PLUGIN_UI_LIVE_REFS")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("wine-ua-work/plugin-specs/agents/F"));
+            let r = dir.join(sub).join(format!("{}.png", entry.stem()));
+            if r.is_file() {
+                compare(&ours, &r);
+            }
+        }
     }
     let missing = assets.images.missing();
     if !missing.is_empty() {
         eprintln!("images that failed to load: {missing:?}");
     }
+}
+
+/// `(index, normalized value, display)` per parameter from agent F's AU dump
+/// (`$PLUGIN_UI_LIVE_REFS` or `~/wine-ua-work/plugin-specs/agents/F` + `params/<stem>.json`).
+fn live_state(stem: &str) -> Option<Vec<(u16, f64, String)>> {
+    let dir = std::env::var("PLUGIN_UI_LIVE_REFS").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("wine-ua-work/plugin-specs/agents/F"));
+    let text = std::fs::read_to_string(dir.join("params").join(format!("{stem}.json"))).ok()?;
+    let list: Vec<serde_json::Value> = serde_json::from_str(&text).ok()?;
+    Some(
+        list.iter()
+            .filter_map(|p| {
+                let (id, v) = (p["id"].as_u64()? as u16, p["value"].as_f64()?);
+                let (lo, hi) = (p["min"].as_f64().unwrap_or(0.0), p["max"].as_f64().unwrap_or(1.0));
+                let n = if hi > lo { (v - lo) / (hi - lo) } else { v };
+                Some((id, n, p["display"].as_str().unwrap_or_default().to_string()))
+            })
+            .collect(),
+    )
+}
+
+/// An IEEE half float's bits (round toward zero; renders only).
+fn half_bits(v: f32) -> u16 {
+    let b = v.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let e = ((b >> 23) & 0xff) as i32 - 127 + 15;
+    if e <= 0 {
+        return sign;
+    }
+    if e >= 31 {
+        return sign | 0x7c00;
+    }
+    sign | ((e as u16) << 10) | ((b >> 13) & 0x3ff) as u16
+}
+
+/// Every meter source reads 0 (a running plug-in in silence), settled.
+fn silence(panel: &mut PluginPanel, params: &MockParams) {
+    let spec = panel.spec.clone();
+    let floats = spec.poll_floats();
+    if !floats.is_empty() {
+        panel.ingest_floats(&vec!["0"; floats.len()].join(","), params);
+    }
+    if let Some((_, p0, n)) = spec.opcode_range() {
+        panel.ingest_opcode(p0, &vec![0.0; n.max(0) as usize], params);
+    }
+    panel.meters.tick(&spec, 10.0);
+}
+
+/// Mock parameters with Console display strings.
+struct Strings {
+    inner: MockParams,
+    strings: std::collections::HashMap<u16, String>,
+}
+
+impl plugin_ui::ParamSource for Strings {
+    fn count(&self) -> usize {
+        self.inner.count()
+    }
+    fn name(&self, k: u16) -> Option<String> {
+        self.inner.name(k)
+    }
+    fn normalized(&self, k: u16) -> Option<f64> {
+        self.inner.normalized(k)
+    }
+    fn display(&self, k: u16) -> Option<String> {
+        self.strings.get(&k).cloned().or_else(|| self.inner.display(k).filter(|_| self.strings.is_empty()))
+    }
+    fn steps(&self, k: u16) -> Vec<String> {
+        self.inner.steps(k)
+    }
+    fn begin_gesture(&mut self) {}
+    fn set(&mut self, k: u16, v: f64) {
+        self.inner.set(k, v)
+    }
+    fn end_gesture(&mut self) {}
 }
 
 /// `out.png` → `out.<tag>.png`.
@@ -157,15 +280,18 @@ fn compare(ours: &Path, reference: &Path) {
         return;
     };
     if (a.width, a.height) != (b.width, b.height) {
-        eprintln!("compare: size {}×{} vs reference {}×{}", a.width, a.height, b.width, b.height);
-        return;
+        // Compare the common top-left area (live snapshots may carry a vendor toolbar or the
+        // UA wrapper's extra rows).
+        eprintln!("compare: size {}×{} vs reference {}×{} ({}); comparing the common area", a.width, a.height, b.width, b.height, reference.display());
     }
-    let px = |d: &ImageData, i: usize| {
+    let (w, h) = (a.width.min(b.width), a.height.min(b.height));
+    let px = |d: &ImageData, x: u32, y: u32| {
+        let i = (y * d.width + x) as usize;
         let p = &d.rgba[i * 4..i * 4 + 4];
         let a = p[3] as f32 / 255.0;
         [p[0] as f32 * a, p[1] as f32 * a, p[2] as f32 * a]
     };
-    let n = (a.width * a.height) as usize;
-    let off = (0..n).filter(|&i| px(&a, i).iter().zip(px(&b, i)).any(|(x, y)| (x - y).abs() > 24.0)).count();
+    let n = (w * h) as usize;
+    let off = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| px(&a, x, y).iter().zip(px(&b, x, y)).any(|(p, q)| (p - q).abs() > 24.0)).count();
     eprintln!("vs {}: {:.3}% pixels off (>24/255)", reference.display(), off as f64 * 100.0 / n as f64);
 }

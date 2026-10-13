@@ -57,3 +57,49 @@ fn spec_matches_engine_parameters() {
     let panel = PluginPanel::new(spec.clone(), &lib, slot.slot.base.as_str());
     assert_eq!(panel.value(2, &view), view.normalized(2).unwrap());
 }
+
+/// Live meters: the panel's VendorSpecific query goes to the engine as a read-only `get` and the
+/// reply moves the meter (MockEngine over loopback; no hardware).
+#[test]
+fn meters_poll_the_engine_read_only() {
+    use std::time::{Duration, Instant};
+    use ua_engine::{MockEngine, MockOptions, Options, Status};
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
+    let server = MockEngine::start(Snapshot::load(path).expect("fixture").tree, MockOptions::default()).expect("mock engine");
+    let mut store = Store::new();
+    store.connect(server.endpoint(), Options::default());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while *store.status() != Status::Live {
+        assert!(Instant::now() < deadline, "mock engine never went live");
+        store.drain();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let slot = "/devices/0/inputs/0/effects/1";
+    let spec = std::sync::Arc::new(
+        plugin_ui::PluginSpec::from_json(
+            r#"{"schema": 1, "effectName": "UAD SPL Vitalizer MK2-T", "namePattern": "Vitalizer", "size": {"w": 10, "h": 10},
+                "parameters": [], "elements": [],
+                "meterSources": {"vu": {"vendorSpecificFloat": 7, "smoothing": 0, "calibration": [[0, 0], [2, 1]]}}}"#,
+        )
+        .unwrap(),
+    );
+    let mut panel = PluginPanel::with_sprites(spec, slot, |_| None);
+    let params = plugin_ui::MockParams::default();
+    server.push(&format!("{slot}/VendorSpecific"), "3f800000");
+    let mut poller = plugin_ui::MeterPoller::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while panel.meters.raw("vu") != Some(1.0) {
+        assert!(Instant::now() < deadline, "no meter reply");
+        store.drain();
+        for (q, data) in poller.poll(&store, &panel.meter_queries()) {
+            assert!(panel.ingest_reply(&q, &data, &params));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panel.meters.tick(&panel.spec.clone(), 0.016);
+    assert_eq!(panel.meters.needle("vu"), 0.5);
+    let gets: Vec<String> = server.received_commands().into_iter().filter(|c| c.contains("VendorSpecific")).collect();
+    assert!(gets.iter().all(|c| c.starts_with(&format!("get {slot}/VendorSpecific/value?floats=7"))), "{gets:?}");
+    assert!(server.write_commands().is_empty(), "meter polling never writes");
+}

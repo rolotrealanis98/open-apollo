@@ -4,7 +4,9 @@
 //! - [`spec`] / [`library`]: ConsoleLink's generated panel specs (`PluginSpec_*.json` plus
 //!   `Images/*@2x.png`), found at runtime (never bundled; see [`SpecLocator`]).
 //! - [`PluginPanel`]: a spec drawn into a `rack::Ui` with hit regions
-//!   (`rack::Control::PluginParam/PluginElement/PluginStep`).
+//!   (`rack::Control::PluginParam/PluginElement/PluginStep`) and its own pointer gestures; a port
+//!   of the Swift spec runtime. [`graph`] evaluates GraphValues and builds graph scenes,
+//!   [`raster`] draws them (and rotated sprites), [`readout`] formats readouts.
 //! - [`GenericPanel`]: a parameter list for plug-ins without a spec.
 //! - [`ParamSource`]: where values come from; [`MockParams`] for renders and tests. The engine
 //!   adapter maps it onto [`paths`].
@@ -18,11 +20,14 @@ pub mod bridge;
 pub mod content;
 pub mod engine;
 pub mod generic;
+pub mod graph;
 pub mod library;
 pub mod meters;
 pub mod panel;
 pub mod params;
 pub mod paths;
+pub mod raster;
+pub mod readout;
 pub mod scales;
 pub mod spec;
 pub mod uanet;
@@ -35,7 +40,7 @@ pub use generic::GenericPanel;
 pub use library::{Entry, PluginSpecLibrary, SpecLocator};
 pub use meters::MeterFeed;
 pub use panel::PluginPanel;
-pub use engine::EngineSlot;
+pub use engine::{EngineSlot, MeterPoller};
 pub use scales::PluginScales;
 pub use params::{MockEvent, MockParam, MockParams, ParamSnapshot, ParamSource};
 pub use paths::{ParamPaths, SlotPath};

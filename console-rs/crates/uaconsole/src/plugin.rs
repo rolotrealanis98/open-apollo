@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use engine_model::EngineMixer;
 use houston::{ImageCache, Rect};
-use plugin_ui::{Content, EngineSlot, LunaLibrary, MockParams, ParamSnapshot, PluginScales, PluginSpecLibrary, PluginWindow, WindowEvent};
+use plugin_ui::{Content, EngineSlot, LunaLibrary, MeterPoller, MockParams, ParamSnapshot, ParamSource, PluginScales, PluginSpecLibrary, PluginWindow, WindowEvent};
 use rack::presets::{PresetCmd, PresetScope};
 use rack::model::{InsertState, StripInfo};
 use rack::{Action, Control, ControlId, Hit, Interaction, MixerModel, PluginWindowButton as B, Ui};
@@ -104,6 +104,8 @@ impl PluginHook for PluginUiHook {
         let slot_path = paths.as_ref().map(|p| p.base.clone()).unwrap_or_else(|| format!("{}/effects/{slot}", strip.id));
         let mut window = PluginWindow::open(slot_path, &name, &format!("{channel}, {which}"), self.specs.as_deref(), Some(&self.luna), self.prefer_web);
         window.chrome.power = power;
+        // Spec panels with mono/stereo variants (state `channels`, `monoSize`).
+        window.set_channel_layout(strip.stereo);
         window.scale = self.scales.borrow().get(&name);
         window.version = self.luna.component_for_effect(&name).and_then(|c| c.version.clone());
         window.insert_menu = Some(rack::menu::plugin_insert_menu(model, &strip.id, slot));
@@ -135,6 +137,8 @@ impl PluginHook for PluginUiHook {
             snapshot,
             hits: Vec::new(),
             interaction: Interaction::default(),
+            panel_gesture: false,
+            meter_poll: MeterPoller::new(),
             origin: (0.0, 0.0),
             specs: self.specs.clone(),
             scales: self.scales.clone(),
@@ -164,6 +168,10 @@ pub struct WindowPanel {
     snapshot: ParamSnapshot,
     hits: Vec<Hit>,
     interaction: Interaction,
+    /// A press went to the spec panel's own gestures (its moves and release follow it).
+    panel_gesture: bool,
+    /// The spec panel's meters (read-only VendorSpecific gets while the window is open).
+    meter_poll: MeterPoller,
     origin: (f32, f32),
     #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     specs: Option<Arc<PluginSpecLibrary>>,
@@ -238,13 +246,19 @@ impl WindowPanel {
     }
 
     fn apply(&mut self, action: &Action, model: &mut dyn MixerModel) -> Option<WindowEvent> {
+        self.with_params(model, |window, params| window.apply(action, params))
+    }
+
+    /// Runs `f` on the window with the slot's live parameters (engine, offline values, or the
+    /// last snapshot).
+    fn with_params<R>(&mut self, model: &mut dyn MixerModel, f: impl FnOnce(&mut PluginWindow, &mut dyn ParamSource) -> R) -> R {
         if let (Some(slot), Some(e)) = (&self.engine, engine_mut(model)) {
             let mut params = slot.view_mut(e.store_mut());
-            return self.window.apply(action, &mut params);
+            return f(&mut self.window, &mut params);
         }
         match &mut self.offline {
-            Some(m) => self.window.apply(action, m),
-            None => self.window.apply(action, &mut self.snapshot),
+            Some(m) => f(&mut self.window, m),
+            None => f(&mut self.window, &mut self.snapshot),
         }
     }
 
@@ -356,6 +370,32 @@ impl Panel for WindowPanel {
 
     fn pointer(&mut self, ev: PointerEvent, model: &mut dyn MixerModel) -> PanelResponse {
         let (dx, dy) = self.origin;
+        // Spec panels recognise their own gestures (long presses, repeats, held looks, swipes,
+        // graph handles, menus); chrome and popovers stay with rack's interaction.
+        match ev {
+            PointerEvent::Down { x, y, double } => {
+                let hits = std::mem::take(&mut self.hits);
+                let taken = self.with_params(model, |w, p| w.panel_pointer_down(&hits, x + dx, y + dy, double, p));
+                self.hits = hits;
+                if taken {
+                    self.panel_gesture = true;
+                    self.refresh(model);
+                    return PanelResponse::Handled;
+                }
+            }
+            PointerEvent::Move { x, y, .. } if self.panel_gesture => {
+                self.with_params(model, |w, p| w.panel_pointer_move(x + dx, y + dy, p));
+                self.refresh(model);
+                return PanelResponse::Handled;
+            }
+            PointerEvent::Up { x, y } if self.panel_gesture => {
+                self.panel_gesture = false;
+                self.with_params(model, |w, p| w.panel_pointer_up(x + dx, y + dy, p));
+                self.refresh(model);
+                return PanelResponse::Handled;
+            }
+            _ => {}
+        }
         let actions = match ev {
             PointerEvent::Down { x, y, double } => self.interaction.pointer_down(&self.hits, x + dx, y + dy, double),
             PointerEvent::Move { x, y, fine } => self.interaction.pointer_move(x + dx, y + dy, fine),
@@ -388,6 +428,19 @@ impl Panel for WindowPanel {
     }
 
     fn sync(&mut self, model: &mut dyn MixerModel) {
+        // Live meters: the panel's VendorSpecific queries, polled read-only while it is open.
+        if let (Some(slot), Some(e)) = (&self.engine, engine_mut(model)) {
+            let queries = self.window.meter_queries();
+            if !queries.is_empty() {
+                let replies = self.meter_poll.poll(e.store(), &queries);
+                let params = slot.view(e.store());
+                for (q, data) in replies {
+                    self.window.ingest_meter_reply(&q, &data, &params);
+                }
+            }
+        }
+        // Meter ballistics, touch-state timeouts, long presses and repeats run on the panel's clock.
+        self.with_params(model, |w, p| w.tick(p));
         self.refresh(model);
     }
 
@@ -413,6 +466,9 @@ impl Panel for WindowPanel {
     /// A web GUI needs GTK and its bridge serviced every tick.
     fn live(&self) -> bool {
         matches!(self.window.content, Content::Web(_))
+            || self.panel_gesture
+            || self.window.animating(&self.snapshot)
+            || (self.engine.is_some() && !self.window.meter_queries().is_empty())
     }
 }
 

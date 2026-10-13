@@ -155,10 +155,18 @@ fn actions_round_trip_through_mock() {
     click(&mut panel, &mut params, 210.0, 20.0);
     assert_eq!(params.value(2), Some(0.0));
     assert_eq!(panel.frame(&panel.spec.elements[7], &params), 0, "lamp follows power through the table");
-    // Menu cycles through its three steps.
+    // A menu pops up its steps; picking one sets it and closes the list.
     click(&mut panel, &mut params, 260.0, 15.0);
+    assert!(panel.popup_open());
+    let menu_assets = self::assets();
+    let mut ui = Ui::new(&menu_assets);
+    panel.build(&mut ui, Rect::new(0.0, 0.0, 400.0, 200.0), &params);
+    let row = ui.hits.iter().find(|h| h.id == id(Control::PluginStep(3, 1))).expect("menu row B").rect;
+    let (x, y) = row.center();
+    click(&mut panel, &mut params, x, y);
     assert_eq!(params.value(3), Some(0.5));
     assert_eq!(panel.display(3, &params), "B");
+    assert!(!panel.popup_open());
     // Multi action: one gesture around both writes.
     params.events.clear();
     click(&mut panel, &mut params, 360.0, 160.0);
@@ -238,11 +246,10 @@ fn meters_decode_and_calibrate() {
     assert_eq!(MeterFeed::floats_query(&spec, SLOT).as_deref(), Some("/devices/0/inputs/0/effects/1/VendorSpecific/value?floats=162"));
     let mut feed = MeterFeed::new();
     feed.ingest_floats(&spec, "3fc00000", |_| 0.0);
-    let mut needles = std::collections::HashMap::new();
     for _ in 0..40 {
-        feed.tick(&spec, &mut needles, 0.016);
+        feed.tick(&spec, 0.016);
     }
-    assert!((needles["vu"] - 0.75).abs() < 0.003);
+    assert!((feed.needle("vu") - 0.75).abs() < 0.003);
     let rows = vec![Row { key: vec![0.0, 1.0], frame: Some(3), frame_normalized: None, opacity: None }];
     assert_eq!(Row::nearest(&rows, &[0.1, 0.9]).and_then(|r| r.frame), Some(3));
 }
@@ -260,17 +267,16 @@ fn combined_and_conditioned_meters_follow_consolelink() {
     let spec = PluginSpec::from_json(&json.to_string()).unwrap();
     assert_eq!(spec.poll_floats(), [1], "derived meters must never poll an invented ID");
     let mut feed = MeterFeed::new();
-    let mut needles = std::collections::HashMap::new();
     feed.ingest_floats(&spec, "bf000000", |_| 0.0); // -0.5 becomes +0.5
-    feed.tick(&spec, &mut needles, 0.016);
-    assert_eq!(needles["clip"], 0.5);
+    feed.tick(&spec, 0.016);
+    assert_eq!(feed.needle("clip"), 0.5);
     feed.ingest_floats(&spec, "0", |_| 0.0); // hold the previous nonzero target
-    feed.tick(&spec, &mut needles, 0.016);
-    assert_eq!(needles["left"], 0.5);
+    feed.tick(&spec, 0.016);
+    assert_eq!(feed.needle("left"), 0.5);
     feed.ingest_opcode(&spec, 2, &[f32::from_bits(2) as f64], |_| 0.0);
-    feed.tick(&spec, &mut needles, 0.016);
-    assert_eq!(needles["right"], 1.0);
-    assert_eq!(needles["clip"], 1.0);
+    feed.tick(&spec, 0.016);
+    assert_eq!(feed.needle("right"), 1.0);
+    assert_eq!(feed.needle("clip"), 1.0);
 }
 
 #[test]

@@ -4,6 +4,12 @@
 //! window is open); writes go through the store's writer, so they obey its write gate (read-only
 //! by default: values move locally and nothing is sent). See the README for the path mapping.
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+use ua_engine::connection::PendingReply;
+use ua_engine::store::Status;
+use ua_engine::value::Json;
 use ua_engine::{InsertPaths, PluginParameter, Store};
 
 use crate::params::{ParamSource, clamp01};
@@ -165,5 +171,67 @@ impl ParamSource for StoreParamsMut<'_> {
     }
     fn end_gesture(&mut self) {
         self.store.end_gesture();
+    }
+}
+
+/// Polls a spec panel's meter queries ([`crate::PluginPanel::meter_queries`]: read-only
+/// `get <slot>/VendorSpecific/value?floats=…` / `?opcode=…`) over the store's live connection
+/// while the window is open, as ConsoleLink does: one request per query in flight, every
+/// `interval`, a second's back-off after an error. Nothing is sent offline.
+#[derive(Debug)]
+pub struct MeterPoller {
+    inflight: Vec<(String, PendingReply)>,
+    next: HashMap<String, Instant>,
+    /// Time between requests of one query (default 1/30 s).
+    pub interval: Duration,
+}
+
+impl Default for MeterPoller {
+    fn default() -> Self {
+        Self { inflight: Vec::new(), next: HashMap::new(), interval: Duration::from_millis(33) }
+    }
+}
+
+impl MeterPoller {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Collects the replies that landed (query, data) and sends the queries that are due.
+    pub fn poll(&mut self, store: &Store, queries: &[String]) -> Vec<(String, Json)> {
+        let now = Instant::now();
+        let mut out = Vec::new();
+        let mut pending = Vec::new();
+        for (q, reply) in self.inflight.drain(..) {
+            match reply.try_take() {
+                None => pending.push((q, reply)),
+                Some(Ok(msg)) => {
+                    if let Some(data) = msg.data {
+                        out.push((q, data));
+                    }
+                }
+                Some(Err(_)) => {
+                    self.next.insert(q, now + Duration::from_secs(1));
+                }
+            }
+        }
+        self.inflight = pending;
+        if *store.status() != Status::Live {
+            return out;
+        }
+        let Some(handle) = store.connection() else { return out };
+        for q in queries {
+            if self.inflight.iter().any(|(p, _)| p == q) || self.next.get(q).is_some_and(|t| *t > now) {
+                continue;
+            }
+            self.next.insert(q.clone(), now + self.interval);
+            self.inflight.push((q.clone(), handle.request(q, false)));
+        }
+        out
+    }
+
+    /// Requests still waiting for a reply.
+    pub fn in_flight(&self) -> usize {
+        self.inflight.len()
     }
 }
