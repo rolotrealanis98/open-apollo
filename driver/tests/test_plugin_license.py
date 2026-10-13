@@ -151,6 +151,7 @@ static void *memchr_inv(const void *p, int c, size_t n)
 	return NULL;
 }
 static void *kvmalloc_array(size_t n, size_t s, int f) { return kvmalloc(n * s, f); }
+#define plugin_host host_param
 #define offsetof_ok 1
 '''
 
@@ -161,7 +162,8 @@ def build_license(main):
         'void ua_plugin_connected(', 'void ua_plugin_epoch_bump(',
         'int ua_plugin_publish_now(', 'void ua_plugin_fence_set(',
         'int ua_plugin_fence_wait(', 'void ua_plugin_teardown(',
-        'void ua_plugin_quarantine(', 'void ua_plugin_device_lost('))
+        'void ua_plugin_quarantine(', 'void ua_plugin_device_lost(',
+        'u64 ua_plugin_host_ops('))
     hdr_abi = csrc.source('ua_ioctl.h')
     abi = '\n'.join(line for line in hdr_abi.splitlines()
                     if line.startswith('#define UA_PLUGIN_') or
@@ -721,6 +723,46 @@ int main(void)
 	return 0;
 }
 ''')
+
+
+def test_operation_bits_only_while_accepted():
+    """GET_PLUGIN_CAPS.operations (A1, review finding 7): nothing with
+    plugin_host=0; DESTROY always with it; BOARD_QUERY only on a connected
+    device with DSP 0's rings running; CREATE only when some DSP is the
+    host's to place on (owned, not quarantined, its map read)."""
+    build_license(r'''
+int main(void)
+{
+	u64 ops;
+
+	setup();
+	dev.audio.connected = true;
+	mutex_lock(&dev.lock);
+	ops = ua_plugin_host_ops(&dev);
+	assert(ops == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_DESTROY));
+	for (int i = 0; i < 4; i++)
+		host.dsp[i].quarantined = true;
+	assert(ua_plugin_host_ops(&dev) == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_DESTROY));
+	host.dsp[2].quarantined = false;
+	assert(ua_plugin_host_ops(&dev) & UA_PLUGIN_OP_CREATE);
+	ua_plugin_disown(&dev, 2, "test");
+	assert(!(ua_plugin_host_ops(&dev) & UA_PLUGIN_OP_CREATE));
+	dev.audio.connected = false;
+	assert(ua_plugin_host_ops(&dev) == UA_PLUGIN_OP_DESTROY);
+	dev.audio.connected = true;
+	dev.dsp[0].resp.live = false;
+	assert(ua_plugin_host_ops(&dev) == UA_PLUGIN_OP_DESTROY);
+	dev.dsp[0].resp.live = true;
+	dev.shutdown.counter = 1;
+	assert(ua_plugin_host_ops(&dev) == UA_PLUGIN_OP_DESTROY);
+	dev.shutdown.counter = 0;
+	host_param = false;
+	assert(ua_plugin_host_ops(&dev) == 0);
+	mutex_unlock(&dev.lock);
+	cleanup();
+	return 0;
+}
+'''.replace('static bool plugin_host_param_unused;', ''))
 
 
 def test_the_gate_is_inside_create():

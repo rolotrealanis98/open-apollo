@@ -557,7 +557,7 @@ struct ua_dsp_ring {
 };
 struct ua_dsp_state { struct ua_dsp_ring cmd, resp; bool rings_allocated; };
 struct ua_plugin_host;
-struct ua_audio { unsigned int sample_rate; };
+struct ua_audio { unsigned int sample_rate; bool connected; };
 struct ua_device {
 	struct pci_dev *pdev;
 	unsigned int num_dsps;
