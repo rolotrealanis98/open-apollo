@@ -15,17 +15,23 @@ USAGE:
   oa-assets attach IMAGE                       attach a (shut down) VM's raw disk image read-only, then scan it
   oa-assets detach IMAGE|LOOPDEVICE            unmount an attached image and release it
   oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs
-  oa-assets status                             show what has been imported
+  oa-assets status [--out DIR]                 show what has been imported and built
   oa-assets firmware [--from PATH] [--out DIR] [--accept-unknown] [--verify-golden] [--json]
                                                extract the DSP modules and USB boot images the Apollo
                                                needs (default --out /lib/firmware/universal-audio)
+  oa-assets plugins [--from PATH] [--out DIR] [--spec ID]... [--verify] [--report FILE]
+                                               regenerate plug-in panel art from the Powered plug-in
+                                               DLLs (default --out ~/.local/share/open-apollo/generated)
 
 PATH is the folder that holds Windows' C:\\ (e.g. /run/media/you/Windows) or a Wine prefix.
 Nothing is written to the source, and nothing leaves this machine.
 Options: --data DIR  (default ~/.local/share/open-apollo)
 firmware: only versions this oa-assets knows are written; --accept-unknown writes others too.
   --verify-golden re-extracts into a temp dir and checks every pinned hash (without --out it
-  writes nothing else). Exit: 0 done, 1 a required module missing, 2 an unknown module version.";
+  writes nothing else). Exit: 0 done, 1 a required module missing, 2 an unknown module version.
+plugins: every image is checked against the recipe's RGBA SHA-256; --verify prints the result per
+  spec and tier and exits 1 if anything failed. --spec limits the build to the panels named.
+  --recipes DIR uses recipe files from DIR instead of the built-in ones; --jobs N sets threads.";
 
 struct Args {
     cmd: String,
@@ -37,6 +43,11 @@ struct Args {
     out: Option<PathBuf>,
     accept_unknown: bool,
     verify_golden: bool,
+    specs: Vec<String>,
+    recipes: Option<PathBuf>,
+    verify: bool,
+    report: Option<PathBuf>,
+    jobs: usize,
 }
 
 impl Args {
@@ -52,6 +63,11 @@ impl Args {
             out: None,
             accept_unknown: false,
             verify_golden: false,
+            specs: Vec::new(),
+            recipes: None,
+            verify: false,
+            report: None,
+            jobs: 0,
         };
         while let Some(arg) = it.next() {
             match arg.as_str() {
@@ -60,6 +76,11 @@ impl Args {
                 "--out" => a.out = Some(it.next().ok_or("--out needs a path")?.into()),
                 "--accept-unknown" => a.accept_unknown = true,
                 "--verify-golden" => a.verify_golden = true,
+                "--spec" => a.specs.push(it.next().ok_or("--spec needs an id")?),
+                "--recipes" => a.recipes = Some(it.next().ok_or("--recipes needs a folder")?.into()),
+                "--verify" => a.verify = true,
+                "--report" => a.report = Some(it.next().ok_or("--report needs a file")?.into()),
+                "--jobs" => a.jobs = it.next().and_then(|n| n.parse().ok()).ok_or("--jobs needs a number")?,
                 "--json" => a.json = true,
                 "--dry-run" => a.dry_run = true,
                 "-h" | "--help" => a.cmd = "help".into(),
@@ -87,6 +108,7 @@ fn main() -> ExitCode {
         "import" => run_import(&args),
         "status" => status(&args),
         "firmware" => return run_firmware(&args),
+        "plugins" => return run_plugins(&args),
         "help" => {
             println!("{USAGE}");
             Ok(())
@@ -263,6 +285,20 @@ fn status(args: &Args) -> Result<(), String> {
         ),
         None => println!("Nothing imported yet. Run `oa-assets scan`, then `oa-assets import`."),
     }
+    let art = args.out.clone().unwrap_or_else(oa_assets::plugins::default_out);
+    let pm = import::read_manifest(&art);
+    match (pm["sprites"].as_object(), pm["specs"].as_object()) {
+        (Some(sprites), Some(specs)) => {
+            let ready = specs.values().filter(|s| s["ready"] == true).count();
+            println!(
+                "Plug-in art: {} images, {ready}/{} panels ready, in {}",
+                sprites.len(),
+                specs.len(),
+                art.display()
+            );
+        }
+        _ => println!("Plug-in art: not built yet. Run `oa-assets plugins`."),
+    }
     Ok(())
 }
 
@@ -339,4 +375,125 @@ fn firmware_root(args: &Args, pins: &Pins, log: &mut dyn FnMut(Event)) -> Result
     )?;
     log(Event::Info(format!("Using {} (pick another with --from PATH)", chosen.path.display())));
     Ok(chosen)
+}
+
+/// `oa-assets plugins`: exit 0 done, 1 failures (with --verify) or an error.
+fn run_plugins(args: &Args) -> ExitCode {
+    match plugins_cmd(args) {
+        Ok(code) => ExitCode::from(code),
+        Err(e) => {
+            eprintln!("oa-assets: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn plugins_cmd(args: &Args) -> Result<u8, String> {
+    use oa_assets::plugins::{self, Outcome, recipe::Status};
+    if let Some(stray) = &args.device {
+        return Err(format!("unexpected {stray}; pass the install with --from PATH"));
+    }
+    let root = match args.from.as_slice() {
+        [one] => one.clone(),
+        [] => {
+            let mut c = discover::mounted_volumes();
+            c.extend(discover::wine_prefixes());
+            c.into_iter()
+                .map(|r| detect::inspect(&r))
+                .find(|i| !i.powered_plugins.is_empty())
+                .map(|i| i.root.path)
+                .ok_or("no UAD install with Powered plug-ins found; mount Windows or pass --from PATH")?
+        }
+        _ => return Err("plugins takes one --from".into()),
+    };
+    let out = args.out.clone().unwrap_or_else(plugins::default_out);
+    if firmware::inside(&out, &root) {
+        return Err(format!("--out {} is inside the UAD install; pick a folder outside it", out.display()));
+    }
+    let opts = plugins::Options { recipes: args.recipes.clone(), jobs: args.jobs };
+    println!("Building plug-in art from {}\n  into {}", root.display(), out.display());
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let mut last = std::time::Instant::now();
+    let report = plugins::build_with(&root, &out, &args.specs, &opts, &mut |done, total| {
+        if tty && (last.elapsed().as_millis() >= 500 || done == total) {
+            last = std::time::Instant::now();
+            eprint!("\r  {done}/{total} images");
+            if done == total {
+                eprintln!();
+            }
+        }
+    })?;
+    let count = |f: &dyn Fn(&plugins::SpriteResult) -> bool| report.sprites.iter().filter(|s| f(s)).count();
+    let ok = count(&|s| s.outcome == Outcome::Ok);
+    let ok_fallback = count(&|s| s.outcome == Outcome::Ok && s.status == Status::Fallback);
+    let failed: Vec<_> = report.failures().collect();
+    println!(
+        "Images: {ok} written ({} verified against the reference art, {ok_fallback} our own fallbacks), {} failed",
+        ok - ok_fallback,
+        failed.len()
+    );
+    println!(
+        "Not built here: {} drawn by plug-in UI code, {} deferred, {} without a recipe",
+        count(&|s| s.status == Status::Runtime),
+        count(&|s| s.status == Status::Deferred),
+        count(&|s| s.status == Status::NoRecipe),
+    );
+    let texts_ok = report.texts.iter().filter(|(_, o)| *o == Outcome::Ok).count();
+    if !report.texts.is_empty() {
+        println!("Texts: {texts_ok}/{} written", report.texts.len());
+    }
+    let specs: Vec<_> = report.specs.iter().filter(|s| args.specs.is_empty() || args.specs.contains(&s.id)).collect();
+    let ready = specs.iter().filter(|s| s.ready).count();
+    println!("Panels ready: {ready}/{}", specs.len());
+    if args.verify {
+        println!(
+            "\nPer tier (a spec is complete when every sprite it draws that isn't runtime/deferred was built and verified):"
+        );
+        for tier in 0..=4u8 {
+            let in_tier: Vec<_> = specs.iter().filter(|s| s.tier == Some(tier)).collect();
+            if in_tier.is_empty() {
+                continue;
+            }
+            let complete = in_tier.iter().filter(|s| s.missing.is_empty()).count();
+            let ready = in_tier.iter().filter(|s| s.ready).count();
+            let ids: std::collections::BTreeSet<&str> = in_tier.iter().map(|s| s.id.as_str()).collect();
+            let sprites: Vec<_> = report.sprites.iter().filter(|s| ids.contains(s.group.as_str())).collect();
+            let built = sprites.iter().filter(|s| s.outcome == Outcome::Ok).count();
+            let fails =
+                sprites.iter().filter(|s| matches!(s.outcome, Outcome::Failed(_) | Outcome::Mismatch { .. })).count();
+            println!(
+                "  tier {tier}: {complete}/{} specs complete, {ready} ready; {built} images ok, {fails} failed",
+                in_tier.len()
+            );
+        }
+        for f in &failed {
+            let why = match &f.outcome {
+                Outcome::Failed(e) => e.clone(),
+                Outcome::Mismatch { got, want } => format!("RGBA hash {} != {}", &got[..12], &want[..12]),
+                _ => String::new(),
+            };
+            println!("  FAIL {} [{}]: {why}", f.id, f.group);
+        }
+    }
+    if let Some(p) = &args.report {
+        let v = serde_json::json!({
+            "sprites": report.sprites.iter().map(|s| serde_json::json!({
+                "id": s.id, "group": s.group, "status": s.status.as_str(), "basis": s.basis, "rgba": s.rgba,
+                "outcome": match &s.outcome {
+                    Outcome::Ok => serde_json::json!("ok"),
+                    Outcome::Skipped => serde_json::json!("skipped"),
+                    Outcome::Failed(e) => serde_json::json!({"failed": e}),
+                    Outcome::Mismatch { got, want } => serde_json::json!({"mismatch": {"got": got, "want": want}}),
+                },
+            })).collect::<Vec<_>>(),
+            "specs": report.specs.iter().map(|s| serde_json::json!({
+                "id": s.id, "tier": s.tier, "ready": s.ready, "built": s.built, "runtime": s.runtime,
+                "deferred": s.deferred, "missing": s.missing,
+            })).collect::<Vec<_>>(),
+            "texts": report.texts.iter().map(|(id, o)| serde_json::json!({"id": id, "ok": *o == Outcome::Ok})).collect::<Vec<_>>(),
+        });
+        std::fs::write(p, serde_json::to_string_pretty(&v).unwrap_or_default())
+            .map_err(|e| format!("{}: {e}", p.display()))?;
+    }
+    Ok(if args.verify && !failed.is_empty() { 1 } else { 0 })
 }

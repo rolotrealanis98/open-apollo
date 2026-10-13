@@ -1,0 +1,31 @@
+{"recipesSchema":2,"group":"v76_preamp","tier":1,"inputs":{"dll:UAD V76 Preamp.dll":{"kind":"dll","file":"UAD V76 Preamp.dll","root":"powered-plugins","sha256":["f1facc7edd8806058a4fd85ed36a7ee76daef421d8f753c9b0bf2fb6dc090633"]}},"uses":["P_v76_preamp_panel_de","v76_preamp_8335","v76_preamp_8336","v76_preamp_8337","v76_preamp_8338","v76_preamp_8339_1","v76_preamp_8340_11","v76_preamp_8341","v76_preamp_8342","v76_preamp_8343","v76_preamp_8344","v76_preamp_8345_2","v76_preamp_8346","v76_preamp_8347"],"blobs":{
+"b0":{"in":"dll:UAD V76 Preamp.dll","res":"10/8350/1033","sha":"13bd2c045b03ceaaa1d00e3c5048938a66c0ab5b5c2ff2cd85ce6cd2cfa14a13","dec":"png"},
+"b1":{"in":"dll:UAD V76 Preamp.dll","res":"10/8335/1033","sha":"54fc270d031645a260d1e934dbb255a56a71ffaf0960066580e18fc973deedfe","dec":"png"},
+"b2":{"in":"dll:UAD V76 Preamp.dll","res":"10/8336/1033","sha":"ef5c5410c91a59b47d1a9532aa16ddde93375dc0087cf91ed6698f7733266910","dec":"png"},
+"b3":{"in":"dll:UAD V76 Preamp.dll","res":"10/8337/1033","sha":"cdeaf4e585e61d747e53b36da63c9072fdb32eba7f7cb8432c21c568f3d777e4","dec":"png"},
+"b4":{"in":"dll:UAD V76 Preamp.dll","res":"10/8338/1033","sha":"5c750f55aff0494930173129e393f35721247e9e617513b8faeefa44a10527d7","dec":"png"},
+"b5":{"in":"dll:UAD V76 Preamp.dll","res":"10/8339/1033","sha":"a025f5cf8ff36c457105b3c0c8648a7023e5dc280d5f9650c74bfe406b1c289f","dec":"png"},
+"b6":{"in":"dll:UAD V76 Preamp.dll","res":"10/8340/1033","sha":"c65ef338111987c306cf60a26a93e4ce7326b057bfbcde70ff03f4e362a7e83e","dec":"png"},
+"b7":{"in":"dll:UAD V76 Preamp.dll","res":"10/8341/1033","sha":"eacb1e754b28434dc24338bf68658bf01c012579cff714c8ab2f34a39afab63f","dec":"png"},
+"b8":{"in":"dll:UAD V76 Preamp.dll","res":"10/8342/1033","sha":"be2bd8d6f4a3539d429374ada4dbd7d2438c8cc0d1d6bb307bc19d33b343b4e9","dec":"png"},
+"b9":{"in":"dll:UAD V76 Preamp.dll","res":"10/8343/1033","sha":"3f1d5bcbb3e1788874298cc50b5faa9f13eae009841677adc49f8f73c8941488","dec":"png"},
+"b10":{"in":"dll:UAD V76 Preamp.dll","res":"10/8344/1033","sha":"b156471bd5a548e4a53e9e5f88ca6ce84bd34f9d61a2d37a5c333cbac6996b38","dec":"png"},
+"b11":{"in":"dll:UAD V76 Preamp.dll","res":"10/8345/1033","sha":"9622e3d96773d71f75d822abb68fa46fbdbcc290e08d0aae1c5ba0b16afec559","dec":"png"},
+"b12":{"in":"dll:UAD V76 Preamp.dll","res":"10/8346/1033","sha":"fdc44272cc8f5923a7f81331ee2b27ee79376dd8b4bbd8cba55bcaa51d41f48c","dec":"png"},
+"b13":{"in":"dll:UAD V76 Preamp.dll","res":"10/8347/1033","sha":"c2550ca4ae7e761af009647273e6236a475ec81b34352698c809400c367d8b14","dec":"png"}
+},"sprites":{
+"P_v76_preamp_panel_de":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1230,"h":802,"rgba":"dcdf28704c5c080498f812d4470fc21d37b7d524c16d758220e66173a54fffad"}},
+"v76_preamp_8335":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,60,720]},{"op":"lanczos2x"}],"output":{"w":120,"h":1440,"rgba":"a9e419f5440cfc68e0750fa2cd7a392a7e03fb5a4973a7a8b6d5b3d8cd27897f"}},
+"v76_preamp_8336":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,36,432]},{"op":"lanczos2x"}],"output":{"w":72,"h":864,"rgba":"ccb3a19e663ba587a75415025aedab81d6e8cc3ebd0ef50b86264da6d2e04acf"}},
+"v76_preamp_8337":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,36,432]},{"op":"lanczos2x"}],"output":{"w":72,"h":864,"rgba":"568aff87895c7f2503aa2f615cb603d2dc48a72948da3b28cc034a544a76750c"}},
+"v76_preamp_8338":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,60,240]},{"op":"lanczos2x"}],"output":{"w":120,"h":480,"rgba":"1038b70f295d50c4ada2bbe48b1765db83dd7aabe078a675076d3bc12a3c8ee6"}},
+"v76_preamp_8339_1":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,52,47]}],[{"op":"load","blob":"b5"},{"op":"crop","box":[0,47,52,47]}]]},{"op":"lanczos2x"}],"output":{"w":104,"h":188,"rgba":"db960272a85b3940f37be385be8cb84580cfe2536451fc4f6a829b8245b6afc8"}},
+"v76_preamp_8340_11":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,43,43]}]]},{"op":"lanczos2x"}],"output":{"w":86,"h":86,"rgba":"20f50aa8ed1dfb33312857c7652f2d7f245b87d5ff6f3d6a3df3f280cefcb62e"}},
+"v76_preamp_8341":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,60,120]},{"op":"lanczos2x"}],"output":{"w":120,"h":240,"rgba":"59125039c94b67521d8d783e828e51675825f54c74eb405c0242c1dc3323a383"}},
+"v76_preamp_8342":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,60,120]},{"op":"lanczos2x"}],"output":{"w":120,"h":240,"rgba":"ca8ba232927296c0936de00b328fd9403aa8b1ee7c5514484348183d9c6fb2bc"}},
+"v76_preamp_8343":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,60,5460]},{"op":"lanczos2x"}],"output":{"w":120,"h":10920,"rgba":"59e091896f6e34d432f97c275cf6c4b0d009042153c54415e1f75dd79cb1368e"}},
+"v76_preamp_8344":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"crop","box":[0,0,615,401]},{"op":"lanczos2x"}],"output":{"w":1230,"h":802,"rgba":"4e4d24b916960196f5d8f5925a6e30a8ee1f61983b1805d08c00bde20cc49c39"}},
+"v76_preamp_8345_2":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b11"},{"op":"crop","box":[0,0,52,47]}],[{"op":"load","blob":"b11"},{"op":"crop","box":[0,47,52,47]}]]},{"op":"lanczos2x"}],"output":{"w":104,"h":188,"rgba":"97e3db7df15d645bd8e024b15aebcc7edc5d030f6572e679d23439cc812028aa"}},
+"v76_preamp_8346":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b12"},{"op":"crop","box":[0,0,60,120]},{"op":"lanczos2x"}],"output":{"w":120,"h":240,"rgba":"f0032f85d39130db494cb3c4a973e0ab6a3f0f3b62a06d29cab6096e7f8e34c1"}},
+"v76_preamp_8347":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b13"},{"op":"crop","box":[0,0,80,2318]},{"op":"lanczos2x"}],"output":{"w":160,"h":4636,"rgba":"18d96a2816235ce210fc75222859feb8475e5f093f1c80dcf3ff586d2d75c6e0"}}
+}}

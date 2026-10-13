@@ -1,0 +1,28 @@
+{"recipesSchema":2,"group":"friedman_ds40","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD Friedman BE100.dll":{"kind":"dll","file":"UAD Friedman BE100.dll","root":"powered-plugins","sha256":["ba1e91cdb54f5a3bb1be9ceb7dbb0ccd672a2508fae1f81d52cced5f8b80ef05"]},"dll:UAD Friedman DS40.dll":{"kind":"dll","file":"UAD Friedman DS40.dll","root":"powered-plugins","sha256":["a0de367fef182f2bdd7c6b40be56893e11831a8099ccb022f6278401e631edb2"]}},"uses":["J_friedman_ds40_background_tb","J_friedman_ds40_tb_bank","J_friedman_ds40_tb_power","J_friedman_ds40_tb_rack","friedman_ds40__BUTTON","friedman_ds40__HEADRACK","friedman_ds40__LEDRED","friedman_ds40__POTI","friedman_ds40__POTIFX","friedman_ds40__POWERLED","friedman_ds40__RACKBNTTAP","friedman_ds40__SWITCH","friedman_ds40__SWITCH3POS","friedman_ds40__SWITCHFX"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/BUTTON.PNG/1033","sha":"0604cbaed2b03cfcd2c1b571ccfc32e42bce20fd59aac1a6b782ad85706435a4","dec":"png"},
+"b2":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/HEADRACK.PNG/1033","sha":"ad432ce2535d5d559173e29c7f0a2766b20dcca57261d109b387061565996d48","dec":"png"},
+"b3":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/LEDRED.PNG/1033","sha":"ca893f4e08b95be6b4d173f876f9056adbf18abca0f129a75fc1cf8812e417b4","dec":"png"},
+"b4":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/POTI.PNG/1033","sha":"6159eb67eaf54340402f899c65265b35159fa61536071928c240246c550af6a6","dec":"png"},
+"b5":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/POTIFX.PNG/1033","sha":"9a737642af0f03df403efabefafbc0b1364927d1c7052afe82bb5bb5a9dec748","dec":"png"},
+"b6":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/POWERLED.PNG/1033","sha":"dab06649ee67b27c09786e429b17e6aedfae3f5b96278c1fb3535e84a9143be8","dec":"png"},
+"b7":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/RACKBNTTAP.PNG/1033","sha":"6b1e0804f5288c593b4714ce74211ed18685c987fbdb1f410b3fc54377cb8e81","dec":"png"},
+"b8":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/SWITCH.PNG/1033","sha":"aba9711a739731a784a164d3e516babfcce6172675f67b6e73a359a3b31f603c","dec":"png"},
+"b9":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"2afd80b4db8ea9ae0b68d5ec971d197a671f4512972f4c6d66f45526a5ac0940","dec":"png"},
+"b10":{"in":"dll:UAD Friedman DS40.dll","res":"PNG/SWITCHFX.PNG/1033","sha":"bfb4179236cbc4e2ead5a06c4ad01e546e720bb9bed9bd1db86671f9dd9c4298","dec":"png"}
+},"sprites":{
+"J_friedman_ds40_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_ds40_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_ds40_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_ds40_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"friedman_ds40__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":50,"h":100,"rgba":"d97ed79a7ded501b86c60d79ccaeee6a355a12605a8a1fb97d8f6924c1d9c7e1"}},
+"friedman_ds40__HEADRACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":2048,"h":484,"rgba":"de8fc55f3a8b940fe60f3a24841b99796e4942d2577f32e7cf73d63e2e0beb47"}},
+"friedman_ds40__LEDRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":48,"h":96,"rgba":"c711cc400bc8bada3978f45b9e2364108d060856a533d92fe4debe0b8eaa65a5"}},
+"friedman_ds40__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":138,"h":8418,"rgba":"12100f8c659c4f8a473fc1159ac3601c302718fa28f230fea4748a878db624d6"}},
+"friedman_ds40__POTIFX":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":118,"h":7198,"rgba":"e9716921cf3cce0f941e4b064af8f69d34693d9983bd6759f4edff9a4c32021b"}},
+"friedman_ds40__POWERLED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":90,"h":180,"rgba":"b66827835feca9303d8034129b88650085d49e501bd7112fdf205e31415f07ba"}},
+"friedman_ds40__RACKBNTTAP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":62,"h":128,"rgba":"33fe86656a34774f9ac56351151a078dea16f6ec9bce51f777e0da5f85494709"}},
+"friedman_ds40__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":76,"h":192,"rgba":"6f3e222d1fbc74b2b69bc694a27e917ce263762e47a011cd123d8a5f8ccda7da"}},
+"friedman_ds40__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":60,"h":180,"rgba":"6c2ea756d196351effbbb7cb6a0965791c748b53b8d78baa769b09dc86b67fa0"}},
+"friedman_ds40__SWITCHFX":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b10"}],"output":{"w":60,"h":120,"rgba":"4af3d0824120514fd87d6533e57abc3567b7a8285ecc029d8c2a52fe17c7143a"}}
+}}

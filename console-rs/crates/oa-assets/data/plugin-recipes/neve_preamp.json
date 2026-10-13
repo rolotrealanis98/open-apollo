@@ -1,0 +1,19 @@
+{"recipesSchema":2,"group":"neve_preamp","tier":0,"inputs":{"dll:UAD Neve Preamp.dll":{"kind":"dll","file":"UAD Neve Preamp.dll","root":"powered-plugins","sha256":["ab59adc0d8d5fb71f17041c117dc3d4dab542c1459a2f01058351669e590f2d7"]}},"uses":["G_x2_neve_preamp_8311","G_x2_neve_preamp_8312","G_x2_neve_preamp_8313","G_x2_neve_preamp_8314","G_x2_neve_preamp_8317","G_x2_neve_preamp_8318","G_x2_neve_preamp_8319","G_x2_neve_preamp_8320_8"],"blobs":{
+"b0":{"in":"dll:UAD Neve Preamp.dll","res":"10/8311/1033","sha":"93d20f2b4437ed77fd420f7beff89d7ce4f221d99cfa0e89d148ac81dd4b39bd","dec":"png"},
+"b1":{"in":"dll:UAD Neve Preamp.dll","res":"10/8312/1033","sha":"7ef1d1e3f46fdb0d9784475dcd37efabd7c1d3fbeed1d5f6b238ea3ae4b089c4","dec":"png"},
+"b2":{"in":"dll:UAD Neve Preamp.dll","res":"10/8313/1033","sha":"b3d657472ab70a08801ab75efb30db7d1c757fea0bb31535aa4851a7a0379a4e","dec":"png"},
+"b3":{"in":"dll:UAD Neve Preamp.dll","res":"10/8314/1033","sha":"6c9d73c0f89cb560ef353569dfd5f75d6cb2f2672324432e791c55795278c761","dec":"png"},
+"b4":{"in":"dll:UAD Neve Preamp.dll","res":"10/8317/1033","sha":"14b1916a521db9a53a5504085f6e40b634ed22f59f4ac9aa870b58f115eadab6","dec":"png"},
+"b5":{"in":"dll:UAD Neve Preamp.dll","res":"10/8318/1033","sha":"d768769ecdb9fa3bcd72009fce33c1652d626f0c6133e074ec17d1820fa339d7","dec":"png"},
+"b6":{"in":"dll:UAD Neve Preamp.dll","res":"10/8319/1033","sha":"355fed6b0669c08a3c89c504619372c5af1f686e419b4935a25e62b5039e2c19","dec":"png"},
+"b7":{"in":"dll:UAD Neve Preamp.dll","res":"10/8320/1033","sha":"87c4a2125b5d1be61ffce1d6d5a4b807803d5365be3c64996e751e77e40dfd6d","dec":"png"}
+},"sprites":{
+"G_x2_neve_preamp_8311":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1176,"h":368,"rgba":"eb011eade2c842fdf4ad23db3d088794902051ef337c84813f243cf39f93bb4e"}},
+"G_x2_neve_preamp_8312":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":272,"h":30008,"rgba":"7687decbcae01292db674dc2fcc60dbf5c3e9faf063669d1100b3e1f9788431f"}},
+"G_x2_neve_preamp_8313":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":80,"h":280,"rgba":"8836d76a1dd0981920f43631b049744b9748b53a5d6e20e022a4e16a422539a1"}},
+"G_x2_neve_preamp_8314":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":116,"h":1184,"rgba":"b7d208fb13bd76193735c4ebe411950a76d6f0a09a0ff71c186549239acb4d98"}},
+"G_x2_neve_preamp_8317":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":336,"h":284,"rgba":"8771e8a30230b4ad4703d079081e6fa6fa78f59502219a9cf159132f2872aed4"}},
+"G_x2_neve_preamp_8318":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":272,"h":248,"rgba":"cd34d9558b9f22afbedb669434a9a21ee0efe8959bf81615633152daa1d94594"}},
+"G_x2_neve_preamp_8319":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":336,"h":3692,"rgba":"22448df5d63a117a569b17f0d8ae496e4b20d24b574df29593e807d8aa4ca59d"}},
+"G_x2_neve_preamp_8320_8":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b7"},{"op":"crop","box":[0,88,58,88]}],[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,58,88]}]]},{"op":"lanczos2x"}],"output":{"w":116,"h":352,"rgba":"cc75ebe9bf7d4687164ebfcf32b583569b46736d6c11753f6cccd828287a0cb4"}}
+}}

@@ -1,0 +1,32 @@
+{"recipesSchema":2,"group":"engl_savage_120","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD ENGL Savage 120.dll":{"kind":"dll","file":"UAD ENGL Savage 120.dll","root":"powered-plugins","sha256":["6560447d19f6ef23d8349cc00528e56f38440b63de2e84e6fcf96ba88db450a8"]}},"uses":["J_engl_savage_120_background_tb","J_engl_savage_120_tb_bank","J_engl_savage_120_tb_power","J_engl_savage_120_tb_rack","engl_savage_120__BUTTON","engl_savage_120__LED","engl_savage_120__LEDGREEN","engl_savage_120__LEDRED","engl_savage_120__LEDYELLOW","engl_savage_120__POTI","engl_savage_120__POWERSWITCH","engl_savage_120__RACK","engl_savage_120__STANBYSWITCH","engl_savage_120__SWITCH","engl_savage_120__SWITCH3POS","engl_savage_120__TUBESON"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/BUTTON.PNG/1033","sha":"33f6d242e5de8b02647bcdab2140ba46143cbf1071402636821240ff64c1717e","dec":"png"},
+"b2":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/LED.PNG/1033","sha":"c76b2d9bcd6cc1549ce6cf6f8f428e83b37e3f32337d6de3e006543c207e600f","dec":"png"},
+"b3":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/LEDGREEN.PNG/1033","sha":"68a9907b4996c7af09d43870792509fa1c5550df3dcabf51d8f26837250348ff","dec":"png"},
+"b4":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/LEDRED.PNG/1033","sha":"2dd37a17e9962936ce85880e2df93f2222c99a319625114fac0843fbbb79a585","dec":"png"},
+"b5":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/LEDYELLOW.PNG/1033","sha":"e1281a652c1ec1ea9cd883422a6e048634eab64d5debaafd93533f32bca9579b","dec":"png"},
+"b6":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/POTI.PNG/1033","sha":"7b4c712e6dbc88aaca13e22ac716d988b58261a365366a9ae3c6c98d35ce0356","dec":"png"},
+"b7":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/POWERSWITCH.PNG/1033","sha":"0537e188cfa3d52e0f924089fcbe0f84b3a59543d9f53d0426c8e99a89f71183","dec":"png"},
+"b8":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/RACK.PNG/1033","sha":"768c40bd95016b7555c1d60891bcfa26f4f742efe0be410673021b436c6f7ba7","dec":"png"},
+"b9":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/STANBYSWITCH.PNG/1033","sha":"da9a574673e3391857a36ecba3abfec8b3c31b541812755e89f8be93f1b3b1ec","dec":"png"},
+"b10":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/SWITCH.PNG/1033","sha":"f871af4760bc66600f714e69b811e55bea4d913c4d782bf87b3fac1629bd2078","dec":"png"},
+"b11":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"f28e975b497682d076a2ea30599b01175e60cb5706468714a654f2fd1443fd08","dec":"png"},
+"b12":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/TUBESON.PNG/1033","sha":"fc999881905ecb56a79f8046601f4f3660a858a008a6f9b996a94ed2375ebf2a","dec":"png"}
+},"sprites":{
+"J_engl_savage_120_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_engl_savage_120_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_engl_savage_120_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_engl_savage_120_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"engl_savage_120__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":40,"h":80,"rgba":"07159e1d62a525132ea537797f03b657c6740a0c5cb2ec56e6f0df8f77a8963c"}},
+"engl_savage_120__LED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":30,"h":60,"rgba":"4b9a203831d5082dab7bde7fce6b0681f3b476b58398c3d01cb025b8f1f940bb"}},
+"engl_savage_120__LEDGREEN":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":30,"h":60,"rgba":"f4e25595afd15b2d2ebf2f67ac3b2ad8c2fdc6e9e429d9529f8759e8dbf03bbb"}},
+"engl_savage_120__LEDRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":30,"h":60,"rgba":"317607b6ab103510a6e6da59b13458de7593f17c274bf3c1c7b88b615588ad94"}},
+"engl_savage_120__LEDYELLOW":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":30,"h":60,"rgba":"d91ea00fb0f3e2fd01a05b79efab1010e92757a4e27a4567024e93052e4a9cdc"}},
+"engl_savage_120__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":106,"h":6466,"rgba":"f6c3e8978bc5c77025d2cd2e830332fb5f28183895380587a98f114169ece624"}},
+"engl_savage_120__POWERSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":80,"h":200,"rgba":"37253e664e36d4e60893fc2a44a30a6f840050bf9f036ef7a7c699d9d5e3585a"}},
+"engl_savage_120__RACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":2048,"h":404,"rgba":"022e314aaeb154e7be5cdab5df410c835379d31ad7698508baf5252f1eb4da9b"}},
+"engl_savage_120__STANBYSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":80,"h":200,"rgba":"e9a20582f36bf0355eb535288d1a61bacdcd92ad7ba8036f75c3f08c92eb6611"}},
+"engl_savage_120__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b10"}],"output":{"w":58,"h":116,"rgba":"31b46d96417c8fbe3272a0b053c9bce0e0e712262cd64176f61a9ca5bbad59ce"}},
+"engl_savage_120__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b11"}],"output":{"w":58,"h":174,"rgba":"9c152bbcd3d770600fa04bf4b90465d3de535a8634e7166b55bf3122c308330d"}},
+"engl_savage_120__TUBESON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b12"}],"output":{"w":422,"h":380,"rgba":"43962ad04303c2a27a0f8e6fd296d72e3acf2500d7b68d225be1b96ad5db3a0a"}}
+}}

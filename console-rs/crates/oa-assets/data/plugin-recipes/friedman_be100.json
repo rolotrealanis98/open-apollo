@@ -1,0 +1,28 @@
+{"recipesSchema":2,"group":"friedman_be100","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD Friedman BE100.dll":{"kind":"dll","file":"UAD Friedman BE100.dll","root":"powered-plugins","sha256":["ba1e91cdb54f5a3bb1be9ceb7dbb0ccd672a2508fae1f81d52cced5f8b80ef05"]}},"uses":["J_friedman_be100_background_tb","J_friedman_be100_tb_bank","J_friedman_be100_tb_power","J_friedman_be100_tb_rack","friedman_be100__BUTTON","friedman_be100__HEADRACK","friedman_be100__LEDRED","friedman_be100__POTI","friedman_be100__POWERLED","friedman_be100__RACKBNTTAP","friedman_be100__SWITCH","friedman_be100__SWITCH3POS","friedman_be100__SWITCH3POSSMALL","friedman_be100__SWITCHSMALL"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/BUTTON.PNG/1033","sha":"8424600f00c67a72f52cc5bb4060aeb693a77644191c3a79ea99dbdf21ffed78","dec":"png"},
+"b2":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/HEADRACK.PNG/1033","sha":"8b60c67d890d6a06186aa9f99debbcaf121302e12f37f744415e74110a5cf71a","dec":"png"},
+"b3":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/LEDRED.PNG/1033","sha":"ca893f4e08b95be6b4d173f876f9056adbf18abca0f129a75fc1cf8812e417b4","dec":"png"},
+"b4":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/POTI.PNG/1033","sha":"3b078160902fed55836762fd1b7d8bdd24bfe302bd1e61bd22be3c51714ecc46","dec":"png"},
+"b5":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/POWERLED.PNG/1033","sha":"3e81484dccf6ad96b28a06ce60c6ff0af09e15bcd547d4942ae13ca912d653f2","dec":"png"},
+"b6":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/RACKBNTTAP.PNG/1033","sha":"8d226b1af43d995d9c562421425bbb61cf6870f15cf6079e53fb796b73f93528","dec":"png"},
+"b7":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/SWITCH.PNG/1033","sha":"fef6de4755bf107714caa54c7a559f06e2014bd91676730a0acc1070a9c00fc0","dec":"png"},
+"b8":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"4927a17871753714161a61477d6c16a0b46c2b6e5e46cf921ecf67b30f443d3c","dec":"png"},
+"b9":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/SWITCH3POSSMALL.PNG/1033","sha":"2bcdddb81b7af5de0a43f2117c95606ecb1e89cb4ad17dd875d88ea565206d8d","dec":"png"},
+"b10":{"in":"dll:UAD Friedman BE100.dll","res":"PNG/SWITCHSMALL.PNG/1033","sha":"62718a0a4c9ba993be02c6bba7a4e14a9c21e698826a651889bc722e09b7410e","dec":"png"}
+},"sprites":{
+"J_friedman_be100_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_be100_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_be100_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_be100_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"friedman_be100__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":50,"h":100,"rgba":"2feeaa9fbdfdf997c8b1e726be8969be8c81bdc104e0e3049cdb60877cb0dd84"}},
+"friedman_be100__HEADRACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":2048,"h":530,"rgba":"a86b07da39e8beeb31b9034f65dec24b5401de9bd921d8ea4c5b775056aa4bae"}},
+"friedman_be100__LEDRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":48,"h":96,"rgba":"c711cc400bc8bada3978f45b9e2364108d060856a533d92fe4debe0b8eaa65a5"}},
+"friedman_be100__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":120,"h":7320,"rgba":"8861c20ba016d7bd936e686694c311882372218fe2f042a2956571bbcd8d6399"}},
+"friedman_be100__POWERLED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":90,"h":180,"rgba":"29bae5ac5320ec01891007465cb234543af741294b41b026349b115cea0d727c"}},
+"friedman_be100__RACKBNTTAP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":62,"h":128,"rgba":"b8522e2143c39f6bf912f8aa8619830209928f790167809c31538b585e93301e"}},
+"friedman_be100__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":76,"h":192,"rgba":"ec5bfe6dea5b6c77d5e34a3745a43a1ddcf241383c2b9181ead7704adf6d55cc"}},
+"friedman_be100__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":90,"h":270,"rgba":"3a5616084442224a60a9684aa7e05d68cc721a08d219c0f5029b506b44c2cfc4"}},
+"friedman_be100__SWITCH3POSSMALL":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":70,"h":150,"rgba":"e7190d216253b4e78efdbd38f56e56a62e3887ba0b61dd6614c0ee26f251259b"}},
+"friedman_be100__SWITCHSMALL":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b10"}],"output":{"w":70,"h":100,"rgba":"914b01a0bb72e664fc52bd4a37887f194d6c614d5310e50873556afb7303c8c3"}}
+}}

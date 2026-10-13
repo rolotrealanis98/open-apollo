@@ -1,0 +1,19 @@
+{"recipesSchema":2,"group":"neve_1073_legacy","tier":1,"inputs":{"dll:UAD Neve 1073 Legacy.dll":{"kind":"dll","file":"UAD Neve 1073 Legacy.dll","root":"powered-plugins","sha256":["37178956e80848c454e435660258a3c4954605d8b8aa2f84c7c4589b690c764d"]}},"uses":["neve_1073_legacy_4700","neve_1073_legacy_4702","neve_1073_legacy_4703","neve_1073_legacy_4704","neve_1073_legacy_4706","neve_1073_legacy_4707","neve_1073_legacy_4708","neve_1073_legacy_4711"],"blobs":{
+"b0":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4700/1033","sha":"0dc8cd0c58a02e8f3e6133f3c3abad6fc6f344ea7df212dd1be1f47c57eee886","dec":"png"},
+"b1":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4702/1033","sha":"4a96bf692cb8e35bdeebfbf7089a0dcc4ba4ac396afe595690f3cbbcdf47a28d","dec":"png"},
+"b2":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4703/1033","sha":"60d54543e8ce679c7831cbf3ec20faa1ff754a55af1f3b12242223d47b561815","dec":"png"},
+"b3":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4704/1033","sha":"050dee27bd2a271cb66f80a6bf5497281b5067b13d2615ce25b98c720b0b2f28","dec":"png"},
+"b4":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4706/1033","sha":"f04fb7882bdba161548da4bf61c9f33178e24a657709d4bdba336dabcbf60424","dec":"png"},
+"b5":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4707/1033","sha":"a8e99c02903a811c8d0f46f5e976785dd6f5d9dd93b36c60fb9e23d6363296f7","dec":"png"},
+"b6":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4708/1033","sha":"e77aae831e89f5ea34a52c10ae655bd1a403b4b76342889f3e91678f7963efe9","dec":"png"},
+"b7":{"in":"dll:UAD Neve 1073 Legacy.dll","res":"10/4711/1033","sha":"81c9ef6878af87ff3305176649004adc37ab1fb76a799ab5165ba6adf043684e","dec":"png"}
+},"sprites":{
+"neve_1073_legacy_4700":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,576,122]},{"op":"lanczos2x"}],"output":{"w":1152,"h":244,"rgba":"107beb35b91b1e583d4950c5c6f0f40a23e3c047cd92e0c0eab30358f0c98ca1"}},
+"neve_1073_legacy_4702":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,112,6324]},{"op":"lanczos2x"}],"output":{"w":224,"h":12648,"rgba":"6a8aae4117403414aa1bde289f45ce4e8905f3fe342b15c6fc16cf526856c156"}},
+"neve_1073_legacy_4703":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,83,10246]},{"op":"lanczos2x"}],"output":{"w":166,"h":20492,"rgba":"30bf535ccb13883d52cf599387431e5be8e251d5d1d13ca432295e36927e079b"}},
+"neve_1073_legacy_4704":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,102,658]},{"op":"lanczos2x"}],"output":{"w":204,"h":1316,"rgba":"6bb36749ac9bf6ff0e791d70d05ba404845249bf0c84afe7f62ebc65dcc3fb23"}},
+"neve_1073_legacy_4706":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,102,470]},{"op":"lanczos2x"}],"output":{"w":204,"h":940,"rgba":"e9b779305c61d43b8ffb67d5ced3b1698cc8db7d44ba333b1ea9dbcdc0b6ea1e"}},
+"neve_1073_legacy_4707":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,102,10246]},{"op":"lanczos2x"}],"output":{"w":204,"h":20492,"rgba":"7a8947d06cbc774cc6f697cc260cfa1cceef1fab937927fdb648867dddbc6ee6"}},
+"neve_1073_legacy_4708":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,97,510]},{"op":"lanczos2x"}],"output":{"w":194,"h":1020,"rgba":"4f68dbadf0b011632db57e6c065349f36127a81d3fa3eb0b557f57e2faf570f7"}},
+"neve_1073_legacy_4711":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,34,400]},{"op":"lanczos2x"}],"output":{"w":68,"h":800,"rgba":"2bca02e2af698c76dcd87bf8644b905a5356012d55789ca5fd2766fff9d72174"}}
+}}

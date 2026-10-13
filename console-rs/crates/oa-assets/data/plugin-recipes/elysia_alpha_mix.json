@@ -1,0 +1,13 @@
+{"recipesSchema":2,"group":"elysia_alpha_mix","tier":0,"inputs":{"dll:UAD elysia alpha master.dll":{"kind":"dll","file":"UAD elysia alpha master.dll","root":"powered-plugins","sha256":["5a04896583f7eb4c0c69b2e180666cc4887e0e66f8df96189dd14ba09ce57213"]},"dll:UAD elysia alpha mix.dll":{"kind":"dll","file":"UAD elysia alpha mix.dll","root":"powered-plugins","sha256":["6210603b430c8efa496c3181326bbba065a0c01f35f59723189e74b24f3ac19f"]}},"uses":["elysia_alpha_mix__BACKGROUNDMONO","elysia_alpha_mix__BUTTONBLUE","elysia_alpha_mix__BUTTONWHITERIGHT","elysia_alpha_mix__KNOBBIGRIGHT","elysia_alpha_mix__METERGRRIGHT"],"blobs":{
+"b0":{"in":"dll:UAD elysia alpha mix.dll","res":"PNG/BACKGROUNDMONO.PNG/1031","sha":"500afc0f3c51998014f277e4ed353c18eef915e26193ba74a9405849d5b80cbd","dec":"png"},
+"b1":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/BUTTONBLUE.PNG/1031","sha":"f8b01ec33d13001b37ab3df94d73f65d2c654d2a0f9c24b29831777df1c0fcc9","dec":"png"},
+"b2":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/BUTTONWHITERIGHT.PNG/1031","sha":"bd1a6d12068d48bad6d95602a32fc1db38bf35a034900b269787419e809aaeca","dec":"png"},
+"b3":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/KNOBBIGRIGHT.PNG/1031","sha":"cae85ccd1c7d0c9f30e396a3ad3806fda2cae938d267aa9bca79a9271db270f5","dec":"png"},
+"b4":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/METERGRRIGHT.PNG/1031","sha":"74dc6ea3b107a8001ba09e8b2b270a9de46b0411194bb1bf4a70f0cada7cf906","dec":"png"}
+},"sprites":{
+"elysia_alpha_mix__BACKGROUNDMONO":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":1464,"h":532,"rgba":"24d84b332e20db2c86f8126820de30e9df7380f15c946008ae7e23a70d7bc986"}},
+"elysia_alpha_mix__BUTTONBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":62,"h":124,"rgba":"a2ca2dc995e8dda24abad48a3e2919b91981f9a1be1e638786db135a07c487df"}},
+"elysia_alpha_mix__BUTTONWHITERIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":62,"h":124,"rgba":"feaa96874eba9686b47e4c358128e4d5c25f5ffaec9df7e3abc45ca0c9171358"}},
+"elysia_alpha_mix__KNOBBIGRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":174,"h":10614,"rgba":"966c256547b9b84bbbdd8c36074e5d2548b330877f2fae6f5040bcf603e2c46c"}},
+"elysia_alpha_mix__METERGRRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":144,"h":18228,"rgba":"39e5d925c79b5c9a7c14ca02ed8c51c87337ebdac1e604655c39771d5d572fba"}}
+}}

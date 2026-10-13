@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"bx_subsynth","tier":2,"inputs":{"dll:UAD bx_subsynth.dll":{"kind":"dll","file":"UAD bx_subsynth.dll","root":"powered-plugins","sha256":["1baf60ed91b741f0c4e446864797dbaf2b3620419e5524cd787b93d0c27b46d1"]}},"uses":["J_bx_subsynth_background_tb","J_bx_subsynth_tb_bank","J_bx_subsynth_tb_power","bx_subsynth__BUTTONSOLO_C0","bx_subsynth__BUTTONSOLO_C1","bx_subsynth__KNOB","bx_subsynth__KNOBBIG","bx_subsynth__KNOBTRIM","bx_subsynth__SWITCH"],"blobs":{
+"b0":{"in":"dll:UAD bx_subsynth.dll","res":"PNG/BUTTONSOLO.PNG/1033","sha":"b96937316c0dbb1f743d302626b6c6efcd298cb792f53b6f32286e8029f9d992","dec":"png"},
+"b1":{"in":"dll:UAD bx_subsynth.dll","res":"PNG/KNOB.PNG/1033","sha":"7625abb939b9ecab7f7a5624860be2792151e7127bfdfa33f6843c8b33c2bf47","dec":"png"},
+"b2":{"in":"dll:UAD bx_subsynth.dll","res":"PNG/KNOBBIG.PNG/1033","sha":"ab7993fd22653300d02ee02d7fa45f7e843720e63e0faaab04a91df4771b63af","dec":"png"},
+"b3":{"in":"dll:UAD bx_subsynth.dll","res":"PNG/KNOBTRIM.PNG/1033","sha":"086876c63216a7381cee8704af0121ed88569c21e6ab68adc279dfe80bbb9890","dec":"png"},
+"b4":{"in":"dll:UAD bx_subsynth.dll","res":"PNG/SWITCH.PNG/1033","sha":"5b6eb362cc96d95013a4c10128bf12694d318021f6deff497920272d94b57940","dec":"png"}
+},"sprites":{
+"J_bx_subsynth_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_bx_subsynth_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_bx_subsynth_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"bx_subsynth__BUTTONSOLO_C0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,46,104]}],"output":{"w":46,"h":104,"rgba":"e8c3b2aeee0c33cbdbb29829ea2e77b8210f4e8a520c7fcbc5636cd870768676"}},
+"bx_subsynth__BUTTONSOLO_C1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[46,0,46,104]}],"output":{"w":46,"h":104,"rgba":"4320a9245790f4e3506c8135415389ef3e3709ed48129cbe1b0e5c7f960c71d2"}},
+"bx_subsynth__KNOB":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":136,"h":8296,"rgba":"47ffde19f2c6d7440eaaeae332ba45dbc39498e4274857e0026b9fbd4cf22277"}},
+"bx_subsynth__KNOBBIG":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":230,"h":14030,"rgba":"23433264052fb629108340b8d6b75b2cc806e485da969e16886edaecb59e4fab"}},
+"bx_subsynth__KNOBTRIM":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":145,"h":2625,"rgba":"d0586a81e16f53b98b24f7439368461693cbe1c1626ca16736db00adc4d3fc7c"}},
+"bx_subsynth__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":76,"h":100,"rgba":"4273f4777223a496e9362e8505c36fa97aba7b7c66da114ecc1fc0761341395f"}}
+}}

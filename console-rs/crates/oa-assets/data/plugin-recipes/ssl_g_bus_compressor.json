@@ -1,0 +1,23 @@
+{"recipesSchema":2,"group":"ssl_g_bus_compressor","tier":1,"inputs":{"dll:UAD SSL G Bus Compressor.dll":{"kind":"dll","file":"UAD SSL G Bus Compressor.dll","root":"powered-plugins","sha256":["4e126b251cf02615be7d1aa65da13e58a83554234354b148784b790722a0e354"]}},"uses":["SSL_G_Comp_background","SSL_G_Comp_knob","SSL_G_Comp_knob_HR_trim","SSL_G_Comp_knob_SC","SSL_G_Comp_knob_attack","SSL_G_Comp_knob_ratio","SSL_G_Comp_knob_release","SSL_G_Comp_needle","SSL_G_Comp_switch_Auto_Fade","SSL_G_Comp_switch_IN"],"blobs":{
+"b0":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8231/1033","sha":"efb7b66bbae561514b2aa48957a1da1beae940e2752bb3484903ed152b20c19c","dec":"png"},
+"b1":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8232/1033","sha":"39f470978e5a05e0c4132c9d702209a74069b6506811417da863e01c52d0fb01","dec":"png"},
+"b2":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8240/1033","sha":"23389c08869744689d7798009f4d3429f7a2eee4f6444495ea8a989064385a32","dec":"png"},
+"b3":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8239/1033","sha":"8d693e30d3bd0de6c046fa49018bebc09a801249e47ca5e7346f34c888681250","dec":"png"},
+"b4":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8234/1033","sha":"76a4d524c322a41831d7dcdf4317ff513b59c7ccc66b9fa5e1bc2577566ab992","dec":"png"},
+"b5":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8233/1033","sha":"1cbd0aa2634b67f16dd76a906c08c82931e30f33e12c7edb50f7d2a9510a5ddd","dec":"png"},
+"b6":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8235/1033","sha":"5bb4a8c3e6d5f575d1ccd1d28bec260e155ba761e07dea31005a123003fab44f","dec":"png"},
+"b7":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8236/1033","sha":"d3c23c120ac48c3be35c84a7a50befee5f570c81472ba783df27be2d3386bdac","dec":"png"},
+"b8":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8238/1033","sha":"75d4922344e11b5e1b037ed4f8c183ee107cb61261169b091783cf94e1ba9e11","dec":"png"},
+"b9":{"in":"dll:UAD SSL G Bus Compressor.dll","res":"10/8237/1033","sha":"7c7284b451c9ead3db5d2ab63540cbadcdab3524d364df80c5e0768f3a1efe3c","dec":"png"}
+},"sprites":{
+"SSL_G_Comp_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":600,"h":1242,"rgba":"ab82ecddf66ed6a9af9fe6b529c493114398e10dc44545550db778a5f1281ffa"}},
+"SSL_G_Comp_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":140,"h":13332,"rgba":"37cd300d76c76b35e99e208a1672e2b502a36cf062881bd9a3e523fc8783d706"}},
+"SSL_G_Comp_knob_HR_trim":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":90,"h":770,"rgba":"4adbe54647c19ba3edf59d29e34c4ee67f1a2a2da6127a80c93d2aefad72b141"}},
+"SSL_G_Comp_knob_SC":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":140,"h":13332,"rgba":"bea7b09fae4f5e2406e8c14a49b8c6b65c85234f4d2f91ce22671ec2ba8b0cca"}},
+"SSL_G_Comp_knob_attack":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":140,"h":792,"rgba":"0653c9bef6bad9b7dfdc4cf6de01633504ed77237a2b0437944e6d4b3ecf7625"}},
+"SSL_G_Comp_knob_ratio":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":140,"h":396,"rgba":"980965fa0d4a698122e2f2c46a0310f822a83ef545241bb3ae71d597abadef9f"}},
+"SSL_G_Comp_knob_release":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":140,"h":660,"rgba":"6380720dfe15e7075dd07e4419b3059a95ab07b270855cab0b02f4949196b8d2"}},
+"SSL_G_Comp_needle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":256,"h":21440,"rgba":"d97ddc107c6be687ff7a7be2bd3f138c2068cc4b098d93b00d9884794a4abbc3"}},
+"SSL_G_Comp_switch_Auto_Fade":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":180,"h":540,"rgba":"03113b76a6f055281da24c664a5e4dc225ec0d0b608f215be57efcc9651e767d"}},
+"SSL_G_Comp_switch_IN":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":180,"h":360,"rgba":"4657d75a2ac438547a33980a663ba99b71c1457b3e19a1e722023f48e15837c5"}}
+}}

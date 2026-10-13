@@ -1,0 +1,26 @@
+{"recipesSchema":2,"group":"suhr_pt100","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD Diezel Herbert.dll":{"kind":"dll","file":"UAD Diezel Herbert.dll","root":"powered-plugins","sha256":["a5474f0620b92049cf01f4d016950ecde8034b333e98d859dcc9b93f10efc186"]},"dll:UAD Suhr PT100.dll":{"kind":"dll","file":"UAD Suhr PT100.dll","root":"powered-plugins","sha256":["1f9ed922ba3308606910e90086f3b3d86c9d7ab4904f64bb75eb86aeb18ae999"]}},"uses":["J_suhr_pt100_background_tb","J_suhr_pt100_tb_bank","J_suhr_pt100_tb_power","J_suhr_pt100_tb_rack","suhr_pt100__LEDBLUE","suhr_pt100__LEDGREEN","suhr_pt100__LEDORANGE","suhr_pt100__LEDRED","suhr_pt100__POTI","suhr_pt100__PUSHBUTTON","suhr_pt100__RACK","suhr_pt100__SWITCH","suhr_pt100__SWITCH3POS"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/LEDBLUE.PNG/1033","sha":"c2c0aa81fccfe7f08c9838fd6c1f97785529d75cf4d406bb36e37fb2d194d370","dec":"png"},
+"b2":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/LEDGREEN.PNG/1033","sha":"ca232506d516148413088efe7e9454a4627af46382c9fd58d458181c118c19c3","dec":"png"},
+"b3":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/LEDORANGE.PNG/1033","sha":"6017f1dc9a5990b474b7f42ab41b7b3a1f9a8bca3a54b2d2cf7bfa4a1411f20c","dec":"png"},
+"b4":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/LEDRED.PNG/1033","sha":"b4f48718c6d63f2a88d131671a70571b66fc432c99704f4a96504a0aa2408c21","dec":"png"},
+"b5":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/POTI.PNG/1033","sha":"dc26120013f24da8bd2ce550893d281119fd0bda2a7f7d49b8d944ae4e11511f","dec":"png"},
+"b6":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/PUSHBUTTON.PNG/1033","sha":"22bbd83a39f835c4bbbf8a8ac65642ca33820c88898aecf157768e66dc2fbe25","dec":"png"},
+"b7":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/RACK.PNG/1033","sha":"448014ae49dc521838287421a382c88909c5d67eb9370f7536e64857a6b5b290","dec":"png"},
+"b8":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/SWITCH.PNG/1033","sha":"1a773e7f76f50083e4fd01ac5b1f0fe40538fd5cb8278a60ed0a4b0e1af2f672","dec":"png"},
+"b9":{"in":"dll:UAD Suhr PT100.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"4443d817cf485375effc1e1c5ec9c740f070c058499b57ae7dc79a458dc91fe4","dec":"png"}
+},"sprites":{
+"J_suhr_pt100_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_suhr_pt100_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_suhr_pt100_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_suhr_pt100_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"suhr_pt100__LEDBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":40,"h":80,"rgba":"d66ccb02e797b97221bcc21363023b6e2951684793b854dda677fc06c741928b"}},
+"suhr_pt100__LEDGREEN":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":40,"h":80,"rgba":"0b3afb95f6ab5feb6d33e55b2c32dffd5043fa5061c922ab4fd038f7733699e6"}},
+"suhr_pt100__LEDORANGE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":40,"h":80,"rgba":"ec5afb888a115305d36a8822d119a9b08a28fc8595dbbf59037a4f9260d7933c"}},
+"suhr_pt100__LEDRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":40,"h":80,"rgba":"55cc834038135e2fdda679fe11eb363df4b9ae2d15b91e7dfd120eaf3d8ee379"}},
+"suhr_pt100__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":100,"h":6100,"rgba":"591d8a77d06ae3d86aac72d93d28d80c0b5f84488dbab89db55e496bddef3abc"}},
+"suhr_pt100__PUSHBUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":30,"h":70,"rgba":"10bb791b1ae948e5a40b9dd947c9711427b6c5f0a077c932447334a9d1a06147"}},
+"suhr_pt100__RACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":2048,"h":514,"rgba":"e2ac7009919f2f81f8d0440f53c901ecb9b8d3434c6be1fa47747ade12a2638c"}},
+"suhr_pt100__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":54,"h":108,"rgba":"36948fd36f50629fc6a9a035900195a097fb0b134fca9f67cc2cc7bc065bc2bc"}},
+"suhr_pt100__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":54,"h":162,"rgba":"b449a8ccb18092abce037762f22ee0387494ac5761981ed90477f80930639b8a"}}
+}}

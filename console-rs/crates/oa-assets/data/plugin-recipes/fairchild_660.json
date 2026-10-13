@@ -1,0 +1,31 @@
+{"recipesSchema":2,"group":"fairchild_660","tier":1,"inputs":{"dll:UAD Fairchild 660.dll":{"kind":"dll","file":"UAD Fairchild 660.dll","root":"powered-plugins","sha256":["4be37b69814a52c8ad700bae983fe9bc389a4a81fe50c10d69d597f94794f0ed"]}},"uses":["UA_Fairchild660_GLOW","UA_Fairchild660_PANEL","UA_Fairchild660_TIMECONSTANT","UA_Fairchild_DCThres_B","UA_Fairchild_INPUT_A","UA_Fairchild_METERING_A","UA_Fairchild_MIX","UA_Fairchild_OUTPUT_A_101steps","UA_Fairchild_POWER","UA_Fairchild_SIDECHAIN_A","UA_Fairchild_THRESHOLD_A","UA_Fairchild_needle_METER","UA_Fairchild_trimpot_BALANCE","UA_Fairchild_trimpot_HEADROOM","transparent"],"blobs":{
+"b0":{"in":"dll:UAD Fairchild 660.dll","res":"10/7761/1033","sha":"60b250b56949b2c6321aebb1f00f801a0e6c5af5b861681841faa45c551f9aa4","dec":"png"},
+"b1":{"in":"dll:UAD Fairchild 660.dll","res":"10/7750/1033","sha":"a70bdd6df00ff1bff3f11ae435be5340c69160c73daeb50ea13c57194b8ae3c4","dec":"png"},
+"b2":{"in":"dll:UAD Fairchild 660.dll","res":"10/7756/1033","sha":"e69490bcb05e2ef997b26e04214b6fb1a6bac149c238c5e47a881838fcd7ebde","dec":"png"},
+"b3":{"in":"dll:UAD Fairchild 660.dll","res":"10/7752/1033","sha":"0fbaa9c98dbca226e592e5a8badd9266c0225279290988af8ddfc00a79fad07f","dec":"png"},
+"b4":{"in":"dll:UAD Fairchild 660.dll","res":"10/7753/1033","sha":"574e5c728216b5e01809dac42f120cacfa6b98f17e3345d0acb71d6ee8c4b09f","dec":"png"},
+"b5":{"in":"dll:UAD Fairchild 660.dll","res":"10/7759/1033","sha":"7ba9050b93b9cfdfa99e1a9ffcb5f3d9af6c24977bf257bb380f6f4910f54b05","dec":"png"},
+"b6":{"in":"dll:UAD Fairchild 660.dll","res":"10/7763/1033","sha":"8d1eb7d34c9b94e6e93be31e130567baba8b69d972905154cbf87ff8d99017ca","dec":"png"},
+"b7":{"in":"dll:UAD Fairchild 660.dll","res":"10/7758/1033","sha":"5b84465c3fda8d2be5d54b2c072a4cc31162071789c3491690b17d41650a2ec2","dec":"png"},
+"b8":{"in":"dll:UAD Fairchild 660.dll","res":"10/7760/1033","sha":"7e2dcce7e2337222a460900619f6f31b42950b41741b7349aaa17a74a5d2f25a","dec":"png"},
+"b9":{"in":"dll:UAD Fairchild 660.dll","res":"10/7764/1033","sha":"4a093b011b0e1ff533f692eb34a843d0b3b098581e12f56b4e9f08b42dc33c80","dec":"png"},
+"b10":{"in":"dll:UAD Fairchild 660.dll","res":"10/7751/1033","sha":"08e81fd575df8c3bf4015255068b4b89ba7cf2fcde8a9369fcc665d34a6ab350","dec":"png"},
+"b11":{"in":"dll:UAD Fairchild 660.dll","res":"10/7755/1033","sha":"35a4b23e381953ee00f7a7a56c12b679f2e874d5e22e67fc11af0b9cdffc9626","dec":"png"},
+"b12":{"in":"dll:UAD Fairchild 660.dll","res":"10/7762/1033","sha":"ae5963b47140fa2e45388f786d565a4825c65be2467481614af8d18f098df4e4","dec":"png"},
+"b13":{"in":"dll:UAD Fairchild 660.dll","res":"10/7765/1033","sha":"5121df02a4ad7ac7b1ccfd133bb3a0125d24d5a54792f20519eb6107b8150983","dec":"png"}
+},"sprites":{
+"UA_Fairchild660_GLOW":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1900,"h":870,"rgba":"f9b119aae5aedd2b9f4b6d082832606848f180125d7c362dfe4e6fddc54b92ad"}},
+"UA_Fairchild660_PANEL":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":1900,"h":870,"rgba":"78b952b94d93d068ab0683e6127460d92aa7b0646c811d290f80b6a94a44faad"}},
+"UA_Fairchild660_TIMECONSTANT":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":280,"h":1680,"rgba":"e31eb463de542fac15fbb22c4151b3389a38a46423607954a650522363f6ad22"}},
+"UA_Fairchild_DCThres_B":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":140,"h":12524,"rgba":"5372ca915b559bd62bc106e46f70a18de11afb419032d2f6f5baaa0bbb49bf97"}},
+"UA_Fairchild_INPUT_A":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":244,"h":5124,"rgba":"437bf1aeeba214007b5822e8254da53e2a146c00819d1813f66cd65f4a71a63f"}},
+"UA_Fairchild_METERING_A":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":280,"h":900,"rgba":"d605832ce3669d0d090dfcf4bf235e818700e9e7f1709a8c68ee18f808496a8c"}},
+"UA_Fairchild_MIX":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":220,"h":22220,"rgba":"107159b7ccf09d1b1c42f1595cd2e6e3316c5cbcbb1ac521a26956ee2bd1ff58"}},
+"UA_Fairchild_OUTPUT_A_101steps":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":244,"h":24644,"rgba":"04fffa9fcd20d9a082aeb6a798f5c2c94ad7208be31c7bda3ae926287d472e76"}},
+"UA_Fairchild_POWER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":100,"h":284,"rgba":"f669f5ca5485d3475615743fd3ce31f6476b0374551456efb528a594904108bd"}},
+"UA_Fairchild_SIDECHAIN_A":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":220,"h":22220,"rgba":"0d6c37fc40018617e97fdf58f7739f8080fc44aed87a8a7be198588350bce8a5"}},
+"UA_Fairchild_THRESHOLD_A":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":242,"h":24442,"rgba":"6bf1bf2e0daaa06304e6b4854764b96ef6d4ceff96eeb6d1777ea1e811fb9f22"}},
+"UA_Fairchild_needle_METER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"output":{"w":220,"h":11110,"rgba":"0d578bea10bf232bb4c2296984e6e40bbf8d1fdee3326982a1b01990360ec6d9"}},
+"UA_Fairchild_trimpot_BALANCE":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b12"},{"op":"lanczos2x"}],"output":{"w":44,"h":4444,"rgba":"a88d2b380e03948b1aac14dc2a46e35aaebbac06b4711a613ee82ad2003f637b"}},
+"UA_Fairchild_trimpot_HEADROOM":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b13"},{"op":"lanczos2x"}],"output":{"w":44,"h":308,"rgba":"ec3b4affccb37b8744afe3dcc76c7af771a6a917cf4f66112fd10745a98d765c"}}
+}}

@@ -1,0 +1,24 @@
+{"recipesSchema":2,"group":"fuchs_train_ii","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD ENGL Savage 120.dll":{"kind":"dll","file":"UAD ENGL Savage 120.dll","root":"powered-plugins","sha256":["6560447d19f6ef23d8349cc00528e56f38440b63de2e84e6fcf96ba88db450a8"]},"dll:UAD Fuchs Train II.dll":{"kind":"dll","file":"UAD Fuchs Train II.dll","root":"powered-plugins","sha256":["bed3b9cd9e826488649228794d16b044b4bbc22568a1daa589250a3de103fbb6"]}},"uses":["J_fuchs_train_ii_background_tb","J_fuchs_train_ii_tb_bank","J_fuchs_train_ii_tb_power","J_fuchs_train_ii_tb_rack","fuchs_train_ii__BUTTON","fuchs_train_ii__LED","fuchs_train_ii__POTI","fuchs_train_ii__POWERLED","fuchs_train_ii__POWERSWITCH","fuchs_train_ii__RACK","fuchs_train_ii__SWITCH","fuchs_train_ii__SWITCH3POS"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Fuchs Train II.dll","res":"PNG/BUTTON.PNG/1033","sha":"17aafe064ed9ec6f4561cab62108b72a750daac0fc8faadcf6b19067761b481f","dec":"png"},
+"b2":{"in":"dll:UAD ENGL Savage 120.dll","res":"PNG/LED.PNG/1033","sha":"c76b2d9bcd6cc1549ce6cf6f8f428e83b37e3f32337d6de3e006543c207e600f","dec":"png"},
+"b3":{"in":"dll:UAD Fuchs Train II.dll","res":"PNG/POTI.PNG/1033","sha":"53efe9e8815f2ecbf85404f83a18195d5cbd7ab5e5db7d272b83c1c0c6a7ff30","dec":"png"},
+"b4":{"in":"dll:UAD Fuchs Train II.dll","res":"PNG/POWERLED.PNG/1033","sha":"626c091851057e56f3256791960d312423f70abb3f5f0138a3c810eb0aaa84f6","dec":"png"},
+"b5":{"in":"dll:UAD Fuchs Train II.dll","res":"PNG/POWERSWITCH.PNG/1033","sha":"e1ea7e37a131584eef2b8482cdaa11aac75929d71ee029935f109b36553d363c","dec":"png"},
+"b6":{"in":"dll:UAD Fuchs Train II.dll","res":"PNG/RACK.PNG/1033","sha":"2a714e30051dd0cd213b6b30f016ff86f8976cfa2a345bbffc69a21b1f2fd9b5","dec":"png"},
+"b7":{"in":"dll:UAD Fuchs Train II.dll","res":"PNG/SWITCH.PNG/1033","sha":"a62b4be25860191ff68496fb3a2b35f471266c24cef696f69ff1003010f00759","dec":"png"},
+"b8":{"in":"dll:UAD Fuchs Train II.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"b94fef9a08702d12ecc6b66e1ab4ac9539d688e81b4504da2fa2091d7d7dc520","dec":"png"}
+},"sprites":{
+"J_fuchs_train_ii_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_fuchs_train_ii_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_fuchs_train_ii_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_fuchs_train_ii_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"fuchs_train_ii__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":50,"h":100,"rgba":"6bfda620015ad0c32d8ce22e757fb1cede636a9d2f6fcf3743126e0e0c1609a6"}},
+"fuchs_train_ii__LED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":30,"h":60,"rgba":"4b9a203831d5082dab7bde7fce6b0681f3b476b58398c3d01cb025b8f1f940bb"}},
+"fuchs_train_ii__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":140,"h":8540,"rgba":"f52fcbab234e05e39cfb5d260dd4b66fdbc21af84c586db70989d61fa85f323e"}},
+"fuchs_train_ii__POWERLED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":266,"h":552,"rgba":"e0514903cbead38549ff091f5f70ddd9cf480b7186a98c0f758aa5fb28df97c3"}},
+"fuchs_train_ii__POWERSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":90,"h":220,"rgba":"bdd0daaed6d44967220d1ed21d2c711281c55acd1d13b893ec404f45b35268ef"}},
+"fuchs_train_ii__RACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":2048,"h":616,"rgba":"0fe384687474e343294a68d97df5281a5c22de5800be5f2eb6fd049f56c18d40"}},
+"fuchs_train_ii__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":64,"h":156,"rgba":"9f4d985f52de93498edd06807a76b0821a20cc402f6d6f53d48a3d6bf08efb3f"}},
+"fuchs_train_ii__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":64,"h":234,"rgba":"325b5a2a348966a434a6990610cfe8bea112ad1201cf47bf08503471052dcacb"}}
+}}

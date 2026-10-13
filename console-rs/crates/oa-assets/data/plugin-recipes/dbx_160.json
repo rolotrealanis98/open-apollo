@@ -1,0 +1,23 @@
+{"recipesSchema":2,"group":"dbx_160","tier":1,"inputs":{"dll:UAD dbx 160.dll":{"kind":"dll","file":"UAD dbx 160.dll","root":"powered-plugins","sha256":["a2770759e41229836365e2a8d841a0690d3d941cae40c66635aff3c7d2b30d76"]}},"uses":["UA_dbx-160_COMPRESSION","UA_dbx-160_LED-ABOVE","UA_dbx-160_LED_BELOW","UA_dbx-160_METER","UA_dbx-160_MIX","UA_dbx-160_OVERLAY-OFF","UA_dbx-160_PANEL","UA_dbx-160_POINTER","UA_dbx-160_POWER","UA_dbx-160_THRESHOLD-OUTPUT-GAIN"],"blobs":{
+"b0":{"in":"dll:UAD dbx 160.dll","res":"10/8564/1033","sha":"d8ef873d3eb64d0a69c010a9f647cee88fa97b669767c153b991345134aacb74","dec":"png"},
+"b1":{"in":"dll:UAD dbx 160.dll","res":"10/8566/1033","sha":"100622a74e49e063d136c4f50d321aab58ef0d4cc0d10740e6ece0fb3dce9b55","dec":"png"},
+"b2":{"in":"dll:UAD dbx 160.dll","res":"10/8565/1033","sha":"9d452efb502b98ac42c11b07a30f1608e2f3dad8c34f936abfbfc5ecea715093","dec":"png"},
+"b3":{"in":"dll:UAD dbx 160.dll","res":"10/8567/1033","sha":"aaeaab9923600587efd35bf904c058e8752ed6cbdcc2735d95f5a4faeb0e0d47","dec":"png"},
+"b4":{"in":"dll:UAD dbx 160.dll","res":"10/8569/1033","sha":"ca974b05eaf89d7ad99d735d1f32698a4c92bbf92a70030dc0a87764b930cff9","dec":"png"},
+"b5":{"in":"dll:UAD dbx 160.dll","res":"10/8570/1033","sha":"bfa951402892caed50f642d75e87aa6e5146a62770f999f1726acb5d199be980","dec":"png"},
+"b6":{"in":"dll:UAD dbx 160.dll","res":"10/8563/1033","sha":"5ff1f48e57276f0a922049d5382ee83def7a98f952590517c2f6cc6cd696c646","dec":"png"},
+"b7":{"in":"dll:UAD dbx 160.dll","res":"10/8571/1033","sha":"12ce41f9ff4c08a0e35daa18979ad39d402ce59834ccc10a90ac57d5a6317697","dec":"png"},
+"b8":{"in":"dll:UAD dbx 160.dll","res":"10/8572/1033","sha":"4d7f258a2caaef5535fafa9b592765524ef286c1bffa13ab1bf08f4e247d8ef2","dec":"png"},
+"b9":{"in":"dll:UAD dbx 160.dll","res":"10/8574/1033","sha":"881ccae418cc9952e5999d4077f8dabf3e99307b3d91595a938ad7e0a4b57392","dec":"png"}
+},"sprites":{
+"UA_dbx-160_COMPRESSION":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":140,"h":14140,"rgba":"6a05165e18f3b5c4cd6541de85a3fe808144b45f092784afe102ba43a73d050c"}},
+"UA_dbx-160_LED-ABOVE":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":92,"h":1568,"rgba":"1261859e7f83f2eb34e7d7392593b2f08a08300245b6365832d9071d21cf79ff"}},
+"UA_dbx-160_LED_BELOW":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":92,"h":1568,"rgba":"8f6cd8662386ba8315b94294216956bf3aca5294ab620ba831a5cb3e336710bb"}},
+"UA_dbx-160_METER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":312,"h":234,"rgba":"00998632c437fef2f02e96ce640359d323de969a26953ec5b5e8ce4bc1cfda4a"}},
+"UA_dbx-160_MIX":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":34,"h":3434,"rgba":"f07892ca567a1bd79e60c3725ecafaf35ca95fa052da8a65599daeb446de7e68"}},
+"UA_dbx-160_OVERLAY-OFF":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":290,"h":144,"rgba":"9fc89cdc624fa1110d42d80d8d14d16b9564324a40c837008221ae91deb29e09"}},
+"UA_dbx-160_PANEL":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":1170,"h":472,"rgba":"dceacf9b74c4a025c8148103b01ed4aec18423002ea81b0a54798b5f628b51c4"}},
+"UA_dbx-160_POINTER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":250,"h":10608,"rgba":"ed8e47ce28ce3f5a2e18c63ec3d3fe8e79992dca3f328cb055f69eb0fe94cf6b"}},
+"UA_dbx-160_POWER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":128,"h":156,"rgba":"663a3d986bceff756e60ab33edde2df8104841a78bc2e67caa952558cd9ebca7"}},
+"UA_dbx-160_THRESHOLD-OUTPUT-GAIN":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":140,"h":14140,"rgba":"3cb68242fbddc5182de83ca86fef055372fda2c1c29e44b56cac7fee61f8e206"}}
+}}

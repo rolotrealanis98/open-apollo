@@ -1,0 +1,7 @@
+{"recipesSchema":2,"group":"ua_1176ln_rev_e","tier":1,"inputs":{"dll:UAD UA 1176LN Rev E.dll":{"kind":"dll","file":"UAD UA 1176LN Rev E.dll","root":"powered-plugins","sha256":["50135cf5973e9e41b83b12186d73b39ce8866b993971afedfeb5be0a2d0de9b0"]}},"uses":["UA_1176LN_panel","UA_1176_buttons_METER-A","UA_1176_buttons_RATIO-A","UA_1176_knob_ATTACK","UA_1176_knob_INPUT-OUTPUT","UA_1176_knob_RELEASE__ua_1176ln_rev_e","UA_1176_knob_SC-FILTER","UA_1176_meter_OVERLAY-OFF","UA_1176_meter_POINTER-OFF","UA_1176_meter_POINTER-ON","UA_1176_trimpot_HEADROOM","UA_1176_trimpot_MIX"],"blobs":{
+"b0":{"in":"dll:UAD UA 1176LN Rev E.dll","res":"10/8531/1033","sha":"4c397ebacc3fd1956ea0f1984549014235e627fbd61f4dd9ca3214f4e53b732f","dec":"png"},
+"b1":{"in":"dll:UAD UA 1176LN Rev E.dll","res":"10/8548/1033","sha":"fa91aa7c3e7e24b12a519dbd1356aa07faf56108839c2994050fe51fd8bd11c7","dec":"png"}
+},"sprites":{
+"UA_1176LN_panel":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1900,"h":350,"rgba":"48ba6806749368cd24cb2ccd4e0ea5ff48b93744b81f72fd8ea43a0154508896"}},
+"UA_1176_knob_RELEASE__ua_1176ln_rev_e":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":120,"h":12120,"rgba":"a0729d8b595ce9e7597550dc7aa64e80f993f0550eda0390698d9aabf797e1f4"}}
+}}

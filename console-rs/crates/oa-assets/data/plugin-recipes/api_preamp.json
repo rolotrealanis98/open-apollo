@@ -1,0 +1,19 @@
+{"recipesSchema":2,"group":"api_preamp","tier":3,"inputs":{"dll:UAD API Preamp.dll":{"kind":"dll","file":"UAD API Preamp.dll","root":"powered-plugins","sha256":["5430762b4f24de6f1be80c8a82057b05a16036ca35cfc16cdf8118a8129b245f"]}},"uses":["G_api_preamp_p7_r0","G_api_preamp_p7_r1","api_preamp_7709","api_preamp_7710","api_preamp_7711","api_preamp_7718","api_preamp_8597","api_preamp_8601","api_preamp_8602"],"blobs":{
+"b0":{"in":"dll:UAD API Preamp.dll","res":"10/8597/1033","sha":"55120964760cd3e01f050b169fd7e7b0ce03bc87d09232c1d433d01a00eb6129","dec":"png"},
+"b1":{"in":"dll:UAD API Preamp.dll","res":"10/7709/1033","sha":"99565a3477b90500475d5f18734416c4b935c17d1b328ad264311a899d55f146","dec":"png"},
+"b2":{"in":"dll:UAD API Preamp.dll","res":"10/7710/1033","sha":"d07ab8a1d639b1e54189c638668bb5cbeac8b621a71a8a217ff41dd4a6debd72","dec":"png"},
+"b3":{"in":"dll:UAD API Preamp.dll","res":"10/7711/1033","sha":"47a34e81c00a07b86777476679cfa98ae817f5ade00623437260433e3b4da35b","dec":"png"},
+"b4":{"in":"dll:UAD API Preamp.dll","res":"10/7718/1033","sha":"2fc78284a7bb3487e484642ba668533cb295f3794e893b93089764dc091fe3af","dec":"png"},
+"b5":{"in":"dll:UAD API Preamp.dll","res":"10/8601/1033","sha":"94b0fff8fa3ad82d754fba77ef8776c39be21b61b0e9ff0ba40392b72901ed1c","dec":"png"},
+"b6":{"in":"dll:UAD API Preamp.dll","res":"10/8602/1033","sha":"e9bc146ef9b6460bb5873260c24738423b25fa603bc831c81893e75337472565","dec":"png"}
+},"sprites":{
+"G_api_preamp_p7_r0":{"status":"fallback","basis":"similar","build":[{"op":"stack","parts":[[{"op":"load","blob":"b0"},{"op":"crop","box":[216,180,33,33]},{"op":"resize","w":66,"h":66,"filter":"lanczos"}],[{"op":"load","blob":"b0"},{"op":"crop","box":[216,180,33,33]},{"op":"resize","w":66,"h":66,"filter":"lanczos"}]]}],"output":{"w":66,"h":132,"rgba":"b848745a1d8cdc65051adf1ab2efc72f2244c9672dfcecd21c684b23da797785"}},
+"G_api_preamp_p7_r1":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"api_preamp_7709":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,106,9090]},{"op":"lanczos2x"}],"output":{"w":212,"h":18180,"rgba":"d9b4344fd1c2551dbe914e2167a4032b2abbdab182466d960791dc2d3943f346"}},
+"api_preamp_7710":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,106,9090]},{"op":"lanczos2x"}],"output":{"w":212,"h":18180,"rgba":"4ca3e48e4645852f3e14ad1344cc4a5681e66ef5fa122635db35a8c308056a6b"}},
+"api_preamp_7711":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,106,9090]},{"op":"lanczos2x"}],"output":{"w":212,"h":18180,"rgba":"e2da3f787bda4d0375de75787da32e49a8c5955cfec106347a0ce8982664bb27"}},
+"api_preamp_7718":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,22,2562]},{"op":"lanczos2x"}],"output":{"w":44,"h":5124,"rgba":"840bb4e9382b12e0e506095e7afc59c76d4001da64cb01cc19958d737c6d68da"}},
+"api_preamp_8597":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,310,320]},{"op":"lanczos2x"}],"output":{"w":620,"h":640,"rgba":"89151a0d87b38591aedbca00be0a8224e64a99670661e889b248aa97838ef45f"}},
+"api_preamp_8601":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,65,228]},{"op":"lanczos2x"}],"output":{"w":130,"h":456,"rgba":"e0b1f7c5778b8791e687f7680a8c50a2bca636b5c34247e9d9aaa98e74917e89"}},
+"api_preamp_8602":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,65,228]},{"op":"lanczos2x"}],"output":{"w":130,"h":456,"rgba":"8fbaac8912c4a775c2b8ad3ce63e8fc721f747da9ecafa57e20881572034cf0f"}}
+}}

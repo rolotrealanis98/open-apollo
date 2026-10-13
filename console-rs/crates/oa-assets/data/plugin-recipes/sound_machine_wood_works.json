@@ -1,0 +1,26 @@
+{"recipesSchema":2,"group":"sound_machine_wood_works","tier":0,"inputs":{"dll:UAD Sound Machine Wood Works.dll":{"kind":"dll","file":"UAD Sound Machine Wood Works.dll","root":"powered-plugins","sha256":["89c2edd69a9aa3400ef95cebbb0ff85b0cff2c7a46653760491380755b3a16eb"]}},"uses":["SMWW_bg","SMWW_clip2","SMWW_knob","SMWW_pan_a","SMWW_pan_b","SMWW_toggle_a","SMWW_toggle_b","SMWW_voicing_off","SMWW_voicing_on","SMWW_vu_off","SMWW_vu_on"],"blobs":{
+"b0":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[10234896,648932],"sha":"799d317e5f86e09d74a6840bb35d6649c85d57da695e3fd84f5b2f8dc33402bb","dec":"png"},
+"b1":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[10216576,8719],"sha":"082150fe7d139506e6c5ca60f4a1d776e16a20c9864792bf472fb7fd22e91eed","dec":"png"},
+"b2":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[10225312,9573],"sha":"91e1dd04e6dcb8326c48287a613796e927ff5f8425d9bee56ed8a49a50a42956","dec":"png"},
+"b3":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[1139840,2055620],"sha":"083ab0a727dcb5602feac051a02dd486cb97a73d79419e81751f3e935808f08a","dec":"png"},
+"b4":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[9359296,428433],"sha":"2bb8837d230053050cc2d8a311d562cbc3c2b625cc332a41bd15cb2102d7d8a4","dec":"png"},
+"b5":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[9787744,428827],"sha":"5d2c1705acfe31a1792a045859db153f0d3455c6b0dbc2d4e9775a813924b417","dec":"png"},
+"b6":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[10883840,9286],"sha":"d85d3889d2457c012202bfd8ef04d4a5d7a2da1b19f410fb3c1f4dbbc15fbdb3","dec":"png"},
+"b7":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[10893136,9241],"sha":"e9554650aaf5946f05b143ce374d0c36ba5c1c7f4fd16bbdbff5ec234b46deb7","dec":"png"},
+"b8":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[10902384,8093381],"sha":"15f44bbd2f088e75492be90e50d743d020bb7c63da6eeddbbdfc321d842ee81f","dec":"png"},
+"b9":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[18995776,8592104],"sha":"92c6567b2e9476af5ba51d3ff5753281ebbf4038b15eaad131356bfeeacecb9c","dec":"png"},
+"b10":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[27587888,2274308],"sha":"faa82b83874de3839563c0368482f18a546b6d6159037c949228fc65a5e01b41","dec":"png"},
+"b11":{"in":"dll:UAD Sound Machine Wood Works.dll","carve":[29862208,2507847],"sha":"501c6e2b409784327690ca60156fac686fbae822c2fcb1d6b8631734fde0e8f2","dec":"png"}
+},"sprites":{
+"SMWW_bg":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1600,"h":1150,"rgba":"9fc025b947bf007ad97505da77a6547467eef662fbe1debd83dcba91e71abda1"}},
+"SMWW_clip2":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,101,52]}],[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,101,52]}]]},{"op":"lanczos2x"}],"output":{"w":202,"h":208,"rgba":"2a5b5be0c04610cf5acda24b4697485260c52a3e1e299355f542172b8f8c5af8"}},
+"SMWW_knob":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":210,"h":20604,"rgba":"617dab77593cc91c08191ce0759c7c23b3a2b9b9792ed336eef5535c4db159cc"}},
+"SMWW_pan_a":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":102,"h":10100,"rgba":"098a5fa0d3f8bce930e5545e631a184a9c88bcb7b547308a5af40feee1141b08"}},
+"SMWW_pan_b":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":102,"h":10100,"rgba":"2e737b4510fc3c73304347776337aeec67b08a23f8aacf8296a17544de54934c"}},
+"SMWW_toggle_a":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":130,"h":288,"rgba":"36bb10bc8eb6be087da5c189d67713fcfd8dadd8c54f55866bcd39ad7aae4967"}},
+"SMWW_toggle_b":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":130,"h":288,"rgba":"abd6ff7a8a16bb7a916347c1f2384f6deff97691ad74769958937a674d883668"}},
+"SMWW_voicing_off":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":532,"h":32926,"rgba":"c27218c84edc6088b744851812afb1a595dabc30252cba84617a3986350b09f3"}},
+"SMWW_voicing_on":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":532,"h":32926,"rgba":"7ca2b9a29b72941ac73e465f5a87892221d64b3632a75d07c6ed4d0a380be1ad"}},
+"SMWW_vu_off":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":290,"h":16766,"rgba":"ad532c7d2c7d571635ac9faf75fb27ab7bf7638d1df794c6f808b71c292c2abe"}},
+"SMWW_vu_on":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"output":{"w":290,"h":16766,"rgba":"220dc61117dc9e88ea41ce17efb5314a0a805bf216f101facc41f71df1f7c7af"}}
+}}

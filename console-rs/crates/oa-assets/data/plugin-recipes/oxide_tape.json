@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"oxide_tape","tier":1,"inputs":{"dll:UAD Oxide Tape.dll":{"kind":"dll","file":"UAD Oxide Tape.dll","root":"powered-plugins","sha256":["4c177a64c3bb4f2a11b7c4de3fb4ba6ffd1e55f0ce09952b6a6b62688b6963b7"]}},"uses":["UA_OXIDE_background_off","UA_OXIDE_background_on","UA_OXIDE_knob","UA_OXIDE_meter_needle","UA_OXIDE_switch_input","UA_OXIDE_switch_repro","UA_OXIDE_switch_toggle"],"blobs":{
+"b0":{"in":"dll:UAD Oxide Tape.dll","res":"10/8062/1033","sha":"8257ba3a845eebaabf73328401a14ccfed87719fe427105af32c181223f4dc5c","dec":"png"},
+"b1":{"in":"dll:UAD Oxide Tape.dll","res":"10/8053/1033","sha":"8ae098ed8ff56d801b1133a02040da2ed38dade5c7bdaad32d2bddd7c22f1629","dec":"png"},
+"b2":{"in":"dll:UAD Oxide Tape.dll","res":"10/8056/1033","sha":"1d110cb8f12ab25934d24f902bac3df9df4de51fe730ca22d6a7698d7e97639c","dec":"png"},
+"b3":{"in":"dll:UAD Oxide Tape.dll","res":"10/8057/1033","sha":"61f4afd609336f1feafdf90d4692c149a1549d3f7d5959a812c7aa2a8c2c1d39","dec":"png"},
+"b4":{"in":"dll:UAD Oxide Tape.dll","res":"10/8058/1033","sha":"5a2dc1f3dc21b8b9113459f3972c460815c1edbf2458a50bfd902c6456426488","dec":"png"},
+"b5":{"in":"dll:UAD Oxide Tape.dll","res":"10/8059/1033","sha":"b522c1777c22e60857bab9d692fb82c4f7d58491b06186992d24a83779892ac1","dec":"png"},
+"b6":{"in":"dll:UAD Oxide Tape.dll","res":"10/8054/1033","sha":"e6c20750f24fa7cfdc856a7a526bab44bb073f846cf802a4acdde7e343826ac6","dec":"png"}
+},"sprites":{
+"UA_OXIDE_background_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1290,"h":690,"rgba":"176970672f43ba4abb370e36ab6548f89c45fd7369e5d7e0d7fdb19c103b6d6c"}},
+"UA_OXIDE_background_on":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":1290,"h":690,"rgba":"372656fa7f1080d97280a8d4054d4584618114745eac64a66c43a15877dc6fc5"}},
+"UA_OXIDE_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":110,"h":11990,"rgba":"2c2011175190326af53553e03ffa4f8eb7fd189233ee04a98c6761b7bd24e344"}},
+"UA_OXIDE_meter_needle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":182,"h":6240,"rgba":"6bf1bf4b17d0856bc9953f29b269eb2f04be68ea7a72c758b4364c62004af4a0"}},
+"UA_OXIDE_switch_input":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":90,"h":384,"rgba":"7bf5738a754d73f5cf16b5d1834c545d45ae1e546d7ce7d454beac6678939f0e"}},
+"UA_OXIDE_switch_repro":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":90,"h":384,"rgba":"a9112add9993a0ef402fbc23ab20cef36147d48e6b4a8b6afecd584499e2982d"}},
+"UA_OXIDE_switch_toggle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":48,"h":164,"rgba":"40de5933765156ced3c72feea37cfbb67602f9b9f39e06b2e4ee3eec9c650105"}}
+}}

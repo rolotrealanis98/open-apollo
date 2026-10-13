@@ -1,0 +1,7 @@
+{"recipesSchema":2,"group":"manley_massive_passive_mst","tier":1,"inputs":{"dll:UAD Manley Massive Passive MST.dll":{"kind":"dll","file":"UAD Manley Massive Passive MST.dll","root":"powered-plugins","sha256":["ea8defe2d4f1221d4ddf32f11719ae43c270b8d89afef3b3c53b7384820cb68d"]}},"uses":["massivepassiveMST_background","massivepassiveMST_knob","massivepassive_knob_lrg_11_step","massivepassive_knob_sml","massivepassive_knob_sml_2_step","massivepassive_knob_sml_6_step","massivepassive_push_switch","massivepassive_push_switch_pwr_off","massivepassive_switch","massivepassive_switch_3p","massivepassive_switch_3p_pwr_off"],"blobs":{
+"b0":{"in":"dll:UAD Manley Massive Passive MST.dll","res":"10/6914/1033","sha":"2416705c47cfce505d9e9dbd5a8c1a4f2f743b17f13ec73871b0d1262999f836","dec":"png"},
+"b1":{"in":"dll:UAD Manley Massive Passive MST.dll","res":"10/6916/1033","sha":"7a164de1fcab1fd16a96f0d526fe67fa20a430e24c34ae85eabb14f42aa746fe","dec":"png"}
+},"sprites":{
+"massivepassiveMST_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1900,"h":528,"rgba":"8cee39bf935973e8cf1d8b7920ad0015b21fd3a4a580030ba4f25c39e1952bb2"}},
+"massivepassiveMST_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":100,"h":1760,"rgba":"759fbacd18a75e5cf0e2dd943b5a5b427d9cb3b6ee7432d5362be36acfb84571"}}
+}}

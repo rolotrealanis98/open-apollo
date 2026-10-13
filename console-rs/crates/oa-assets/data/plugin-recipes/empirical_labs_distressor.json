@@ -1,0 +1,28 @@
+{"recipesSchema":2,"group":"empirical_labs_distressor","tier":3,"inputs":{"dll:UAD Empirical Labs Distressor.dll":{"kind":"dll","file":"UAD Empirical Labs Distressor.dll","root":"powered-plugins","sha256":["bfa0e72967cc3207195837ee46e410e35cf08bc10d336371fc98d010c94004b0"]}},"uses":["G_empirical_labs_distressor_p0_r0","distressor_bg","distressor_knob","distressor_knob_hr","distressor_knob_mix","distressor_led_3way","distressor_led_meter","distressor_led_ratio","distressor_led_red","distressor_led_yellow","distressor_switch","distressor_switch_bypass","distressor_switch_power"],"blobs":{
+"b0":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8298/1033","sha":"500366cc6ecda8144c6c9a2a01dc58bb4dbdd4e0dfb87cf5e25a1ceac69a38cb","dec":"png"},
+"b1":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8300/1033","sha":"b80c5768a1c09aaf0bd8c710e56b2bac718c10ba0be52939d1c641bcd48e207a","dec":"png"},
+"b2":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8306/1033","sha":"93d383052f85b594e150502b8dee612fcb3bfa061a860c02fa8cc8baba65d569","dec":"png"},
+"b3":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8307/1033","sha":"b518d1e1db77cd5a136a6ebbd98637909dd412cd8653e29e34e9ec1f9154f85c","dec":"png"},
+"b4":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8299/1033","sha":"cc0375cfdc732b9923589a27db7309df6611ab2edb2f0387302ced68e94e86bf","dec":"png"},
+"b5":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8310/1033","sha":"46da8ef53c9890b4168a61f9327aee5e9bb6b781ce4e616b438eae8df91bbab7","dec":"png"},
+"b6":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8301/1033","sha":"ff8136bb987e621f1a7c9217e28722e26e2e2332be2b0f6e6ac94427b41be238","dec":"png"},
+"b7":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8305/1033","sha":"35fe510bb8dd7fb9b8aa48e384c5d20ca7661974471ada14aa7ee797fe644de0","dec":"png"},
+"b8":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8309/1033","sha":"5a764900f54157446b5e44d3095e1c0b266b76f154b20b6efe8b10f650eac573","dec":"png"},
+"b9":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8303/1033","sha":"e8bfe696c5ab89bfba9723a30afc3a852fe4990e771ba320131b310b54a47af9","dec":"png"},
+"b10":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8304/1033","sha":"6eb9a16be98e6581e8e7229ceb40ad0b17cb6d913a56beab8e9ab040d1ff6938","dec":"png"},
+"b11":{"in":"dll:UAD Empirical Labs Distressor.dll","res":"10/8302/1033","sha":"4f5f9cba1091c008f7fdc2343731abecabe74c86f08a25f06b829ea8d1247e03","dec":"png"}
+},"sprites":{
+"G_empirical_labs_distressor_p0_r0":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"distressor_bg":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":2020,"h":724,"rgba":"3aa1cfd81ccedf16b706a0acdc25d343bf50ae927d678b714b08b4385a0ebaa0"}},
+"distressor_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":350,"h":71740,"rgba":"39ca0096a88df4c232f2af0bb67e042c3df4921899a9807cf32471f8737a0cd7"}},
+"distressor_knob_hr":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":78,"h":686,"rgba":"97fdce5f394e0b071f25bb65e3d1e4958260632236fa9bdd1ccc06c537fc6e78"}},
+"distressor_knob_mix":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":196,"h":19190,"rgba":"4aba2ef7fb774db3f47dda8724b3a4b13173b9f05166f4c9be3dd98b27330775"}},
+"distressor_led_3way":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":50,"h":1184,"rgba":"af86cfd07337bb47792022c94f7cacf88013e4797432815beca8b3dea616c187"}},
+"distressor_led_meter":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":948,"h":2352,"rgba":"dd124e43a43ec75ff39bbb25668c9784d907a1f6f049fe520bcd418122330658"}},
+"distressor_led_ratio":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":688,"h":432,"rgba":"c25a43fbbdbef750db57418e0907d40d6f8ef6a9e1a5dcd5b7d014a8bb16311c"}},
+"distressor_led_red":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":48,"h":96,"rgba":"72055864f0964e7ba81d3736c245eeda3d918a02923591a88a9962064d9ecd96"}},
+"distressor_led_yellow":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":48,"h":96,"rgba":"fb216cfa162994072bdc34d42a30aaa3ead6171b8121b334a7e560dbb3912fa2"}},
+"distressor_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":174,"h":244,"rgba":"6c3b204bfa2df74f176e2657bfa2183275bba90f10148f119ccd6dbe6cd8f216"}},
+"distressor_switch_bypass":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":174,"h":224,"rgba":"58304ddcb42beb8f111c1a41086c175ec9568dace3f16953b94e953851a504de"}},
+"distressor_switch_power":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"output":{"w":202,"h":576,"rgba":"89bd4588a1dd3cf562685440e5cf0e680f0aa66c738e706e450c8014474413a7"}}
+}}

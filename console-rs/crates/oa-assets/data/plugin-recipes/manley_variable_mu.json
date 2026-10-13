@@ -1,0 +1,25 @@
+{"recipesSchema":2,"group":"manley_variable_mu","tier":1,"inputs":{"dll:UAD Manley Variable Mu.dll":{"kind":"dll","file":"UAD Manley Variable Mu.dll","root":"powered-plugins","sha256":["d77ee0b00416543e39e939acb41e9dea03916aeef1691feda0022bba1349114c"]}},"uses":["VariMu_background","VariMu_large_continuous_V5","VariMu_meter-background","VariMu_meter-needle","VariMu_meter-reflex-left","VariMu_meter-reflex-right","VariMu_power-switch","VariMu_recover-switch_V5","VariMu_small_continuous_V5","VariMu_trimpot_HEADROOM","VariMu_two-position-switch"],"blobs":{
+"b0":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7778/1033","sha":"c0f56b7b51c8cd5a11777fb9ea31cd22b339a6582742fb4ed051ac41cdababbe","dec":"png"},
+"b1":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7779/1033","sha":"4ec90e9028c481696cd4d26dcbd20eaebcf120cd7bc8dbd638231b75f3b267a6","dec":"png"},
+"b2":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7785/1033","sha":"dcb8b0a592b130ac911a3f31188e5335bce1f4822f628c7d7d5e0d8ca487093e","dec":"png"},
+"b3":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7786/1033","sha":"51b194e39c2be5882a60551f5c0704170ddc51f6fcab8a1c6e62085d2289cf13","dec":"png"},
+"b4":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7789/1033","sha":"49bfa4bbcbabe8eb2eae961f10d0ec2f104104e7062e75955d74ae2d9854f905","dec":"png"},
+"b5":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7790/1033","sha":"61f149891b004a94dcf2b2f9baf485164b93147595123929c1467eafdafde80d","dec":"png"},
+"b6":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7784/1033","sha":"21d3944907cf0f6489a7601acf41958783cd892435e5f44f5a4550a35ba3cb4e","dec":"png"},
+"b7":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7780/1033","sha":"0719ea84442dd5557dac9c4933dd5886f3978047c0b96d7043788d7f8c00c3f5","dec":"png"},
+"b8":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7782/1033","sha":"08ba7a7934f94d567f69dfdb3263d0d17cdf0129c729d051b007aeb112c82532","dec":"png"},
+"b9":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7791/1033","sha":"291cc5cb09b826becd6784c7803d06f5e7979a9aacfeec6e3b37419bb4e5d00d","dec":"png"},
+"b10":{"in":"dll:UAD Manley Variable Mu.dll","res":"10/7783/1033","sha":"29932a37292f562fe90b1654cf512ac5fffb00f32ba6e242778906030ee2e20b","dec":"png"}
+},"sprites":{
+"VariMu_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1900,"h":344,"rgba":"1bcf835b3436b56574b3496470cda8ee5576e809628055f295f29265f71aa385"}},
+"VariMu_large_continuous_V5":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":106,"h":13332,"rgba":"036a92e04717da3e8a987c0c87b0d0c77ca8db3c18d044f8a9a1d403aa9d7b82"}},
+"VariMu_meter-background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":294,"h":252,"rgba":"25d57bd49dc823fe5a061890ef4920526c59d8d40d0deb465c8bc31dfa787c1f"}},
+"VariMu_meter-needle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":250,"h":11110,"rgba":"ab5bc6664187248c640198496848e8837af72fa5ae4ec61f43f9487f9631779b"}},
+"VariMu_meter-reflex-left":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":294,"h":126,"rgba":"1af5151a9ff2db566654e49803f471075656a949ded51012a6ddd729e7d968cf"}},
+"VariMu_meter-reflex-right":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":294,"h":126,"rgba":"c984de36ad361aeaaf8ce987c8e4db8fa7a82bfe9c1b224adcb5812af5c1dc50"}},
+"VariMu_power-switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":84,"h":88,"rgba":"4c890b9d78cdc3bcd8257d307ff47f5943144a6c4c20f2b37b0e9b946abcf4b8"}},
+"VariMu_recover-switch_V5":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":160,"h":660,"rgba":"8cdd9f00b5e11abc0fba58f4a4899ae2f445bc51760680112009c878558afd5b"}},
+"VariMu_small_continuous_V5":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":90,"h":6100,"rgba":"cccc3617c9683859129e57b296010b2985f801c4a7f756b280cb4156ecef7ad8"}},
+"VariMu_trimpot_HEADROOM":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":44,"h":396,"rgba":"77ecfab139822262e8ebfe00770142dd338544a079cc2011eda2d3312e86e333"}},
+"VariMu_two-position-switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":42,"h":148,"rgba":"16b59ab4f9364234698190b57bc2dc99fe05441c0ad9a1ed6eda9fc078e9e210"}}
+}}

@@ -1,0 +1,27 @@
+{"recipesSchema":2,"group":"pure_plate","tier":1,"inputs":{"dll:UAD Pure Plate.dll":{"kind":"dll","file":"UAD Pure Plate.dll","root":"powered-plugins","sha256":["ef4ca67601fbfa17f6a69a011d6f1bdfb20698783f738a615d019d081a0cbce3"]}},"uses":["Pure_Plate_background","Pure_Plate_damper_bg","Pure_Plate_damper_switch_minus","Pure_Plate_damper_switch_plus","Pure_Plate_knob","Pure_Plate_slider_cap","Pure_Plate_slider_cap_3p","Pure_Plate_switch","Pure_Plate_vu_meter_background","Pure_Plate_vu_needle","Pure_plate_damper_needle","Pure_plate_damper_needle_BG"],"blobs":{
+"b0":{"in":"dll:UAD Pure Plate.dll","res":"10/8244/1033","sha":"1fb4f01b62674753b4d7f93bf8faf4857f28593ec9b31aa3811d099d5c5b72eb","dec":"png"},
+"b1":{"in":"dll:UAD Pure Plate.dll","res":"10/8245/1033","sha":"20a7ca0db68e6c9a30a2bfa63279872da0815943a07d5de1d8aeb8f485d14473","dec":"png"},
+"b2":{"in":"dll:UAD Pure Plate.dll","res":"10/8248/1033","sha":"750f25284c6a3a1af4cbace9bdd3865c17d3e533f1198240b1ba00d5491b07c6","dec":"png"},
+"b3":{"in":"dll:UAD Pure Plate.dll","res":"10/8249/1033","sha":"0d9b3e9d2fe46a157627fc0ed1794ec3f229c211d7885ab625a8be889a7ee97e","dec":"png"},
+"b4":{"in":"dll:UAD Pure Plate.dll","res":"10/8250/1033","sha":"cafec1b946d025b6d2465a761ba44745a4aed167db15f8ee88e8d4d1b45fbabe","dec":"png"},
+"b5":{"in":"dll:UAD Pure Plate.dll","res":"10/8251/1033","sha":"2bb4c5d7cb73e71174d3c7b11be90f925f40386bd455559a095e00c0b692c8c4","dec":"png"},
+"b6":{"in":"dll:UAD Pure Plate.dll","res":"10/8252/1033","sha":"26bea27147f37df8f6db10eb944eca59af32544f7baad8d73322d3075fff027c","dec":"png"},
+"b7":{"in":"dll:UAD Pure Plate.dll","res":"10/8253/1033","sha":"f64d661847b532a78d2c7778ec137fedc6c8d234944049c89c99ed63cfd727c3","dec":"png"},
+"b8":{"in":"dll:UAD Pure Plate.dll","res":"10/8254/1033","sha":"90959e99922a2ae413a5ef1897423fa28a3471c46bc7eca3b1d574935785b50e","dec":"png"},
+"b9":{"in":"dll:UAD Pure Plate.dll","res":"10/8255/1033","sha":"03facd0519ff81678ffebd1e97959ffbc15e67129693fc29edb5ed3bf50f33c8","dec":"png"},
+"b10":{"in":"dll:UAD Pure Plate.dll","res":"10/8246/1033","sha":"cb11710fa865703201319b016f503f2e46e90069373bb24bf1c2b90929853aee","dec":"png"},
+"b11":{"in":"dll:UAD Pure Plate.dll","res":"10/8247/1033","sha":"4a551193a7a4101417441a029c4a68277833588aa7ae6a35e6fb4dbfe9532342","dec":"png"}
+},"sprites":{
+"Pure_Plate_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":820,"h":1324,"rgba":"05f39c0c8506c090cdf199bfc764f0ae94f71bdbb4bd4c7dc8ac048907bf0890"}},
+"Pure_Plate_damper_bg":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":248,"h":41044,"rgba":"252a8b13ca51202a2cdad600eff62a535d822c219453323f181ae2884743e3eb"}},
+"Pure_Plate_damper_switch_minus":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":84,"h":294,"rgba":"65d47faae74aaaff76d33b0b65d239bc53d71b03d4eef8f61fb8f53ee88198c1"}},
+"Pure_Plate_damper_switch_plus":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":84,"h":294,"rgba":"8899bd98ae1c0025f2fbe34dc75e2a39bb5c480cd64383a84a86fd68fa740611"}},
+"Pure_Plate_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":160,"h":19190,"rgba":"6696c5a171e916d00e1203e2974a38d024e9a5f4d3bec928bb86739b9933e8d8"}},
+"Pure_Plate_slider_cap":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":226,"h":13332,"rgba":"9dfaa0f6feb4b921c255343582b8a6d7afc9e007d53170c646fa4be24b2991d8"}},
+"Pure_Plate_slider_cap_3p":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":226,"h":396,"rgba":"4c8a8662cf30ed2be86c969d1690c3f7fb5f98af33559fea9b747a367aeb5fa6"}},
+"Pure_Plate_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":176,"h":272,"rgba":"c5f4cfae6c02d2e06a904b4523300c4b9f167fdc39aacbc1bcc0add831c3e9aa"}},
+"Pure_Plate_vu_meter_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":322,"h":324,"rgba":"28ac6b81d558ad8217d26cc28fd6df1479006e1619c750c66788bbf94a7caae1"}},
+"Pure_Plate_vu_needle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":238,"h":11716,"rgba":"44ed8689a7e1a80e45db209b9a9e20935b1da09572217e21696b5221ca337666"}},
+"Pure_plate_damper_needle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":192,"h":4646,"rgba":"0f1a46d3e50c04271eae2ddc5724bf9df6f8527fa8ec49e57a6b13a57f43d28a"}},
+"Pure_plate_damper_needle_BG":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"output":{"w":192,"h":92,"rgba":"c3f64018de6c25b4bdf0f5989f5a66128f299b95c9d2ba933484e1de82593f7e"}}
+}}

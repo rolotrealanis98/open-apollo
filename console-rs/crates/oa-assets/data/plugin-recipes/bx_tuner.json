@@ -1,0 +1,11 @@
+{"recipesSchema":2,"group":"bx_tuner","tier":0,"inputs":{"dll:UAD bx_tuner.dll":{"kind":"dll","file":"UAD bx_tuner.dll","root":"powered-plugins","sha256":["ee038fe72c2827ae909c4d333e9b029105cbb64920c63cd67d4ce16f5f271fab"]}},"uses":["bx_tuner__BACKGROUND","bx_tuner__SWITCH","bx_tuner__SWITCHTRISTATE","bx_tuner__TUNERLED"],"blobs":{
+"b0":{"in":"dll:UAD bx_tuner.dll","res":"PNG/BACKGROUND.PNG/1031","sha":"ada7a10d963968f26bc20408654169205265f09a45ae052bff94693e7042ebad","dec":"png"},
+"b1":{"in":"dll:UAD bx_tuner.dll","res":"PNG/SWITCH.PNG/1031","sha":"03bc6caef18b127df2457acfb35332c260ba0fcc3caba87b00f928c1a21d41cd","dec":"png"},
+"b2":{"in":"dll:UAD bx_tuner.dll","res":"PNG/SWITCHTRISTATE.PNG/1031","sha":"129e322ab82ab2ca238e31e97cc34bb738c91b4a10ce7a42f665bece329c22db","dec":"png"},
+"b3":{"in":"dll:UAD bx_tuner.dll","res":"PNG/TUNERLED.PNG/1031","sha":"11a9e38c9b8aa29aa98e69bf0d62c8b4d51a304ba57af565fb048974f1d7cf02","dec":"png"}
+},"sprites":{
+"bx_tuner__BACKGROUND":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":1368,"h":324,"rgba":"727af9fc5275f67e72b465baac81f064e6ebc28189ccab2305de9f69dbdbd6ea"}},
+"bx_tuner__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":124,"h":248,"rgba":"9f2de23219fe16c2ea59cf8976e930d310ad6fbfb336ae4ac3bcee787c746601"}},
+"bx_tuner__SWITCHTRISTATE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":124,"h":372,"rgba":"4f57cf2298fb2784894b5559256f7c5a2ddf2421099e5a1d203a6152a9a7e8f2"}},
+"bx_tuner__TUNERLED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":1058,"h":10206,"rgba":"8092e07b88835b9ab9f6505839b0c86296a464a81ab2c62e65906c9efb57aaff"}}
+}}
