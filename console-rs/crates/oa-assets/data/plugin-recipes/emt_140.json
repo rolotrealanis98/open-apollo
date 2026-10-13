@@ -1,0 +1,31 @@
+{"recipesSchema":2,"group":"emt_140","tier":1,"inputs":{"dll:UAD EMT 140.dll":{"kind":"dll","file":"UAD EMT 140.dll","root":"powered-plugins","sha256":["a95c031ee445d001d7a8cdcac526d675c8635df81043a663241967eab77ffcc8"]}},"uses":["G_emt_140__Pure_Plate_damper_switch_minus","G_emt_140__Pure_Plate_damper_switch_plus","damper_film_off","damper_glass_overlay","emt140_background_off","emt140_background_on","emt_knob","eq_switch_metal","plate_select_knob","power_switch_metal","slider","vu_off","vu_on","wet_solo_switch"],"blobs":{
+"b0":{"in":"dll:UAD EMT 140.dll","res":"10/8799/1033","sha":"b5dcaa875980d8f152162d0e79762db61c32b9851109450a92dccdf3fbccc509","dec":"png"},
+"b1":{"in":"dll:UAD EMT 140.dll","res":"10/6931/1033","sha":"7eea06b949b984ccb97f0550dc1b19399426472f7b0159da679bad15df55b573","dec":"png"},
+"b2":{"in":"dll:UAD EMT 140.dll","res":"10/6933/1033","sha":"0e83309a9badf10e75b99cddbb8a1488339fa9ccd381a42dc41abbb49438309c","dec":"png"},
+"b3":{"in":"dll:UAD EMT 140.dll","res":"10/8800/1033","sha":"80bde3414483c9eb168910ebc96e71880a04132a8e4332c279a5ba69493f1d99","dec":"png"},
+"b4":{"in":"dll:UAD EMT 140.dll","res":"10/8801/1033","sha":"57c26e248a5347ee7592410bfc5736a6d133728e7492a9dac2476b8f95e4d4c2","dec":"png"},
+"b5":{"in":"dll:UAD EMT 140.dll","res":"10/6930/1033","sha":"23ca48521465506173f6d218be602d71f21819450c4ac9a1075c903e932f7b58","dec":"png"},
+"b6":{"in":"dll:UAD EMT 140.dll","res":"10/6938/1033","sha":"133ebceffbb6e8c55c00b617fd0f8b8571fb46c1ea3d6e61e85a21ef2f04bfcf","dec":"png"},
+"b7":{"in":"dll:UAD EMT 140.dll","res":"10/6934/1033","sha":"753f051e29d3fc7c6ebd3a41b0f17aab3b99cdf567c0db7317f385f3dcf640f7","dec":"png"},
+"b8":{"in":"dll:UAD EMT 140.dll","res":"10/6935/1033","sha":"9efb71d19e3aa4fd0fa35f144e9ed94ebd92d4dfff8212a506736c1fbf0d65f5","dec":"png"},
+"b9":{"in":"dll:UAD EMT 140.dll","res":"10/6936/1033","sha":"0a4ff2b4a5c9a39a4c68561a5b643953e0124dd267c1dbfaaa58b1aea97fbd78","dec":"png"},
+"b10":{"in":"dll:UAD EMT 140.dll","res":"10/6941/1033","sha":"86cd04ab01b95639df935c40d64fcb1ece16b80f7f59169ec47a34b10afd1fa8","dec":"png"},
+"b11":{"in":"dll:UAD EMT 140.dll","res":"10/8802/1033","sha":"a09f5605e43f68f8d65dafd4de18a6aa21c079f38366233b210ced2236b9e908","dec":"png"},
+"b12":{"in":"dll:UAD EMT 140.dll","res":"10/6939/1033","sha":"2ce1ae52de6d8f89a5e2cd847a47e0113844ddad0e03445367d57a9552f27886","dec":"png"},
+"b13":{"in":"dll:UAD EMT 140.dll","res":"10/6940/1033","sha":"3465cdef9203c4bfc12df7132c7a8d456f6fe84c3b6372867ca6d3810f00ee64","dec":"png"}
+},"sprites":{
+"G_emt_140__Pure_Plate_damper_switch_minus":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":84,"h":300,"rgba":"6e7c890cf101fa350a77906bab6ee7aba799c63250bf700cb815907040173570"}},
+"G_emt_140__Pure_Plate_damper_switch_plus":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":84,"h":300,"rgba":"a1340317a375db399351b5fc4ebce45ec2962942495e67ea3393065c348b0345"}},
+"damper_film_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":88,"h":27068,"rgba":"db68842538f9c4c84a980347cda611662ba06667cf0bf1025e98747ea6e5c7fd"}},
+"damper_glass_overlay":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":474,"h":268,"rgba":"e89687e360c1edddc1ae6bded65186e5347a4eac60009ddad93ea9653ecf98b2"}},
+"emt140_background_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":2400,"h":832,"rgba":"e362a08162d9e3796fb75d71276b3df68cd28c88b2ff6b7644ae09288056c925"}},
+"emt140_background_on":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":2400,"h":832,"rgba":"93b9fda49c6a959ae911b2f81bd09e01d0c1d17130010308ddaf63c9260bf9a2"}},
+"emt_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":200,"h":20200,"rgba":"29a91467432f09c03953ebb8251dda608e9472a03004367037a6646f625edbc7"}},
+"eq_switch_metal":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":168,"h":264,"rgba":"6e478880902880bb761dc11aa146ec13243a21aa3f22c82ebbd8013dbd16fa8c"}},
+"plate_select_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":240,"h":1080,"rgba":"db2162373fadfa1561d9e40dca67ca37326baa8b650718fc7d7839b1704f6b61"}},
+"power_switch_metal":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":332,"h":1136,"rgba":"4199b06bf5bec84f032f592c9b37c25b7af6d03a4bb31ee4da4c10daf4937362"}},
+"slider":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":580,"h":1520,"rgba":"9d503c8f2973143c0a0f49dbc13190c5e9546a6e3347302d43421dd73b223c25"}},
+"vu_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"output":{"w":270,"h":24442,"rgba":"4d187432949e9fb0f7941815fc99616a5a7067f47cf57c4c357636b341752b9e"}},
+"vu_on":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b12"},{"op":"lanczos2x"}],"output":{"w":270,"h":24442,"rgba":"dbb05d87ff5ae302dcd207f9c73c02b9ce602d9b752540a09d96a02be5eef8b5"}},
+"wet_solo_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b13"},{"op":"lanczos2x"}],"output":{"w":112,"h":300,"rgba":"bcf60f721d21741aca7a229149840935f9d69bab9b42afdb1db4ca60e5a46f6a"}}
+}}

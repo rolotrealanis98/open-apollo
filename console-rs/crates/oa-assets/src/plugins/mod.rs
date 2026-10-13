@@ -93,6 +93,8 @@ pub struct SpriteResult {
     pub status: Status,
     pub basis: Option<String>,
     pub outcome: Outcome,
+    /// RGBA SHA-256 of what was built (also set on a mismatch).
+    pub rgba: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +174,7 @@ pub fn build_with(
                 status: Status::NoRecipe,
                 basis: None,
                 outcome: Outcome::Failed("no recipe".into()),
+                rgba: None,
             });
             continue;
         };
@@ -182,6 +185,7 @@ pub fn build_with(
                 status: s.status,
                 basis: s.basis.clone(),
                 outcome: Outcome::Skipped,
+                rgba: None,
             });
             continue;
         }
@@ -192,10 +196,10 @@ pub fn build_with(
             if !seen.insert(x.clone()) {
                 continue;
             }
-            if let Some((_, s)) = book.sprite(&x)
+            if let Some((f, s)) = book.sprite(&x)
                 && let Some(b) = &s.build
             {
-                recipe::inputs(b, &mut ins);
+                recipe::inputs(b, &f.blobs, &mut ins);
                 recipe::deps(b, &mut stack);
             }
         }
@@ -280,6 +284,7 @@ fn make_one(runner: &mut run::Runner, id: &str, images: &Path) -> Made {
         status: s.status,
         basis: s.basis.clone(),
         outcome: Outcome::Ok,
+        rgba: None,
     };
     let im = match runner.sprite(id, 0) {
         Ok(im) => im,
@@ -289,6 +294,7 @@ fn make_one(runner: &mut run::Runner, id: &str, images: &Path) -> Made {
         }
     };
     let hash = im.hash();
+    r.rgba = Some(hash.clone());
     if let Some(o) = &s.output {
         if (o.w, o.h) != (im.w, im.h) {
             r.outcome = Outcome::Failed(format!("size {}x{}, want {}x{}", im.w, im.h, o.w, o.h));
@@ -307,7 +313,7 @@ fn make_one(runner: &mut run::Runner, id: &str, images: &Path) -> Made {
     }
     let mut ins = Vec::new();
     if let Some(b) = &s.build {
-        recipe::inputs(b, &mut ins);
+        recipe::inputs(b, &f.blobs, &mut ins);
     }
     let inputs = ins.into_iter().filter_map(|i| runner.read.get(&i).map(|h| (i, h.clone()))).collect();
     (r, Some((hash, inputs)))

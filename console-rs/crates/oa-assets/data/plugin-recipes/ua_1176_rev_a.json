@@ -1,0 +1,25 @@
+{"recipesSchema":2,"group":"ua_1176_rev_a","tier":1,"inputs":{"dll:UAD UA 1176 Rev A.dll":{"kind":"dll","file":"UAD UA 1176 Rev A.dll","root":"powered-plugins","sha256":["90f4544a5076f79fe6d1fc0a18d628d0946c033520bf872ade2c9f13499a41d5"]}},"uses":["UA_1176RevA_knob_INPUT-OUTPUT","UA_1176RevA_lamp","UA_1176RevA_meter_POINTER","UA_1176RevA_panel","UA_1176_buttons_METER-A","UA_1176_buttons_RATIO-A","UA_1176_knob_ATTACK","UA_1176_knob_RELEASE","UA_1176_knob_SC-FILTER","UA_1176_trimpot_HEADROOM","UA_1176_trimpot_MIX"],"blobs":{
+"b0":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8533/1033","sha":"f86540aaeadaf92d12016f6a9f00bbd2e895fa173736dfd50e9e1870244dca7d","dec":"png"},
+"b1":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8543/1033","sha":"bf041d6109659abba05cab2d34f3e59e3acedea67f439bae402e0608d4e22b62","dec":"png"},
+"b2":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8541/1033","sha":"ab6e8dc96cee966a85c79d5d990fcb20f0353a20c8828f943b4ccc9e5364c18b","dec":"png"},
+"b3":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8530/1033","sha":"48dbad3cba89061d849aafb6b96d413346e4d184d0e3a84c2c13cdb0399c4d9d","dec":"png"},
+"b4":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8544/1033","sha":"efb6c6816200e4e9fb1eb9b2463d4904940da6e126ffee2ff35eff8c5f0f076e","dec":"png"},
+"b5":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8546/1033","sha":"4a4122bad05e05f666589704021097abc448cffd19f8123370c496c242afb476","dec":"png"},
+"b6":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8535/1033","sha":"93acee6c8b53ea510266c32fbda50bff5dd852d08748227c21cc02db7f8c98a8","dec":"png"},
+"b7":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8548/1033","sha":"fa91aa7c3e7e24b12a519dbd1356aa07faf56108839c2994050fe51fd8bd11c7","dec":"png"},
+"b8":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8536/1033","sha":"20c089145e48fd41677ed52ad1c5e2ef8f9584c84d8451c73b5290eeb21bb307","dec":"png"},
+"b9":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8537/1033","sha":"16712dd472ebfa3546f3a3d73cc6db658bb178c7e17ca952b5f19d0f7b6e6d07","dec":"png"},
+"b10":{"in":"dll:UAD UA 1176 Rev A.dll","res":"10/8538/1033","sha":"0bc9bd1fb658337f133f7ff7039ee7d5e697b718a2efb24997202dbdf4b05023","dec":"png"}
+},"sprites":{
+"UA_1176RevA_knob_INPUT-OUTPUT":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":180,"h":19620,"rgba":"455fc7d231f160da9141cec9c7ccfe4479cd8a8b63e5eb0f11510771e21acd65"}},
+"UA_1176RevA_lamp":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":64,"h":128,"rgba":"bb9017ecf04124ec18d14a0a35c7229c0dfaa90b879b421d701710c7e3837ff9"}},
+"UA_1176RevA_meter_POINTER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":260,"h":13728,"rgba":"25929580cbea5f994f8671b6b64136795830db94777c2015a1bffe215022276d"}},
+"UA_1176RevA_panel":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":1900,"h":350,"rgba":"a1752f31ced37451a4c4cf61fbdc23153a1191fc98aaf4ea1c1912ed9a023022"}},
+"UA_1176_buttons_METER-A":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":90,"h":1144,"rgba":"66fb0d35b3ce519c744b4a3bebd4b6b34793f594d1918abd71b799e920d802b0"}},
+"UA_1176_buttons_RATIO-A":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":90,"h":4576,"rgba":"6a005d8cdbcde6f5fa5589b6d38f2da5919a217568a5ddecf59638d228b8dbfc"}},
+"UA_1176_knob_ATTACK":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":120,"h":12240,"rgba":"b93c30b5a6ea050a4e395429a08cecf94674f60683656fba3c24644dce8c5880"}},
+"UA_1176_knob_RELEASE":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":120,"h":12120,"rgba":"a0729d8b595ce9e7597550dc7aa64e80f993f0550eda0390698d9aabf797e1f4"}},
+"UA_1176_knob_SC-FILTER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":120,"h":12120,"rgba":"0858db243d18837841f8f114399287993c304ac65a0926ebc50dfb0b7dc86d56"}},
+"UA_1176_trimpot_HEADROOM":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":28,"h":196,"rgba":"73fffbb3008baca0ecaf6416df6c204a2dc924ffb93328d11bb800946fcf906f"}},
+"UA_1176_trimpot_MIX":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":28,"h":2828,"rgba":"fba911dea4090950e19101fdcd0da31af300f9c16d8d1f8b1375f7088efdd369"}}
+}}

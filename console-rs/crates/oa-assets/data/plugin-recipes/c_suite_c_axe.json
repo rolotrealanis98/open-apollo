@@ -1,0 +1,14 @@
+{"recipesSchema":2,"group":"c_suite_c_axe","tier":3,"inputs":{"dll:UAD C-Suite C-Axe.dll":{"kind":"dll","file":"UAD C-Suite C-Axe.dll","root":"powered-plugins","sha256":["ea9542f1ae031f197ba8a491f781cc8660315275b9eb26eb625835a63e57e4b4"]}},"uses":["CSAX_bg","CSAX_hum","CSAX_knob_2","CSAX_learn","K_CSAX_display","R_c_suite_c_axe_bypass"],"blobs":{
+"b0":{"in":"dll:UAD C-Suite C-Axe.dll","carve":[2507648,9041],"sha":"f3e75a34a4cc3143ed5b7d98dadd4bab144f431a5a99d738aaa4adb8413f44f4","dec":"png"},
+"b1":{"in":"dll:UAD C-Suite C-Axe.dll","carve":[2516704,8995],"sha":"bd5e663d91c4566a538658f16c1577a27be5fbd2cc13f47c8676ffa469112daa","dec":"png"},
+"b2":{"in":"dll:UAD C-Suite C-Axe.dll","carve":[2405648,13703],"sha":"a29c4feecc075c24c93aa83e10eba0871a6761d1b9825c24ff46f090c295319e","dec":"png"},
+"b3":{"in":"dll:UAD C-Suite C-Axe.dll","carve":[2419360,15238],"sha":"f97988168d1deb54740b92f972b6049392c492556f12db46e46829b192cf945e","dec":"png"},
+"b4":{"in":"dll:UAD C-Suite C-Axe.dll","carve":[2390784,14856],"sha":"d1039f9e30231bd19192d896154bca954ef83ad626a8fbda2e535af4cd548e1d","dec":"png"}
+},"sprites":{
+"CSAX_bg":{"status":"no-recipe","basis":"derived","kind":"todo"},
+"CSAX_hum":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,137,78]}],[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,137,78]}]]}],"output":{"w":137,"h":156,"rgba":"4b0baa6995d93a24ba95852b3c05a85d306d4d877e5aedd34d34123e746a47ff"}},
+"CSAX_knob_2":{"status":"no-recipe","basis":"derived","kind":"todo"},
+"CSAX_learn":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,240,80]}],[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,240,80]}],[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,240,80]}]]}],"output":{"w":240,"h":240,"rgba":"8aa20443525580dc0fc3781643741515cbcb50394a94fb37bae91f15dcfb32b4"}},
+"K_CSAX_display":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"R_c_suite_c_axe_bypass":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"}
+}}

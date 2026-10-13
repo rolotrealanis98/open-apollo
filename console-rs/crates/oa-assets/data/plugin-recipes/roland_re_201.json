@@ -1,0 +1,24 @@
+{"recipesSchema":2,"group":"roland_re_201","tier":1,"inputs":{"dll:UAD Roland RE-201.dll":{"kind":"dll","file":"UAD Roland RE-201.dll","root":"powered-plugins","sha256":["72ebf9676e5cd396b783cb3b7bc2fc6ceb6702af7965f3e41683fe1d95d5caf3"]}},"uses":["I_roland_re_201_bg","P_roland_re_201_dashes","P_roland_re_201_segfont","roland_re_201_4601","roland_re_201_4602","roland_re_201_4603","roland_re_201_4604","roland_re_201_4605","roland_re_201_4606","roland_re_201_4608","roland_re_201_4609"],"blobs":{
+"b0":{"in":"dll:UAD Roland RE-201.dll","res":"10/4600/1033","sha":"a6ab4e9bcecccee435ec6c6d1f45c8e8e150b56a7e25e0e4fdea5d548d1d3494","dec":"bmp"},
+"b1":{"in":"dll:UAD Roland RE-201.dll","res":"10/4607/1033","sha":"4ef0b82123d960fa1ab0f8a7ace1783ad0ceb829367fd6b2a8cf5ffd1835d004","dec":"bmp"},
+"b2":{"in":"dll:UAD Roland RE-201.dll","res":"10/4601/1033","sha":"51959b54656b96185bb12ef470e18c42e1e73bfbe1b557c32ec7f39730605807","dec":"bmp-premultiplied"},
+"b3":{"in":"dll:UAD Roland RE-201.dll","res":"10/4602/1033","sha":"01ac851977689f80bf5575df9f0987970fa2adf811860053f680fe73d36615b5","dec":"bmp-premultiplied"},
+"b4":{"in":"dll:UAD Roland RE-201.dll","res":"10/4603/1033","sha":"80b3ae8c7a92930c8b0dbfc7883175f772c0bf53d5fa33e897c08ae01d857e44","dec":"bmp-premultiplied"},
+"b5":{"in":"dll:UAD Roland RE-201.dll","res":"10/4604/1033","sha":"d401ff472395ef3282c0b9778e93f07845e19f2479d04701a505856eb5dfe9f7","dec":"bmp"},
+"b6":{"in":"dll:UAD Roland RE-201.dll","res":"10/4605/1033","sha":"d6715782f50731c0043e73c96daf9c25ea533053b9e70a796355dbb8e0ddcd57","dec":"bmp"},
+"b7":{"in":"dll:UAD Roland RE-201.dll","res":"10/4606/1033","sha":"dc9f09e3ed5df70b681d41fe44d1eeb41cdd2f2bc5662dcaddc337e8af4222b7","dec":"bmp-premultiplied"},
+"b8":{"in":"dll:UAD Roland RE-201.dll","res":"10/4608/1033","sha":"bb50d6b6ff74201250fe89551eab4134d0d1d36cf443a3f3a3d8e5c22c185b8c","dec":"bmp-premultiplied"},
+"b9":{"in":"dll:UAD Roland RE-201.dll","res":"10/4609/1033","sha":"0fc454ad9c6527b2e23eed365444e54e9cea74535eeeb1f115e91e2a8dd004b3","dec":"bmp-premultiplied"}
+},"sprites":{
+"I_roland_re_201_bg":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,712,295]},{"op":"lanczos2x"}],"output":{"w":1424,"h":590,"rgba":"6c149021160eade85682e5ed0da9675c3280edb733c77c1e7409bf52e413c7f9"}},
+"P_roland_re_201_dashes":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[378,238,24,11]},{"op":"lanczos2x"}],"output":{"w":48,"h":22,"rgba":"986b0760ca0f24a59d87e21a7a7834e265b51b523c6aff9e324f5427671fcffe"}},
+"P_roland_re_201_segfont":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,6,165]},{"op":"lanczos2x"}],"output":{"w":12,"h":330,"rgba":"e5f80e9d628a68b78635235e3f4950494f077b5d24c72abab8d477fbbb3bcd79"}},
+"roland_re_201_4601":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,56,3976]},{"op":"lanczos2x"}],"output":{"w":112,"h":7952,"rgba":"9d6552aad250038b35afe845eedaab5c8345eed442bd8f1640bac010e7aa5565"}},
+"roland_re_201_4602":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,88,1176]},{"op":"lanczos2x"}],"output":{"w":176,"h":2352,"rgba":"7218f38c4186e4b123e41606e154264139c69c77aa655d1af72bed134418b44c"}},
+"roland_re_201_4603":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,24,768]},{"op":"lanczos2x"}],"output":{"w":48,"h":1536,"rgba":"0a4913b45424b5328c8bea58bfb0b1b3f761375a4f0b4d624139534856dbb85e"}},
+"roland_re_201_4604":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,96,3834]},{"op":"lanczos2x"}],"output":{"w":192,"h":7668,"rgba":"c960ef2a081fd70191e53ef7b5b4862e640cb2a272e7371ce5d30bf72713402f"}},
+"roland_re_201_4605":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,24,48]},{"op":"lanczos2x"}],"output":{"w":48,"h":96,"rgba":"3196c99a711bf91090fa05ed5a761ca20ce47bf958bca0d91a1843130c416226"}},
+"roland_re_201_4606":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,32,48]},{"op":"lanczos2x"}],"output":{"w":64,"h":96,"rgba":"c949371467a7c12b1d81ca508ce90a0b2c8828970818b8291440d8dc7cfc7726"}},
+"roland_re_201_4608":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,48,96]},{"op":"lanczos2x"}],"output":{"w":96,"h":192,"rgba":"602800d199eea67b20e1fa6098f2c31e979afbd67a8976f6b3bb12117f1de850"}},
+"roland_re_201_4609":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,24,48]},{"op":"lanczos2x"}],"output":{"w":48,"h":96,"rgba":"ebd6399a9299d9385f245dd6ed1d5cd956c022e9eeb3da93d101ac05eb58d425"}}
+}}

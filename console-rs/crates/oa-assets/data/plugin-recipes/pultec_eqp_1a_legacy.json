@@ -1,0 +1,19 @@
+{"recipesSchema":2,"group":"pultec_eqp_1a_legacy","tier":1,"inputs":{"dll:UAD Pultec EQP-1A Legacy.dll":{"kind":"dll","file":"UAD Pultec EQP-1A Legacy.dll","root":"powered-plugins","sha256":["66f80bb7a4bbd6a5e0aab3b746b68db69c69503f96b4dbeebaf8af3f973d2cb9"]}},"uses":["pultec_eqp_1a_legacy_1400","pultec_eqp_1a_legacy_1401","pultec_eqp_1a_legacy_1403","pultec_eqp_1a_legacy_1407","pultec_eqp_1a_legacy_1408","pultec_eqp_1a_legacy_1409","pultec_eqp_1a_legacy_1410_7","pultec_eqp_1a_legacy_1411"],"blobs":{
+"b0":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1400/1033","sha":"b1e4e054885e80e86b9f64aed69110b39d1f5667d6b2e2e59810f3b782c503c0","dec":"png"},
+"b1":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1401/1033","sha":"19d9d291d0e705e2973d97be275aaeecb1e8d1d8024920881b65e56b4e69ae92","dec":"png"},
+"b2":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1403/1033","sha":"ef3731dc0293e9c16d932db286a866e64630cdf601afca43c40619c8dc7778b7","dec":"png"},
+"b3":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1407/1033","sha":"c6559ba6496989696ab6ddd753f4560c5c0b4ec34457094284b1557bec52a492","dec":"png"},
+"b4":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1408/1033","sha":"9a54d115f91bafa6165f8dddf98db9465d8ad55e310a8233b2b21ad461317cdd","dec":"png"},
+"b5":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1409/1033","sha":"4e09f5e8cee094475ff7dbf4fa1f5a4c0da2037d9055d00d50725637a1ac6fc4","dec":"png"},
+"b6":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1410/1033","sha":"ad29e44a03f5acb0dedbfd06e616c7bb98522bba1b2653d69611e406107e3e3a","dec":"png"},
+"b7":{"in":"dll:UAD Pultec EQP-1A Legacy.dll","res":"10/1411/1033","sha":"458e5068e5f8e95e8f5899145db70f69cdd6f86bc8a37297ae5e61afe100921f","dec":"png"}
+},"sprites":{
+"pultec_eqp_1a_legacy_1400":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,950,264]},{"op":"lanczos2x"}],"output":{"w":1900,"h":528,"rgba":"a3ac6961569b587b3e8a3c52cdb76edfc76c5a79f2820cade7897d5ede63f03c"}},
+"pultec_eqp_1a_legacy_1401":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,105,13653]},{"op":"lanczos2x"}],"output":{"w":210,"h":27306,"rgba":"64e9f296f5d09f98fa41a9e757e186ba5d81356e6c97c6368b983cfc962c3189"}},
+"pultec_eqp_1a_legacy_1403":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,78,360]},{"op":"lanczos2x"}],"output":{"w":156,"h":720,"rgba":"dfb316f131b83043529c53085bd83e72dbba332783d1fbc6d65abbc9454ce1df"}},
+"pultec_eqp_1a_legacy_1407":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,120,868]},{"op":"lanczos2x"}],"output":{"w":240,"h":1736,"rgba":"93c7b1a1f1f6005df28fe90ee41dc30236598f806846fa14bd4a96034bef87f3"}},
+"pultec_eqp_1a_legacy_1408":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,55,200]},{"op":"lanczos2x"}],"output":{"w":110,"h":400,"rgba":"515c22d6410c4991701f824e46c1b02e350e2427804d232b44c2bc744fcf423c"}},
+"pultec_eqp_1a_legacy_1409":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,120,496]},{"op":"lanczos2x"}],"output":{"w":240,"h":992,"rgba":"7239cfecc4cbfa39ca43ee40ee785d3f08f6515bb31463c3cdd9378625a7b3e2"}},
+"pultec_eqp_1a_legacy_1410_7":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,85,85]}],[{"op":"load","blob":"b6"},{"op":"crop","box":[0,85,85,85]}]]},{"op":"lanczos2x"}],"output":{"w":170,"h":340,"rgba":"32961f9b5f97cdf2bce2691a16d88c69c976a6cbe6f48abacf0a26f6e47a0d19"}},
+"pultec_eqp_1a_legacy_1411":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,51,136]},{"op":"lanczos2x"}],"output":{"w":102,"h":272,"rgba":"8640c9bb64f22e43f24049b2054090f9f6f7f4f83fdf45daa686ec36e90bde06"}}
+}}

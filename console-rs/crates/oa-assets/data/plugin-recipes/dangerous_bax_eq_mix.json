@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"dangerous_bax_eq_mix","tier":0,"inputs":{"dll:UAD Dangerous BAX EQ Master.dll":{"kind":"dll","file":"UAD Dangerous BAX EQ Master.dll","root":"powered-plugins","sha256":["7d64e3b3af1c1b4a2faf74efc0b8ca6324e7be682923cfba76851c85ceba4e7a"]},"dll:UAD Dangerous BAX EQ Mix.dll":{"kind":"dll","file":"UAD Dangerous BAX EQ Mix.dll","root":"powered-plugins","sha256":["93cd0040054b8f8112ca3f96a617971bb34a7abbaa23047bae4a0335b9299469"]}},"uses":["dangerous_bax_eq_mix__BACKGROUNDMONO","dangerous_bax_eq_mix__BUTTONBIG","dangerous_bax_eq_mix__KNOBBIGLEFT","dangerous_bax_eq_mix__KNOBBIGRIGHT","dangerous_bax_eq_mix__KNOBSMALLRIGHT","dangerous_bax_eq_mix__KNOBSMALLSTEPPEDLEFT","dangerous_bax_eq_mix__KNOBSMALLSTEPPEDRIGHT"],"blobs":{
+"b0":{"in":"dll:UAD Dangerous BAX EQ Mix.dll","res":"PNG/BACKGROUNDMONO.PNG/1033","sha":"50de63c82526c25c2fb7c5acb3405885eb9275a8e0d2bfb31748ea6935881260","dec":"png"},
+"b1":{"in":"dll:UAD Dangerous BAX EQ Master.dll","res":"PNG/BUTTONBIG.PNG/1033","sha":"6e65a3c04eccab0cdac4042d21a43ca704b402f29c89fce296c79520aca84ad7","dec":"png"},
+"b2":{"in":"dll:UAD Dangerous BAX EQ Master.dll","res":"PNG/KNOBBIGLEFT.PNG/1033","sha":"b77d8852b4e275ef74b68c86fdf624db13e1adc632e7f9e50b12030750794e08","dec":"png"},
+"b3":{"in":"dll:UAD Dangerous BAX EQ Master.dll","res":"PNG/KNOBBIGRIGHT.PNG/1033","sha":"f0669c2f1b5c0732889dfc3db2b7dfbd6f3e9ff87d7fa810540b4b6029c80256","dec":"png"},
+"b4":{"in":"dll:UAD Dangerous BAX EQ Master.dll","res":"PNG/KNOBSMALLRIGHT.PNG/1033","sha":"1764a68501528e5eb1545c04a2946daf223e70366441d9517645ca3384df814a","dec":"png"},
+"b5":{"in":"dll:UAD Dangerous BAX EQ Master.dll","res":"PNG/KNOBSMALLSTEPPEDLEFT.PNG/1033","sha":"a665c032b45121cf136deac6ae9a969839970835c84a9e7babc47332b0a9fbd4","dec":"png"},
+"b6":{"in":"dll:UAD Dangerous BAX EQ Master.dll","res":"PNG/KNOBSMALLSTEPPEDRIGHT.PNG/1033","sha":"8626cfd4a15e34a2a8908548d370a685871b04121d9bc16eb20870bbc4258d0a","dec":"png"}
+},"sprites":{
+"dangerous_bax_eq_mix__BACKGROUNDMONO":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":2048,"h":220,"rgba":"8f64aab1942c2aa59eae6a2b442ec6506f1dfeb4a2061389ea810f4ad4086b8c"}},
+"dangerous_bax_eq_mix__BUTTONBIG":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":160,"h":320,"rgba":"730f6c7e19676049441d3605423ea3ed9aa10bd71c286a18d06818ee3a3f7072"}},
+"dangerous_bax_eq_mix__KNOBBIGLEFT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":206,"h":4326,"rgba":"a8aa17b4be77bcdc09b60e9b053ce754ec95123670437dc7bf540b9f4ab167ec"}},
+"dangerous_bax_eq_mix__KNOBBIGRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":206,"h":4326,"rgba":"de11624a4426524b0a43d766d7954363edda4aa15c78ad74b32c67ad780db34d"}},
+"dangerous_bax_eq_mix__KNOBSMALLRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":174,"h":3654,"rgba":"7f95272840f32dec00583c7ee4b0ddd52c4b3763362f4e26ae3b7adacb083300"}},
+"dangerous_bax_eq_mix__KNOBSMALLSTEPPEDLEFT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":174,"h":1392,"rgba":"bcc15ca2cb11a6e9b8f29ce3615bae976a822f4f233d6b665cbd724802c16cb1"}},
+"dangerous_bax_eq_mix__KNOBSMALLSTEPPEDRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":174,"h":1392,"rgba":"35ab5822d96dde0301635cecb0335e94c500d696cec426cf2157e9ef8928f168"}}
+}}

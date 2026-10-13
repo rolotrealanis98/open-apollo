@@ -1,0 +1,21 @@
+{"recipesSchema":2,"group":"antares_auto_tune_realtime","tier":0,"inputs":{"dll:UAD Antares Auto-Tune Realtime.dll":{"kind":"dll","file":"UAD Antares Auto-Tune Realtime.dll","root":"powered-plugins","sha256":["3cffdcd259e4541dbc3ebc12c7d5f2396cca47be51033ecbffa11c440062c50d"]}},"uses":["antares_auto_tune_realtime__5215","antares_auto_tune_realtime__5216","antares_auto_tune_realtime__6058_UAD","antares_auto_tune_realtime__6093_BAR","antares_auto_tune_realtime__6200","antares_auto_tune_realtime__7075_UAD","antares_auto_tune_realtime__7085_UAD","antares_auto_tune_realtime__8050","antares_auto_tune_realtime__8051"],"blobs":{
+"b0":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/5215.PNG/1033","sha":"4a111a0fc5f2c2c1a8d0991ff9efca1390983d991a367f35b153fac7b092c158","dec":"png"},
+"b1":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/5216.PNG/1033","sha":"d26aac6c7d23a28a9051cf10c3fa595ce0ed009de422c282fe50937274f0aa6a","dec":"png"},
+"b2":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/6058_UAD.PNG/1033","sha":"64840278fd3e762a0b7d2c0f21fddf5767e3519ce0903918493fbbab038416b4","dec":"png"},
+"b3":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/6093.PNG/1033","sha":"d5a4153aa37d1188de96c544ff5ecbaa94f9fc10e899b2cd2de657480a46d403","dec":"png"},
+"b4":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/6200.PNG/1033","sha":"230997c22ee157aa71f69196b0da7df0a4ac07b34c2e640def839e969b62e5a6","dec":"png"},
+"b5":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/7075_UAD.PNG/1033","sha":"df7e242e7164d5df7a0378f524ea2911f6cef828e5fdebc6dbade496cfbcf3a8","dec":"png"},
+"b6":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/7085_UAD.PNG/1033","sha":"916c84927d0482a970df287ada96a0e0c16a87f2ddc88b0936a87b7b7cb4824b","dec":"png"},
+"b7":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/8050.PNG/1033","sha":"8fb396d0739aa55054670e29df1d23655c35229c0c5fa6339a2830f56eeb83cd","dec":"png"},
+"b8":{"in":"dll:UAD Antares Auto-Tune Realtime.dll","res":"PNG/8051.PNG/1033","sha":"584f3e3d47e1dec6d5fe5736bbae2b04d6ae654ef57a62df404abc0d628bf538","dec":"png"}
+},"sprites":{
+"antares_auto_tune_realtime__5215":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":76,"h":76,"rgba":"812c9aeffbf83c2fc994ae8e7636b520babe3e44a9ccb837c68b6b06c753aa86"}},
+"antares_auto_tune_realtime__5216":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":152,"h":76,"rgba":"140475a35d0983b841d83dd6a45161dd6a93cfba4c112d22e4d841c4a64b86e5"}},
+"antares_auto_tune_realtime__6058_UAD":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":1700,"h":1012,"rgba":"4d53a61885b032ce038bc847a8061a4d5075572e416085f7dcdd2211863c1c3d"}},
+"antares_auto_tune_realtime__6093_BAR":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"resize","w":640,"h":52,"filter":"lanczos"},{"op":"meter-fill","n":33,"vertical":false}],"output":{"w":640,"h":1716,"rgba":"9e7d2a20fba2734c8f1325c92554f744134d60c4e6e4f36b8bc746c897bdb00e"}},
+"antares_auto_tune_realtime__6200":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":1564,"h":124,"rgba":"fd9aa4073ca51407a0410a40fc94588c00397e6828413fda7ec1e2877333c2e0"}},
+"antares_auto_tune_realtime__7075_UAD":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":1700,"h":184,"rgba":"869d6a3a645bccdfd81d90afc703bcd415695259c33580222f859a8e574d2265"}},
+"antares_auto_tune_realtime__7085_UAD":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":1700,"h":64,"rgba":"a56792734c797bd341d76c46e8149aa6f9b39a9b8ae149cd5e6b255dfab401bc"}},
+"antares_auto_tune_realtime__8050":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":144,"h":18576,"rgba":"60612de5ea60d9de27e4173ec295ab1a449b83a5b3d317d04947e5946c64ae05"}},
+"antares_auto_tune_realtime__8051":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":144,"h":18576,"rgba":"ed228927ca5e1a18d424892eb05af7af4a4cf4cf8df73e6773bcce5e58fb98b7"}}
+}}

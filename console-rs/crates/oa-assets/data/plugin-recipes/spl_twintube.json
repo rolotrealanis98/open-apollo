@@ -1,0 +1,22 @@
+{"recipesSchema":2,"group":"spl_twintube","tier":3,"inputs":{"dll:UAD SPL TwinTube.dll":{"kind":"dll","file":"UAD SPL TwinTube.dll","root":"powered-plugins","sha256":["323f355d50e293f668ff5c466772cb76f5c5fb31d9243ebc1c727045a24d2b2e"]}},"uses":["G_spl_twintube_p3_r0","R_spl_twintube_lamp","R_spl_twintube_preset","spl_twintube__BACKGROUNDTWINTUBE","spl_twintube__BUTTONBLUE","spl_twintube__BUTTONYELLOW","spl_twintube__KNOBBIG","spl_twintube__KNOBSMALL","spl_twintube__METERCLIP","spl_twintube__METERSIGNAL","spl_twintube__SLIDER"],"blobs":{
+"b0":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/BACKGROUNDTWINTUBE.PNG/1033","sha":"24af5609b460ac6904a0ea55f4d8c21c6dfbf0d1539115ae306f06de10dd83e1","dec":"png"},
+"b1":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/BUTTONBLUE.PNG/1033","sha":"7d2982f0d11891a23431eb5699ed6ca6b36b4df4b11f61c4e367411d76ba079a","dec":"png"},
+"b2":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/BUTTONYELLOW.PNG/1033","sha":"8550fff242df3f39436e205b9cc485e5c4adb844d795f226461a98029402b298","dec":"png"},
+"b3":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/KNOBBIG.PNG/1033","sha":"3d8ab50d51adda738406032b5643b663047ffb393703dd9d06dcc0a393e8c9e5","dec":"png"},
+"b4":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/KNOBSMALL.PNG/1033","sha":"7213ec1b987a8373cb6c42b71de135fdec889d02732ba9ae5f9c33a31fde5d74","dec":"png"},
+"b5":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/METERCLIP.PNG/1033","sha":"c0584b4623fe965a7c7934ccccc944763e406aed0cbef11de69308b5e69170fd","dec":"png"},
+"b6":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/METERSIGNAL.PNG/1033","sha":"b452ee8b189b84666087de46f4aba36c2c6008ccf2b7a585007ae66e8574aaf4","dec":"png"},
+"b7":{"in":"dll:UAD SPL TwinTube.dll","res":"PNG/SLIDER.PNG/1033","sha":"04f4206d514f7eb4f6d7fa0a1f0983762b9eb6db7650b208e7ef84732c2d5997","dec":"png"}
+},"sprites":{
+"G_spl_twintube_p3_r0":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"R_spl_twintube_lamp":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"R_spl_twintube_preset":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"spl_twintube__BACKGROUNDTWINTUBE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":616,"h":860,"rgba":"67db430a21d64831e7647d548e99f6a0d6f82983a3d9335afb6310c6041205d6"}},
+"spl_twintube__BUTTONBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":78,"h":156,"rgba":"1d09441f8a45f3791513d8f525ec77452947a66d842a04fa9aa715585204f8b9"}},
+"spl_twintube__BUTTONYELLOW":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":78,"h":156,"rgba":"240c975c1e5660220d5cee142276a57b230788747b28e19d4cde053cde9d4b25"}},
+"spl_twintube__KNOBBIG":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":190,"h":11590,"rgba":"0949439394dc00ece6719adf55a68f25fb5248f03054590e40b9a29a8b4d476a"}},
+"spl_twintube__KNOBSMALL":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":150,"h":9150,"rgba":"f23b4dbe420aa2c9e72ce7c80aa2bd310f333a6736274bdcee8d1e093b7b3b3b"}},
+"spl_twintube__METERCLIP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":42,"h":84,"rgba":"88a3f5ca1f4514d7d1bc8b558b8be09544f748cad6f415a122b6b291d03b0c81"}},
+"spl_twintube__METERSIGNAL":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":42,"h":462,"rgba":"b9807ea8e290ae4fba558b660db61eb6dfea7d4a28f8e2649c260e7e7539a0e9"}},
+"spl_twintube__SLIDER":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":270,"h":3416,"rgba":"4e1940e8b9db6dc35c3bff45e590a839ad9e937070796717f1d3d65b9b879302"}}
+}}

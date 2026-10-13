@@ -1,0 +1,16 @@
+{"recipesSchema":2,"group":"harrison_32c_se","tier":0,"inputs":{"dll:UAD Harrison 32C SE.dll":{"kind":"dll","file":"UAD Harrison 32C SE.dll","root":"powered-plugins","sha256":["46562402b06b511e1717dbc8fe6f0698f7a976dc132a76f1085fe12285033dec"]}},"uses":["P_harrison_32c_se_btn39","P_harrison_32c_se_btn51","P_harrison_32c_se_btn_power","harrison_32c_se_6201","harrison_32c_se_6202","harrison_32c_se_6203","harrison_32c_se_6207"],"blobs":{
+"b0":{"in":"dll:UAD Harrison 32C SE.dll","res":"10/6206/1033","sha":"c111ba39ac18f4755edb31839f19ad496d0e18b54ec4cbab5508dc404e0d0754","dec":"bmp-premultiplied"},
+"b1":{"in":"dll:UAD Harrison 32C SE.dll","res":"10/6205/1033","sha":"a5edeba5d47c03fda3be8d9e36b8bb64c21c029c6ab7efbc54700b2a2343e51a","dec":"bmp-premultiplied"},
+"b2":{"in":"dll:UAD Harrison 32C SE.dll","res":"10/6201/1033","sha":"13d2d319e232c442cc8510e3f978a98b0eb86a9ff607b6b4ed5178b145ebd7b1","dec":"bmp"},
+"b3":{"in":"dll:UAD Harrison 32C SE.dll","res":"10/6202/1033","sha":"9e8c8f92e810b4b2d4ad52a38f89d17aa6d63ca97bb8b0f2782e22955d0868d6","dec":"bmp-premultiplied"},
+"b4":{"in":"dll:UAD Harrison 32C SE.dll","res":"10/6203/1033","sha":"4421e93acff5e0ad825f0cba3f69b9b902bdded45879238d28d9119b4700e686","dec":"bmp-premultiplied"},
+"b5":{"in":"dll:UAD Harrison 32C SE.dll","res":"10/6207/1033","sha":"023ca23cebc354c8bcaba2bf84e576c3760f6d4ab622d60046acf215179b63e3","dec":"bmp-premultiplied"}
+},"sprites":{
+"P_harrison_32c_se_btn39":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,39,132]},{"op":"lanczos2x"}],"output":{"w":78,"h":264,"rgba":"0eefc7eb953c848ccfb14ae882f6463acd35f0c43678c6fa5bf7075c9ec9601e"}},
+"P_harrison_32c_se_btn51":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":102,"h":264,"rgba":"d4f0dc4c5a9d285138e59d203c6add0a564576aced14150b7e75d0bfa2874abc"}},
+"P_harrison_32c_se_btn_power":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":78,"h":132,"rgba":"45d77fa1ea4ca8de4899374edd4f15c8b6506fd0464dbc38ff01822132372748"}},
+"harrison_32c_se_6201":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,763,169]},{"op":"lanczos2x"}],"output":{"w":1526,"h":338,"rgba":"0bbfc88582bff7bd61e39cc9306e2e5db6a6135f96664b2af620acbd0bf6ebc9"}},
+"harrison_32c_se_6202":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,64,3904]},{"op":"lanczos2x"}],"output":{"w":128,"h":7808,"rgba":"105964a3c59d8e491d0fc83d3f5e73b3accbdc447d491d9db23c8db620507a7c"}},
+"harrison_32c_se_6203":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,64,3904]},{"op":"lanczos2x"}],"output":{"w":128,"h":7808,"rgba":"44edc63125b53148941204f9fde893e4bb75cfc64054a702a27af423ac7bb449"}},
+"harrison_32c_se_6207":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,14,28]},{"op":"lanczos2x"}],"output":{"w":28,"h":56,"rgba":"5fbd835af621df3cd5586475876c6ede657740628095f9671c7cf87cedf4ac28"}}
+}}

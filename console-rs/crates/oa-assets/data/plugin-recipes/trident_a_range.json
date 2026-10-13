@@ -1,0 +1,23 @@
+{"recipesSchema":2,"group":"trident_a_range","tier":0,"inputs":{"dll:UAD Trident A-Range.dll":{"kind":"dll","file":"UAD Trident A-Range.dll","root":"powered-plugins","sha256":["1cc73c6d8d0b807d0a4498e4120edca5a8c8a0b8fe0818cb2ebb3c6c646848e8"]}},"uses":["trident_a_range_6900","trident_a_range_6901","trident_a_range_6902","trident_a_range_6903","trident_a_range_6904","trident_a_range_6905","trident_a_range_6906","trident_a_range_6907_8","trident_a_range_6908_7","trident_a_range_6909_9"],"blobs":{
+"b0":{"in":"dll:UAD Trident A-Range.dll","res":"10/6900/1033","sha":"2aa0fcb9a14206664c94ec4776f10430b55da2783eeb00846ce49d6f1d29e919","dec":"png"},
+"b1":{"in":"dll:UAD Trident A-Range.dll","res":"10/6901/1033","sha":"f52221f91d5d1f3bbc3895ed2a3de521cdd4de34eff3770ecb3af08bda05b19c","dec":"png"},
+"b2":{"in":"dll:UAD Trident A-Range.dll","res":"10/6902/1033","sha":"d2e99c72f0cf3d5aae9ecb66c004513f5f04841612f7069f553a710bc52ac41e","dec":"png"},
+"b3":{"in":"dll:UAD Trident A-Range.dll","res":"10/6903/1033","sha":"cc663fb3907b43f043a9d00601c543e35459107e9c10afc8da6331d2217287ed","dec":"png"},
+"b4":{"in":"dll:UAD Trident A-Range.dll","res":"10/6904/1033","sha":"deb8486da6aeda69709fc32bbcfbe6e2d726aba7a81014f8c7e33575df8bce39","dec":"png"},
+"b5":{"in":"dll:UAD Trident A-Range.dll","res":"10/6905/1033","sha":"f80067eb887dd333bacdbca4bbd53d89b478481cf3a602e9130253ba2f5c0c95","dec":"png"},
+"b6":{"in":"dll:UAD Trident A-Range.dll","res":"10/6906/1033","sha":"ebdb76a6d941b371293c3de5b3942d61874917bbc1716cd773c50129ef011003","dec":"png"},
+"b7":{"in":"dll:UAD Trident A-Range.dll","res":"10/6907/1033","sha":"c07507c628e1d0ed9d3b07cff59c3bc7377d0d1bb51515edae0f21d4b054367c","dec":"png"},
+"b8":{"in":"dll:UAD Trident A-Range.dll","res":"10/6908/1033","sha":"b743c57e9072e7b5471c292dd7437913a9521480860eb8d02eae685b5d607f57","dec":"png"},
+"b9":{"in":"dll:UAD Trident A-Range.dll","res":"10/6909/1033","sha":"937cbfae496a60ce567d359fdf943c305d83ddba618cf85c29582aa6e37eaa1c","dec":"png"}
+},"sprites":{
+"trident_a_range_6900":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,1900,220]}],"output":{"w":1900,"h":220,"rgba":"ede90a9a62af28c76daf879911d0a2a874ad603eeaf128cd12d14718f368250f"}},
+"trident_a_range_6901":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,414,10872]}],"output":{"w":414,"h":10872,"rgba":"ce62d57567a7e90679e2c08f16157c5267928a4696a861967bab3635299b4a06"}},
+"trident_a_range_6902":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,120,400]}],"output":{"w":120,"h":400,"rgba":"8b78460c75b9a3a7892111733a5918d235332452072edbf8dd1b17a9c5cf697a"}},
+"trident_a_range_6903":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,120,400]}],"output":{"w":120,"h":400,"rgba":"8de3e246f29395c450ad31d5cd1ce8a7952fa7b86bbe134332431f8b26098946"}},
+"trident_a_range_6904":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,120,400]}],"output":{"w":120,"h":400,"rgba":"3b88d2bacd2ac87ca02cd601cd9338f30770e03097d26709257b1e5c5e33a9e2"}},
+"trident_a_range_6905":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,120,400]}],"output":{"w":120,"h":400,"rgba":"d567519b626143e8e5d003ba45be4ad1b4899f3a0199056d9fa6c0000edbd62a"}},
+"trident_a_range_6906":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,160,9760]}],"output":{"w":160,"h":9760,"rgba":"5a8bbb988a737821f9a7dffe29d13fef8a63e55e6dc7a1cf346de3e9f038f014"}},
+"trident_a_range_6907_8":{"status":"verified","basis":"exact","build":[{"op":"stack","parts":[[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,82,52]}],[{"op":"load","blob":"b7"},{"op":"crop","box":[0,52,82,52]}]]}],"output":{"w":82,"h":104,"rgba":"fcf6b34a17712d967e07510b5b2a72d16ee44c598ee4db091e331b0ab1381803"}},
+"trident_a_range_6908_7":{"status":"verified","basis":"exact","build":[{"op":"stack","parts":[[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,64,52]}],[{"op":"load","blob":"b8"},{"op":"crop","box":[0,52,64,52]}]]}],"output":{"w":64,"h":104,"rgba":"fa0eb4fd841bcc207bf9475afa67fd8f915f841ba04f658313deac99cab001b9"}},
+"trident_a_range_6909_9":{"status":"verified","basis":"exact","build":[{"op":"stack","parts":[[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,64,140]}],[{"op":"load","blob":"b9"},{"op":"crop","box":[0,140,64,140]}]]}],"output":{"w":64,"h":280,"rgba":"94df3d019117d9148bf7b608890d58fb6bc5101abe6cdf8ddfe767673b94b5bc"}}
+}}

@@ -1,0 +1,13 @@
+{"recipesSchema":2,"group":"c_suite_c_max","tier":3,"inputs":{"dll:UAD C-Suite C-Max.dll":{"kind":"dll","file":"UAD C-Suite C-Max.dll","root":"powered-plugins","sha256":["e9e15f95ca37572655e40f7f6b3a2f8aac8ef6dc9e5242dd0d40effae8120fd8"]}},"uses":["CSMX_knob_0","CSMX_knob_1","CSMX_knob_2","K_CSMX_bg","Q_c_suite_c_max_bar","Q_c_suite_c_max_tick_blue","Q_c_suite_c_max_tick_red","R_c_suite_c_max_band","R_c_suite_c_max_bypass"],"blobs":{
+"b0":{"in":"dll:UAD C-Suite C-Max.dll","carve":[2529904,4150],"sha":"04334459cecc6754c90ed2d556a8cb84a05d823cab78948294145558fb7d3fe8","dec":"png"}
+},"sprites":{
+"CSMX_knob_0":{"status":"no-recipe","basis":"derived","kind":"todo"},
+"CSMX_knob_1":{"status":"no-recipe","basis":"derived","kind":"todo"},
+"CSMX_knob_2":{"status":"no-recipe","basis":"derived","kind":"todo"},
+"K_CSMX_bg":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"Q_c_suite_c_max_bar":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"Q_c_suite_c_max_tick_blue":{"status":"verified","basis":"synth","build":[{"op":"canvas","w":30,"h":6,"rgba":[91,203,250,239]}],"output":{"w":30,"h":6,"rgba":"31ecc05f66aab865731f506c46b7a72b7204548ee58bd76386561ebb0d78e11c"}},
+"Q_c_suite_c_max_tick_red":{"status":"verified","basis":"synth","build":[{"op":"canvas","w":30,"h":6,"rgba":[255,0,0,213]}],"output":{"w":30,"h":6,"rgba":"2aae6420214592ac9227bcd5e130b6d6a3b02280a8bffb3bec049652d221d4b7"}},
+"R_c_suite_c_max_band":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"R_c_suite_c_max_bypass":{"status":"fallback","basis":"scaled","build":[{"op":"stack","parts":[[{"op":"canvas","w":74,"h":74},{"op":"paste","src":[{"op":"load","blob":"b0"}],"at":[0,0],"blend":"replace"}],[{"op":"canvas","w":74,"h":74},{"op":"paste","src":[{"op":"load","blob":"b0"}],"at":[0,0],"blend":"replace"}]]}],"output":{"w":74,"h":148,"rgba":"31ea93b2d0dffbb3ee3f15368e545a34c7ee8ee5484f5f8284aaf7c489574035"}}
+}}

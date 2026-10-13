@@ -1,0 +1,14 @@
+{"recipesSchema":2,"group":"ep_34_tape_echo","tier":1,"inputs":{"dll:UAD EP-34 Tape Echo.dll":{"kind":"dll","file":"UAD EP-34 Tape Echo.dll","root":"powered-plugins","sha256":["8903a8c16f360ec9ea62b11bfe99bf9215ee3d61d932c9497d7688dde1688756"]}},"uses":["P_ep_34_tape_echo_delay_lever","P_ep_34_tape_echo_delay_pointer","ep_34_tape_echo_6942","ep_34_tape_echo_6942_1","ep_34_tape_echo_6943","ep_34_tape_echo_6948","ep_34_tape_echo_6949"],"blobs":{
+"b0":{"in":"dll:UAD EP-34 Tape Echo.dll","res":"10/6942/1033","sha":"09e157c83db6d11e2b62111987c09cea0eb3cb1b9dfd862064a881db1ee16cbe","dec":"bmp"},
+"b1":{"in":"dll:UAD EP-34 Tape Echo.dll","res":"10/6943/1033","sha":"8567021799aada8df5f5707e560fd721b05c9e33196442b409325d76b08ebd33","dec":"bmp-premultiplied"},
+"b2":{"in":"dll:UAD EP-34 Tape Echo.dll","res":"10/6948/1033","sha":"481e69184224177424f6c085960fceaa3d8690f0834a815aeba91dcda18d9292","dec":"bmp-premultiplied"},
+"b3":{"in":"dll:UAD EP-34 Tape Echo.dll","res":"10/6949/1033","sha":"937fb712c01546e19573b4241c7229ec08dc35596b255ab891fad02758d3ef01","dec":"bmp-premultiplied"}
+},"sprites":{
+"P_ep_34_tape_echo_delay_lever":{"status":"no-recipe","basis":"dll-composite","kind":"todo"},
+"P_ep_34_tape_echo_delay_pointer":{"status":"no-recipe","basis":"dll-composite","kind":"todo"},
+"ep_34_tape_echo_6942":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,720,500]},{"op":"lanczos2x"}],"output":{"w":1440,"h":1000,"rgba":"26950c600f2c7e0edfc2284cfdaa265f8c9ea589f07ea1d19fa88ca6fa8017dd"}},
+"ep_34_tape_echo_6942_1":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b0"},{"op":"crop","box":[607,269,20,11]}]]},{"op":"lanczos2x"}],"output":{"w":40,"h":22,"rgba":"543b19eea050524fff22b691da13ce6927f76a59e0cd362290a513ab0b313513"}},
+"ep_34_tape_echo_6943":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,64,5070]},{"op":"lanczos2x"}],"output":{"w":128,"h":10140,"rgba":"49f441e4f2badb25c4015a5c7cf8558970fdec315042e40bfab12742b5b2adcf"}},
+"ep_34_tape_echo_6948":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,58,144]},{"op":"lanczos2x"}],"output":{"w":116,"h":288,"rgba":"96825eaa092e00d0ea0cb2169bde7030953337873f18fa2fedf4925c9b6b6ce7"}},
+"ep_34_tape_echo_6949":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,22,80]},{"op":"lanczos2x"}],"output":{"w":44,"h":160,"rgba":"68598d817f04343741829ef1c7e7bdf4a4f4f94bb95521bc03d4c3c15105af36"}}
+}}

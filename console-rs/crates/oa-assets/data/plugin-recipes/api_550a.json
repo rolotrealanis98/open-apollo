@@ -1,0 +1,23 @@
+{"recipesSchema":2,"group":"api_550a","tier":1,"inputs":{"dll:UAD API 550A.dll":{"kind":"dll","file":"UAD API 550A.dll","root":"powered-plugins","sha256":["9a95d59c6c6caa0989cbdea70a4f209b4119f18dadea80ae835678a2a130218b"]}},"uses":["api_550a_7480","api_550a_7481_9","api_550a_7482_7","api_550a_7483","api_550a_7484_6","api_550a_7485","api_550a_7486","api_550a_7487","api_550a_7488","api_550a_7489"],"blobs":{
+"b0":{"in":"dll:UAD API 550A.dll","res":"10/7480/1033","sha":"4012618773be59a6beb5bf51ee63269d1497aa4e5d68ce64cd13b5b404e8b10e","dec":"png"},
+"b1":{"in":"dll:UAD API 550A.dll","res":"10/7481/1033","sha":"46768694cba9173831701ed07c273d5f57cf7ebeba36387722b40b2058533e8d","dec":"png"},
+"b2":{"in":"dll:UAD API 550A.dll","res":"10/7482/1033","sha":"770fbc42ed331b68f6b797640a98dae81a5ab0e4f71f2c5fa52e935defe216aa","dec":"png"},
+"b3":{"in":"dll:UAD API 550A.dll","res":"10/7483/1033","sha":"502d154841f2cf8a1e6fcc7414177e64bb976bdd43ff36ce1c2487cbe23f4482","dec":"png"},
+"b4":{"in":"dll:UAD API 550A.dll","res":"10/7484/1033","sha":"00bab1feeadcad4d47f1af3ffb4aec810f6ac28d8eee25841d29182b45d2bccf","dec":"png"},
+"b5":{"in":"dll:UAD API 550A.dll","res":"10/7485/1033","sha":"141bc70508e5399be6ef8e0e63fe16e2f665c4d956573aa0cad2a4f6b8aea3a1","dec":"png"},
+"b6":{"in":"dll:UAD API 550A.dll","res":"10/7486/1033","sha":"99fd22fef51b90072da0d46b410becb23e9ffaf384b3bdcdd3c98c2c2d01e064","dec":"png"},
+"b7":{"in":"dll:UAD API 550A.dll","res":"10/7487/1033","sha":"83602120eec07732ea9cb3dc13bb54e1994c07948455a34efbf3577640b1bd03","dec":"png"},
+"b8":{"in":"dll:UAD API 550A.dll","res":"10/7488/1033","sha":"80d77dd304bae0a1e398e48db5a9cce4d85b2c590ebaa68b05c28886ac21cd77","dec":"png"},
+"b9":{"in":"dll:UAD API 550A.dll","res":"10/7489/1033","sha":"48f9d7d53e30c829527fb7e8e4a8cc9b5fa3c890c412f074d5c6401cc4871948","dec":"png"}
+},"sprites":{
+"api_550a_7480":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,310,550]},{"op":"lanczos2x"}],"output":{"w":620,"h":1100,"rgba":"889f5e2fb8fdd5c957f2a5de2b99c1e12569a999aba43355a35db1f58b1c1277"}},
+"api_550a_7481_9":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,42,101]}],[{"op":"load","blob":"b1"},{"op":"crop","box":[0,101,42,101]}]]},{"op":"lanczos2x"}],"output":{"w":84,"h":404,"rgba":"177b9e8c55a44431864e1e2678b523fee6b4a1d74c42a526fda6cd1251df1c1d"}},
+"api_550a_7482_7":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,42,101]}],[{"op":"load","blob":"b2"},{"op":"crop","box":[0,101,42,101]}]]},{"op":"lanczos2x"}],"output":{"w":84,"h":404,"rgba":"d17fc91f0bdc634d64f5ecd0b16436dd0da2371fa74d268b31130cdda82beee7"}},
+"api_550a_7483":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,85,8484]},{"op":"lanczos2x"}],"output":{"w":170,"h":16968,"rgba":"fc403fb80ca314e8723736952c276f38cdecd5143028319e96095715fa1bf8c4"}},
+"api_550a_7484_6":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,42,58]}],[{"op":"load","blob":"b4"},{"op":"crop","box":[0,58,42,58]}]]},{"op":"lanczos2x"}],"output":{"w":84,"h":232,"rgba":"d5b818646cb13f02057f243da776bc6ee4fb4da8f9782bbeaa812fe50e5f307e"}},
+"api_550a_7485":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,147,575]},{"op":"lanczos2x"}],"output":{"w":294,"h":1150,"rgba":"8d6dded7258074b8edd65501e1628b156c5a800b508556405e0b9e171ae4b7ba"}},
+"api_550a_7486":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,147,1265]},{"op":"lanczos2x"}],"output":{"w":294,"h":2530,"rgba":"0218a8d8a8aa2068672c56539e54dd3e957226c882bbe3846bbfe343514798f4"}},
+"api_550a_7487":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,147,1265]},{"op":"lanczos2x"}],"output":{"w":294,"h":2530,"rgba":"7e1cb7b84f48da0a40aac672c4178bdfe9f5983d2e2ccba346d0d0abc2d635ba"}},
+"api_550a_7488":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,147,1265]},{"op":"lanczos2x"}],"output":{"w":294,"h":2530,"rgba":"717567fb727f436d2e7cef6385f47bf181f7d4d4c1ad0233350e22d8058f4d8f"}},
+"api_550a_7489":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,75,90]},{"op":"lanczos2x"}],"output":{"w":150,"h":180,"rgba":"b057a8e324b5e6029dd03ecf6eaf8dee7599d9bf2dfed7e06ed91b5a97318c0d"}}
+}}

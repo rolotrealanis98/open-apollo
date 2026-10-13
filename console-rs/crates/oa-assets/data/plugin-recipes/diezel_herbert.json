@@ -1,0 +1,28 @@
+{"recipesSchema":2,"group":"diezel_herbert","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD Diezel Herbert.dll":{"kind":"dll","file":"UAD Diezel Herbert.dll","root":"powered-plugins","sha256":["a5474f0620b92049cf01f4d016950ecde8034b333e98d859dcc9b93f10efc186"]}},"uses":["J_diezel_herbert_background_tb","J_diezel_herbert_tb_bank","J_diezel_herbert_tb_power","J_diezel_herbert_tb_rack","diezel_herbert__LED","diezel_herbert__LEDRED","diezel_herbert__POTI","diezel_herbert__POWERSWITCH","diezel_herbert__PUSHBUTTON","diezel_herbert__RACK","diezel_herbert__SWITCH","diezel_herbert__SWITCH3POS","diezel_herbert__SWITCHINVERSE","diezel_herbert__SWITCHLEFTRIGHT"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/LED.PNG/1033","sha":"17e353d2f9f6bf0aff2af64fd772f8b3997259d550df14d20a668ee8a3b39901","dec":"png"},
+"b2":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/LEDRED.PNG/1033","sha":"b4f48718c6d63f2a88d131671a70571b66fc432c99704f4a96504a0aa2408c21","dec":"png"},
+"b3":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/POTI.PNG/1033","sha":"aa7e24208c10a8e6bf32f6c4e43316cbf7c5a94f4c284d1d4f413ab2572457fb","dec":"png"},
+"b4":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/POWERSWITCH.PNG/1033","sha":"894f8a85bece84b56da39f0b4e7ae5ea9a3d84e7b6a5c671eafe32d1ceb7e239","dec":"png"},
+"b5":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/PUSHBUTTON.PNG/1033","sha":"cf4d63acf5195a8632b779b697ece81cfb5e616f9c2fd9954e087a23a698c65f","dec":"png"},
+"b6":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/RACK.PNG/1033","sha":"50ff64317b9cc2db11e61324b766f9a65fa874e10d917e758fa453f5e13af681","dec":"png"},
+"b7":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/SWITCH.PNG/1033","sha":"62f246f314386cd3d4d430389cd4e0a69217d6ad2077a15544f12db5c3c1853a","dec":"png"},
+"b8":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"bb291cb60faaf45a0dd789e889f9b785ccc80b3af8a7bb63a46b3f4e80bd93d9","dec":"png"},
+"b9":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/SWITCHINVERSE.PNG/1033","sha":"7eb20f5507aab4affc5c9fc3efa1082e3434ce2e1baeb0b2f61a193902f538b8","dec":"png"},
+"b10":{"in":"dll:UAD Diezel Herbert.dll","res":"PNG/SWITCHLEFTRIGHT.PNG/1033","sha":"0af4abb5b1fc4a46a600e55f0dae36747d29b81504143a19e104255174fad2ac","dec":"png"}
+},"sprites":{
+"J_diezel_herbert_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_diezel_herbert_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_diezel_herbert_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_diezel_herbert_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"diezel_herbert__LED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":58,"h":116,"rgba":"86dc683ae657c249188dcbe29b1889d1a4d545a68071a2836000aa2a3b5302ff"}},
+"diezel_herbert__LEDRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":40,"h":80,"rgba":"55cc834038135e2fdda679fe11eb363df4b9ae2d15b91e7dfd120eaf3d8ee379"}},
+"diezel_herbert__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":90,"h":5490,"rgba":"6d82339964929d033a0754bf9b91d4b8e79481359fef519e38fceef2f11745f3"}},
+"diezel_herbert__POWERSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":98,"h":172,"rgba":"08855238768caafc541342d7278daeb08233e98aa625d3737db1fa5036b0ab5a"}},
+"diezel_herbert__PUSHBUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":50,"h":100,"rgba":"b4c441b45be4bd16f148037b3e98608c7465c1193c87387aa2cdea7fd4ddcd4b"}},
+"diezel_herbert__RACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":2400,"h":496,"rgba":"82e6a92fb93b9e6966471c1a37676d0fa71d0fad7ff00dc473a59b6fceaaa403"}},
+"diezel_herbert__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":32,"h":108,"rgba":"0a75ee5021c62611357f530ff0a245cbeeade866aefca89fa134ddd4dd787f12"}},
+"diezel_herbert__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":32,"h":162,"rgba":"a93b72e788866fd6a39e6902e0a4b0603e60b3ea3a036fb6dbbb1b3624b2820d"}},
+"diezel_herbert__SWITCHINVERSE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":32,"h":108,"rgba":"8a02f9ae108bb6b7db1a992abae47a4f7a1ffeabb881426a25a3f28db6a0ea4f"}},
+"diezel_herbert__SWITCHLEFTRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b10"}],"output":{"w":50,"h":84,"rgba":"9d611d8ba0d645f6115ddddef0421395e6aeb48b53bfb61a7ea8ec86f25927b8"}}
+}}

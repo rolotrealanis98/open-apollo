@@ -1,0 +1,15 @@
+{"recipesSchema":2,"group":"little_labs_vog","tier":0,"inputs":{"dll:UAD Little Labs VOG.dll":{"kind":"dll","file":"UAD Little Labs VOG.dll","root":"powered-plugins","sha256":["de6df11861e00d0716fc0030d906e06aa1371db70efd322246e8d4b9b2a3a05e"]}},"uses":["LEDgreen","LEDred","button","knob","panel","switch-Power"],"blobs":{
+"b0":{"in":"dll:UAD Little Labs VOG.dll","res":"10/7204/1033","sha":"8c43d4b2b5d8a9603761b16324f2fefa3154ecc02f2a05953b1e0a88326e012b","dec":"png"},
+"b1":{"in":"dll:UAD Little Labs VOG.dll","res":"10/7205/1033","sha":"78510f6e49847099ee53172ba0cb09b0c8344fa9a385296248cd12a740c7889f","dec":"png"},
+"b2":{"in":"dll:UAD Little Labs VOG.dll","res":"10/7202/1033","sha":"d9397926e3a397597231f080ae7d22e200cba984b38b52ac05aa99bbb965c203","dec":"png"},
+"b3":{"in":"dll:UAD Little Labs VOG.dll","res":"10/7201/1033","sha":"ba268b55aad69dfbd5d104dc7383f66733a67b471d87b4c1f81c3fc38cb093d2","dec":"png"},
+"b4":{"in":"dll:UAD Little Labs VOG.dll","res":"10/7200/1033","sha":"96a69e52539f9d386d270febc2609ae284f728e52f1c3566a22c2640edc2acaf","dec":"png"},
+"b5":{"in":"dll:UAD Little Labs VOG.dll","res":"10/7203/1033","sha":"17e14fe663847ad314128c7d6777ab79aa319855e78d5c080bb9fdce5e400440","dec":"png"}
+},"sprites":{
+"LEDgreen":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":30,"h":64,"rgba":"0eb28b5dfcede2d07a6657f9570fa2b9a615c8b937bfb5788ad744b44b4f08ce"}},
+"LEDred":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":30,"h":64,"rgba":"fa114bb20f1a9f8eb01afac92a0fa9704b71f47533ba021b0a286c81303e09de"}},
+"button":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,72,76]}],[{"op":"load","blob":"b2"},{"op":"crop","box":[0,74,72,76]}]]}],"output":{"w":72,"h":152,"rgba":"4da01d2112efe8bb59d9d9205c374f064250da40894a0ab3b461b00ad9571011"}},
+"knob":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":190,"h":18988,"rgba":"42073f90f15863ead58037e958c2e1ec65bc3686cc90dc7b5f9a300c46d94ced"}},
+"panel":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":620,"h":1100,"rgba":"ae7b2e8574e61adaedec74f8dc105dedaf04148a919ba377676ca23e7eda4189"}},
+"switch-Power":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":120,"h":160,"rgba":"8deea303bac4e77446e5a9b745fe1dfa68b81c90b24b4cdd63780da02defda39"}}
+}}

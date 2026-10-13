@@ -1,0 +1,18 @@
+{"recipesSchema":2,"group":"elysia_mpressor","tier":1,"inputs":{"dll:UAD elysia mpressor.dll":{"kind":"dll","file":"UAD elysia mpressor.dll","root":"powered-plugins","sha256":["162857df544a2f753135032b42167f8b92f59fe36cc1f95d48d6892a42471018"]}},"uses":["Q_elysia_mpressor__BUTTONBLUE_mono128_565656","elysia_mpressor__BACKGROUNDNONSC","elysia_mpressor__BUTTONBLUE","elysia_mpressor__BUTTONRED","elysia_mpressor__BUTTONWHITE","elysia_mpressor__KNOB","elysia_mpressor__METERGR","elysia_mpressor__METERGRLIMIT"],"blobs":{
+"b0":{"in":"dll:UAD elysia mpressor.dll","res":"PNG/BACKGROUNDNONSC.PNG/1033","sha":"c53d6cb2954088c121b9b470090e139c4be7b4c1b8bced21432930b7134f47b6","dec":"png"},
+"b1":{"in":"dll:UAD elysia mpressor.dll","res":"PNG/BUTTONBLUE.PNG/1033","sha":"c26d2ac6a32a50659a4b51975280774c3ee40a534538b85222a82e01c0f0b5d7","dec":"png"},
+"b2":{"in":"dll:UAD elysia mpressor.dll","res":"PNG/BUTTONRED.PNG/1033","sha":"df7c5dd5cd43eeeadcbb0a26350e4c5ce3d60c23743d2874690bed3c171235e5","dec":"png"},
+"b3":{"in":"dll:UAD elysia mpressor.dll","res":"PNG/BUTTONWHITE.PNG/1033","sha":"ccbeb0bd3ac06100674e3f077ff6aa82a6843ad21fca3bf0b0038bd0f142be0f","dec":"png"},
+"b4":{"in":"dll:UAD elysia mpressor.dll","res":"PNG/KNOB.PNG/1033","sha":"ede17ffbe7e97e4206a3828ec942ad4f62bbf057e6cd470d24b3723fb67982d3","dec":"png"},
+"b5":{"in":"dll:UAD elysia mpressor.dll","res":"PNG/METERGR.PNG/1033","sha":"c08754fd68431e1e85f766476b2050fe4eb799b338cf90ba46edec50657527a3","dec":"png"},
+"b6":{"in":"dll:UAD elysia mpressor.dll","res":"PNG/METERGRLIMIT.PNG/1033","sha":"bcc6fc45de7ec09773d2c7774e4c0f7d308ad4d9f7579de081a7027b2d6b6f69","dec":"png"}
+},"sprites":{
+"Q_elysia_mpressor__BUTTONBLUE_mono128_565656":{"status":"verified","basis":"dll-composite","build":[{"op":"sprite","id":"elysia_mpressor__BUTTONBLUE"},{"op":"premul-tint","rgb":[86,86,86],"a":128}],"output":{"w":74,"h":120,"rgba":"9f6e903926acddb4b826dd72d9b9bf62fe09c12a4138da91eace4f25722777ec"}},
+"elysia_mpressor__BACKGROUNDNONSC":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":1504,"h":512,"rgba":"03e36a0a8fcf9b1cac866de09f718402b839f52100d17eeff2f9228d73a437b8"}},
+"elysia_mpressor__BUTTONBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":74,"h":120,"rgba":"f8639738e06a28145d88dc8538015956956b6117da2ff3abe3ef36198a967de3"}},
+"elysia_mpressor__BUTTONRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":74,"h":120,"rgba":"0d40c6881d6b38c98d4a6c11af82acf6c02fa8052c0ab45f3619e5fa6635babd"}},
+"elysia_mpressor__BUTTONWHITE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":74,"h":120,"rgba":"75c33a6ed8d10492d3c6ac0d369b0fd3d658bd91dbede40935b89f27a9728754"}},
+"elysia_mpressor__KNOB":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":176,"h":10736,"rgba":"57857e2b89e6a1bd8bf1864fb257c9665631eef5e725f4d2cc739b292e113637"}},
+"elysia_mpressor__METERGR":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":74,"h":14080,"rgba":"3fecf876d4435a334855723b05f1d9a15188841de8f8090c7f43549e71e9016c"}},
+"elysia_mpressor__METERGRLIMIT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":44,"h":88,"rgba":"cab2b9197114092766d655f731fdd4f478d5b458516ae173bf87447cd1414547"}}
+}}

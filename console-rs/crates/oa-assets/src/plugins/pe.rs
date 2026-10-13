@@ -114,13 +114,20 @@ pub fn find<'a>(b: &'a [u8], leaves: &[Leaf], ty: &str, name: &str, lang: Option
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A minimal PE32+ with one section holding a resource tree:
     /// RCDATA(10)/42/1033 and "PNG"/"A.PNG"/1033.
     pub(crate) fn tiny_pe() -> Vec<u8> {
-        let mut b = vec![0u8; 0x400];
+        tiny_pe_with(b"abcd", b"xyz")
+    }
+
+    /// [`tiny_pe`] with the given bytes as "PNG"/"A.PNG" and RCDATA/42.
+    pub(crate) fn tiny_pe_with(png: &[u8], rc: &[u8]) -> Vec<u8> {
+        let (a_at, r_at) = (0x400usize, 0x400 + png.len().div_ceil(16) * 16);
+        let total = r_at + rc.len().div_ceil(16) * 16 + 16;
+        let mut b = vec![0u8; total];
         b[0..2].copy_from_slice(b"MZ");
         b[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
         b[0x80..0x84].copy_from_slice(b"PE\0\0");
@@ -134,9 +141,10 @@ mod tests {
         b[dirs + 20..dirs + 24].copy_from_slice(&0x200u32.to_le_bytes());
         let sec = opt + 240;
         b[sec..sec + 5].copy_from_slice(b".rsrc");
-        b[sec + 8..sec + 12].copy_from_slice(&0x200u32.to_le_bytes());
+        let raw = (total - 0x200) as u32;
+        b[sec + 8..sec + 12].copy_from_slice(&raw.to_le_bytes());
         b[sec + 12..sec + 16].copy_from_slice(&0x1000u32.to_le_bytes());
-        b[sec + 16..sec + 20].copy_from_slice(&0x200u32.to_le_bytes());
+        b[sec + 16..sec + 20].copy_from_slice(&raw.to_le_bytes());
         b[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes());
         let r = 0x200;
         let w32 = |b: &mut Vec<u8>, o: usize, v: u32| b[o..o + 4].copy_from_slice(&v.to_le_bytes());
@@ -163,12 +171,12 @@ mod tests {
         w32(&mut b, r + 0x78 + 16, 1033);
         w32(&mut b, r + 0x78 + 20, 0xa0);
         // data entries
-        w32(&mut b, r + 0x90, 0x1000 + 0x100);
-        w32(&mut b, r + 0x94, 4);
-        w32(&mut b, r + 0xa0, 0x1000 + 0x110);
-        w32(&mut b, r + 0xa4, 3);
-        b[r + 0x100..r + 0x104].copy_from_slice(b"abcd");
-        b[r + 0x110..r + 0x113].copy_from_slice(b"xyz");
+        w32(&mut b, r + 0x90, 0x1000 + (a_at - r) as u32);
+        w32(&mut b, r + 0x94, png.len() as u32);
+        w32(&mut b, r + 0xa0, 0x1000 + (r_at - r) as u32);
+        w32(&mut b, r + 0xa4, rc.len() as u32);
+        b[a_at..a_at + png.len()].copy_from_slice(png);
+        b[r_at..r_at + rc.len()].copy_from_slice(rc);
         // names
         for (at, s) in [(0x180, "PNG"), (0x190, "A.PNG")] {
             w16(&mut b, r + at, s.len() as u16);

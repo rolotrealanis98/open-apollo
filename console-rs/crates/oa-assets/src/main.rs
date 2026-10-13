@@ -398,9 +398,10 @@ fn plugins_cmd(args: &Args) -> Result<u8, String> {
     }
     let opts = plugins::Options { recipes: args.recipes.clone(), jobs: args.jobs };
     println!("Building plug-in art from {}\n  into {}", root.display(), out.display());
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
     let mut last = std::time::Instant::now();
     let report = plugins::build_with(&root, &out, &args.specs, &opts, &mut |done, total| {
-        if last.elapsed().as_millis() >= 1000 || done == total {
+        if tty && (last.elapsed().as_millis() >= 500 || done == total) {
             last = std::time::Instant::now();
             eprint!("\r  {done}/{total} images");
             if done == total {
@@ -427,10 +428,7 @@ fn plugins_cmd(args: &Args) -> Result<u8, String> {
     if !report.texts.is_empty() {
         println!("Texts: {texts_ok}/{} written", report.texts.len());
     }
-    let shown: std::collections::BTreeSet<&str> =
-        report.sprites.iter().map(|s| s.group.as_str()).chain(args.specs.iter().map(String::as_str)).collect();
-    let specs: Vec<_> =
-        report.specs.iter().filter(|s| args.specs.is_empty() || shown.contains(s.id.as_str())).collect();
+    let specs: Vec<_> = report.specs.iter().filter(|s| args.specs.is_empty() || args.specs.contains(&s.id)).collect();
     let ready = specs.iter().filter(|s| s.ready).count();
     println!("Panels ready: {ready}/{}", specs.len());
     if args.verify {
@@ -466,7 +464,7 @@ fn plugins_cmd(args: &Args) -> Result<u8, String> {
     if let Some(p) = &args.report {
         let v = serde_json::json!({
             "sprites": report.sprites.iter().map(|s| serde_json::json!({
-                "id": s.id, "group": s.group, "status": s.status.as_str(), "basis": s.basis,
+                "id": s.id, "group": s.group, "status": s.status.as_str(), "basis": s.basis, "rgba": s.rgba,
                 "outcome": match &s.outcome {
                     Outcome::Ok => serde_json::json!("ok"),
                     Outcome::Skipped => serde_json::json!("skipped"),

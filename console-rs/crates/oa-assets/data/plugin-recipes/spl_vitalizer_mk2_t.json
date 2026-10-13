@@ -1,0 +1,18 @@
+{"recipesSchema":2,"group":"spl_vitalizer_mk2_t","tier":1,"inputs":{"dll:UAD SPL Vitalizer MK2-T.dll":{"kind":"dll","file":"UAD SPL Vitalizer MK2-T.dll","root":"powered-plugins","sha256":["875d10ae17a56520936013708d1ed3d9e3c5214d13b1c528bc46385949e83697"]}},"uses":["Q_spl_vitalizer_mk2_t__KNOB_mono128_948561","spl_vitalizer_mk2_t__BACKGROUND","spl_vitalizer_mk2_t__BUTTONBIG","spl_vitalizer_mk2_t__BUTTONSMALL","spl_vitalizer_mk2_t__KNOB","spl_vitalizer_mk2_t__METERCLIP","spl_vitalizer_mk2_t__METERCOMP","spl_vitalizer_mk2_t__SWITCHPOWER"],"blobs":{
+"b0":{"in":"dll:UAD SPL Vitalizer MK2-T.dll","res":"PNG/BACKGROUND.PNG/1033","sha":"eeb539ce298c6a98efd6f76a3718a398d930fbc22ec7103c9b27c1380460bf33","dec":"png"},
+"b1":{"in":"dll:UAD SPL Vitalizer MK2-T.dll","res":"PNG/BUTTONBIG.PNG/1033","sha":"9ad6a855bde4c76e6acc0fd65dc957eb63f4ac5d1b802a09c1befe9e4257cd8f","dec":"png"},
+"b2":{"in":"dll:UAD SPL Vitalizer MK2-T.dll","res":"PNG/BUTTONSMALL.PNG/1033","sha":"0ef99e89a8dcb16d04e57a5c689b38fdfee8e3fa118bb77627d152eb8646f5b8","dec":"png"},
+"b3":{"in":"dll:UAD SPL Vitalizer MK2-T.dll","res":"PNG/KNOB.PNG/1033","sha":"1be47db8cbc5c50e789dccd4e26a2dbe9537892d5f9ee37c16fdab4b8d08991d","dec":"png"},
+"b4":{"in":"dll:UAD SPL Vitalizer MK2-T.dll","res":"PNG/METERCLIP.PNG/1033","sha":"791ec0552fc08d61c5ef0ecaf0f7c8849ca06939feee0b389ac12489bdab2914","dec":"png"},
+"b5":{"in":"dll:UAD SPL Vitalizer MK2-T.dll","res":"PNG/METERCOMP.PNG/1033","sha":"acad6a24c0a99d3499525dec8fb82a15367113eec2bd6cf76e52ba6de85ed0f6","dec":"png"},
+"b6":{"in":"dll:UAD SPL Vitalizer MK2-T.dll","res":"PNG/SWITCHPOWER.PNG/1033","sha":"6d6473988eabcee2569ff2a54a64d430c9641520927434d6c44c682ab0d8d465","dec":"png"}
+},"sprites":{
+"Q_spl_vitalizer_mk2_t__KNOB_mono128_948561":{"status":"verified","basis":"dll-composite","build":[{"op":"sprite","id":"spl_vitalizer_mk2_t__KNOB"},{"op":"premul-tint","rgb":[148,133,97],"a":128}],"output":{"w":114,"h":6954,"rgba":"9985cdd1095e0660ea743eb9b480bf2b6fce53d72286d3a6c4c1e734007fcae9"}},
+"spl_vitalizer_mk2_t__BACKGROUND":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":2048,"h":188,"rgba":"887e1f03f30af43679cec914276031ec98cd93dbd54acba045182f9a301c6132"}},
+"spl_vitalizer_mk2_t__BUTTONBIG":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":52,"h":104,"rgba":"612bc420f00899e978ce21d21d1c586cc168ed388a9d0462d895b43c67a7b29b"}},
+"spl_vitalizer_mk2_t__BUTTONSMALL":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":40,"h":80,"rgba":"2803cc04032817a9c9c0fad9d2e8ffec3ecf7474ab777ce08ec02db838e1b9f9"}},
+"spl_vitalizer_mk2_t__KNOB":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":114,"h":6954,"rgba":"7ec81e36a295a5e42fc82175cab2e3bc92682f91134ffd3feac0d870e51cea13"}},
+"spl_vitalizer_mk2_t__METERCLIP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":28,"h":56,"rgba":"b232e9f4cd086e13e93518eaaf789428f2aa74f2e1c094e0e88bf3f2e1746de8"}},
+"spl_vitalizer_mk2_t__METERCOMP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":28,"h":56,"rgba":"0be0de6dc8c7a06c6ab8c28cd3cacd042e3762902d703c66abedd99cf04cec44"}},
+"spl_vitalizer_mk2_t__SWITCHPOWER":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":86,"h":232,"rgba":"fb08f647a7e43b4c16d82f66b081fa0eff991553f4fbe14f70576066e6114bd9"}}
+}}

@@ -1,0 +1,31 @@
+{"recipesSchema":2,"group":"ada_flanger","tier":2,"inputs":{"dll:UAD ADA Flanger.dll":{"kind":"dll","file":"UAD ADA Flanger.dll","root":"powered-plugins","sha256":["a0c5c78e01582ee5c4cd628907b502fa4bc219ce630500d20c6202138692b600"]}},"uses":["J_ada_flanger_background_tb","J_ada_flanger_tb_bank","J_ada_flanger_tb_knob_10","J_ada_flanger_tb_knob_12","J_ada_flanger_tb_knob_13","J_ada_flanger_tb_power","ada_flanger__BACKGROUND","ada_flanger__FOOTSWITCH_C0","ada_flanger__FOOTSWITCH_C1","ada_flanger__KNOBSTEPPED_C0","ada_flanger__KNOBSTEPPED_C1","ada_flanger__KNOBTRIM","ada_flanger__KNOB_C0","ada_flanger__KNOB_C1","ada_flanger__LABELS_C0","ada_flanger__LABELS_C1","ada_flanger__LED_C0","ada_flanger__LED_C1","ada_flanger__SWITCH_C0","ada_flanger__SWITCH_C1"],"blobs":{
+"b0":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/BACKGROUND.PNG/1033","sha":"d6ee595012ae66ab71a6d39e9fb32be53fc87aa32c892d95f7fec53e212cd07a","dec":"png"},
+"b1":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/FOOTSWITCH.PNG/1033","sha":"e9983270cc9fea25fbec6bcc3871f07980a0751764e422176f7e1e4ea471a062","dec":"png"},
+"b2":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/KNOBSTEPPED.PNG/1033","sha":"492e411aa1da23c26e2d53b7b2e9c77abb38678dbd32a23b94c84477405e3474","dec":"png"},
+"b3":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/KNOBTRIM.PNG/1033","sha":"4c0c36592875331dd11c4e02252fee86ba07783a3caae6cc2e96636fc933bfce","dec":"png"},
+"b4":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/KNOB.PNG/1033","sha":"38ac7e088ace464c5ba38ac9b1068a94cd9b8fee7997947f9e7e8569b1a334f6","dec":"png"},
+"b5":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/LABELS.PNG/1033","sha":"c71803b351f0d716ba5e224bb5930176beb1eb42b7e469d9ea4c506b9ec46fd9","dec":"png"},
+"b6":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/LED.PNG/1033","sha":"0fab6ee13bcda14f52cfa905333404dd94911c1bb45ff40798089b2bd138808a","dec":"png"},
+"b7":{"in":"dll:UAD ADA Flanger.dll","res":"PNG/SWITCH.PNG/1033","sha":"81c90d228ba077b825deb12f4b38adad7a9abd9ef9a995bdff915b086c133927","dec":"png"}
+},"sprites":{
+"J_ada_flanger_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ada_flanger_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ada_flanger_tb_knob_10":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ada_flanger_tb_knob_12":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ada_flanger_tb_knob_13":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ada_flanger_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"ada_flanger__BACKGROUND":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":1230,"h":1073,"rgba":"75c24cbf720891a0525962f45245604ebd23d5acb68bf6f39ed86a6dd93a9d82"}},
+"ada_flanger__FOOTSWITCH_C0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,170,328]}],"output":{"w":170,"h":328,"rgba":"2ae120b26efa5902572f5bb5f4f430a4870f680ad9ab586ce0dd211f1dbda9bb"}},
+"ada_flanger__FOOTSWITCH_C1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[170,0,170,328]}],"output":{"w":170,"h":328,"rgba":"4d792522cbb35d5b96fa94830cd267e4df7ac68f69feaa69c938e5a4e1b4c84a"}},
+"ada_flanger__KNOBSTEPPED_C0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,244,3904]}],"output":{"w":244,"h":3904,"rgba":"58cc6dc333d59ccf831488e6d81bd49e49dfc30cbe311032416596811eda2db4"}},
+"ada_flanger__KNOBSTEPPED_C1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[244,0,244,3904]}],"output":{"w":244,"h":3904,"rgba":"6a5d8a6c0d7224dc4e89f01d3b916f58e8887d2f22d840463cc9522348a40236"}},
+"ada_flanger__KNOBTRIM":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":125,"h":2625,"rgba":"bde24b3ac979d491a3716c3d0da234d0ade55a869fb4ccd1ca54a18b04e447c1"}},
+"ada_flanger__KNOB_C0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,244,14884]}],"output":{"w":244,"h":14884,"rgba":"4f4fba6363ac361d43327862c8dda5815a5fc122673ab933e2caff74ae45bd17"}},
+"ada_flanger__KNOB_C1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[244,0,244,14884]}],"output":{"w":244,"h":14884,"rgba":"a0ab7eae3378677d9842cd3734f4454d845ae4b496aa968ce875c1bdd7c45657"}},
+"ada_flanger__LABELS_C0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,410,150]}],"output":{"w":410,"h":150,"rgba":"db06ba44c1c18a239af2a0019c99b125116e31c0adbfef288406b99682b6d275"}},
+"ada_flanger__LABELS_C1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[410,0,410,150]}],"output":{"w":410,"h":150,"rgba":"e949961f53e41343fd2dfd177d8385adcf574af1397749c254fd90e6bc558b1d"}},
+"ada_flanger__LED_C0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,44,92]}],"output":{"w":44,"h":92,"rgba":"583a4ca2ea37b1a6af83d382cda7ff37fc7bdf25d8368033b5fe31f96b7bc12f"}},
+"ada_flanger__LED_C1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[44,0,44,92]}],"output":{"w":44,"h":92,"rgba":"9f9e1b40be4eb8f2edeaf1295a870a124473093bb95620112d26d77f07eeb33b"}},
+"ada_flanger__SWITCH_C0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,74,100]}],"output":{"w":74,"h":100,"rgba":"530c4630c3fb344ca56374cb4adc1f32b2f0ee897024f38ade88a3a9214d69fc"}},
+"ada_flanger__SWITCH_C1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[74,0,74,100]}],"output":{"w":74,"h":100,"rgba":"164d6491ea097c2ed47c616171e79c291dc83ec01621cb23a006e77e54bd0b89"}}
+}}

@@ -1,0 +1,24 @@
+{"recipesSchema":2,"group":"friedman_buxom_betty","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD Friedman Buxom Betty.dll":{"kind":"dll","file":"UAD Friedman Buxom Betty.dll","root":"powered-plugins","sha256":["50a3054bb54a29c2701f6ff3cd6fabaf28b6279bf7975556df7899e25742115e"]}},"uses":["J_friedman_buxom_betty_background_tb","J_friedman_buxom_betty_tb_bank","J_friedman_buxom_betty_tb_power","J_friedman_buxom_betty_tb_rack","friedman_buxom_betty__BUTTON","friedman_buxom_betty__LED","friedman_buxom_betty__POTI","friedman_buxom_betty__POWERLED","friedman_buxom_betty__RACK","friedman_buxom_betty__SWITCH","friedman_buxom_betty__SWITCH3POS","friedman_buxom_betty__SWITCH3POSSMALL"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/BUTTON.PNG/1033","sha":"fc7eb1332952a7b6bc26d630c438c9318bf08fc24906937b1cfe3c545c137272","dec":"png"},
+"b2":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/LED.PNG/1033","sha":"29fa0b6b922bfc1bbc0e3aa6f871f2135350133cefadc58d1da6f123e1c41994","dec":"png"},
+"b3":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/POTI.PNG/1033","sha":"1d43654c65f27cd26e99014cf5d4addc0ccf4e2504ec2fcb8c93f59153b2c09f","dec":"png"},
+"b4":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/POWERLED.PNG/1033","sha":"0f4fec15141cc7098b18b18415be707f1381e365a8de8ad0e405adaa073954bd","dec":"png"},
+"b5":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/RACK.PNG/1033","sha":"b9599cb1295e9c02d6e8f78c6176668164a95a6e02875ccea339a2fe33ddc171","dec":"png"},
+"b6":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/SWITCH.PNG/1033","sha":"962f231debf9151296b31f2cd220c5ee18522b208e1610fcd17e3a4113b069a3","dec":"png"},
+"b7":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"7d75370375d2e72c8637f1b2f0d5f640c4b644c7618e634fe4d33f199d6e3953","dec":"png"},
+"b8":{"in":"dll:UAD Friedman Buxom Betty.dll","res":"PNG/SWITCH3POSSMALL.PNG/1033","sha":"0bfb4b3e504e8a0f72a547559d21aa3c69f50b25f89b4ce55fe5d6653486bdbc","dec":"png"}
+},"sprites":{
+"J_friedman_buxom_betty_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_buxom_betty_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_buxom_betty_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_friedman_buxom_betty_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"friedman_buxom_betty__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":50,"h":100,"rgba":"b4c441b45be4bd16f148037b3e98608c7465c1193c87387aa2cdea7fd4ddcd4b"}},
+"friedman_buxom_betty__LED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":42,"h":84,"rgba":"00b4d9d1698f2426e5c958b6bed2d707fceb882ad8e9e43f1b0826c1ff5173d9"}},
+"friedman_buxom_betty__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":130,"h":7930,"rgba":"f478b4b2daa75074f606c8289b663b554beef28e2a8dda0d12f8b432975fd5b0"}},
+"friedman_buxom_betty__POWERLED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":70,"h":144,"rgba":"1fd8089673512a35d02b00aa44e49950c355f0e0afd14d9fb28795d6c4fac421"}},
+"friedman_buxom_betty__RACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":2048,"h":493,"rgba":"9db6559c5206d380b3c43830187e5168cc0bb758d7e5678e86a0b03aa6d5ae01"}},
+"friedman_buxom_betty__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":72,"h":172,"rgba":"93a8d4f591bbc47f6d5b83563fbad47b2b94030e02261c866e3bb6293825ec69"}},
+"friedman_buxom_betty__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":72,"h":258,"rgba":"2cc90f3124b5c78e21f5ccb0b4eabf67f65a16fa809e872b4a62cab5266dd08b"}},
+"friedman_buxom_betty__SWITCH3POSSMALL":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":54,"h":162,"rgba":"d2f31698b578101c63503f2877b0ca885f7979b85c3991b0eb2346d13b9d8d78"}}
+}}

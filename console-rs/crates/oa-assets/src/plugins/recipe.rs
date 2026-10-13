@@ -21,10 +21,30 @@ pub struct RecipeFile {
     /// Every sprite id the spec draws, including ids defined by other groups.
     #[serde(default)]
     pub uses: Vec<String>,
+    /// Blobs that `load` steps name by key (`{"op": "load", "blob": "b0"}`), so a
+    /// blob used many times is spelled out once.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub blobs: BTreeMap<String, Blob>,
     #[serde(default)]
     pub sprites: BTreeMap<String, Sprite>,
     #[serde(default)]
     pub texts: BTreeMap<String, Text>,
+}
+
+/// A blob of an input file: a PE resource `TYPE/NAME/LANG`, or `carve: [offset,
+/// length]` (PNG/JPEG/SVG embedded anywhere in the file), and how to decode it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Blob {
+    #[serde(rename = "in")]
+    pub input: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub res: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carve: Option<[u64; 2]>,
+    /// SHA-256 of the blob bytes.
+    pub sha: String,
+    pub dec: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -109,18 +129,20 @@ pub struct Output {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Op {
-    /// Decode a blob of an input file: a PE resource `TYPE/NAME/LANG`,
-    /// or `carve: [offset, length]` (PNG/JPEG/SVG embedded anywhere in the file).
+    /// Decode a blob: either `blob` (a key of the file's `blobs`) or the blob's fields inline.
     Load {
-        #[serde(rename = "in")]
-        input: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        blob: Option<String>,
+        #[serde(default, rename = "in", skip_serializing_if = "Option::is_none")]
+        input: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         res: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         carve: Option<[u64; 2]>,
-        /// SHA-256 of the blob bytes.
-        sha: String,
-        dec: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sha: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dec: Option<String>,
     },
     /// A new image filled with `rgba` (default transparent black).
     Canvas {
@@ -173,6 +195,12 @@ pub enum Op {
     Layers { n: u32, layers: Vec<Layer> },
     /// Mirror: "x" left-right, "y" top-bottom.
     Flip { axis: String },
+    /// Brainworx "disabled" tint: every pixel with alpha > 0 moves toward `rgb`
+    /// by `a`/256 after scaling colour by alpha/256, rounded half to even (integer form).
+    PremulTint { rgb: [u8; 3], a: u32 },
+    /// JUCE's load-time premultiply (`(c * a + 127) >> 8`, skipped at alpha 255)
+    /// undone by an integer divide, as the art looked in the plug-in's memory.
+    JucePremulRoundtrip,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -275,18 +303,19 @@ pub fn deps(ops: &[Op], out: &mut Vec<String>) {
 }
 
 /// Input ids a pipeline reads.
-pub fn inputs(ops: &[Op], out: &mut Vec<String>) {
+pub fn inputs(ops: &[Op], blobs: &BTreeMap<String, Blob>, out: &mut Vec<String>) {
     for op in ops {
         match op {
-            Op::Load { input, .. } => out.push(input.clone()),
-            Op::Stack { parts, .. } => parts.iter().for_each(|p| inputs(p, out)),
-            Op::Paste { src, .. } => inputs(src, out),
+            Op::Load { input: Some(i), .. } => out.push(i.clone()),
+            Op::Load { blob: Some(b), .. } => out.extend(blobs.get(b).map(|b| b.input.clone())),
+            Op::Stack { parts, .. } => parts.iter().for_each(|p| inputs(p, blobs, out)),
+            Op::Paste { src, .. } => inputs(src, blobs, out),
             Op::ThumbFader { track, thumb, .. } => {
-                inputs(track, out);
-                inputs(thumb, out);
+                inputs(track, blobs, out);
+                inputs(thumb, blobs, out);
             }
-            Op::Slide { thumb, .. } => inputs(thumb, out),
-            Op::Layers { layers, .. } => layers.iter().for_each(|l| inputs(&l.src, out)),
+            Op::Slide { thumb, .. } => inputs(thumb, blobs, out),
+            Op::Layers { layers, .. } => layers.iter().for_each(|l| inputs(&l.src, blobs, out)),
             _ => {}
         }
     }

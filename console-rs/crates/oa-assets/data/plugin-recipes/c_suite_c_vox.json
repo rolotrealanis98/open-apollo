@@ -1,0 +1,14 @@
+{"recipesSchema":2,"group":"c_suite_c_vox","tier":3,"inputs":{"dll:UAD C-Suite C-Vox.dll":{"kind":"dll","file":"UAD C-Suite C-Vox.dll","root":"powered-plugins","sha256":["65fee057180a26535bc380b3b2e49b93286c72ebb5548fdd502d6474725f480a"]}},"uses":["CSVX_knob_1","CSVX_knob_2","CSVX_label_1","CSVX_label_2","CSVX_mode","Q_CSVX_bg","R_c_suite_c_vox_bypass"],"blobs":{
+"b0":{"in":"dll:UAD C-Suite C-Vox.dll","carve":[2377392,2479],"sha":"8687ec694795d42eb956c8c3ddf0531f595092997bde67b1af89bf722fb98cb2","dec":"png"},
+"b1":{"in":"dll:UAD C-Suite C-Vox.dll","carve":[2319904,3103],"sha":"cc5df50a1499365bd50f17d66eb3ce50f90dcee65123ebe9fa5b5ac7676c3e5a","dec":"png"},
+"b2":{"in":"dll:UAD C-Suite C-Vox.dll","carve":[2327216,9041],"sha":"f3e75a34a4cc3143ed5b7d98dadd4bab144f431a5a99d738aaa4adb8413f44f4","dec":"png"},
+"b3":{"in":"dll:UAD C-Suite C-Vox.dll","carve":[2364576,8995],"sha":"bd5e663d91c4566a538658f16c1577a27be5fbd2cc13f47c8676ffa469112daa","dec":"png"}
+},"sprites":{
+"CSVX_knob_1":{"status":"no-recipe","basis":"derived","kind":"todo"},
+"CSVX_knob_2":{"status":"no-recipe","basis":"derived","kind":"todo"},
+"CSVX_label_1":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":222,"h":24,"rgba":"293b818772a62ee0206a79acc5b2c1cea0272dd28eb95506b8857ea54e83b6db"}},
+"CSVX_label_2":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":222,"h":24,"rgba":"80689150ecc2ec81e74daea83387d3f71b7c5bd5ffe28e1a6625f1a8179f3740"}},
+"CSVX_mode":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,137,78]}],[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,137,78]}]]}],"output":{"w":137,"h":156,"rgba":"4b0baa6995d93a24ba95852b3c05a85d306d4d877e5aedd34d34123e746a47ff"}},
+"Q_CSVX_bg":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"},
+"R_c_suite_c_vox_bypass":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"vector"}
+}}

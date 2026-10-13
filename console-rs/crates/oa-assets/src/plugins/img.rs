@@ -165,6 +165,43 @@ impl Rgba {
     }
 }
 
+impl Rgba {
+    /// Brainworx's disabled-control tint in integer form: for alpha `al` > 0 and
+    /// target `t`, `c = min(255, round_half_even((c*al*(256-a) + t*a*256) / 65536))`.
+    /// Equal to agent Q's float64 formula, whose terms are all exact.
+    pub fn premul_tint(&mut self, rgb: [u8; 3], a: u32) {
+        for p in self.px.as_chunks_mut::<4>().0 {
+            let al = p[3] as u32;
+            if al == 0 {
+                continue;
+            }
+            for k in 0..3 {
+                let num = p[k] as u32 * al * (256 - a) + rgb[k] as u32 * a * 256;
+                let (mut q, r) = (num >> 16, num & 0xFFFF);
+                if r > 0x8000 || (r == 0x8000 && q & 1 == 1) {
+                    q += 1;
+                }
+                p[k] = q.min(255) as u8;
+            }
+        }
+    }
+
+    /// JUCE premultiplies 8-bit art on load (`(c * a + 127) >> 8`, not at alpha
+    /// 255); dumping it back divides by alpha (integer floor). Alpha 0 clears colour.
+    pub fn juce_premul_roundtrip(&mut self) {
+        for p in self.px.as_chunks_mut::<4>().0 {
+            let al = p[3] as u32;
+            for c in &mut p[..3] {
+                *c = match al {
+                    255 => *c,
+                    0 => 0,
+                    _ => (((*c as u32 * al + 127) >> 8) * 255 / al) as u8,
+                };
+            }
+        }
+    }
+}
+
 /// Pillow's `ImagingAlphaComposite` for one pixel (`src` over `dst`).
 #[inline]
 pub fn over(src: &[u8], dst: &[u8]) -> [u8; 4] {

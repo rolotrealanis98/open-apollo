@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"oxford_inflator","tier":4,"inputs":{},"uses":["FM_oxford-inflator_0","FM_oxford-inflator_1","FM_oxford-inflator_2","FM_oxford-inflator_3","F_Oxford-Inflator_p0_0","F_Oxford-Inflator_p1_0","F_Oxford-Inflator_p2_0","F_Oxford-Inflator_p3_0","F_Oxford-Inflator_p5_0","F_Oxford-Inflator_p6_0","R_Oxford-Inflator_bg","R_Oxford-Inflator_bypass","R_Oxford-Inflator_bypass_icon","R_Oxford-Inflator_effect_out","R_Oxford-Inflator_effect_out_0"],"sprites":{
+"FM_oxford-inflator_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"similar"},
+"FM_oxford-inflator_1":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"similar"},
+"FM_oxford-inflator_2":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"similar"},
+"FM_oxford-inflator_3":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"similar"},
+"F_Oxford-Inflator_p0_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"F_Oxford-Inflator_p1_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"F_Oxford-Inflator_p2_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"F_Oxford-Inflator_p3_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"F_Oxford-Inflator_p5_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"F_Oxford-Inflator_p6_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"R_Oxford-Inflator_bg":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"R_Oxford-Inflator_bypass":{"status":"verified","basis":"synth","build":[{"op":"canvas","w":874,"h":624,"rgba":[2,3,6,47]}],"output":{"w":874,"h":624,"rgba":"7580aeabd76f5d42c0ece3ce6da36624fbedac075f37ed3ef263f2bb06793a57"}},
+"R_Oxford-Inflator_bypass_icon":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"},
+"R_Oxford-Inflator_effect_out":{"status":"verified","basis":"synth","build":[{"op":"canvas","w":330,"h":624,"rgba":[9,1,16,87]}],"output":{"w":330,"h":624,"rgba":"50d67f23c0ce205a0505f9b351c8897548568e998d8c38f2f9c63844a0f48551"}},
+"R_Oxford-Inflator_effect_out_0":{"status":"deferred","basis":"live","owner":"plugin-ui/vector","kind":"vector"}
+}}

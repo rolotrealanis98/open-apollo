@@ -1,0 +1,29 @@
+{"recipesSchema":2,"group":"tube_tech_cl_1b_mk_ii","tier":2,"inputs":{"dll:UAD Tube-Tech CL 1B mk II.dll":{"kind":"dll","file":"UAD Tube-Tech CL 1B mk II.dll","root":"powered-plugins","sha256":["f8cbb4d834aa290a80c2c82539b6df9c9e08b0cecf17fc84594067f2494948d8"]}},"uses":["K_STB_power","K_tube_tech_cl_1b_mk_ii_toolbar","Q_Tube_Tech_CL_1B_mk_II_1005","STB_Tube_Tech_CL_1B_mk_II_1000","STB_Tube_Tech_CL_1B_mk_II_1002","STB_Tube_Tech_CL_1B_mk_II_1003","STB_Tube_Tech_CL_1B_mk_II_1004","STB_Tube_Tech_CL_1B_mk_II_1006","STB_Tube_Tech_CL_1B_mk_II_1007","STB_Tube_Tech_CL_1B_mk_II_1009","STB_Tube_Tech_CL_1B_mk_II_1010","STB_Tube_Tech_CL_1B_mk_II_1011","STB_Tube_Tech_CL_1B_mk_II_1013","STB_Tube_Tech_CL_1B_mk_II_1014","STB_Tube_Tech_CL_1B_mk_II_needle-0"],"blobs":{
+"b0":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1005/1053","sha":"291783d2c723eb577a48f7107fad2094f8be8eb73d0db279b6fece78781959d8","dec":"png"},
+"b1":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1000/1053","sha":"b7650f85dac3baacaf296fe8e4fcf588ec816882833356adf53328d6b5007c07","dec":"png"},
+"b2":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1002/1053","sha":"8857d9ec87c0653f4be52a10efc9f0f668f88b984b2402ce439a356f775d940e","dec":"png"},
+"b3":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1003/1053","sha":"acbd9b8da7cc10050d642afd18169ac42f5bd482197af020d22e95b81443a20c","dec":"png"},
+"b4":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1004/1053","sha":"984e3903eb3fd654f452c66368044421d3cbbc74a89b0f20e47e0e77bd661d78","dec":"png"},
+"b5":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1006/1053","sha":"8c2c11706f04b5eb6a136da7dbed522a8e8963d02fbac628c44ee4d5580d5423","dec":"png"},
+"b6":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1007/1053","sha":"cdafa789f84370d9767eb1c44a15b4ec4b58d550f37dc0b3573928f76c4d96bc","dec":"png"},
+"b7":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1009/1053","sha":"daa74cf1d50372558024ad22c6a6b72d0f22c773b520a6b73aaeb3d0fe3eee34","dec":"png"},
+"b8":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1010/1053","sha":"41c7880bf3a8241141775bf0352cc9e416baf71a8226c912c22286144c88cdf9","dec":"png"},
+"b9":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1011/1053","sha":"e5cc570a95c517dfb3b08b3f6549137f248123b7ef44221490c86440d6cbb32a","dec":"png"},
+"b10":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1013/1053","sha":"7b29645f3566f6c246e0b38ae7f67ca266cb281dbf2c313e4dc13e36af0a7f5a","dec":"png"},
+"b11":{"in":"dll:UAD Tube-Tech CL 1B mk II.dll","res":"MPACK/1014/1053","sha":"82751f3733c1f975b6954862c7e376411a9870c4b88a09f8eb6ec8ff8f53ef91","dec":"png"}
+},"sprites":{
+"K_tube_tech_cl_1b_mk_ii_toolbar":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"Q_Tube_Tech_CL_1B_mk_II_1005":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":164,"h":330,"rgba":"608945cb58e8a9d336f5ad142ee17ad4f72aaeff6af29085f678a71349f87f26"}},
+"STB_Tube_Tech_CL_1B_mk_II_1000":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":270,"h":29040,"rgba":"55d3e7659a441c30108d0f83e8ca7b4d412a2447889118d2db21a20c295da0a3"}},
+"STB_Tube_Tech_CL_1B_mk_II_1002":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":2320,"h":656,"rgba":"6885f5ee0e3f40eda075378f8bdcb17a4fa28fa47333aea2d664c2c0fd13749d"}},
+"STB_Tube_Tech_CL_1B_mk_II_1003":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":330,"h":750,"rgba":"53f5be6187abb66313a3771a1fc59e7eaf197e659b8363672fd4a673c7c3f238"}},
+"STB_Tube_Tech_CL_1B_mk_II_1004":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":154,"h":3234,"rgba":"711d2f2074703e72783649e83633e3dfebfb522cc34942cb67637e39d40eb420"}},
+"STB_Tube_Tech_CL_1B_mk_II_1006":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":330,"h":750,"rgba":"7919d7b74c497e08bd49f350814583c52439adf17b3afaa70db442c1f9338bba"}},
+"STB_Tube_Tech_CL_1B_mk_II_1007":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":274,"h":29040,"rgba":"b049cbd68d5acbb605b6a376f895c97ae6a40448a50e9e8896f9e7d35c28b7ea"}},
+"STB_Tube_Tech_CL_1B_mk_II_1009":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":182,"h":19844,"rgba":"9a392e3db420b913667aabb711230cb75847e44405d6830b475cd0c26bbaf9a7"}},
+"STB_Tube_Tech_CL_1B_mk_II_1010":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":256,"h":29040,"rgba":"ee1507bbee49e8d4521835bb9696f0b220800d44cff7a67e509ac9ce21d8d370"}},
+"STB_Tube_Tech_CL_1B_mk_II_1011":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":270,"h":29040,"rgba":"e403cf8f56ba5625e8034e4e30e7cafca787005395b966111b93c0db536b58ba"}},
+"STB_Tube_Tech_CL_1B_mk_II_1013":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":258,"h":29040,"rgba":"b204fed26f67a8c85b94e0daf81b430566618f1f97ab5aa2c3b6bafb0d6e9aac"}},
+"STB_Tube_Tech_CL_1B_mk_II_1014":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"output":{"w":586,"h":376,"rgba":"ae4e2c9d234413866239ac74398c8ba8e3ff17a481d4820670ec7ccffc8b6dbd"}},
+"STB_Tube_Tech_CL_1B_mk_II_needle-0":{"status":"no-recipe","basis":"derived","kind":"todo"}
+}}

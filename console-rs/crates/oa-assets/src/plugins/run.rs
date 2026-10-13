@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::decode::{Decode, decode};
 use super::img::{Rgba, sha256};
 use super::pe;
-use super::recipe::{Book, Layer, Op};
+use super::recipe::{Blob, Book, Layer, Op};
 use super::resample::{Filter, resize, resize_nearest};
 
 /// An input file's bytes and parsed resource directory.
@@ -132,26 +132,43 @@ impl<'a> Runner<'a> {
         if depth > 8 {
             return Err(format!("sprite {id}: references nest too deep"));
         }
-        let (_, s) = self.book.sprite(id).ok_or_else(|| format!("unknown sprite {id}"))?;
+        let fi = *self.book.sprite_at.get(id).ok_or_else(|| format!("unknown sprite {id}"))?;
+        let s = &self.book.files[fi].sprites[id];
         if !s.status.buildable() {
             return Err(format!("sprite {id} is {}", s.status.as_str()));
         }
         let ops = s.build.clone().ok_or_else(|| format!("sprite {id} has no build"))?;
-        let im = Arc::new(self.pipeline(&ops, depth + 1)?);
+        let im = Arc::new(self.pipeline(&ops, depth + 1, fi)?);
         self.built.insert(id.to_string(), im.clone());
         Ok(im)
     }
 
-    pub fn pipeline(&mut self, ops: &[Op], depth: usize) -> Result<Rgba, String> {
+    /// The blob a `load` step names, from the file's `blobs` table or inline.
+    fn resolve(&self, op: &Op, fi: usize) -> Result<Blob, String> {
+        let Op::Load { blob, input, res, carve, sha, dec } = op else { return Err("not a load".into()) };
+        if let Some(k) = blob {
+            return self.book.files[fi].blobs.get(k).cloned().ok_or_else(|| format!("unknown blob {k}"));
+        }
+        Ok(Blob {
+            input: input.clone().ok_or("load needs in")?,
+            res: res.clone(),
+            carve: *carve,
+            sha: sha.clone().ok_or("load needs sha")?,
+            dec: dec.clone().ok_or("load needs dec")?,
+        })
+    }
+
+    pub fn pipeline(&mut self, ops: &[Op], depth: usize, fi: usize) -> Result<Rgba, String> {
         let (first, rest) = ops.split_first().ok_or("empty pipeline")?;
         let mut im: Rgba = match first {
-            Op::Load { input, res, carve, sha, dec } => {
+            Op::Load { .. } => {
+                let Blob { input, res, carve, sha, dec } = self.resolve(first, fi)?;
                 let key = format!("{input}|{res:?}|{carve:?}|{dec}");
                 if let Some(b) = self.blobs.get(&key) {
                     (**b).clone()
                 } else {
-                    let how = Decode::parse(dec).ok_or_else(|| format!("unknown decode {dec}"))?;
-                    let bytes = self.blob(input, res.as_deref(), *carve, sha)?;
+                    let how = Decode::parse(&dec).ok_or_else(|| format!("unknown decode {dec}"))?;
+                    let bytes = self.blob(&input, res.as_deref(), carve, &sha)?;
                     let im = Arc::new(decode(&bytes, how)?);
                     self.blobs.insert(key, im.clone());
                     (*im).clone()
@@ -162,29 +179,29 @@ impl<'a> Runner<'a> {
             Op::Stack { parts, axis } => {
                 let mut imgs = Vec::new();
                 for p in parts {
-                    imgs.push(self.pipeline(p, depth)?);
+                    imgs.push(self.pipeline(p, depth, fi)?);
                 }
                 stack(&imgs, axis.as_deref() == Some("x"))
             }
             Op::ThumbFader { track, thumb, w, h, k } => {
-                let track = self.pipeline(track, depth)?;
-                let thumb = self.pipeline(thumb, depth)?;
+                let track = self.pipeline(track, depth, fi)?;
+                let thumb = self.pipeline(thumb, depth, fi)?;
                 thumb_fader(&track, &thumb, *w, *h, *k)?
             }
             Op::Slide { thumb, n, w, h, x, y } => {
-                let thumb = self.pipeline(thumb, depth)?;
+                let thumb = self.pipeline(thumb, depth, fi)?;
                 slide(&thumb, *n, *w, *h, *x, *y)?
             }
-            Op::Layers { n, layers } => self.layers(*n, layers, depth)?,
+            Op::Layers { n, layers } => self.layers(*n, layers, depth, fi)?,
             other => return Err(format!("pipeline must start with a source, not {other:?}")),
         };
         for op in rest {
-            im = self.step(im, op, depth)?;
+            im = self.step(im, op, depth, fi)?;
         }
         Ok(im)
     }
 
-    fn step(&mut self, im: Rgba, op: &Op, depth: usize) -> Result<Rgba, String> {
+    fn step(&mut self, im: Rgba, op: &Op, depth: usize, fi: usize) -> Result<Rgba, String> {
         Ok(match op {
             Op::Load { .. }
             | Op::Canvas { .. }
@@ -211,7 +228,7 @@ impl<'a> Runner<'a> {
                 }
             }
             Op::Paste { src, at, blend } => {
-                let s = self.pipeline(src, depth)?;
+                let s = self.pipeline(src, depth, fi)?;
                 let mut out = im;
                 match blend.as_deref().unwrap_or("over") {
                     "over" => out.composite(&s, at[0], at[1]),
@@ -223,13 +240,26 @@ impl<'a> Runner<'a> {
             }
             Op::MeterFill { n, vertical } => meter_fill(&im, *n, *vertical)?,
             Op::Flip { axis } => flip(&im, axis == "y"),
+            Op::PremulTint { rgb, a } => {
+                if *a > 256 {
+                    return Err("premul-tint: a is 0..=256".into());
+                }
+                let mut out = im;
+                out.premul_tint(*rgb, *a);
+                out
+            }
+            Op::JucePremulRoundtrip => {
+                let mut out = im;
+                out.juce_premul_roundtrip();
+                out
+            }
         })
     }
 
-    fn layers(&mut self, n: u32, layers: &[Layer], depth: usize) -> Result<Rgba, String> {
+    fn layers(&mut self, n: u32, layers: &[Layer], depth: usize, fi: usize) -> Result<Rgba, String> {
         let mut ims = Vec::new();
         for l in layers {
-            ims.push((self.pipeline(&l.src, depth)?, l.frames.max(1)));
+            ims.push((self.pipeline(&l.src, depth, fi)?, l.frames.max(1)));
         }
         let fw = ims.iter().map(|(i, _)| i.w).max().unwrap_or(0);
         let fh = ims.iter().map(|(i, fr)| i.h / fr).max().unwrap_or(0);

@@ -1,0 +1,27 @@
+{"recipesSchema":2,"group":"maag_eq4","tier":0,"inputs":{"dll:UAD Maag EQ4.dll":{"kind":"dll","file":"UAD Maag EQ4.dll","root":"powered-plugins","sha256":["8719608652aa82f971c49bc59ae7d5f2f860809273a94668177855557041f61a"]}},"uses":["maag_eq4__BACKGROUND","maag_eq4__BUTTON","maag_eq4__KNOBBLACK","maag_eq4__KNOBBLUE","maag_eq4__KNOBBLUESTEPPED","maag_eq4__KNOBGREEN","maag_eq4__KNOBORANGE","maag_eq4__KNOBRED","maag_eq4__KNOBTRIM","maag_eq4__KNOBYELLOW","maag_eq4__METERCLIP","maag_eq4__METERSIGNAL"],"blobs":{
+"b0":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/BACKGROUND.PNG/1033","sha":"872887b8bca098158965ea0e0650308666fa40bae75daa51ea98f80ff297ca50","dec":"png"},
+"b1":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/BUTTON.PNG/1033","sha":"32dce65313ba453d446f4ad03a802d041896d295e10dc158e05dea04096fb333","dec":"png"},
+"b2":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBBLACK.PNG/1033","sha":"26d1b457c1936eb13c84fd9a32f4a464ee6a2ab67dfcd31a24c6fdb881a82fa1","dec":"png"},
+"b3":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBBLUE.PNG/1033","sha":"834923aacde6a1c11863b908331a076385af1399101eed2e81999b3a87dc1e8e","dec":"png"},
+"b4":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBBLUESTEPPED.PNG/1033","sha":"75d8c55ff3e827427aa1d60cf078ecf9cd62d637a01000eea1032c67d9e08907","dec":"png"},
+"b5":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBGREEN.PNG/1033","sha":"0f330d518c9447860fe4e92d742c37af14761f9ebffd576bbb85cc9161fc980f","dec":"png"},
+"b6":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBORANGE.PNG/1033","sha":"7285626c00b634a0d915f7d44b09ff08e690a0b311d08fec0921c257a00f5ac7","dec":"png"},
+"b7":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBRED.PNG/1033","sha":"aba4ae79834513aab76794a1ccec429082e9d3add1343888e2f74a2689537fbb","dec":"png"},
+"b8":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBTRIM.PNG/1033","sha":"029822ae2e3d2fc30d692eb400bb3345d7750ec18a69b4e16f778191dcf47ccf","dec":"png"},
+"b9":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/KNOBYELLOW.PNG/1033","sha":"ff10acc4eabda623fe3b532c6c77372cdb4b7c6806564dddbde31f108ba39c1e","dec":"png"},
+"b10":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/METERCLIP.PNG/1033","sha":"513c44688edc06376010f444df0435b2a0dbc1f3f3915cbcfa586504c9b9f88b","dec":"png"},
+"b11":{"in":"dll:UAD Maag EQ4.dll","res":"PNG/METERSIGNAL.PNG/1033","sha":"1f0161add3c103d1f8b0e14eeaf79368300a81cf29a5b4b51819765c378a055e","dec":"png"}
+},"sprites":{
+"maag_eq4__BACKGROUND":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":1090,"h":272,"rgba":"229877ed1a76531feb24638e6a74c0a7a581db0fa8fbb7498730ca26e0665f7e"}},
+"maag_eq4__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":150,"h":192,"rgba":"c42a6c4c4026613cbcc4c98c93c33d79bd941014c94df214dd79fcf41effb58c"}},
+"maag_eq4__KNOBBLACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":142,"h":2982,"rgba":"247fd7cf77e671bc9f609b91ee18e0e7fd77f1087be5b186f2338e11fe92a40e"}},
+"maag_eq4__KNOBBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":142,"h":2982,"rgba":"4f35e4d3f40baf9481e75cfd96a859430b502051825200fd9b924bb5cfd5b333"}},
+"maag_eq4__KNOBBLUESTEPPED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":142,"h":852,"rgba":"e456bdc470a23725af90217857ffb357484ebcb84f6ab82ecfbaf9413fdeee79"}},
+"maag_eq4__KNOBGREEN":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":142,"h":2982,"rgba":"f6004d3863e80cd3c8fea5fde0b6be66a78f8ab4afca3e5d473c6978a444a95d"}},
+"maag_eq4__KNOBORANGE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":142,"h":2982,"rgba":"a2cba96959ddc607c937154ce5d43553253cd397be8010de51f964877c014ab0"}},
+"maag_eq4__KNOBRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":142,"h":2982,"rgba":"f3a989f009161ff16d5c3bae29ea9ae8713997c4cb0b4afb6a4b3deca2f3bcee"}},
+"maag_eq4__KNOBTRIM":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":100,"h":2100,"rgba":"39ff740aa4a76b4e4bf55629afd81486a54ee755dfc5b9f2620131d73717f163"}},
+"maag_eq4__KNOBYELLOW":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":142,"h":2982,"rgba":"1d45d738fd50256910a53befdd3ba1c11495658e9050aef6da5dd481ab2914f9"}},
+"maag_eq4__METERCLIP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b10"}],"output":{"w":48,"h":96,"rgba":"4106892e77c9a726637c8a422b87fe96d19f40656842534140657cfac401ab45"}},
+"maag_eq4__METERSIGNAL":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b11"}],"output":{"w":48,"h":336,"rgba":"86970418c3222d43e958ebc9d74f07dadf53e46c70bf951b520d05a947d54af6"}}
+}}
