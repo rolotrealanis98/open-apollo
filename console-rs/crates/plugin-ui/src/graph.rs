@@ -376,6 +376,8 @@ pub fn band_db(b: &GraphBand, f: f64, gain_override: Option<f64>, ctx: &dyn Look
             q = Some(sq);
         }
     }
+    // Swift's literal 0.7071 (not exactly 1/√2), kept for identical curves.
+    #[allow(clippy::approx_constant)]
     let mut qq = q.unwrap_or(0.7071).max(0.01);
     let mut order: i64 = 2;
     if let Some(o) = b.order.as_ref().map(|v| v.resolve(ctx)) {
