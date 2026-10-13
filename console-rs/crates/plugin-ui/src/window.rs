@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use houston::{Insets, Rect, Rgba};
-use rack::{Action, Align, Control, ControlId, HitKind, PluginWindowButton as B, TextStyle, Ui};
+use rack::{Action, Align, Control, ControlId, Hit, HitKind, PluginWindowButton as B, TextStyle, Ui};
 
 use crate::generic::GenericPanel;
 use crate::library::PluginSpecLibrary;
@@ -718,6 +718,67 @@ impl PluginWindow {
             Content::Web(_) => false,
         };
         handled.then_some(WindowEvent::Handled)
+    }
+
+    // MARK: spec panel gestures
+
+    /// A press at window point (x, y) for a spec panel's own gestures (long presses, repeats,
+    /// held looks, swipes, graph handles, its pop-ups): taken when it lands on the panel and the
+    /// topmost of `hits` (this frame's hits) there is the panel's, not chrome or a popover.
+    /// Follow with [`panel_pointer_move`](Self::panel_pointer_move) /
+    /// [`panel_pointer_up`](Self::panel_pointer_up); untaken presses go through `rack`.
+    pub fn panel_pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool, params: &mut dyn ParamSource) -> bool {
+        let slot = self.slot.clone();
+        let Content::Spec(p) = &mut self.content else { return false };
+        if let Some(h) = hits.iter().rev().find(|h| h.rect.contains(x, y)) {
+            let ours = h.id.strip == slot && matches!(h.id.control, Control::PluginParam(_) | Control::PluginElement(_) | Control::PluginStep(..));
+            if !ours {
+                return false;
+            }
+        }
+        if !p.contains(x, y) {
+            return false;
+        }
+        p.pointer_down(x, y, double, params)
+    }
+
+    pub fn panel_pointer_move(&mut self, x: f32, y: f32, params: &mut dyn ParamSource) -> bool {
+        match &mut self.content {
+            Content::Spec(p) => p.pointer_move(x, y, params),
+            _ => false,
+        }
+    }
+
+    pub fn panel_pointer_up(&mut self, x: f32, y: f32, params: &mut dyn ParamSource) -> bool {
+        match &mut self.content {
+            Content::Spec(p) => p.pointer_up(x, y, params),
+            _ => false,
+        }
+    }
+
+    /// Advances a spec panel's clock (meters, touch-state timeouts, long presses, repeats).
+    /// True when something changed.
+    pub fn tick(&mut self, params: &mut dyn ParamSource) -> bool {
+        match &mut self.content {
+            Content::Spec(p) => p.tick(params),
+            _ => false,
+        }
+    }
+
+    /// True while the spec panel animates on its own (the shell keeps redrawing).
+    pub fn animating(&self, params: &dyn ParamSource) -> bool {
+        match &self.content {
+            Content::Spec(p) => p.animating(params),
+            _ => false,
+        }
+    }
+
+    /// The insert's channel layout: a spec declaring state `channels` gets 1 (mono) or 2
+    /// (stereo), and a mono insert draws at `monoSize` when the spec has one.
+    pub fn set_channel_layout(&mut self, stereo: bool) {
+        if let Content::Spec(p) = &mut self.content {
+            p.set_channel_layout(stereo);
+        }
     }
 }
 
