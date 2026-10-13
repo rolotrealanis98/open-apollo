@@ -42,9 +42,11 @@ Leave these advisory (visible on every PR, not required):
 - `nix`: it follows `nixos-unstable` (there is no `flake.lock`) and is not run for every
   console-rs PR.
 
-`clean-repo` fails today on the private hub's `main`: `tools/usb-re/init-bulk-sequence.bin`
-holds UA DSP modules. The history rewrite deletes that file; turn the check on as required
-once `main` passes `python3 tools/check-clean-repo.py`.
+The last file `clean-repo` flagged, `tools/usb-re/init-bulk-sequence.bin` (a Windows USB
+capture that held UA DSP modules), is gone from the tree: the USB init now builds that stream
+from the user's own extracted modules and `tools/uausb/solo-usb-init.json`. Older commits still
+carry it until the history rewrite; turn the check on as required once `main` passes
+`python3 tools/check-clean-repo.py`.
 
 ## The clean-repo guard
 

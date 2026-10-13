@@ -3,7 +3,8 @@
 #
 # Removes everything install-usb.sh creates:
 #   - Patched snd-usb-audio.ko in /lib/modules/<KERNEL>/updates/
-#   - /usr/local/lib/ua-usb/ helper library (fx3-load, init scripts)
+#   - /usr/local/lib/ua-usb/ helper library (fx3-load, init scripts, the
+#     uausb package and its init facts solo-usb-init.json)
 #   - /usr/local/bin/ua-usb-init + ua-usb-dsp-init wrappers
 #   - /etc/udev/rules.d/99-apollo-usb.rules
 #   - WirePlumber override (~/.config/wireplumber/.../50-apollo-solo-usb.conf)
