@@ -148,6 +148,7 @@ ignored as information only, as in Swift.
 ```
 cargo run -p plugin-ui --example render -- ua_1176_rev_a out.png                 # spec panel at defaults + out.zero.png
 cargo run -p plugin-ui --example render -- oxford_supresser_ds out.png --meters 0.6  # mock meters and analyser bins
+cargo run -p plugin-ui --example sweeps [-- polar_sphere] [--every 2] [--out dir]  # parameter sweeps vs the live AU editor
 cargo run -p plugin-ui --example render -- ua_1176_rev_a out.png --window --status "NO UAD-2 DEVICES FOUND"
 cargo run -p plugin-ui --features webview --example web -- ua_1176_rev_a --snapshot gui.png [--zero] [--compare ref.png] [--file]
 cargo run -p uaconsole -- --render out.png --open-plugin in2:1                     # the app, preview data, dbx 160 open
@@ -168,6 +169,12 @@ Checks (pixels whose largest channel differs by more than 24/255):
 | Oxford EQ, Lexicon 224, Sphere Mic Collection (defaults) | 0.17%, 0.08%, 0.20% |
 | Oxford SuprEsser DS, C-Vox, AMS Neve DFC, Precision Limiter (defaults) | 0.94%, 1.13%, 1.16%, 1.47% |
 | Cyclosonic Panner (defaults) | 4.9% (its LED ring follows the running sweep in the snapshot) |
+| parameter sweeps vs the live AU editor (`sweeps`, agent F's `r_renders`, 2149 shots, no audio) | median 1.09%, 90th percentile 2.17% |
+| … Auto-Tune scale names, key/scale keyboard greying (336 shots) | 0.00% |
+| … DFC dot-matrix level/Q readouts, EQ/FLT lamps (≈250 shots) | median 0.00%, worst 2.6% |
+| … polar patterns per mic type and pattern, six mic plug-ins (≈1350 shots) | median 0.9–2.3%, worst 2.7% |
+| … Oxford Dynamic EQ range line (68 shots) | median 0.96%, worst 2.1% |
+| … Softube Amp Room pages at 0.5 / 1 (5 shots) | 41–75%: the spec's page sprites are permuted against the settled live editor (spec content) |
 | UA's 1176 Rev A HTML GUI in our webview, fed by our bridge, on `ua-content://` and on `file://` | 0.000% |
 | header layout vs the 1.3.1 capture (SSL G, 304×710) | every button edge to the point |
 
