@@ -1,0 +1,493 @@
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use engine_model::{EngineMixer, UNISON_SLOT, fader_readout};
+use rack::geometry::StripKind;
+use rack::model::{InsertState, MixerModel, PreviewMixer, StripInfo};
+use rack::{Action, Control, ControlId, scales};
+use ua_engine::{MeterReading, MockEngine, MockOptions, Snapshot, Status, Value};
+
+fn fixture() -> String {
+    format!(
+        "{}/../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
+fn offline() -> EngineMixer {
+    EngineMixer::from_snapshot(fixture()).expect("fixture")
+}
+
+fn id(strip: &StripInfo, control: Control) -> ControlId {
+    ControlId {
+        strip: strip.id.clone(),
+        control,
+    }
+}
+
+fn preamp(name: &str) -> Control {
+    Control::Preamp(Arc::from(name))
+}
+
+/// The live x4 capture (sanitized names) maps onto the same strips as rack's preview of
+/// console-main-1.png.
+#[test]
+fn strips_match_the_console_layout() {
+    let m = offline();
+    let preview = PreviewMixer::default();
+    let titles = |v: Vec<StripInfo>| {
+        v.iter()
+            .map(|s| {
+                (
+                    s.title.clone(),
+                    s.stereo,
+                    s.preamp_layout.is_some(),
+                    s.shows_sr_convert,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(titles(m.inputs()), titles(preview.inputs()));
+    assert_eq!(titles(m.auxes()), titles(preview.auxes()));
+    assert_eq!(m.inputs()[0].id.as_ref(), "/devices/0/inputs/0");
+    assert_eq!(
+        m.inputs()[0].preamp_layout.as_deref(),
+        Some("preamp_channel_strip_controls")
+    );
+    assert!(m.inputs().iter().all(|s| s.kind == StripKind::Input));
+    assert!(m.auxes().iter().all(|s| s.kind == StripKind::Aux));
+    assert_eq!(m.session_name(), "Session*"); // `/Dirty` is true in the capture
+}
+
+#[test]
+fn main_strip_state() {
+    let m = offline();
+    let inputs = m.inputs();
+    let a1 = m.main(&inputs[0]);
+    assert_eq!(a1.name, "Vocal Mic"); // mono: Name, not StereoName
+    assert!(a1.mute && !a1.solo);
+    assert_eq!((a1.pan_l, a1.pan_r), (0.5, 0.5));
+    assert_eq!(a1.readout, "-0.0"); // FaderLevel −0.01: Console prints the sign (p1 SM7B)
+    let pair = m.main(&inputs[2]);
+    assert_eq!(pair.name, "Keys"); // pair: StereoName
+    assert_eq!((pair.pan_l, pair.pan_r), (0.0, 1.0));
+    let aux = m.main(&m.auxes()[0]);
+    assert_eq!(aux.name, "AUX 1");
+    assert_eq!(aux.readout, "-9.4");
+    assert!(!aux.pre && !aux.mono); // SendPostFader true → POST
+    assert!((aux.fader - scales::fader_tapered(-9.4)).abs() < 0.01);
+}
+
+#[test]
+fn preamp_state() {
+    let m = offline();
+    let inputs = m.inputs();
+    let line = m.preamp(&inputs[0]).unwrap();
+    assert_eq!(line.source, "LINE");
+    assert!(!line.phantom_enabled && !line.pad_enabled); // Line mode: no 48V/pad
+    assert_eq!(line.gain_text, "27 dB"); // custom display text "---" has no digits
+    assert!((line.gain - 0.3148148).abs() < 1e-6);
+    let mic = m.preamp(&inputs[1]).unwrap();
+    assert_eq!(mic.source, "MIC");
+    assert!(mic.phantom_enabled && mic.pad_enabled);
+    assert_eq!(mic.gain_text, "10 dB");
+    assert!(m.preamp(&inputs[3]).is_none()); // S/PDIF
+    assert_eq!(line.input_led, 0.0);
+}
+
+#[test]
+fn inserts_unison_sends_and_flags() {
+    let m = offline();
+    let inputs = m.inputs();
+    assert_eq!(
+        m.inserts(&inputs[0]),
+        [
+            InsertState::Empty,
+            InsertState::Loaded {
+                name: "UAD SPL Vitalizer MK2-T".into(),
+                power: true
+            },
+            InsertState::Empty,
+            InsertState::Empty
+        ]
+    );
+    assert_eq!(
+        m.inserts(&inputs[1])
+            .iter()
+            .filter(|s| matches!(s, InsertState::Loaded { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(m.inserts(&m.auxes()[0]).len(), 4);
+    assert_eq!(m.unison(&inputs[0]), InsertState::Empty);
+    assert_eq!(m.unison(&inputs[3]), InsertState::Empty);
+    // CueBusCount 2: the aux shows CUE 1 and CUE 2 only.
+    let sends = m.sends(&m.auxes()[0]);
+    assert_eq!(
+        sends.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+        ["CUE 1", "CUE 2"]
+    );
+    assert!(sends.iter().all(|s| s.level == 0.0 && !s.muted));
+    assert!(m.sends(&inputs[0]).is_empty());
+    assert!(!m.records_pre_effects(&inputs[0]));
+    let mon = m.monitor();
+    assert_eq!(mon.readout, "-52.0 dB");
+    assert!((mon.level - 0.0925926).abs() < 1e-6);
+    assert!(!mon.mono && !mon.mute);
+}
+
+#[test]
+fn meters_use_the_console_scale() {
+    let mut m = offline();
+    let inputs = m.inputs();
+    assert_eq!(m.meters(&inputs[0]).left, 0.0); // −77 dBFS (unit offline at capture)
+    let base = m.store().topology().inputs[2].meters.clone();
+    let gen0 = m.meter_generation();
+    m.store().meters().set(
+        &base[0].base,
+        MeterReading {
+            level_db: -6.0,
+            peak_db: -3.0,
+            clip: false,
+            updates: 1,
+        },
+    );
+    m.store().meters().set(
+        &base[1].base,
+        MeterReading {
+            level_db: -18.0,
+            peak_db: -12.0,
+            clip: true,
+            updates: 1,
+        },
+    );
+    assert!(m.meter_generation() > gen0);
+    let f = m.meters(&inputs[2]);
+    assert!((f.left - scales::meter_fraction(-6.0)).abs() < 1e-9);
+    assert!((f.right - scales::meter_fraction(-18.0)).abs() < 1e-9);
+    assert!(!f.clip_left && f.clip_right);
+    // Mono strips mirror the left meter.
+    let mono = m.store().topology().inputs[0].meters[0].base.clone();
+    m.store().meters().set(
+        &mono,
+        MeterReading {
+            level_db: -12.0,
+            peak_db: -12.0,
+            clip: false,
+            updates: 1,
+        },
+    );
+    let f = m.meters(&inputs[0]);
+    assert_eq!(f.left, f.right);
+    m.set_live_meters(false);
+    assert_eq!(m.meters(&inputs[2]).left, 0.0);
+}
+
+/// Offline (no connection, writer gate closed): actions move local values only.
+#[test]
+fn offline_actions_move_local_values() {
+    let mut m = offline();
+    let s = m.inputs()[1].clone();
+    m.apply(&Action::GestureBegin(id(&s, Control::Fader)));
+    m.apply(&Action::Set(id(&s, Control::Fader), 0.6));
+    m.apply(&Action::GestureEnd(id(&s, Control::Fader)));
+    let main = m.main(&s);
+    assert_eq!(main.fader, 0.6);
+    assert_eq!(main.readout, "-10.0"); // local dB companion
+    m.apply(&Action::Toggle(id(&s, Control::Mute)));
+    assert!(!m.main(&s).mute);
+    // 48V is not offered in Line mode, so the toggle does nothing.
+    let line = m.inputs()[0].clone();
+    m.apply(&Action::Toggle(id(&line, preamp("48v"))));
+    assert!(!m.preamp(&line).unwrap().phantom);
+    assert_eq!(m.store().writer().sent_count(), 0);
+    assert!(m.store().writer().suppressed_count() >= 6);
+    // Taps are queued; insert controls resolve to slots.
+    m.apply(&Action::Tap(id(&s, Control::Insert(0))));
+    m.apply(&Action::Tap(id(&s, Control::Insert(UNISON_SLOT))));
+    let taps = m.take_taps();
+    assert_eq!(taps.len(), 2);
+    assert_eq!(
+        m.insert_slot(&taps[0]).unwrap().base,
+        "/devices/0/inputs/1/effects/0"
+    );
+    assert_eq!(
+        m.insert_slot(&taps[1]).unwrap().base,
+        "/devices/0/inputs/1/preamps/0/effects/0"
+    );
+    assert!(
+        m.insert_slot(&taps[0])
+            .unwrap()
+            .parameter(3)
+            .normalized()
+            .ends_with("/effects/0/parameters/3/NormalizedValue")
+    );
+    assert!(m.take_taps().is_empty());
+}
+
+#[test]
+fn readout_format() {
+    assert_eq!(fader_readout(-144.0), "-∞");
+    assert_eq!(fader_readout(f64::NEG_INFINITY), "-∞");
+    // Console keeps the sign of the unrounded value (p1: SM7B −0.01 → "-0.0").
+    assert_eq!(fader_readout(-0.01), "-0.0");
+    assert_eq!(fader_readout(0.047), "+0.0");
+    assert_eq!(fader_readout(0.0), "0.0");
+    assert_eq!(fader_readout(3.04), "+3.0");
+}
+
+fn live(server: &MockEngine, writes: bool) -> EngineMixer {
+    let mut m = EngineMixer::connect(server.endpoint(), writes);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while *m.store().status() != Status::Live {
+        m.pump();
+        assert!(
+            Instant::now() < deadline,
+            "not live: {:?}",
+            m.store().status()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    m
+}
+
+fn wait_sets(server: &MockEngine, n: usize) -> Vec<String> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while server.set_commands().len() < n {
+        assert!(Instant::now() < deadline, "got {:?}", server.set_commands());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    server.set_commands()
+}
+
+/// `apply(Action)` → the engine `set` commands Console would send.
+#[test]
+fn actions_write_to_the_engine() {
+    let tree = Snapshot::load(fixture()).unwrap().tree;
+    let server = MockEngine::start(tree, MockOptions::default()).unwrap();
+    let mut m = live(&server, true);
+    let inputs = m.inputs();
+    let (line, mic) = (inputs[0].clone(), inputs[1].clone());
+    let aux = m.auxes()[0].clone();
+    let monitor = ControlId {
+        strip: Arc::from("monitor"),
+        control: Control::MonitorLevel,
+    };
+    let drag = |m: &mut EngineMixer, cid: ControlId, values: &[f64]| {
+        m.apply(&Action::GestureBegin(cid.clone()));
+        for v in values {
+            m.apply(&Action::Set(cid.clone(), *v));
+            m.pump();
+        }
+        m.apply(&Action::GestureEnd(cid));
+    };
+    drag(&mut m, id(&mic, Control::Fader), &[0.5, 0.55, 0.6]);
+    m.apply(&Action::Toggle(id(&mic, Control::Mute)));
+    drag(&mut m, id(&mic, Control::PanL), &[0.25]);
+    m.apply(&Action::Toggle(id(&mic, preamp("48v"))));
+    m.apply(&Action::Toggle(id(&line, preamp("48v")))); // Line mode: not offered, nothing sent
+    drag(&mut m, id(&mic, preamp("preamp_gain")), &[1.0]);
+    m.apply(&Action::Toggle(id(&mic, Control::RecMon)));
+    m.apply(&Action::Toggle(id(&aux, Control::PrePost)));
+    drag(&mut m, id(&aux, Control::SendLevel(1)), &[0.7]);
+    m.apply(&Action::Toggle(id(&aux, Control::SendMute(0))));
+    drag(&mut m, monitor.clone(), &[0.5]);
+    m.apply(&Action::Toggle(ControlId {
+        strip: Arc::from("monitor"),
+        control: Control::MonitorMute,
+    }));
+
+    let i1 = "/devices/0/inputs/1";
+    let a0 = "/devices/0/auxs/0";
+    let o18 = "/devices/0/outputs/18";
+    let step = |s: &str| {
+        vec![
+            "set /UndoRecording/value true".to_owned(),
+            s.to_owned(),
+            "set /UndoRecording/value false".to_owned(),
+        ]
+    };
+    let want: Vec<String> = [
+        step(&format!("set {i1}/FaderLevelTapered/value 0.6")),
+        step(&format!("set {i1}/Mute/value false")),
+        step(&format!("set {i1}/Pan/value -0.5")),
+        step(&format!("set {i1}/preamps/0/48V/value true")),
+        step(&format!("set {i1}/preamps/0/GainTapered/value 1")),
+        step(&format!("set {i1}/RecordPreEffects/value true")),
+        step(&format!("set {a0}/SendPostFader/value false")),
+        step(&format!("set {a0}/sends/1/GainTapered/value 0.7")),
+        step(&format!("set {a0}/sends/0/Bypass/value true")),
+        step(&format!("set {o18}/CRMonitorLevelTapered/value 0.5")),
+        step(&format!("set {o18}/Mute/value true")),
+    ]
+    .concat();
+    assert_eq!(wait_sets(&server, want.len()), want);
+    assert_eq!(
+        server.value(&format!("{i1}/FaderLevelTapered")),
+        Some(Value::Number(0.6))
+    );
+    // The engine's dB companion comes back and drives the readout.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while m.main(&mic).readout != "-10.0" {
+        m.pump();
+        assert!(
+            Instant::now() < deadline,
+            "readout {}",
+            m.main(&mic).readout
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(m.main(&aux).pre);
+    assert_eq!(
+        m.monitor().readout,
+        format!("{:.1} dB", ua_engine::tapers::monitor::db_from_tapered(0.5))
+    ); // -13.5
+}
+
+/// `connect(_, false)`: the connection refuses writes; controls move locally only.
+#[test]
+fn read_only_connection_sends_nothing() {
+    let tree = Snapshot::load(fixture()).unwrap().tree;
+    let server = MockEngine::start(tree, MockOptions::default()).unwrap();
+    let mut m = live(&server, false);
+    let mic = m.inputs()[1].clone();
+    m.apply(&Action::Toggle(id(&mic, Control::Solo)));
+    m.apply(&Action::GestureBegin(id(&mic, Control::Fader)));
+    m.apply(&Action::Set(id(&mic, Control::Fader), 0.2));
+    m.apply(&Action::GestureEnd(id(&mic, Control::Fader)));
+    std::thread::sleep(Duration::from_millis(100));
+    m.pump();
+    assert!(server.write_commands().is_empty());
+    assert!(m.main(&mic).solo);
+    assert_eq!(m.main(&mic).fader, 0.2);
+    assert_eq!(m.store().writer().sent_count(), 0);
+}
+
+/// The UI-surface methods read the x4 capture (2 active cues, HP 1/2, monitor with dim).
+#[test]
+fn surface_data_from_the_capture() {
+    let m = offline();
+    let a1 = m.inputs()[0].clone();
+    let sends = m.input_sends(&a1);
+    let names: Vec<&str> = sends.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["AUX 1", "AUX 2", "CUE 1", "CUE 2"], "CueBusCount 2 hides CUE 3/4");
+    assert!(m.send_pre(&a1, 0).is_some());
+    assert_eq!(m.input_sources(&a1), ["LINE", "MIC", "DANTE"]);
+    assert!(m.input_sources(&m.inputs()[3]).is_empty(), "no preamp, no picker");
+
+    let st = m.status();
+    assert_eq!(st.sample_rate, Some(48_000));
+    assert_eq!(st.clock_source.as_deref(), Some("Internal"));
+    assert_eq!(st.tempo, 120.0);
+    let set = m.engine_settings();
+    assert_eq!(set.sample_rates.len(), 6);
+    assert_eq!(set.clock_sources, ["Internal", "S/PDIF"]);
+    assert!(!set.writes_enabled);
+
+    let cues = m.cue_outputs();
+    assert_eq!(cues.len(), 2);
+    assert_eq!(cues[0].name, "CUE 1");
+    assert!(!cues[0].source_cue, "MixInSource mon");
+    let hps = m.headphone_outputs();
+    assert_eq!(hps[0].name, "HP 1");
+    assert_eq!(hps[0].options[hps[0].source], "CUE 1");
+    let mon = m.monitor_options();
+    assert_eq!(mon.dim, Some(false));
+    assert_eq!(mon.dim_readout, "-17 dB");
+    assert_eq!(mon.talkback, Some(false));
+}
+
+/// Surface controls write the paths in ui-to-path.md (offline: local values move).
+#[test]
+fn surface_actions_move_local_values() {
+    let mut m = offline();
+    let a1 = m.inputs()[0].clone();
+    let tap = |c: Control| Action::Tap(id(&a1, c));
+    m.apply(&tap(Control::InputSource(1)));
+    assert_eq!(m.preamp(&a1).unwrap().source, "MIC");
+    m.apply(&Action::Toggle(id(&a1, Control::Isolate)));
+    assert!(m.isolated(&a1));
+    let pre = m.send_pre(&a1, 0).unwrap();
+    m.apply(&Action::Toggle(id(&a1, Control::SendPre(0))));
+    assert_eq!(m.send_pre(&a1, 0), Some(!pre));
+    m.apply(&Action::Toggle(id(&a1, Control::SendMute(2))));
+    assert!(m.input_sends(&a1)[2].muted);
+    m.apply(&Action::Set(id(&a1, Control::SendLevel(1)), 0.5));
+    assert_eq!(m.input_sends(&a1)[1].level, 0.5);
+
+    m.set_text(&id(&a1, Control::Insert(0)), "UAD Pultec EQP-1A");
+    // Loading writes EffectName only (as Console does); Power keeps the slot's value.
+    let InsertState::Loaded { name, power } = m.inserts(&a1)[0].clone() else { panic!("not loaded") };
+    assert_eq!(name, "UAD Pultec EQP-1A");
+    m.apply(&tap(Control::InsertPower(0)));
+    assert!(matches!(m.inserts(&a1)[0], InsertState::Loaded { power: p, .. } if p != power));
+    let empty = 1 + m.inserts(&a1)[1..].iter().position(|s| *s == InsertState::Empty).expect("an empty slot");
+    m.apply(&tap(Control::InsertCopy(0)));
+    m.apply(&tap(Control::InsertCopy(empty as u8)));
+    // Copy / Paste are the engine's (`/CopyInsert`, `/PasteInsert`): offline nothing lands, the
+    // clipboard keeps the name for `Paste "<name>"` (tests/inserts.rs checks the wire).
+    assert_eq!(m.inserts(&a1)[empty], InsertState::Empty);
+    assert_eq!(m.menu_state().clipboard.as_deref(), Some("UAD Pultec EQP-1A"));
+    m.apply(&tap(Control::InsertRemove(0)));
+    assert_eq!(m.inserts(&a1)[0], InsertState::Empty);
+    assert!(m.take_taps().is_empty(), "surface taps are not plug-in opens");
+
+    m.set_text(&id(&a1, Control::Name), "Vox");
+    assert_eq!(m.main(&a1).name, "Vox");
+    let g = |c: Control| ControlId { strip: "global".into(), control: c };
+    m.apply(&Action::Tap(g(Control::SampleRate(3))));
+    assert_eq!(m.status().sample_rate, Some(96_000));
+    m.apply(&Action::Tap(g(Control::ClockSource(1))));
+    assert_eq!(m.status().clock_source.as_deref(), Some("S/PDIF"));
+    m.apply(&Action::Tap(g(Control::AllRecordPreEffects(true))));
+    assert!(m.inputs().iter().all(|s| m.records_pre_effects(s)));
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Toggle(mon(Control::MonitorDim)));
+    assert_eq!(m.monitor_options().dim, Some(true));
+    m.apply(&Action::Toggle(mon(Control::CueSource(0))));
+    assert!(m.cue_outputs()[0].source_cue);
+    m.apply(&Action::Tap(mon(Control::HeadphoneSource { output: 0, option: 0 })));
+    assert_eq!(m.headphone_outputs()[0].options[m.headphone_outputs()[0].source], "MON");
+    m.apply(&Action::Toggle(ControlId { strip: "settings".into(), control: Control::WritesEnabled }));
+    assert!(m.engine_settings().writes_enabled);
+}
+
+/// `/plugins/P`: engine (numeric) order, every category, active vs. inactive and the badge of
+/// inactive entries.
+#[test]
+fn plugin_catalog_maps_licence_states() {
+    let plugin = |name: &str, cats: &str, auth: bool, demo_available: bool, extra: &str| {
+        format!(
+            r#"{{"properties":{{"Name":{{"type":"string","value":"{name}"}},"Categories":{{"type":"string","value":"{cats}"}},"Authorized":{{"type":"bool","value":{auth}}},"Demoing":{{"type":"bool","value":false}},"DemoAvailable":{{"type":"bool","value":{demo_available}}},"AuthHardware":{{"type":"bool","value":true}},"AuthUpdateRequired":{{"type":"bool","value":false}}{extra}}}}}"#
+        )
+    };
+    let mut entries = vec![
+        plugin("UAD A", "Delay,Modulation", true, false, ""),
+        plugin("UAD B", "Equalization", false, true, ""),
+        plugin("UAD C", "Equalization", false, false, ""),
+        plugin("UAD D", "Delay", false, true, r#","AuthUpdateRequired":{"type":"bool","value":true}"#),
+    ];
+    for i in entries.len()..11 {
+        entries.push(plugin(&format!("UAD P{i}"), "Delay", true, false, ""));
+    }
+    let children: Vec<String> = entries.iter().enumerate().map(|(i, e)| format!(r#""{i}":{e}"#)).collect();
+    let json = format!(
+        r#"{{"format":"consolelab-engine-snapshot","info":{{}},"tree":{{"children":{{"plugins":{{"children":{{{}}}}}}}}},"version":1}}"#,
+        children.join(",")
+    );
+    let path = std::env::temp_dir().join(format!("engine-model-catalog-{}.json", std::process::id()));
+    std::fs::write(&path, json).unwrap();
+    let m = EngineMixer::from_snapshot(&path).expect("snapshot");
+    std::fs::remove_file(&path).ok();
+    let cat = m.plugin_catalog();
+    let names: Vec<&str> = cat.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(&names[..5], ["UAD A", "UAD B", "UAD C", "UAD D", "UAD P4"]);
+    assert_eq!(names[10], "UAD P10");
+    assert_eq!(cat[0].categories, ["Delay", "Modulation"]);
+    assert!(cat[0].in_category("Modulation") && cat[0].enabled && cat[0].badge.is_none());
+    use rack::PluginBadge;
+    assert_eq!((cat[1].enabled, cat[1].badge), (false, Some(PluginBadge::Demo)));
+    assert_eq!((cat[2].enabled, cat[2].badge), (false, Some(PluginBadge::Buy)));
+    assert_eq!((cat[3].enabled, cat[3].badge), (false, Some(PluginBadge::Activate)));
+}

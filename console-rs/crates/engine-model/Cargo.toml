@@ -1,0 +1,17 @@
+[package]
+name = "engine-model"
+version = "0.1.0"
+description = "rack::MixerModel over the UA Mixer Engine (ua-engine Store, topology, meters, gated writer)"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+log = "0.4"
+serde_json = "1"
+rack = { version = "0.1.0", path = "../rack" }
+ua-engine = { version = "0.1.0", path = "../ua-engine" }
+base64 = "0.22.1"
+
+[dev-dependencies]
+houston = { version = "0.1.0", path = "../houston" }

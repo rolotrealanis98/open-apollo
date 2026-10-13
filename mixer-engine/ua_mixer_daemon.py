@@ -38,6 +38,7 @@ from pathlib import Path
 from protocol import (Command, parse_command, encode_response_bytes,
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
+from console_commands import ConsoleCommands
 from helper_tree import HelperTree
 from autogain import AutoGainService
 from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
@@ -63,7 +64,8 @@ from metering import (NullMeter, ReadbackMeter, SILENCE_DB, find_apollo_card,
 from bonjour import BonjourAnnouncer, _default_name
 from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
                             latency_figures, load_descriptor)
-from commands import CommandEngine, parse_cmdparams, refused_set
+from commands import (CommandEngine, ERR_FAILED, parse_cmdparams,
+                      refused_set)
 from session_dirty import SessionDirty
 from plugin_lifecycle import PluginLifecycle, is_plugin_slot_path
 from plugin_remote import PluginRemote
@@ -166,6 +168,10 @@ def apply_runtime_properties(state: StateTree):
 
 
 # A preamp's Gain / GainTapered, exactly (not GainUnknown, not a send Gain)
+# Recall properties of the daemon's object commands (commands.on_set)
+_RE_RECALL_SET = re_mod.compile(
+    r"^/(?:Snapshot|PrimedSnapshot|IOMapPreset)/value$|/Preset/value$")
+
 _RE_PREAMP_GAIN = re_mod.compile(
     r"^(/devices/0/inputs/\d+/preamps/0)/(GainTapered|Gain)(?:/value)?$")
 
@@ -427,6 +433,7 @@ class MixerClient:
         # command), else NUL-terminated JSON text
         self.ubjson = False
         self.json_framed = False
+        self.sleep = False   # Per-socket meter-consumer hint, never mixer state.
         self._send_count = 0
 
     def send(self, data: bytes):
@@ -480,7 +487,9 @@ class MixerDaemon:
                  loaded_map: Path | None = None,
                  preserve_hardware: bool = False,
                  plugin_backend=None, plugin_transactions=None,
-                 plugin_remote_backend=None, plugin_hosting: bool = False):
+                 plugin_remote_backend=None, plugin_hosting: bool = False,
+                 sessions_dir=None, software_only: bool = False,
+                 presets_dir=None, factory_presets=None):
         self.state = state
         # Plugin hosting is inert unless a backend is injected: without one,
         # effect-slot SETs and GETs go through the tree exactly as before
@@ -527,6 +536,20 @@ class MixerDaemon:
         # defaults until we've had a chance to push them to hardware.
         self._readback_start_time = time.monotonic()
         self._hw_init_done = False
+
+        # Console 1.3.1 host commands (console_commands): .uadmix sessions,
+        # plug-in presets, scenes, inserts and the /UndoRedo gesture
+        # history.  Built before the hardware router is wired, so a restored
+        # last-used session only fills the tree; the init sequence pushes
+        # it.  With a persisted state file the daemon's own state is the
+        # last-used state: only the session name and scenes are taken from
+        # .last-used.uadmix (a newer edit made over WS is not rolled back).
+        self.console = ConsoleCommands(
+            state, sessions_dir, software_only=software_only,
+            helper=helper_tree, presets_dir=presets_dir,
+            factory_presets=factory_presets,
+            restore_values=(getattr(state, "_save_path", None) is None
+                            and not preserve_hardware))
 
         # Wire state tree SET notifications to hardware router
         if hw_router:
@@ -1770,6 +1793,8 @@ class MixerDaemon:
 
         # Register subscription callback for this client
         def on_notify(path: str, value):
+            if client.sleep and ("/meters/" in path or path == "/MeterPulse/value"):
+                return
             if client.ubjson:
                 resp = {"path": path, "data": value}
                 client.send(ubjson_encode_response(resp))
@@ -1840,6 +1865,7 @@ class MixerDaemon:
         finally:
             log.info("Disconnected: %s", client)
             client.closed = True
+            self.console.history.disconnect(client.id)
             self.state.unsubscribe_all(client.id)
             self.state.unregister_callback(client.id)
             self.clients.pop(client.id, None)
@@ -2276,13 +2302,15 @@ class MixerDaemon:
         else:
             client.send(encode_response_bytes(path, data, params))
 
-    def _send_error(self, client: MixerClient, path: str, verb: str):
+    def _send_error(self, client: MixerClient, path: str, verb: str, params=None):
         """Send an error response in the client's protocol."""
+        resp = {"path": path, "error": f"Unable to resolve path for {verb}."}
+        if params:
+            resp["parameters"] = self._coerce_params(params)
         if client.ubjson:
-            resp = {"path": path, "error": f"Unable to resolve path for {verb}."}
             client.send(ubjson_encode_response(resp))
         else:
-            client.send(encode_error_bytes(path, verb))
+            client.send((json.dumps(resp) + "\0").encode())
 
     # ── Command parsing ─────────────────────────────────────────────
 
@@ -2385,6 +2413,9 @@ class MixerDaemon:
             return
 
         # Ping — keepalive health check, return immediately
+        if cmd.path.lower().removesuffix("/value") == "/sleep":
+            self._send_response(client, cmd.path, client.sleep, resp_params)
+            return
         if cmd.path in ("/ping", "ping"):
             self._send_response(client, "/ping", True, resp_params or None)
             return
@@ -2413,7 +2444,7 @@ class MixerDaemon:
         data = self.state.get(cmd.path, recursive=cmd.recursive,
                               propfilter=cmd.propfilter or None)
         if data is None:
-            self._send_error(client, cmd.path, "get")
+            self._send_error(client, cmd.path, "get", resp_params)
             return
 
         if cmd.recursive:
@@ -2523,7 +2554,48 @@ class MixerDaemon:
                 self._send_response(client, path, cmd.value, resp_params)
             return
 
+        # /Sleep is a per-connection meter-consumer hint (Console), never
+        # mixer state: it does not dirty the session or reach the tree
+        if path.lower().removesuffix("/value") == "/sleep":
+            if not isinstance(cmd.value, bool):
+                self._send_error(client, path, "set", resp_params)
+            else:
+                client.sleep = cmd.value
+                if resp_params:
+                    self._send_response(client, path, cmd.value, resp_params)
+            return
+
         old_value = self.commands.value_of(path)
+
+        # Console host properties (console_commands): insert EffectName,
+        # plug-in/channel Preset, /Session, /ModifiedSessions, /UndoRedo,
+        # /UndoRecording, the Dante adapter
+        if self._console_owns_set(path, cmd.value):
+            try:
+                # console_commands owns /Dirty for what it loads or restores
+                with self.session_dirty.suppress():
+                    handled = self.console.set(client.id, path, cmd.value)
+                if handled:
+                    if resp_params:
+                        self._send_response(client, path,
+                                            self.state.get_value(path),
+                                            resp_params)
+                    return
+            except (ValueError, KeyError, OSError, TypeError) as error:
+                log.warning("Console SET refused: %s (%s)", path, error)
+                self._send_error(client, path, "set", resp_params)
+                return
+        before = self.console.history.snapshot()
+        if path.endswith("/SceneName/value") and isinstance(cmd.value, str):
+            cmd.value = cmd.value.strip().upper()
+
+        # Resolve Console's reset sentinel before helper routing, gain
+        # companion conversion, hardware callbacks, and response echoes.
+        if cmd.value == "default":
+            if not self.state.set(path, cmd.value):
+                self._send_error(client, path, "set", resp_params)
+                return
+            cmd.value = self.state.get_value(path)
 
         if client.helper and self.helper_tree:
             # Try helper tree first, fall back to state tree
@@ -2612,9 +2684,29 @@ class MixerDaemon:
         # A Snapshot or channel Preset name that exists is recalled
         self.commands.on_set(path, cmd.value, old=old_value, client=client.id)
 
+        # Console gesture history (/UndoRedo); marks the session /Dirty.  A
+        # Snapshot, I/O map or daemon channel-preset recall is not an edit
+        # (CMxRoot::setSnapshot clears Dirty; session_dirty)
+        if not _RE_RECALL_SET.search(path if path.endswith("/value")
+                                     else path + "/value"):
+            self.console.history.record(client.id, before)
         # Send response if func_id present (real server echoes value + func_id)
         if "func_id" in resp_params:
             self._send_response(client, path, cmd.value, resp_params)
+
+    def _console_owns_set(self, path: str, value) -> bool:
+        """Whether console_commands takes this SET.  Not a channel Preset
+        naming one of the daemon's own presets (commands.on_set recalls
+        it), and not an insert's EffectName unless the daemon runs the
+        software plug-in model (--no-hardware): with hardware the slot is
+        the plugin lifecycle's, or the tree's while no backend is
+        injected."""
+        if self.commands.has_channel_preset(path, value):
+            return False
+        if path.removesuffix("/value").endswith("/EffectName") and \
+                not self.console.inserts.software_only:
+            return False
+        return True
 
     def _publish_plugin_commit(self, events):
         """Publish an adapter-confirmed transaction, including retirement errors.
@@ -2897,13 +2989,53 @@ class MixerDaemon:
             self._send_post_reply(client, cmd.path, data, error, params)
             return
 
+        params = {k: v for k, v in (resp_params or {}).items()
+                  if k != "cmdparams"} or None
+
+        # Console sends ClearClips/ClearSolos with an object body ({} or
+        # {"path": <strip>}); anything else is refused before a change
+        if cmd.path in ("/ClearSolos", "/ClearClips") and \
+                cmd.value is not None and not isinstance(cmd.value, dict):
+            self._send_post_reply(client, cmd.path, None, ERR_FAILED, params)
+            return
+
+        # Console 1.3.1 host commands (console_commands): .uadmix sessions
+        # and folders, plug-in presets, scenes, inserts.  Its argument
+        # shapes are Console's; what it does not own falls through to the
+        # object commands below.
+        if isinstance(cmd.value, dict) or cmd.value is None:
+            try:
+                with self.session_dirty.suppress():
+                    handled = self.console.post(cmd.path, cmd.value or {})
+            except (ValueError, KeyError, OSError, TypeError) as error:
+                log.warning("Console POST refused: %s (%s)", cmd.path, error)
+                self._send_post_reply(client, cmd.path, None, ERR_FAILED,
+                                      params)
+                return
+            if handled:
+                self._after_console_post(cmd.path)
+                self._send_post_reply(client, cmd.path, True, None, params)
+                return
+
         # Object commands (`post <object>/<CommandName>`): the engine's
         # result, or its error string
         data, error = self.commands.execute(cmd.path, cmd.value,
                                             cmd.raw_params)
-        params = {k: v for k, v in (resp_params or {}).items()
-                  if k != "cmdparams"} or None
         self._send_post_reply(client, cmd.path, data, error, params)
+
+    def _after_console_post(self, path: str):
+        """Daemon-side effects of a Console session command: a new or opened
+        session starts a fresh object-command undo history, and the last-used
+        save also writes the daemon's state file now (Console sends it on its
+        way out)."""
+        name = path.rstrip("/").rsplit("/", 1)[-1]
+        if name in ("NewSession", "OpenSession"):
+            self.commands.clear_history()
+        elif name == "SaveLastUsedSession":
+            try:
+                self.state.save_now()
+            except Exception:
+                log.exception("SaveLastUsedSession: state file not written")
 
     def _send_post_reply(self, client: MixerClient, path: str, data,
                          error: str | None, params: dict | None):
@@ -3314,6 +3446,12 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                         help="Debug logging")
     parser.add_argument("--trace", "-t", action="store_true",
                         help="Protocol trace (log every message sent/received)")
+    parser.add_argument("--sessions-dir", type=Path,
+                        help="Session .uadmix directory (default: ~/Documents/Universal Audio/Sessions)")
+    parser.add_argument("--presets-dir", type=Path,
+                        help="Daemon-owned .oapreset library directory")
+    parser.add_argument("--factory-presets-dir", type=Path,
+                        help="Read-only factory .fxp/.uadchannel directory")
     args = parser.parse_args()
 
     # Logging
@@ -3454,7 +3592,11 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                          helper_tree=helper_tree, metering=metering,
                          network_id=network_id,
                          loaded_map=None if args.device_map else device_map,
-                         preserve_hardware=args.preserve_hardware)
+                         preserve_hardware=args.preserve_hardware,
+                         sessions_dir=args.sessions_dir,
+                         software_only=args.no_hardware,
+                         presets_dir=args.presets_dir,
+                         factory_presets=args.factory_presets_dir)
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}

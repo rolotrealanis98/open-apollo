@@ -1,0 +1,20 @@
+[package]
+name = "uaconsole-ffi"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "C ABI over houston + rack + gfx + engine-model for native Apple hosts (iPad, macOS)"
+
+[lib]
+name = "uaconsole_ffi"
+# staticlib: the iOS XCFramework; cdylib: dlopen-style hosts; rlib: Rust tests.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+engine-model = { version = "0.1.0", path = "../engine-model" }
+gfx = { version = "0.1.0", path = "../gfx" }
+houston = { version = "0.1.0", path = "../houston" }
+pollster = "1.0.1"
+rack = { version = "0.1.0", path = "../rack" }
+ua-engine = { version = "0.1.0", path = "../ua-engine" }
+wgpu = "30"

@@ -104,7 +104,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 ## Not Yet Implemented
 
-Talkback audio routing, virtual/monitor loopback, console UI, multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), plugin chain (UAD plugins require PACE licensing — not planned). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
+Talkback audio routing, virtual/monitor loopback, a complete console UI (a native console is in progress; see [Mixer Console](#mixer-console-experimental)), multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), plugin chain (UAD plugins require PACE licensing — not planned). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
 
 ## Supported Devices
 
@@ -281,6 +281,21 @@ echo 'module ua_apollo +p' | sudo tee /sys/kernel/debug/dynamic_debug/control
 
 Or enable them from load time with `dyndbg=+p` on the modprobe line (`sudo modprobe ua_apollo dyndbg=+p`, or `options ua_apollo dyndbg=+p` in `/etc/modprobe.d/`).
 
+### Mixer Console (experimental)
+
+`uaconsole` is a native Linux rebuild of UA's UAD Console mixer that talks to the daemon on
+127.0.0.1:4710, so you no longer need to run the Windows Console under Wine. Install it as your
+normal user:
+
+```bash
+bash scripts/install-uaconsole.sh
+```
+
+Then open it from your app menu (**Open Apollo Console**), with **Open Console** in the tray,
+or with `uaconsole`. It draws UA's art from your own UAD Console install; open-apollo does not
+include it. See [console-rs/README.md](console-rs/README.md) for requirements, Nix and
+troubleshooting.
+
 ## Architecture
 
 ```
@@ -313,6 +328,7 @@ Or enable them from load time with `dyndbg=+p` on the modprobe line (`sudo modpr
 |-----------|------|-------------|
 | **Driver** | `driver/` | Linux PCIe kernel module — DMA, ALSA, DSP ring buffer, preamp control |
 | **Mixer Daemon** | `mixer-engine/` | TCP:4710 + TCP:4720 + WS:4721 daemon — state tree, hardware routing, metering |
+| **Console** | `console-rs/` | Native mixer console (`uaconsole`), experimental — see [console-rs/README.md](console-rs/README.md) |
 | **Configs** | `configs/` | PipeWire, WirePlumber, and UCM2 configuration profiles |
 | **Tools** | `tools/contribute/` | Device probe and capture scripts for community contributions |
 

@@ -1,0 +1,26 @@
+[package]
+name = "ua-engine"
+version = "0.1.0"
+description = "UA Mixer Engine protocol and model: NUL-framed JSON over TCP 4710, path tree, topology, tapers, meters, gated writer"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Bonjour discovery of `_uamixer._tcp` engines (pure Rust, no system daemon needed).
+mdns = ["dep:mdns-sd"]
+# `Snapshot::bundled_x4()`: a sanitized live Apollo x4 capture (engine 12.0.0) compiled into
+# the binary (~0.5 MB) for offline rendering without a snapshot file.
+bundled-snapshot = []
+
+[dependencies]
+log = "0.4"
+serde_json = "1"
+socket2 = "0.6"
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "io-util", "macros"] }
+mdns-sd = { version = "0.21", optional = true, default-features = false }
+
+[[bin]]
+name = "ua-engine-probe"
+path = "src/bin/ua-engine-probe.rs"

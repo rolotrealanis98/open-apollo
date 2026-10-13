@@ -1,0 +1,15 @@
+[package]
+name = "gfx"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bytemuck = { version = "1.25.2", features = ["derive"] }
+cosmic-text = "0.19"
+houston = { version = "0.1.0", path = "../houston" }
+png = "0.18.1"
+pollster = "1.0.1"
+rack = { version = "0.1.0", path = "../rack" }
+swash = "0.2.10"
+wgpu = "30"

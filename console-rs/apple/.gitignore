@@ -1,0 +1,5 @@
+# Rust staticlibs / XCFramework and Xcode build output
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate

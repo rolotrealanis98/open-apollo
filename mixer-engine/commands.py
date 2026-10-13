@@ -412,6 +412,21 @@ class CommandEngine:
         except Exception:
             log.exception("recall on %s=%r crashed", path, value)
 
+    def has_channel_preset(self, path: str, value: Any) -> bool:
+        """A SET of a channel's Preset naming one of this daemon's own
+        channel presets (<state>/<device>.presets.json): recalled by
+        on_set rather than by the Console preset library."""
+        vp = path if path.endswith("/value") else path + "/value"
+        m = _RE_PRESET_PATH.match(vp)
+        if not m or not isinstance(value, str) or not value \
+                or self.store_dir is None:
+            return False
+        try:
+            items = self._presets()["kinds"].get(m.group(1), {})
+        except Exception:
+            return False
+        return value in (items.get("items") or {})
+
     # ── Undo / Redo (U33) ──────────────────────────────────────────
 
     def _record(self, path: str, old: Any, client: str | None):
@@ -572,13 +587,34 @@ class CommandEngine:
 
     # ── ClearClips / ClearSolos ────────────────────────────────────
 
+    @staticmethod
+    def _clear_scope(params: dict) -> str | None:
+        """Console's `{"path": <object>}` limits ClearClips/ClearSolos to
+        one strip (MxClnt_MixerData::ClearClips); none means every one."""
+        scope = params.get("path")
+        if scope is None:
+            return None
+        if not isinstance(scope, str) or not scope.startswith("/"):
+            raise CommandError("path must be an object path")
+        return scope.rstrip("/") + "/"
+
     def _clear_clips(self, obj: str, params: dict):
         d = self.d
+        scope = self._clear_scope(params)
         clear = getattr(d._metering, "clear_clips", None)
-        if callable(clear):
+        if callable(clear) and scope is None:
             clear()
+        # clip holds kept as tree properties (software model, sessions)
+        tree = self.state
+        for p in tree.all_paths():
+            if p.endswith("/MeterClip") and (scope is None
+                                             or p.startswith(scope)):
+                if tree.get_value(p + "/value"):
+                    tree.set(p + "/value", False, hardware=False)
         count = 0
         for path in list(d._last_meter):
+            if scope is not None and not path.startswith(scope):
+                continue
             if path.endswith("/Clip/value") or path.endswith(
                     "/MeterClip/value"):
                 if d._last_meter.get(path):
@@ -592,9 +628,10 @@ class CommandEngine:
 
     def _clear_solos(self, obj: str, params: dict):
         tree = self.state
+        scope = self._clear_scope(params)
         paths = [p for p in tree.all_paths()
                  if (p.endswith("/Solo") or p.endswith("/SurroundSolo"))
-                 and p.startswith("/devices/0/")]
+                 and p.startswith(scope or "/devices/0/")]
         n = 0
         for p in paths:
             vp = p + "/value"

@@ -13,6 +13,13 @@ if str(ENGINE_DIR) not in sys.path:
 DEVICE_MAP_X4 = ENGINE_DIR / "device_maps" / "device_map_apollo_x4.json"
 
 
+@pytest.fixture(autouse=True)
+def _private_home(tmp_path_factory, monkeypatch):
+    """A MixerDaemon built without sessions_dir/presets_dir uses Console's
+    folders under ~ (console_commands): never the real home in a test."""
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+
+
 class FakeBackend:
     """Stands in for hardware.HardwareBackend: records every write.
 
