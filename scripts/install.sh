@@ -1345,7 +1345,12 @@ main() {
     header "Hardware Setup"
     echo ""
 
-    if [ -t 0 ]; then
+    if [ "${TEST_BUILD:-0}" = "1" ]; then
+        # Build test (the Docker matrix): no Thunderbolt bus to wait for
+        info "TEST_BUILD: not waiting for an Apollo"
+        STEP_STATUS[init]="skipped"
+        STEP_DETAIL[init]="build test, no hardware"
+    elif [ -t 0 ]; then
         # Interactive mode — guide the user through power cycle
         if lspci -d 1a00: 2>/dev/null | grep -q .; then
             info "Apollo detected, but we need a clean start for reliable setup."
