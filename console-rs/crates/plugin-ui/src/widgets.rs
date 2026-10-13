@@ -181,7 +181,7 @@ pub fn glyph_image(name: &str, w: f64, h: f64, ink: Rgba, px: f64) -> Option<Ima
         }
         "gear" => {
             let outer = s * 0.5;
-            if let Some(p) = gear_path(cx, cy, outer, 8, 0.72) {
+            if let Some(p) = gear_path(cx, cy, outer, 8, 0.76) {
                 fill_with(&mut pm, &p, Shader::SolidColor(color(ink)), t);
             }
             let hole = PathBuilder::from_circle(cx as f32, cy as f32, (outer * 0.3) as f32);
@@ -335,8 +335,9 @@ pub fn shape_image(input: &ShapeInput, w: f64, h: f64, opacity: f32, px: f64) ->
     if let Some(mut c) = input.stroke {
         c.a *= opacity;
         let paint = Paint { shader: Shader::SolidColor(color(c)), anti_alias: true, ..Default::default() };
+        // Never thinner than one device pixel: a hairline still shows (and dashes keep their gaps).
         let mut stroke = Stroke {
-            width: input.shape.width.unwrap_or(1.0).max(0.0) as f32,
+            width: input.shape.width.unwrap_or(1.0).max(1.0 / px) as f32,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
             ..Default::default()

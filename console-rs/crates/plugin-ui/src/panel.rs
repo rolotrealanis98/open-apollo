@@ -2588,7 +2588,10 @@ fn draw_text(ui: &mut Ui, text: &str, t: Option<&spec::TextStyle>, r: Rect, opac
     };
     let lines = t.and_then(|t| t.lines).unwrap_or(1).max(0) as usize;
     let width = r.w / scale.max(1e-3);
-    let (text, size) = if lines == 1 {
+    let squeeze = t.and_then(|t| t.fit.as_deref()) == Some("squeeze");
+    let (text, size) = if lines == 1 && squeeze {
+        (text.to_string(), size)
+    } else if lines == 1 {
         (text.to_string(), readout::fitted_size(text, width, size, mono, bold))
     } else {
         (readout::wrap(text, width, size, mono, bold, lines).join("\n"), size)

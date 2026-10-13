@@ -433,6 +433,10 @@ pub struct TextStyle {
     /// or Menlo when `monospaced`. The renderer substitutes a metric-compatible face.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
+    /// Schema 2: a single line wider than its frame `shrink`s its size (default, down to half) or
+    /// is `squeeze`d horizontally (JUCE's fitted text: down to 70 %, then "...").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<String>,
     /// With `value`: print `names[round(value)]` (empty out of range).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub names: Option<Vec<String>>,
