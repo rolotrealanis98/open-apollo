@@ -411,3 +411,24 @@ masking means a zero outer result is not an MCU acknowledgement. The actual
 passive capture attempt also failed to attach under SIP; it was not counted
 as an empty successful trace. Raw snapshots, response logs and comparison
 results are retained outside git in console-port/continuation-evidence.
+
+## Linux CLI enable-only investigation (transport blocked)
+
+Added a separately authorized, bounded enable/banner/restore diagnostic and
+eight mock tests under tools/cli-capture. It never submits text or command
+lengths, requires all three initial control words zero, and reports failed
+cleanup/readback explicitly. Native default CLI refusal remains intact.
+Original kext EnableCLI 0x4f124 supplies the three-write sequence; genuine
+firmware command vocabulary and decrypted-code retrieval remain unproved.
+
+Hardware preflight failed following an upstream fatal PCIe error before any
+CLI writes. Apollo-only rebind and function bus reset failed. The device is
+currently unbound and its PCI listing stale, awaiting physical reconnection.
+No CLI enable/send executed, shared controller reset, daemon restart or Mac
+Console automation occurred. See tools/cli-capture/README.md for the bounded
+REA search evidence and exact limits. Native driver WIP remains untouched.
+
+Validation: eight device-free probe tests pass, 285 workspace tests pass
+(10 ignored), locked release build, p1 158/158, p2 195/195, windows_check,
+ledger tests and ledger regeneration. Hardware enable/banner verification
+remains pending transport recovery; no decryption or key export is claimed.
