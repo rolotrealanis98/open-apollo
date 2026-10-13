@@ -180,6 +180,7 @@ impl App {
                 let label = match cur {
                     StepId::Welcome => "Get started",
                     StepId::Find if self.selected_found().is_some() => "Use this install",
+                    StepId::Find if !self.scanning => "Continue without one",
                     StepId::Console => "Finish",
                     StepId::Done => "Close",
                     _ if status == Status::Failed => "Continue anyway",

@@ -558,8 +558,8 @@ impl App {
         }
         let status = match self.selected_found() {
             Some(f) if f.has_console() => Status::Done,
-            Some(_) => Status::Warning,
-            None => Status::Failed,
+            // Nothing found (yet) is amber: later steps show what's missing.
+            Some(_) | None => Status::Warning,
         };
         self.steps.set(StepId::Find, status);
     }

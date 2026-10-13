@@ -27,6 +27,7 @@ pub fn paint_status(ui: &mut Ui, rect: Rect, status: Status) {
             p.circle_stroke(c, r - 0.5, Stroke::new(1.5, FAINT));
         }
         Status::Running => {
+            p.circle_stroke(c, r - 0.5, Stroke::new(1.5, tint(INFO, 60)));
             ui.put(rect, Spinner::new().size(rect.width()).color(INFO));
         }
         Status::Done => {
@@ -272,7 +273,7 @@ pub fn sidebar_row(ui: &mut Ui, selected: bool, enabled: bool, add: impl FnOnce(
 
 /// A left-aligned label in a fixed-width column.
 pub fn fixed_label(ui: &mut Ui, width: f32, text: RichText) {
-    ui.allocate_ui_with_layout(vec2(width, 0.0), Layout::left_to_right(Align::Center), |ui| {
+    ui.allocate_ui_with_layout(vec2(width, 0.0), Layout::left_to_right(Align::Min), |ui| {
         ui.set_min_width(width);
         ui.label(text);
     });

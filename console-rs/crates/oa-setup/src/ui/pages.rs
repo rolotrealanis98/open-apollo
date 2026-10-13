@@ -161,7 +161,7 @@ impl App {
                     status_icon(ui, level_status(c.level), 18.0);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 3.0;
-                        ui.horizontal(|ui| {
+                        ui.horizontal_top(|ui| {
                             fixed_label(ui, 170.0, RichText::new(c.title).strong().color(TEXT));
                             ui.add(
                                 egui::Label::new(RichText::new(&c.value).color(if c.level == Level::Warn {
@@ -288,6 +288,7 @@ impl App {
         ui.add_space(6.0);
         CollapsingHeader::new(RichText::new("No Windows on this computer?").strong().color(TEXT))
             .id_salt("vmhelp")
+            .default_open(scan.best().is_none())
             .show(ui, vm_help);
         ui.add_space(4.0);
         if !self.scanning && self.selected_found().is_none() {
@@ -548,6 +549,7 @@ impl App {
             if run.demo {
                 badge(ui, "DEMO: simulated, nothing written", INFO);
             }
+            run_outcome(ui, run, None);
             if !run.files.is_empty() {
                 card(ui, false, |ui| {
                     egui::Grid::new("fw-files").num_columns(3).spacing([14.0, 6.0]).show(ui, |ui| {
@@ -556,13 +558,8 @@ impl App {
                                 status_icon(ui, f.status, 16.0);
                                 ui.label(RichText::new(&f.name).monospace().color(STRONG));
                             });
-                            let sha = f
-                                .sha256
-                                .as_deref()
-                                .map(|h| {
-                                    format!("sha256 {}…{}", &h[..h.len().min(12)], &h[h.len().saturating_sub(6)..])
-                                })
-                                .unwrap_or_default();
+                            let sha =
+                                f.sha256.as_deref().map(|h| format!("sha256 {}", short_hash(h))).unwrap_or_default();
                             ui.label(RichText::new(sha).monospace().small().color(WEAK));
                             ui.label(RichText::new(f.note.as_deref().unwrap_or("")).small().color(WEAK));
                             ui.end_row();
@@ -570,7 +567,7 @@ impl App {
                     });
                 });
             }
-            run_status(ui, run, "firmware-log", None);
+            run_log(ui, run, "firmware-log");
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -674,6 +671,8 @@ impl App {
             if run.demo {
                 badge(ui, "DEMO: simulated output, nothing installed", INFO);
             }
+            let fallback = self.driver_command().map(|(_, _, t)| t);
+            run_outcome(ui, run, fallback.as_deref());
             ui.columns(2, |cols| {
                 card(&mut cols[0], false, |ui| substeps(ui, &run.progress.substeps));
                 cols[1].vertical(|ui| {
@@ -686,8 +685,6 @@ impl App {
                     log_view(ui, "driver-log", &run.progress.lines, 300.0);
                 });
             });
-            let fallback = self.driver_command().map(|(_, _, t)| t);
-            run_status(ui, run, "", fallback.as_deref());
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -766,11 +763,11 @@ impl App {
             if run.demo {
                 badge(ui, "DEMO: simulated build, nothing installed", INFO);
             }
+            run_outcome(ui, run, None);
             ui.columns(2, |cols| {
                 card(&mut cols[0], false, |ui| substeps(ui, &run.progress.substeps));
                 log_view(&mut cols[1], "console-log", &run.progress.lines, 240.0);
             });
-            run_status(ui, run, "", None);
         }
         match &self.launched {
             Some(Ok(m)) => callout(
@@ -1068,15 +1065,7 @@ fn no_install_blocker(ui: &mut Ui, act: &mut Acts, why: &str) {
 }
 
 /// The end-of-run banner, with a terminal fallback command when it failed.
-fn run_status(ui: &mut Ui, run: &Run, log_id: &str, fallback: Option<&str>) {
-    if !log_id.is_empty() {
-        CollapsingHeader::new(RichText::new("Output").color(WEAK)).id_salt(log_id).default_open(run.running()).show(
-            ui,
-            |ui| {
-                log_view(ui, log_id, &run.progress.lines, 200.0);
-            },
-        );
-    }
+fn run_outcome(ui: &mut Ui, run: &Run, fallback: Option<&str>) {
     if let Some(o) = &run.progress.outcome {
         callout(ui, o.status, &o.message, "");
         if o.status == Status::Failed {
@@ -1092,4 +1081,16 @@ fn run_status(ui: &mut Ui, run: &Run, log_id: &str, fallback: Option<&str>) {
             );
         }
     }
+}
+
+/// The run's output, folded away once it has finished.
+fn run_log(ui: &mut Ui, run: &Run, id: &str) {
+    CollapsingHeader::new(RichText::new("Output").color(WEAK)).id_salt(id).default_open(run.running()).show(ui, |ui| {
+        log_view(ui, id, &run.progress.lines, 200.0);
+    });
+}
+
+/// `3f1a9c0d2e4b…07c1fe` for a long ASCII hash.
+fn short_hash(h: &str) -> String {
+    if h.len() > 20 && h.is_ascii() { format!("{}…{}", &h[..12], &h[h.len() - 6..]) } else { h.to_string() }
 }
