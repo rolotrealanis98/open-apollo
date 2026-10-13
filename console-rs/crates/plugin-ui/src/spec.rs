@@ -1,4 +1,8 @@
-//! ConsoleLink's generated plug-in panel spec (`PluginSpec_*.json`, `schema` 1).
+//! ConsoleLink's generated plug-in panel spec (`PluginSpec_*.json`, `schema` 1 or 2).
+//!
+//! Schema 2 is the release format (RUNTIME-V2.md): sprite fields hold recipe ids whose art the
+//! importer regenerates from the user's own install, withheld texts are `stringRef` / `stepsRef`
+//! ids, and `toolbar` / `label` / `shape` / `lamp` elements are drawn by our code from facts.
 //!
 //! Specs are produced by the plugin-spec pipeline from UA's LUNA GUI bundles, the Powered DLLs and
 //! live editor captures, joined with a UA Console parameter capture (indices, names, steps,
@@ -37,6 +41,12 @@ pub struct Parameter {
     pub steps: Option<Vec<String>>,
     #[serde(default, rename = "default", skip_serializing_if = "Option::is_none")]
     pub default_value: Option<f64>,
+    /// Schema 2: the number of steps when the labels are withheld (`steps: null`).
+    #[serde(default, rename = "stepCount", skip_serializing_if = "Option::is_none")]
+    pub step_count: Option<u32>,
+    /// Schema 2: a texts-recipe id (`dll-string-table`) holding the withheld step labels.
+    #[serde(default, rename = "stepsRef", skip_serializing_if = "Option::is_none")]
+    pub steps_ref: Option<String>,
 }
 
 /// One row of a lookup table keyed by the values of the table's `params`, then `states`, then
@@ -154,7 +164,8 @@ string_enum!(
 );
 
 string_enum!(
-    /// `element.kind`.
+    /// `element.kind`. `toolbar`, `label`, `shape` and `lamp` are schema-2 runtime additions
+    /// (RUNTIME-V2.md): elements drawn by our code from facts instead of captured art.
     ElementKind {
         Knob = "knob",
         Switch = "switch",
@@ -165,6 +176,34 @@ string_enum!(
         Text = "text",
         Menu = "menu",
         Graph = "graph",
+        Toolbar = "toolbar",
+        Label = "label",
+        Shape = "shape",
+        Lamp = "lamp",
+    }
+);
+
+string_enum!(
+    /// `toolbar.family`: whose plug-in shell strip the toolbar draws (its colours and glyphs).
+    ToolbarFamily { Brainworx = "brainworx", Softube = "softube" }
+);
+
+string_enum!(
+    /// `toolbar.items[].type`.
+    ToolbarItemKind { Icon = "icon", Switch = "switch", Bank = "bank", Knob = "knob", Gear = "gear", Rect = "rect" }
+);
+
+string_enum!(
+    /// `shape.type`.
+    ShapeKind {
+        Rect = "rect",
+        Ellipse = "ellipse",
+        Line = "line",
+        Polyline = "polyline",
+        Polygon = "polygon",
+        Arc = "arc",
+        Gear = "gear",
+        Hexagon = "hexagon",
     }
 );
 
@@ -207,7 +246,18 @@ pub struct FrameSource {
 
 impl FrameSource {
     pub fn param(param: u16) -> Self {
-        Self { kind: FrameSourceKind::Param, param: Some(param), params: None, table: None, meter: None, states: None, meters: None, threshold: None, period: None, channel: None }
+        Self {
+            kind: FrameSourceKind::Param,
+            param: Some(param),
+            params: None,
+            table: None,
+            meter: None,
+            states: None,
+            meters: None,
+            threshold: None,
+            period: None,
+            channel: None,
+        }
     }
 }
 
@@ -371,9 +421,18 @@ pub struct TextStyle {
     /// Maximum lines (default 1; 0 = unlimited).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lines: Option<i64>,
-    /// Static text (no parameter or meter).
+    /// Static text (no parameter or meter). Schema 2: a short label (≤ 48 characters, one line);
+    /// longer text comes from the user's install through `string_ref`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub string: Option<String>,
+    /// Schema 2: a texts-recipe id (`dll-string`) whose generated text is shown instead of
+    /// `string` (empty until imported).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub string_ref: Option<String>,
+    /// Schema 2: the font family (a fact: "Helvetica", "Arial", "Ubuntu", …). Absent: Helvetica,
+    /// or Menlo when `monospaced`. The renderer substitutes a metric-compatible face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
     /// With `value`: print `names[round(value)]` (empty out of range).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub names: Option<Vec<String>>,
@@ -519,6 +578,175 @@ pub struct Element {
     pub rotate: Option<GraphValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spin: Option<Spin>,
+    /// `toolbar` elements: a plug-in shell strip (RUNTIME-V2.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolbar: Option<Toolbar>,
+    /// `shape` elements: a vector primitive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Shape>,
+    /// `lamp` elements: an LED or lamp lit by the element's frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lamp: Option<Lamp>,
+    /// `label` / `shape`: text (or stroke) colour per frame, `#RRGGBB[AA]`; the frame comes from
+    /// `frameSource`, else the `param`'s step (as a switch shows it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<Vec<String>>,
+    /// `label` / `shape`: fill per frame (a label's box behind its text).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fills: Option<Vec<Fill>>,
+}
+
+/// A plug-in shell toolbar: a bar of `family` colour with icons (the user's DLL art, by recipe
+/// id), parameter switches, a segmented bank selector, ring knobs and glyphs drawn by us.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Toolbar {
+    pub family: ToolbarFamily,
+    /// Bar fill (default: the family's, brainworx `#000000`, softube `#444444`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Knob ring track and value colours (default: the family's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
+    /// In drawing order; coordinates are element-local points.
+    #[serde(default)]
+    pub items: Vec<ToolbarItem>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolbarItem {
+    #[serde(rename = "type")]
+    pub kind: ToolbarItemKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub y: f32,
+    #[serde(default)]
+    pub w: f32,
+    #[serde(default)]
+    pub h: f32,
+    /// A vertical filmstrip (recipe id): `icon` draws `frame`; `switch` the parameter's step;
+    /// `bank` crops `cells` horizontal cells from frame 0 (unselected) and frame 1 (selected).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprite: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frames: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param: Option<u16>,
+    /// `switch`: frame 0 is the "on" look (a lit bypass icon).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invert: Option<bool>,
+    /// `bank`: number of cells (default: the parameter's steps, else 4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells: Option<u32>,
+    /// Drawn when the sprite is not available: `power`, `undo`, `redo` (vector glyphs) or text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glyph: Option<String>,
+    /// `rect` fill, `gear` and fallback-glyph colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// `knob`: the ring, item-local.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ring: Option<Ring>,
+}
+
+/// A toolbar knob: an open ring (gap at the bottom) whose value arc runs clockwise.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+pub struct Ring {
+    pub cx: f32,
+    pub cy: f32,
+    /// Centre-line radius and stroke width (points).
+    pub r: f32,
+    pub width: f32,
+    /// Opening at the bottom in degrees (default 70).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap: Option<f32>,
+}
+
+/// A colour (`#RRGGBB[AA]`) or a gradient.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum Fill {
+    Color(String),
+    Gradient(Gradient),
+}
+
+/// Element-local gradient: `linear` `[x0, y0, x1, y1]` or `radial` `[cx, cy, r]`, with
+/// `stops` `[[t, "#RRGGBB[AA]"], …]`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct Gradient {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear: Option<[f64; 4]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radial: Option<[f64; 3]>,
+    pub stops: Vec<(f64, String)>,
+}
+
+/// A vector primitive in the element's frame (points).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Shape {
+    #[serde(rename = "type")]
+    pub kind: ShapeKind,
+    /// `rect`: corner radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// `line` / `polyline` / `polygon`: element-local points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<[f64; 2]>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Fill>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dash: Option<Vec<f64>>,
+    /// `arc`: degrees clockwise from up (GraphValues, so an arc can follow a parameter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<GraphValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<GraphValue>,
+    /// `gear`: teeth and the root radius as a fraction of the outer radius (default 8, 0.72).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teeth: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner: Option<f64>,
+    /// Shrink the frame by this many points on every side before drawing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inset: Option<f64>,
+}
+
+/// An LED or lamp: `off` → `on` by the element's level (frame / (frames − 1)), with an optional
+/// glow, bezel and highlight.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Lamp {
+    pub on: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<String>,
+    /// `circle` (default) | `rect`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// Glow beyond the lamp (points), drawn while lit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glow: Option<f64>,
+    /// A soft specular highlight in the upper left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bezel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bezel_width: Option<f64>,
 }
 
 impl Element {
@@ -538,7 +766,10 @@ impl Element {
 
     /// Kinds that bind a parameter or action for the "more" panel's bookkeeping.
     pub fn is_interactive_kind(&self) -> bool {
-        matches!(self.kind, ElementKind::Knob | ElementKind::Switch | ElementKind::Button | ElementKind::Zone | ElementKind::Menu)
+        matches!(
+            self.kind,
+            ElementKind::Knob | ElementKind::Switch | ElementKind::Button | ElementKind::Zone | ElementKind::Menu
+        )
     }
 }
 
@@ -698,7 +929,9 @@ impl Graph {
     pub fn drag_values<'a>(&'a self, h: &'a GraphHandle) -> (Option<&'a GraphValue>, Option<&'a GraphValue>) {
         let b = self.band(h.band.as_deref());
         let x = h.x.as_ref().or_else(|| b.and_then(|b| b.freq.as_ref()));
-        let y = h.y.as_ref().or_else(|| if h.y_mode.as_deref().unwrap_or("gain") == "gain" { b.and_then(|b| b.gain.as_ref()) } else { None });
+        let y = h.y.as_ref().or_else(|| {
+            if h.y_mode.as_deref().unwrap_or("gain") == "gain" { b.and_then(|b| b.gain.as_ref()) } else { None }
+        });
         (x, y)
     }
 }
@@ -903,7 +1136,9 @@ impl GraphValue {
         if let Some(m) = &self.meter {
             out.insert(m.clone());
         }
-        for list in [&self.sum, &self.product, &self.min_of, &self.max_of, &self.ratio, &self.apply].into_iter().flatten() {
+        for list in
+            [&self.sum, &self.product, &self.min_of, &self.max_of, &self.ratio, &self.apply].into_iter().flatten()
+        {
             for v in list {
                 v.meters(out);
             }
@@ -1317,7 +1552,16 @@ impl PluginSpec {
 
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Self::from_json(&text).map_err(|e| format!("{}: {e}", path.display()))
+        let spec = Self::from_json(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        if spec.schema > Self::SCHEMA_MAX {
+            eprintln!(
+                "plugin-ui: {} is schema {} (this runtime reads up to {}); unknown fields are ignored",
+                path.display(),
+                spec.schema,
+                Self::SCHEMA_MAX
+            );
+        }
+        Ok(spec)
     }
 
     pub fn parameter(&self, index: u16) -> Option<&Parameter> {
@@ -1352,8 +1596,38 @@ impl PluginSpec {
                     names.insert(d);
                 }
             }
+            for item in e.toolbar.iter().flat_map(|t| &t.items) {
+                if let Some(s) = &item.sprite {
+                    names.insert(s);
+                }
+            }
         }
         names
+    }
+
+    /// Schema 2: texts-recipe ids the spec reads (`text.stringRef`, `parameters[].stepsRef`).
+    pub fn text_refs(&self) -> BTreeSet<&str> {
+        let mut refs: BTreeSet<&str> = BTreeSet::new();
+        for e in &self.elements {
+            if let Some(r) = e.text.as_ref().and_then(|t| t.string_ref.as_deref()) {
+                refs.insert(r);
+            }
+        }
+        for p in &self.parameters {
+            if let Some(r) = &p.steps_ref {
+                refs.insert(r);
+            }
+        }
+        refs
+    }
+
+    /// Highest `schema` this runtime reads; newer specs load with a warning (unknown keys and
+    /// element kinds are ignored, as before).
+    pub const SCHEMA_MAX: i64 = 2;
+
+    /// True for schema 1 (ConsoleLink's stage) and 2 (release format: recipe ids, text refs).
+    pub fn is_known_schema(&self) -> bool {
+        (1..=Self::SCHEMA_MAX).contains(&self.schema)
     }
 
     /// Parameters no panel element can change, offered in the "more" panel (Swift's
@@ -1368,6 +1642,13 @@ impl PluginSpec {
                 }
                 for a in [&el.action, &el.long_press_action, &el.tap_action].into_iter().flatten() {
                     a.params(&mut bound);
+                }
+            }
+            for item in el.toolbar.iter().flat_map(|t| &t.items) {
+                if let (Some(p), ToolbarItemKind::Switch | ToolbarItemKind::Bank | ToolbarItemKind::Knob) =
+                    (item.param, item.kind)
+                {
+                    bound.insert(p);
                 }
             }
             if el.kind == ElementKind::Graph {
@@ -1391,7 +1672,11 @@ impl PluginSpec {
 
     /// Analyser blocks of graph elements, polled like opcode meters (`op` 519).
     pub fn spectrum_opcodes(&self) -> Vec<Opcode> {
-        self.elements.iter().filter_map(|e| e.graph.as_ref()?.spectrum.as_ref()).map(|s| Opcode { op: 519, p0: s.first, p1: s.count }).collect()
+        self.elements
+            .iter()
+            .filter_map(|e| e.graph.as_ref()?.spectrum.as_ref())
+            .map(|s| Opcode { op: 519, p0: s.first, p1: s.count })
+            .collect()
     }
 
     /// True when a graph draws an analyser (the latest opcode block is kept by variable id).
@@ -1435,7 +1720,11 @@ impl PluginSpec {
     /// Float ids to poll with `floats=`, ascending (the order the reply lists them).
     pub fn poll_floats(&self) -> Vec<i64> {
         let range = self.opcode_range();
-        let ids: BTreeSet<i64> = self.meters().filter(|(_, m)| !Self::served(m, range)).filter_map(|(_, m)| m.vendor_specific_float).collect();
+        let ids: BTreeSet<i64> = self
+            .meters()
+            .filter(|(_, m)| !Self::served(m, range))
+            .filter_map(|(_, m)| m.vendor_specific_float)
+            .collect();
         ids.into_iter().collect()
     }
 

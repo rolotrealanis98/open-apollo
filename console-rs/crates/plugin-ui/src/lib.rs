@@ -1,8 +1,10 @@
 //! Plug-in windows for console-rs: tapping a loaded insert opens that plug-in's UI and drives its
 //! parameters through the UA Mixer Engine.
 //!
-//! - [`spec`] / [`library`]: ConsoleLink's generated panel specs (`PluginSpec_*.json` plus
-//!   `Images/*@2x.png`), found at runtime (never bundled; see [`SpecLocator`]).
+//! - [`spec`] / [`library`] / [`recipes`]: panel specs (`PluginSpec_*.json`; schema 2 names its
+//!   art by recipe id and the importer regenerates it from the user's own install into the art
+//!   root, see [`SpecLocator`] and [`ArtLocator`]), never bundled.
+//! - [`widgets`]: the schema-2 code-drawn elements (shell toolbars, shapes, lamps).
 //! - [`PluginPanel`]: a spec drawn into a `rack::Ui` with hit regions
 //!   (`rack::Control::PluginParam/PluginElement/PluginStep`) and its own pointer gestures; a port
 //!   of the Swift spec runtime. [`graph`] evaluates GraphValues and builds graph scenes,
@@ -28,16 +30,19 @@ pub mod params;
 pub mod paths;
 pub mod raster;
 pub mod readout;
+pub mod recipes;
 pub mod scales;
 pub mod spec;
 pub mod uanet;
 pub mod web;
+pub mod widgets;
 pub mod window;
 #[cfg(all(feature = "webview", target_os = "linux"))]
 pub mod webview;
 
 pub use generic::GenericPanel;
-pub use library::{Entry, PluginSpecLibrary, SpecLocator};
+pub use library::{ArtLocator, Availability, Entry, PluginSpecLibrary, SpecLocator, TextValue};
+pub use recipes::{RecipeStatus, Recipes};
 pub use meters::MeterFeed;
 pub use panel::PluginPanel;
 pub use engine::{EngineSlot, MeterPoller};

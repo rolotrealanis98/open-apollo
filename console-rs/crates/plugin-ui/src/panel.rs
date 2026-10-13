@@ -37,12 +37,15 @@ use parking_lot::Mutex;
 use rack::{Action, Align, Control, ControlId, Frame, HitKind, TextStyle, Ui};
 
 use crate::graph::{Axes, Lookup, Scene, SceneInput};
-use crate::library::PluginSpecLibrary;
+use crate::library::{PluginSpecLibrary, TextValue};
 use crate::meters::MeterFeed;
 use crate::params::{ParamSource, clamp01, step_index, step_value};
 use crate::raster::{self, Region};
 use crate::readout;
-use crate::spec::{self, ActionKind, Element, ElementKind, FrameSourceKind, GraphValue, PluginSpec, Row, TouchState};
+use crate::spec::{
+    self, ActionKind, Element, ElementKind, FrameSourceKind, GraphValue, PluginSpec, Row, ToolbarItemKind, TouchState,
+};
+use crate::widgets;
 
 /// Points of drag for the full 0…1 range (SpriteKnob: 0.005 per point).
 pub const DRAG_SPAN: f32 = 200.0;
@@ -93,26 +96,68 @@ struct HandleHit {
 
 #[derive(Clone, Debug)]
 enum Target {
-    Knob { el: usize, param: u16, horizontal: bool },
-    DragZone { el: usize, param: u16 },
-    Swipe { el: usize, param: u16 },
-    Switch { el: usize, param: u16 },
-    Button { el: usize },
-    Zone { el: usize },
-    Menu { el: usize },
+    Knob {
+        el: usize,
+        param: u16,
+        horizontal: bool,
+    },
+    DragZone {
+        el: usize,
+        param: u16,
+    },
+    Swipe {
+        el: usize,
+        param: u16,
+    },
+    Switch {
+        el: usize,
+        param: u16,
+    },
+    Button {
+        el: usize,
+    },
+    Zone {
+        el: usize,
+    },
+    Menu {
+        el: usize,
+    },
     Handle(Box<HandleHit>),
     MoreButton,
-    MoreSlider { param: u16, track: Rect },
-    MoreStep { param: u16, step: usize },
+    MoreSlider {
+        param: u16,
+        track: Rect,
+    },
+    MoreStep {
+        param: u16,
+        step: usize,
+    },
     MoreList,
-    MenuRow { el: usize, param: u16, step: usize },
+    MenuRow {
+        el: usize,
+        param: u16,
+        step: usize,
+    },
+    /// A toolbar switch or bank cell: a tap writes `value` to `param`.
+    ToolbarSet {
+        el: usize,
+        param: u16,
+        value: f64,
+    },
     Dismiss,
 }
 
 impl Target {
     fn element(&self) -> Option<usize> {
         match self {
-            Target::Knob { el, .. } | Target::DragZone { el, .. } | Target::Swipe { el, .. } | Target::Switch { el, .. } | Target::Button { el } | Target::Zone { el } | Target::Menu { el } => Some(*el),
+            Target::Knob { el, .. }
+            | Target::DragZone { el, .. }
+            | Target::Swipe { el, .. }
+            | Target::Switch { el, .. }
+            | Target::Button { el }
+            | Target::Zone { el }
+            | Target::Menu { el }
+            | Target::ToolbarSet { el, .. } => Some(*el),
             Target::Handle(h) => Some(h.el),
             _ => None,
         }
@@ -184,6 +229,9 @@ pub struct PluginPanel {
     target: Arc<str>,
     sprites: HashMap<String, Arc<str>>,
     missing: Vec<String>,
+    /// Schema-2 texts (`stringRef`, `stepsRef`) the importer extracted from the user's install.
+    texts: HashMap<String, TextValue>,
+    missing_texts: Vec<String>,
     /// Values for parameters the source does not publish (spec defaults until changed).
     local: HashMap<u16, f64>,
     /// Local UI state (pages, tabs, band selection, `channels`); never sent to Console.
@@ -238,11 +286,26 @@ impl PluginPanel {
     /// Sprites resolve through `library` (call [`PluginSpecLibrary::attach`] on the image cache
     /// `gfx` draws with).
     pub fn new(spec: Arc<PluginSpec>, library: &PluginSpecLibrary, target: impl Into<Arc<str>>) -> Self {
-        Self::with_sprites(spec, target, |name| library.sprite_key(name))
+        Self::with_assets(spec, target, |name| library.sprite_key(name), |id| library.text(id))
     }
 
-    /// As [`new`](Self::new), with a custom sprite-name → image-key resolver.
-    pub fn with_sprites(spec: Arc<PluginSpec>, target: impl Into<Arc<str>>, resolve: impl Fn(&str) -> Option<Arc<str>>) -> Self {
+    /// As [`new`](Self::new), with a custom sprite-name → image-key resolver (no texts).
+    pub fn with_sprites(
+        spec: Arc<PluginSpec>,
+        target: impl Into<Arc<str>>,
+        resolve: impl Fn(&str) -> Option<Arc<str>>,
+    ) -> Self {
+        Self::with_assets(spec, target, resolve, |_| None)
+    }
+
+    /// As [`new`](Self::new), with custom resolvers for sprite ids (image keys) and text ids
+    /// (schema 2 `stringRef` / `stepsRef`).
+    pub fn with_assets(
+        spec: Arc<PluginSpec>,
+        target: impl Into<Arc<str>>,
+        resolve: impl Fn(&str) -> Option<Arc<str>>,
+        text: impl Fn(&str) -> Option<TextValue>,
+    ) -> Self {
         let mut sprites = HashMap::new();
         let mut missing = Vec::new();
         for name in spec.sprite_names() {
@@ -251,6 +314,16 @@ impl PluginPanel {
                     sprites.insert(name.to_string(), key);
                 }
                 None => missing.push(name.to_string()),
+            }
+        }
+        let mut texts = HashMap::new();
+        let mut missing_texts = Vec::new();
+        for id in spec.text_refs() {
+            match text(id) {
+                Some(t) => {
+                    texts.insert(id.to_string(), t);
+                }
+                None => missing_texts.push(id.to_string()),
             }
         }
         let local = spec.parameters.iter().map(|p| (p.index, p.default_value.unwrap_or(0.0))).collect();
@@ -264,6 +337,8 @@ impl PluginPanel {
             target,
             sprites,
             missing,
+            texts,
+            missing_texts,
             local,
             ui_state,
             meters: MeterFeed::new(),
@@ -294,9 +369,15 @@ impl PluginPanel {
         &self.target
     }
 
-    /// Sprite names with no image file in the spec folder.
+    /// Sprite (recipe) ids with no image file.
     pub fn missing_sprites(&self) -> &[String] {
         &self.missing
+    }
+
+    /// Text ids (`stringRef`, `stepsRef`) not imported: their readouts are empty and their
+    /// step labels fall back to the engine's (or "1"…"N").
+    pub fn missing_texts(&self) -> &[String] {
+        &self.missing_texts
     }
 
     /// Parameters no element reaches (offered in the "more" panel).
@@ -353,18 +434,46 @@ impl PluginPanel {
             .unwrap_or(0.0)
     }
 
-    /// Step labels: the spec's, else the source's (empty when continuous).
+    /// Step labels (empty when continuous), in order: the spec's; the imported `stepsRef` list
+    /// (labels past its end from the source); the source's; placeholders "1"…"N" from
+    /// `stepCount` (withheld labels keep a stepped parameter stepped in mock renders).
     pub fn step_labels(&self, k: u16, params: &dyn ParamSource) -> Vec<String> {
         if let Some(s) = self.spec.step_labels(k) {
             return s.to_vec();
         }
-        let s = params.steps(k);
-        if s.len() > 1 { s } else { vec![] }
+        let source = params.steps(k);
+        let p = self.spec.parameter(k);
+        let count = p.and_then(|p| p.step_count).unwrap_or(0) as usize;
+        if let Some(TextValue::List(list)) = p.and_then(|p| p.steps_ref.as_ref()).and_then(|r| self.texts.get(r)) {
+            let n = list.len().max(source.len()).max(count);
+            if n > 1 {
+                return (0..n)
+                    .map(|i| list.get(i).or_else(|| source.get(i)).cloned().unwrap_or_else(|| (i + 1).to_string()))
+                    .collect();
+            }
+        }
+        if source.len() > 1 {
+            return source;
+        }
+        if count > 1 {
+            return (1..=count).map(|i| i.to_string()).collect();
+        }
+        vec![]
     }
 
-    /// Number of discrete steps (0 when continuous).
+    /// Number of discrete steps (0 when continuous): the labels', at least `stepCount`.
     pub fn steps(&self, k: u16, params: &dyn ParamSource) -> usize {
-        self.step_labels(k, params).len()
+        let n = self.step_labels(k, params).len();
+        let count = self.spec.parameter(k).and_then(|p| p.step_count).unwrap_or(0) as usize;
+        if count > 1 { n.max(count) } else { n }
+    }
+
+    /// An imported text (`stringRef`): the string, or a list joined by newlines.
+    pub fn text_value(&self, id: &str) -> Option<String> {
+        match self.texts.get(id)? {
+            TextValue::Text(t) => Some(t.clone()),
+            TextValue::List(l) => Some(l.join("\n")),
+        }
     }
 
     /// Readout: the source's display text (Console `StringValue`), else the step label, else a
@@ -398,10 +507,15 @@ impl PluginPanel {
     pub fn readout_text(&self, el: &Element, params: &dyn ParamSource) -> String {
         let ctx = self.ctx(params);
         let style = el.text.as_ref();
+        if let Some(id) = style.and_then(|t| t.string_ref.as_ref()) {
+            return self.text_value(id).unwrap_or_default();
+        }
         if let Some(fixed) = style.and_then(|t| t.string.as_ref()) {
             return fixed.clone();
         }
-        if let (Some(names), Some(v)) = (style.and_then(|t| t.names.as_ref()).filter(|n| !n.is_empty()), style.and_then(|t| t.value.as_ref())) {
+        if let (Some(names), Some(v)) =
+            (style.and_then(|t| t.names.as_ref()).filter(|n| !n.is_empty()), style.and_then(|t| t.value.as_ref()))
+        {
             let i = v.resolve(&ctx).round();
             return if i >= 0.0 && (i as usize) < names.len() { names[i as usize].clone() } else { String::new() };
         }
@@ -430,7 +544,13 @@ impl PluginPanel {
     }
 
     /// A lookup key: the params' values, then the states (absent: 0), then the meter needles.
-    fn key(&self, ps: &[u16], states: Option<&[String]>, meters: Option<&[String]>, params: &dyn ParamSource) -> Vec<f64> {
+    fn key(
+        &self,
+        ps: &[u16],
+        states: Option<&[String]>,
+        meters: Option<&[String]>,
+        params: &dyn ParamSource,
+    ) -> Vec<f64> {
         let mut key: Vec<f64> = ps.iter().map(|&k| self.value(k, params)).collect();
         key.extend(states.unwrap_or(&[]).iter().map(|s| self.ui_state.get(s).copied().unwrap_or(0.0)));
         key.extend(meters.unwrap_or(&[]).iter().map(|m| self.meters.needle(m)));
@@ -579,7 +699,11 @@ impl PluginPanel {
     /// [`size`](Self::size) for 1:1) and registers its hit regions. Leaves clipping off.
     pub fn build(&self, ui: &mut Ui, origin: Rect, params: &dyn ParamSource) {
         let (sw, sh) = self.size();
-        let s = if origin.w > 0.0 && origin.h > 0.0 && sw > 0.0 && sh > 0.0 { (origin.w / sw).min(origin.h / sh) } else { 1.0 };
+        let s = if origin.w > 0.0 && origin.h > 0.0 && sw > 0.0 && sh > 0.0 {
+            (origin.w / sw).min(origin.h / sh)
+        } else {
+            1.0
+        };
         let place = Placement { x: origin.x, y: origin.y, scale: s, w: sw, h: sh };
         *self.placement.lock() = Some(place);
         {
@@ -602,7 +726,11 @@ impl PluginPanel {
         if !self.unbound.is_empty() {
             let r = place.map(Rect::new(sw - 4.0 - MORE_D, 4.0, MORE_D, MORE_D));
             let px = (s * 2.0) as f64;
-            if let Some(key) = ui.assets.images.put_raster(&format!("plugin-ui/more/{}", px.to_bits()), px.to_bits(), || raster::more_icon(MORE_D as f64, px)) {
+            if let Some(key) =
+                ui.assets.images.put_raster(&format!("plugin-ui/more/{}", px.to_bits()), px.to_bits(), || {
+                    raster::more_icon(MORE_D as f64, px)
+                })
+            {
                 ui.image(&key, r, None, None, 1.0);
             }
             ui.hit(r, self.id(Control::PluginElement(MORE_BUTTON)), HitKind::Tap);
@@ -623,7 +751,14 @@ impl PluginPanel {
 
     /// One element with its modifiers: `move` shifts it, `reveal` clips it (in its unshifted
     /// frame), `rotate`/`spin` turn sprites, opacity fades it.
-    fn draw_element(&self, ui: &mut Ui, i: usize, place: &Placement, params: &dyn ParamSource, hits: &mut Vec<PanelHit>) {
+    fn draw_element(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        place: &Placement,
+        params: &dyn ParamSource,
+        hits: &mut Vec<PanelHit>,
+    ) {
         let el = &self.spec.elements[i];
         let opacity = self.opacity(el, params);
         if opacity <= 0.0 {
@@ -632,7 +767,16 @@ impl PluginPanel {
         let interactive = opacity > 0.01;
         let ctx = self.ctx(params);
         let s = place.scale;
-        let shift = el.move_by.as_ref().map(|m| (m.x.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(0.0), m.y.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(0.0))).unwrap_or((0.0, 0.0));
+        let shift = el
+            .move_by
+            .as_ref()
+            .map(|m| {
+                (
+                    m.x.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(0.0),
+                    m.y.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(0.0),
+                )
+            })
+            .unwrap_or((0.0, 0.0));
         let base = el.rect();
         let local = base.offset(shift.0 as f32, shift.1 as f32);
         let r = place.map(local);
@@ -642,7 +786,12 @@ impl PluginPanel {
             let t = rv.top.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(0.0);
             let rr = rv.right.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(w);
             let b = rv.bottom.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(h);
-            place.map(Rect::new(base.x + l as f32, base.y + t as f32, (rr - l).max(0.0) as f32, (b - t).max(0.0) as f32))
+            place.map(Rect::new(
+                base.x + l as f32,
+                base.y + t as f32,
+                (rr - l).max(0.0) as f32,
+                (b - t).max(0.0) as f32,
+            ))
         });
         if let Some(clip) = reveal {
             ui.clip(Some(clip));
@@ -659,7 +808,11 @@ impl PluginPanel {
                     if interactive {
                         let horizontal = el.drag.as_deref() == Some("horizontal");
                         self.rack_drag(ui, r, k, horizontal, s, params);
-                        hits.push(PanelHit { rect: r, circle: None, target: Target::Knob { el: i, param: k, horizontal } });
+                        hits.push(PanelHit {
+                            rect: r,
+                            circle: None,
+                            target: Target::Knob { el: i, param: k, horizontal },
+                        });
                     }
                 }
             }
@@ -713,7 +866,9 @@ impl PluginPanel {
                             self.rack_drag(ui, r, k, false, s, params);
                             hits.push(PanelHit { rect: r, circle: None, target: Target::DragZone { el: i, param: k } });
                         }
-                        (Some("swipe"), Some(k)) => hits.push(PanelHit { rect: r, circle: None, target: Target::Swipe { el: i, param: k } }),
+                        (Some("swipe"), Some(k)) => {
+                            hits.push(PanelHit { rect: r, circle: None, target: Target::Swipe { el: i, param: k } })
+                        }
                         _ => {
                             if el.action.is_some() {
                                 ui.hit(r, self.id(Control::PluginElement(ei)), HitKind::Tap);
@@ -725,7 +880,9 @@ impl PluginPanel {
             }
             ElementKind::Text => {
                 let style = el.text.as_ref();
-                if style.is_some_and(|t| t.meter.is_some() || t.string.is_some()) || self.readout_param(el).is_some() {
+                if style.is_some_and(|t| t.meter.is_some() || t.string.is_some() || t.string_ref.is_some())
+                    || self.readout_param(el).is_some()
+                {
                     let text = self.readout_text(el, params);
                     match style.and_then(|t| t.sprite_font.as_ref()) {
                         Some(font) => self.draw_sprite_text(ui, &text, font, r, o, s),
@@ -749,6 +906,14 @@ impl PluginPanel {
                     self.draw_graph(ui, i, g, r, place, o, params, hits);
                 }
             }
+            ElementKind::Toolbar => {
+                if let Some(tb) = &el.toolbar {
+                    self.draw_toolbar(ui, i, tb, r, o, interactive, params, hits);
+                }
+            }
+            ElementKind::Label => self.draw_label(ui, i, r, o, s, params),
+            ElementKind::Shape => self.draw_shape(ui, i, r, o, rotation, s, params),
+            ElementKind::Lamp => self.draw_lamp(ui, i, r, o, s, params),
             ElementKind::Other => {}
         }
         if reveal.is_some() {
@@ -758,7 +923,18 @@ impl PluginPanel {
 
     /// A filmstrip frame stretched over `r` (or rotated about its centre).
     #[allow(clippy::too_many_arguments)]
-    fn draw_sprite(&self, ui: &mut Ui, i: usize, key: &Arc<str>, frames: u32, index: u32, r: Rect, opacity: f32, rotation: Option<f64>, s: f32) {
+    fn draw_sprite(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        key: &Arc<str>,
+        frames: u32,
+        index: u32,
+        r: Rect,
+        opacity: f32,
+        rotation: Option<f64>,
+        s: f32,
+    ) {
         let frame = film_frame(ui, key, frames, index);
         match rotation {
             Some(deg) => self.draw_rotated(ui, i, key, frame, r, opacity, deg, s),
@@ -767,19 +943,38 @@ impl PluginPanel {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_rotated(&self, ui: &mut Ui, i: usize, key: &Arc<str>, frame: Option<Frame>, r: Rect, opacity: f32, degrees: f64, s: f32) {
+    fn draw_rotated(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        key: &Arc<str>,
+        frame: Option<Frame>,
+        r: Rect,
+        opacity: f32,
+        degrees: f64,
+        s: f32,
+    ) {
         let Some(img) = ui.assets.images.get(key) else { return };
         let rows = frame.map(|f| (f.index * f.height, f.height)).unwrap_or((0, img.height));
         let (w, h) = ((r.w / s) as f64, (r.h / s) as f64);
         let px = (s * 2.0) as f64;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&(key.as_ref(), rows, w.to_bits(), h.to_bits(), degrees.to_bits(), px.to_bits()), &mut hasher);
+        std::hash::Hash::hash(
+            &(key.as_ref(), rows, w.to_bits(), h.to_bits(), degrees.to_bits(), px.to_bits()),
+            &mut hasher,
+        );
         let fp = std::hash::Hasher::finish(&hasher);
         let mut bounds = (w, h);
         let name = format!("{}{i}/rot", self.raster_prefix);
-        let drawn = ui.assets.images.put_raster(&name, fp, || raster::rotated_sprite(&img, rows, w, h, degrees, px).map(|(img, _, _)| img));
+        let drawn = ui
+            .assets
+            .images
+            .put_raster(&name, fp, || raster::rotated_sprite(&img, rows, w, h, degrees, px).map(|(img, _, _)| img));
         let rad = degrees.to_radians();
-        bounds = (bounds.0 * rad.cos().abs() + bounds.1 * rad.sin().abs(), bounds.0 * rad.sin().abs() + bounds.1 * rad.cos().abs());
+        bounds = (
+            bounds.0 * rad.cos().abs() + bounds.1 * rad.sin().abs(),
+            bounds.0 * rad.sin().abs() + bounds.1 * rad.cos().abs(),
+        );
         if let Some(k) = drawn {
             let (bw, bh) = (bounds.0 as f32 * s, bounds.1 as f32 * s);
             let (cx, cy) = r.center();
@@ -816,7 +1011,17 @@ impl PluginPanel {
     /// A graph element: background colour, underlay sprite, the code-drawn curves and overlays,
     /// peak labels, then the handles and their labels (Swift's `SpecGraphView` order).
     #[allow(clippy::too_many_arguments)]
-    fn draw_graph(&self, ui: &mut Ui, i: usize, g: &spec::Graph, r: Rect, place: &Placement, opacity: f32, params: &dyn ParamSource, hits: &mut Vec<PanelHit>) {
+    fn draw_graph(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        g: &spec::Graph,
+        r: Rect,
+        place: &Placement,
+        opacity: f32,
+        params: &dyn ParamSource,
+        hits: &mut Vec<PanelHit>,
+    ) {
         let s = place.scale;
         let (w, h) = ((r.w / s) as f64, (r.h / s) as f64);
         let ctx = self.ctx(params);
@@ -828,12 +1033,19 @@ impl PluginPanel {
         if let Some(key) = self.sprite_key(g.underlay.as_ref()) {
             if let Some(img) = ui.assets.images.get(key) {
                 ui.clip(Some(r));
-                ui.image(key, Rect::new(r.x, r.y, img.width as f32 / 2.0 * s, img.height as f32 / 2.0 * s), None, None, opacity);
+                ui.image(
+                    key,
+                    Rect::new(r.x, r.y, img.width as f32 / 2.0 * s, img.height as f32 / 2.0 * s),
+                    None,
+                    None,
+                    opacity,
+                );
                 ui.clip(None);
             }
         }
         // Element-local bounds of everything drawn, kept inside the panel.
-        let panel_local = (-(r.x - place.x) as f64 / s as f64, -(r.y - place.y) as f64 / s as f64, place.w as f64, place.h as f64);
+        let panel_local =
+            (-(r.x - place.x) as f64 / s as f64, -(r.y - place.y) as f64 / s as f64, place.w as f64, place.h as f64);
         let px = (s * 2.0) as f64;
         let region = |extra: &mut dyn Iterator<Item = (f64, f64)>| -> Option<Region> {
             let (mut x0, mut y0, mut x1, mut y1) = (0.0f64, 0.0f64, w, h);
@@ -848,14 +1060,33 @@ impl PluginPanel {
             let (px0, py0) = (panel_local.0, panel_local.1);
             let (x0, y0) = (x0.max(px0), y0.max(py0));
             let (x1, y1) = (x1.min(px0 + panel_local.2), y1.min(py0 + panel_local.3));
-            (x1 > x0 && y1 > y0).then_some(Region { x: x0.floor(), y: y0.floor(), w: (x1 - x0.floor()).ceil(), h: (y1 - y0.floor()).ceil(), px })
+            (x1 > x0 && y1 > y0).then_some(Region {
+                x: x0.floor(),
+                y: y0.floor(),
+                w: (x1 - x0.floor()).ceil(),
+                h: (y1 - y0.floor()).ceil(),
+                px,
+            })
         };
-        let to_window = |rg: &Region| Rect::new(r.x + rg.x as f32 * s, r.y + rg.y as f32 * s, rg.w as f32 * s, rg.h as f32 * s);
+        let to_window =
+            |rg: &Region| Rect::new(r.x + rg.x as f32 * s, r.y + rg.y as f32 * s, rg.w as f32 * s, rg.h as f32 * s);
         if !(scene.fills.is_empty() && scene.strokes.is_empty() && scene.overlays.is_empty()) {
-            let mut extra = scene.overlays.iter().flat_map(|o| o.path.coords().collect::<Vec<_>>().chunks(2).filter(|c| c.len() == 2).map(|c| (c[0], c[1])).collect::<Vec<_>>());
+            let mut extra = scene.overlays.iter().flat_map(|o| {
+                o.path
+                    .coords()
+                    .collect::<Vec<_>>()
+                    .chunks(2)
+                    .filter(|c| c.len() == 2)
+                    .map(|c| (c[0], c[1]))
+                    .collect::<Vec<_>>()
+            });
             if let Some(rg) = region(&mut extra) {
                 let fp = raster::scene_fingerprint(&scene, &rg, false);
-                if let Some(key) = ui.assets.images.put_raster(&format!("{}{i}/curves", self.raster_prefix), fp, || raster::scene_curves(&scene, &rg)) {
+                if let Some(key) = ui
+                    .assets
+                    .images
+                    .put_raster(&format!("{}{i}/curves", self.raster_prefix), fp, || raster::scene_curves(&scene, &rg))
+                {
                     ui.image(&key, to_window(&rg), None, None, opacity);
                 }
             }
@@ -866,13 +1097,24 @@ impl PluginPanel {
             let size = l.size as f32 * s;
             let width = readout::estimate_width(&l.text, l.size as f32, false, false) * s + 4.0 * s;
             let style = TextStyle { family: "Helvetica".into(), size, bold: false, italic: false, color };
-            ui.text(&l.text, style, Rect::new(r.x + l.x as f32 * s, r.y + l.y as f32 * s, width, size * 1.25), Align::Left);
+            ui.text(
+                &l.text,
+                style,
+                Rect::new(r.x + l.x as f32 * s, r.y + l.y as f32 * s, width, size * 1.25),
+                Align::Left,
+            );
         }
         if !scene.handles.is_empty() {
-            let mut extra = scene.handles.iter().flat_map(|h| [(h.x - h.radius - 1.0, h.y - h.radius - 1.0), (h.x + h.radius + 1.0, h.y + h.radius + 1.0)]);
+            let mut extra = scene.handles.iter().flat_map(|h| {
+                [(h.x - h.radius - 1.0, h.y - h.radius - 1.0), (h.x + h.radius + 1.0, h.y + h.radius + 1.0)]
+            });
             if let Some(rg) = region(&mut extra) {
                 let fp = raster::scene_fingerprint(&scene, &rg, true);
-                if let Some(key) = ui.assets.images.put_raster(&format!("{}{i}/handles", self.raster_prefix), fp, || raster::scene_handles(&scene, &rg)) {
+                if let Some(key) =
+                    ui.assets.images.put_raster(&format!("{}{i}/handles", self.raster_prefix), fp, || {
+                        raster::scene_handles(&scene, &rg)
+                    })
+                {
                     ui.image(&key, to_window(&rg), None, None, opacity);
                 }
             }
@@ -905,8 +1147,357 @@ impl PluginPanel {
         }
     }
 
+    /// The frame of a code-drawn element (`label`, `shape`, `lamp`): its `frameSource`, else its
+    /// `param`'s value over `frames` (as a switch shows it), else 0.
+    fn widget_frame(&self, el: &Element, frames: u32, params: &dyn ParamSource) -> u32 {
+        match (el.frame_source.as_ref(), el.param) {
+            (Some(src), _) => self.frame_of(el, Some(src), frames, params),
+            (None, Some(k)) => self.frame_of(el, Some(&spec::FrameSource::param(k)), frames, params),
+            _ => 0,
+        }
+    }
+
+    /// Frames of a `label` / `shape`: `frames`, else as many as its per-frame colours or fills.
+    fn palette_frames(el: &Element) -> u32 {
+        el.frames.unwrap_or_else(|| {
+            el.colors.as_ref().map_or(0, |c| c.len()).max(el.fills.as_ref().map_or(0, |f| f.len())).max(1) as u32
+        })
+    }
+
+    /// A code-drawn image of element `i` (`what` names it within the element), cached by `fp`.
+    fn raster(
+        &self,
+        ui: &Ui,
+        i: usize,
+        what: &str,
+        fp: u64,
+        draw: impl FnOnce() -> Option<houston::ImageData>,
+    ) -> Option<String> {
+        ui.assets.images.put_raster(&format!("{}{i}/{what}", self.raster_prefix), fp, draw)
+    }
+
+    /// A plug-in shell toolbar: the bar, then each item in order (RUNTIME-V2.md). Icons and
+    /// switches draw their recipe sprites (vector glyphs or text while the art is missing); bank
+    /// cells, switches and ring knobs take taps and drags like their spec counterparts.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_toolbar(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        tb: &spec::Toolbar,
+        r: Rect,
+        o: f32,
+        interactive: bool,
+        params: &dyn ParamSource,
+        hits: &mut Vec<PanelHit>,
+    ) {
+        let el = &self.spec.elements[i];
+        let s = if el.w.unwrap_or(0.0) > 0.0 { r.w / el.w.unwrap_or(1.0) } else { 1.0 };
+        let look = widgets::family_look(tb.family);
+        let mut bar = parse_hex(tb.color.as_deref()).unwrap_or(look.bar);
+        bar.a *= o;
+        ui.fill(r, bar);
+        let track = parse_hex(tb.track.as_deref()).unwrap_or(look.track);
+        let accent = parse_hex(tb.accent.as_deref()).unwrap_or(look.accent);
+        let px = (s * 2.0) as f64;
+        ui.clip(Some(r));
+        for (n, item) in tb.items.iter().enumerate() {
+            let ir = Rect::new(r.x + item.x * s, r.y + item.y * s, item.w * s, item.h * s);
+            let sprite = self.sprite_key(item.sprite.as_ref()).cloned();
+            let frames = item.frames.unwrap_or(2).max(1);
+            match item.kind {
+                ToolbarItemKind::Rect => {
+                    if let Some(mut c) = parse_hex(item.color.as_deref()) {
+                        c.a *= o;
+                        ui.fill(ir, c);
+                    }
+                }
+                ToolbarItemKind::Icon => {
+                    let frame = item.frame.unwrap_or(0).min(frames - 1);
+                    self.toolbar_art(ui, i, n, item, sprite.as_ref(), frames, frame, ir, look.ink, o, s);
+                }
+                ToolbarItemKind::Gear => {
+                    let ink = parse_hex(item.color.as_deref()).unwrap_or(look.ink);
+                    let fp = widgets::fingerprint(
+                        &("gear", n),
+                        &[item.w as f64, item.h as f64, px, ink.r as f64, ink.g as f64, ink.b as f64],
+                    );
+                    if let Some(k) = self.raster(ui, i, &format!("tb{n}"), fp, || {
+                        widgets::glyph_image("gear", item.w as f64, item.h as f64, ink, px)
+                    }) {
+                        ui.image(&k, ir, None, None, o);
+                    }
+                }
+                ToolbarItemKind::Switch => {
+                    let Some(k) = item.param else { continue };
+                    let v = self.value(k, params);
+                    let n_steps = self.steps(k, params).max(2);
+                    let step = step_index(v, n_steps);
+                    let on = step > 0;
+                    let frame = if frames == 2 {
+                        (on != (item.invert == Some(true))) as u32
+                    } else {
+                        (step as u32).min(frames - 1)
+                    };
+                    let ink = if frame > 0 { accent } else { look.ink };
+                    self.toolbar_art(ui, i, n, item, sprite.as_ref(), frames, frame, ir, ink, o, s);
+                    if interactive {
+                        let next = (step + 1) % n_steps;
+                        ui.hit(ir, self.id(Control::PluginStep(k, next as u16)), HitKind::Tap);
+                        hits.push(PanelHit {
+                            rect: ir,
+                            circle: None,
+                            target: Target::ToolbarSet { el: i, param: k, value: step_value(next, n_steps) },
+                        });
+                    }
+                }
+                ToolbarItemKind::Bank => {
+                    let Some(k) = item.param else { continue };
+                    let cells = item.cells.map(|c| c as usize).unwrap_or_else(|| match self.steps(k, params) {
+                        0 | 1 => 4,
+                        n => n,
+                    });
+                    let sel = step_index(self.value(k, params), cells);
+                    let cw = ir.w / cells.max(1) as f32;
+                    for c in 0..cells {
+                        let cell = Rect::new(ir.x + c as f32 * cw, ir.y, cw, ir.h);
+                        let selected = c == sel;
+                        match &sprite {
+                            Some(key) => {
+                                ui.clip(Some(cell));
+                                let frame = film_frame(ui, key, frames, selected as u32);
+                                ui.image(key, ir, None, frame, o);
+                                ui.clip(None);
+                            }
+                            None => {
+                                let label = item
+                                    .glyph
+                                    .as_deref()
+                                    .and_then(|g| g.chars().nth(c))
+                                    .map(String::from)
+                                    .unwrap_or_else(|| ((b'A' + c as u8) as char).to_string());
+                                let mut ink = if selected { accent } else { look.ink };
+                                ink.a *= o;
+                                let style = TextStyle {
+                                    family: "Helvetica".into(),
+                                    size: item.h * 0.55 * s,
+                                    bold: true,
+                                    italic: false,
+                                    color: ink,
+                                };
+                                ui.text(&label, style, cell, Align::Center);
+                            }
+                        }
+                        if interactive {
+                            ui.hit(cell, self.id(Control::PluginStep(k, c as u16)), HitKind::Tap);
+                            hits.push(PanelHit {
+                                rect: cell,
+                                circle: None,
+                                target: Target::ToolbarSet { el: i, param: k, value: step_value(c, cells) },
+                            });
+                        }
+                    }
+                }
+                ToolbarItemKind::Knob => {
+                    let (Some(k), Some(ring)) = (item.param, item.ring.as_ref()) else { continue };
+                    let v = self.value(k, params);
+                    let fp = widgets::fingerprint(
+                        &("ring", n),
+                        &[
+                            v,
+                            item.w as f64,
+                            item.h as f64,
+                            px,
+                            ring.cx as f64,
+                            ring.cy as f64,
+                            ring.r as f64,
+                            ring.width as f64,
+                            ring.gap.unwrap_or(70.0) as f64,
+                            track.r as f64,
+                            track.g as f64,
+                            track.b as f64,
+                            accent.r as f64,
+                            accent.g as f64,
+                            accent.b as f64,
+                        ],
+                    );
+                    if let Some(key) = self.raster(ui, i, &format!("tb{n}"), fp, || {
+                        widgets::ring_image(ring, v, item.w as f64, item.h as f64, track, accent, px)
+                    }) {
+                        ui.image(&key, ir, None, None, o);
+                    }
+                    if interactive {
+                        self.rack_drag(ui, ir, k, false, s, params);
+                        hits.push(PanelHit {
+                            rect: ir,
+                            circle: None,
+                            target: Target::Knob { el: i, param: k, horizontal: false },
+                        });
+                    }
+                }
+                ToolbarItemKind::Other => {}
+            }
+        }
+        ui.clip(None);
+    }
+
+    /// A toolbar icon or switch: its sprite's `frame`, else a vector glyph (`power`, `undo`,
+    /// `redo`, `gear`), else `glyph` as text, in `ink`.
+    #[allow(clippy::too_many_arguments)]
+    fn toolbar_art(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        n: usize,
+        item: &spec::ToolbarItem,
+        sprite: Option<&Arc<str>>,
+        frames: u32,
+        frame: u32,
+        ir: Rect,
+        ink: Rgba,
+        o: f32,
+        s: f32,
+    ) {
+        if let Some(key) = sprite {
+            let f = film_frame(ui, key, frames, frame);
+            ui.image(key, ir, None, f, o);
+            return;
+        }
+        let Some(glyph) = item.glyph.as_deref() else { return };
+        let px = (s * 2.0) as f64;
+        let fp = widgets::fingerprint(
+            &(glyph, n),
+            &[item.w as f64, item.h as f64, px, ink.r as f64, ink.g as f64, ink.b as f64],
+        );
+        let drawn = self.raster(ui, i, &format!("tb{n}"), fp, || {
+            widgets::glyph_image(glyph, item.w as f64, item.h as f64, ink, px)
+        });
+        match drawn {
+            Some(key) => ui.image(&key, ir, None, None, o),
+            None => {
+                let style = TextStyle {
+                    family: "Helvetica".into(),
+                    size: item.h * 0.55 * s,
+                    bold: true,
+                    italic: false,
+                    color: ink.with_alpha(ink.a * o),
+                };
+                ui.text(glyph, style, ir, Align::Center);
+            }
+        }
+    }
+
+    /// Static text from facts (font, size, colour per frame, alignment) over an optional box.
+    fn draw_label(&self, ui: &mut Ui, i: usize, r: Rect, o: f32, s: f32, params: &dyn ParamSource) {
+        let el = &self.spec.elements[i];
+        let frames = Self::palette_frames(el);
+        let f = self.widget_frame(el, frames, params) as usize;
+        if let Some(fill) = el.fills.as_ref().and_then(|v| v.get(f.min(v.len().saturating_sub(1)))) {
+            match fill {
+                spec::Fill::Color(c) => {
+                    if let Some(mut c) = parse_hex(Some(c)) {
+                        c.a *= o;
+                        ui.fill(r, c);
+                    }
+                }
+                spec::Fill::Gradient(_) => {
+                    let shape = spec::Shape {
+                        kind: spec::ShapeKind::Rect,
+                        radius: None,
+                        points: None,
+                        fill: Some(fill.clone()),
+                        stroke: None,
+                        width: None,
+                        dash: None,
+                        from: None,
+                        to: None,
+                        teeth: None,
+                        inner: None,
+                        inset: None,
+                    };
+                    let (w, h) = ((r.w / s) as f64, (r.h / s) as f64);
+                    let px = (s * 2.0) as f64;
+                    let fp = widgets::fingerprint(&(f, "label-fill"), &[w, h, px]);
+                    let input =
+                        widgets::ShapeInput { shape: &shape, fill: Some(fill), stroke: None, from: 0.0, to: 0.0 };
+                    if let Some(k) = self.raster(ui, i, "fill", fp, || widgets::shape_image(&input, w, h, 1.0, px)) {
+                        ui.image(&k, r, None, None, o);
+                    }
+                }
+            }
+        }
+        let text = self.readout_text(el, params);
+        let mut style = el.text.clone().unwrap_or_default();
+        if let Some(c) = el.colors.as_ref().and_then(|v| v.get(f.min(v.len().saturating_sub(1)))) {
+            style.color = Some(c.clone());
+        }
+        draw_text(ui, &text, Some(&style), r, o, s);
+    }
+
+    /// A vector primitive: fill and stroke per frame, arcs following GraphValues, rotation.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_shape(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        r: Rect,
+        o: f32,
+        rotation: Option<f64>,
+        s: f32,
+        params: &dyn ParamSource,
+    ) {
+        let el = &self.spec.elements[i];
+        let Some(shape) = &el.shape else { return };
+        let frames = Self::palette_frames(el);
+        let f = self.widget_frame(el, frames, params) as usize;
+        let ctx = self.ctx(params);
+        let fill = el.fills.as_ref().and_then(|v| v.get(f.min(v.len().saturating_sub(1)))).or(shape.fill.as_ref());
+        let stroke = el
+            .colors
+            .as_ref()
+            .and_then(|v| v.get(f.min(v.len().saturating_sub(1))))
+            .or(shape.stroke.as_ref())
+            .and_then(|c| parse_hex(Some(c)));
+        let from = shape.from.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(0.0);
+        let to = shape.to.as_ref().map(|v| v.resolve(&ctx)).unwrap_or(360.0);
+        let (w, h) = ((r.w / s) as f64, (r.h / s) as f64);
+        let px = (s * 2.0) as f64;
+        let fp = widgets::fingerprint(&(f, format!("{fill:?}{stroke:?}")), &[from, to, w, h, px]);
+        let input = widgets::ShapeInput { shape, fill, stroke, from, to };
+        let Some(key) = self.raster(ui, i, "shape", fp, || widgets::shape_image(&input, w, h, 1.0, px)) else { return };
+        match rotation {
+            Some(deg) => {
+                let key: Arc<str> = key.into();
+                self.draw_rotated(ui, i, &key, None, r, o, deg, s);
+            }
+            None => ui.image(&key, r, None, None, o),
+        }
+    }
+
+    /// An LED or lamp at the element's level (frame / (frames − 1)); the glow may leave the frame.
+    fn draw_lamp(&self, ui: &mut Ui, i: usize, r: Rect, o: f32, s: f32, params: &dyn ParamSource) {
+        let el = &self.spec.elements[i];
+        let Some(lamp) = &el.lamp else { return };
+        let frames = el.frames.unwrap_or(2).max(2);
+        let level = self.widget_frame(el, frames, params) as f64 / (frames - 1) as f64;
+        let (w, h) = ((r.w / s) as f64, (r.h / s) as f64);
+        let px = (s * 2.0) as f64;
+        let m = widgets::lamp_margin(lamp) as f32 * s;
+        let fp = widgets::fingerprint(&format!("{lamp:?}"), &[level, w, h, px]);
+        if let Some(key) = self.raster(ui, i, "lamp", fp, || widgets::lamp_image(lamp, level, w, h, px)) {
+            ui.image(&key, Rect::new(r.x - m, r.y - m, r.w + 2.0 * m, r.h + 2.0 * m), None, None, o);
+        }
+    }
+
     /// The menu element's step list under (or above) the element.
-    fn draw_menu_popup(&self, ui: &mut Ui, i: usize, place: &Placement, params: &dyn ParamSource, hits: &mut Vec<PanelHit>) {
+    fn draw_menu_popup(
+        &self,
+        ui: &mut Ui,
+        i: usize,
+        place: &Placement,
+        params: &dyn ParamSource,
+        hits: &mut Vec<PanelHit>,
+    ) {
         let Some(el) = self.spec.elements.get(i) else { return };
         let Some(k) = el.param else { return };
         let labels = self.step_labels(k, params);
@@ -934,9 +1525,31 @@ impl PluginPanel {
             let rr = Rect::new(x, y + 4.0 * s + n as f32 * row, w, row);
             if n == current {
                 ui.fill(rr, ACCENT.with_alpha(0.85));
-                ui.text("✓", TextStyle { family: "Helvetica".into(), size: size * s, bold: true, italic: false, color: Rgba::WHITE }, Rect::new(rr.x + 4.0 * s, rr.y, 14.0 * s, rr.h), Align::Left);
+                ui.text(
+                    "✓",
+                    TextStyle {
+                        family: "Helvetica".into(),
+                        size: size * s,
+                        bold: true,
+                        italic: false,
+                        color: Rgba::WHITE,
+                    },
+                    Rect::new(rr.x + 4.0 * s, rr.y, 14.0 * s, rr.h),
+                    Align::Left,
+                );
             }
-            ui.text(label, TextStyle { family: "Helvetica".into(), size: size * s, bold: false, italic: false, color: Rgba::WHITE }, Rect::new(rr.x + 20.0 * s, rr.y, rr.w - 24.0 * s, rr.h), Align::Left);
+            ui.text(
+                label,
+                TextStyle {
+                    family: "Helvetica".into(),
+                    size: size * s,
+                    bold: false,
+                    italic: false,
+                    color: Rgba::WHITE,
+                },
+                Rect::new(rr.x + 20.0 * s, rr.y, rr.w - 24.0 * s, rr.h),
+                Align::Left,
+            );
             ui.hit(rr, self.id(Control::PluginStep(k, n as u16)), HitKind::Tap);
             hits.push(PanelHit { rect: rr, circle: None, target: Target::MenuRow { el: i, param: k, step: n } });
         }
@@ -948,7 +1561,14 @@ impl PluginPanel {
     }
 
     /// The "more" panel: every unbound parameter with its readout and a slider or step row.
-    fn draw_more(&self, ui: &mut Ui, scroll: f32, place: &Placement, params: &dyn ParamSource, hits: &mut Vec<PanelHit>) {
+    fn draw_more(
+        &self,
+        ui: &mut Ui,
+        scroll: f32,
+        place: &Placement,
+        params: &dyn ParamSource,
+        hits: &mut Vec<PanelHit>,
+    ) {
         let s = place.scale;
         let panel = place.rect();
         self.backdrop(ui, panel, hits);
@@ -962,17 +1582,33 @@ impl PluginPanel {
         ui.hit(list, self.id(Control::PluginElement(MORE_LIST)), HitKind::Tap);
         hits.push(PanelHit { rect: list, circle: None, target: Target::MoreList });
         ui.clip(Some(list));
-        let text = |size: f32, bold: bool, color: Rgba| TextStyle { family: "Helvetica".into(), size: size * s, bold, italic: false, color };
+        let text = |size: f32, bold: bool, color: Rgba| TextStyle {
+            family: "Helvetica".into(),
+            size: size * s,
+            bold,
+            italic: false,
+            color,
+        };
         for (n, &k) in self.unbound.iter().enumerate() {
             let top = y + (14.0 + n as f32 * MORE_ROW - scroll) * s;
             let row = Rect::new(x + 14.0 * s, top, w - 28.0 * s, MORE_ROW * s);
             if row.max_y() < list.y || row.y > list.max_y() {
                 continue;
             }
-            let name = self.spec.parameter(k).map(|p| p.name.clone()).or_else(|| params.name(k)).unwrap_or_else(|| format!("Parameter {k}"));
+            let name = self
+                .spec
+                .parameter(k)
+                .map(|p| p.name.clone())
+                .or_else(|| params.name(k))
+                .unwrap_or_else(|| format!("Parameter {k}"));
             ui.text(&name, text(12.0, true, Rgba::WHITE), Rect::new(row.x, row.y, row.w * 0.6, 16.0 * s), Align::Left);
             let mono = TextStyle { family: "Menlo".into(), ..text(11.0, false, Rgba::WHITE.with_alpha(0.8)) };
-            ui.text(&self.display(k, params), mono, Rect::new(row.x + row.w * 0.4, row.y, row.w * 0.6, 16.0 * s), Align::Right);
+            ui.text(
+                &self.display(k, params),
+                mono,
+                Rect::new(row.x + row.w * 0.4, row.y, row.w * 0.6, 16.0 * s),
+                Align::Right,
+            );
             let control = Rect::new(row.x, row.y + 18.0 * s, row.w, 20.0 * s);
             let labels = self.step_labels(k, params);
             if labels.len() > 1 {
@@ -988,12 +1624,24 @@ impl PluginPanel {
                 }
             } else {
                 let v = self.value(k, params) as f32;
-                let track = Rect::new(control.x + 8.0 * s, control.y + control.h / 2.0 - 1.5 * s, control.w - 16.0 * s, 3.0 * s);
+                let track = Rect::new(
+                    control.x + 8.0 * s,
+                    control.y + control.h / 2.0 - 1.5 * s,
+                    control.w - 16.0 * s,
+                    3.0 * s,
+                );
                 ui.fill(track, POPUP_LINE);
                 ui.fill(Rect::new(track.x, track.y, track.w * v, track.h), ACCENT);
-                ui.fill(Rect::new(track.x + track.w * v - 6.0 * s, control.y + 2.0 * s, 12.0 * s, control.h - 4.0 * s), Rgba::WHITE);
+                ui.fill(
+                    Rect::new(track.x + track.w * v - 6.0 * s, control.y + 2.0 * s, 12.0 * s, control.h - 4.0 * s),
+                    Rgba::WHITE,
+                );
                 let reset = self.spec.parameter(k).and_then(|p| p.default_value);
-                ui.hit(control, self.id(Control::PluginParam(k)), HitKind::Drag { value: v as f64, span: track.w.max(1.0), reset });
+                ui.hit(
+                    control,
+                    self.id(Control::PluginParam(k)),
+                    HitKind::Drag { value: v as f64, span: track.w.max(1.0), reset },
+                );
                 hits.push(PanelHit { rect: control, circle: None, target: Target::MoreSlider { param: k, track } });
             }
         }
@@ -1017,14 +1665,22 @@ impl PluginPanel {
                 let h = r.h / n as f32;
                 for seg in 0..n {
                     let step = if el.reverse == Some(true) { seg } else { n - 1 - seg };
-                    ui.hit(Rect::new(r.x, r.y + seg as f32 * h, r.w, h), self.id(Control::PluginStep(k, step as u16)), HitKind::Tap);
+                    ui.hit(
+                        Rect::new(r.x, r.y + seg as f32 * h, r.w, h),
+                        self.id(Control::PluginStep(k, step as u16)),
+                        HitKind::Tap,
+                    );
                 }
                 return;
             }
             if (el.is_horizontal() || el.segments.as_deref() == Some("horizontal")) && r.w > 0.0 {
                 let w = r.w / n as f32;
                 for seg in 0..n {
-                    ui.hit(Rect::new(r.x + seg as f32 * w, r.y, w, r.h), self.id(Control::PluginStep(k, seg as u16)), HitKind::Tap);
+                    ui.hit(
+                        Rect::new(r.x + seg as f32 * w, r.y, w, r.h),
+                        self.id(Control::PluginStep(k, seg as u16)),
+                        HitKind::Tap,
+                    );
                 }
                 return;
             }
@@ -1043,13 +1699,20 @@ impl PluginPanel {
         self.touch_generation.insert(t.state.clone(), generation);
         if let Some(timeout) = t.timeout.filter(|&x| x > 0.0) {
             self.timers.retain(|x| x.state != t.state);
-            self.timers.push(TouchTimer { state: t.state.clone(), generation, due: self.clock + timeout, fallback: t.fallback, hold: t.hold.clone() });
+            self.timers.push(TouchTimer {
+                state: t.state.clone(),
+                generation,
+                due: self.clock + timeout,
+                fallback: t.fallback,
+                hold: t.hold.clone(),
+            });
         }
     }
 
     fn fire_timers(&mut self) -> bool {
         let now = self.clock;
-        let (due, pending): (Vec<TouchTimer>, Vec<TouchTimer>) = std::mem::take(&mut self.timers).into_iter().partition(|t| t.due <= now);
+        let (due, pending): (Vec<TouchTimer>, Vec<TouchTimer>) =
+            std::mem::take(&mut self.timers).into_iter().partition(|t| t.due <= now);
         self.timers = pending;
         let mut changed = false;
         for t in due {
@@ -1059,7 +1722,8 @@ impl PluginPanel {
             if t.hold.as_ref().is_some_and(|h| self.ui_state.get(h).copied().unwrap_or(0.0) > 0.5) {
                 continue;
             }
-            let v = t.fallback.or_else(|| self.spec.states.as_ref().and_then(|s| s.get(&t.state).copied())).unwrap_or(0.0);
+            let v =
+                t.fallback.or_else(|| self.spec.states.as_ref().and_then(|s| s.get(&t.state).copied())).unwrap_or(0.0);
             self.ui_state.insert(t.state, v);
             changed = true;
         }
@@ -1133,7 +1797,13 @@ impl PluginPanel {
             }
             ActionKind::Toggle => {
                 let n = self.steps(param, params);
-                let v = if n > 2 { step_value((step_index(current, n) + 1) % n, n) } else if current > 0.5 { 0.0 } else { 1.0 };
+                let v = if n > 2 {
+                    step_value((step_index(current, n) + 1) % n, n)
+                } else if current > 0.5 {
+                    0.0
+                } else {
+                    1.0
+                };
                 self.write(param, v, false, params, tx);
             }
             ActionKind::Default => {
@@ -1158,9 +1828,13 @@ impl PluginPanel {
                 let picked = match &action.keys {
                     Some(keys) => {
                         let key: Vec<f64> = keys.iter().map(|&k| self.value(k, params)).collect();
-                        nearest_by(rows.iter().filter(|r| r.key.is_some()), |r| spec::key_distance(r.key.as_deref().unwrap_or(&[]), &key))
+                        nearest_by(rows.iter().filter(|r| r.key.is_some()), |r| {
+                            spec::key_distance(r.key.as_deref().unwrap_or(&[]), &key)
+                        })
                     }
-                    None => nearest_by(rows.iter().filter(|r| r.current.is_some()), |r| (r.current.unwrap_or(0.0) - current).abs()),
+                    None => nearest_by(rows.iter().filter(|r| r.current.is_some()), |r| {
+                        (r.current.unwrap_or(0.0) - current).abs()
+                    }),
                 };
                 if let Some(row) = picked {
                     self.write(param, row.value, false, params, tx);
@@ -1173,7 +1847,8 @@ impl PluginPanel {
     /// `snapshot`: `store` current → slot, `recall` slot → params, `switch` (store under
     /// slots[state], recall slots[value], set the state; an empty slot keeps the current values).
     fn snapshot(&mut self, action: &spec::Action, params: &mut dyn ParamSource, tx: &mut Tx) {
-        let list: Vec<u16> = action.params.clone().unwrap_or_else(|| self.spec.parameters.iter().map(|p| p.index).collect());
+        let list: Vec<u16> =
+            action.params.clone().unwrap_or_else(|| self.spec.parameters.iter().map(|p| p.index).collect());
         let store = |panel: &mut Self, slot: &str, params: &dyn ParamSource| {
             let set = list.iter().map(|&p| (p, panel.value(p, params))).collect();
             panel.snapshots.insert(slot.to_string(), set);
@@ -1195,7 +1870,10 @@ impl PluginPanel {
                 }
             }
             Some("switch") => {
-                let (Some(state), Some(slots)) = (&action.state, action.slots.as_ref().filter(|s| !s.is_empty())) else { return };
+                let (Some(state), Some(slots)) = (&action.state, action.slots.as_ref().filter(|s| !s.is_empty()))
+                else {
+                    return;
+                };
                 let current = self.ui_state.get(state).copied().unwrap_or(0.0).round() as i64;
                 let target = action.value.unwrap_or(0.0).round() as i64;
                 if target == current || target < 0 || target as usize >= slots.len() {
@@ -1285,7 +1963,11 @@ impl PluginPanel {
     pub fn tap(&mut self, i: usize, params: &mut dyn ParamSource) {
         match i as u16 {
             MORE_BUTTON => {
-                self.popup = if matches!(self.popup, Some(Popup::More { .. })) { None } else { Some(Popup::More { scroll: 0.0 }) };
+                self.popup = if matches!(self.popup, Some(Popup::More { .. })) {
+                    None
+                } else {
+                    Some(Popup::More { scroll: 0.0 })
+                };
                 return;
             }
             POPUP_BACKDROP => {
@@ -1350,7 +2032,12 @@ impl PluginPanel {
         }
         match (action, &id.control) {
             (Action::GestureBegin(_), Control::PluginParam(k)) => {
-                let touch = self.spec.elements.iter().find(|e| e.param == Some(*k) && e.touch_state.is_some()).and_then(|e| e.touch_state.clone());
+                let touch = self
+                    .spec
+                    .elements
+                    .iter()
+                    .find(|e| e.param == Some(*k) && e.touch_state.is_some())
+                    .and_then(|e| e.touch_state.clone());
                 self.touch(touch.as_ref());
                 params.begin_gesture();
             }
@@ -1363,7 +2050,8 @@ impl PluginPanel {
                     self.touch(touch.as_ref());
                     self.popup = None;
                 }
-                let n = self.steps(*k, params);
+                // A two-state toolbar switch on a parameter without step labels still has 2 steps.
+                let n = self.steps(*k, params).max(2);
                 self.commit(*k, step_value(*step as usize, n), params);
             }
             _ => return false,
@@ -1416,7 +2104,18 @@ impl PluginPanel {
         }
         let hit = self.hits.lock().iter().rev().find(|h| h.contains(x, y)).cloned();
         let Some(hit) = hit else { return self.contains(x, y) };
-        let mut g = Gesture { target: hit.target.clone(), rect: hit.rect, start: (x, y), last: (x, y), start_value: 0.0, start_time: now, moved: false, long_fired: false, next_repeat: None, began: false };
+        let mut g = Gesture {
+            target: hit.target.clone(),
+            rect: hit.rect,
+            start: (x, y),
+            last: (x, y),
+            start_value: 0.0,
+            start_time: now,
+            moved: false,
+            long_fired: false,
+            next_repeat: None,
+            began: false,
+        };
         match &hit.target {
             Target::Knob { el, param, .. } | Target::DragZone { el, param } => {
                 let el = self.spec.elements[*el].clone();
@@ -1495,7 +2194,8 @@ impl PluginPanel {
                 self.drag_write(*param, v, params);
             }
             Target::MoreList => {
-                let max = (MORE_ROW * self.unbound.len() as f32 + 28.0 - 420.0f32.min(self.size().1 - 12.0 - MORE_D)).max(0.0);
+                let max = (MORE_ROW * self.unbound.len() as f32 + 28.0 - 420.0f32.min(self.size().1 - 12.0 - MORE_D))
+                    .max(0.0);
                 if let Some(Popup::More { scroll }) = &mut self.popup {
                     *scroll = (g.start_value as f32 - dy / s).clamp(0.0, max);
                 }
@@ -1609,13 +2309,22 @@ impl PluginPanel {
             }
             Target::MoreButton => {
                 if !g.moved {
-                    self.popup = if matches!(self.popup, Some(Popup::More { .. })) { None } else { Some(Popup::More { scroll: 0.0 }) };
+                    self.popup = if matches!(self.popup, Some(Popup::More { .. })) {
+                        None
+                    } else {
+                        Some(Popup::More { scroll: 0.0 })
+                    };
                 }
             }
             Target::MoreStep { param, step } => {
                 if !g.moved {
                     let n = self.steps(param, params);
                     self.commit(param, step_value(step, n), params);
+                }
+            }
+            Target::ToolbarSet { param, value, .. } => {
+                if !g.moved {
+                    self.commit(param, value, params);
                 }
             }
             Target::Dismiss => {
@@ -1672,7 +2381,8 @@ impl PluginPanel {
         if let Some(g) = self.gesture.clone() {
             if let (false, false, Some(el)) = (g.long_fired, g.moved, g.target.element()) {
                 let e = self.spec.elements[el].clone();
-                let held_style = matches!(g.target, Target::Zone { .. }) || (matches!(g.target, Target::Switch { .. }) && e.pressed_frame_offset.is_none());
+                let held_style = matches!(g.target, Target::Zone { .. })
+                    || (matches!(g.target, Target::Switch { .. }) && e.pressed_frame_offset.is_none());
                 if held_style && self.clock - g.start_time >= LONG_PRESS {
                     if let Some(lp) = e.long_press_action.clone() {
                         self.touch(e.touch_state.as_ref());
@@ -1717,7 +2427,9 @@ impl PluginPanel {
         let ctx = self.ctx(params);
         self.spec.elements.iter().any(|e| {
             e.blink.is_some()
-                || e.frame_source.as_ref().is_some_and(|f| f.kind == FrameSourceKind::Blink && f.param.is_some_and(|p| self.value(p, params) > 0.5))
+                || e.frame_source.as_ref().is_some_and(|f| {
+                    f.kind == FrameSourceKind::Blink && f.param.is_some_and(|p| self.value(p, params) > 0.5)
+                })
                 || e.spin.as_ref().is_some_and(|sp| GraphValue::is_on(sp.while_on.as_ref(), &ctx))
         })
     }
@@ -1726,7 +2438,10 @@ impl PluginPanel {
     /// descriptor): `floats=` for the plain variables, one `opcode=` range for the tagged ones and
     /// the analyser bins. Answer each with [`ingest_reply`](Self::ingest_reply).
     pub fn meter_queries(&self) -> Vec<String> {
-        [MeterFeed::floats_query(&self.spec, &self.target), MeterFeed::opcode_query(&self.spec, &self.target)].into_iter().flatten().collect()
+        [MeterFeed::floats_query(&self.spec, &self.target), MeterFeed::opcode_query(&self.spec, &self.target)]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// A reply to one of [`meter_queries`](Self::meter_queries): `floats=` replies carry a string
@@ -1766,7 +2481,13 @@ impl PluginPanel {
     }
 
     fn mode_values(&self, params: &dyn ParamSource) -> HashMap<u16, f64> {
-        self.spec.meter_sources.iter().flatten().filter_map(|(_, m)| m.mode_param).map(|k| (k, self.value(k, params))).collect()
+        self.spec
+            .meter_sources
+            .iter()
+            .flatten()
+            .filter_map(|(_, m)| m.mode_param)
+            .map(|k| (k, self.value(k, params)))
+            .collect()
     }
 
     /// Is a pop-up (menu list or "more" panel) open?
@@ -1855,7 +2576,7 @@ fn draw_text(ui: &mut Ui, text: &str, t: Option<&spec::TextStyle>, r: Rect, opac
     // rack has bold or regular, and medium draws regular.
     let bold = t.and_then(|t| t.weight.as_deref()) == Some("bold");
     let mono = t.and_then(|t| t.monospaced) == Some(true);
-    let family = if mono { "Menlo" } else { "Helvetica" };
+    let family = t.and_then(|t| t.font.as_deref()).unwrap_or(if mono { "Menlo" } else { "Helvetica" });
     let align = match t.and_then(|t| t.align.as_deref()) {
         Some("left") => Align::Left,
         Some("right") => Align::Right,

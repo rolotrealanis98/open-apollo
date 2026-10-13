@@ -19,9 +19,12 @@ use std::sync::Arc;
 
 use engine_model::EngineMixer;
 use houston::{ImageCache, Rect};
-use plugin_ui::{Content, EngineSlot, LunaLibrary, MeterPoller, MockParams, ParamSnapshot, ParamSource, PluginScales, PluginSpecLibrary, PluginWindow, WindowEvent};
-use rack::presets::{PresetCmd, PresetScope};
+use plugin_ui::{
+    Content, EngineSlot, LunaLibrary, MeterPoller, MockParams, ParamSnapshot, ParamSource, PluginScales,
+    PluginSpecLibrary, PluginWindow, WindowEvent,
+};
 use rack::model::{InsertState, StripInfo};
+use rack::presets::{PresetCmd, PresetScope};
 use rack::{Action, Control, ControlId, Hit, Interaction, MixerModel, PluginWindowButton as B, Ui};
 use ua_engine::InsertPaths;
 
@@ -60,7 +63,12 @@ impl PluginUiHook {
             }
             None => log_line("plug-in specs: none found (generic parameter lists only)"),
         }
-        Self { specs, luna: Arc::new(LunaLibrary::locate()), prefer_web: cfg!(feature = "webview"), scales: Rc::new(RefCell::new(PluginScales::load())) }
+        Self {
+            specs,
+            luna: Arc::new(LunaLibrary::locate()),
+            prefer_web: cfg!(feature = "webview"),
+            scales: Rc::new(RefCell::new(PluginScales::load())),
+        }
     }
 }
 
@@ -94,24 +102,54 @@ fn resolve_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
 impl PluginHook for PluginUiHook {
     fn on_open_plugin(&mut self, strip_id: &str, slot: u8, model: &dyn MixerModel) -> Option<Box<dyn Panel>> {
         let strip = resolve_strip(model, strip_id)?;
-        let state = if slot == UNISON_SLOT { model.unison(&strip) } else { model.inserts(&strip).get(slot as usize).cloned()? };
+        let state = if slot == UNISON_SLOT {
+            model.unison(&strip)
+        } else {
+            model.inserts(&strip).get(slot as usize).cloned()?
+        };
         // An empty slot opens Console's plug-in browser, not a window.
         let InsertState::Loaded { name, power } = state else { return None };
         let channel = model.main(&strip).name;
         let channel = if channel.is_empty() { strip.title.clone() } else { channel };
         let which = if slot == UNISON_SLOT { "Unison".to_string() } else { format!("Insert {}", slot as u32 + 1) };
-        let paths = engine(model).and_then(|e| e.insert_slot(&ControlId { strip: strip.id.clone(), control: Control::Insert(slot) }));
-        let slot_path = paths.as_ref().map(|p| p.base.clone()).unwrap_or_else(|| format!("{}/effects/{slot}", strip.id));
-        let mut window = PluginWindow::open(slot_path, &name, &format!("{channel}, {which}"), self.specs.as_deref(), Some(&self.luna), self.prefer_web);
+        let paths = engine(model)
+            .and_then(|e| e.insert_slot(&ControlId { strip: strip.id.clone(), control: Control::Insert(slot) }));
+        let slot_path =
+            paths.as_ref().map(|p| p.base.clone()).unwrap_or_else(|| format!("{}/effects/{slot}", strip.id));
+        let mut window = PluginWindow::open(
+            slot_path,
+            &name,
+            &format!("{channel}, {which}"),
+            self.specs.as_deref(),
+            Some(&self.luna),
+            self.prefer_web,
+        );
         window.chrome.power = power;
         // Spec panels with mono/stereo variants (state `channels`, `monoSize`).
         window.set_channel_layout(strip.stereo);
         window.scale = self.scales.borrow().get(&name);
         window.version = self.luna.component_for_effect(&name).and_then(|c| c.version.clone());
         window.insert_menu = Some(rack::menu::plugin_insert_menu(model, &strip.id, slot));
+        match &window.availability {
+            Some(plugin_ui::Availability::Pending(ids)) => log_line(&format!(
+                "{name}: panel art not generated yet ({} ids, e.g. {}); run `oa-assets build` and reopen",
+                ids.len(),
+                ids[0]
+            )),
+            Some(plugin_ui::Availability::Unavailable(ids)) => log_line(&format!(
+                "{name}: no panel from this install ({} ids without a recipe, e.g. {}); showing the parameter list",
+                ids.len(),
+                ids[0]
+            )),
+            _ => {}
+        }
         if !self.prefer_web {
             if let Some(gui) = self.luna.component_for_effect(&name) {
-                log_line(&format!("{name}: UA's web GUI ({}) is available; showing the {} panel", gui.id, window.content.kind()));
+                log_line(&format!(
+                    "{name}: UA's web GUI ({}) is available; showing the {} panel",
+                    gui.id,
+                    window.content.kind()
+                ));
             }
         }
         let offline = match (&paths, &window.content) {
@@ -251,7 +289,11 @@ impl WindowPanel {
 
     /// Runs `f` on the window with the slot's live parameters (engine, offline values, or the
     /// last snapshot).
-    fn with_params<R>(&mut self, model: &mut dyn MixerModel, f: impl FnOnce(&mut PluginWindow, &mut dyn ParamSource) -> R) -> R {
+    fn with_params<R>(
+        &mut self,
+        model: &mut dyn MixerModel,
+        f: impl FnOnce(&mut PluginWindow, &mut dyn ParamSource) -> R,
+    ) -> R {
         if let (Some(slot), Some(e)) = (&self.engine, engine_mut(model)) {
             let mut params = slot.view_mut(e.store_mut());
             return f(&mut self.window, &mut params);
@@ -302,11 +344,13 @@ impl WindowPanel {
             // Help & Video › Documentation.
             B::Help => open_url(PLUGIN_DOCS_URL),
             // `Rack_PlugInFooter::DoStateClicked` → StartDemo; BUY opens UA's store.
-            B::FooterState | B::FooterAction => match (self.window.chrome.action.as_deref(), &self.plugin_path, engine_mut(model)) {
-                (Some("START DEMO"), Some(path), Some(e)) => e.start_plugin_demo(path),
-                (Some("BUY"), ..) => open_url("https://www.uaudio.com/"),
-                _ => {}
-            },
+            B::FooterState | B::FooterAction => {
+                match (self.window.chrome.action.as_deref(), &self.plugin_path, engine_mut(model)) {
+                    (Some("START DEMO"), Some(path), Some(e)) => e.start_plugin_demo(path),
+                    (Some("BUY"), ..) => open_url("https://www.uaudio.com/"),
+                    _ => {}
+                }
+            }
             other => log_line(&format!("plug-in window: {other:?} is not implemented yet")),
         }
     }
@@ -317,7 +361,10 @@ impl WindowPanel {
 
     /// Loads `[folder/]name` into the slot (`set <effect>/Preset/value`, one undo step).
     fn load_preset(&mut self, value: &str, model: &mut dyn MixerModel) {
-        model.set_text(&ControlId { strip: self.strip.clone(), control: Control::Preset(PresetScope::Insert(self.slot)) }, value);
+        model.set_text(
+            &ControlId { strip: self.strip.clone(), control: Control::Preset(PresetScope::Insert(self.slot)) },
+            value,
+        );
         self.window.chrome.preset = value.to_string();
     }
 
@@ -403,7 +450,11 @@ impl Panel for WindowPanel {
             PointerEvent::Wheel { .. } => return PanelResponse::Ignored,
         };
         if actions.is_empty() {
-            return if matches!(ev, PointerEvent::Down { .. }) { PanelResponse::Handled } else { PanelResponse::Ignored };
+            return if matches!(ev, PointerEvent::Down { .. }) {
+                PanelResponse::Handled
+            } else {
+                PanelResponse::Ignored
+            };
         }
         let mut close = false;
         for a in &actions {
@@ -495,12 +546,21 @@ mod web {
     }
 
     impl WebHost {
-        pub fn open(component: &LunaComponent, window: &PluginWindow, params: &dyn ParamSource, specs: Option<&PluginSpecLibrary>) -> Result<Self, String> {
+        pub fn open(
+            component: &LunaComponent,
+            window: &PluginWindow,
+            params: &dyn ParamSource,
+            specs: Option<&PluginSpecLibrary>,
+        ) -> Result<Self, String> {
             gtk_ready()?;
             let server = BridgeServer::bind(0).map_err(|e| e.to_string())?;
             let bundle = std::fs::read_to_string(component.html_dir.join("bundle.js")).unwrap_or_default();
             let spec = specs.and_then(|l| l.spec_for_effect(&window.effect_name));
-            let meters = spec.as_ref().and_then(|s| s.meter_sources.as_ref()).map(|m| m.keys().cloned().collect()).unwrap_or_default();
+            let meters = spec
+                .as_ref()
+                .and_then(|s| s.meter_sources.as_ref())
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default();
             let map = ControlMap::build(&scrape_control_ids(&bundle), params, &BTreeMap::new(), meters);
             // Console 1.3.1's keys (host, port, path, plugin_id); the bridge answers that path.
             let query = GuiQuery::console("127.0.0.1", server.port(), &window.slot, &component.id);
@@ -558,14 +618,16 @@ mod tests {
     }
 
     fn fixture() -> EngineMixer {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
         EngineMixer::from_snapshot(path).expect("fixture")
     }
 
     /// The fixture with presets on in0's insert 2 (the Vitalizer): a factory file and a user
     /// folder.
     fn with_presets() -> EngineMixer {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../ua-engine/tests/fixtures/apollo-x4-12.0.0.snapshot.json");
         let mut snap = ua_engine::Snapshot::load(path).expect("fixture");
         snap.tree.set_property(
             "/devices/0/inputs/0/effects/1/Preset",
@@ -585,7 +647,13 @@ mod tests {
         let mut ui = Ui::new(assets);
         panel.build(&mut ui, Rect::new(0.0, 0.0, w, h));
         panel.build_popups(&mut ui, Rect::new(0.0, 0.0, w, h));
-        let r = ui.hits.iter().rev().find(|h| h.id.control == Control::PluginWindow(b)).unwrap_or_else(|| panic!("no {b:?} hit")).rect;
+        let r = ui
+            .hits
+            .iter()
+            .rev()
+            .find(|h| h.id.control == Control::PluginWindow(b))
+            .unwrap_or_else(|| panic!("no {b:?} hit"))
+            .rect;
         let (x, y) = r.center();
         panel.pointer(PointerEvent::Down { x, y, double: false }, model);
         panel.pointer(PointerEvent::Up { x, y }, model);
@@ -599,7 +667,9 @@ mod tests {
         let mut model = with_presets();
         let mut panel = hook.on_open_plugin("in0", 1, &model).unwrap();
         panel.sync(&mut model);
-        let preset = |m: &EngineMixer| m.store().value("/devices/0/inputs/0/effects/1/Preset").and_then(|v| v.as_str().map(str::to_owned));
+        let preset = |m: &EngineMixer| {
+            m.store().value("/devices/0/inputs/0/effects/1/Preset").and_then(|v| v.as_str().map(str::to_owned))
+        };
         // › steps from no preset to the first, then on (`set <effect>/Preset/value`, local while
         // read-only).
         press(&mut panel, &assets, &mut model, B::PresetNext);
@@ -616,7 +686,10 @@ mod tests {
         press(&mut panel, &assets, &mut model, B::Presets);
         press(&mut panel, &assets, &mut model, B::PresetBrowser);
         let forwarded = panel.take_mixer_actions();
-        assert!(matches!(&forwarded[..], [Action::Tap(id)] if id.control == Control::Menu(rack::menu::MenuCmd::Presets(PresetScope::Insert(1)))), "{forwarded:?}");
+        assert!(
+            matches!(&forwarded[..], [Action::Tap(id)] if id.control == Control::Menu(rack::menu::MenuCmd::Presets(PresetScope::Insert(1)))),
+            "{forwarded:?}"
+        );
         assert_eq!(model.store().writer().sent_count(), 0, "read-only by default");
     }
 
@@ -666,7 +739,8 @@ mod tests {
         let (w, h) = panel.size();
         let mut ui = Ui::new(&assets);
         panel.build(&mut ui, Rect::new(0.0, 0.0, w, h));
-        let power = ui.hits.iter().find(|h| h.id.control == Control::PluginWindow(B::Power)).expect("power button").rect;
+        let power =
+            ui.hits.iter().find(|h| h.id.control == Control::PluginWindow(B::Power)).expect("power button").rect;
         let (x, y) = power.center();
         assert_eq!(panel.pointer(PointerEvent::Down { x, y, double: false }, &mut model), PanelResponse::Handled);
     }
@@ -682,15 +756,25 @@ mod tests {
         let mut ui = Ui::new(&assets);
         panel.build(&mut ui, Rect::new(100.0, 50.0, w, h));
         // The title and the engine-backed parameter list (spec panel or generic list).
-        let texts: Vec<String> = ui.list.items.iter().filter_map(|d| if let rack::Draw::Text { text, .. } = d { Some(text.clone()) } else { None }).collect();
+        let texts: Vec<String> = ui
+            .list
+            .items
+            .iter()
+            .filter_map(|d| if let rack::Draw::Text { text, .. } = d { Some(text.clone()) } else { None })
+            .collect();
         assert!(texts.iter().any(|t| t.ends_with(", Insert 2")), "{texts:?}");
         // Drag the first parameter drag target up by 100 pt: one gesture, local only (gate closed).
-        let drag = ui.hits.iter().find(|h| matches!(h.id.control, Control::PluginParam(_))).cloned().expect("a parameter hit");
+        let drag =
+            ui.hits.iter().find(|h| matches!(h.id.control, Control::PluginParam(_))).cloned().expect("a parameter hit");
         let Control::PluginParam(k) = drag.id.control else { unreachable!() };
         let path = format!("{}/parameters/{k}/NormalizedValue", drag.id.strip);
         let before = model.store().value(&path).and_then(|v| v.as_f64()).unwrap();
         let (cx, cy) = drag.rect.center();
-        for ev in [PointerEvent::Down { x: cx - 100.0, y: cy - 50.0, double: false }, PointerEvent::Move { x: cx - 100.0, y: cy - 150.0, fine: false }, PointerEvent::Up { x: cx - 100.0, y: cy - 150.0 }] {
+        for ev in [
+            PointerEvent::Down { x: cx - 100.0, y: cy - 50.0, double: false },
+            PointerEvent::Move { x: cx - 100.0, y: cy - 150.0, fine: false },
+            PointerEvent::Up { x: cx - 100.0, y: cy - 150.0 },
+        ] {
             assert_ne!(panel.pointer(ev, &mut model), PanelResponse::Ignored);
         }
         let after = model.store().value(&path).and_then(|v| v.as_f64()).unwrap();
@@ -700,7 +784,10 @@ mod tests {
         let close = ui.hits.iter().find(|h| h.id.control == Control::PluginWindow(B::Close)).unwrap().rect;
         let (x, y) = close.center();
         assert!(model.store().retained_subscriptions().count() > 0);
-        assert_eq!(panel.pointer(PointerEvent::Down { x: x - 100.0, y: y - 50.0, double: false }, &mut model), PanelResponse::Close);
+        assert_eq!(
+            panel.pointer(PointerEvent::Down { x: x - 100.0, y: y - 50.0, double: false }, &mut model),
+            PanelResponse::Close
+        );
         assert_eq!(model.store().retained_subscriptions().count(), 0);
     }
 }

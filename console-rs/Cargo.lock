@@ -2550,6 +2550,7 @@ dependencies = [
  "rack",
  "serde",
  "serde_json",
+ "sha2",
  "tiny-skia 0.12.0",
  "tungstenite",
  "ua-engine",

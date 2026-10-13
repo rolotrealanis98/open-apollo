@@ -1,5 +1,5 @@
 //! Spec parsing, hit mapping and parameter round trips. Inline specs always run; the fetched
-//! ConsoleLink specs are used when a spec folder is found (`$UACONSOLE_PLUGIN_SPECS`, …).
+//! ConsoleLink specs are used when a spec folder is found (`$OA_PLUGIN_SPECS`, …).
 
 use std::sync::Arc;
 
@@ -351,7 +351,7 @@ fn slot_paths() {
 fn library() -> Option<PluginSpecLibrary> {
     let lib = PluginSpecLibrary::locate();
     if lib.is_none() {
-        eprintln!("skipped: no plug-in spec folder (set UACONSOLE_PLUGIN_SPECS)");
+        eprintln!("skipped: no plug-in spec folder (set OA_PLUGIN_SPECS)");
     }
     lib
 }

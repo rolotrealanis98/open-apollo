@@ -6,7 +6,7 @@
 //! runtime does not read. Only keys that are not part of the contract may be dropped:
 //! informational metadata the Swift runtime ignores too.
 //!
-//! Skipped (with a note) when no spec folder is found (`$UACONSOLE_PLUGIN_SPECS`, …).
+//! Skipped (with a note) when no spec folder is found (`$OA_PLUGIN_SPECS`, …).
 
 use std::collections::BTreeMap;
 
@@ -76,7 +76,7 @@ fn inline_round_trip_reports_unknown_keys() {
 #[test]
 fn every_contract_key_in_the_catalog_is_decoded() {
     let Some(lib) = PluginSpecLibrary::locate() else {
-        eprintln!("skipped: no plug-in spec folder (set UACONSOLE_PLUGIN_SPECS)");
+        eprintln!("skipped: no plug-in spec folder (set OA_PLUGIN_SPECS)");
         return;
     };
     let mut dropped: BTreeMap<String, (usize, String)> = BTreeMap::new();
