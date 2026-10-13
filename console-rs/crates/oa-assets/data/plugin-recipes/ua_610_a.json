@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"ua_610_a","tier":1,"inputs":{"dll:UAD UA 610-A.dll":{"kind":"dll","file":"UAD UA 610-A.dll","root":"powered-plugins","sha256":["15191d13e35c281e378473abea6865d1db477e4de04c0e8f9315f417e220a7c4"]}},"uses":["UA_610-A_HF","UA_610-A_LEVEL","UA_610-A_LF","UA_610-A_knob_OUTPUT","UA_610-A_panel","UA_610-A_switch-2pos","UA_610-A_switch_INPUT"],"blobs":{
+"b0":{"in":"dll:UAD UA 610-A.dll","res":"10/7413/1033","sha":"fc3ec6435d2dfd2ad66c7277997ae05d8d0c3423cb9560d41a3fa0471c345e22","dec":"png"},
+"b1":{"in":"dll:UAD UA 610-A.dll","res":"10/7415/1033","sha":"db3a9e3494d7d8e968ddad712be9d13d6612847a600d7724140f2b69c9ddf258","dec":"png"},
+"b2":{"in":"dll:UAD UA 610-A.dll","res":"10/7412/1033","sha":"042f6829a4378a31ef188fa1eaf29b25ddfc24e875846f1f33a7f96dc74a1941","dec":"png"},
+"b3":{"in":"dll:UAD UA 610-A.dll","res":"10/7416/1033","sha":"6a198334730d714d45f92b90f18f45260bf559aad17ae0a99c09f7da459cbb63","dec":"png"},
+"b4":{"in":"dll:UAD UA 610-A.dll","res":"10/7410/1033","sha":"2fdcafc3b0df5bd24a0241b1919f6342487888368994662ddc2750dca34a071f","dec":"png"},
+"b5":{"in":"dll:UAD UA 610-A.dll","res":"10/7414/1033","sha":"1b23f4f66eb6bab86f272bfeab9dac11fad1f043e1720cdbd1d550d89f681fae","dec":"png"},
+"b6":{"in":"dll:UAD UA 610-A.dll","res":"10/7417/1033","sha":"7a66519369d43131d22955164e6557bc0d77b8b022efc4ba0d5c53c8329ac20d","dec":"png"}
+},"sprites":{
+"UA_610-A_HF":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":120,"h":480,"rgba":"953d05acd72be3c8d3d43725816a47384fad99ba3a190a7a8441358a889ad80a"}},
+"UA_610-A_LEVEL":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":300,"h":31500,"rgba":"9f51be0f16a42b12ca47e6498e1f4a83e6ebc25e8be2d3815f791fa9b5f285c0"}},
+"UA_610-A_LF":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":120,"h":360,"rgba":"d515396122b68a049f713c17b3ea8518d7543474bb381eef0cdd12b28f598b6b"}},
+"UA_610-A_knob_OUTPUT":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":120,"h":21720,"rgba":"a5414cbabb97e9104007b60291a89c8cdb0a6bc6dd56679a13cc691fb261f4ef"}},
+"UA_610-A_panel":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":568,"h":1400,"rgba":"e2bcf4e92fce845a7d31148592961e0e7d3c7121db10f2c81a329c65b14e87d7"}},
+"UA_610-A_switch-2pos":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":64,"h":264,"rgba":"be31b3d9c7b6afa52c6b13db890bea3cbb9aef4ac05e2d5a34fb15cdffe509a1"}},
+"UA_610-A_switch_INPUT":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":232,"h":336,"rgba":"047cc99335ade70b4fcd7889664de36e0bf79f1d712189fe06487116c2a08e46"}}
+}}

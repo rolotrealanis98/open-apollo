@@ -1,0 +1,33 @@
+{"recipesSchema":2,"group":"ampeg_b15n","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]}},"uses":["J_ampeg_b15n_background_tb","J_ampeg_b15n_tb_bank","J_ampeg_b15n_tb_power","J_ampeg_b15n_tb_rack","ampeg_b15n__BUTTON","ampeg_b15n__LEDRED","ampeg_b15n__LOGOBLUE","ampeg_b15n__LOGOGREEN","ampeg_b15n__LOGOPURPLE","ampeg_b15n__POTI","ampeg_b15n__POTIVU","ampeg_b15n__POWERSWITCH","ampeg_b15n__RACK","ampeg_b15n__SWITCH","ampeg_b15n__SWITCH3POS","ampeg_b15n__SWITCHH"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/SPLASH.PNG/1033","sha":"91ee2ff09baaa22caf5160361b978dd64d94eebb767ed079316186092dcfd624","dec":"png"},
+"b1":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b2":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/BUTTON.PNG/1033","sha":"db127d0fc70bdceab0a567e9ced7b51a2bd7a2cbcef156a0664c4d5db8af1115","dec":"png"},
+"b3":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/LEDRED.PNG/1033","sha":"4a4b37f73c4fd1cefed6bfac66581a52ca9d9b29b3d9af3109a381eb1882522b","dec":"png"},
+"b4":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/LOGOBLUE.PNG/1033","sha":"be1d9372ff5956eb434b81c258e0c020d37b6adfb6198b5c683ae334e0479dcb","dec":"png"},
+"b5":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/LOGOGREEN.PNG/1033","sha":"7deaf79513a952c4c8259d4cc812e6d9aef4f8c5436a1ad5d1941d4a4a80316b","dec":"png"},
+"b6":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/LOGOPURPLE.PNG/1033","sha":"ef48d3b2daf3924bc029f00c9baa089ca1f2d5541cc7d05f620a0b36b09f2d4e","dec":"png"},
+"b7":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/POTI.PNG/1033","sha":"ac3cb908513699ec45e68125941392a7e46894e4fd3ea44d50cfbdc3ee7939fe","dec":"png"},
+"b8":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/POTIVU.PNG/1033","sha":"2e7eafe1de3c038b3c4d635a53efb51da8cb9b2799696af990f7d16702269218","dec":"png"},
+"b9":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/POWERSWITCH.PNG/1033","sha":"4383a2feb5490a6fda8d910fd0c047f5df9ab6cc2f22e514e27cb9da75605f61","dec":"png"},
+"b10":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/RACK.PNG/1033","sha":"27ce903be9d8836b62bbf02a9af7c9355dc04ae7dbc5ed25493f2a9c38cb7b19","dec":"png"},
+"b11":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/SWITCH.PNG/1033","sha":"faf670a9188e6a2c99c41940dbc125fa00ae9dfc92e7d57f40032287a97ada01","dec":"png"},
+"b12":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"0bb5da8b0ecb7b8d79045fd1be2aa2abad087cd06b3000676fb4489b1572010a","dec":"png"},
+"b13":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/SWITCHH.PNG/1033","sha":"fba450702dca41695f0415540ae760c0552558acf52f81c64d0ac7353a507a71","dec":"png"}
+},"sprites":{
+"J_ampeg_b15n_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ampeg_b15n_tb_bank":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[685,8,200,192]}],"output":{"w":200,"h":192,"rgba":"c89d21d61e6664bbdaf55cea343ffeaf7ba49a2fc6c12369a0cab904872191a7"}},
+"J_ampeg_b15n_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ampeg_b15n_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"ampeg_b15n__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":60,"h":120,"rgba":"01892579afeed826c85816b7831bb849c2983b5237f2c7e0c678dc937b0e23a1"}},
+"ampeg_b15n__LEDRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":50,"h":100,"rgba":"2539c9b7b16d7fafdff47bdd14eac339a759e45a3b4ec120abb77ef8d4182c77"}},
+"ampeg_b15n__LOGOBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":346,"h":570,"rgba":"163fa03137918fe77d35d193a19d60005893e46f4240ef1411a4389b6a056560"}},
+"ampeg_b15n__LOGOGREEN":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":346,"h":570,"rgba":"1ab8eb9bc3799ac7180a1a853ba2a3c410d281ab15f898f300edbe67e529cea6"}},
+"ampeg_b15n__LOGOPURPLE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":346,"h":570,"rgba":"af99d27a1e68d7260cea3dbb008fded0ba5d4337f6f6fb86caf1b08dbc2b403e"}},
+"ampeg_b15n__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":138,"h":8418,"rgba":"d7f585a4e9d851236625cf3110f51fa68f75003e52c81d339dc5acc9610624c5"}},
+"ampeg_b15n__POTIVU":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":168,"h":10248,"rgba":"5426afa62be7ac82ea8f233f7262edc3cb6f9e6622d009c554d928c06215abc7"}},
+"ampeg_b15n__POWERSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":90,"h":260,"rgba":"9b83350ed94c69841361c8f027bbd590547dd1ca1b3985fc07a4cf3f5dcdad79"}},
+"ampeg_b15n__RACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b10"}],"output":{"w":2048,"h":580,"rgba":"95ca1955f21078025a5f70fba4fc563a1e361dfa1c8c09c6ebb49d4d43ea67ec"}},
+"ampeg_b15n__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b11"}],"output":{"w":80,"h":160,"rgba":"51c448569a087001a485444e9753214e320a6c9fcad84f7e1c26b2288b61f5eb"}},
+"ampeg_b15n__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b12"}],"output":{"w":100,"h":300,"rgba":"530587b569533b2ea5b611a67977fb33643f18038635ca0de65c8c3b8fb646c7"}},
+"ampeg_b15n__SWITCHH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b13"}],"output":{"w":80,"h":160,"rgba":"82681aee45f890e87e05cc0f12783671f9ef3b91846d8b891a5fa607edb0ac60"}}
+}}

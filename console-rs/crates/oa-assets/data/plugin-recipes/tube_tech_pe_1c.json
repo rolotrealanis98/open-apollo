@@ -1,0 +1,24 @@
+{"recipesSchema":2,"group":"tube_tech_pe_1c","tier":2,"inputs":{"dll:UAD Tube-Tech PE 1C.dll":{"kind":"dll","file":"UAD Tube-Tech PE 1C.dll","root":"powered-plugins","sha256":["3d1b772c77b584956faae003681f7bac36ffc3c8bc85e68da53d9c04de5ed43c"]}},"uses":["K_STB_power","K_tube_tech_pe_1c_toolbar","STB_Tube_Tech_PE_1C_1000","STB_Tube_Tech_PE_1C_1001","STB_Tube_Tech_PE_1C_1002","STB_Tube_Tech_PE_1C_1003","STB_Tube_Tech_PE_1C_1004","STB_Tube_Tech_PE_1C_1005","STB_Tube_Tech_PE_1C_1006","STB_Tube_Tech_PE_1C_1007","STB_Tube_Tech_PE_1C_1008","STB_Tube_Tech_PE_1C_1009"],"blobs":{
+"b0":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1000/1053","sha":"b8e4acca47ebc4bc391220c91ba2569c633344d24f3cfc025857c72d25ba50fa","dec":"png"},
+"b1":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1001/1053","sha":"a151948f6eddeb10492024513775a23969340d6fa1b596b764d1443be2d8bc29","dec":"png"},
+"b2":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1002/1053","sha":"7a6e9ac262c39769b40bd72e65be67562b3cc2caced128b7243e0df19faceb52","dec":"png"},
+"b3":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1003/1053","sha":"fd45202a3465b7e918c8ab0f9f112b264b754e8f719dcd797e1ef27470320962","dec":"png"},
+"b4":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1004/1053","sha":"d5096867002b0c9e0f45af4a939c2f6ce73e603925c905e45f4c8a18abd2ab49","dec":"png"},
+"b5":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1005/1053","sha":"7e71aa9ecaecc2b8116b62447975c1a7ad72ccdc1fe479a52df7a11f12d3532a","dec":"png"},
+"b6":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1006/1053","sha":"7e2606dea60dab5d6393865bbfd53c30a0953bd0452cb815321bb850d6e275cf","dec":"png"},
+"b7":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1007/1053","sha":"d6bcdad876e8fa5ffc369f8c770a9dba2d328f824bcc494f9356b4a3059b7744","dec":"png"},
+"b8":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1008/1053","sha":"e25390aaccd50ea46e2fce050028cd1bbc99bd84ee657c3a5528b7e4d9bae8a4","dec":"png"},
+"b9":{"in":"dll:UAD Tube-Tech PE 1C.dll","res":"MPACK/1009/1053","sha":"0ca6c9bd26d5e76ae1710e60163b02a22e6fc07ba59f6f020547b47d1c9de215","dec":"png"}
+},"sprites":{
+"K_tube_tech_pe_1c_toolbar":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"STB_Tube_Tech_PE_1C_1000":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":238,"h":714,"rgba":"407bb8e8e8271f8afefb84ec7ce6bbd695f922ff61664743645fa69e924874e4"}},
+"STB_Tube_Tech_PE_1C_1001":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":1632,"h":530,"rgba":"1d1ab42110f87ffe23f3b8fafe01815bdeb876fbe1ae57a84a2b867eb3f2e04a"}},
+"STB_Tube_Tech_PE_1C_1002":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":194,"h":19400,"rgba":"fb1eef45e3f3f984121fe9c2506c31bc338458d3af35f99dee7d189025d74ce9"}},
+"STB_Tube_Tech_PE_1C_1003":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":194,"h":19400,"rgba":"01e90e07f8bd29bba94cdd2d3992edd980d6146406b3dfdf2bba3eca2b36aa5c"}},
+"STB_Tube_Tech_PE_1C_1004":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":194,"h":19400,"rgba":"e14c432b37d69165e2ac0da08cc49a78a62557b80b6c9cd42ef29ad57bd93e88"}},
+"STB_Tube_Tech_PE_1C_1005":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":228,"h":2280,"rgba":"502964f8af0c1cd55641d83b463dd8554fb3fb6dc46649dff4d4df4e442a1065"}},
+"STB_Tube_Tech_PE_1C_1006":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":194,"h":19400,"rgba":"db592305b72df5ff72a0e9d4cd8a6fb1880bebe12b1bbd900268335b970dcba4"}},
+"STB_Tube_Tech_PE_1C_1007":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":194,"h":19400,"rgba":"88bdec857ba337b6e5f6ee4549fec98c1d36328a99dd0e15086403cb9e6e8f8c"}},
+"STB_Tube_Tech_PE_1C_1008":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":228,"h":912,"rgba":"8189562073f9ff7b403c3ae436de1e5976eff15f7399378e44d53d8ca76483c4"}},
+"STB_Tube_Tech_PE_1C_1009":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":138,"h":13800,"rgba":"b5a623682ffa35613682040a08a5ecec6d9194cc5f2f46ad1fdfbebe0f2009e8"}}
+}}

@@ -1,0 +1,31 @@
+{"recipesSchema":2,"group":"helios_type_69","tier":1,"inputs":{"dll:UAD Helios Type 69.dll":{"kind":"dll","file":"UAD Helios Type 69.dll","root":"powered-plugins","sha256":["c69f3496e62bce12c53419e6d4b6e8b4aede0d6de9980d4e061ae6170d1a5ab2"]}},"uses":["P_helios_type_69_thumb","helios_type_69_8282","helios_type_69_8283","helios_type_69_8284","helios_type_69_8286","helios_type_69_8287","helios_type_69_8288","helios_type_69_8289","helios_type_69_8290","helios_type_69_8291","helios_type_69_8292","helios_type_69_8293","helios_type_69_8294","helios_type_69_8295"],"blobs":{
+"b0":{"in":"dll:UAD Helios Type 69.dll","res":"10/8296/1033","sha":"2b21f0f6360d6ae3aa1f856fcf6c9a100859f452cf871af6e796bc876965cdc9","dec":"png"},
+"b1":{"in":"dll:UAD Helios Type 69.dll","res":"10/8282/1033","sha":"48342cfc952c0b42176fe7902a34529174ac20c880b20d620a55f06e67a4e57e","dec":"png"},
+"b2":{"in":"dll:UAD Helios Type 69.dll","res":"10/8283/1033","sha":"3ae5b6e3a3fd24a10d4e00e9c8bf739c6b30f6a1fba3ece502cc91676b8a3d37","dec":"png"},
+"b3":{"in":"dll:UAD Helios Type 69.dll","res":"10/8284/1033","sha":"58af77fefa155a337ad0e84358131b4401e17f32b16a5a039ae67ebf0d2a1dad","dec":"png"},
+"b4":{"in":"dll:UAD Helios Type 69.dll","res":"10/8286/1033","sha":"a9b77796514e16db3a47606fae167ea984fe55cd784df0fbfc5971f5de44f082","dec":"png"},
+"b5":{"in":"dll:UAD Helios Type 69.dll","res":"10/8287/1033","sha":"4d613f659f6269aba0de9ec5c9a07f98f1bed4c35737f5c41b765b5734643c8a","dec":"png"},
+"b6":{"in":"dll:UAD Helios Type 69.dll","res":"10/8288/1033","sha":"917570e146959c1b43705b9c49b543a1b5a159975ab82133dc4b804153ab4e39","dec":"png"},
+"b7":{"in":"dll:UAD Helios Type 69.dll","res":"10/8289/1033","sha":"eac4d26e4ec07629af98bdbd2cae761770205b47b2117c3f0f8a88943ee99619","dec":"png"},
+"b8":{"in":"dll:UAD Helios Type 69.dll","res":"10/8290/1033","sha":"6f4771682568184b467beaa41d76042be83c039bd9838dfcfb3767a83d6b671a","dec":"png"},
+"b9":{"in":"dll:UAD Helios Type 69.dll","res":"10/8291/1033","sha":"15447d5ff0db1d1406213facf4800a08f5c23c6edf3282550ce806be346b67b5","dec":"png"},
+"b10":{"in":"dll:UAD Helios Type 69.dll","res":"10/8292/1033","sha":"862680c1979aaae98e3d02e3809ac5bae0f8a4385209b833a8ef879c3ea9511d","dec":"png"},
+"b11":{"in":"dll:UAD Helios Type 69.dll","res":"10/8293/1033","sha":"a238add047ea6fe439ea2a0a268d814a232aa435aca82336469e90ad88d41df4","dec":"png"},
+"b12":{"in":"dll:UAD Helios Type 69.dll","res":"10/8294/1033","sha":"bdc109eea94ef8dd4dff09873f3eb5ee46341a46ec1238e7eccb9f06ffcb485c","dec":"png"},
+"b13":{"in":"dll:UAD Helios Type 69.dll","res":"10/8295/1033","sha":"90c357a093d99388dcbb73229d4d9d563526b02c94104823ac7376c544fbad67","dec":"png"}
+},"sprites":{
+"P_helios_type_69_thumb":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":224,"h":182,"rgba":"3c39c347bd94c848523b6b7f64d506f94a6d98c5d47036fee6f2c563dd59697e"}},
+"helios_type_69_8282":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,383,723]},{"op":"lanczos2x"}],"output":{"w":766,"h":1446,"rgba":"e2b24b96713fb8d861abd791b084150a2c0f1a63a1f60997f7dcf383a2520e52"}},
+"helios_type_69_8283":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,55,174]},{"op":"lanczos2x"}],"output":{"w":110,"h":348,"rgba":"1c71a9f842204a56a6ccc0b6170cfa96a7ad3e6b484fd7cfaf787e4a96eaa794"}},
+"helios_type_69_8284":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,79,474]},{"op":"lanczos2x"}],"output":{"w":158,"h":948,"rgba":"f99a705c913f9df4ac9a0909e1a89159a64678ef90f579088966056c90f242fc"}},
+"helios_type_69_8286":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,69,552]},{"op":"lanczos2x"}],"output":{"w":138,"h":1104,"rgba":"3b463fe7d2098e240971b59774919625a819ec4fccc0e20afe118f7fae4138c7"}},
+"helios_type_69_8287":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,79,632]},{"op":"lanczos2x"}],"output":{"w":158,"h":1264,"rgba":"3f8fd84baa05d61e2535280aad5177c53826e5e5b28e7ef12f3c15410c9757b3"}},
+"helios_type_69_8288":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,69,6969]},{"op":"lanczos2x"}],"output":{"w":138,"h":13938,"rgba":"b4d2ae3a4771261acf91c3b7f35466db50d6667d66a2fd65405fc5d4eafac0ee"}},
+"helios_type_69_8289":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,79,7979]},{"op":"lanczos2x"}],"output":{"w":158,"h":15958,"rgba":"70aa171522d884c73e04b14742a3c869dd1c640c64760e390181856f7d4dbd39"}},
+"helios_type_69_8290":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,38,120]},{"op":"lanczos2x"}],"output":{"w":76,"h":240,"rgba":"aa59cc6a48e7e69afc8b30540c98560bf03b93ec29421c164b9e89d377284a05"}},
+"helios_type_69_8291":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,69,6969]},{"op":"lanczos2x"}],"output":{"w":138,"h":13938,"rgba":"46264d978ee252e589a38267258c722000fb37c8664c8fad992b5891f588b0a2"}},
+"helios_type_69_8292":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"crop","box":[0,0,79,7979]},{"op":"lanczos2x"}],"output":{"w":158,"h":15958,"rgba":"f62d62da100d66795f0365b5c6ac19ad7ae10f5a0f7d134d88c98fc4455f6073"}},
+"helios_type_69_8293":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b11"},{"op":"crop","box":[0,0,69,690]},{"op":"lanczos2x"}],"output":{"w":138,"h":1380,"rgba":"c5a00c673f263cfb9c351b06452820fd65b083cf04744de5bfc9dbc9b48027ab"}},
+"helios_type_69_8294":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b12"},{"op":"crop","box":[0,0,79,790]},{"op":"lanczos2x"}],"output":{"w":158,"h":1580,"rgba":"864ca1d30a1a57d27f0e50e3603f4a1ffacc14d7006844cb1ef22d7573833401"}},
+"helios_type_69_8295":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b13"},{"op":"crop","box":[0,0,99,100]},{"op":"lanczos2x"}],"output":{"w":198,"h":200,"rgba":"71959d4ae8428935099a284a3ffb12dde9a7ed5ee211cf1e90311dc71e8536c6"}}
+}}

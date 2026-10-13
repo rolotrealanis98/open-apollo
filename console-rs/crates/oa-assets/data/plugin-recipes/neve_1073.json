@@ -1,0 +1,27 @@
+{"recipesSchema":2,"group":"neve_1073","tier":1,"inputs":{"dll:UAD Neve 1073.dll":{"kind":"dll","file":"UAD Neve 1073.dll","root":"powered-plugins","sha256":["6879174fdc64035406891a8df477513d1aecb6f54aacde6d9f8b81f4985f488b"]}},"uses":["UA_Neve1073New_PANEL","UA_Neve1073New_buttons","UA_Neve1073New_knob_CENTER","UA_Neve1073New_knob_INPUT_LineOnly","UA_Neve1073New_knob_INPUT_MicOnly","UA_Neve1073New_knob_LFFREQ","UA_Neve1073New_knob_MFFREQ","UA_Neve1073New_switch","UA_Neve1073_knob_HFGAIN","UA_Neve1073_knob_LOCUT","UA_Neve1073_knob_OUTPUT","synth_uadneve1073_output-fader"],"blobs":{
+"b0":{"in":"dll:UAD Neve 1073.dll","res":"10/7810/1033","sha":"e5f440e7b427659ffb3a5455c62f44e9881d1bf02b83238da403b3e0e5657491","dec":"png"},
+"b1":{"in":"dll:UAD Neve 1073.dll","res":"10/7817/1033","sha":"aca3b791410f9dd307ef63055f67fb4ad9dda0d56f04a2a1c63b2c0f74090536","dec":"png"},
+"b2":{"in":"dll:UAD Neve 1073.dll","res":"10/7813/1033","sha":"70013e59cc3efe9b4d05ee20b864620471623bf3cca99e4de265373dc8c95728","dec":"png"},
+"b3":{"in":"dll:UAD Neve 1073.dll","res":"10/7825/1033","sha":"f59e1b6d478f115de96b9591a3f22130458c11a14c91e795c26cd271c697d6e9","dec":"png"},
+"b4":{"in":"dll:UAD Neve 1073.dll","res":"10/7824/1033","sha":"5cab0f8f4717fcc77219f38513bfb7c07bd5353299361c18718b552e14952ca5","dec":"png"},
+"b5":{"in":"dll:UAD Neve 1073.dll","res":"10/7815/1033","sha":"4e17946091f4a96f3763a6de66eae3f1e260d8191f377bc1db7470664fa24114","dec":"png"},
+"b6":{"in":"dll:UAD Neve 1073.dll","res":"10/7814/1033","sha":"e3a15d370d5b8dd0de83ba3babf880d21c80fea512e724253ecce75b48aea813","dec":"png"},
+"b7":{"in":"dll:UAD Neve 1073.dll","res":"10/7820/1033","sha":"e85fb63437e2f3205aa090c40ce468fae3a297258b837b844c0d31a396cf2ab4","dec":"png"},
+"b8":{"in":"dll:UAD Neve 1073.dll","res":"10/7812/1033","sha":"f84977efedc8707a366ca8542c1f1930c32b1e48669bd498e4fa269e379cfb92","dec":"png"},
+"b9":{"in":"dll:UAD Neve 1073.dll","res":"10/7816/1033","sha":"70b1838ee3749a6bc36260e672a979f0b7e9488b45a476db69f16d0a4aa213b6","dec":"png"},
+"b10":{"in":"dll:UAD Neve 1073.dll","res":"10/7819/1033","sha":"49d48a143f84c4825e98ded2fe896cac67551c5117e34d086d76dd848904bf78","dec":"png"},
+"b11":{"in":"dll:UAD Neve 1073.dll","res":"10/7818/1033","sha":"b37872cdf6c76e0420d5cf99948cc09a77e8f452d178cdebb8a8cff1b6633e73","dec":"png"}
+},"sprites":{
+"UA_Neve1073New_PANEL":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":660,"h":1324,"rgba":"d1863e50818d35f18541bb586bce2e000f86c7a8d6e4378521604cc411dbf2d0"}},
+"UA_Neve1073New_buttons":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":208,"h":272,"rgba":"ef5947c4037756944092e91fa1b0428085262d5d49ce95f580578fcb81038bb0"}},
+"UA_Neve1073New_knob_CENTER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":232,"h":20492,"rgba":"8816b899fb6095fbce251941e85db9076fa1a0c653430e7065a4da9885077ced"}},
+"UA_Neve1073New_knob_INPUT_LineOnly":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":232,"h":1632,"rgba":"a2d4fe7c2629be7bcd54a9aeae9778bae6bc1ec1c2d800f0d22b764c1c1f7fd4"}},
+"UA_Neve1073New_knob_INPUT_MicOnly":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":232,"h":2856,"rgba":"58d1e3c574457a4fe72ad2d17c5169f7856569a9fed36c6de8b21266c3f7d48f"}},
+"UA_Neve1073New_knob_LFFREQ":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":232,"h":940,"rgba":"9909fd7930e966370a41c3bc7deca53bdb65b9fe68d8bf84ad86474014c9b453"}},
+"UA_Neve1073New_knob_MFFREQ":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":232,"h":1316,"rgba":"a5b53f8490a359fafbaf9067a7f9f6165c7c7c086b5f4c60e312e6c48d2e6995"}},
+"UA_Neve1073New_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":128,"h":112,"rgba":"303a644d1316636a8d35d20cb308e59776d37da96e40720ff98171949dd0d702"}},
+"UA_Neve1073_knob_HFGAIN":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":232,"h":18748,"rgba":"c6e736ef005a990b671b17b370c90e231b7c73c1926cb7d2c1ff34553ae28843"}},
+"UA_Neve1073_knob_LOCUT":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":232,"h":1020,"rgba":"ea0e670e748d34bcdf91cbc809aef832fae53da091e2c9339c9bc7239132e07b"}},
+"UA_Neve1073_knob_OUTPUT":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":148,"h":12524,"rgba":"9bbb1ef0cf8a70a388904dba004b9c8f947a2e16565c2f330badfadc0187c2bb"}},
+"synth_uadneve1073_output-fader":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"n":101,"w":120,"h":668,"x":[0,0,0],"y":[0,520,-1],"clip":true}],"output":{"w":120,"h":67468,"rgba":"ab0d10b3bd344dabed673ce5b33627bf59c8fdbf2d9f0fa29e21177c92bd81f5"}}
+}}

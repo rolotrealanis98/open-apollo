@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"ua_176","tier":1,"inputs":{"dll:UAD UA 176.dll":{"kind":"dll","file":"UAD UA 176.dll","root":"powered-plugins","sha256":["f19214dbf1946a2c8e5a96b43856704a8ed17fe5064e2dd016ac691823abe46d"]}},"uses":["UA_175b-176_knob_LARGE","UA_175b-176_knob_METER","UA_175b-176_knob_SMALL","UA_175b-176_trimpot","UA_175b-176_trimpot_HEADROOM","UA_175b_knob_RATIO","UA_176_jewellamp","UA_176_knob_RATIO","UA_176_meter_NEEDLE","UA_176_panel","UA_176_switch_POWER","UA_176_switch_SC-LINK"],"blobs":{
+"b0":{"in":"dll:UAD UA 176.dll","res":"10/8417/1033","sha":"ad283b7962fbff6262736f8d275406c45ec2420f892f78ac9bc4d01fa42a1c84","dec":"png"},
+"b1":{"in":"dll:UAD UA 176.dll","res":"10/8407/1033","sha":"e5b06f69ac496863c97160b17c1fa0dc457052b99ea3c3430b3d7172a86595aa","dec":"png"},
+"b2":{"in":"dll:UAD UA 176.dll","res":"10/8408/1033","sha":"c5b37632b8ce49a70ef9e064b91eae3980e47f26e0d4495c69d0bf831962ee88","dec":"png"},
+"b3":{"in":"dll:UAD UA 176.dll","res":"10/8409/1033","sha":"c9bb93cd0c1f2c29927b8ea41afdbcbadca71c1bb1741c9cce9f7f33e5010826","dec":"png"},
+"b4":{"in":"dll:UAD UA 176.dll","res":"10/8406/1033","sha":"1f6ccc12147a75b303f8c8bb22d8c78619526aa1d87463c4e32748135aefbf39","dec":"png"},
+"b5":{"in":"dll:UAD UA 176.dll","res":"10/8410/1033","sha":"6a261d64dbadecc78d099a6990e719ac491e9ca310b80c69126cb70a66adce78","dec":"png"},
+"b6":{"in":"dll:UAD UA 176.dll","res":"10/8411/1033","sha":"ae57b46a7de89eeeb4aba76aa1bd31032a555a01f5c7d9e6e0afba7892c817ed","dec":"png"}
+},"sprites":{
+"UA_175b-176_trimpot_HEADROOM":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":48,"h":336,"rgba":"e58bd784bedafaef29cd51dd223dcf4aa92dc7313de9f8a0aa062cd97976a87b"}},
+"UA_176_jewellamp":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":80,"h":160,"rgba":"7ac5879878410c10e023a9efba9ac8d1d924cd97e2f62c3865a54e69861ced11"}},
+"UA_176_knob_RATIO":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":128,"h":512,"rgba":"ea43a2e2a20be0a4ae1e1a5a9afe97841aaba8f540765d0a6b877f9b5e7a7e55"}},
+"UA_176_meter_NEEDLE":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":224,"h":12900,"rgba":"5ead3e6a555160670c27306f19cc984078fe3523e9d96507530b6100f6bf5a31"}},
+"UA_176_panel":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":1900,"h":350,"rgba":"61e83828700c3eef4d067a41ae2aa14fcd8c6dd145e9d8dd1c004755e01af49f"}},
+"UA_176_switch_POWER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":84,"h":276,"rgba":"ee0f8eff71579a909f9c066da2b698c7f9b6245cdafca6f651a3be017a396d39"}},
+"UA_176_switch_SC-LINK":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":84,"h":276,"rgba":"237530f4e37e4e45455028b8bdc863949daed80a97f6de5c9029278e7a95c6fd"}}
+}}

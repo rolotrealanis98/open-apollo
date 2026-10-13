@@ -5,13 +5,16 @@
 //! reports what it contains, and copies the pieces console-rs needs into
 //! `~/.local/share/open-apollo/`. `oa-assets firmware` likewise extracts the
 //! DSP modules and USB boot images the Apollo needs into
-//! `/lib/firmware/universal-audio/`. Everything is read-only toward the source.
+//! `/lib/firmware/universal-audio/`. `oa-assets plugins` regenerates plug-in
+//! panel art from the install's Powered plug-in DLLs ([`plugins`]).
+//! Everything is read-only toward the source.
 
 pub mod detect;
 pub mod discover;
 pub mod firmware;
 pub mod import;
 pub mod pe;
+pub mod plugins;
 
 use std::path::{Path, PathBuf};
 

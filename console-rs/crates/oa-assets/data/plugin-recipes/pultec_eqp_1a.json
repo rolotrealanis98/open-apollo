@@ -1,0 +1,19 @@
+{"recipesSchema":2,"group":"pultec_eqp_1a","tier":1,"inputs":{"dll:UAD Pultec EQP-1A.dll":{"kind":"dll","file":"UAD Pultec EQP-1A.dll","root":"powered-plugins","sha256":["4fdfae0afcca4e08d06eea65d393f10d8b78d7d66b89c7cadd28d200f2e025e3"]},"dll:UAD Pultec HLF-3C.dll":{"kind":"dll","file":"UAD Pultec HLF-3C.dll","root":"powered-plugins","sha256":["bc6eeb2dc728bfaccd203d1e96c8f2fa6a60a01459ee896bb30af28fa039053a"]}},"uses":["pultec_atten_select","pultec_continuous_knob","pultec_eqp_1a_back","pultec_freq_switch_4_step","pultec_freq_switch_7_step","pultec_in_switch_V1","pultec_power_light_1","pultec_power_switch_270"],"blobs":{
+"b0":{"in":"dll:UAD Pultec EQP-1A.dll","res":"10/7532/1033","sha":"ef3731dc0293e9c16d932db286a866e64630cdf601afca43c40619c8dc7778b7","dec":"png"},
+"b1":{"in":"dll:UAD Pultec EQP-1A.dll","res":"10/7531/1033","sha":"19d9d291d0e705e2973d97be275aaeecb1e8d1d8024920881b65e56b4e69ae92","dec":"png"},
+"b2":{"in":"dll:UAD Pultec EQP-1A.dll","res":"10/7520/1033","sha":"8e3364d26bb4f148c47cd8d0d1553c8f530439eb22039970017872ba20ab4ef8","dec":"png"},
+"b3":{"in":"dll:UAD Pultec EQP-1A.dll","res":"10/7521/1033","sha":"3f08372f5b6be6bdb1a01559b8d8051153f0c44577767a928eaa2af9703a2eb4","dec":"png"},
+"b4":{"in":"dll:UAD Pultec EQP-1A.dll","res":"10/7522/1033","sha":"e07849e5f56ab816b4a4f6a09010c737b9ab031d7e80950978f1ef01ec9b19b6","dec":"png"},
+"b5":{"in":"dll:UAD Pultec HLF-3C.dll","res":"10/7549/1033","sha":"9a54d115f91bafa6165f8dddf98db9465d8ad55e310a8233b2b21ad461317cdd","dec":"png"},
+"b6":{"in":"dll:UAD Pultec EQP-1A.dll","res":"10/7523/1033","sha":"ad29e44a03f5acb0dedbfd06e616c7bb98522bba1b2653d69611e406107e3e3a","dec":"png"},
+"b7":{"in":"dll:UAD Pultec EQP-1A.dll","res":"10/7524/1033","sha":"a7c91c15066cf4f15461e021a96a9f2892c7d18dd5fc891a4be4f7e4ed862e50","dec":"png"}
+},"sprites":{
+"pultec_atten_select":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":156,"h":720,"rgba":"dfb316f131b83043529c53085bd83e72dbba332783d1fbc6d65abbc9454ce1df"}},
+"pultec_continuous_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":210,"h":27306,"rgba":"64e9f296f5d09f98fa41a9e757e186ba5d81356e6c97c6368b983cfc962c3189"}},
+"pultec_eqp_1a_back":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":1900,"h":528,"rgba":"e46dfe96d00197d41d854594bd2be6452f9bd286857a5fccd9930f5015235ace"}},
+"pultec_freq_switch_4_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":240,"h":992,"rgba":"9da6a2ebd9cbd0181455f55fe68ee7c0acb5b4a647b92d30ddf4d5fb225c3303"}},
+"pultec_freq_switch_7_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":240,"h":1736,"rgba":"7b7ec8388d35b1f25ed337fc79184b69313ed665c789b8c453e052de69d981ac"}},
+"pultec_in_switch_V1":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":110,"h":400,"rgba":"515c22d6410c4991701f824e46c1b02e350e2427804d232b44c2bc744fcf423c"}},
+"pultec_power_light_1":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":170,"h":340,"rgba":"32961f9b5f97cdf2bce2691a16d88c69c976a6cbe6f48abacf0a26f6e47a0d19"}},
+"pultec_power_switch_270":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":130,"h":6936,"rgba":"da3ca89ef3586b92523f4c54a78921dc18edaba0e7d399edf072e6a21c01b48b"}}
+}}

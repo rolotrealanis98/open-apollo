@@ -1,0 +1,23 @@
+{"recipesSchema":2,"group":"bermuda_triangle","tier":1,"inputs":{"dll:UAD Bermuda Triangle.dll":{"kind":"dll","file":"UAD Bermuda Triangle.dll","root":"powered-plugins","sha256":["19aaeff8b133904101806705090e4c0de7eb5cec8c8be26342efcada8bbc5572"]}},"uses":["P_bermuda_triangle_switch-6-power","bermuda_triangle_7872","bermuda_triangle_7873_1","bermuda_triangle_7874","bermuda_triangle_7875","bermuda_triangle_7876","bermuda_triangle_7880","bermuda_triangle_7881","bermuda_triangle_7882","bermuda_triangle_7883"],"blobs":{
+"b0":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7884/1033","sha":"8e072c192d5e67d67718d1d58252db53d8d491291885fc02f6e835894b1e1f61","dec":"png"},
+"b1":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7872/1033","sha":"b7623175fd36ea9e4696eb68e55296986a124e5a3adbf5c284fed1ef3a0e7c0a","dec":"png"},
+"b2":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7873/1033","sha":"67ce6111b6c3cb3a74276cf5b468bea5803017c509efa2c0c537b1cecfa50dc6","dec":"png"},
+"b3":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7874/1033","sha":"8a9c8a4232f137e559cac9488b44d7a73d7774088cce101d720119e2fc64b1a5","dec":"png"},
+"b4":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7875/1033","sha":"bd0799e1cb9959b5d7bf2c0bc4af3d077e28098a4a77fd46e93c6609913aa4e7","dec":"png"},
+"b5":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7876/1033","sha":"eab6464ee18e00bd24716b67762233d3f4720bf9c96acc5d449d43019b7ff8c6","dec":"png"},
+"b6":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7880/1033","sha":"c70b01f1c61770f1732fa6e9c28f90d98d3e047dd65e778b93d3c8c38877bbc4","dec":"png"},
+"b7":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7881/1033","sha":"b9733b745344d3649098ddf311a61349dcf50f7118bf3a71528b67d49ebcaef1","dec":"png"},
+"b8":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7882/1033","sha":"d9498b8076780deab88d2c8f5dcb8a31750dc68eb233feb78d54966b3580a0c2","dec":"png"},
+"b9":{"in":"dll:UAD Bermuda Triangle.dll","res":"10/7883/1033","sha":"b57b5b8547c0bebd4d941c1c8cad925bc88212bc4dca4a83bb178812e178a4cf","dec":"png"}
+},"sprites":{
+"P_bermuda_triangle_switch-6-power":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":122,"h":148,"rgba":"7198e8dd8b6a81eae9f3f89eb2678b5dda5ca2dfc3b30b2fc0a59192773e4a82"}},
+"bermuda_triangle_7872":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,480,580]},{"op":"lanczos2x"}],"output":{"w":960,"h":1160,"rgba":"6115d501e3b4aa2b711ed9188bc39d63d8f994f8c9ea5d68b37a0b834a578d17"}},
+"bermuda_triangle_7873_1":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,100,70]}],[{"op":"load","blob":"b2"},{"op":"crop","box":[0,70,100,70]}]]},{"op":"lanczos2x"}],"output":{"w":200,"h":280,"rgba":"11d601dd2eb6f5e8faf67e3d46dd91b6008757b991cac8c774ef15b3f3d2e4ae"}},
+"bermuda_triangle_7874":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,119,9898]},{"op":"lanczos2x"}],"output":{"w":238,"h":19796,"rgba":"4a213ed5b8ae83edf2613c7dae00a40a57a91fbbaeaa987a754a63876383bfa6"}},
+"bermuda_triangle_7875":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,119,9898]},{"op":"lanczos2x"}],"output":{"w":238,"h":19796,"rgba":"fb2f3a04361eb526eb63df682cfc3671c92a2a7bdcecdfc73ff49a3030490b31"}},
+"bermuda_triangle_7876":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,119,9898]},{"op":"lanczos2x"}],"output":{"w":238,"h":19796,"rgba":"87d6c2d96e2e9b22ab10512c639a49c3edc3704843685fbc37c50654091d6296"}},
+"bermuda_triangle_7880":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,119,98]},{"op":"lanczos2x"}],"output":{"w":238,"h":196,"rgba":"ee545aa1f9470dea22c0564b4dee2603bb84bd78ff9f533b76df909820781a55"}},
+"bermuda_triangle_7881":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,119,98]},{"op":"lanczos2x"}],"output":{"w":238,"h":196,"rgba":"dfe83f8a8ba479ea14dcff184d1111b5ad7b76479abde1378eb88e123c6ef3e7"}},
+"bermuda_triangle_7882":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,68,7194]},{"op":"lanczos2x"}],"output":{"w":136,"h":14388,"rgba":"05bf7a97a07e49e2608a28bf2ffc5a5465fdb42a2bcff2b472a39ea8d003a327"}},
+"bermuda_triangle_7883":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,68,7194]},{"op":"lanczos2x"}],"output":{"w":136,"h":14388,"rgba":"2b70181ec58158e151fe57d3e81206253202b2540542e41289d451fe103e3431"}}
+}}

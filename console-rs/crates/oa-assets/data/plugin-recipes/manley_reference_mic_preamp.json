@@ -1,0 +1,23 @@
+{"recipesSchema":2,"group":"manley_reference_mic_preamp","tier":1,"inputs":{"dll:UAD Manley Reference Mic Preamp.dll":{"kind":"dll","file":"UAD Manley Reference Mic Preamp.dll","root":"powered-plugins","sha256":["fc00f0693381a77d7a5ce21107f8d2e69ac4a91f271c232b3c8c18a92f980f1d"]}},"uses":["UA_Manley_Preamp_knob","UA_Manley_Preamp_knob_2pos","UA_Manley_Preamp_knob_5pos","UA_Manley_Preamp_meter_needle","UA_Manley_Preamp_meter_off","UA_Manley_Preamp_meter_on","UA_Manley_Preamp_panel","UA_Manley_Preamp_push_switch","UA_Manley_Preamp_switch_2pos","UA_Manley_Preamp_switch_3pos"],"blobs":{
+"b0":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8609/1033","sha":"c107f5302f11d3a01172b99c7ad3ac9f8d9e1bb383d0ac79a11a1e59ed39ce09","dec":"png"},
+"b1":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8607/1033","sha":"63b4b1609b47a9f6f86d8555518d28916a07ed3c991a371a4392711141a36ffa","dec":"png"},
+"b2":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8608/1033","sha":"d230946701804f6ce929f0468f0f5a0781ff81e935d01d582fd620c3816a6475","dec":"png"},
+"b3":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8612/1033","sha":"182c59e086ba4de79d7c3a7c74113b92105dcbb867c70f623c808e7dd7fc75aa","dec":"png"},
+"b4":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8613/1033","sha":"ddc0788917b29fda18684efdcfffcd90e7751a444e673d16aaa42278f415fc9b","dec":"png"},
+"b5":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8614/1033","sha":"018af580cc8042e1118f1054e4121cc1454c72de13376d41a9c9aeb47f59d8a3","dec":"png"},
+"b6":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8606/1033","sha":"d125cf5b3935488816a2b6f37460c8183d9132c7297c1c30fda1c3feb219cbfa","dec":"png"},
+"b7":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8610/1033","sha":"ec88fd2250023e61e4fecabb7ea255462dd08a9c30f37457594890ec8682707c","dec":"png"},
+"b8":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8616/1033","sha":"69e709e7d9908e9a10dcd045fb8e4181888d4766cc474deba2fff8f6145a964b","dec":"png"},
+"b9":{"in":"dll:UAD Manley Reference Mic Preamp.dll","res":"10/8615/1033","sha":"aa7102127383078024077a2a07dab17636bdf5993f2cf2e383f35de04b0cd607","dec":"png"}
+},"sprites":{
+"UA_Manley_Preamp_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":200,"h":20200,"rgba":"70cb177f6783096e04c4b7e4c50ab4ef9af6d54fea3ae277a096bd5639e035a1"}},
+"UA_Manley_Preamp_knob_2pos":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":200,"h":400,"rgba":"4127927195299de7ddfad2880def5cb7937db644675bab75513ec372747ea7fb"}},
+"UA_Manley_Preamp_knob_5pos":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":200,"h":1000,"rgba":"3e9c3ab809fa1ac1e2960e3ba7c12f8e82c0434dd12ba3aba08c2a7c2111efac"}},
+"UA_Manley_Preamp_meter_needle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":408,"h":22140,"rgba":"fbee9ea5e5594ff3a02d0ea98f78fbf5e12b808901501bbf106004fa6f686ac7"}},
+"UA_Manley_Preamp_meter_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":408,"h":180,"rgba":"007101c9f9005101695c6298a2073d0a9d4a048ffea7d280000084fdfc50ce3b"}},
+"UA_Manley_Preamp_meter_on":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":408,"h":180,"rgba":"886be14b4f33b80b390269b4ed40b594a22764dddda39e76e5b9c57190aa56a8"}},
+"UA_Manley_Preamp_panel":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":720,"h":1050,"rgba":"70915ac70e4f1eee3d03f729d5c4bfe6027421297884da853df32cc24aff49b5"}},
+"UA_Manley_Preamp_push_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":96,"h":192,"rgba":"91fb88226a67e5f653889b76742d5f3c2251887f7f79ae72491e0198a380f7e4"}},
+"UA_Manley_Preamp_switch_2pos":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":120,"h":120,"rgba":"a143756895d0a49eb42f023dfaafb0cbbeeaa5a8026cdb5f42d83903232ec55a"}},
+"UA_Manley_Preamp_switch_3pos":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":120,"h":180,"rgba":"0de154248aed6ed5aa9198958e11dcdf29f0b970af09a541d0119d273e56dc80"}}
+}}

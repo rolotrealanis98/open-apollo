@@ -1,0 +1,23 @@
+{"recipesSchema":2,"group":"raw","tier":1,"inputs":{"dll:UAD Raw.dll":{"kind":"dll","file":"UAD Raw.dll","root":"powered-plugins","sha256":["ff12f57b8d2a9d195a1dfb2f63377264ad7b81775207db944ba605ac0bf29b47"]}},"uses":["P_raw_switch-6-power","raw_7858","raw_7859_1","raw_7860","raw_7861","raw_7862","raw_7866","raw_7867","raw_7868","raw_7869"],"blobs":{
+"b0":{"in":"dll:UAD Raw.dll","res":"10/7870/1033","sha":"8e072c192d5e67d67718d1d58252db53d8d491291885fc02f6e835894b1e1f61","dec":"png"},
+"b1":{"in":"dll:UAD Raw.dll","res":"10/7858/1033","sha":"f361407ffad347d282f1aa4fcad01a5e3e2ecf98a58a390b80dca136e6867107","dec":"png"},
+"b2":{"in":"dll:UAD Raw.dll","res":"10/7859/1033","sha":"49cbdb2cee6019f91a61270bc7587ed345cfa57582144752035bd072febae474","dec":"png"},
+"b3":{"in":"dll:UAD Raw.dll","res":"10/7860/1033","sha":"71549ac51538a27df9b95645ec56cb4bb5938431a941f2acd574951d2b375fbe","dec":"png"},
+"b4":{"in":"dll:UAD Raw.dll","res":"10/7861/1033","sha":"bbb0400cdbdf08fdc79edc50b29a247df046a7db32190ea97929aa734eaed37f","dec":"png"},
+"b5":{"in":"dll:UAD Raw.dll","res":"10/7862/1033","sha":"fb1e90db025a1d24fc752aea6981e94c6b5c5251cef0bf73117011b28eba4170","dec":"png"},
+"b6":{"in":"dll:UAD Raw.dll","res":"10/7866/1033","sha":"40885c888a9ed9de42bba3f340d9687e1dec2f07af571e127fff3c641c9fd2d1","dec":"png"},
+"b7":{"in":"dll:UAD Raw.dll","res":"10/7867/1033","sha":"e624eccd7d3102c5e25d9e272b4c6bc58d141dc5114644c1305ebd7a658ace9e","dec":"png"},
+"b8":{"in":"dll:UAD Raw.dll","res":"10/7868/1033","sha":"d9498b8076780deab88d2c8f5dcb8a31750dc68eb233feb78d54966b3580a0c2","dec":"png"},
+"b9":{"in":"dll:UAD Raw.dll","res":"10/7869/1033","sha":"b57b5b8547c0bebd4d941c1c8cad925bc88212bc4dca4a83bb178812e178a4cf","dec":"png"}
+},"sprites":{
+"P_raw_switch-6-power":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":122,"h":148,"rgba":"7198e8dd8b6a81eae9f3f89eb2678b5dda5ca2dfc3b30b2fc0a59192773e4a82"}},
+"raw_7858":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,520,440]},{"op":"lanczos2x"}],"output":{"w":1040,"h":880,"rgba":"4cdca26b34ed29377b272ac62bc88b993000a957492027322878ba869b7c7059"}},
+"raw_7859_1":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,80,80]}],[{"op":"load","blob":"b2"},{"op":"crop","box":[0,80,80,80]}]]},{"op":"lanczos2x"}],"output":{"w":160,"h":320,"rgba":"c9379718e95ab6a5773e1d19579293412be98c664bd623771ad983d6aa7abba1"}},
+"raw_7860":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,75,8686]},{"op":"lanczos2x"}],"output":{"w":150,"h":17372,"rgba":"1dfaf10396d1fdadcd201515a8623b029ad0d8cfd2c0abb266f5776ad1e567a0"}},
+"raw_7861":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,75,8686]},{"op":"lanczos2x"}],"output":{"w":150,"h":17372,"rgba":"7c5d184a831507a27a5d293da658dc1813811983a7a1a8b65751ecd79c4c6006"}},
+"raw_7862":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,76,8686]},{"op":"lanczos2x"}],"output":{"w":152,"h":17372,"rgba":"bac14b8ec06e8cf485dc090c031c065de20e26718196ec44f9d2e40a0daa29e4"}},
+"raw_7866":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,75,86]},{"op":"lanczos2x"}],"output":{"w":150,"h":172,"rgba":"41ba3ce3a2a557d6abeda9b8af1d48d7510198937c60199ddf9c80310fc08c1a"}},
+"raw_7867":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,76,86]},{"op":"lanczos2x"}],"output":{"w":152,"h":172,"rgba":"1e5867cee1d8d6b7728f0c4fe6fe2e0ec687bef0cc098c0f8b277ec07376f05f"}},
+"raw_7868":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,68,7194]},{"op":"lanczos2x"}],"output":{"w":136,"h":14388,"rgba":"05bf7a97a07e49e2608a28bf2ffc5a5465fdb42a2bcff2b472a39ea8d003a327"}},
+"raw_7869":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,68,7194]},{"op":"lanczos2x"}],"output":{"w":136,"h":14388,"rgba":"2b70181ec58158e151fe57d3e81206253202b2540542e41289d451fe103e3431"}}
+}}

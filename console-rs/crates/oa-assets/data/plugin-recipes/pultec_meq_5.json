@@ -1,0 +1,11 @@
+{"recipesSchema":2,"group":"pultec_meq_5","tier":1,"inputs":{"dll:UAD Pultec MEQ-5.dll":{"kind":"dll","file":"UAD Pultec MEQ-5.dll","root":"powered-plugins","sha256":["37184c88902aa98b4755e6b5c51c8c3ee9652bf6c216980850b166221b0148c1"]}},"uses":["pultec_continuous_knob","pultec_freq_switch_11_step","pultec_freq_switch_5_step","pultec_in_switch_V2","pultec_meq_5_back","pultec_power_light_2","pultec_power_switch_270"],"blobs":{
+"b0":{"in":"dll:UAD Pultec MEQ-5.dll","res":"10/7543/1033","sha":"24fd66d405f0897356c94faa68574983c7a7594a66c5e5ca1c710838e2c61ad5","dec":"png"},
+"b1":{"in":"dll:UAD Pultec MEQ-5.dll","res":"10/7544/1033","sha":"0c0f24b0b64d7cc262ad148a40e7bc79bd2249c5cabd0fe859b1bc8d0c851863","dec":"png"},
+"b2":{"in":"dll:UAD Pultec MEQ-5.dll","res":"10/7540/1033","sha":"4a729909d332acb0d72123bda15df83132a9b3d8fd61cb20ca85b501b53dcb6e","dec":"png"},
+"b3":{"in":"dll:UAD Pultec MEQ-5.dll","res":"10/7541/1033","sha":"c57fe12e834ccedc8bbdc7162223d2e042b50a27d56af54882e2830011198ad9","dec":"png"}
+},"sprites":{
+"pultec_freq_switch_5_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":240,"h":1240,"rgba":"62a2ab5587ee91e20a95ffb2da1f1ac0eaaba976fef6332d0f4477aec74e6b7c"}},
+"pultec_in_switch_V2":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":110,"h":400,"rgba":"df81cfe37cc4631e0aff6370109319b916ead67e0adce2abf58cb98979b21da6"}},
+"pultec_meq_5_back":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":1900,"h":376,"rgba":"bf620635232e2906642fd0bff2e356af55a7bc9fdf0971925021f2996f246051"}},
+"pultec_power_light_2":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":170,"h":340,"rgba":"fe7186680f6a63c9106d2e08dd747e4463e66acc0bf45e4f79255eb6236fa043"}}
+}}

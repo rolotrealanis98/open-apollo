@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"teletronix_la_2a_legacy","tier":1,"inputs":{"dll:UAD Teletronix LA-2A Legacy.dll":{"kind":"dll","file":"UAD Teletronix LA-2A Legacy.dll","root":"powered-plugins","sha256":["7de7eceb327910d303a7e96ae5516a6f711a307c92334d8efc8980524a5b5418"]}},"uses":["teletronix_la_2a_legacy_1100","teletronix_la_2a_legacy_1101","teletronix_la_2a_legacy_1103","teletronix_la_2a_legacy_1104","teletronix_la_2a_legacy_1105","teletronix_la_2a_legacy_1106","teletronix_la_2a_legacy_8050"],"blobs":{
+"b0":{"in":"dll:UAD Teletronix LA-2A Legacy.dll","res":"10/1100/1033","sha":"b0577801541d78f0ee0c0a927dc9d94ee27a3c4854774ab29e5a23a4eea0b5b4","dec":"png"},
+"b1":{"in":"dll:UAD Teletronix LA-2A Legacy.dll","res":"10/1101/1033","sha":"a98c489872ccb49585fc6be821e4d7af0ccd96eb9163e52cee85971da6f1c07d","dec":"png"},
+"b2":{"in":"dll:UAD Teletronix LA-2A Legacy.dll","res":"10/1103/1033","sha":"bd5a4d61868adbe35d7c2fcc79d62c9ecf83c350ae215767c5bbf4f0861c5966","dec":"png"},
+"b3":{"in":"dll:UAD Teletronix LA-2A Legacy.dll","res":"10/1104/1033","sha":"86a1d011f2bf13043076461ac9f9a8c66a93cd41a327f1d2acd10251d0d0fc55","dec":"png"},
+"b4":{"in":"dll:UAD Teletronix LA-2A Legacy.dll","res":"10/1105/1033","sha":"0eb5c6b6f15a0cd7675aeb25058eb0c1aa90c2c4db1d0d4db93ad516405c8638","dec":"png"},
+"b5":{"in":"dll:UAD Teletronix LA-2A Legacy.dll","res":"10/1106/1033","sha":"29d1696eab38de7ee5bdff8035febfc29347f38e0d36db845ea39a2bb34fad04","dec":"png"},
+"b6":{"in":"dll:UAD Teletronix LA-2A Legacy.dll","res":"10/8050/1033","sha":"6669e7898e23ebecc5ee57be2f4f43a1ec0c7a21625ae5bfabe97f256f37ef4e","dec":"png"}
+},"sprites":{
+"teletronix_la_2a_legacy_1100":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,950,263]},{"op":"lanczos2x"}],"output":{"w":1900,"h":526,"rgba":"3ee44c12570d61c7fa21242981660e8e48f4965c9e51a805d09538cb6692c6f4"}},
+"teletronix_la_2a_legacy_1101":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,84,8652]},{"op":"lanczos2x"}],"output":{"w":168,"h":17304,"rgba":"fa43040d7d6550509740f6083b7db57d0f0a2af97add230f70cc690e6371085c"}},
+"teletronix_la_2a_legacy_1103":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,56,112]},{"op":"lanczos2x"}],"output":{"w":112,"h":224,"rgba":"a189ab8eef3b08cbf6823d55e2c6bfe1d8beca0fd84a5a7382a068c780370361"}},
+"teletronix_la_2a_legacy_1104":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,84,252]},{"op":"lanczos2x"}],"output":{"w":168,"h":504,"rgba":"cee35bcdecebf39487853ae1edbb69bd2ed25cd6780906fdf6fccd6fd6cd1ec5"}},
+"teletronix_la_2a_legacy_1105":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,162,78]},{"op":"lanczos2x"}],"output":{"w":324,"h":156,"rgba":"3da03bbacb99da1cff1fbd369d388a4ea7ecbe905d522caf0eebbe14f458d7c3"}},
+"teletronix_la_2a_legacy_1106":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,142,5355]},{"op":"lanczos2x"}],"output":{"w":284,"h":10710,"rgba":"285a34341938e827b47b4a7f8d84b951de94be9ba5ba78e8e56c392e7d59700f"}},
+"teletronix_la_2a_legacy_8050":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,142,5355]},{"op":"lanczos2x"}],"output":{"w":284,"h":10710,"rgba":"eea6745527327b28f3875cc4c50741ecf1ce2bd6f9b0092717d97cc0dad2e868"}}
+}}

@@ -1,0 +1,11 @@
+{"recipesSchema":2,"group":"hitsville_eq","tier":2,"inputs":{"dll:UAD Hitsville EQ.dll":{"kind":"dll","file":"UAD Hitsville EQ.dll","root":"powered-plugins","sha256":["665b540bfec3bfac746c1f2db34c89f3a336da55b53588ff5cb81839d8ce1271"]}},"uses":["UA_Hitsville-MIX-EQ_DYMO-labels","UA_Hitsville-MIX-EQ_knob","UA_Hitsville-MIX-EQ_panel","UA_Hitsville-MIX-EQ_switch","transparent"],"blobs":{
+"b0":{"in":"dll:UAD Hitsville EQ.dll","res":"10/8644/1033","sha":"b3afa741cda305650649554a4261baba000dafc6f32281ad2c5aaf89756783ef","dec":"png"},
+"b1":{"in":"dll:UAD Hitsville EQ.dll","res":"10/8646/1033","sha":"c29332d4704b3cf950558478d4530cc3a11de3fd81346bdd4cd241c797d8144f","dec":"png"},
+"b2":{"in":"dll:UAD Hitsville EQ.dll","res":"10/8647/1033","sha":"305c88332b084e9a41a2b3b6063c15f350cfcad3f754795aef98da740dfe03ce","dec":"png"},
+"b3":{"in":"dll:UAD Hitsville EQ.dll","res":"10/8648/1033","sha":"acf3efeb8a2da54f4449e804ce0c0ec94e4bb724f314c75afa3d230d9b80889c","dec":"png"}
+},"sprites":{
+"UA_Hitsville-MIX-EQ_DYMO-labels":{"status":"fallback","basis":"similar","build":[{"op":"stack","parts":[[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,581,21]},{"op":"resize","w":1162,"h":42,"filter":"lanczos"}],[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,581,21]},{"op":"resize","w":1162,"h":42,"filter":"lanczos"}]]}],"output":{"w":1162,"h":84,"rgba":"19db02f5ef02c41be18aec6789b3f3823c43849d71fb24e2b2a3f47bfab65d1d"}},
+"UA_Hitsville-MIX-EQ_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":174,"h":3060,"rgba":"4e58061af352c26fbc18fd0df6515b6a35109816a88eed4b3b9c1b2a4dbe2f5a"}},
+"UA_Hitsville-MIX-EQ_panel":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":1900,"h":350,"rgba":"eb3be7fdece8df754807559f89168523062ac09f20ceda1ac7ecb593a687cf84"}},
+"UA_Hitsville-MIX-EQ_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":124,"h":612,"rgba":"c473da516c8a3ca4978617d201a192b1d163db0822b00ee2f84af2234c68ede9"}}
+}}

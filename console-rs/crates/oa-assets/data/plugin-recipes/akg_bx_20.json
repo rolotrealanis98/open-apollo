@@ -1,0 +1,16 @@
+{"recipesSchema":2,"group":"akg_bx_20","tier":1,"inputs":{"dll:UAD AKG BX 20.dll":{"kind":"dll","file":"UAD AKG BX 20.dll","root":"powered-plugins","sha256":["d9850c7bec727a1e56d939fdedae6da1029e438772de3b53b93f8f8860303a9b"]}},"uses":["P_akg_bx_20_zone-16-power","akg_bx_20_7903","akg_bx_20_7904","akg_bx_20_7905_4","akg_bx_20_7906","akg_bx_20_7907_2","akg_bx_20_7908_5"],"blobs":{
+"b0":{"in":"dll:UAD AKG BX 20.dll","res":"10/7908/1033","sha":"be311707c438f084e6c6ab4761079c69541447febb2528445150ab957c198249","dec":"png"},
+"b1":{"in":"dll:UAD AKG BX 20.dll","res":"10/7903/1033","sha":"b455570c5d73f22c636db855634f08e5ab467d1269d08b3c2730d82c94cc29ba","dec":"png"},
+"b2":{"in":"dll:UAD AKG BX 20.dll","res":"10/7904/1033","sha":"04f11f623372da072e847a2bea5aa85a824d4121a60779b3ad733f3f6bd89f72","dec":"png"},
+"b3":{"in":"dll:UAD AKG BX 20.dll","res":"10/7905/1033","sha":"2ff5a69b4618654a948a54ff212bcf28cc83098042ee0970e579ea76f7eff8ea","dec":"png"},
+"b4":{"in":"dll:UAD AKG BX 20.dll","res":"10/7906/1033","sha":"8722656ea487c5fcbd467286a5a684864d13132a9eff2325a87de6d6a7bde90e","dec":"png"},
+"b5":{"in":"dll:UAD AKG BX 20.dll","res":"10/7907/1033","sha":"b5518bad7aee7a150341467a065dc75c6c36c4225ba300f6d498075d73250e1e","dec":"png"}
+},"sprites":{
+"P_akg_bx_20_zone-16-power":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":144,"h":288,"rgba":"2f229efffec6796e068b01484d9fee7b76b3882def57ebdd109da7857a751429"}},
+"akg_bx_20_7903":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,509,662]},{"op":"lanczos2x"}],"output":{"w":1018,"h":1324,"rgba":"3dffbb6760fc430af6370a09e1d8761e609ccfd19cbe816168ec998929484a71"}},
+"akg_bx_20_7904":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,83,160]},{"op":"lanczos2x"}],"output":{"w":166,"h":320,"rgba":"78914634c2f545db6e35bee4f99842a35ad4a3c06cad11685c8abb3e48214bd4"}},
+"akg_bx_20_7905_4":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,70,8720]},{"op":"lanczos2x"}],"output":{"w":140,"h":17440,"rgba":"8757ab3381f8eb6126a0abe650136677e76c93fea8f8a3f1eba8057ef0104860"}},
+"akg_bx_20_7906":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,83,240]},{"op":"lanczos2x"}],"output":{"w":166,"h":480,"rgba":"9b8de1bc3e752f400b39d63a0d54ae7809ee4178482f5bb3e15cfeaa506ed649"}},
+"akg_bx_20_7907_2":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,72,72]}],[{"op":"load","blob":"b5"},{"op":"crop","box":[0,72,72,72]}]]},{"op":"lanczos2x"}],"output":{"w":144,"h":288,"rgba":"aa803bb34c37c397c5893a09df4d76301ea446aed653812d6398a9a0c8fb4574"}},
+"akg_bx_20_7908_5":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,72,72]}],[{"op":"load","blob":"b0"},{"op":"crop","box":[0,72,72,72]}]]},{"op":"lanczos2x"}],"output":{"w":144,"h":288,"rgba":"2f229efffec6796e068b01484d9fee7b76b3882def57ebdd109da7857a751429"}}
+}}

@@ -1,0 +1,21 @@
+{"recipesSchema":2,"group":"roland_ce_1","tier":0,"inputs":{"dll:UAD Roland CE-1.dll":{"kind":"dll","file":"UAD Roland CE-1.dll","root":"powered-plugins","sha256":["af10d823c4dbee9121f56523d222514dc3e77f6cd98c1555ac88bc2739bc899b"]}},"uses":["roland_ce_1_4300","roland_ce_1_4301","roland_ce_1_4302","roland_ce_1_4303","roland_ce_1_4304_6","roland_ce_1_4305_7","roland_ce_1_4306","roland_ce_1_4307","roland_ce_1_4308"],"blobs":{
+"b0":{"in":"dll:UAD Roland CE-1.dll","res":"10/4300/1033","sha":"097f46c1450aa6555074f0b82b2cda9d9885143c1c4ac6717b7f596dcf9205e4","dec":"bmp"},
+"b1":{"in":"dll:UAD Roland CE-1.dll","res":"10/4301/1033","sha":"15edb59cbf3dda71f21bb7f6e101a806c601cd48cb66334c1a40e3c45a112804","dec":"bmp"},
+"b2":{"in":"dll:UAD Roland CE-1.dll","res":"10/4302/1033","sha":"6133ed722ba446b45671b236f52399ab15dcb1a028a199d50768e4db39baa5c8","dec":"bmp"},
+"b3":{"in":"dll:UAD Roland CE-1.dll","res":"10/4303/1033","sha":"0bc85bab1a270e9c8d18ff1ca341a74bed22842b3eccdf5bfbf9b568d6abe3c6","dec":"bmp-premultiplied"},
+"b4":{"in":"dll:UAD Roland CE-1.dll","res":"10/4304/1033","sha":"3ad553be5f3348b3643d7325ccb2e98492fb954cce2070cd8781fafe7940700c","dec":"bmp"},
+"b5":{"in":"dll:UAD Roland CE-1.dll","res":"10/4305/1033","sha":"a1129fac022b3b306d382014d92a839aa6cd73e2fd21f0f13ea637bcb7514f7d","dec":"bmp"},
+"b6":{"in":"dll:UAD Roland CE-1.dll","res":"10/4306/1033","sha":"34c828b513c5cb7d28f152183acf005f982b4944cee0575ab955f914805cd7c2","dec":"bmp-premultiplied"},
+"b7":{"in":"dll:UAD Roland CE-1.dll","res":"10/4307/1033","sha":"1fe5c5ee7cc37c59112417e9a7326f78dbb8c26028298cc2ff81e35a3f7a2f56","dec":"bmp"},
+"b8":{"in":"dll:UAD Roland CE-1.dll","res":"10/4308/1033","sha":"371b46eaee0d5dadb773911110c1eed79c05a5896d456ee93502ed9a4bdfef13","dec":"bmp"}
+},"sprites":{
+"roland_ce_1_4300":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,420,280]},{"op":"lanczos2x"}],"output":{"w":840,"h":560,"rgba":"e14c4be0ccbff89af888e9721db6aa4f26e82e6745c4b6fdd210c5bd91fce964"}},
+"roland_ce_1_4301":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,24,100]},{"op":"lanczos2x"}],"output":{"w":48,"h":200,"rgba":"3cac18e3292b71ad518015262b9dca2190067dff5e1719d1ec91e969f044cfca"}},
+"roland_ce_1_4302":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,14,52]},{"op":"lanczos2x"}],"output":{"w":28,"h":104,"rgba":"b48731ecc232ae2b5c6d7f34731a8303f6f8fe67b511fd714fcc3bb02bf216a6"}},
+"roland_ce_1_4303":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,38,2432]},{"op":"lanczos2x"}],"output":{"w":76,"h":4864,"rgba":"3ea23b32e9195aab61f479cd254bce3fe9ff9c754b941d5a18a6c28a77d979b3"}},
+"roland_ce_1_4304_6":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,26,24]}],[{"op":"load","blob":"b4"},{"op":"crop","box":[0,24,26,24]}]]},{"op":"lanczos2x"}],"output":{"w":52,"h":96,"rgba":"ff78815e69d05b28c8017311827bebe266a8f9bb18e5f49f6e0eee703976c72e"}},
+"roland_ce_1_4305_7":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,26,24]}],[{"op":"load","blob":"b5"},{"op":"crop","box":[0,24,26,24]}]]},{"op":"lanczos2x"}],"output":{"w":52,"h":96,"rgba":"83658c1e4081e8691ec4149b5b27185705e31e0078e9a00ab6897323cbaaf3a7"}},
+"roland_ce_1_4306":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,24,120]},{"op":"lanczos2x"}],"output":{"w":48,"h":240,"rgba":"50b5f5d0047e8a58bb144346e668381ff12459ed0793ebaab75ffffca663f37d"}},
+"roland_ce_1_4307":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,32,108]},{"op":"lanczos2x"}],"output":{"w":64,"h":216,"rgba":"6afe43a8aff55b0693b861f43d7d61b6767364dd0b86752e47d91dddc03d233d"}},
+"roland_ce_1_4308":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,32,108]},{"op":"lanczos2x"}],"output":{"w":64,"h":216,"rgba":"3536c895baa074bf17fbbe8ac50adcf56769294f743499798d9eb4acbfec1847"}}
+}}

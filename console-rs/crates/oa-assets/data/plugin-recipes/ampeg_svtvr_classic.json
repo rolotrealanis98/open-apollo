@@ -1,0 +1,26 @@
+{"recipesSchema":2,"group":"ampeg_svtvr_classic","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD Ampeg SVTVR Classic.dll":{"kind":"dll","file":"UAD Ampeg SVTVR Classic.dll","root":"powered-plugins","sha256":["76266b793d9d6892bd256ce22aed6ea05ea388e9f4eee630b98f42c19147ad1d"]}},"uses":["J_ampeg_svtvr_classic_background_tb","J_ampeg_svtvr_classic_tb_bank","J_ampeg_svtvr_classic_tb_power","J_ampeg_svtvr_classic_tb_rack","ampeg_svtvr_classic__BUTTON","ampeg_svtvr_classic__DIPSWITCH","ampeg_svtvr_classic__HEADRACKCLASSIC","ampeg_svtvr_classic__LEDINPUTS","ampeg_svtvr_classic__LINEULTRA","ampeg_svtvr_classic__POTI","ampeg_svtvr_classic__POTIVU","ampeg_svtvr_classic__POWERLED","ampeg_svtvr_classic__POWERSWITCH"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/BUTTON.PNG/1033","sha":"2572c3558a9bf45d532b160d46fa769edbb500b0b20cfb4d5af5d7f105eba1b9","dec":"png"},
+"b2":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/DIPSWITCH.PNG/1033","sha":"33bb5c4ce95e693a0dc6645bb8323f341d7868ed0c76897c271ecaced3ac6d2e","dec":"png"},
+"b3":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/HEADRACKCLASSIC.PNG/1033","sha":"6780ab4ca20a8b3145e94000a9897eac9574cc526d969c40bd44760bca081c15","dec":"png"},
+"b4":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/LEDINPUTS.PNG/1033","sha":"e318c3283c94046b7a1820dc72ac9d56e7ec8c7850a2f534803ae21ed8a41fad","dec":"png"},
+"b5":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/LINEULTRA.PNG/1033","sha":"83875238919b26340c654613cec3714afd0d15ac7fd171919ca6e03a6a9e6fa1","dec":"png"},
+"b6":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/POTI.PNG/1033","sha":"0542ddc56822a80da0b0cfc27f9b19df87904af5f88b34f31ae7121e44641565","dec":"png"},
+"b7":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/POTIVU.PNG/1033","sha":"0840c4890c42ed1cb110024ebfd3ea000ee1956184a1df6d46cfc45866a68f96","dec":"png"},
+"b8":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/POWERLED.PNG/1033","sha":"090ed770feed263b95d576c60c12b46c335e99f368999a31fcbd554623f352fb","dec":"png"},
+"b9":{"in":"dll:UAD Ampeg SVTVR Classic.dll","res":"PNG/POWERSWITCH.PNG/1033","sha":"1ef7aeb8afd4caccd79928fa99ffd14ec620ba54f99c7fd67ad07e593125bfb4","dec":"png"}
+},"sprites":{
+"J_ampeg_svtvr_classic_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ampeg_svtvr_classic_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ampeg_svtvr_classic_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_ampeg_svtvr_classic_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"ampeg_svtvr_classic__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":66,"h":132,"rgba":"3e05a1cdd5edbdee212d4a5239669b082ca1e0e5c576cf3195b04f0aec0c0970"}},
+"ampeg_svtvr_classic__DIPSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":84,"h":72,"rgba":"535109f9eeb812ea386f7a60ee5f6bb587da092d3fc75e97bf4ac72ead359abf"}},
+"ampeg_svtvr_classic__HEADRACKCLASSIC":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":1880,"h":300,"rgba":"90dbc1b6c7a039a175d1ef454cac5309ac641512e391dfd018081c1e47cac221"}},
+"ampeg_svtvr_classic__LEDINPUTS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":50,"h":100,"rgba":"6662d44eab48dfb145b75bee2e2399b46817a218c12a759dd4188e7231968243"}},
+"ampeg_svtvr_classic__LINEULTRA":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":130,"h":8,"rgba":"a28a34471f4e5723b632a4cd12138d82e5e6792338d2df4afc6ec5655f5a5110"}},
+"ampeg_svtvr_classic__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":136,"h":8296,"rgba":"1c178a2b79f884cb7715aafbebe23c4fec2b86ce6a1994b76366850e017a0087"}},
+"ampeg_svtvr_classic__POTIVU":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":136,"h":8296,"rgba":"efad44b8047aa1a8c846bf3745fdd515f23ac1ee00a18606970de788071a1468"}},
+"ampeg_svtvr_classic__POWERLED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":50,"h":100,"rgba":"4222a934f3ed41529eaa418ec18c5a740d8a86b7907c490917799394545fc774"}},
+"ampeg_svtvr_classic__POWERSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":100,"h":220,"rgba":"90691c0d012d713a0dc01f64f1288a9f29666f08d4644f4a4022aedcc201369c"}}
+}}

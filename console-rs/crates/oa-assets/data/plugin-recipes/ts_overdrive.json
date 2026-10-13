@@ -1,0 +1,27 @@
+{"recipesSchema":2,"group":"ts_overdrive","tier":1,"inputs":{"dll:UAD TS Overdrive.dll":{"kind":"dll","file":"UAD TS Overdrive.dll","root":"powered-plugins","sha256":["2eb310199b726cb278e6fcdbbb1a32aa18799f6a7efe4c93318084e7c4a34375"]}},"uses":["P_ts_overdrive_switch-9-power","ts_overdrive_7897","ts_overdrive_7898","ts_overdrive_7899","ts_overdrive_7900","ts_overdrive_8275","ts_overdrive_8276_1","ts_overdrive_8277","ts_overdrive_8278","ts_overdrive_8279","ts_overdrive_8280","ts_overdrive_8281"],"blobs":{
+"b0":{"in":"dll:UAD TS Overdrive.dll","res":"10/7901/1033","sha":"8e072c192d5e67d67718d1d58252db53d8d491291885fc02f6e835894b1e1f61","dec":"png"},
+"b1":{"in":"dll:UAD TS Overdrive.dll","res":"10/7897/1033","sha":"3616a11dbe3592534e6a1a9dfb7ba45cd91e292cc2e83da706d1aa282ae6db3c","dec":"png"},
+"b2":{"in":"dll:UAD TS Overdrive.dll","res":"10/7898/1033","sha":"11e5122c71595ef6d85513b2ae3313f619177502107079866849f824d37ff21d","dec":"png"},
+"b3":{"in":"dll:UAD TS Overdrive.dll","res":"10/7899/1033","sha":"d9498b8076780deab88d2c8f5dcb8a31750dc68eb233feb78d54966b3580a0c2","dec":"png"},
+"b4":{"in":"dll:UAD TS Overdrive.dll","res":"10/7900/1033","sha":"b57b5b8547c0bebd4d941c1c8cad925bc88212bc4dca4a83bb178812e178a4cf","dec":"png"},
+"b5":{"in":"dll:UAD TS Overdrive.dll","res":"10/8275/1033","sha":"a1c84586d91cf729eef8412a898c96a4a6a65075a7f776ccfa3949389032124d","dec":"png"},
+"b6":{"in":"dll:UAD TS Overdrive.dll","res":"10/8276/1033","sha":"021eafb8bd3742449dda20b971b838181b35db4f2ce1fb42cc1539a6f7b7bc4a","dec":"png"},
+"b7":{"in":"dll:UAD TS Overdrive.dll","res":"10/8277/1033","sha":"ee6bbb20c9cdd216eb5e2e98a674670c721ee34406bf7a64d804e9c14f5b60d0","dec":"png"},
+"b8":{"in":"dll:UAD TS Overdrive.dll","res":"10/8278/1033","sha":"bc19efffd5db1900808878bf5b046a24c3189212bbc682121c4dc34950a17af7","dec":"png"},
+"b9":{"in":"dll:UAD TS Overdrive.dll","res":"10/8279/1033","sha":"c2187cbedd281f3880ca09b58fd03a14e4c705bb87af5a8f20c868acbac9d9bf","dec":"png"},
+"b10":{"in":"dll:UAD TS Overdrive.dll","res":"10/8280/1033","sha":"89289a9b258b03521402bf277afc568c1cf5c22aae4a5df37c22cebdb6802ee3","dec":"png"},
+"b11":{"in":"dll:UAD TS Overdrive.dll","res":"10/8281/1033","sha":"0d181816e3a6e2bcd9565cd4670163b52bf9904b2847977d640891fadc2aa8d7","dec":"png"}
+},"sprites":{
+"P_ts_overdrive_switch-9-power":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":122,"h":148,"rgba":"7198e8dd8b6a81eae9f3f89eb2678b5dda5ca2dfc3b30b2fc0a59192773e4a82"}},
+"ts_overdrive_7897":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,55,70]},{"op":"lanczos2x"}],"output":{"w":110,"h":140,"rgba":"d70f204764efdfa3a3d495093b2484c19a35b32596cd1a67d5e69b65fe011f16"}},
+"ts_overdrive_7898":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,57,70]},{"op":"lanczos2x"}],"output":{"w":114,"h":140,"rgba":"4eb13b9c141623f1605fa429a614799f6e48ca85d24ecd1915a91d3009c1097f"}},
+"ts_overdrive_7899":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,68,7194]},{"op":"lanczos2x"}],"output":{"w":136,"h":14388,"rgba":"05bf7a97a07e49e2608a28bf2ffc5a5465fdb42a2bcff2b472a39ea8d003a327"}},
+"ts_overdrive_7900":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,68,7194]},{"op":"lanczos2x"}],"output":{"w":136,"h":14388,"rgba":"2b70181ec58158e151fe57d3e81206253202b2540542e41289d451fe103e3431"}},
+"ts_overdrive_8275":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,400,520]},{"op":"lanczos2x"}],"output":{"w":800,"h":1040,"rgba":"1226eab3d3b0e8ff1e1ac9557a19e183b429855ebd1588288d4a7269442f616b"}},
+"ts_overdrive_8276_1":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,80,62]}],[{"op":"load","blob":"b6"},{"op":"crop","box":[0,62,80,62]}]]},{"op":"lanczos2x"}],"output":{"w":160,"h":248,"rgba":"7636c76d087cc2fe4ae57f79943021b4a1480f2c4a2a243e7d97085f3b841891"}},
+"ts_overdrive_8277":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,113,196]},{"op":"lanczos2x"}],"output":{"w":226,"h":392,"rgba":"e08335b8b347edf08897081a18cb6103c08449ba760f48254b95df06a8dbf041"}},
+"ts_overdrive_8278":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,56,92]},{"op":"lanczos2x"}],"output":{"w":112,"h":184,"rgba":"7d74eacfcbfb03b6e845134fdcac3072477e0df0a25417d6a8c01a723a94cdc2"}},
+"ts_overdrive_8279":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"crop","box":[0,0,55,7070]},{"op":"lanczos2x"}],"output":{"w":110,"h":14140,"rgba":"0a5ae96c84025905c7bf247ed4faf34efc9c3bf666125dc2c6108614f96fb3f1"}},
+"ts_overdrive_8280":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"crop","box":[0,0,56,7070]},{"op":"lanczos2x"}],"output":{"w":112,"h":14140,"rgba":"236488a3ecdecebe94204353c517a2f8c07d2ad24dcd6d6c647b35b7c1a0c927"}},
+"ts_overdrive_8281":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b11"},{"op":"crop","box":[0,0,57,7070]},{"op":"lanczos2x"}],"output":{"w":114,"h":14140,"rgba":"1914a7a14dd0fb79909a96385add66c5412cf1629536500e249e0136682328bf"}}
+}}

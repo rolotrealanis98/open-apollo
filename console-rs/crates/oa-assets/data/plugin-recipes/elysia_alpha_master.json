@@ -1,0 +1,27 @@
+{"recipesSchema":2,"group":"elysia_alpha_master","tier":0,"inputs":{"dll:UAD elysia alpha master.dll":{"kind":"dll","file":"UAD elysia alpha master.dll","root":"powered-plugins","sha256":["5a04896583f7eb4c0c69b2e180666cc4887e0e66f8df96189dd14ba09ce57213"]}},"uses":["elysia_alpha_master__BACKGROUNDSTEREO","elysia_alpha_master__BUTTONBLUE","elysia_alpha_master__BUTTONWHITE","elysia_alpha_master__BUTTONWHITELEFT","elysia_alpha_master__BUTTONWHITERIGHT","elysia_alpha_master__KNOBBIGLEFT","elysia_alpha_master__KNOBBIGRIGHT","elysia_alpha_master__KNOBSMALLLEFT","elysia_alpha_master__KNOBSMALLRIGHT","elysia_alpha_master__METERGRLEFT","elysia_alpha_master__METERGRRIGHT","elysia_alpha_master__METERSOFTCLIP"],"blobs":{
+"b0":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/BACKGROUNDSTEREO.PNG/1031","sha":"af2145d75a087bf7802f784bb81d9d3d2c6dd287192a57be32ee365c46088a82","dec":"png"},
+"b1":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/BUTTONBLUE.PNG/1031","sha":"f8b01ec33d13001b37ab3df94d73f65d2c654d2a0f9c24b29831777df1c0fcc9","dec":"png"},
+"b2":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/BUTTONWHITE.PNG/1031","sha":"086ab666314ec83d91ccf12b9979f85063fad29a6dfa93ed799e581db034f68d","dec":"png"},
+"b3":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/BUTTONWHITELEFT.PNG/1031","sha":"a888325e1b602f5e01234b7fd62322e0a1f9fb5dfc24a0e72918db6f4c5a68ef","dec":"png"},
+"b4":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/BUTTONWHITERIGHT.PNG/1031","sha":"bd1a6d12068d48bad6d95602a32fc1db38bf35a034900b269787419e809aaeca","dec":"png"},
+"b5":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/KNOBBIGLEFT.PNG/1031","sha":"268fd7e974d537c117733a5e9c05a2c66d178b15ee179659b93e4a55ce00e99a","dec":"png"},
+"b6":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/KNOBBIGRIGHT.PNG/1031","sha":"cae85ccd1c7d0c9f30e396a3ad3806fda2cae938d267aa9bca79a9271db270f5","dec":"png"},
+"b7":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/KNOBSMALLLEFT.PNG/1031","sha":"d4df46672718c286dda50d024f5d609ca52d6400d5308751b81691f310dda6c7","dec":"png"},
+"b8":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/KNOBSMALLRIGHT.PNG/1031","sha":"5bce6c2d84acbd35e7fae919f041fcd06f0c4495084e3b184668db7f77c0874d","dec":"png"},
+"b9":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/METERGRLEFT.PNG/1031","sha":"8aa70c6428a22d81a93a4a2c70e0557041b45189f1ca4a88801e8baebf5d7f88","dec":"png"},
+"b10":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/METERGRRIGHT.PNG/1031","sha":"74dc6ea3b107a8001ba09e8b2b270a9de46b0411194bb1bf4a70f0cada7cf906","dec":"png"},
+"b11":{"in":"dll:UAD elysia alpha master.dll","res":"PNG/METERSOFTCLIP.PNG/1031","sha":"6d3b2966d5cbd8691b01fd0d0b4494a9ff478ef40da4a68755e991f7215ca007","dec":"png"}
+},"sprites":{
+"elysia_alpha_master__BACKGROUNDSTEREO":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":2400,"h":658,"rgba":"71b4620176f5f26580e409696ec36616c37b0e2db755bc68a91235e6a9297f1a"}},
+"elysia_alpha_master__BUTTONBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":62,"h":124,"rgba":"a2ca2dc995e8dda24abad48a3e2919b91981f9a1be1e638786db135a07c487df"}},
+"elysia_alpha_master__BUTTONWHITE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":62,"h":124,"rgba":"328cb64bac73f549a7e1e4e576aabcafc558b99536cee818a944692f94d3b690"}},
+"elysia_alpha_master__BUTTONWHITELEFT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":62,"h":124,"rgba":"c45009fedd6265068393e2051ba3934133c5beac86fa3877e4d96c6b6afb590d"}},
+"elysia_alpha_master__BUTTONWHITERIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":62,"h":124,"rgba":"feaa96874eba9686b47e4c358128e4d5c25f5ffaec9df7e3abc45ca0c9171358"}},
+"elysia_alpha_master__KNOBBIGLEFT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":174,"h":10614,"rgba":"2920988980291a195cf946bac95151788ecbb5858697459d7e19defe0112a34f"}},
+"elysia_alpha_master__KNOBBIGRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":174,"h":10614,"rgba":"966c256547b9b84bbbdd8c36074e5d2548b330877f2fae6f5040bcf603e2c46c"}},
+"elysia_alpha_master__KNOBSMALLLEFT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":142,"h":8662,"rgba":"1bc578ff3821270ba40c296cc41170057988686fa85bd3f144bbaafda4d0ef8a"}},
+"elysia_alpha_master__KNOBSMALLRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":142,"h":8662,"rgba":"37aea64f0a248d7e62c417fc9c193db49fad93b3018bab4e3b6c3b7923964b18"}},
+"elysia_alpha_master__METERGRLEFT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b9"}],"output":{"w":144,"h":18228,"rgba":"fb8029aec23d0d6a189ef6cd0b265a8708258368f01c2f27785bc8101ef41c27"}},
+"elysia_alpha_master__METERGRRIGHT":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b10"}],"output":{"w":144,"h":18228,"rgba":"39e5d925c79b5c9a7c14ca02ed8c51c87337ebdac1e604655c39771d5d572fba"}},
+"elysia_alpha_master__METERSOFTCLIP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b11"}],"output":{"w":26,"h":252,"rgba":"c0e0696fc6984e6f496b3d9f1659b6e9913e4269ba74f1f3406dc306b79af38a"}}
+}}

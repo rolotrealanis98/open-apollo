@@ -1,0 +1,25 @@
+{"recipesSchema":2,"group":"century_tube_channel_strip","tier":1,"inputs":{"dll:UAD Century Tube Channel Strip.dll":{"kind":"dll","file":"UAD Century Tube Channel Strip.dll","root":"powered-plugins","sha256":["2c380c1997c543861d5baa8371000f0aaf8f20a2c3f4b38f83b3291e3b31decb"]}},"uses":["tube_cs_background","tube_cs_knob","tube_cs_knob_chickenhead","tube_cs_knob_skirt","tube_cs_knob_sml","tube_cs_led_clip","tube_cs_led_green","tube_cs_needle_GR","tube_cs_needle_VU","tube_cs_switch_horizontal","tube_cs_switch_vertical"],"blobs":{
+"b0":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8321/1033","sha":"ebfc836f2b706bb32162794fc04c4043f04295e142209d9a29f793a716b8f2b6","dec":"png"},
+"b1":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8327/1033","sha":"297ac468b605f47beb1ed2b65dab06ee0a0f9f8de442061b9ab36626d62f161d","dec":"png"},
+"b2":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8322/1033","sha":"53e00e96c18d70a75070f09bae4569133514f2c5a1ee4a34747c2336db2c7781","dec":"png"},
+"b3":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8325/1033","sha":"4d0141af6a5e60b4b3c5b9db405dad4f77518caec8361501d048b87c636661f7","dec":"png"},
+"b4":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8328/1033","sha":"bab7ac304fe00dd94a3e2a7cab577ad6fa296d056a4411f573df3e37b06941bd","dec":"png"},
+"b5":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8334/1033","sha":"c715faa4b8c5807d052363c01b81985210c2ad8d29b7d85cfe70b81814e7e680","dec":"png"},
+"b6":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8330/1033","sha":"c79b50399510abc09e6b18d49887ae44aa86bcf0101ecb44875c48a9a9aa9aea","dec":"png"},
+"b7":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8331/1033","sha":"be123ba8031641954f99d05e17fa5f211879d3e77ad2885ea28fa623fb4a1d16","dec":"png"},
+"b8":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8332/1033","sha":"886dc213e55a532ff7d7a4389c85bdbb279920f838ac9ab66d0a87324fa7505d","dec":"png"},
+"b9":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8329/1033","sha":"a2186eb960c4ca5bfafb9dd63a52b8fa07473b40e59c7daff9441b0c6899e5cf","dec":"png"},
+"b10":{"in":"dll:UAD Century Tube Channel Strip.dll","res":"10/8324/1033","sha":"fae4f0f6d7113ecbb96722464b7501317b2fd634ba051f75c51bc3498541e4f1","dec":"png"}
+},"sprites":{
+"tube_cs_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1492,"h":1016,"rgba":"128ecd692071a21195c133a8443f6d7058587a69ee234734a186468bb87cc039"}},
+"tube_cs_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":194,"h":28034,"rgba":"4871e1753f6e6ca5718b2ae2895f542f61110b3286bab59e4a0f80cb4f5380e0"}},
+"tube_cs_knob_chickenhead":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":164,"h":424,"rgba":"48a9466e8ea49ad82b93434d21215506a1d15cb0c6479e0feb570f9d5e87e2c8"}},
+"tube_cs_knob_skirt":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":258,"h":34848,"rgba":"c3d345daa1cddc41376dcfea6b190503552d889fe9ac0df0b59385a6592fffa1"}},
+"tube_cs_knob_sml":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":146,"h":20960,"rgba":"b06b6b76bfd9f421f7b1fbd756dca91bdee81786106dc42c048b7bf2fa078ca8"}},
+"tube_cs_led_clip":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":62,"h":80,"rgba":"9f80ba5db1a90eaa3c453b54c7db4d89f77a824828e71eb813250b5878f88a54"}},
+"tube_cs_led_green":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":34,"h":120,"rgba":"a51e390c636caa70ef4066696a02ce576a70715b66ab39226bda9a00f90a47fb"}},
+"tube_cs_needle_GR":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":302,"h":19000,"rgba":"73966b6fb007614a6570f204516c44692016b2d9b9109bece13f1b5a09275003"}},
+"tube_cs_needle_VU":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":302,"h":19000,"rgba":"e1fe6543543152e89e93270c5ca26fc2567d258d2badec927dde2f3d0903e982"}},
+"tube_cs_switch_horizontal":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":208,"h":120,"rgba":"a31de9ebd6554fb4044a6b9503c6ba9ce4a5c80e631ddb8650d9a39a486a579c"}},
+"tube_cs_switch_vertical":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":60,"h":308,"rgba":"d3e58e630b00b2cce90559bd242780b6dd87676a49415ed5e6055037ea6a796b"}}
+}}

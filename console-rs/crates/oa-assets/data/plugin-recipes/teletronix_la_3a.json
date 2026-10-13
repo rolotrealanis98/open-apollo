@@ -1,0 +1,19 @@
+{"recipesSchema":2,"group":"teletronix_la_3a","tier":1,"inputs":{"dll:UAD Teletronix LA-3A.dll":{"kind":"dll","file":"UAD Teletronix LA-3A.dll","root":"powered-plugins","sha256":["a4a2e0d68d32fd392b2a44c3575f9987854c70b4571c343b2043e144b7681c65"]}},"uses":["UA_LA-3A_knob","UA_LA-3A_meter-needle_OFF","UA_LA-3A_meter-needle_ON","UA_LA-3A_meter-overlay_OFF","UA_LA-3A_panel","UA_LA-3A_switch_COMP-LIM","UA_LA-3A_switch_METER","UA_LA-3A_trimpot"],"blobs":{
+"b0":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8521/1033","sha":"dac0119e98ccb5fd8bbf59bb8596e646d70e62447e2cb91305372564a75aa378","dec":"png"},
+"b1":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8525/1033","sha":"caf46fd9338ff6aa7b75433b8fa3a1ad5e2cdcafcaaf4fea1fe1191794875a56","dec":"png"},
+"b2":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8526/1033","sha":"a401313f014a1365ba8cff06795553837d55b2289589fba17fed0db8b19c37c0","dec":"png"},
+"b3":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8524/1033","sha":"fd6321e0f6018c06be509517cfe8e7dedfd7f29684b5f5c11009c6f40f253180","dec":"png"},
+"b4":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8520/1033","sha":"ceb75f9f8a175ee64f28425b20a459ae4f483dc6e9233a71ff3fccb31ff42c57","dec":"png"},
+"b5":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8523/1033","sha":"defa13f9cec40221e05ea8096f54dfe2f4dc44386549276514bde4621c18b0f5","dec":"png"},
+"b6":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8522/1033","sha":"705ada049f189bba265cc2c7584144bb9d4da9478f711c50222c5615f80971a5","dec":"png"},
+"b7":{"in":"dll:UAD Teletronix LA-3A.dll","res":"10/8527/1033","sha":"616450c8862cfb770fa458a986266d0364253793de5beebc325ddf2567709bf3","dec":"png"}
+},"sprites":{
+"UA_LA-3A_knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":180,"h":18180,"rgba":"60b3513db6bc9c0901d54e4db8070c0c2011cebb82d436fe33860a380084aed6"}},
+"UA_LA-3A_meter-needle_OFF":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":340,"h":15150,"rgba":"310d7bd904054126af71353ffba8b61b3b2814a8fc6cc807880a443a7415927c"}},
+"UA_LA-3A_meter-needle_ON":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":340,"h":15150,"rgba":"f3a4e4445d2acd8c51056ed150fae3fa0309c5bbdadd606683c504500c088b22"}},
+"UA_LA-3A_meter-overlay_OFF":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":370,"h":204,"rgba":"741c4cc758c60745330f6641b70830113bb04deb203e56ffece2ea6f8faffd84"}},
+"UA_LA-3A_panel":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":1074,"h":440,"rgba":"84eb4678e143c8edd4120696c2315ccb501e7d837b4fe89885ff5b010715c8c1"}},
+"UA_LA-3A_switch_COMP-LIM":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":80,"h":124,"rgba":"f0ff32c9bf1d0b6c005deb21c7c3dcbbc46798c6dfb0f3d28990513bd610c11b"}},
+"UA_LA-3A_switch_METER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":80,"h":186,"rgba":"10c8d0f66882bce207bed0097e3a0a302315a899942c27f1ce28b6ec079c597d"}},
+"UA_LA-3A_trimpot":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":48,"h":4848,"rgba":"ff4d6377a64a823d20671b66d2307fa449367e904ccd8300103492bff03de1ab"}}
+}}

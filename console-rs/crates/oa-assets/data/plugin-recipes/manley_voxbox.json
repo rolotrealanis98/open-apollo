@@ -1,0 +1,31 @@
+{"recipesSchema":2,"group":"manley_voxbox","tier":1,"inputs":{"dll:UAD Manley VOXBOX.dll":{"kind":"dll","file":"UAD Manley VOXBOX.dll","root":"powered-plugins","sha256":["07c989634187c4d02d477e12f52125f1d42a7efaa6433118baef9a638b906ca3"]}},"uses":["voxbox_background","voxbox_knob_lrg","voxbox_knob_lrg_2_step","voxbox_knob_lrg_5_step_L","voxbox_knob_lrg_5_step_R","voxbox_knob_lrg_5_step_UP","voxbox_knob_sml","voxbox_knob_sml_5_step","voxbox_led","voxbox_meter_needle","voxbox_meter_off","voxbox_meter_on","voxbox_switch","voxbox_switch_3p"],"blobs":{
+"b0":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8078/1033","sha":"21964fe4ce7fdb95094acd7ff411dc1f77bc4d500c076bc3b3c8b1c26562a9df","dec":"png"},
+"b1":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8065/1033","sha":"0b3530560a405edf635d576fd34143ceec1f7d94eb5b910ebfe8a8d908020692","dec":"png"},
+"b2":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8079/1033","sha":"f2701525db4908a9cee8d88a2e15ca9575017208a90f09ac5c393ad9f5d15cbd","dec":"png"},
+"b3":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8080/1033","sha":"d57fbf8484f1dc902f5213c7a10211c76eeee44e5ec503469cb18b9352b080f1","dec":"png"},
+"b4":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8063/1033","sha":"32e8a5a6aea90101bbc707107ba05cec1907d627ae4572432ff38bf393ee187d","dec":"png"},
+"b5":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8064/1033","sha":"15ea7eabe57711fb280d6d1f40283d9d09e5997de977f2081b772032743b3779","dec":"png"},
+"b6":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8068/1033","sha":"75896f2dc832334e17ac63fcf4a3873db3f3e29a4eb6f3c6809cfb0b60a77b17","dec":"png"},
+"b7":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8067/1033","sha":"d07479b49d751a36fe368bc10ca24c02b0af9b1b2d7019e769b5da998c9b6b56","dec":"png"},
+"b8":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8069/1033","sha":"58a3d95f443bdb240404f58e8f6940c1eeda8c800dc49730aa9beb9a045660bd","dec":"png"},
+"b9":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8070/1033","sha":"af56c7a74a9ff6613b8acf988ff833c00ddac12bcdc5c8754b8566c0c8f7955c","dec":"png"},
+"b10":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8071/1033","sha":"a028202c46c8227ceb71517683e9b14dd785c0d5b900236fd6e2cf7be0603894","dec":"png"},
+"b11":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8072/1033","sha":"0d1a4226bf3953b21aca505baa4788035bdedcafd5c62968b80ba5a501f50e54","dec":"png"},
+"b12":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8074/1033","sha":"0dc5fea0c668761632979475dca1a7def66cca41f15cfcdac714efb9180f4f77","dec":"png"},
+"b13":{"in":"dll:UAD Manley VOXBOX.dll","res":"10/8073/1033","sha":"a8bd3b99c36e4d5f7875a5af572859ba255ad5ccfce902c03262a3317cef7087","dec":"png"}
+},"sprites":{
+"voxbox_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1900,"h":528,"rgba":"b66678f95eb377a8c8899c802828ad4457375b571ba5fe9b00bddd2ed8559de6"}},
+"voxbox_knob_lrg":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":106,"h":13332,"rgba":"3374608a9efad7009d9417da095d32db4ed23d9713eff9010066f031b38ea676"}},
+"voxbox_knob_lrg_2_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":106,"h":264,"rgba":"ac1389e3d3930ce8f5b52df8199ee848f69392a4fe075b1ff4dbd3f432e66fb8"}},
+"voxbox_knob_lrg_5_step_L":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":106,"h":660,"rgba":"ecde5e256d781743b86d8b6e244578f04f2d4b7b8d08055d811aa9e5ee0c5074"}},
+"voxbox_knob_lrg_5_step_R":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":106,"h":660,"rgba":"83aaf7a7b883da309f4ffa3298055b3cad2d11dd4325d2c42a28408c9ef60236"}},
+"voxbox_knob_lrg_5_step_UP":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":106,"h":660,"rgba":"36c53fed2cc5156c4f0565482787f4762c023129d428053687a33571a9f07ab7"}},
+"voxbox_knob_sml":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":90,"h":6100,"rgba":"6ab7893eb4c3b9af706fd2809c33ad594df2d28dee4d8952603901e470996a75"}},
+"voxbox_knob_sml_5_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":90,"h":500,"rgba":"381e8baaa49f6b24f2c8c15feade53d92f77f1a1a320cc2b294532eb236c649c"}},
+"voxbox_led":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":44,"h":88,"rgba":"2d03b5307fc9442c5c15914bf0b548b3dd789752afd81aec4613d5fbd0ceba48"}},
+"voxbox_meter_needle":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":284,"h":12120,"rgba":"c2d8f5bbc3d50e4770e69b9d6b80d53b458eff6ff166e052825b438c5f597dc0"}},
+"voxbox_meter_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b10"},{"op":"lanczos2x"}],"output":{"w":284,"h":120,"rgba":"7c431623a160859bc050a88db885c307573db8b6778e6dcc1eb148d50f7f37ff"}},
+"voxbox_meter_on":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b11"},{"op":"lanczos2x"}],"output":{"w":284,"h":120,"rgba":"b5cd2a4bb3ecd412af9a8ddfc5d077ac9e1dfc390085b5075b9360615aeb2096"}},
+"voxbox_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b12"},{"op":"lanczos2x"}],"output":{"w":82,"h":188,"rgba":"6048e1ebfff89c1335ea101f79cbdaccfb2602772f2beb82d55591b6d6105626"}},
+"voxbox_switch_3p":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b13"},{"op":"lanczos2x"}],"output":{"w":82,"h":222,"rgba":"d9615398be6c5fc322e04015f9df02ddc7fda8cec3825b3d967e66d5de0aca20"}}
+}}

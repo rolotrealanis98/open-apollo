@@ -1,0 +1,24 @@
+{"recipesSchema":2,"group":"valley_people_dyna_mite","tier":2,"inputs":{"dll:UAD Valley People Dyna-mite.dll":{"kind":"dll","file":"UAD Valley People Dyna-mite.dll","root":"powered-plugins","sha256":["a29073ec13d90ab7680184effe78d631a484983e2f15e920d95fe855cfcdaea0"]}},"uses":["K_STB_power","K_valley_people_dyna_mite_toolbar","STB_Valley_People_Dyna_mite_1001","STB_Valley_People_Dyna_mite_1002","STB_Valley_People_Dyna_mite_1003","STB_Valley_People_Dyna_mite_1004","STB_Valley_People_Dyna_mite_1005","STB_Valley_People_Dyna_mite_1006","STB_Valley_People_Dyna_mite_1007","STB_Valley_People_Dyna_mite_1008","STB_Valley_People_Dyna_mite_1009","STB_Valley_People_Dyna_mite_1010"],"blobs":{
+"b0":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1001/1053","sha":"0791e44474153bad9aca6a662829b91091906781045bc054b5071cf66cc8994d","dec":"png"},
+"b1":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1002/1053","sha":"0582052dd9cb9f1d49d37d3cfe24e1c4bc96a098a3cfecb838048160aacd6fb3","dec":"png"},
+"b2":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1003/1053","sha":"a6822eee20c60f78a544b46d0978f7409de2b12d5af557fb64ab1f0989d06256","dec":"png"},
+"b3":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1004/1053","sha":"7d82b6cc753e569203ea1e86ed8a452f3c5e2a655115e0c7ab8113903df628f8","dec":"png"},
+"b4":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1005/1053","sha":"81a87bd2b52a2e23565581fb974be6757fc87114952a57f0b1f9af1b06e96164","dec":"png"},
+"b5":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1006/1053","sha":"42d6f3dfd254bde3a7215bbf36ad9bebddac6084a0415405a8426a42b1fbbce8","dec":"png"},
+"b6":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1007/1053","sha":"cc1bc82b1f7aeb907414f3dc8de54d10b23d315bdd0e699b01bc5bfd6ec5543c","dec":"png"},
+"b7":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1008/1053","sha":"905b70edbf4aff80445189f44fe1f2bd54f6b6e1b449ab66ce0da505163cff6c","dec":"png"},
+"b8":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1009/1053","sha":"8eed43f6609f3b1d24cae44d2288709fe5dbd0b8864cf751b3e7bf3fefe96fa0","dec":"png"},
+"b9":{"in":"dll:UAD Valley People Dyna-mite.dll","res":"MPACK/1010/1053","sha":"ecba7534e584dba3b8f80cdacbc340e784cb5f20a1ee90e4d0adfa109895224b","dec":"png"}
+},"sprites":{
+"K_valley_people_dyna_mite_toolbar":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"STB_Valley_People_Dyna_mite_1001":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1680,"h":400,"rgba":"4644e177389fd9889a4ea478363c1450da26c1d41c68bf1c485288fa08e4cca9"}},
+"STB_Valley_People_Dyna_mite_1002":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":48,"h":96,"rgba":"8d1b65375e1b01c970f1f3b95026596dca4ee5a31f780a9e1099bd9e4ee6575e"}},
+"STB_Valley_People_Dyna_mite_1003":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":46,"h":546,"rgba":"b95c8495138e33ab3936bdb1cd572903e0c46886bb5695e18e6cf535efa73fba"}},
+"STB_Valley_People_Dyna_mite_1004":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":46,"h":546,"rgba":"3f7671bbeb0e127a843e3500629ceaf160a78e3c8ac8cee46bc4a13c9c5e3db7"}},
+"STB_Valley_People_Dyna_mite_1005":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":370,"h":432,"rgba":"fca1fa7e62c78acd054fbb3025dbdb403f5563a1702452ba1ef7beca078b6a3e"}},
+"STB_Valley_People_Dyna_mite_1006":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":46,"h":546,"rgba":"cb739e92ac56f99f6a4c02b279dc4fbfa430aba3d76516a6a6b12acbb9a2b011"}},
+"STB_Valley_People_Dyna_mite_1007":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":112,"h":16320,"rgba":"c512cc71438d5c02b828e579aeb4f8d22e3e49339e41795b6f84e83348a9e800"}},
+"STB_Valley_People_Dyna_mite_1008":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":112,"h":16320,"rgba":"11b74478d32d9568953d2099578499385cbc4a541cc9dacaf7c18af97faf25cd"}},
+"STB_Valley_People_Dyna_mite_1009":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":112,"h":16320,"rgba":"82c5f2927ac82cc2fab1abf477985ef1754b8b1fa82db6c1af3ed720026b096b"}},
+"STB_Valley_People_Dyna_mite_1010":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":112,"h":16320,"rgba":"0ee198bb54f490000069bef130d77ef8beec701425b0d6984b55df4c976610dc"}}
+}}

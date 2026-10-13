@@ -1,0 +1,17 @@
+{"recipesSchema":2,"group":"4k_buss_compressor","tier":0,"inputs":{"dll:UAD 4K Buss Compressor.dll":{"kind":"dll","file":"UAD 4K Buss Compressor.dll","root":"powered-plugins","sha256":["5c201eb83cdb7f521d5f77d7be6b9df4be95cd9ad200fb3e241de663198935b2"]}},"uses":["4k_buss_compressor_6500","4k_buss_compressor_6501","4k_buss_compressor_6502","4k_buss_compressor_6503","4k_buss_compressor_6504","4k_buss_compressor_6505","4k_buss_compressor_6506_6"],"blobs":{
+"b0":{"in":"dll:UAD 4K Buss Compressor.dll","res":"10/6500/1033","sha":"2f1aa513a7b53c3562572313004909e31736a500c289e60d403aecb378eb403f","dec":"bmp"},
+"b1":{"in":"dll:UAD 4K Buss Compressor.dll","res":"10/6501/1033","sha":"32a37e690d2d1febac92233c256cc85732cf5c05137b6f087b14aa723dfea4e1","dec":"bmp-premultiplied"},
+"b2":{"in":"dll:UAD 4K Buss Compressor.dll","res":"10/6502/1033","sha":"59dab628608ef196db182ed3962e0424908c4bb220cdad1521b8f5fbf505a8c3","dec":"bmp-premultiplied"},
+"b3":{"in":"dll:UAD 4K Buss Compressor.dll","res":"10/6503/1033","sha":"598ade30ef98857f642610c4375de211dcd70f3b37688900d5ef5a3075a2aeda","dec":"bmp-premultiplied"},
+"b4":{"in":"dll:UAD 4K Buss Compressor.dll","res":"10/6504/1033","sha":"d902c1e93965df367fdf1ca05d2844be7e701b1dc6c1a17cb1cedc6b1e2a35d1","dec":"bmp-premultiplied"},
+"b5":{"in":"dll:UAD 4K Buss Compressor.dll","res":"10/6505/1033","sha":"8986f7b7091b169d22a364f3a2e8e9b4dd91e5ae4fb047a1543c996829c154ce","dec":"bmp"},
+"b6":{"in":"dll:UAD 4K Buss Compressor.dll","res":"10/6506/1033","sha":"8b15635a1ef356189308d15ee5550751e5821808f4b82d84b987b4a5c25e7200","dec":"bmp-premultiplied"}
+},"sprites":{
+"4k_buss_compressor_6500":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,300,415]},{"op":"lanczos2x"}],"output":{"w":600,"h":830,"rgba":"301fd8b758ae0e3a0535f6ec2c0fe9d62c5bee8b0fa5ba856aa48c80bd9337fb"}},
+"4k_buss_compressor_6501":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,70,3721]},{"op":"lanczos2x"}],"output":{"w":140,"h":7442,"rgba":"4785e1f6aa3ccf198e27dce3f31e6d1901357380bfd263f919dee079468842f5"}},
+"4k_buss_compressor_6502":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,70,183]},{"op":"lanczos2x"}],"output":{"w":140,"h":366,"rgba":"c617ef144a8246a8161c3c612bdc1003d3199342ed0418b9bb386f49899983ee"}},
+"4k_buss_compressor_6503":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,70,366]},{"op":"lanczos2x"}],"output":{"w":140,"h":732,"rgba":"feec61461a0b064c3008a876250f8ed0fc4384fbeb8403301c9bcac4be3cae73"}},
+"4k_buss_compressor_6504":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,80,305]},{"op":"lanczos2x"}],"output":{"w":160,"h":610,"rgba":"0153f95c3bfd92dc21244abd7de3056e17004f551195263cbba0b157ba2f20b6"}},
+"4k_buss_compressor_6505":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,126,3904]},{"op":"lanczos2x"}],"output":{"w":252,"h":7808,"rgba":"99a2f02cea4f770e5f3631b953998f84e659cc46de096574a03b20c1e1010950"}},
+"4k_buss_compressor_6506_6":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,75,75]}],[{"op":"load","blob":"b6"},{"op":"crop","box":[0,75,75,75]}]]},{"op":"lanczos2x"}],"output":{"w":150,"h":300,"rgba":"265de4ca44ab2c05732f0b024ace44009728f95dbfeb63fe07a81020f597ec7b"}}
+}}

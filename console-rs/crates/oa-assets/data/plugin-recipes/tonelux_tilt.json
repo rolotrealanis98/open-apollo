@@ -1,0 +1,24 @@
+{"recipesSchema":2,"group":"tonelux_tilt","tier":2,"inputs":{"dll:UAD Tonelux Tilt Live.dll":{"kind":"dll","file":"UAD Tonelux Tilt Live.dll","root":"powered-plugins","sha256":["0c6160f561357fd5da9c93bb76458882679fa27325a002255668cbedd685b646"]},"dll:UAD Tonelux Tilt.dll":{"kind":"dll","file":"UAD Tonelux Tilt.dll","root":"powered-plugins","sha256":["359c1d2c326bb43479b69db1249b86c988a71786542d8e21d9851dae405a4c16"]}},"uses":["K_STB_power","K_tonelux_tilt_toolbar","STB_Tonelux_Tilt_1000","STB_Tonelux_Tilt_1001","STB_Tonelux_Tilt_1002","STB_Tonelux_Tilt_1003","STB_Tonelux_Tilt_1004","STB_Tonelux_Tilt_1005","STB_Tonelux_Tilt_1006","STB_Tonelux_Tilt_1007","STB_Tonelux_Tilt_1008","STB_Tonelux_Tilt_1009"],"blobs":{
+"b0":{"in":"dll:UAD Tonelux Tilt Live.dll","res":"MPACK/1000/1053","sha":"df6b50e3df3424e29078627f0f1417f7baca1b5a8e3a7edd7d02e93cd688c55d","dec":"png"},
+"b1":{"in":"dll:UAD Tonelux Tilt.dll","res":"MPACK/1001/1053","sha":"7ebe060ae8d84bcf815fc6c5c8b988cf6ea2c1de1e5eb61e46001e369b44eeca","dec":"png"},
+"b2":{"in":"dll:UAD Tonelux Tilt Live.dll","res":"MPACK/1004/1053","sha":"e6be1045337f60f3d599a14b8137ea96e8cbabafcaf6fdd42391bd412a96d570","dec":"png"},
+"b3":{"in":"dll:UAD Tonelux Tilt.dll","res":"MPACK/1003/1053","sha":"d146c9e9c13169b3fe8c41cce2a3ff58695caf3bfc74f906cbca0d43f5169429","dec":"png"},
+"b4":{"in":"dll:UAD Tonelux Tilt Live.dll","res":"MPACK/1005/1053","sha":"85df9a6c13251fbf282b3e6f8c1ed2d96e1b3131e8acc2a19626e287063e8f7e","dec":"png"},
+"b5":{"in":"dll:UAD Tonelux Tilt Live.dll","res":"MPACK/1006/1053","sha":"c59eb408c56403fcdb793519be84855dea8007dd95c901150f409acb198f9579","dec":"png"},
+"b6":{"in":"dll:UAD Tonelux Tilt.dll","res":"MPACK/1006/1053","sha":"0e4bf9fd601f1dab968561001e85c1ebf70548445db8e7966dfc537c0b08b83c","dec":"png"},
+"b7":{"in":"dll:UAD Tonelux Tilt Live.dll","res":"MPACK/1008/1053","sha":"0f401379f41c201a70e8fa7eef7d45ffaa198d7dd5690b5004bdbfb40398366e","dec":"png"},
+"b8":{"in":"dll:UAD Tonelux Tilt Live.dll","res":"MPACK/1009/1053","sha":"505bd5d40110c86891e4836112a0bb5a35b6321ab07368cd22bc3a7446e805ed","dec":"png"},
+"b9":{"in":"dll:UAD Tonelux Tilt Live.dll","res":"MPACK/1010/1053","sha":"e6fda9fdceab77b1d7397b46e8d2848820177318ac4ec62b8b270f79b87fb519","dec":"png"}
+},"sprites":{
+"K_tonelux_tilt_toolbar":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"STB_Tonelux_Tilt_1000":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":126,"h":252,"rgba":"3c987852724edd481aca5b6d7e3ea5120f14a3deb98a4e678eb994b6867fb696"}},
+"STB_Tonelux_Tilt_1001":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":1296,"h":392,"rgba":"3c4032430879e11a233f89630ccc4c216f70fe45013ef5d6497239ec0c7acceb"}},
+"STB_Tonelux_Tilt_1002":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":126,"h":252,"rgba":"3b7b5c6c8e372ae62a4ba71b02c15593d6e71d4356610bdd615eeb2bf3cf0814"}},
+"STB_Tonelux_Tilt_1003":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":130,"h":17040,"rgba":"7b4489bb5c2d789f4d007e42eb59f4ddff63c211283686b29e38f0ec2c5cd37e"}},
+"STB_Tonelux_Tilt_1004":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":130,"h":16320,"rgba":"0769071016f34bdcc745bb354f01123d6b98142cc12c25f441555235beee6ad9"}},
+"STB_Tonelux_Tilt_1005":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":130,"h":16320,"rgba":"4a05ed6f56703c685426852a8fc8ea6ffb79e8dc51267bf5f78b10f2efb16eaf"}},
+"STB_Tonelux_Tilt_1006":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":126,"h":252,"rgba":"e17959d05ef1e3348bb639f10624ec83e362f7dadb9eb609e5a11d019c5322c2"}},
+"STB_Tonelux_Tilt_1007":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":120,"h":252,"rgba":"c7cee813f19d4448d705d11e689f3cd9f1f11eaea9bde43c8658b113d30f767d"}},
+"STB_Tonelux_Tilt_1008":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":130,"h":17040,"rgba":"eb1332926cc49de651d7d1b59cf19f3c4f09c644c6b32115a8a62d56064b2451"}},
+"STB_Tonelux_Tilt_1009":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":120,"h":252,"rgba":"704b61129a7c49748b161dac46b82bfe9965fcef77959fad7b8d54e81890cce7"}}
+}}

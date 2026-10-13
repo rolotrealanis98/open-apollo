@@ -1,0 +1,21 @@
+{"recipesSchema":2,"group":"cooper_time_cube","tier":1,"inputs":{"dll:UAD Cooper Time Cube.dll":{"kind":"dll","file":"UAD Cooper Time Cube.dll","root":"powered-plugins","sha256":["941f255cea53fd58b74a92c506233c0ca2c5497462e6ece349c34102e2d96bc3"]}},"uses":["cooper_time_cube_8680","cooper_time_cube_8681","cooper_time_cube_8682","cooper_time_cube_8683","cooper_time_cube_8684","cooper_time_cube_8685","cooper_time_cube_8686","cooper_time_cube_8688","cooper_time_cube_8690"],"blobs":{
+"b0":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8680/1033","sha":"1e1f5bcf46c1cc31e1fa8d57b4c99817c0f6d50b1f89af6d37760885a4331dd0","dec":"png"},
+"b1":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8681/1033","sha":"fa0915f7963ea611e5f63540c8089d4d09062499037c46e4f28a7a445cdfd778","dec":"png"},
+"b2":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8682/1033","sha":"b53a2dd1f69ca4d3d664ba754ce395046476f13b9de2217e9d042263978e88ec","dec":"png"},
+"b3":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8683/1033","sha":"7599ccddfccbd223af55b90c0800c2ec92b8a5cf90c3c1e86b82289ce6bdd45e","dec":"png"},
+"b4":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8684/1033","sha":"b931b0ebaf6b72da3147ab73969c5c9626f4a89772bd2f9376512623ed3a2a4d","dec":"png"},
+"b5":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8685/1033","sha":"1eee3cd17dc782776504de8b805756168e54603f7af7c38393b5c84236345182","dec":"png"},
+"b6":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8686/1033","sha":"3916592896cb043b38294eb29a354d933bfc5e6a64c878a4cf2d87bc317763d1","dec":"png"},
+"b7":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8688/1033","sha":"1eccf0892860ab372e75fb9237df41bc69c57c8f19b83a8d45045b2f45aa1691","dec":"png"},
+"b8":{"in":"dll:UAD Cooper Time Cube.dll","res":"10/8690/1033","sha":"655dbcfbb83f3661d7decd69ca0a94e7f3fc0e5038dfb1eff6f8ef1eda521fbf","dec":"png"}
+},"sprites":{
+"cooper_time_cube_8680":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,950,175]},{"op":"lanczos2x"}],"output":{"w":1900,"h":350,"rgba":"d775f64f3ea00eaf982580dc9560d0ca202da1318d9a9e7ad6cd332729cef28b"}},
+"cooper_time_cube_8681":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,56,5656]},{"op":"lanczos2x"}],"output":{"w":112,"h":11312,"rgba":"7e4d22e0cf2e847a4b6768f96aeee74131f69e8fceda6ac5a2389e71d61bf1eb"}},
+"cooper_time_cube_8682":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,36,72]},{"op":"lanczos2x"}],"output":{"w":72,"h":144,"rgba":"a4a83effb0cba0c3b82e51eba474399cfbeeeee6648c0e5200d517b362648cc3"}},
+"cooper_time_cube_8683":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,36,72]},{"op":"lanczos2x"}],"output":{"w":72,"h":144,"rgba":"26f55365082024b20848e36f2045038f32a1c50efc32539bc51b61c5d39d21d4"}},
+"cooper_time_cube_8684":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"crop","box":[0,0,36,72]},{"op":"lanczos2x"}],"output":{"w":72,"h":144,"rgba":"0fe95fdc648ba553850ee9eb4e183fba868597bd75e7d5d365f704360cc1989b"}},
+"cooper_time_cube_8685":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"crop","box":[0,0,36,72]},{"op":"lanczos2x"}],"output":{"w":72,"h":144,"rgba":"b8eb4ef0d743dc0ab24d59c589ddff94dfc72e875b4802cbfec7884ab6d5cbee"}},
+"cooper_time_cube_8686":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"crop","box":[0,0,130,6666]},{"op":"lanczos2x"}],"output":{"w":260,"h":13332,"rgba":"061296f4209049e4f2d1e7ed02271590bfcf955852bf363295cb9c94b0b0938f"}},
+"cooper_time_cube_8688":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"crop","box":[0,0,148,82]},{"op":"lanczos2x"}],"output":{"w":296,"h":164,"rgba":"134ef3760d0834b6704130fe27b0cd76d978f3e7b72c2cbb402fbd12837f5de8"}},
+"cooper_time_cube_8690":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"crop","box":[0,0,56,5712]},{"op":"lanczos2x"}],"output":{"w":112,"h":11424,"rgba":"b1f1fbdd9bfd7fc1e8d1930750d4c43bc14227be78509d8ce5c61b9ae0ad1046"}}
+}}

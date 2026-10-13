@@ -1,0 +1,26 @@
+{"recipesSchema":2,"group":"vertigo_vsc_2","tier":1,"inputs":{"dll:UAD Vertigo VSC-2.dll":{"kind":"dll","file":"UAD Vertigo VSC-2.dll","root":"powered-plugins","sha256":["8e263003fe902bc0d88be58c448d749f2e3b98da3f8e7d8da575d7e0a6fcc97d"]}},"uses":["Q_vertigo_vsc_2__KNOBSTEPPED_mono140_086cb9","Q_vertigo_vsc_2__KNOB_mono140_086cb9","Q_vertigo_vsc_2__SWITCHBLACK_mono140_086cb9","Q_vertigo_vsc_2__SWITCHBLUE_mono140_086cb9","Q_vertigo_vsc_2__SWITCHRED_mono140_086cb9","vertigo_vsc_2__BACKGROUND","vertigo_vsc_2__KNOB","vertigo_vsc_2__KNOBSTEPPED","vertigo_vsc_2__LAMP","vertigo_vsc_2__METERGR","vertigo_vsc_2__SWITCHBLACK","vertigo_vsc_2__SWITCHBLUE","vertigo_vsc_2__SWITCHPOWER","vertigo_vsc_2__SWITCHRED"],"blobs":{
+"b0":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/KNOBSTEPPED.PNG/1033","sha":"9942d7ea0f32e5626377f18cb8046ad1377960a9df8f4df562de0b498fa7dad4","dec":"png"},
+"b1":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/KNOB.PNG/1033","sha":"e50fb186b773332b1ca6e9ab1de83100d7a7fc82dfffc6e9fdc5890071301d95","dec":"png"},
+"b2":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/SWITCHBLACK.PNG/1033","sha":"020e0150790e9d5b9058e0ca73a6c192eebadb3a2531d98180bf923e8ac445b9","dec":"png"},
+"b3":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/SWITCHBLUE.PNG/1033","sha":"86471dd528e133b2f9b6024b3451408e0c56addd1ea450a7c0ebcccf35d5d505","dec":"png"},
+"b4":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/BACKGROUND.PNG/1033","sha":"90181cdc527559e01ed9140b12249f8e147010d5264f087e586f5172b7baa696","dec":"png"},
+"b5":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/LAMP.PNG/1033","sha":"fc2e32f9fba81f1742bc3e00fbbaab6c11c62da54f52d89e346fe23aabd0a7a2","dec":"png"},
+"b6":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/METERGR.PNG/1033","sha":"91a31c0ee3d9879ace01a3aac7a8c768df7f3b48868c9216195f2b018da35943","dec":"png"},
+"b7":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/SWITCHPOWER.PNG/1033","sha":"7a128c04d331fd47308505093e5279afcb60995811dd231c255ec1d064ba813f","dec":"png"},
+"b8":{"in":"dll:UAD Vertigo VSC-2.dll","res":"PNG/SWITCHRED.PNG/1033","sha":"9037c05709348f48222642dc3804ec2587e67c71de491ec032ef81cd801b3a69","dec":"png"}
+},"sprites":{
+"Q_vertigo_vsc_2__KNOBSTEPPED_mono140_086cb9":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"}],"output":{"w":154,"h":924,"rgba":"ac8f19eaf834ea0b1ad62474d86d320f515ef5048c051a4282213b61ebd9ce26"}},
+"Q_vertigo_vsc_2__KNOB_mono140_086cb9":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"}],"output":{"w":154,"h":9394,"rgba":"28dbc22e38d8a0015221a3f646e2c2a85f97bb050a85ba58c5096b497c227145"}},
+"Q_vertigo_vsc_2__SWITCHBLACK_mono140_086cb9":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"}],"output":{"w":72,"h":236,"rgba":"0d77b26fa349423d7e27ac6ac77f248a887ee6ed8173f5ffcc9b11ac179bc80b"}},
+"Q_vertigo_vsc_2__SWITCHBLUE_mono140_086cb9":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"}],"output":{"w":72,"h":354,"rgba":"365100b5c2196026b3240f97bbb98df058a1b7281043af1f4f38b5477f68be84"}},
+"Q_vertigo_vsc_2__SWITCHRED_mono140_086cb9":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"}],"output":{"w":72,"h":236,"rgba":"0d77b26fa349423d7e27ac6ac77f248a887ee6ed8173f5ffcc9b11ac179bc80b"}},
+"vertigo_vsc_2__BACKGROUND":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":2048,"h":372,"rgba":"28581f436bf1fcf324e2938ccb1da14d5dc3310f7a652491ee474c0f2474b0a1"}},
+"vertigo_vsc_2__KNOB":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":154,"h":9394,"rgba":"28dbc22e38d8a0015221a3f646e2c2a85f97bb050a85ba58c5096b497c227145"}},
+"vertigo_vsc_2__KNOBSTEPPED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":154,"h":924,"rgba":"ac8f19eaf834ea0b1ad62474d86d320f515ef5048c051a4282213b61ebd9ce26"}},
+"vertigo_vsc_2__LAMP":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":148,"h":296,"rgba":"55fe44cf6379252fe4aba1cba092acf942a8c425a52eba56ab8243f79403ef32"}},
+"vertigo_vsc_2__METERGR":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":166,"h":5612,"rgba":"7a0c0101f03425580ea9aae223a94d6e6048a286eb29ef7af83bb0a56dd549c7"}},
+"vertigo_vsc_2__SWITCHBLACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":72,"h":236,"rgba":"0d77b26fa349423d7e27ac6ac77f248a887ee6ed8173f5ffcc9b11ac179bc80b"}},
+"vertigo_vsc_2__SWITCHBLUE":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":72,"h":354,"rgba":"365100b5c2196026b3240f97bbb98df058a1b7281043af1f4f38b5477f68be84"}},
+"vertigo_vsc_2__SWITCHPOWER":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":92,"h":240,"rgba":"40ad4ed600e8633d7e8f4c394d1bbb77a591bfeb4d93a60932eec1f67ac54903"}},
+"vertigo_vsc_2__SWITCHRED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":72,"h":236,"rgba":"fae7f652d02254830600e3db797ff72cb47bd0de2e9f3baf1e43c8b4531d3fde"}}
+}}

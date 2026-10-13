@@ -1,0 +1,7 @@
+{"recipesSchema":2,"group":"pultec_hlf_3c","tier":1,"inputs":{"dll:UAD Pultec HLF-3C.dll":{"kind":"dll","file":"UAD Pultec HLF-3C.dll","root":"powered-plugins","sha256":["bc6eeb2dc728bfaccd203d1e96c8f2fa6a60a01459ee896bb30af28fa039053a"]}},"uses":["pultec_freq_switch_11_step","pultec_hlf_3c_back","pultec_in_switch_V1"],"blobs":{
+"b0":{"in":"dll:UAD Pultec HLF-3C.dll","res":"10/7550/1033","sha":"c8a294fb98d078b105d2ea6da5574f56bd079b6044418a79a2da1c1f0cbbf497","dec":"png"},
+"b1":{"in":"dll:UAD Pultec HLF-3C.dll","res":"10/7548/1033","sha":"0ee0be22165e551a3b58378033d24e16556ae6c9a7d6d5106390308185d79da9","dec":"png"}
+},"sprites":{
+"pultec_freq_switch_11_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":240,"h":2728,"rgba":"26205c63247cc4df168411b5097fde94357ced773ff4ce1d7fecb69eea53a975"}},
+"pultec_hlf_3c_back":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":1900,"h":376,"rgba":"699cd853c21ab867d88e0ebc772d4966c59e0bc75f8d11a235da4e1273d43a9b"}}
+}}

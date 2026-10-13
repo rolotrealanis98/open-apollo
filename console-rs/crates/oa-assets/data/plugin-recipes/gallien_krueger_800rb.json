@@ -1,0 +1,24 @@
+{"recipesSchema":2,"group":"gallien_krueger_800rb","tier":2,"inputs":{"dll:UAD Ampeg B15N.dll":{"kind":"dll","file":"UAD Ampeg B15N.dll","root":"powered-plugins","sha256":["8eca571d0f4875a148991d0596c1ec1f715dad7a8d78135c8af439ca67289ea3"]},"dll:UAD Gallien Krueger 800RB.dll":{"kind":"dll","file":"UAD Gallien Krueger 800RB.dll","root":"powered-plugins","sha256":["1155c8a6bf762bda9c8d20f597983a1aba3f71f87a7b93d8a57b6ff5422a24cb"]}},"uses":["J_gallien_krueger_800rb_background_tb","J_gallien_krueger_800rb_tb_bank","J_gallien_krueger_800rb_tb_power","J_gallien_krueger_800rb_tb_rack","gallien_krueger_800rb__BUTTON","gallien_krueger_800rb__LED","gallien_krueger_800rb__LEDGREEN","gallien_krueger_800rb__POTI","gallien_krueger_800rb__POWERSWITCH","gallien_krueger_800rb__RACK","gallien_krueger_800rb__SWITCH","gallien_krueger_800rb__SWITCH3POS"],"blobs":{
+"b0":{"in":"dll:UAD Ampeg B15N.dll","res":"PNG/TOOLBARRACKBNT.PNG/1033","sha":"d45dea7be38754e283eafdea8dcaecb869695044d8ead47be83472f397465b13","dec":"png"},
+"b1":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/BUTTON.PNG/1033","sha":"3c32f897b2a8f43c8de7c82415c5d2590e29029ce7db6fd1771178313fadd31d","dec":"png"},
+"b2":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/LED.PNG/1033","sha":"16edae17a332264619caf2037eff0f4b249f8be4b6bd0f81acd8a47f44217aa4","dec":"png"},
+"b3":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/LEDGREEN.PNG/1033","sha":"0408bd398a2216324be2f2437ca28acdceb43191fc9f87da44a133882b4b854b","dec":"png"},
+"b4":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/POTI.PNG/1033","sha":"27410e5ed81a9fbc736a680cf34349c0623e23c8de9f05e7109c4cb641de5107","dec":"png"},
+"b5":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/POWERSWITCH.PNG/1033","sha":"88b3ec2744041483556b1d467d71bbd24166e38d78c022b2be0f2a60dce8050a","dec":"png"},
+"b6":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/RACK.PNG/1033","sha":"483f7c20ca0c25bc8b72d1a30bbf80888c945264e0d498289c212a258db11e4e","dec":"png"},
+"b7":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/SWITCH.PNG/1033","sha":"b577ef98b4bf8fb6afafda4659c4e7c0aa7e288cab6004b07f127b8bc43d2195","dec":"png"},
+"b8":{"in":"dll:UAD Gallien Krueger 800RB.dll","res":"PNG/SWITCH3POS.PNG/1033","sha":"491107943bbfd8e79c320dbc9ae1949aa291dd1e0edb45868d53cecc67439676","dec":"png"}
+},"sprites":{
+"J_gallien_krueger_800rb_background_tb":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_gallien_krueger_800rb_tb_bank":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_gallien_krueger_800rb_tb_power":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
+"J_gallien_krueger_800rb_tb_rack":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b0"}],"output":{"w":110,"h":96,"rgba":"efd4fee22dd4549a4981fc60164d82e1a1d9f522f8c9f3be11298a733f02766b"}},
+"gallien_krueger_800rb__BUTTON":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b1"}],"output":{"w":66,"h":84,"rgba":"85ca526c5f0518d35e139fecebda1ee951b78c4b19bd4d29a2a5af9476ec5a62"}},
+"gallien_krueger_800rb__LED":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b2"}],"output":{"w":16,"h":37,"rgba":"35cfed9ffdbd88874c39c676952077c0c245744ed629155f9b94583ccfca1450"}},
+"gallien_krueger_800rb__LEDGREEN":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b3"}],"output":{"w":16,"h":37,"rgba":"c983f32df14539dab5d224788bb5ea24b03d9ac497059e506c838f0c813b73b5"}},
+"gallien_krueger_800rb__POTI":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b4"}],"output":{"w":104,"h":6344,"rgba":"8544feb8ca5fe06b2dc78b36f7392d49f43ad2dfd0c1c913010b62c0e033a3ba"}},
+"gallien_krueger_800rb__POWERSWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b5"}],"output":{"w":70,"h":260,"rgba":"deedcdb0931bd3e385a3cb36594156e2845350812d84ee57e799ffe2a1eef56b"}},
+"gallien_krueger_800rb__RACK":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b6"}],"output":{"w":2048,"h":709,"rgba":"9f27cf07667f89797cff0c2e78505d08fcdddb2d174d398b518838c4d3894bfd"}},
+"gallien_krueger_800rb__SWITCH":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b7"}],"output":{"w":58,"h":116,"rgba":"1d4c750d1a21020d7fd16ea285ce68c4801e13588e7fdcee3a04fcf019cde97f"}},
+"gallien_krueger_800rb__SWITCH3POS":{"status":"verified","basis":"exact","build":[{"op":"load","blob":"b8"}],"output":{"w":58,"h":174,"rgba":"737cee0cd6a4b9318064f8bf802175aa8aace11bd34e6652f676d703ff49be6d"}}
+}}

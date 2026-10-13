@@ -1,0 +1,11 @@
+{"recipesSchema":2,"group":"little_labs_ibp","tier":1,"inputs":{"dll:UAD Little Labs IBP.dll":{"kind":"dll","file":"UAD Little Labs IBP.dll","root":"powered-plugins","sha256":["8c96809a03effe32646a469779fb0a6027881afde4a807a8d263e5a0cdb4eb93"]}},"uses":["I_little_labs_ibp_bg","little_labs_ibp_6101","little_labs_ibp_6102_2","little_labs_ibp_6103"],"blobs":{
+"b0":{"in":"dll:UAD Little Labs IBP.dll","res":"10/6100/1033","sha":"14792d5ef42ed622f3342dfddc3edfc49c01e2a85ec8819bb70c5560dc64e095","dec":"bmp"},
+"b1":{"in":"dll:UAD Little Labs IBP.dll","res":"10/6101/1033","sha":"49c74943571520cacc75c92b13072527dcb1ebc4c8de707bafb74260c9dfc738","dec":"bmp-premultiplied"},
+"b2":{"in":"dll:UAD Little Labs IBP.dll","res":"10/6102/1033","sha":"a69bfc7f275584bddcf1d3f6be65d8311dad6aa509deaf03ade8321b3cd25c1a","dec":"bmp-premultiplied"},
+"b3":{"in":"dll:UAD Little Labs IBP.dll","res":"10/6103/1033","sha":"e37a6b293670824cf6a97f18e176b867b8f3966c4a6915a3fccda79dc9936d9c","dec":"bmp-premultiplied"}
+},"sprites":{
+"I_little_labs_ibp_bg":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"crop","box":[0,0,466,166]},{"op":"lanczos2x"}],"output":{"w":932,"h":332,"rgba":"3164859df5bd121bc025f011b2313c699f5cd6dae6b8e3fd52264eb5dcd02cde"}},
+"little_labs_ibp_6101":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[0,0,82,6480]},{"op":"lanczos2x"}],"output":{"w":164,"h":12960,"rgba":"fffd4ec81eb135cc1f8e21f18c8f6990cc9e3e7599ef083712cd7913972a148a"}},
+"little_labs_ibp_6102_2":{"status":"verified","basis":"derived","build":[{"op":"stack","parts":[[{"op":"load","blob":"b2"},{"op":"crop","box":[0,0,31,30]}],[{"op":"load","blob":"b2"},{"op":"crop","box":[0,30,31,30]}]]},{"op":"lanczos2x"}],"output":{"w":62,"h":120,"rgba":"ef50f4c0e358becac72f4ad7abbad10b4e6c18ec63f638d99d259d27f6f237d3"}},
+"little_labs_ibp_6103":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b3"},{"op":"crop","box":[0,0,18,36]},{"op":"lanczos2x"}],"output":{"w":36,"h":72,"rgba":"558b27fa0d43e26af037b8ccfdbae49ec566a47f5e89bfd4c31411b42ccafb43"}}
+}}

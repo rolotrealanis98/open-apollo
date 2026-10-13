@@ -1,0 +1,25 @@
+{"recipesSchema":2,"group":"manley_massive_passive","tier":1,"inputs":{"dll:UAD Manley Massive Passive.dll":{"kind":"dll","file":"UAD Manley Massive Passive.dll","root":"powered-plugins","sha256":["f5994db7dcbb8ad4612dfa28c275eaa33b91bf30b2877f738f63ceb77d1f0259"]}},"uses":["massivepassive_background","massivepassive_knob_lrg","massivepassive_knob_lrg_11_step","massivepassive_knob_sml","massivepassive_knob_sml_2_step","massivepassive_knob_sml_6_step","massivepassive_push_switch","massivepassive_push_switch_pwr_off","massivepassive_switch","massivepassive_switch_3p","massivepassive_switch_3p_pwr_off"],"blobs":{
+"b0":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6913/1033","sha":"eb1211f194dafda34d112461899486fd2f44e28d0abbf96f8d14da9e66dcdd6d","dec":"png"},
+"b1":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6918/1033","sha":"e706043f49027b4a7e7099238d45c3c475c5f285cc0bc3d31edf171320ca37db","dec":"png"},
+"b2":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/8136/1033","sha":"3f8292e12a1e816d0d2bcbed81da70b5791f5cbfcd965b3f9db7a254f30ee048","dec":"png"},
+"b3":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6919/1033","sha":"72e54d4650b17d5ab12ca9de0dfbaecbf89be716c98b1748bdbfd76a133e3a36","dec":"png"},
+"b4":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6921/1033","sha":"0ce8b96113f236c127252e18cc60dbb45e0ccfd53e97de7249b10053f9da81ed","dec":"png"},
+"b5":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6920/1033","sha":"c54302b2da4f02528e4a58ee4fd29636db0daf3a23407d053a20051ea36b2228","dec":"png"},
+"b6":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6926/1033","sha":"0cd5272691c9e95b4cf415d08d12981989e4c7145192b18d56cc6eb575ec682b","dec":"png"},
+"b7":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6927/1033","sha":"ea535cf66539289d0c6c4e4f04b17fd6f09ec34b8a40ea3fac3cfb847bff9cf7","dec":"png"},
+"b8":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6925/1033","sha":"318e502ae1f9b58d3e26c67b67eb76aee3486a43bf6be35efe8cd6c6e2c782cc","dec":"png"},
+"b9":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6922/1033","sha":"54a1746062de4272aefbee637b36e93f53ad3bf002cc518e43cd4b6a99be6f73","dec":"png"},
+"b10":{"in":"dll:UAD Manley Massive Passive.dll","res":"10/6923/1033","sha":"aaa3bcca510685fb0101d68f0d6ca3e0b0a11518efca575a7c681a1dde30fdd8","dec":"png"}
+},"sprites":{
+"massivepassive_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":1900,"h":528,"rgba":"866c7d97a815fcedd02845e8eda1100711598c8f9e99c19bd604e4c0e93c098d"}},
+"massivepassive_knob_lrg":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":106,"h":13332,"rgba":"0456049a8bb6b585027144c323a3b0ab9060261f6a9e9d8d55b471a6a3a44408"}},
+"massivepassive_knob_lrg_11_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b2"},{"op":"lanczos2x"}],"output":{"w":106,"h":1386,"rgba":"6284b25f932dcc408255022a33273d052069a4d85c0246748bc588655b3696a5"}},
+"massivepassive_knob_sml":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b3"},{"op":"lanczos2x"}],"output":{"w":90,"h":6100,"rgba":"60b448631977b2b22a872afca74ceb404f3d9ef5041843f693a460f1af9fbf59"}},
+"massivepassive_knob_sml_2_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b4"},{"op":"lanczos2x"}],"output":{"w":90,"h":200,"rgba":"d89f320182c2f74f096ebb08da1e8a7c0cc33acba74c7dc6c718f769ceed0e61"}},
+"massivepassive_knob_sml_6_step":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b5"},{"op":"lanczos2x"}],"output":{"w":90,"h":600,"rgba":"d6f706ff9bccb851f6a5705f89d71bbf8a618025d09ab7ac0d5d77c2f78abf89"}},
+"massivepassive_push_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b6"},{"op":"lanczos2x"}],"output":{"w":58,"h":112,"rgba":"83f4affd38dbe8fe2aaba5a084e5c8adbf8b444ff755658e5c4b1620d2b8d925"}},
+"massivepassive_push_switch_pwr_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b7"},{"op":"lanczos2x"}],"output":{"w":58,"h":112,"rgba":"aa0eb175ca4aed83cb4a536b1597fce17c48715070d47c82a9240526bcf6e70c"}},
+"massivepassive_switch":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b8"},{"op":"lanczos2x"}],"output":{"w":34,"h":124,"rgba":"5e69f6f1cad3a958e4146297df9276180cfade87cb62d912b56dab87d5fe4c61"}},
+"massivepassive_switch_3p":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b9"},{"op":"lanczos2x"}],"output":{"w":58,"h":210,"rgba":"3b8cfd9678bc7137e9ffae0c3f57160972a08eac14540a206eb9f5233e7dd827"}},
+"massivepassive_switch_3p_pwr_off":{"status":"fallback","basis":"equivalent","build":[{"op":"stack","parts":[[{"op":"load","blob":"b10"},{"op":"crop","box":[0,0,29,35]}],[{"op":"load","blob":"b9"},{"op":"crop","box":[0,35,29,35]}],[{"op":"load","blob":"b10"},{"op":"crop","box":[0,70,29,35]}]]},{"op":"lanczos2x"}],"output":{"w":58,"h":210,"rgba":"9fcb5f13fc361082216a2e5e0ee0ff085b28f68ec3f033332bbc1bd8944e1679"}}
+}}
