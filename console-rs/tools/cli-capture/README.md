@@ -25,8 +25,8 @@ calls scalar selector 0 after IOServiceOpen. Omitting it produced
 `0xe00002c2`; the struct framing itself was correct.
 
 `cli_calls.d` is a prepared passive template for a **selected process** that
-uses the inspected IOConnectCallStructMethod ABI. It prints selectors 173–175
-and bounded command/response strings for at most 10 seconds. It does not
+uses the inspected IOConnectCallStructMethod ABI. It prints selectors 173–175, call/return metadata
+and bounded command/response packet hex dumps for at most 10 seconds. It does not
 cause the process to send a command. SIP can prevent attaching to a signed
 vendor process; do not change security settings or re-sign/launch vendor apps
 automatically. Failed probe attachment is not an empty successful capture.
@@ -87,3 +87,16 @@ The CLI/Terminal/Debug regex also matched unrelated Client/click/debug names;
 this is a bounded negative name search, not exclusion of indirect callers.
 The installed Ghidra was used through a per-command environment variable;
 agent configuration and original retained analysis snapshots were preserved.
+
+## Prepared Mac tracing continuation
+
+See [MAC-INVESTIGATION.md](MAC-INVESTIGATION.md) for the exact staged test,
+source pins, stop conditions and unresolved questions. `run_mac_cli_capture.sh`
+selects one fresh UA PID and a new capture directory, validates the framework
+pin, and preserves diagnostics. `cli_trace_fixture.c` tests the tracer without
+IOKit or a device. The SIP-enabled Mac fixture attached and observed calls,
+but raw packet reads faulted. A text-only fallback subsequently passed the
+same fixture with SIP enabled, including command/reply text and send stack.
+This does not establish access to protected UA processes or full packet reads. Security
+settings and UA apps were unchanged. The selected mode’s fixture must pass before live tracing. The runner
+defaults to text mode; `packets` selects the still-unvalidated full-byte mode.

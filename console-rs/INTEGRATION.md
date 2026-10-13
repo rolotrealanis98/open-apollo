@@ -432,3 +432,27 @@ Validation: eight device-free probe tests pass, 285 workspace tests pass
 (10 ignored), locked release build, p1 158/158, p2 195/195, windows_check,
 ledger tests and ledger regeneration. Hardware enable/banner verification
 remains pending transport recovery; no decryption or key export is claimed.
+
+## Prepared bounded Mac CLI DTrace investigation
+
+Expanded the selected-process trace with connection/thread correlation, send
+stacks, exact-size hex packet dumps, return codes and explicit fault/completion
+counts. Added a pinned-framework capture runner and a device-free C fixture,
+plus tools/cli-capture/MAC-INVESTIGATION.md with the staged runtime plan.
+
+On the SIP-enabled arm64 Mac, the warning-clean fixture compiled and the trace
+attached, observing four mock returns. Packet reads faulted (five errors); a
+minimal copyin/tracemem check also failed. Full packet capture is not validated, and disabling SIP is not guaranteed
+to resolve it. A subsequent bounded copyinstr check and text-only fallback
+passed with SIP enabled: one enable, one send, two gets, four returns, no
+faults, expected fixture text and send stack. The runner defaults to that
+fallback. Owned-process validation does not establish vendor attachment. Only our own mock process
+ran: no live UA process tracing, GUI operation, CLI requests, firmware writes
+or security-setting changes. Raw logs stay outside git. Genuine command
+vocabulary and a jailbreak path remain unresolved.
+
+Validation at this boundary: 285 workspace tests pass (10 ignored), locked
+release build, p1 158/158, p2 195/195, windows_check, ledger tests and ledger
+regeneration. Fixture C builds are warning-clean on Linux and Mac; runner
+shell syntax checks pass on both. Prepared sources are staged on Mac at
+~/Library/Caches/apollo-cli-investigation/prepared-20261012/. SIP remains on.
