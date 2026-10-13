@@ -1,13 +1,13 @@
 //! Drawing each step. Pages only read state and push [`Action`]s.
 
-use eframe::egui::{self, CollapsingHeader, ProgressBar, RichText, Ui};
+use eframe::egui::{self, CollapsingHeader, RichText, Ui};
 
-use super::app::{Action, App, Mounted, Run};
+use super::app::{Action, App, Install, Run};
 use super::theme::*;
 use super::widgets::*;
 use crate::firmware;
-use crate::importer::{Item, State as ImportState};
 use crate::scan::{Found, Origin, human_size};
+use crate::setuprun::{self, RootStep, Section, Source};
 use crate::steps::{Status, StepId};
 use crate::syscheck::Level;
 
@@ -33,18 +33,28 @@ impl App {
                 "Find your UAD install",
                 "open-apollo uses the UAD software installed on your Windows side, opened read-only.".into(),
             ),
+            StepId::Review => (
+                "Review and install",
+                "Setup always installs fresh: it removes any earlier open-apollo install first. Your password is asked once."
+                    .into(),
+            ),
+            StepId::Remove => (
+                "Remove previous install",
+                "Everything an earlier open-apollo install left on this computer is removed, so what follows is fresh."
+                    .into(),
+            ),
             StepId::Import => {
-                ("Import assets", format!("Copy the Console art from your UAD install to {}.", tilde(&self.opts.data)))
+                ("Import assets", format!("The Console art is copied from your UAD install to {}.", tilde(&self.opts.data)))
             }
             StepId::Firmware => (
                 "DSP programs & firmware",
-                "Extract what the driver loads onto your Apollo, from your own UAD install.".into(),
+                "What the driver loads onto your Apollo is extracted from your own UAD install.".into(),
             ),
             StepId::Driver => {
-                ("Install the driver", "Build the open-apollo driver and set up audio for your Apollo.".into())
+                ("Install the driver", "The open-apollo driver is built and the audio settings for your Apollo installed.".into())
             }
             StepId::Console => {
-                ("Console", "Build and start the open-apollo Console, the mixer for your Apollo.".into())
+                ("Console", "The open-apollo Console, the mixer for your Apollo, is built and started.".into())
             }
             StepId::Done if any_failed => {
                 ("Setup finished", "Some steps need another look; the details are below.".into())
@@ -58,6 +68,8 @@ impl App {
             StepId::Welcome => self.welcome(ui),
             StepId::System => self.system(ui, act),
             StepId::Find => self.find(ui, act),
+            StepId::Review => self.review(ui, act),
+            StepId::Remove => self.remove_page(ui, act),
             StepId::Import => self.import_page(ui, act),
             StepId::Firmware => self.firmware_page(ui, act),
             StepId::Driver => self.driver_page(ui, act),
@@ -75,10 +87,12 @@ impl App {
             let rows = [
                 (StepId::System, "A read-only look at your kernel, Secure Boot, Thunderbolt and Apollo."),
                 (StepId::Find, "Your UAD install on a Windows partition, a Windows VM's disk, or a Wine prefix."),
+                (StepId::Review, "See what will happen, then install. Asks for your password once."),
+                (StepId::Remove, "Remove everything an earlier open-apollo install left, so the rest is fresh."),
                 (StepId::Import, "Copy the Console art to this computer."),
-                (StepId::Firmware, "Extract the DSP programs and firmware the driver loads. Asks for your password."),
-                (StepId::Driver, "Build and install the driver and audio settings. Asks for your password."),
-                (StepId::Console, "Build and start the open-apollo Console."),
+                (StepId::Firmware, "Extract the DSP programs and firmware the driver loads."),
+                (StepId::Driver, "Build and install the driver and audio settings."),
+                (StepId::Console, "Build and start the open-apollo Console. No password needed."),
             ];
             for (i, (step, text)) in rows.iter().enumerate() {
                 ui.horizontal_top(|ui| {
@@ -117,7 +131,7 @@ impl App {
                 ui,
                 Status::Skipped,
                 "Demo mode",
-                "The firmware, driver and Console steps only simulate their work: no password prompts, no builds, nothing installed. Scanning and the art import are real.",
+                "The install and the Console build only simulate their work: no password prompt, no builds, nothing removed or installed. Scanning is real.",
             );
         }
         ui.add_space(8.0);
@@ -216,24 +230,24 @@ impl App {
         ui.add_space(4.0);
 
         let (with, without): (Vec<&Found>, Vec<&Found>) = scan.found.iter().partition(|f| f.install.found_anything());
-        if with.is_empty() {
+        let parts: Vec<_> = scan.likely_windows().collect();
+        if with.is_empty() && parts.is_empty() {
             callout(
                 ui,
                 Status::Warning,
                 "No UAD install found yet",
-                "If Windows is on another partition, open it below. No Windows on this computer? See the help at the bottom.",
+                "If Windows is on another disk, connect it and press Rescan. No Windows on this computer? See the help at the bottom.",
             );
-        } else {
+        } else if !with.is_empty() {
             section(ui, "UAD installs found");
             for f in with {
                 self.found_card(ui, f, act);
             }
         }
-        let parts: Vec<_> = scan.likely_windows().collect();
         if !parts.is_empty() {
-            section(ui, "Windows partitions not opened yet");
+            section(ui, "Windows partitions");
             for u in parts {
-                unmounted_card(ui, u, self.busy.is_none(), act);
+                self.partition_card(ui, u, act);
             }
         }
         if !scan.images.is_empty() {
@@ -281,8 +295,13 @@ impl App {
                             .small()
                             .color(WEAK),
                         );
-                        if !u.is_bitlocker() && ui.small_button("Open read-only").clicked() {
-                            act.push(Action::Mount(u.device.clone()));
+                        let picked = self.selected_device.as_deref() == Some(u.device.as_str());
+                        if !u.is_bitlocker()
+                            && !picked
+                            && !self.selection_locked()
+                            && ui.small_button("Use this one").clicked()
+                        {
+                            act.push(Action::SelectDevice(u.device.clone()));
                         }
                     });
                 }
@@ -291,10 +310,10 @@ impl App {
         ui.add_space(6.0);
         CollapsingHeader::new(RichText::new("No Windows on this computer?").strong().color(TEXT))
             .id_salt("vmhelp")
-            .default_open(scan.best().is_none())
+            .default_open(scan.best().is_none() && scan.unmounted.is_empty())
             .show(ui, vm_help);
         ui.add_space(4.0);
-        if !self.scanning && self.selected_found().is_none() {
+        if !self.scanning && self.selected_found().is_none() && self.selected_device.is_none() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Already set up, or doing this later?").color(WEAK));
                 if ui.link("Skip finding an install").clicked() {
@@ -315,7 +334,8 @@ impl App {
                 };
                 badge(ui, f.origin.label(), color);
                 ui.label(RichText::new(tilde(f.path())).strong().color(STRONG));
-                if self.mounted.iter().any(|m| matches!(&m.what, Mounted::Partition { at, .. } if at == f.path())) {
+                if matches!(&f.origin, Origin::VmImage { image, .. } if self.attached.iter().any(|a| &a.image == image))
+                {
                     badge(ui, "opened by setup", WEAK);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -355,298 +375,133 @@ impl App {
                     ("UA driver files", n(i.drivers.len())),
                 ],
             );
-            if i.console.is_none() {
-                ui.label(RichText::new("No UAD Console here, so there's no Console art to import. The plug-in files still give the driver its DSP programs.").small().color(WARN));
+            let missing = setuprun::missing_parts(i);
+            if !missing.is_empty() {
+                ui.label(
+                    RichText::new(format!("Setup can't use this one: it has no {}.", missing.join(", and no ")))
+                        .small()
+                        .color(WARN),
+                );
             }
         });
     }
 
-    // ---- 4. Import ----
-
-    fn import_page(&self, ui: &mut Ui, act: &mut Acts) {
-        let Some(found) = self.selected_found().filter(|_| self.steps.blocker(StepId::Import).is_none()) else {
-            callout(
-                ui,
-                Status::Failed,
-                "No UAD install picked",
-                "Go back to Find your UAD install and pick one, or skip importing (the Console needs the art to draw its mixer).",
-            );
+    fn partition_card(&self, ui: &mut Ui, u: &oa_assets::discover::Unmounted, act: &mut Acts) {
+        let picked = self.selected_device.as_deref() == Some(u.device.as_str());
+        card(ui, picked, |ui| {
             ui.horizontal(|ui| {
-                if secondary(ui, "Back to Find", true).clicked() {
-                    act.push(Action::Goto(StepId::Find));
-                }
-                if secondary(ui, "Skip importing", self.steps.status(StepId::Import) != Status::Skipped).clicked() {
-                    act.push(Action::SkipImport);
+                badge(
+                    ui,
+                    if u.is_bitlocker() { "BitLocker" } else { "not open" },
+                    if u.is_bitlocker() { WARN } else { WEAK },
+                );
+                let label = u.label.as_deref().map(|l| format!(" \"{l}\"")).unwrap_or_default();
+                ui.label(RichText::new(format!("Windows partition{label}")).strong().color(STRONG));
+                ui.label(RichText::new(format!("{}, {}", u.device, u.size.as_deref().unwrap_or("?"))).color(WEAK));
+                if !u.is_bitlocker() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let r = ui.add_enabled(
+                            picked || !self.selection_locked(),
+                            egui::RadioButton::new(picked, if picked { "Using this one" } else { "Use this one" }),
+                        );
+                        if r.clicked() && !picked {
+                            act.push(Action::SelectDevice(u.device.clone()));
+                        }
+                    });
                 }
             });
-            return;
-        };
-        card(ui, false, |ui| {
-            let from = match &found.install.console {
-                Some(c) => format!("UAD Console {}", c.version.as_deref().unwrap_or("(version unknown)")),
-                None => "No UAD Console in this install".into(),
-            };
-            facts(
-                ui,
-                &[
-                    ("From", from),
-                    ("", format!("{}: {}", found.origin.label(), tilde(found.path()))),
-                    ("To", tilde(&self.opts.data.join(oa_assets::import::CONSOLE_DIR))),
-                ],
-            );
-        });
-        let status = self.steps.status(StepId::Import);
-        if let Some((ver, files)) = self.console_art().filter(|_| status == Status::Pending && !self.importing) {
-            callout(
-                ui,
-                Status::Done,
-                &format!(
-                    "Console art is already imported (Console {}, {files} files)",
-                    ver.as_deref().unwrap_or("version unknown")
-                ),
-                "Use it as it is, or import again to refresh it from this install.",
-            );
-        }
-        for (item, state) in &self.import {
-            card(ui, false, |ui| {
-                ui.horizontal(|ui| {
-                    let st = match state {
-                        ImportState::Waiting => Status::Pending,
-                        ImportState::ComingSoon | ImportState::NotInInstall(_) => Status::Skipped,
-                        ImportState::Copying { .. } => Status::Running,
-                        ImportState::Done { .. } => Status::Done,
-                        ImportState::Failed(_) => Status::Failed,
-                    };
-                    status_icon(ui, st, 18.0);
-                    ui.label(RichText::new(item.title()).strong().color(STRONG));
-                    if *state == ImportState::ComingSoon {
-                        badge(ui, "coming soon", INFO);
-                    }
-                });
-                ui.label(RichText::new(item.description()).color(WEAK));
-                match state {
-                    ImportState::Copying { files, bytes, total_files, total_bytes } => {
-                        ui.add(
-                            ProgressBar::new(state.fraction().unwrap_or(0.0))
-                                .fill(ACCENT)
-                                .desired_height(10.0)
-                                .corner_radius(5),
-                        );
-                        ui.label(
-                            RichText::new(format!(
-                                "{files} of {total_files} files, {} of {}",
-                                human_size(*bytes),
-                                human_size(*total_bytes)
-                            ))
-                            .small()
-                            .color(WEAK),
-                        );
-                    }
-                    ImportState::Done { files, bytes, dest } => {
-                        ui.label(
-                            RichText::new(format!("Copied {files} files ({}) to {}", human_size(*bytes), tilde(dest)))
-                                .color(ACCENT),
-                        );
-                    }
-                    ImportState::Failed(e) => {
-                        ui.label(RichText::new(e).color(FAIL));
-                    }
-                    ImportState::NotInInstall(why) => {
-                        ui.label(RichText::new(why).small().color(WARN));
-                    }
-                    ImportState::ComingSoon if *item == Item::PluginPanels => {
-                        ui.label(RichText::new("Not in this version yet. The Console works without them; plug-in windows show a plain panel.").small().color(FAINT));
-                    }
-                    _ => {}
-                }
-            });
-        }
-        if self.used_previous_import {
-            callout(ui, Status::Done, "Using the Console art imported earlier.", "");
-        }
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            let has_art = found.has_console();
-            match status {
-                Status::Running => {}
-                Status::Pending => {
-                    if primary(ui, "Import", has_art).clicked() {
-                        act.push(Action::StartImport);
-                    }
-                    if self.console_art().is_some() && secondary(ui, "Use the earlier import", true).clicked() {
-                        act.push(Action::UsePreviousImport);
-                    }
-                    if secondary(ui, "Skip", true).clicked() {
-                        act.push(Action::SkipImport);
-                    }
-                }
-                _ => {
-                    if secondary(ui, "Import again", has_art).clicked() {
-                        act.push(Action::StartImport);
-                    }
-                }
+            if u.is_bitlocker() {
+                ui.add(egui::Label::new(RichText::new(
+                    "This partition is encrypted with BitLocker, so Linux can't read it as it is. Either unlock it in your file manager with its 48-digit recovery key (find it at account.microsoft.com/devices/recoverykey), then press Rescan; or start Windows, copy \"C:\\Program Files\\Universal Audio\" and \"C:\\Program Files (x86)\\Universal Audio\" to a USB stick keeping those folder names, and use Choose a folder.",
+                ).small().color(TEXT)).wrap());
+            } else {
+                ui.label(RichText::new("The install opens it read-only (no extra password) and checks it holds a UAD install before changing anything. Nothing on it is changed.").small().color(WEAK));
             }
         });
     }
 
-    // ---- 5. DSP programs & firmware ----
+    // ---- 4. Review and install ----
 
-    fn firmware_page(&self, ui: &mut Ui, act: &mut Acts) {
-        let Some(found) = self.selected_found().filter(|_| self.steps.blocker(StepId::Firmware).is_none()) else {
+    fn review(&self, ui: &mut Ui, act: &mut Acts) {
+        let plan = self.install_plan();
+        let picked = self.selected_found().is_some() || self.selected_device.is_some();
+        if !picked && self.install.is_none() {
             no_install_blocker(
                 ui,
                 act,
-                "The driver loads DSP programs and firmware that come from your own UAD install, and no install is picked.",
+                "The install reads the DSP programs, firmware and Console art from your own UAD install, and none is picked.",
             );
-            if self.steps.status(StepId::Firmware) == Status::Pending && ui.link("Skip this for now").clicked() {
-                act.push(Action::SkipFirmware);
-            }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Driver already installed?").color(WEAK));
+                if ui.link("Skip the install and go to the Console").clicked() {
+                    act.push(Action::SkipInstall);
+                }
+            });
             return;
-        };
-        ui.add(
-            egui::Label::new(
-                RichText::new(format!(
-                    "Your Apollo runs DSP programs and firmware written by Universal Audio. open-apollo doesn't ship them, so this step extracts them from your install into {}, with a manifest listing each file's SHA-256. Writing there needs administrator rights, so your password is asked.",
-                    firmware::FIRMWARE_DIR
-                ))
-                .color(TEXT),
-            )
-            .wrap(),
-        );
+        }
+        if let Some(i) = &self.install {
+            self.install_banner(ui, act, i);
+        }
         card(ui, false, |ui| {
-            let i = &found.install;
+            let source = match (self.selected_found(), &self.selected_device) {
+                (Some(f), _) => {
+                    let console = f
+                        .install
+                        .console
+                        .as_ref()
+                        .map(|c| format!("UAD Console {}", c.version.as_deref().unwrap_or("(version unknown)")))
+                        .unwrap_or_else(|| "no UAD Console".into());
+                    format!("{}: {} ({console})", f.origin.label(), tilde(f.path()))
+                }
+                (None, Some(d)) => format!("Windows partition {d}: opened read-only during the install"),
+                (None, None) => "none".into(),
+            };
             facts(
                 ui,
                 &[
-                    ("From", format!("{}: {}", found.origin.label(), tilde(found.path()))),
-                    ("Plug-in files", count(i.powered_plugins.len(), "Powered plug-in DLL")),
-                    ("UA drivers", count(i.drivers.len(), "file")),
-                    ("To", format!("{}  (read by the driver)", firmware::FIRMWARE_DIR)),
+                    ("From", source),
+                    ("Console art to", tilde(&self.opts.data.join(oa_assets::import::CONSOLE_DIR))),
+                    ("Firmware to", firmware::FIRMWARE_DIR.to_string()),
                 ],
             );
         });
-        if found.install.powered_plugins.is_empty() && found.install.drivers.is_empty() {
-            callout(
-                ui,
-                Status::Warning,
-                "This install has no plug-in or driver files",
-                "The DSP programs come from the Powered plug-ins. Install UAD's plug-ins in Windows (UA Connect), or pick another install.",
-            );
-        }
-        let status = self.steps.status(StepId::Firmware);
-        let existing = firmware::existing(std::path::Path::new(firmware::FIRMWARE_DIR));
-        if let Some(e) = existing.as_ref().filter(|_| status == Status::Pending && self.firmware.is_none()) {
-            let from = e.source.as_deref().map(|s| format!(" from {s}")).unwrap_or_default();
-            callout(
-                ui,
-                Status::Done,
-                &format!("Already extracted earlier: {} files{from}", e.files),
-                "Keep them, or extract again from this install.",
-            );
-        }
-        let unavailable = !self.opts.demo && self.extractor_ok != Some(true);
-        if unavailable && self.firmware.is_none() {
-            let body = match (&self.extractor, self.extractor_ok) {
-                (None, _) => "The oa-assets program wasn't found next to setup or on your PATH. Build it with: cargo build -p oa-assets".to_string(),
-                (Some(_), None) => "Checking the extractor…".to_string(),
-                (Some(x), Some(_)) => format!("{} has no firmware command yet. It's being finished separately; until then the driver can't be installed from here.", x.program.display()),
-            };
-            callout(ui, Status::Warning, "The firmware extractor isn't available in this build", &body);
-        }
-        if let Some(run) = &self.firmware {
-            if run.demo {
-                badge(ui, "DEMO: simulated, nothing written", INFO);
-            }
-            run_outcome(ui, run, None);
-            if !run.files.is_empty() {
-                card(ui, false, |ui| {
-                    egui::Grid::new("fw-files").num_columns(3).spacing([14.0, 6.0]).show(ui, |ui| {
-                        for f in &run.files {
-                            ui.horizontal(|ui| {
-                                status_icon(ui, f.status, 16.0);
-                                ui.label(RichText::new(&f.name).monospace().color(STRONG));
-                            });
-                            let sha =
-                                f.sha256.as_deref().map(|h| format!("sha256 {}", short_hash(h))).unwrap_or_default();
-                            ui.label(RichText::new(sha).monospace().small().color(WEAK));
-                            ui.label(RichText::new(f.note.as_deref().unwrap_or("")).small().color(WEAK));
-                            ui.end_row();
-                        }
-                    });
-                });
-            }
-            run_log(ui, run, "firmware-log");
-        }
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            let running = self.firmware.as_ref().is_some_and(Run::running);
-            if !running {
-                let label = if self.firmware.is_some() { "Extract again" } else { "Extract (asks for your password)" };
-                let enabled = !unavailable;
-                let r = if self.firmware.is_some() || existing.is_some() {
-                    secondary(ui, label, enabled)
-                } else {
-                    primary(ui, label, enabled)
-                };
-                if r.clicked() {
-                    act.push(Action::StartFirmware);
-                }
-                if existing.is_some()
-                    && status == Status::Pending
-                    && secondary(ui, "Keep the earlier files", true).clicked()
-                {
-                    act.push(Action::KeepFirmware);
-                }
-                if status == Status::Pending && secondary(ui, "Skip for now", true).clicked() {
-                    act.push(Action::SkipFirmware);
-                }
-            }
-        });
-    }
-
-    // ---- 6. Driver ----
-
-    fn driver_page(&self, ui: &mut Ui, act: &mut Acts) {
-        if let Some(b) = self.steps.blocker(StepId::Driver) {
-            if self.selected_found().is_none() || self.steps.blocker(b).is_some() {
-                no_install_blocker(
-                    ui,
-                    act,
-                    "The driver loads DSP programs and firmware extracted from your own UAD install, and setup hasn't found one. Without them the Apollo can't run.",
-                );
+        section(ui, "When you press Install");
+        card(ui, false, |ui| {
+            let remove = if self.keep_current {
+                "Skipped: your current install stays, and the rest is installed over it."
             } else {
-                callout(
-                    ui,
-                    Status::Failed,
-                    "DSP programs & firmware come first",
-                    "The driver loads the DSP programs and firmware extracted from your UAD install. Run that step, then come back.",
-                );
-                if secondary(ui, "Go to DSP programs & firmware", true).clicked() {
-                    act.push(Action::Goto(StepId::Firmware));
-                }
-            }
-            if self.steps.status(StepId::Driver) == Status::Pending && ui.link("Skip the driver for now").clicked() {
-                act.push(Action::SkipDriver);
-            }
-            return;
+                "Everything an earlier open-apollo install left is removed: driver, DKMS builds, settings, extracted firmware, imported art, the Console."
+            };
+            let rows: Vec<(&str, String)> = vec![
+                ("1", "Your UAD install is checked. If it can't be used, setup stops here and nothing is changed.".into()),
+                ("2", remove.into()),
+                ("3", "The Console art is copied fresh from your UAD install.".into()),
+                ("4", "The DSP programs and firmware are extracted fresh.".into()),
+                ("5", "The driver is built fresh and installed with DKMS, PipeWire, WirePlumber and UCM2 settings and the mixer daemon.".into()),
+                ("6", "Then, without a password: the Console is built, the mixer daemon restarted, and you can launch it.".into()),
+            ];
+            facts(ui, &rows);
+            ui.add_space(2.0);
+            ui.label(RichText::new("Steps 1 to 5 run in one go with administrator rights, so your password is asked once. The installer's questions get their default answers; on Intel VT-d systems iommu=pt is added to GRUB (a restart is needed after).").small().color(WEAK));
+        });
+        self.earlier_card(ui, act);
+        ui.add_space(4.0);
+        let idle = !self.install_running();
+        let mut keep = self.keep_current;
+        if ui
+            .add_enabled(idle, egui::Checkbox::new(&mut keep, "Keep my current install (don't remove it first)"))
+            .changed()
+        {
+            act.push(Action::KeepCurrent(keep));
         }
-        ui.add(
-            egui::Label::new(
-                RichText::new("Runs open-apollo's installer (scripts/install.sh) with administrator rights. It installs missing packages, builds the ua_apollo driver, registers it with DKMS so kernel updates rebuild it, installs PipeWire, WirePlumber and UCM2 settings, and, if your Apollo is on, loads the driver and starts the mixer daemon.")
-                    .color(TEXT),
+        ui.label(
+            RichText::new(
+                "Only if a clean reinstall isn't possible: leftovers of an older version can then get in the way.",
             )
-            .wrap(),
-        );
-        ui.add(
-            egui::Label::new(
-                RichText::new("Its questions get their default answers: missing packages are installed, DKMS is set up, on Intel VT-d systems iommu=pt is added to GRUB (a restart is needed after), and the install report stays on this computer unless you tick the box below.")
-                    .small()
-                    .color(WEAK),
-            )
-            .wrap(),
+            .small()
+            .color(WEAK),
         );
         let mut send = self.send_report;
-        let idle = !self.driver.as_ref().is_some_and(Run::running);
         if ui
             .add_enabled(idle, egui::Checkbox::new(&mut send, "Send an anonymous install report to help open-apollo"))
             .changed()
@@ -661,79 +516,309 @@ impl App {
             )
             .wrap(),
         );
-        if let Some(sys) = &self.sys {
-            if sys.apollo.pci.is_empty() && !sys.apollo.usb.is_empty() {
-                callout(
-                    ui,
-                    Status::Warning,
-                    "Your Apollo is a USB model",
-                    "USB Apollos use scripts/install-usb.sh. This step installs the Thunderbolt driver.",
-                );
-            } else if sys.apollo.pci.is_empty() && self.driver.is_none() {
-                callout(
-                    ui,
-                    Status::Skipped,
-                    "No Apollo connected",
-                    "That's fine: it's set up when you connect it. To have the installer verify the driver now, power on the Apollo, connect it, and wait ~20 s before starting.",
-                );
-            }
-            if sys.driver.is_some() && self.driver.is_none() {
-                callout(
-                    ui,
-                    Status::Done,
-                    "The driver is already installed",
-                    "Running the installer again updates it to this version.",
-                );
-            }
-        }
-        if !self.opts.demo && self.opts.repo.is_none() {
+        if let Some(sys) = &self.sys
+            && sys.apollo.pci.is_empty()
+            && !sys.apollo.usb.is_empty()
+        {
             callout(
                 ui,
-                Status::Failed,
-                "Can't find the open-apollo folder",
-                "Setup runs scripts/install.sh from your open-apollo checkout. Start setup from inside it, or pass --repo DIR.",
+                Status::Warning,
+                "Your Apollo is a USB model",
+                "USB Apollos use scripts/install-usb.sh. This installs the Thunderbolt driver.",
             );
         }
-        if let Some(run) = &self.driver {
-            if run.demo {
-                badge(ui, "DEMO: simulated output, nothing installed", INFO);
-            }
-            let fallback = self.driver_command().map(|(_, _, t)| t);
-            run_outcome(ui, run, fallback.as_deref());
-            ui.columns(2, |cols| {
-                card(&mut cols[0], false, |ui| substeps(ui, &run.progress.substeps));
-                cols[1].vertical(|ui| {
-                    if let Some(cur) = run.progress.current().filter(|_| run.running()) {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(RichText::new(&cur.label).strong().color(STRONG));
-                        });
-                    }
-                    log_view(ui, "driver-log", &run.progress.lines, 300.0);
-                });
-            });
+        if self.opts.demo {
+            badge(ui, "DEMO: the install is simulated, nothing changes", INFO);
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            let running = self.driver.as_ref().is_some_and(Run::running);
-            let possible = self.opts.demo || self.opts.repo.is_some();
-            if !running {
-                let r = if self.driver.is_some() { secondary(ui, "Run again", possible) } else { primary(ui, "Install driver (asks for your password)", possible) };
-                if r.clicked() {
-                    act.push(Action::StartDriver);
+            if self.install_running() {
+                ui.spinner();
+                ui.label(RichText::new("Installing… the next pages follow along.").color(WEAK));
+                return;
+            }
+            let label = if self.install.is_some() { "Install again" } else { "Install (asks for your password once)" };
+            let r = if self.install.as_ref().is_some_and(|i| !i.running()) {
+                secondary(ui, label, plan.is_ok())
+            } else {
+                primary(ui, label, plan.is_ok())
+            };
+            if r.clicked() {
+                act.push(Action::StartInstall);
+            }
+        });
+        if let Err(why) = &plan
+            && !self.install_running()
+        {
+            ui.label(RichText::new(why).small().color(WARN));
+        }
+        if let Ok(p) = &plan {
+            CollapsingHeader::new(RichText::new("The command it runs").small().color(WEAK)).id_salt("cmd").show(
+                ui,
+                |ui| {
+                    command(ui, &p.command_line("pkexec", &self.setup_script()));
+                },
+            );
+        }
+    }
+
+    /// What an earlier install left, from `uninstall.sh --list`.
+    fn earlier_card(&self, ui: &mut Ui, act: &mut Acts) {
+        section(ui, "Earlier open-apollo install");
+        card(ui, false, |ui| {
+            if self.install.is_some() {
+                ui.label(RichText::new("See Remove previous install for what the install removed.").color(WEAK));
+                return;
+            }
+            match &self.earlier {
+                None => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Looking for an earlier install…").color(WEAK));
+                    });
                 }
-                if self.steps.status(StepId::Driver) == Status::Pending && secondary(ui, "Skip", true).clicked() {
-                    act.push(Action::SkipDriver);
+                Some(Err(e)) => {
+                    ui.horizontal(|ui| {
+                        status_icon(ui, Status::Warning, 18.0);
+                        ui.label(RichText::new(format!("Couldn't check: {e}")).color(WARN));
+                    });
+                    ui.label(RichText::new("The install removes whatever is there anyway.").small().color(WEAK));
                 }
-            } else if !self.opts.demo {
-                ui.label(RichText::new("It runs with administrator rights, so it can't be stopped from here; closing setup leaves it running.").small().color(WEAK));
+                Some(Ok(list)) if list.is_empty() => {
+                    ui.horizontal(|ui| {
+                        status_icon(ui, Status::Done, 18.0);
+                        ui.label(RichText::new("Nothing from an earlier install is on this computer.").color(TEXT));
+                    });
+                }
+                Some(Ok(list)) => {
+                    ui.horizontal(|ui| {
+                        status_icon(ui, if self.keep_current { Status::Skipped } else { Status::Warning }, 18.0);
+                        let what = if self.keep_current { "kept" } else { "removed first" };
+                        ui.label(
+                            RichText::new(format!("Found, and {what} ({} items):", list.len())).strong().color(TEXT),
+                        );
+                    });
+                    let rows: Vec<(&str, String)> =
+                        setuprun::group(list).into_iter().map(|(label, items)| (label, summarize(&items))).collect();
+                    facts(ui, &rows);
+                }
+            }
+            if !self.earlier_checking && ui.link("Check again").clicked() {
+                act.push(Action::CheckEarlier);
             }
         });
     }
 
-    // ---- 7. Console ----
+    /// How the install went, at the top of Review and install.
+    fn install_banner(&self, ui: &mut Ui, act: &mut Acts, i: &Install) {
+        match &i.run.outcome {
+            None => {
+                let at = i.run.current().map(|c| c.doing()).unwrap_or("waiting for your password");
+                callout(ui, Status::Running, &format!("Installing: {at}…"), "");
+            }
+            Some(o) => {
+                callout(ui, o.status, &o.message, "");
+                if o.status == Status::Failed {
+                    failed_help(ui, act, i, false);
+                }
+            }
+        }
+    }
+
+    // ---- 5-8. The install's sections ----
+
+    /// The top of a section's page: where the install is, and how this section
+    /// went. Returns the section once it has started.
+    fn section_head<'a>(&'a self, ui: &mut Ui, act: &mut Acts, id: RootStep) -> Option<&'a Section> {
+        let Some(i) = &self.install else {
+            let skipped = self.steps.status(id.page().unwrap_or(StepId::Review)) == Status::Skipped;
+            if skipped {
+                callout(ui, Status::Skipped, "Skipped", "You skipped the install.");
+            } else {
+                callout(
+                    ui,
+                    Status::Pending,
+                    "Not started yet",
+                    "This runs as part of the install. See Review and install, then press Install.",
+                );
+                if secondary(ui, "Go to Review and install", true).clicked() {
+                    act.push(Action::Goto(StepId::Review));
+                }
+            }
+            return None;
+        };
+        if i.demo {
+            badge(ui, "DEMO: simulated, nothing changes", INFO);
+        }
+        let s = i.run.section(id);
+        match s.status {
+            Status::Pending if i.running() => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Waiting for the steps before it…").color(WEAK));
+                });
+                None
+            }
+            Status::Pending => {
+                let why = match i.run.failed_at() {
+                    Some(at) => format!("The install stopped while {} before getting here.", at.doing()),
+                    None => "The install ended before getting here.".into(),
+                };
+                callout(ui, Status::Skipped, "Not run", &why);
+                failed_help(ui, act, i, true);
+                None
+            }
+            Status::Running => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    let now = s.progress.current().map(|c| c.label.as_str()).unwrap_or("Working");
+                    ui.label(RichText::new(format!("{now}…")).strong().color(STRONG));
+                });
+                Some(s)
+            }
+            st => {
+                let status = if id == RootStep::Firmware {
+                    let usb = self.sys.as_ref().is_none_or(|s| !s.apollo.usb.is_empty());
+                    i.run.firmware_status(usb)
+                } else {
+                    st
+                };
+                let fallback = match status {
+                    Status::Done => "Done.",
+                    Status::Warning => "Done, with warnings.",
+                    Status::Skipped => "Skipped.",
+                    _ => "Failed.",
+                };
+                callout(ui, status, s.message.as_deref().unwrap_or(fallback), "");
+                if st == Status::Failed {
+                    failed_help(ui, act, i, true);
+                }
+                Some(s)
+            }
+        }
+    }
+
+    fn remove_page(&self, ui: &mut Ui, act: &mut Acts) {
+        ui.add(egui::Label::new(RichText::new("Runs open-apollo's uninstaller (scripts/uninstall.sh --yes --purge): every DKMS build of the driver, the mixer daemon's units and drop-ins, PipeWire and WirePlumber rules (yours and the system's), udev rules, the extracted firmware, the imported art and the Console go, and it checks nothing is left. Then everything is installed fresh.").color(TEXT)).wrap());
+        ui.label(RichText::new("By hand: sudo bash scripts/uninstall.sh --purge").small().color(WEAK));
+        let Some(s) = self.section_head(ui, act, RootStep::Remove) else { return };
+        if s.status == Status::Skipped {
+            return;
+        }
+        two_columns(ui, s, "remove-log");
+    }
+
+    fn import_page(&self, ui: &mut Ui, act: &mut Acts) {
+        ui.add(egui::Label::new(RichText::new(format!("Copies the UAD Console's art from your install to {}, as you (oa-assets import). Plug-in panels follow once oa-assets can generate them.", tilde(&self.opts.data.join(oa_assets::import::CONSOLE_DIR)))).color(TEXT)).wrap());
+        let Some(s) = self.section_head(ui, act, RootStep::Import) else { return };
+        if s.status.is_success()
+            && let Some((ver, files)) = self.console_art()
+        {
+            card(ui, false, |ui| {
+                facts(
+                    ui,
+                    &[
+                        (
+                            "Console art",
+                            format!("Console {}, {files} files", ver.as_deref().unwrap_or("(version unknown)")),
+                        ),
+                        ("In", tilde(&self.opts.data.join(oa_assets::import::CONSOLE_DIR))),
+                        ("Manifest", tilde(&self.opts.data.join(oa_assets::import::MANIFEST))),
+                    ],
+                );
+            });
+        }
+        log_view(ui, "import-log", &s.progress.lines, 160.0);
+    }
+
+    fn firmware_page(&self, ui: &mut Ui, act: &mut Acts) {
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!(
+                    "Your Apollo runs DSP programs and firmware written by Universal Audio. open-apollo doesn't ship them, so they're extracted from your install into {}, with a manifest listing each file's SHA-256.",
+                    firmware::FIRMWARE_DIR
+                ))
+                .color(TEXT),
+            )
+            .wrap(),
+        );
+        let Some(s) = self.section_head(ui, act, RootStep::Firmware) else { return };
+        if !s.files.is_empty() {
+            card(ui, false, |ui| {
+                egui::Grid::new("fw-files").num_columns(3).spacing([14.0, 6.0]).show(ui, |ui| {
+                    for f in &s.files {
+                        ui.horizontal(|ui| {
+                            status_icon(ui, f.status, 16.0);
+                            ui.label(RichText::new(&f.name).monospace().color(STRONG));
+                        });
+                        let sha = f.sha256.as_deref().map(|h| format!("sha256 {}", short_hash(h))).unwrap_or_default();
+                        ui.label(RichText::new(sha).monospace().small().color(WEAK));
+                        ui.label(RichText::new(f.note.as_deref().unwrap_or("")).small().color(WEAK));
+                        ui.end_row();
+                    }
+                });
+            });
+        }
+        CollapsingHeader::new(RichText::new("Output").color(WEAK))
+            .id_salt("firmware-log")
+            .default_open(s.status == Status::Running || s.status == Status::Failed)
+            .show(ui, |ui| log_view(ui, "firmware-log", &s.progress.lines, 200.0));
+    }
+
+    fn driver_page(&self, ui: &mut Ui, act: &mut Acts) {
+        ui.add(
+            egui::Label::new(
+                RichText::new("Runs open-apollo's installer (scripts/install.sh --yes): it installs missing packages, builds the ua_apollo driver, registers it with DKMS so kernel updates rebuild it, installs PipeWire, WirePlumber and UCM2 settings, and, if your Apollo is on, loads the driver and starts the mixer daemon.")
+                    .color(TEXT),
+            )
+            .wrap(),
+        );
+        if let Some(sys) = &self.sys
+            && sys.apollo.pci.is_empty()
+            && self.install.is_none()
+        {
+            callout(
+                ui,
+                Status::Skipped,
+                "No Apollo connected",
+                "That's fine: it's set up when you connect it. To have the installer verify the driver too, power on the Apollo, connect it, and wait ~20 s before installing.",
+            );
+        }
+        let Some(s) = self.section_head(ui, act, RootStep::Driver) else { return };
+        if s.progress.reboot_needed {
+            callout(
+                ui,
+                Status::Warning,
+                "Restart needed",
+                "The installer added iommu=pt to the kernel command line. Restart before using the Apollo.",
+            );
+        }
+        two_columns(ui, s, "driver-log");
+    }
+
+    // ---- 9. Console ----
 
     fn console_page(&self, ui: &mut Ui, act: &mut Acts) {
+        if !self.console_allowed() {
+            let installing = self.install_running();
+            callout(
+                ui,
+                if installing { Status::Running } else { Status::Pending },
+                if installing {
+                    "The Console is built once the install is done"
+                } else {
+                    "The Console is built after the install"
+                },
+                "Building it before would be wasted: the install removes an earlier Console build first.",
+            );
+            if !installing && secondary(ui, "Go to Review and install", true).clicked() {
+                act.push(Action::Goto(StepId::Review));
+            }
+            if self.steps.status(StepId::Console) == Status::Pending && ui.link("Skip the Console").clicked() {
+                act.push(Action::SkipConsole);
+            }
+            return;
+        }
         card(ui, false, |ui| {
             ui.horizontal(|ui| match self.console_art() {
                 Some((ver, files)) => {
@@ -749,16 +834,9 @@ impl App {
                 None => {
                     status_icon(ui, Status::Warning, 18.0);
                     ui.label(RichText::new("No Console art yet: the Console needs it to draw its mixer.").color(WARN));
-                    if ui.link("Import assets").clicked() {
-                        act.push(Action::Goto(StepId::Import));
-                    }
                 }
             });
-            let installed = if self.opts.demo {
-                self.console.as_ref().is_some_and(Run::exit_ok)
-            } else {
-                self.console_bin.is_some()
-            };
+            let installed = self.console_installed();
             ui.horizontal(|ui| {
                 if installed {
                     status_icon(ui, Status::Done, 18.0);
@@ -769,9 +847,33 @@ impl App {
                     ui.label(RichText::new("uaconsole isn't installed yet").color(TEXT));
                 }
             });
+            match &self.daemon {
+                Some(Ok(())) => {
+                    ui.horizontal(|ui| {
+                        status_icon(ui, Status::Done, 18.0);
+                        ui.label(
+                            RichText::new("Mixer daemon restarted: it sees the imported art and plug-ins").color(TEXT),
+                        );
+                    });
+                }
+                Some(Err(e)) => {
+                    ui.horizontal(|ui| {
+                        status_icon(ui, Status::Warning, 18.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!(
+                                    "Couldn't restart the mixer daemon ({e}); it reads them when it next starts."
+                                ))
+                                .color(WARN),
+                            )
+                            .wrap(),
+                        );
+                    });
+                }
+                None => {}
+            }
         });
-        let needs_build =
-            if self.opts.demo { !self.console.as_ref().is_some_and(Run::exit_ok) } else { self.console_bin.is_none() };
+        let needs_build = !self.console_installed();
         if needs_build && self.console.is_none() {
             ui.add(
                 egui::Label::new(
@@ -790,7 +892,7 @@ impl App {
             if run.demo {
                 badge(ui, "DEMO: simulated build, nothing installed", INFO);
             }
-            run_outcome(ui, run, None);
+            run_outcome(ui, run);
             ui.columns(2, |cols| {
                 card(&mut cols[0], false, |ui| substeps(ui, &run.progress.substeps));
                 log_view(&mut cols[1], "console-log", &run.progress.lines, 240.0);
@@ -801,7 +903,7 @@ impl App {
                 ui,
                 Status::Done,
                 m,
-                "It connects to the mixer daemon the driver step started (127.0.0.1:4710).",
+                "It connects to the mixer daemon the driver install started (127.0.0.1:4710).",
             ),
             Some(Err(e)) => callout(ui, Status::Failed, e, ""),
             None => {}
@@ -831,7 +933,11 @@ impl App {
         });
     }
 
-    // ---- 8. Done ----
+    fn console_installed(&self) -> bool {
+        if self.opts.demo { self.console.as_ref().is_some_and(Run::exit_ok) } else { self.console_bin.is_some() }
+    }
+
+    // ---- 10. Done ----
 
     fn done(&self, ui: &mut Ui, act: &mut Acts) {
         card(ui, false, |ui| {
@@ -843,7 +949,8 @@ impl App {
                 });
             }
         });
-        if self.driver.as_ref().is_some_and(|d| d.progress.reboot_needed) {
+        let reboot = self.install.as_ref().is_some_and(|i| i.run.section(RootStep::Driver).progress.reboot_needed);
+        if reboot {
             callout(
                 ui,
                 Status::Warning,
@@ -879,20 +986,25 @@ impl App {
             if self.steps.status(StepId::Driver).is_success() {
                 rows.push(("Driver", "ua_apollo kernel module, kept up to date by DKMS".into()));
                 rows.push(("", "PipeWire, WirePlumber and UCM2 settings; mixer daemon on 127.0.0.1:4710".into()));
-                rows.push(("", "Install report: /tmp/open-apollo-install-report.json (not uploaded)".into()));
+                let sent = self.install.as_ref().is_some_and(|i| i.plan.send_report);
+                rows.push((
+                    "",
+                    format!(
+                        "Install report: /tmp/open-apollo-install-report.json ({})",
+                        if sent { "also sent" } else { "not uploaded" }
+                    ),
+                ));
             }
             if self.steps.status(StepId::Console).is_success() {
                 rows.push(("Console", "~/.local/bin/uaconsole, and \"Open Apollo Console\" in your app menu".into()));
             }
-            if rows.is_empty() {
-                ui.label(RichText::new("Nothing was installed or copied.").color(WEAK));
-            } else {
-                facts(ui, &rows);
-            }
+            rows.push(("Remove it all", "sudo bash scripts/uninstall.sh --purge".into()));
+            facts(ui, &rows);
         });
         section(ui, "Your Windows disk");
         card(ui, false, |ui| {
-            if self.mounted.is_empty() {
+            let opened = self.install.as_ref().filter(|i| matches!(i.plan.source, Source::Partition(_)));
+            if self.attached.is_empty() && opened.is_none() {
                 ui.label(
                     RichText::new(
                         "Setup didn't open any disk itself; disks that were already open were left as they were.",
@@ -900,27 +1012,38 @@ impl App {
                     .color(WEAK),
                 );
             }
-            for (i, m) in self.mounted.iter().enumerate() {
+            if let Some(i) = opened {
+                let Source::Partition(dev) = &i.plan.source else { unreachable!() };
+                let u = i.run.section(RootStep::Unmount);
                 ui.horizontal(|ui| {
-                    let (what, button) = match &m.what {
-                        Mounted::Partition { device, at } => {
-                            (format!("{device} opened read-only at {}", tilde(at)), "Unmount")
+                    let (st, text) = match u.status {
+                        Status::Done => {
+                            (Status::Skipped, format!("{dev}: opened read-only during the install, closed again"))
                         }
-                        Mounted::Image { image, loop_device } => {
-                            (format!("{} attached as {loop_device}", tilde(image)), "Detach image")
+                        Status::Pending if i.running() => {
+                            (Status::Running, format!("{dev}: open read-only while installing"))
                         }
+                        Status::Pending => (Status::Skipped, format!("{dev}: opened read-only during the install")),
+                        st => (st, format!("{dev}: {}", u.message.as_deref().unwrap_or("couldn't be closed"))),
                     };
+                    status_icon(ui, st, 16.0);
+                    ui.label(RichText::new(text).color(if st == Status::Warning { WARN } else { WEAK }));
+                });
+            }
+            for (i, m) in self.attached.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let what = format!("{} attached as {}", tilde(&m.image), m.loop_device);
                     match &m.released {
                         None => {
                             status_icon(ui, Status::Done, 16.0);
                             ui.label(RichText::new(what).color(TEXT));
-                            if secondary(ui, button, true).clicked() {
+                            if secondary(ui, "Detach image", !self.install_running()).clicked() {
                                 act.push(Action::Release(i));
                             }
                         }
                         Some(Ok(())) => {
                             status_icon(ui, Status::Skipped, 16.0);
-                            ui.label(RichText::new(format!("{what}: released")).color(WEAK));
+                            ui.label(RichText::new(format!("{what}: detached")).color(WEAK));
                         }
                         Some(Err(e)) => {
                             status_icon(ui, Status::Failed, 16.0);
@@ -931,9 +1054,7 @@ impl App {
             }
         });
         ui.add_space(6.0);
-        let installed =
-            if self.opts.demo { self.console.as_ref().is_some_and(Run::exit_ok) } else { self.console_bin.is_some() };
-        if installed && primary(ui, "Launch Console", true).clicked() {
+        if self.console_installed() && primary(ui, "Launch Console", true).clicked() {
             act.push(Action::Launch);
         }
         if let Some(Ok(m)) = &self.launched {
@@ -943,21 +1064,24 @@ impl App {
 
     pub(super) fn result_of(&self, step: StepId) -> String {
         let st = self.steps.status(step);
-        if st == Status::Skipped {
-            return "skipped".into();
-        }
         if st == Status::Pending {
             return "not run".into();
         }
-        let outcome = |r: &Option<Run>| r.as_ref().and_then(|r| r.progress.outcome.as_ref()).map(|o| o.message.clone());
+        let section_msg = |id: RootStep| {
+            let i = self.install.as_ref()?;
+            let s = i.run.section(id);
+            let m = s.message.clone()?;
+            Some(if i.demo { format!("{m} (demo)") } else { m })
+        };
         match step {
             StepId::System => match &self.sys {
                 Some(r) if r.warnings() > 0 => format!("{} warning(s) with fixes", r.warnings()),
                 Some(_) => "all good".into(),
                 None => "not run".into(),
             },
-            StepId::Find => match self.selected_found() {
-                Some(f) => format!(
+            _ if st == Status::Skipped && step != StepId::Remove => "skipped".into(),
+            StepId::Find => match (self.selected_found(), &self.selected_device) {
+                (Some(f), _) => format!(
                     "{} on {}",
                     f.install
                         .console
@@ -967,32 +1091,36 @@ impl App {
                         .unwrap_or_else(|| "UAD plug-ins".into()),
                     tilde(f.path())
                 ),
-                None => "no UAD install found".into(),
+                (None, Some(d)) => format!("Windows partition {d}"),
+                (None, None) => "no UAD install found".into(),
             },
-            StepId::Import => match self.import.iter().find(|(i, _)| *i == Item::ConsoleArt) {
-                Some((_, ImportState::Done { files, bytes, .. })) => {
-                    format!("Console art: {files} files, {}", human_size(*bytes))
-                }
-                Some((_, ImportState::Failed(e))) => e.clone(),
-                _ if self.used_previous_import => "using the earlier import".into(),
-                _ => "nothing imported".into(),
+            StepId::Review => match &self.install {
+                Some(i) => i.run.outcome.as_ref().map(|o| o.message.clone()).unwrap_or_else(|| "installing".into()),
+                None => "not run".into(),
             },
-            StepId::Firmware if self.kept_firmware => "kept the files extracted earlier".into(),
-            StepId::Firmware => match &self.firmware {
-                Some(r) if !r.running() => {
-                    let ok = r.files.iter().filter(|f| f.status == Status::Done).count();
-                    format!("{ok} file(s) in {}{}", firmware::FIRMWARE_DIR, if r.demo { " (demo)" } else { "" })
+            StepId::Remove if st == Status::Skipped => "kept the current install".into(),
+            StepId::Remove => section_msg(RootStep::Remove).unwrap_or_else(|| "removed".into()),
+            StepId::Import => match (section_msg(RootStep::Import), self.console_art()) {
+                (Some(m), Some((_, files))) => format!("{m}: {files} files"),
+                (Some(m), None) => m,
+                (None, _) => "not run".into(),
+            },
+            StepId::Firmware => match &self.install {
+                Some(i) if i.run.status(RootStep::Firmware).is_finished() => {
+                    let s = i.run.section(RootStep::Firmware);
+                    let ok = s.files.iter().filter(|f| f.status == Status::Done).count();
+                    format!("{ok} file(s) in {}{}", firmware::FIRMWARE_DIR, if i.demo { " (demo)" } else { "" })
                 }
                 _ => "not run".into(),
             },
-            StepId::Driver => outcome(&self.driver)
-                .map(|m| if self.opts.demo { format!("{m} (demo)") } else { m })
-                .unwrap_or_else(|| "not run".into()),
-            StepId::Console => match (&self.launched, outcome(&self.console)) {
-                (Some(Ok(_)), _) => "installed and started".into(),
-                (_, Some(m)) => m,
-                _ => "installed".into(),
-            },
+            StepId::Driver => section_msg(RootStep::Driver).unwrap_or_else(|| "not run".into()),
+            StepId::Console => {
+                match (&self.launched, self.console.as_ref().and_then(|r| r.progress.outcome.as_ref())) {
+                    (Some(Ok(_)), _) => "installed and started".into(),
+                    (_, Some(o)) => o.message.clone(),
+                    _ => "installed".into(),
+                }
+            }
             _ => String::new(),
         }
     }
@@ -1003,12 +1131,20 @@ fn section(ui: &mut Ui, title: &str) {
     ui.label(RichText::new(title.to_uppercase()).small().strong().color(WEAK));
 }
 
-fn count(n: usize, what: &str) -> String {
-    match n {
-        0 => "none".into(),
-        1 => format!("1 {what}"),
-        n => format!("{n} {what}s"),
-    }
+/// A few items of a group, then how many more.
+fn summarize(items: &[&str]) -> String {
+    const SHOWN: usize = 3;
+    let home = std::env::var("HOME").unwrap_or_default();
+    let short: Vec<String> = items
+        .iter()
+        .take(SHOWN)
+        .map(|i| match i.strip_prefix(&home) {
+            Some(rest) if !home.is_empty() && rest.starts_with('/') => format!("~{rest}"),
+            _ => i.to_string(),
+        })
+        .collect();
+    let more = items.len().saturating_sub(SHOWN);
+    if more > 0 { format!("{}, and {more} more", short.join(", ")) } else { short.join(", ") }
 }
 
 /// `/home/me/x` as `~/x`.
@@ -1021,32 +1157,11 @@ pub(super) fn tilde(p: &std::path::Path) -> String {
     }
 }
 
-fn unmounted_card(ui: &mut Ui, u: &oa_assets::discover::Unmounted, idle: bool, act: &mut Acts) {
-    card(ui, false, |ui| {
-        ui.horizontal(|ui| {
-            badge(
-                ui,
-                if u.is_bitlocker() { "BitLocker" } else { "not open" },
-                if u.is_bitlocker() { WARN } else { WEAK },
-            );
-            let label = u.label.as_deref().map(|l| format!(" \"{l}\"")).unwrap_or_default();
-            ui.label(RichText::new(format!("Windows partition{label}")).strong().color(STRONG));
-            ui.label(RichText::new(format!("{}, {}", u.device, u.size.as_deref().unwrap_or("?"))).color(WEAK));
-            if !u.is_bitlocker() {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if secondary(ui, "Open read-only", idle).clicked() {
-                        act.push(Action::Mount(u.device.clone()));
-                    }
-                });
-            }
-        });
-        if u.is_bitlocker() {
-            ui.add(egui::Label::new(RichText::new(
-                "This partition is encrypted with BitLocker, so Linux can't read it as it is. Either unlock it in your file manager with its 48-digit recovery key (find it at account.microsoft.com/devices/recoverykey), then press Rescan; or start Windows, copy \"C:\\Program Files\\Universal Audio\" and \"C:\\Program Files (x86)\\Universal Audio\" to a USB stick keeping those folder names, and use Choose a folder.",
-            ).small().color(TEXT)).wrap());
-        } else {
-            ui.label(RichText::new("Opens it read-only to look for UAD software. Your password may be asked; nothing on it is changed.").small().color(WEAK));
-        }
+/// Sub-steps on the left, the section's log on the right.
+fn two_columns(ui: &mut Ui, s: &Section, id: &str) {
+    ui.columns(2, |cols| {
+        card(&mut cols[0], false, |ui| substeps(ui, &s.progress.substeps));
+        log_view(&mut cols[1], id, &s.progress.lines, 300.0);
     });
 }
 
@@ -1081,9 +1196,9 @@ fn no_install_blocker(ui: &mut Ui, act: &mut Acts, why: &str) {
     callout(
         ui,
         Status::Failed,
-        "No UAD install found",
+        "No UAD install picked",
         &format!(
-            "{why} Go back to Find your UAD install: open your Windows partition, pick a VM disk image, or choose a folder."
+            "{why} Go back to Find your UAD install: pick a Windows partition, a VM disk image, or choose a folder."
         ),
     );
     if secondary(ui, "Back to Find your UAD install", true).clicked() {
@@ -1091,30 +1206,33 @@ fn no_install_blocker(ui: &mut Ui, act: &mut Acts, why: &str) {
     }
 }
 
-/// The end-of-run banner, with a terminal fallback command when it failed.
-fn run_outcome(ui: &mut Ui, run: &Run, fallback: Option<&str>) {
+/// After a failed install: how it ended, the command for a terminal, and the way back.
+fn failed_help(ui: &mut Ui, act: &mut Acts, i: &Install, with_outcome: bool) {
+    if i.running() {
+        return;
+    }
+    if with_outcome && let Some(o) = &i.run.outcome {
+        ui.label(RichText::new(&o.message).color(TEXT));
+    }
+    if !i.run.other.is_empty() && i.run.nothing_changed() {
+        log_view(ui, "install-other", &i.run.other, 80.0);
+    }
+    ui.label(RichText::new("You can also run it in a terminal to see everything:").small().color(WEAK));
+    command(ui, &i.terminal);
+    if secondary(ui, "Back to Review and install", true).clicked() {
+        act.push(Action::Goto(StepId::Review));
+    }
+}
+
+/// The end-of-run banner of the Console build, with its command when it failed.
+fn run_outcome(ui: &mut Ui, run: &Run) {
     if let Some(o) = &run.progress.outcome {
         callout(ui, o.status, &o.message, "");
         if o.status == Status::Failed {
             ui.label(RichText::new("You can also run it in a terminal to see everything:").small().color(WEAK));
-            command(ui, fallback.unwrap_or(&run.command));
-        }
-        if run.progress.reboot_needed {
-            callout(
-                ui,
-                Status::Warning,
-                "Restart needed",
-                "The installer added iommu=pt to the kernel command line. Restart before using the Apollo.",
-            );
+            command(ui, &run.command);
         }
     }
-}
-
-/// The run's output, folded away once it has finished.
-fn run_log(ui: &mut Ui, run: &Run, id: &str) {
-    CollapsingHeader::new(RichText::new("Output").color(WEAK)).id_salt(id).default_open(run.running()).show(ui, |ui| {
-        log_view(ui, id, &run.progress.lines, 200.0);
-    });
 }
 
 /// `3f1a9c0d2e4b…07c1fe` for a long ASCII hash.

@@ -72,8 +72,8 @@ impl eframe::App for App {
         if self.confirm_close {
             egui::Modal::new(egui::Id::new("confirm-close")).show(ui.ctx(), |ui| {
                 ui.set_max_width(420.0);
-                ui.label(RichText::new("The installer is still running").strong().size(17.0).color(STRONG));
-                ui.label("It runs with administrator rights and keeps going if you close setup. You won't see how it ends here.");
+                ui.label(RichText::new("The install is still running").strong().size(17.0).color(STRONG));
+                ui.label("It runs with administrator rights and keeps going if you close setup. You won't see how it ends here, and the Console isn't built afterwards.");
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     if primary(ui, "Keep setup open", true).clicked() {
@@ -148,7 +148,7 @@ impl App {
                             ui.set_width(ui.available_width());
                             ui.label(RichText::new("DEMO MODE").small().strong().color(INFO));
                             ui.label(
-                                RichText::new("Firmware, driver and Console steps are simulated.").small().color(TEXT),
+                                RichText::new("The install and the Console build are simulated.").small().color(TEXT),
                             );
                         });
                 }
@@ -177,9 +177,21 @@ impl App {
                 ui.label(RichText::new("Working…").color(WEAK));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Review and install: the button starts the install.
+                if cur == StepId::Review && self.install.is_none() && self.steps.status(cur) != Status::Skipped {
+                    let plan = self.install_plan();
+                    if primary(ui, "Install", plan.is_ok()).clicked() {
+                        act.push(Action::StartInstall);
+                    }
+                    if plan.is_err() {
+                        ui.label(RichText::new("Pick a usable UAD install to continue").small().color(FAINT));
+                    }
+                    return;
+                }
+                let picked = self.selected_found().is_some() || self.selected_device.is_some();
                 let label = match cur {
                     StepId::Welcome => "Get started",
-                    StepId::Find if self.selected_found().is_some() => "Use this install",
+                    StepId::Find if picked => "Use this install",
                     StepId::Find if !self.scanning => "Continue without one",
                     StepId::Console => "Finish",
                     StepId::Done => "Close",
@@ -201,9 +213,7 @@ impl App {
     /// Why Next is disabled.
     fn waiting_for(&self, step: StepId) -> &'static str {
         match step {
-            StepId::Import => "Import, or skip, to continue",
-            StepId::Firmware => "Extract the files, or skip, to continue",
-            StepId::Driver => "Install the driver, or skip, to continue",
+            StepId::Remove | StepId::Import | StepId::Firmware | StepId::Driver => "Waiting for the install",
             StepId::Console => "Install or launch the Console, or skip",
             _ => "",
         }

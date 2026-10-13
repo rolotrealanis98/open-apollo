@@ -200,7 +200,7 @@ for kind in noconsole nodsp; do
     check "$kind: removes nothing" hasnt "$log" "uninstall.sh"
     check "$kind: installs no driver" test -z "$(grep '^install.sh' "$log")"
     check "$kind: installs nothing" test -z "$(grep -E '^(install.sh|oa-assets (import|firmware))' "$log")"
-    check "$kind: says nothing was changed" has "$tmp_dir/out" "nothing was changed"
+    check "$kind: says nothing was changed" has "$tmp_dir/out" "Nothing was changed on this computer"
 done
 check "a missing Console is named" has "$tmp_dir/out" "No Console strip plug-ins or UAD2SDK.dll"
 

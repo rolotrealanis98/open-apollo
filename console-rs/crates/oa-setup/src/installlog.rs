@@ -136,6 +136,39 @@ pub const INSTALL_SH: &[Phase] = &[
     phase(&["Install Report", "Telemetry"], "Install report", None),
 ];
 
+/// scripts/uninstall.sh, in order. "USB install" (with uninstall-usb.sh's own
+/// headers) only runs when a USB install is there.
+pub const UNINSTALL_SH: &[Phase] = &[
+    phase(&["Earlier install"], "Look for the earlier install", None),
+    phase(&["Mixer daemon"], "Stop and remove the mixer daemon", None),
+    phase(&["Unloading the driver"], "Unload the driver", None),
+    phase(&["Console"], "Console (uaconsole)", None),
+    phase(&["Audio settings"], "PipeWire, WirePlumber and UCM2 settings", None),
+    phase(&["udev rules and helpers"], "udev rules and helpers", None),
+    phase(&["Old tray and launcher"], "Old tray and launcher", None),
+    phase(
+        &[
+            "USB install",
+            "Stopping init processes",
+            "Removing udev rules",
+            "Removing installed scripts",
+            "Restoring stock snd-usb-audio",
+            "Cleaning build cache",
+            "Removing WirePlumber override",
+            "Removing install reports",
+            "Purging firmware (--purge)",
+            "Uninstall Complete",
+            "Uninstall PARTIAL — REBOOT REQUIRED",
+            "Uninstall PARTIAL — NO USB AUDIO DRIVER LOADED",
+        ],
+        "USB Apollo install",
+        None,
+    ),
+    phase(&["Driver (DKMS)"], "Driver, DKMS and built modules", None),
+    phase(&["Firmware and imported art"], "Extracted firmware and imported art", None),
+    phase(&["Check"], "Check that nothing is left", None),
+];
+
 /// scripts/install-uaconsole.sh, in order.
 pub const INSTALL_UACONSOLE_SH: &[Phase] = &[
     phase(&["Building uaconsole (release)"], "Build uaconsole", None),
@@ -506,6 +539,36 @@ mod tests {
         let mut p = Progress::new(INSTALL_SH);
         p.finish(None, false);
         assert_eq!(p.outcome.unwrap().status, Status::Failed);
+    }
+
+    #[test]
+    fn maps_an_uninstall_with_a_usb_install() {
+        let mut p = Progress::new(UNINSTALL_SH);
+        for l in [
+            header("Earlier install"),
+            "[INFO]  Found: ua_apollo 0.1.0 (DKMS)".into(),
+            header("Mixer daemon"),
+            ok("Removed /etc/systemd/user/ua-mixer-daemon.service"),
+            header("USB install"),
+            "Open Apollo USB — Uninstaller".into(),
+            header("Stopping init processes"),
+            header("Removing udev rules"),
+            ok("Removed /etc/udev/rules.d/99-apollo-usb.rules"),
+            header("Uninstall Complete"),
+            header("Driver (DKMS)"),
+            ok("Removed DKMS registration ua_apollo/0.1.0"),
+            header("Check"),
+            fail("Still here: /etc/udev/rules.d/91-ua-apollo.rules"),
+        ] {
+            p.feed(&l);
+        }
+        p.finish(Some(1), true);
+        assert_eq!(p.substeps.len(), UNINSTALL_SH.len(), "uninstall-usb.sh's headers fold into one sub-step");
+        assert_eq!(status_of(&p, "USB Apollo install"), Status::Done);
+        assert_eq!(status_of(&p, "Unload the driver"), Status::Skipped);
+        let check = p.substeps.iter().find(|s| s.label.starts_with("Check")).unwrap();
+        assert_eq!(check.status, Status::Failed);
+        assert_eq!(check.note.as_deref(), Some("Still here: /etc/udev/rules.d/91-ua-apollo.rules"));
     }
 
     #[test]

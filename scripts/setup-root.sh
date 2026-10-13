@@ -189,11 +189,11 @@ step_source() {
     header "Checking your UAD install"
     if ! find_oa_assets; then
         fail "oa-assets not found: build it (cargo build --release -p oa-assets) or pass --oa-assets PATH"
-        marker source failed "oa-assets not found; nothing was changed"
+        marker source failed "oa-assets not found"
         return 1
     fi
     if [ -n "$MOUNT_DEV" ] && ! mount_source; then
-        marker source failed "Couldn't open $MOUNT_DEV read-only; nothing was changed"
+        marker source failed "Couldn't open $MOUNT_DEV read-only"
         return 1
     fi
     if [ ! -d "$FROM" ]; then
@@ -203,7 +203,7 @@ step_source() {
     fi
     info "Reading $FROM (read-only)"
     if ! check_source; then
-        marker source failed "No usable UAD install in $FROM; nothing was changed"
+        marker source failed "No usable UAD install in $FROM"
         return 1
     fi
     marker source "done" "UAD install found in $FROM"
@@ -335,7 +335,10 @@ main() {
     echo -e "${BOLD}Open Apollo — Setup${NC}"
     echo "==================="
 
-    step_source || return 1
+    if ! step_source; then
+        info "Nothing was changed on this computer."
+        return 1
+    fi
     step_remove || return 1
     step_import || return 1
     step_firmware || return 1

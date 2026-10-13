@@ -112,7 +112,7 @@ pub fn run(repo: Option<&Path>) -> Report {
     checks.push(match in_path("udisksctl") {
         Some(_) => Check::new("Disk mounting", Level::Ok, "udisks2"),
         None => Check::new("Disk mounting", Level::Warn, "udisksctl not found")
-            .hint("Needed to open your Windows partition or VM disk read-only. Install udisks2, or mount it yourself and use Choose a folder."),
+            .hint("Needed to open a Windows VM's disk image read-only. Install udisks2, or mount it yourself and use Choose a folder."),
     });
     checks.push(match command_output("cargo", &["--version"]) {
         Some(v) => Check::new("Rust toolchain", Level::Ok, v),
