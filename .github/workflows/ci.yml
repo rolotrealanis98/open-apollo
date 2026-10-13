@@ -35,9 +35,8 @@ jobs:
       webview: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.webview == 'true' }}
       installer: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.installer == 'true' }}
       install_matrix: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.install_matrix == 'true' }}
-      nix: >-
-        ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.nix == 'true'
-            || (github.event_name == 'push' && steps.filter.outputs.console_rs == 'true') }}
+      # nix also runs after any console-rs change lands on main
+      nix: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.nix == 'true' || (github.event_name == 'push' && steps.filter.outputs.console_rs == 'true') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -247,12 +246,15 @@ jobs:
           command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -y shellcheck; }
           shellcheck --version | head -2
           # *.sh plus the extensionless sh/bash scripts (udev workers)
-          git ls-files -z scripts tools configs tests | while IFS= read -r -d '' f; do
+          scripts=()
+          while IFS= read -r -d '' f; do
             case "$f" in
-              *.sh) printf '%s\0' "$f" ;;
-              *) head -n1 "$f" | grep -qE '^#!.*[/ ](ba|da)?sh( |$)' && printf '%s\0' "$f" ;;
+              *.sh) scripts+=("$f") ;;
+              *) if head -c 128 "$f" | head -n1 | grep -qE '^#!.*[/ ](ba|da)?sh( |$)'; then scripts+=("$f"); fi ;;
             esac
-          done | xargs -0 shellcheck --severity=error
+          done < <(git ls-files -z scripts tools configs tests)
+          echo "${#scripts[@]} shell scripts"
+          shellcheck --severity=error "${scripts[@]}"
       - name: Installer and host-check unit tests
         run: |
           # Each sources install.sh (functions only) or fakes sysfs; no root,
