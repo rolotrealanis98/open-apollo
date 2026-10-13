@@ -207,6 +207,23 @@ static int ua_inst_check_rows(const struct ua_memspec_row *rows,
 	return ret;
 }
 
+/*
+ * A module with the same id and architecture but other bytes than one the
+ * host already uses (the strips' or another instance's): the DSP knows a
+ * resource by its id, so the two cannot both be there.  (ua->lock)
+ */
+static bool ua_inst_conflicts(struct ua_plugin_host *h,
+			      const struct ua_cat_entry *e)
+{
+	const struct ua_cat_entry *o;
+
+	list_for_each_entry(o, &h->catalog, node)
+		if (o != e && o->users && o->info.id == e->info.id &&
+		    o->info.arch == e->info.arch)
+			return true;
+	return false;
+}
+
 /* Is the instance's set uploadable (kinds, architectures, duplicates)? */
 static int ua_inst_check_set(struct ua_plugin_inst *in)
 {
@@ -358,7 +375,12 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 		rq[in->n_res + i] = (struct ua_pool_request){ rows[i].pool,
 			rows[i].dwords, &in->ident[i], false };
 	mutex_lock(&ua->lock);
-	if (h->epoch != epoch) {
+	for (i = 0; i < in->n_res; i++)
+		if (ua_inst_conflicts(h, in->res[i]))
+			ret = -EEXIST;
+	if (ret == -EEXIST) {
+		/* refused: another version of a module the host already uses */
+	} else if (h->epoch != epoch) {
 		ret = -ESTALE;
 	} else {
 		ret = ua_plugin_place(ua, req->dsp, rq, n, &dsp, in->lease);

@@ -496,6 +496,26 @@ int ua_xact_wait(struct ua_device *ua, struct ua_xact *x,
 	}
 }
 
+/*
+ * What a transaction that ended unproven looked like (ua->lock held): for
+ * the hardware sessions, whether the command ring passed it, whether the
+ * response ring did, and whether its first reply word was written anyway.
+ */
+static void ua_xact_report(struct ua_device *ua, struct ua_xact *x, int ret)
+{
+	struct ua_dsp_state *ds = &ua->dsp[x->dsp];
+	u32 w0 = 0;
+
+	if (x->n_rx && x->cpu)
+		w0 = le32_to_cpu(READ_ONCE(*(__le32 *)((u8 *)x->cpu + x->rx_base)));
+	dev_warn(&ua->pdev->dev,
+		 "plug-in host: DSP %u transaction (%u entries, %u replies) ended %d after %u ms: cmd end %u pos %u, resp end %u pos %u, reply word 0x%08x\n",
+		 x->dsp, x->n, x->n_rx, ret,
+		 jiffies_to_msecs(jiffies - x->published),
+		 x->ref[0].end, ds->cmd.hw_pos, x->ref[1].end, ds->resp.hw_pos,
+		 w0);
+}
+
 /**
  * ua_xact_run - map, publish and wait; quarantine on an unknown outcome
  * @ua: device (host->mutex held, ua->lock NOT held)
@@ -522,6 +542,7 @@ int ua_xact_run(struct ua_device *ua, struct ua_xact *x,
 	ret = ua_xact_wait(ua, x, timeout_ms);
 	if (ret && ret != -ENODEV) {
 		mutex_lock(&ua->lock);
+		ua_xact_report(ua, x, ret);
 		ua->host->dsp[x->dsp].timeouts++;
 		ua_plugin_quarantine(ua, x->dsp, "a transaction ended unproven",
 				     ret);

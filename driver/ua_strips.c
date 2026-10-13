@@ -1058,7 +1058,10 @@ static int ua_strips_upload(struct ua_device *ua, struct ua_strips *st,
 			mutex_unlock(&ua->lock);
 			return -ECANCELED;
 		}
-		st->mod_state[j] = ret ? UA_MOD_UPLOADING : UA_MOD_RESIDENT;
+		/* a failed upload the DSP may have seen still needs its release */
+		st->mod_state[j] = !ret ? UA_MOD_RESIDENT :
+				   st->mod[j]->res[0].state != UA_RES_NONE ?
+				   UA_MOD_UPLOADING : UA_MOD_NONE;
 		mutex_unlock(&ua->lock);
 		if (ret)
 			return ret;

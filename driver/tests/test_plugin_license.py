@@ -620,6 +620,55 @@ int main(void)
 ''')
 
 
+def test_another_version_of_a_module_in_use_is_refused():
+    """The DSP knows a resource by its id: a module with the same id and
+    architecture but other bytes than one already in use is refused before
+    anything is placed."""
+    build_license(r'''
+int main(void)
+{
+	static u8 other[64];
+	static u8 sha_other[32];
+	static char name_other[128];
+	struct ua_plugin_instance q, q2;
+	unsigned int up;
+
+	setup();
+	bq_table[6] = 0x81000000;
+	assert(create(&file_a, 0x806, 0, &q) == 0);
+	mk(other, sizeof(other), 0xF00001, 0x02000000, 3, sha_other, name_other);
+	other[40] ^= 0xff;			/* same id, other bytes */
+	sha256(other, sizeof(other), sha_other);
+	{
+		char hex[65];
+
+		*bin2hex(hex, sha_other, 32) = 0;
+		snprintf(name_other, 128, "universal-audio/plugins/modules/%s.bill", hex);
+	}
+	disk[ndisk++] = (struct disk){ name_other, other, sizeof(other) };
+	up = uploads();
+	memset(&q2, 0, sizeof(q2));
+	memcpy(res[0].sha256, sha_other, 32);
+	memcpy(res[1].sha256, sha_data, 32);
+	q2.struct_size = sizeof(q2);
+	q2.op = UA_PLUGIN_INST_CREATE;
+	q2.render_id = 0x806;
+	q2.dsp = UA_PLUGIN_DSP_ANY;
+	q2.n_resources = 2;
+	q2.n_private = 2;
+	q2.resources = (u64)(uintptr_t)res;
+	q2.privates = (u64)(uintptr_t)priv;
+	assert(ua_plugin_ioctl_instance(&dev, &file_a, (unsigned long)&q2) == -EEXIST);
+	assert(uploads() == up && host.n_instances == 1);
+	ua_plugin_file_release(&file_a);
+	assert(all_idle());
+	cleanup();
+	assert(!k_objects && !dma_live);
+	return 0;
+}
+''')
+
+
 def test_request_validation():
     build_license(r'''
 int main(void)
