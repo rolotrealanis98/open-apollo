@@ -338,7 +338,9 @@ install_files() {
     mkdir -p -- "$APPS_DIR"
     while IFS= read -r line; do
         case "$line" in
-            Exec=*) printf 'Exec=%s\n' "$exec_value" ;;
+            # The menu entry is the user's mixer: it controls the Apollo.  Plain
+            # uaconsole (scripts, tests) stays read-only.
+            Exec=*) printf 'Exec=%s --writes\n' "$exec_value" ;;
             Icon=*) printf 'Icon=%s\n' "$icon_value" ;;
             *) printf '%s\n' "$line" ;;
         esac

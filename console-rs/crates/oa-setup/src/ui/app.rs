@@ -851,6 +851,8 @@ impl App {
         }
         let Some(bin) = self.console_bin.clone() else { return };
         let mut cmd = Command::new(&bin);
+        // The user's mixer: it controls the Apollo (plain uaconsole starts read-only).
+        cmd.arg("--writes");
         if !self.opts.data_is_default {
             cmd.env("CONSOLE_RESOURCES", self.opts.data.join(oa_assets::import::CONSOLE_DIR));
         }

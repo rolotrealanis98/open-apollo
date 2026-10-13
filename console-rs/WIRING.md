@@ -32,8 +32,9 @@ on 2026-10-13 from `rc/console-wiring`.
   daemon on a private loopback port with a recording backend. Daemon-side tests are in
   `mixer-engine/tests/test_console_wiring.py`.
 
-**Writes are off by default.** uaconsole starts read-only, and so does the `open-apollo-console`
-launcher, which does not pass `--writes`. Before this branch, Settings' **WRITES** switch only
+**Writes: on for the user's console, off for scripts.** The **Open Apollo Console** menu entry and
+the setup wizard's Launch button start `uaconsole --writes`; plain `uaconsole` (scripts, tests,
+agents) starts read-only. Before this branch, Settings' **WRITES** switch only
 opened the writer: the connection kept refusing `set` and `post`, so a console launched without
 `--writes` changed nothing on the Apollo even with the switch on. The switch now opens both
 gates (`Store::set_engine_writes`, `EngineHandle::set_allow_writes`; test
