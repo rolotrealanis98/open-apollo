@@ -40,7 +40,7 @@ pub use generic::GenericPanel;
 pub use library::{Entry, PluginSpecLibrary, SpecLocator};
 pub use meters::MeterFeed;
 pub use panel::PluginPanel;
-pub use engine::EngineSlot;
+pub use engine::{EngineSlot, MeterPoller};
 pub use scales::PluginScales;
 pub use params::{MockEvent, MockParam, MockParams, ParamSnapshot, ParamSource};
 pub use paths::{ParamPaths, SlotPath};

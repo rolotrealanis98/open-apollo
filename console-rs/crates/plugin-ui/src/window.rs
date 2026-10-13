@@ -773,6 +773,22 @@ impl PluginWindow {
         }
     }
 
+    /// The read-only meter queries of a spec panel (empty for other content).
+    pub fn meter_queries(&self) -> Vec<String> {
+        match &self.content {
+            Content::Spec(p) => p.meter_queries(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// A reply to one of [`meter_queries`](Self::meter_queries).
+    pub fn ingest_meter_reply(&mut self, query: &str, reply: &serde_json::Value, params: &dyn ParamSource) -> bool {
+        match &mut self.content {
+            Content::Spec(p) => p.ingest_reply(query, reply, params),
+            _ => false,
+        }
+    }
+
     /// The insert's channel layout: a spec declaring state `channels` gets 1 (mono) or 2
     /// (stereo), and a mono insert draws at `monoSize` when the spec has one.
     pub fn set_channel_layout(&mut self, stereo: bool) {

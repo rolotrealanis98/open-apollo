@@ -26,7 +26,7 @@ No UA asset is in this repository: GUIs, specs, sprites and Console art are read
 | `readout` | `String(format:)` for one %f/%g/%e conversion, sprite-font cells, text fitting and wrapping |
 | `window` | Console's window chrome and layout (`header_layout` = Rack.dll's mode 0/1/2 + overflow) |
 | `params` | `ParamSource`, `MockParams`, `ParamSnapshot` |
-| `engine` | `EngineSlot`: `ParamSource` over `ua_engine::Store` |
+| `engine` | `EngineSlot`: `ParamSource` over `ua_engine::Store`; `MeterPoller`: the panel's read-only meter gets |
 | `meters` | VendorSpecific polling (floats= list + one opcode range incl. analyser bins), reply decoding, conditioning (integer bits, absolute, ignoreZero, derive direction), combine max, calibration and mode curves, ballistics, the analyser block |
 | `web`, `uanet` | lunacomponent discovery, the page URL and its keys (`GuiQuery`), and the UANet dialect (pure) |
 | `content` | the `ua-content://` scheme: Console 1.3.1's path resolution, MIME table and headers (pure; WEBBRIDGE.md §8) |
@@ -100,7 +100,9 @@ implements it over ua-engine; `<slot>` is `/devices/D/inputs/N/effects/K`, an au
 Open: `get <slot>?recursive=1` (read-only), then subscribe `NormalizedValue`, `StringValue`,
 `StepValue` of each parameter; release on close. Writes obey the store's gate (read-only by
 default: nothing is sent). Meters: `PluginPanel::meter_queries` gives the read-only gets
-(`<slot>/VendorSpecific/value?floats=ID,…` and one `?opcode=OP&p0=ID&p1=N&p2=1`) and
+(`<slot>/VendorSpecific/value?floats=ID,…` and one `?opcode=OP&p0=ID&p1=N&p2=1`),
+[`MeterPoller`](src/engine.rs) sends them over the store's live connection (one in flight per
+query, every 1/30 s, a second's back-off after an error) from the app's `sync`, and
 `PluginPanel::ingest_reply` feeds the replies into `PluginPanel::meters` (`MeterFeed`).
 
 Hit regions use `rack::Control` variants appended for plug-in windows: `PluginParam(k)` (drag),
@@ -199,9 +201,8 @@ hook on engine and preview models.
 The staged catalog (223 specs, 2026-10-13) decodes completely and every spec builds and takes
 gestures headless; the Swift runtime's features are ported (above). Not covered:
 
-- **Meters from a live engine**: the queries and reply handling exist
-  (`meter_queries`/`ingest_reply`), but `EngineSlot` does not issue the VendorSpecific gets yet
-  (ua-engine's `Store` has no one-shot query API), so app panels show meters at rest.
+- **Meters on hardware**: `MeterPoller` sends the panel's VendorSpecific gets over the store's
+  connection and is tested against the mock engine; it has not run against a live Apollo here.
 - **Text metrics** are estimated (shrink-to-fit and wrapping use average advances), and medium
   weights draw regular (rack has bold or regular).
 - Rotation applies to sprite elements (the only ones the catalog rotates), not to text or graphs.

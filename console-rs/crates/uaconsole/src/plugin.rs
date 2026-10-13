@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use engine_model::EngineMixer;
 use houston::{ImageCache, Rect};
-use plugin_ui::{Content, EngineSlot, LunaLibrary, MockParams, ParamSnapshot, ParamSource, PluginScales, PluginSpecLibrary, PluginWindow, WindowEvent};
+use plugin_ui::{Content, EngineSlot, LunaLibrary, MeterPoller, MockParams, ParamSnapshot, ParamSource, PluginScales, PluginSpecLibrary, PluginWindow, WindowEvent};
 use rack::presets::{PresetCmd, PresetScope};
 use rack::model::{InsertState, StripInfo};
 use rack::{Action, Control, ControlId, Hit, Interaction, MixerModel, PluginWindowButton as B, Ui};
@@ -138,6 +138,7 @@ impl PluginHook for PluginUiHook {
             hits: Vec::new(),
             interaction: Interaction::default(),
             panel_gesture: false,
+            meter_poll: MeterPoller::new(),
             origin: (0.0, 0.0),
             specs: self.specs.clone(),
             scales: self.scales.clone(),
@@ -169,6 +170,8 @@ pub struct WindowPanel {
     interaction: Interaction,
     /// A press went to the spec panel's own gestures (its moves and release follow it).
     panel_gesture: bool,
+    /// The spec panel's meters (read-only VendorSpecific gets while the window is open).
+    meter_poll: MeterPoller,
     origin: (f32, f32),
     #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     specs: Option<Arc<PluginSpecLibrary>>,
@@ -425,6 +428,17 @@ impl Panel for WindowPanel {
     }
 
     fn sync(&mut self, model: &mut dyn MixerModel) {
+        // Live meters: the panel's VendorSpecific queries, polled read-only while it is open.
+        if let (Some(slot), Some(e)) = (&self.engine, engine_mut(model)) {
+            let queries = self.window.meter_queries();
+            if !queries.is_empty() {
+                let replies = self.meter_poll.poll(e.store(), &queries);
+                let params = slot.view(e.store());
+                for (q, data) in replies {
+                    self.window.ingest_meter_reply(&q, &data, &params);
+                }
+            }
+        }
         // Meter ballistics, touch-state timeouts, long presses and repeats run on the panel's clock.
         self.with_params(model, |w, p| w.tick(p));
         self.refresh(model);
@@ -451,7 +465,10 @@ impl Panel for WindowPanel {
 
     /// A web GUI needs GTK and its bridge serviced every tick.
     fn live(&self) -> bool {
-        matches!(self.window.content, Content::Web(_)) || self.panel_gesture || self.window.animating(&self.snapshot)
+        matches!(self.window.content, Content::Web(_))
+            || self.panel_gesture
+            || self.window.animating(&self.snapshot)
+            || (self.engine.is_some() && !self.window.meter_queries().is_empty())
     }
 }
 
