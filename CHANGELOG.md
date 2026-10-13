@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- The committed device maps (`device_map_apollo_x4.json`, `device_map_apollo_x8p.json`) and Mixer Helper tree (`helper_tree.json`) are structure only. UA's plug-in catalogue, factory channel-strip and I/O-map preset menus and Mixer Helper help text are no longer shipped, and neither is the capture machines' data (an Apollo serial number, hardware ids, a session path, MIDI devices, LAN addresses, home paths, account feature flags, licence state). The x4 map has 7,944 controls (was 9,924).
+- Mixer daemon: overlays the UA catalogue that `oa-assets import` writes from the user's own UAD install (`~/.local/share/open-apollo/ua-catalogue/`, `--ua-catalogue DIR`, `$OA_UA_CATALOGUE`; `--no-ua-catalogue` to skip): the `/plugins` list, the factory channel-strip presets on every input and aux, the factory I/O presets before the user's saved ones, and the helper help strings (matched by position and SHA-256 through `device_maps/helper_tree.pins.json`). Without an import the plug-in list and factory menus are empty; nothing else changes. `tests/test_shipped_data.py` keeps UA content and host data out of the shipped files.
+- Console host commands (`console_presets`): the preset menus of channels, auxes, inserts and `/plugins` entries list the imported factory preset names (locked, after the user's own) when no `--factory-presets-dir` folder holds that plug-in's files; loading a name that has no file says so. Without an import they list the user's own presets only.
+
 ### Added
 - Status map in the README (`docs/status/`, `tools/gen-status-graph.py`): one square per behaviour of UA's drivers in the parity map, per task of the work plan and per Apollo model, coloured verified on hardware / done in code / partial / still to figure out / understood, not done / plugin hosting / needs hardware, with per-area numbers and the open tasks in `docs/status/README.md`. CI checks it is up to date.
 - `tools/extract-ua-dsp-modules.py`: copies UA Console's built-in input-strip DSP modules (Mic Input Strip 0EB/0DA/0A5/0C2/12B, Input Strip 0DB, Talkback 0C9) from the user's own UA install (Windows, Wine or macOS) to `/lib/firmware/ua_apollo/dsp/`, for the driver's input strips; nothing UA-made is shipped. Found all seven in the Windows install on titan.

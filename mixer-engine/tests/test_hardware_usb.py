@@ -45,7 +45,7 @@ def test_open_reads_identity_and_adopts_seq():
     info = be.get_device_info()
     assert info["device_type"] == 0x1000D and info["subsystem_id"] == 0x000D
     assert info["fw_version"] == 0x01030003 and info["num_dsps"] == 1
-    assert be.get_system_info() == {"serial": "20352028005850"}
+    assert be.get_system_info() == {"serial": "20000000000001"}
     # read-only requests only at open
     assert all(c[0] == 0xC1 for c in dev.ctrl_log)
 

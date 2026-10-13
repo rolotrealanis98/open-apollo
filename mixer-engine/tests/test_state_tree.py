@@ -13,8 +13,8 @@ GAIN = "/devices/0/inputs/0/preamps/0/Gain"
 class TestLoading:
     def test_device_map_loaded(self, tree):
         assert tree.device_name == "Apollo x4"
-        assert tree.control_count == 9924
-        assert len(tree.all_paths()) > 9000
+        assert tree.control_count == 7944
+        assert len(tree.all_paths()) > 7900
 
     @pytest.mark.parametrize("name", ["device_map_apollo_x4.json",
                                       "device_map_apollo_x8p.json"])

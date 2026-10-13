@@ -653,10 +653,12 @@ class TestSessions:
         assert data["values"][f"{IN}/0/FaderLevel/value"] == -8.0
 
     def test_save_with_a_foreign_session_path_keeps_the_last_part(self, stack):
-        # the captured map's /Session is a path from another machine
-        assert stack.state.get_value("/Session/value").count("/") > 1
+        # a Mixer Engine reports /Session as a path, possibly from another
+        # machine (the shipped map's own is empty)
+        assert stack.state.get_value("/Session/value") == ""
+        stack.state.set("/Session/value", "../../../Desktop/Gigs/Main Room")
         r = ok(stack, "/SaveSession")
-        assert r["name"] == "API Preamp Controls"
+        assert r["name"] == "Main Room"
 
     def test_save_without_name_or_session_fails(self, stack):
         stack.state.set("/Session/value", "")
