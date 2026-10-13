@@ -110,3 +110,12 @@ raw packets match expected bytes. A pinned loaded-engine idle trace observed
 changed only in meters. Genuine CLI command grammar and a jailbreak remain
 unproved. All-selector size/count aggregates now distinguish working native
 traffic observation from an idle CLI window. Raw captures remain outside git.
+
+## Producer and firmware boundary investigation
+
+[CLI-PRODUCER-AND-FIRMWARE.md](CLI-PRODUCER-AND-FIRMWARE.md) records the
+additional helper receiver checks, nonconsuming logger ABI and its pointer-only
+CLI records, UA Services' inventory/MCP boundaries, and REA firmware signatures
+with independent rejection. No genuine command producer or readable firmware
+parser was recovered. No vendor execution, tool invocation or Apollo write
+occurred. Raw assets/results remain outside git.

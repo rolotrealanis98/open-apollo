@@ -496,3 +496,36 @@ for this fix. The failure reproduced at repetition 33 before the change.
 Validation: four multi-device tests and 100 repeated target runs pass; full
 workspace 285 tests pass (10 ignored), locked release build, p1 158/158,
 p2 195/195, windows_check, ledger tests and regeneration.
+
+## CLI producer and firmware boundary pass (2026-10-13)
+
+Read-only/offline diagnostic-helper review qualified ualogger's host-log path,
+CoreAudio panel callbacks and UA Services' real device-inventory path rather
+than treating matching vtable offsets as CLI calls. No genuine command
+producer found. The logger's 48-byte records store the CLI command pointer,
+not text; its bounded nonconsuming ABI is documented, but no live query or
+pointer dereference was performed.
+
+UA Services MCP is a localhost stdio bridge with asymmetric framing and a
+139-tool DAW/session catalog; no firmware/debug tool was identified. The app
+and listener were absent on Mac, so no service launch or tool invocation.
+REA/Binwalk scanned both x4 update candidates: all ten zlib and three GPG
+candidates failed independent validation. No executable parser region was
+recovered; high entropy does not prove encryption or locate keys.
+
+See tools/cli-capture/CLI-PRODUCER-AND-FIRMWARE.md for exact pins, source
+addresses, Evidence IDs, primary hardware documentation and remaining unknowns.
+No live Apollo writes, UA assets in git or native driver edits occurred.
+Jailbreak/custom-code execution, plaintext/key extraction and a readable
+controller image remain unresolved.
+
+Additional mapping review found only session-owned host DMA allocation/map
+paths, not a verified IOConnectMapMemory type exposing BAR0 or controller
+plaintext. No runtime mapping or allocation was requested.
+
+Verification found and reproduced a separate multi-device test race: an
+UndoRecording frame satisfied its wait before the mute frame arrived. The
+fix is isolated on codex/multidevice-test-wait, with 100 repeated runs and
+full workspace 285 tests passing (10 ignored). Locked release build,
+p1 158/158, p2 195/195, windows_check, ledger tests and regeneration pass
+with that fix. Both task histories are merged into feat/rust-console.
