@@ -618,7 +618,7 @@ fn map_table(name: &str) -> Vec<(&'static str, PropValue)> {
     }
 }
 
-/// NETWORK INTERFACE: the helper's adapters (`en0  (192.168.1.4)`), the selected one ticked.
+/// NETWORK INTERFACE: the helper's adapters (`en0  (192.0.2.4)`), the selected one ticked.
 /// Picking one asks [`NIC_CONFIRM_TITLE`] first (the view), then writes the helper (`nic-set:`).
 fn network_interface_field(src: &dyn PropertySource) -> SettingField {
     let adapters = src.choices(&format!("{HELPER_PREFIX}{NIC_LIST_PATH}"));
@@ -1247,10 +1247,10 @@ impl MemoryProperties {
             .with("/IOMapPresetDirty", B(true))
             .with("/TotalDriverInputRoutes", I(22))
             .with("/TotalDriverOutputRoutes", I(24))
-            .with_choices("/MidiInputDevice", S(String::new()), vec![s("Network RTP MIDI Mac Studio"), s("Virtual Midi Bus 1")])
+            .with_choices("/MidiInputDevice", S(String::new()), vec![s("Network RTP MIDI Session"), s("Virtual Midi Bus 1")])
             .with("/Version", S("12.0.0".into()))
             .with("/ProtocolVersion", S("1.0.0".into()))
-            .with("/SerialNumber", S("20192005010254".into()))
+            .with("/SerialNumber", S("20000000000002".into()))
             .with("/devices/0/DeviceName", S("Apollo x4".into()))
             .with("/devices/0/DeviceTypeID", S("Apollo x4".into()))
             .with("/devices/0/DeviceOnline", B(true))

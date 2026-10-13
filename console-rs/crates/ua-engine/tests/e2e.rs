@@ -512,8 +512,8 @@ fn daemon_style_engine() {
 #[test]
 fn endpoint_parsing() {
     assert_eq!(
-        Endpoint::parse("192.168.1.4"),
-        Endpoint::new("192.168.1.4", 4710)
+        Endpoint::parse("192.0.2.4"),
+        Endpoint::new("192.0.2.4", 4710)
     );
     assert_eq!(
         Endpoint::parse("127.0.0.1:14710"),

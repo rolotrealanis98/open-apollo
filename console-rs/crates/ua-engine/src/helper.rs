@@ -375,7 +375,7 @@ impl NetworkAdapter {
             .collect()
     }
 
-    /// How Console lists it: `en0  (192.168.1.4)`, `en14  ()` (capture s30).
+    /// How Console lists it: `en0  (192.0.2.4)`, `en14  ()` (capture s30).
     pub fn label(&self) -> String {
         format!("{}  ({})", self.name, self.address)
     }

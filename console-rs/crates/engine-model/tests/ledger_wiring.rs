@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use engine_model::EngineMixer;
-use ua_engine::{Snapshot, Store};
+use ua_engine::{Property, Snapshot, Store};
 use houston::Resources;
 use rack::menu::PopupEntry;
 use rack::{Assets, Control, Hit, HitKind, Interaction, MenuCmd, Ui, ViewState, build_window_with};
@@ -48,6 +48,25 @@ fn assets() -> (Assets, &'static str) {
     std::fs::create_dir_all(dir.join("appearance")).unwrap();
     std::fs::write(dir.join("appearance/Appearance.json"), FIXTURE_APPEARANCE).unwrap();
     (Assets::load(Resources::at(&dir).unwrap()).unwrap(), "fixture-appearance")
+}
+
+/// The committed fixture ships empty I/O preset and MIDI input lists (UA factory names and host
+/// devices are stripped): seed small synthetic lists so the I/O PRESETS and MIDI menus are still
+/// pressed. A `LEDGER_SNAPSHOT` with its own lists is left alone.
+fn seed_lists(snap: &mut Snapshot) {
+    let file = |v: &str| serde_json::json!({"value": v, "type": "file", "locked": false});
+    for (path, values) in [
+        ("/IOMapPreset", serde_json::json!([file("Example I/O 1"), file("Example I/O 2")])),
+        ("/MidiInputDevice", serde_json::json!([{"value": "Example MIDI In"}])),
+    ] {
+        if snap.tree.meta(path).is_some_and(|m| m.choices().is_empty()) {
+            let value = snap.tree.value(path).map_or(serde_json::json!(""), |v| v.to_json());
+            snap.tree.set_property(
+                path,
+                Property::from_json(&serde_json::json!({"type": "string", "value": value, "values": values})),
+            );
+        }
+    }
 }
 
 fn snapshot() -> String {
@@ -338,7 +357,8 @@ const KNOWN_NOOPS: &[&str] = &[
 #[test]
 fn every_control_is_wired() {
     let (assets, art) = assets();
-    let snap = Snapshot::load(snapshot()).expect("snapshot");
+    let mut snap = Snapshot::load(snapshot()).expect("snapshot");
+    seed_lists(&mut snap);
     let model = EngineMixer::new(Store::from_snapshot(snap.clone()));
     let seen = model.store().writer().suppressed_count();
     let mut audit = Audit { assets, snap, model, groups: BTreeMap::new(), seen, dirty: false, occluded: BTreeMap::new() };

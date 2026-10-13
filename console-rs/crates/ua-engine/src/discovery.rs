@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 /// An engine found on the LAN.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Discovered {
-    /// Instance name, e.g. `Rolando’s Mac Studio (1419)`.
+    /// Instance name, e.g. `Studio Mac (1419)`.
     pub name: String,
     pub host: String,
     pub port: u16,

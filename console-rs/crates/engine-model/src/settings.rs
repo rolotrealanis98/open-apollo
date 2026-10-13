@@ -47,7 +47,7 @@ impl PropertySource for EngineMixer {
     }
 
     fn choices(&self, path: &str) -> Vec<Choice> {
-        // NETWORK INTERFACE: the helper's adapter list (`en0  (192.168.1.4)` → `en0`).
+        // NETWORK INTERFACE: the helper's adapter list (`en0  (192.0.2.4)` → `en0`).
         if path == format!("{}{}", rack::settings::HELPER_PREFIX, rack::settings::NIC_LIST_PATH) {
             let Some(h) = &self.helper else { return Vec::new() };
             return h

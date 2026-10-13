@@ -10,7 +10,7 @@ use rack::surfaces::Popover;
 use rack::{Action, Control, ControlId, ViewState};
 use ua_engine::{HelperStore, MockEngine, MockOptions, PRIMARY_NETWORK_ADAPTER, Snapshot, Value};
 
-const ADAPTERS: &str = r#"[{"adapter_name":"en0","adapter_address":"192.168.1.4"},{"adapter_name":"en14","adapter_address":""},{"adapter_name":"en24","adapter_address":"10.0.0.5"}]"#;
+const ADAPTERS: &str = r#"[{"adapter_name":"en0","adapter_address":"192.0.2.4"},{"adapter_name":"en14","adapter_address":""},{"adapter_name":"en24","adapter_address":"10.0.0.5"}]"#;
 
 fn helper_json() -> serde_json::Value {
     serde_json::json!({
@@ -41,7 +41,7 @@ fn network_interface_lists_the_helper_adapters_and_asks_before_switching() {
     assert_eq!(&*nic.key, "nic:/dante/primary_network_adapter");
     match &nic.kind {
         rack::settings::FieldKind::Choice { options, selected, .. } => {
-            assert_eq!(options, &["en0  (192.168.1.4)", "en14  ()", "en24  (10.0.0.5)"]);
+            assert_eq!(options, &["en0  (192.0.2.4)", "en14  ()", "en24  (10.0.0.5)"]);
             assert_eq!(*selected, Some(2));
         }
         k => panic!("{k:?}"),
