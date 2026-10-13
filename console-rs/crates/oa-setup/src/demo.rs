@@ -43,8 +43,8 @@ impl Script {
     }
 }
 
-/// scripts/install.sh --yes on a machine with an Apollo connected.
-pub fn driver(distro: &str, kernel: &str) -> Vec<(Duration, String)> {
+/// scripts/install.sh --yes (`send_report`: and --send-report) on a machine with an Apollo connected.
+pub fn driver(distro: &str, kernel: &str, send_report: bool) -> Vec<(Duration, String)> {
     let mut s = Script::new(true);
     s.raw(200, "");
     s.raw(0, format!("{BOLD}Open Apollo — Installer{NC}"));
@@ -107,7 +107,12 @@ pub fn driver(distro: &str, kernel: &str) -> Vec<(Duration, String)> {
     s.header(200, "Install Report");
     s.ok(500, "Report saved: /tmp/open-apollo-install-report.json");
     s.header(100, "Telemetry");
-    s.info(100, "No data sent. Report saved locally at /tmp/open-apollo-install-report.json");
+    if send_report {
+        s.info(100, "Sending report to https://open-apollo-api.rolotrealanis.workers.dev/reports...");
+        s.ok(600, "Report sent — thank you! (demo: nothing was sent)");
+    } else {
+        s.info(100, "No data sent. Report saved locally at /tmp/open-apollo-install-report.json");
+    }
     s.lines
 }
 
@@ -204,7 +209,7 @@ mod tests {
     #[test]
     fn demo_driver_run_parses_as_a_clean_install() {
         let mut p = Progress::new(INSTALL_SH);
-        for (_, l) in driver("Arch Linux", "6.9") {
+        for (_, l) in driver("Arch Linux", "6.9", false) {
             p.feed(&l);
         }
         p.finish(Some(0), true);

@@ -119,6 +119,7 @@ pub(super) enum Action {
     SkipFirmware,
     StartDriver,
     SkipDriver,
+    SendReport(bool),
     StartConsole,
     SkipConsole,
     Launch,
@@ -156,6 +157,8 @@ pub struct App {
     pub(super) kept_firmware: bool,
     // Driver
     pub(super) driver: Option<Run>,
+    /// Pass --send-report: upload install.sh's report (opt-in, off by default).
+    pub(super) send_report: bool,
     // Console
     pub(super) console: Option<Run>,
     pub(super) console_bin: Option<PathBuf>,
@@ -196,6 +199,7 @@ impl App {
             extractor_ok: None,
             kept_firmware: false,
             driver: None,
+            send_report: false,
             console: None,
             console_bin: options::installed_console(),
             launched: None,
@@ -542,6 +546,7 @@ impl App {
             Action::SkipFirmware => self.steps.set(StepId::Firmware, Status::Skipped),
             Action::StartDriver => self.start_driver(),
             Action::SkipDriver => self.steps.set(StepId::Driver, Status::Skipped),
+            Action::SendReport(on) => self.send_report = on,
             Action::StartConsole => self.start_console(),
             Action::SkipConsole => self.steps.set(StepId::Console, Status::Skipped),
             Action::Launch => self.launch(),
@@ -658,20 +663,25 @@ impl App {
         let bash = ["/usr/bin/bash", "/bin/bash"].into_iter().find(|b| Path::new(b).is_file()).unwrap_or("bash");
         let mut cmd = Command::new("pkexec");
         cmd.arg(bash).arg(&script).arg("--yes");
+        let send = if self.send_report { " --send-report" } else { "" };
+        if self.send_report {
+            cmd.arg("--send-report");
+        }
         let q = firmware::shell_quote(&script.to_string_lossy());
-        Some((cmd, format!("pkexec bash {q} --yes"), format!("sudo bash {q}")))
+        Some((cmd, format!("pkexec bash {q} --yes{send}"), format!("sudo bash {q}{send}")))
     }
 
     fn start_driver(&mut self) {
         let run = if self.opts.demo {
             let (distro, kernel) = self.sys.as_ref().map(|s| (s.distro.clone(), s.kernel.clone())).unwrap_or_default();
-            let script = crate::demo::driver(&distro, &kernel);
+            let script = crate::demo::driver(&distro, &kernel, self.send_report);
+            let send = if self.send_report { " --send-report" } else { "" };
             Run::new(
                 INSTALL_SH,
                 Job::replay(script, 0, self.wake.clone()),
                 true,
                 true,
-                "pkexec bash scripts/install.sh --yes".into(),
+                format!("pkexec bash scripts/install.sh --yes{send}"),
             )
         } else {
             let Some((cmd, shown, _)) = self.driver_command() else { return };

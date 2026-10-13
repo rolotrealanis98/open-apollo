@@ -11,6 +11,9 @@ use crate::scan::{Found, Origin, human_size};
 use crate::steps::{Status, StepId};
 use crate::syscheck::Level;
 
+/// Where install.sh --send-report uploads its report (scripts/install.sh TELEMETRY_URL).
+const REPORT_URL: &str = "open-apollo-api.rolotrealanis.workers.dev";
+
 type Acts = Vec<Action>;
 
 impl App {
@@ -636,7 +639,23 @@ impl App {
         );
         ui.add(
             egui::Label::new(
-                RichText::new("Its questions get their default answers: missing packages are installed, DKMS is set up, on Intel VT-d systems iommu=pt is added to GRUB (a restart is needed after), and the install report stays on this computer.")
+                RichText::new("Its questions get their default answers: missing packages are installed, DKMS is set up, on Intel VT-d systems iommu=pt is added to GRUB (a restart is needed after), and the install report stays on this computer unless you tick the box below.")
+                    .small()
+                    .color(WEAK),
+            )
+            .wrap(),
+        );
+        let mut send = self.send_report;
+        let idle = !self.driver.as_ref().is_some_and(Run::running);
+        if ui
+            .add_enabled(idle, egui::Checkbox::new(&mut send, "Send an anonymous install report to help open-apollo"))
+            .changed()
+        {
+            act.push(Action::SendReport(send));
+        }
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!("It holds your distro, kernel, CPU, PCI and sound devices, PipeWire's device list, each install step's result and the driver's kernel log lines, and goes to {REPORT_URL}; a copy stays in /tmp/open-apollo-install-report.json."))
                     .small()
                     .color(WEAK),
             )

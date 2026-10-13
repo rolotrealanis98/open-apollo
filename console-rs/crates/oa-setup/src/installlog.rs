@@ -133,7 +133,7 @@ pub const INSTALL_SH: &[Phase] = &[
     phase(&["Hardware Verification"], "Load and verify the driver", Some("init")),
     phase(&["Mixer Daemon"], "Mixer daemon", Some("daemon")),
     phase(&["Summary"], "Summary", None),
-    phase(&["Install Report", "Telemetry"], "Install report (kept on this computer)", None),
+    phase(&["Install Report", "Telemetry"], "Install report", None),
 ];
 
 /// scripts/install-uaconsole.sh, in order.
