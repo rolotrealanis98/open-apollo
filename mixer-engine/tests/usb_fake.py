@@ -62,8 +62,8 @@ class FakeApollo:
                      (0x1067, 0x8000), (0x0C00, 0xA90EC5AC),
                      (0x0C01, 0x81410111)):
             self.regs[a] = v
-        for a, raw in ((0x1008, "32303335"), (0x1009, "32303238"),
-                       (0x100A, "30303538"), (0x100B, "35300000")):
+        for a, raw in ((0x1008, "32303030"), (0x1009, "30303030"),
+                       (0x100A, "30303030"), (0x100B, "30310000")):
             self.regs[a] = struct.unpack("<I", bytes.fromhex(raw))[0]
         self.boot_words = None          # list served for 0x1069, last repeats
         self.ack_delay = 0              # SEQ_RD reads before the DSP acks
