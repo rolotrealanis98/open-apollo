@@ -3,16 +3,16 @@
 ## Located work and transcript
 
 The Wine investigation is Codex thread `01a12885-2f60-7452-a616-f44fc44949e9`:
-`/home/rolo/.codex/sessions/2026/10/10/rollout-2026-10-10T21-12-59-01a12885-2f60-7452-a616-f44fc44949e9.jsonl`.
-The related work is in `/home/rolo/wine-ua-work`, with committed evidence under
+`/home/you/.codex/sessions/2026/10/10/rollout-2026-10-10T21-12-59-01a12885-2f60-7452-a616-f44fc44949e9.jsonl`.
+The related work is in `/home/you/wine-ua-work`, with committed evidence under
 `analysis/full-plugin-support/` and tools under `tools-wine/`. This checkout has
 existing uncommitted changes; they were preserved.
 
 The final transcript handoff cites `fbcf7ee`, which lives in a separate git
-repository, `/home/rolo/open-apollo-plugin-native`, branch
+repository, `/home/you/open-apollo-plugin-native`, branch
 `codex/plugin-native-query`. Its companion worktrees are
-`/home/rolo/open-apollo-plugin-integration` (`codex/plugin-integration-479b42e`,
-tip `5dc2455`) and `/home/rolo/open-apollo-plugin-daemon`
+`/home/you/open-apollo-plugin-integration` (`codex/plugin-integration-479b42e`,
+tip `5dc2455`) and `/home/you/open-apollo-plugin-daemon`
 (`codex/plugin-daemon`, tip `53d3a66`). The native tree currently has uncommitted
 bootstrap tracing declarations/calls in ua_apollo.h and ua_core.c. Do not
 overwrite or mistake those edits for the committed baseline.
@@ -21,7 +21,7 @@ overwrite or mistake those edits for the committed baseline.
 
 Fetching GitHub's driver-v2 yielded `9469f9a`. The separate native repository
 has a newer Mac-exported driver-v2 foundation at `2d59108`, imported through
-`/home/rolo/oa-test/mac-driver-v2-2d59108.bundle`. The driver-v2 history includes
+`/home/you/oa-test/mac-driver-v2-2d59108.bundle`. The driver-v2 history includes
 firmware I/O descriptors and generated model tables, lifecycle/clock/rate
 fixes, inherited input-strip preservation, diagnostics, and more daemon
 commands. Its changelog says the earlier Codex hardening was reconciled by
@@ -72,7 +72,7 @@ Rust already hosts generated ConsoleLink panels independently of Windows
 plugin editor instances. The seven-spec development sample was the default
 discovered folder. The full integrated stage contains 223 specs and sprites:
 
-`/home/rolo/wine-ua-work/plugin-specs/integrate/stage/Console Link/Console Link/PluginSpecs`
+`/home/you/wine-ua-work/plugin-specs/integrate/stage/Console Link/Console Link/PluginSpecs`
 
 The loader now checks that stage before the small sample, after an explicit
 environment override and the installed user catalog. No proprietary assets

@@ -222,7 +222,7 @@ preconditions hold. No Mac Console automation is authorized or required.
 
 Fresh Linux daemon snapshot: Apollo x4, DeviceOnline=false, ANALOG 1 Mute=true,
 Stereo=false, FaderLevel=0 dB. Local process 1324 runs the exported
-`/home/rolo/oa-test/driver-v2-latest/mixer-engine/ua_mixer_daemon.py`; the older
+`/home/you/oa-test/driver-v2-latest/mixer-engine/ua_mixer_daemon.py`; the older
 handoff's pid 1386 is stale. This running process was not restarted or modified.
 
 Titan (hostname omarchy) currently has no Apollo ALSA card, no enumerated

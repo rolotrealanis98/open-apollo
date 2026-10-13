@@ -132,9 +132,10 @@ def test_info_blocks_decode():
 
 def test_serial_and_memory_map_from_dsp_window():
     dev = FakeCtrl()
-    # apollo-init.pcap after the DSP started
-    for a, raw in ((0x1008, "32303335"), (0x1009, "32303238"),
-                   (0x100A, "30303538"), (0x100B, "35300000")):
+    # the DSP window of apollo-init.pcap after the DSP started (a synthetic
+    # serial in place of the captured unit's)
+    for a, raw in ((0x1008, "32303030"), (0x1009, "30303030"),
+                   (0x100A, "30303030"), (0x100B, "30310000")):
         dev.regs[a] = struct.unpack("<I", bytes.fromhex(raw))[0]
     for a, v in ((0x1004, 0x4000), (0x1005, 0xA9B9), (0x1006, 0x1FFF),
                  (0x1007, 0xFF51B2), (0x1061, 0xE0000), (0x1062, 0x92800),
@@ -142,7 +143,7 @@ def test_serial_and_memory_map_from_dsp_window():
                  (0x1066, 0x80), (0x1067, 0x8000)):
         dev.regs[a] = v
     r = ud.UsbRegs(dev)
-    assert r.serial(0) == "20352028005850"
+    assert r.serial(0) == "20000000000001"
     mm = r.memory_map(0)
     from uausb import soloinit
     assert soloinit.MemoryMap.from_dict(mm) == soloinit.SOLO_USB_MEMORY_MAP

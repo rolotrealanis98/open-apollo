@@ -15,7 +15,7 @@ Protocol background lives in `~/wine-ua-work/console-port/protocol/`
 use ua_engine::{Endpoint, Options, Store, tapers};
 
 let mut store = Store::new();                       // owned by the UI thread
-store.connect(Endpoint::parse("192.168.1.4"), Options::default()); // read-only
+store.connect(Endpoint::parse("192.0.2.4"), Options::default()); // read-only
 store.set_waker(move || proxy.wake());              // optional: called from the network thread
 
 // every frame (and whenever the waker fires):
@@ -72,7 +72,7 @@ After that, pushes are handled like this:
   Both default to off.
 - The helper client (`HelperStore`, `Options::helper()`) forces `allow_writes` off. It sends identity, `get`, `subscribe` and `get /ping`, never `post` (not even `command_format`) and no challenge or response.
 - `ua-engine-probe` has no write option. Its live commands send only identity, `get`, `subscribe` and `unsubscribe`.
-- During this work, only those commands were sent to the local daemon on `127.0.0.1:4710`, which drives the real Apollo, and to the real engine on `192.168.1.4:4710`. No `set` or `post` was sent to either. `set /Sleep false`, Console's wake-up call, is a `set`, so it is never sent. Both engines serve read-only clients without it.
+- During this work, only those commands were sent to the local daemon on `127.0.0.1:4710`, which drives the real Apollo, and to the real engine on `192.0.2.4:4710`. No `set` or `post` was sent to either. `set /Sleep false`, Console's wake-up call, is a `set`, so it is never sent. Both engines serve read-only clients without it.
 - Writes were tested against `MockEngine` and against a separate software-only daemon:
   - It was launched as `--no-hardware --no-helper --no-ws --no-bonjour --host 127.0.0.1 --port 14710`.
   - It ran from a scratch copy of `mixer-engine`.
@@ -81,7 +81,7 @@ After that, pushes are handled like this:
 
 ## Live findings (2026-10-11, read-only)
 
-| | Local daemon `127.0.0.1:4710` | Real engine `192.168.1.4:4710` |
+| | Local daemon `127.0.0.1:4710` | Real engine `192.0.2.4:4710` |
 |---|---|---|
 | Server | open-apollo daemon (driver-v2 build), hardware attached | UA Mixer Engine on the Mac Studio |
 | Device / `/Version` | Apollo x4 / 11.8.2 (the device map's capture), `DeviceOnline` true | Apollo x4 / 12.0.0, `DeviceOnline` false |
@@ -148,7 +148,7 @@ The ConsoleLab findings still hold on 12.0.0. Pushes come in `multi` envelopes, 
 
 ## UA Mixer Helper (4720)
 
-The helper (`mxhlpr`, Bonjour `_uamixerhelper._tcp`) was mapped read-only on 2026-10-12, on the Mac's helper 1.3.1.1152 (`192.168.1.4:4720`, Console 1.3.1) and on the local open-apollo daemon's helper (`127.0.0.1:4720`). Only identity, `get`, `subscribe` and `get /ping` were sent. No `set`, no `post` (not even `command_format`), and no challenge or response.
+The helper (`mxhlpr`, Bonjour `_uamixerhelper._tcp`) was mapped read-only on 2026-10-12, on the Mac's helper 1.3.1.1152 (`192.0.2.4:4720`, Console 1.3.1) and on the local open-apollo daemon's helper (`127.0.0.1:4720`). Only identity, `get`, `subscribe` and `get /ping` were sent. No `set`, no `post` (not even `command_format`), and no challenge or response.
 
 **Wire behaviour (Mac).**
 

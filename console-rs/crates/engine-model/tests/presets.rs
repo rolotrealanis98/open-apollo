@@ -21,8 +21,8 @@ fn tree() -> ua_engine::Tree {
     let mut t = Snapshot::load(p).unwrap().tree;
     let channel = serde_json::json!({"plugin": "Channel Strip", "type": "string", "value": "", "values": [
         {"type": "folder", "value": "Bass", "locked": true, "children": [
-            {"type": "file", "value": "Andrew Scheps - Bass", "locked": true},
-            {"type": "file", "value": "Darrell Thorp - Bass", "locked": true}]},
+            {"type": "file", "value": "Factory A - Bass", "locked": true},
+            {"type": "file", "value": "Factory B - Bass", "locked": true}]},
         {"type": "folder", "value": "Mine", "children": [{"type": "file", "value": "Vox Chain"}]},
         {"type": "file", "value": "Loose"},
     ]});
@@ -81,10 +81,10 @@ fn channel_presets_list_load_and_save() {
     let mut v = ViewState::default();
     v.dispatch(Action::Tap(strip(Control::Menu(MenuCmd::Presets(PresetScope::Channel)))), &mut m);
     assert_eq!(v.browser.preset_target, Some((IN0.into(), PresetScope::Channel)));
-    // A file row loads it: `set <strip>/Preset/value "Bass/Andrew Scheps - Bass"`.
+    // A file row loads it: `set <strip>/Preset/value "Bass/Factory A - Bass"`.
     v.dispatch(Action::Tap(ControlId { strip: "browser".into(), control: Control::BrowserPresetFile(0, 0) }), &mut m);
     let w = writes_with(&server, "/inputs/0/Preset/value", 1);
-    assert!(w[0].contains("\"Bass/Andrew Scheps - Bass\""), "{w:?}");
+    assert!(w[0].contains("\"Bass/Factory A - Bass\""), "{w:?}");
     // A top-level file: no folder.
     v.dispatch(Action::Tap(ControlId { strip: "browser".into(), control: Control::BrowserPresetFile(1, u16::MAX) }), &mut m);
     let w = writes_with(&server, "/inputs/0/Preset/value", 2);
@@ -158,7 +158,7 @@ fn read_only_sends_nothing() {
         m.pump();
         std::thread::sleep(Duration::from_millis(5));
     }
-    m.set_text(&strip(Control::Preset(PresetScope::Channel)), "Bass/Andrew Scheps - Bass");
+    m.set_text(&strip(Control::Preset(PresetScope::Channel)), "Bass/Factory A - Bass");
     m.apply(&Action::Tap(strip(Control::PresetCmd(PresetScope::Channel, PresetCmd::Delete("Loose".into())))));
     m.pump();
     std::thread::sleep(Duration::from_millis(100));

@@ -70,7 +70,7 @@ uaconsole connects to the local daemon on `127.0.0.1:4710` by default. To use an
 another machine, pass `--engine`:
 
 ```bash
-uaconsole --engine 192.168.1.20        # port 4710
+uaconsole --engine 192.0.2.20        # port 4710
 uaconsole --engine studio-pc.local:4710
 ```
 

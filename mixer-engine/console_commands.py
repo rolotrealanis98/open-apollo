@@ -11,7 +11,10 @@ import re
 class ConsoleCommands:
     def __init__(self, state, directory=None, *, software_only=False,
                  helper=None, presets_dir=None, factory_presets=None,
-                 restore_values=True):
+                 restore_values=True, catalogue=None):
+        # catalogue: the user's UA import (ua_catalogue.apply), whose
+        # plug-in list the daemon has already laid on /plugins; None
+        # without one (no plug-ins, no factory preset names)
         self.state = state
         self.scenes = {}
         self.history = History(state, self.publish)
@@ -32,7 +35,7 @@ class ConsoleCommands:
         self.publish("/pluginscenes/0/RecalledSceneIndex", -1, "int")
         self.presets = Presets(state, self.history, self.publish, self.inserts,
                                presets_dir or Path.home() / ".local/share/open-apollo/Presets",
-                               factory_presets)
+                               factory_presets, catalogue)
         self.network = Network(state, helper, self.publish)
         self.inserts.refresh_paste()
         self.publish("/openapollo/PluginBackend", "software-model" if software_only else "unavailable", "string")

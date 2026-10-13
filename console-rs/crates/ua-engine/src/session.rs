@@ -402,7 +402,7 @@ mod tests {
         ]));
         assert_eq!(m[0].label(), "[Sep 18, 2026 05:14:34 AM] - - New Session -");
         assert_eq!(m[1].label(), "Band");
-        assert_eq!(display_name("../../../Desktop/Fonoflow Capture 2/API Preamp Controls"), "API Preamp Controls");
+        assert_eq!(display_name("../../../Desktop/Example/My Session"), "My Session");
         assert_eq!(display_name(""), NEW_SESSION_LABEL);
         assert_eq!(values_path("/Session"), "/Session/values");
     }

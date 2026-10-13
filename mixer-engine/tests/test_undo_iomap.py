@@ -5,6 +5,7 @@ import json
 import pytest
 
 import commands as cmdmod
+import ua_catalogue
 from commands import ERR_FAILED
 from test_post_commands import Client, FakeLoop, ok, post, stack  # noqa: F401
 
@@ -158,6 +159,16 @@ class TestUndo:
 
 ROUTE = "/inputroutes/0/Active/value"
 OUTROUTE = "/outputroutes/0/Active/value"
+# A factory I/O preset, as an import of the user's UAD install provides
+FACTORY = "Factory Map A"
+
+
+def with_factory(d):
+    """The stack with an imported factory I/O preset list (the shipped map
+    has none: UA's list comes from the user's install)."""
+    cat = ua_catalogue.Catalogue(directory=None, io_presets=[FACTORY])
+    ua_catalogue.apply_to_state(d.state, cat)
+    return d
 
 
 class TestIOMapPresets:
@@ -193,11 +204,13 @@ class TestIOMapPresets:
         assert stack.state.get_value(ROUTE) is False
 
     def test_recall_of_a_builtin_name_does_nothing(self, stack):
+        with_factory(stack)
         stack.state.set(ROUTE, False)
-        post(stack, "set /IOMapPreset/value Multi-A16 Legacy")
+        post(stack, f"set /IOMapPreset/value {FACTORY}")
         assert stack.state.get_value(ROUTE) is False
 
     def test_delete(self, stack):
+        with_factory(stack)
         ok(stack, "/SaveIOMapPreset", {"name": "a"})
         ok(stack, "/SaveIOMapPreset", {"name": "b"})
         assert ok(stack, "/DeleteIOMapPreset", {"name": "a"}) == \
@@ -205,7 +218,7 @@ class TestIOMapPresets:
         names = [v["value"] for v in
                  stack.state.get_prop_dict("/IOMapPreset")["values"]]
         assert "a" not in names and "b" in names
-        assert "Multi-A16 Legacy" in names       # the map's own stay
+        assert FACTORY in names                  # the factory ones stay
         assert stack.commands.execute(
             "/DeleteIOMapPreset", {"name": "a"})[1] == ERR_FAILED
 
@@ -215,8 +228,11 @@ class TestIOMapPresets:
         assert stack.state.get_value("/IOMapPreset/value") == ""
 
     def test_cannot_delete_a_builtin(self, stack):
+        with_factory(stack)
         assert stack.commands.execute(
-            "/DeleteIOMapPreset", {"name": "Multi-A16 Legacy"})[1] == ERR_FAILED
+            "/DeleteIOMapPreset", {"name": FACTORY})[1] == ERR_FAILED
+        assert FACTORY in [v["value"] for v in
+                           stack.state.get_prop_dict("/IOMapPreset")["values"]]
 
     def test_rename(self, stack):
         ok(stack, "/SaveIOMapPreset", {"name": "a"})
@@ -237,12 +253,12 @@ class TestIOMapPresets:
     def test_saved_presets_are_listed_after_a_restart(self, stack, tmp_path):
         ok(stack, "/SaveIOMapPreset", {"name": "kept"})
         stack.state.update_property("/IOMapPreset", {"values": [
-            {"value": "Multi-A16 Legacy", "type": "file", "locked": False}]})
+            {"value": FACTORY, "type": "file", "locked": False}]})
         stack.commands._iomap_saved_names = []
         stack.commands.set_store(tmp_path, "x4")
         names = [v["value"] for v in
                  stack.state.get_prop_dict("/IOMapPreset")["values"]]
-        assert names == ["Multi-A16 Legacy", "kept"]
+        assert names == [FACTORY, "kept"]
 
     def test_commands_are_known(self, stack):
         for n in ("SaveIOMapPreset", "DeleteIOMapPreset", "RenameIOMapPreset"):

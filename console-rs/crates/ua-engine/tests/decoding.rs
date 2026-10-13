@@ -305,9 +305,11 @@ fn snapshot_round_trip() {
 #[test]
 fn trimming_drops_catalogues() {
     let x4 = common::device_map("x4");
-    assert!(!x4.children("/plugins").is_empty());
+    assert!(!x4.children("/pluginscenes").is_empty());
+    assert!(!x4.children("/inputroutes").is_empty());
     let t = x4.trimmed(true);
-    assert!(t.children("/plugins").is_empty());
+    assert!(t.children("/pluginscenes").is_empty());
+    assert!(t.children("/inputroutes").is_empty());
     assert!(t.children("/devices/0/asioinputs").is_empty());
     assert!(t.property_count() < x4.property_count());
     assert_eq!(
@@ -323,5 +325,5 @@ fn empty_nodes_are_not_stubs_after_a_round_trip() {
     assert!(t.stub_paths().is_empty());
     let again = Tree::from_node(&t.node_json("/"));
     assert!(again.stub_paths().is_empty(), "{:?}", again.stub_paths());
-    assert!(again.has_node("/plugins"));
+    assert!(again.has_node("/pluginscenes") && again.has_node("/inputroutes"));
 }

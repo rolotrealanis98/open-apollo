@@ -40,6 +40,7 @@ from protocol import (Command, parse_command, encode_response_bytes,
 from state_tree import StateTree
 from console_commands import ConsoleCommands
 from helper_tree import HelperTree
+import ua_catalogue
 from autogain import AutoGainService
 from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UNSUPPORTED as EVENTS_UNSUPPORTED, EVENT_NAMES,
@@ -400,6 +401,9 @@ def fill_helper_identity(helper_tree: HelperTree | None,
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_DEVICE_MAP = SCRIPT_DIR / "device_maps" / "device_map_apollo_x4.json"
 DEFAULT_HELPER_TREE = SCRIPT_DIR / "device_maps" / "helper_tree.json"
+# sha256 of the UA help strings removed from the shipped helper tree, by
+# position: ua_catalogue puts the user's imported copies back
+DEFAULT_HELPER_PINS = SCRIPT_DIR / "device_maps" / "helper_tree.pins.json"
 # Device descriptors (devices/apollo-*.json) map a driver device_type to a model
 # name, from which the matching device map filename is derived.
 DEVICES_DIR = SCRIPT_DIR.parent / "devices"
@@ -489,7 +493,8 @@ class MixerDaemon:
                  plugin_backend=None, plugin_transactions=None,
                  plugin_remote_backend=None, plugin_hosting: bool = False,
                  sessions_dir=None, software_only: bool = False,
-                 presets_dir=None, factory_presets=None):
+                 presets_dir=None, factory_presets=None,
+                 catalogue=None):
         self.state = state
         # Plugin hosting is inert unless a backend is injected: without one,
         # effect-slot SETs and GETs go through the tree exactly as before
@@ -549,7 +554,8 @@ class MixerDaemon:
             helper=helper_tree, presets_dir=presets_dir,
             factory_presets=factory_presets,
             restore_values=(getattr(state, "_save_path", None) is None
-                            and not preserve_hardware))
+                            and not preserve_hardware),
+            catalogue=catalogue)
 
         # Wire state tree SET notifications to hardware router
         if hw_router:
@@ -3384,6 +3390,14 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                              f"+ {PORT_STRIDE} x device index)")
     parser.add_argument("--no-helper", action="store_true",
                         help="Disable Mixer Helper TCP:4720 server")
+    parser.add_argument("--ua-catalogue", type=Path, metavar="DIR",
+                        help="UA plug-in catalogue, factory presets and help "
+                             "text imported by `oa-assets import` (default: "
+                             "$OA_UA_CATALOGUE or "
+                             "~/.local/share/open-apollo/ua-catalogue)")
+    parser.add_argument("--no-ua-catalogue", action="store_true",
+                        help="Serve the shipped trees only (no imported UA "
+                             "catalogue)")
     parser.add_argument("--device", "-d",
                         help="Device node, e.g. /dev/ua_apollo1 (default: the first "
                              "/dev/ua_apollo*). One daemon serves one Apollo: "
@@ -3550,6 +3564,15 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                      helper_tree_path)
     fill_helper_identity(helper_tree, info)
 
+    # UA's own content (plug-in list, factory preset menus, help text) is
+    # not shipped: overlay the user's import, before the commands publish
+    # the saved I/O presets after the factory ones and before Console's
+    # commands (console_commands) list its factory preset names
+    catalogue = None
+    if not args.no_ua_catalogue:
+        catalogue = ua_catalogue.apply(state, helper_tree, args.ua_catalogue,
+                                       DEFAULT_HELPER_PINS)
+
     # Wire up the hardware router (backend was opened above for device detection)
     hw_router = None
     if backend is not None:
@@ -3603,7 +3626,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                          sessions_dir=args.sessions_dir,
                          software_only=args.no_hardware,
                          presets_dir=args.presets_dir,
-                         factory_presets=args.factory_presets_dir)
+                         factory_presets=args.factory_presets_dir,
+                         catalogue=catalogue)
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}

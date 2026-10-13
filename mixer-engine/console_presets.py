@@ -4,6 +4,11 @@ Native factory .fxp files use opaque FPCh chunks (presets-decomp/1000dee38.c).
 They require a plugin backend; never pretend their bytes are scalar settings.
 Native channel_strip XML supports a scalar-only subset (100056370.c).
 Daemon snapshots use .oapreset, not a counterfeit .fxp/.uadchannel format.
+
+Factory menus: a --factory-presets-dir folder when it holds the plug-in's
+presets, else the names the user's UA catalogue import lists
+(ua_catalogue.factory_trees); open-apollo ships none, so without either the
+menus hold the user's own presets only.
 """
 from copy import deepcopy
 from pathlib import Path
@@ -12,15 +17,33 @@ import json
 import xml.etree.ElementTree as ET
 
 import session_xml
+import ua_catalogue
 
 EXTENSIONS = (".oapreset", ".uadchannel", ".fxp")
+CHANNEL_STRIP = "Channel Strip"
+
+
+def listed(tree, name):
+    """Whether `name` ("Folder/Preset") is a file entry of a preset tree."""
+    entries, parts = tree or [], name.split("/")
+    for i, part in enumerate(parts):
+        last = i == len(parts) - 1
+        entry = next((e for e in entries if e.get("value") == part
+                      and (e.get("type") == "folder") != last), None)
+        if entry is None:
+            return False
+        entries = entry.get("children") or []
+    return True
 
 
 class Presets:
-    def __init__(self, state, history, publish, inserts, directory, factory=None):
+    def __init__(self, state, history, publish, inserts, directory, factory=None,
+                 catalogue=None):
         self.state, self.history, self.publish, self.inserts = state, history, publish, inserts
         self.directory = Path(directory).expanduser().resolve()
         self.factory = Path(factory).expanduser().resolve() if factory else None
+        # Factory preset names from the user's UA import, by plug-in name
+        self.catalogue = ua_catalogue.factory_trees(catalogue, CHANNEL_STRIP)
         self.refresh()
 
     def plugin(self, base):
@@ -35,7 +58,7 @@ class Presets:
         if base.startswith("/plugins/"):
             return self.state.get_value(base + "/Name")
         if "/inputs/" in base or "/auxs/" in base:
-            return "Channel Strip"
+            return CHANNEL_STRIP
         raise ValueError("unsupported preset object")
 
     def folder(self, plugin, factory=False):
@@ -93,9 +116,8 @@ class Presets:
             meta = self.state.get_prop_dict(path)
             meta["plugin"] = plugin
             values = self.entries(self.folder(plugin), False)
-            if self.factory:
-                values += self.entries(self.folder(plugin, True), True)
-            meta["values"] = values
+            factory = self.entries(self.folder(plugin, True), True) if self.factory else []
+            meta["values"] = values + (factory or deepcopy(self.catalogue.get(plugin, [])))
 
     def load(self, base, name):
         plugin = self.plugin(base)
@@ -109,6 +131,9 @@ class Presets:
             if file:
                 break
         if file is None:
+            if listed(self.catalogue.get(plugin), name):
+                raise ValueError("factory preset file unavailable: the UA import lists "
+                                 "its name only (--factory-presets-dir)")
             raise ValueError("preset does not exist")
         if file.stat().st_size > 8 * 1024 * 1024:
             raise ValueError("preset exceeds size limit")
