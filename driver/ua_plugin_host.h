@@ -339,6 +339,7 @@ void ua_strips_free(struct ua_device *ua);		/* host free */
 void ua_strips_connected(struct ua_device *ua);	/* ua->lock */
 void ua_strips_run(struct ua_device *ua);		/* host work */
 void ua_strips_teardown(struct ua_device *ua, const char *why); /* ua->lock */
+void ua_strips_lost(struct ua_device *ua);		/* ua->lock */
 void ua_strips_service(struct ua_device *ua);		/* ua->lock */
 bool ua_strips_live(struct ua_device *ua);		/* ua->lock */
 void ua_strips_proc(struct ua_device *ua, struct snd_info_buffer *buf);
@@ -355,6 +356,7 @@ void ua_plugin_teardown(struct ua_device *ua, const char *why); /* ua->lock */
 void ua_plugin_host_quiesce(struct ua_device *ua, const char *why,
 			    bool present);			/* no lock */
 void ua_plugin_service(struct ua_device *ua);		/* ua->lock, 10 ms */
+void ua_plugin_device_lost(struct ua_device *ua, const char *why); /* no lock */
 int ua_plugin_publish_now(struct ua_device *ua, struct ua_xact *x); /* ua->lock */
 void ua_plugin_fence_set(struct ua_device *ua, unsigned int dsp,
 			 struct ua_xact *x);			/* ua->lock */

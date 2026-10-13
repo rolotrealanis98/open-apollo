@@ -672,7 +672,7 @@ def host_source():
         'int ua_plugin_publish_now(', 'void ua_plugin_fence_set(',
         'int ua_plugin_fence_wait(', 'void ua_plugin_teardown(',
         'void ua_plugin_host_quiesce(', 'void ua_plugin_service(',
-        'void ua_plugin_quarantine('))
+        'void ua_plugin_quarantine(', 'void ua_plugin_device_lost('))
     return fns
 
 
@@ -1152,6 +1152,47 @@ int main(void)
 	consume_limit = ~0u;
 	cold_connect();
 	assert(st->state == UA_STRIPS_ARMED && !host.dsp[0].quarantined);
+	teardown_host();
+	assert(!k_objects && !dma_live);
+	return 0;
+}
+''')
+
+
+def test_device_lost_forgets_without_sending():
+    """A PCIe error: the strips are forgotten without a command, every DSP
+    is disowned, the fence dropped; the next cold start owns DSP 0 again
+    and builds the strips afresh."""
+    build_host(r'''
+int main(void)
+{
+	struct ua_strips *st;
+	unsigned int n0;
+
+	setup(0x1F);
+	ua_strips_init(&dev);
+	st = host.strips;
+	cold_connect();
+	ua_strips_run(&dev);
+	assert(st->state == UA_STRIPS_LIVE);
+	teardown("x");
+	connect_again();
+	assert(host.fence[0] || st->state == UA_STRIPS_ARMED);
+	ua_strips_run(&dev);
+	assert(st->state == UA_STRIPS_LIVE);
+	dev.shutdown.counter = 1;
+	n0 = nputs;
+	ua_plugin_device_lost(&dev, "a PCIe error");
+	assert(nputs == n0 && st->state == UA_STRIPS_IDLE);
+	for (int i = 0; i < 4; i++)
+		assert(!host.dsp[i].owned && !host.dsp[i].pools && !host.fence[i]);
+	assert(cancels >= 1 && HAS("forgotten, the device's state is gone"));
+	dev.shutdown.counter = 0;
+	connect_again();
+	assert(st->state == UA_STRIPS_IDLE);
+	cold_connect();
+	ua_strips_run(&dev);
+	assert(st->state == UA_STRIPS_LIVE && !host.dsp[0].quarantined);
 	teardown_host();
 	assert(!k_objects && !dma_live);
 	return 0;

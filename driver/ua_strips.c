@@ -1273,6 +1273,28 @@ void ua_strips_teardown(struct ua_device *ua, const char *why)
 }
 
 /**
+ * ua_strips_lost - the device's state is gone: forget the strips
+ * @ua: device (ua->lock held)
+ *
+ * Nothing is sent; a pass in progress sees the generation change.
+ */
+void ua_strips_lost(struct ua_device *ua)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_strips *st = h ? h->strips : NULL;
+
+	if (!st)
+		return;
+	lockdep_assert_held(&ua->lock);
+	if (st->state == UA_STRIPS_IDLE || st->state == UA_STRIPS_OFF)
+		return;
+	st->gen++;
+	ua_strips_forget(ua, st);
+	dev_info(&ua->pdev->dev,
+		 "input strips: forgotten, the device's state is gone\n");
+}
+
+/**
  * ua_strips_service - the DSP service loop's share (input_strips_rebuild)
  * @ua: device (ua->lock held)
  */

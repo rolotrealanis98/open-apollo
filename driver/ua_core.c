@@ -4794,6 +4794,9 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 	cancel_work_sync(&ua->resume_work);
 	ua_dsp_service_stop(ua);
 
+	/* Plug-in host: nothing on the DSPs can be trusted any more */
+	ua_plugin_device_lost(ua, "a PCIe error");
+
 	/* Mark audio as disconnected — hardware state is gone */
 	ua->audio.connected = false;
 	ua->audio.transport_running = false;

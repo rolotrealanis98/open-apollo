@@ -222,6 +222,39 @@ void ua_plugin_host_quiesce(struct ua_device *ua, const char *why,
 	mutex_unlock(&h->mutex);
 }
 
+/**
+ * ua_plugin_device_lost - the device's state is gone (a PCIe error)
+ * @ua: device (no lock held; the shutdown flag is already set)
+ * @why: for the log
+ *
+ * Nothing can be sent and nothing on the DSPs can be trusted: the strips
+ * and instances are forgotten without a command, every DSP is disowned
+ * until the next cold start, held fences are dropped (their buffers stay
+ * with the transactions list until the rings prove them, or fini).
+ */
+void ua_plugin_device_lost(struct ua_device *ua, const char *why)
+{
+	struct ua_plugin_host *h = ua->host;
+	unsigned int i;
+
+	if (!h)
+		return;
+	cancel_delayed_work_sync(&h->work);
+	if (!h->active)
+		return;
+	mutex_lock(&ua->lock);
+	ua_strips_lost(ua);
+	for (i = 0; i < UA_HOST_DSPS; i++) {
+		if (h->fence[i])
+			ua_xact_done(ua, h->fence[i]);
+		h->fence[i] = NULL;
+		if (h->dsp[i].owned)
+			ua_plugin_disown(ua, i, why);
+	}
+	ua_plugin_epoch_bump(ua, why);
+	mutex_unlock(&ua->lock);
+}
+
 /* The DSP service loop's share (ua->lock held, every 10 ms) */
 void ua_plugin_service(struct ua_device *ua)
 {
