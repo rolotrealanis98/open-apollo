@@ -123,3 +123,10 @@ unexpected persistent engine changes or device loss. No arbitrary commands,
 memory modification, flash erase, protection bypass or firmware replacement
 are part of the prepared experiment. Firmware grammar, memory access,
 plaintext retrieval and custom-code execution remain unresolved.
+
+## Continuation
+
+The user disabled SIP and authorized continuation on 2026-10-13. See
+[MAC-NOSIP-RESULTS.md](MAC-NOSIP-RESULTS.md) for successful raw-packet fixtures,
+loaded-engine capture, the guarded response query, source identity and limits.
+The earlier preparation failures above remain historical results.
