@@ -192,13 +192,20 @@ a spare port, never a daemon or engine that drives real hardware.
 
 ### Tests in CI
 
-`.github/workflows/console-rs.yml` runs on every change under `console-rs/`, `flake.nix` or
-`nix/`:
+The `console-rs` job of `.github/workflows/ci.yml` (see `.github/CI.md`) runs on every change
+under `console-rs/` or `mixer-engine/device_maps/`:
 
 - `cargo build --workspace --all-targets --locked` and `cargo test --workspace --locked` on
-  Ubuntu. These must pass. Keep `Cargo.lock` committed and current.
-- `cargo fmt --check` and `cargo clippy`. These are advisory for now and do not fail the check.
-- `nix flake check`, which builds `packages.uaconsole` and runs the same tests in the Nix sandbox.
+  Ubuntu. These must pass. Keep `Cargo.lock` committed and current. The default build needs no
+  system packages.
+- `cargo fmt --check` for the crates that follow `rustfmt.toml` (today `oa-assets`) and
+  `cargo clippy -- -D warnings` for `oa-assets` and `oa-setup`. The rest of the workspace is not
+  rustfmt- or clippy-clean yet; format a crate with `cargo fmt -p <crate>` before adding it.
+- `cargo check` with the `webview` feature (`plugin-ui`, `uaconsole`; installs the
+  `libwebkit2gtk-4.1-dev` and `libgtk-3-dev` headers) when those crates or `Cargo.lock` change.
+- `nix flake check` (the `nix` job), which builds `packages.uaconsole` and runs the same tests in
+  the Nix sandbox: on PRs that touch `flake.nix`, `nix/` or a Cargo manifest, and after every
+  console-rs change on `main`.
 
 The CI runners have **no GPU and no UA resources**, and neither does the Nix build sandbox. A
 test that needs either must detect that and skip itself at run time, not fail:

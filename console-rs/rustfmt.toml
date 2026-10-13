@@ -1,0 +1,5 @@
+# rustfmt settings for the console-rs workspace. CI checks the crates that
+# already follow them (.github/workflows/ci.yml, "rustfmt"); run
+# `cargo fmt -p <crate>` before adding a crate to that list.
+max_width = 120
+use_small_heuristics = "Max"

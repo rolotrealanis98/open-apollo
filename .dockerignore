@@ -1,0 +1,6 @@
+# Build context of the install matrix images (tests/docker): the installer
+# needs the sources, not the history or build output.
+.git
+**/target
+result
+result-*

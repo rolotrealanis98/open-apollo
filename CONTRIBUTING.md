@@ -83,9 +83,14 @@ See the [Device Capture (Windows, USB) guide](https://github.com/rolotrealanis98
 ### Workflow
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/my-feature`
+2. Create a feature branch from `main`: `git checkout -b feat/my-feature`
 3. Make your changes
-4. Submit a pull request
+4. Submit a pull request against `main`
+
+CI (`.github/workflows/ci.yml`, described in [.github/CI.md](.github/CI.md)) runs the checks of
+every component your change touches. Run `python3 tools/check-clean-repo.py` before you push:
+the repository holds no Universal Audio files (DSP modules, firmware, art, screenshots) and no
+personal data (serial numbers, LAN addresses, home paths, e-mail addresses).
 
 ### Commit Messages
 

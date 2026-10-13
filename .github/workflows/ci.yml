@@ -1,0 +1,315 @@
+name: CI
+
+# One workflow for every component. `changes` decides which jobs a push or PR
+# needs; a job skipped by its `if:` reports success, so the required checks in
+# .github/CI.md never wait on a job that had nothing to check. A job runs
+# whenever a file it builds, tests or reads changes (and on any change to this
+# file). `clean-repo` always runs.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: # runs every job
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # the PR's file list
+    outputs:
+      driver: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.driver == 'true' }}
+      daemon: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.daemon == 'true' }}
+      console_rs: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.console_rs == 'true' }}
+      webview: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.webview == 'true' }}
+      installer: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.installer == 'true' }}
+      install_matrix: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.install_matrix == 'true' }}
+      nix: >-
+        ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.nix == 'true'
+            || (github.event_name == 'push' && steps.filter.outputs.console_rs == 'true') }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          filters: |
+            workflow: &workflow
+              - '.github/workflows/ci.yml'
+            driver:
+              - *workflow
+              - 'driver/**'
+              # driver/tests/test_clock_source_mapping.py reads the daemon's map
+              - 'mixer-engine/hardware.py'
+            daemon:
+              - *workflow
+              - 'mixer-engine/**'
+              - 'tools/**'
+              - 'devices/**'
+              - 'docs/**'
+              # check-models and gen-driver-models --check read the driver sources
+              - 'driver/**'
+            console_rs:
+              - *workflow
+              - 'console-rs/**'
+              # ua-engine's tests load the shipped device maps
+              - 'mixer-engine/device_maps/**'
+            webview:
+              - *workflow
+              - 'console-rs/Cargo.lock'
+              - 'console-rs/crates/plugin-ui/**'
+              - 'console-rs/crates/uaconsole/**'
+            installer:
+              - *workflow
+              - 'scripts/**'
+              - 'tests/**'
+              - 'configs/**'
+              - 'tools/**/*.sh'
+            install_matrix:
+              - *workflow
+              - 'driver/**'
+              - 'scripts/**'
+              - 'configs/**'
+              - 'tests/docker/**'
+              - '.dockerignore'
+            nix:
+              # On PRs: the packaging and the Rust manifests. After a merge to
+              # main any console-rs change runs it too (see `nix` output above).
+              - *workflow
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'nix/**'
+              - 'console-rs/Cargo.toml'
+              - 'console-rs/Cargo.lock'
+              - 'console-rs/crates/*/Cargo.toml'
+              - 'console-rs/packaging/**'
+
+  clean-repo:
+    # No UA bytes (DSP modules, pinned firmware, art) and no personal data in
+    # any tracked file: tools/check-clean-repo.py, allowlist in
+    # tools/check-clean-repo.allow.
+    name: clean-repo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Guard self-test
+        run: python3 tools/test-check-clean-repo.py
+      - name: No UA bytes, no personal data
+        run: python3 tools/check-clean-repo.py
+
+  driver:
+    name: driver
+    needs: changes
+    if: needs.changes.outputs.driver == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Kernel headers
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends linux-headers-generic
+      - name: Build the module
+        run: |
+          # Ubuntu's generic kernel headers, not the runner's own Azure kernel:
+          # Azure kernels lack CONFIG_SND, so modpost cannot resolve snd_*
+          # symbols. Compile test only; nothing is loaded.
+          KDIR="$(find /usr/src -maxdepth 1 -name 'linux-headers-*-generic' | sort -V | tail -1)"
+          echo "KDIR=$KDIR"
+          make -C driver KDIR="$KDIR"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Driver host tests
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest driver/tests -q
+
+  daemon:
+    name: daemon
+    needs: changes
+    if: needs.changes.outputs.daemon == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Ruff (faults only) and compile check
+        run: |
+          # E9/F63/F7/F82: syntax errors and real faults only; the tree is
+          # green at this level. Do not widen without fixing findings first.
+          pipx run ruff check --select E9,F63,F7,F82 mixer-engine tools
+          python -m compileall -q mixer-engine tools
+      - name: Private HOME for the tests
+        # The console tests write sessions and presets under
+        # ~/Documents/Universal Audio unless HOME points elsewhere.
+        run: mkdir -p "$RUNNER_TEMP/home" && echo "TEST_HOME=$RUNNER_TEMP/home" >> "$GITHUB_ENV"
+      - name: Mixer engine tests (no hardware)
+        run: |
+          python -m pip install --quiet pytest
+          HOME="$TEST_HOME" python -m pytest mixer-engine/tests -q
+      - name: Console protocol tests
+        run: HOME="$TEST_HOME" python -m pytest mixer-engine/test_console_*.py -q
+      - name: The tests left the real home alone
+        run: test ! -e "$HOME/Documents/Universal Audio"
+      - name: Generated model header is up to date
+        run: python tools/gen-driver-models.py --check
+      - name: Model data is consistent
+        run: python tools/check-models.py
+      - name: Status map is up to date
+        run: |
+          python tools/gen-status-graph.py --check
+          python tools/test-gen-status-graph.py
+      - name: Tool unit tests
+        run: |
+          python tools/test-apollo-wavcheck.py
+          python tools/test-extract-ua-dsp-modules.py
+
+  console-rs:
+    # Native console workspace. The runners have no GPU and no UA resources:
+    # tests that need either skip themselves (console-rs/README.md, "Tests in
+    # CI"). The default build needs no system packages (winit, glutin and
+    # wgpu load X11, Wayland, xkbcommon, GL and Vulkan with dlopen).
+    name: console-rs
+    needs: changes
+    if: needs.changes.outputs.console_rs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+    defaults:
+      run:
+        working-directory: console-rs
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: console-rs
+          # PRs restore main's cache and do not save their own, so the 10 GB
+          # cache quota keeps main's warm.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: rustfmt (crates that follow console-rs/rustfmt.toml)
+        run: cargo fmt --check -p oa-assets
+      - name: Build
+        run: cargo build --workspace --all-targets --locked
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: clippy -D warnings (oa-assets, oa-setup)
+        run: cargo clippy -p oa-assets -p oa-setup --all-targets --locked -- -D warnings
+      - name: webview feature (plugin-ui, uaconsole)
+        # Optional WebKitGTK host for UA's HTML plug-in GUIs; needs
+        # webkit2gtk-4.1 and gtk3 headers. Checked when it can have changed.
+        if: needs.changes.outputs.webview == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev
+          cargo check -p plugin-ui -p uaconsole --features plugin-ui/webview,uaconsole/webview --all-targets --locked
+
+  installer:
+    name: installer
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: shellcheck --severity=error
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -y shellcheck; }
+          shellcheck --version | head -2
+          # *.sh plus the extensionless sh/bash scripts (udev workers)
+          git ls-files -z scripts tools configs tests | while IFS= read -r -d '' f; do
+            case "$f" in
+              *.sh) printf '%s\0' "$f" ;;
+              *) head -n1 "$f" | grep -qE '^#!.*[/ ](ba|da)?sh( |$)' && printf '%s\0' "$f" ;;
+            esac
+          done | xargs -0 shellcheck --severity=error
+      - name: Installer and host-check unit tests
+        run: |
+          # Each sources install.sh (functions only) or fakes sysfs; no root,
+          # no hardware, no network. test-install-matrix.sh is the docker job.
+          failed=0
+          for t in tests/test-install-*.sh tests/test-host-checks.sh; do
+            [ "$t" = tests/test-install-matrix.sh ] && continue
+            echo "::group::$t"
+            bash "$t" || { echo "::error file=$t::$t failed"; failed=1; }
+            echo "::endgroup::"
+          done
+          exit "$failed"
+
+  install:
+    # The installer end to end in each distro's container (module build against
+    # that distro's kernel headers, WirePlumber and UCM2 configs).
+    name: install (${{ matrix.distro }})
+    needs: changes
+    if: needs.changes.outputs.install_matrix == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu, fedora, debian, arch, opensuse]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build test image
+        run: docker build -t test-${{ matrix.distro }} -f tests/docker/Dockerfile.${{ matrix.distro }} .
+      - name: Install and verify
+        run: |
+          docker run --rm test-${{ matrix.distro }} bash -c "
+            TEST_BUILD=1 bash scripts/install.sh --skip-init --no-dkms 2>&1 || exit 1;
+            ls /etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf 2>/dev/null || \
+            ls /etc/wireplumber/main.lua.d/51-ua-apollo.lua 2>/dev/null || \
+            { echo 'FAIL: No WirePlumber config'; exit 1; };
+            ls /usr/share/alsa/ucm2/ua_apollo/ua_apollo.conf || \
+            { echo 'FAIL: No UCM2 config'; exit 1; };
+            echo 'All checks passed'
+          "
+
+  nix:
+    # Builds packages.uaconsole (through checks.uaconsole) and runs the
+    # workspace tests in the Nix sandbox. No binary cache for our crates, so
+    # it is the slowest job: on PRs it runs for packaging and manifest
+    # changes, on main for every console-rs change.
+    name: nix
+    needs: changes
+    if: needs.changes.outputs.nix == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: nix flake check
+        run: nix flake check -L
