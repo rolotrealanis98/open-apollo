@@ -10,7 +10,7 @@
 
 obj-m := ua_apollo.o
 ua_apollo-y := ua_core.o ua_audio.o ua_dsp.o ua_event.o \
-	       ua_plugin_host.o ua_resource_pool.o
+	       ua_plugin_host.o ua_resource_pool.o ua_dsp_xact.o
 
 # GCC 13.3 ICE workaround: try_forward_edges crash at -O1/-O2
 # Both ua_core.c and ua_audio.c trigger cfgcleanup.cc:580 ICE.

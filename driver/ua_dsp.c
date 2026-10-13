@@ -40,6 +40,7 @@
 #include "ua_dsp_modules.h"
 
 #include "ua_apollo.h"
+#include "ua_plugin_host.h"
 
 /* Defined with the DSP vector code at the end of the file */
 static void ua_dsp_msg_work(struct work_struct *work);
@@ -126,14 +127,13 @@ static void ua_dsp_ring_free(struct ua_device *ua, struct ua_dsp_ring *ring)
  *   - the producer index wraps with & 0x3ff.
  * ---------------------------------------------------------------- */
 
-static unsigned int ua_dsp_ring_free_slots(const struct ua_dsp_ring *ring)
+unsigned int ua_dsp_ring_free_slots(const struct ua_dsp_ring *ring)
 {
 	return (ring->hw_pos - ring->write_ptr - 1) & (ring->capacity - 1);
 }
 
 /* Refresh hw_pos from POSITION.  -ENODEV when BAR0 reads all-ones. */
-static int ua_dsp_ring_update_pos(struct ua_device *ua,
-				  struct ua_dsp_ring *ring)
+int ua_dsp_ring_update_pos(struct ua_device *ua, struct ua_dsp_ring *ring)
 {
 	u32 pos = ua_read(ua, ring->reg_base + UA_RING_POSITION);
 
@@ -145,7 +145,7 @@ static int ua_dsp_ring_update_pos(struct ua_device *ua,
 }
 
 /* Entries queued but not yet consumed by the FPGA (as of the last read) */
-static unsigned int ua_dsp_ring_pending(const struct ua_dsp_ring *ring)
+unsigned int ua_dsp_ring_pending(const struct ua_dsp_ring *ring)
 {
 	return (ring->write_ptr - ring->hw_pos) & (ring->capacity - 1);
 }
@@ -497,6 +497,8 @@ static void ua_dsp_orphans_abandon(struct ua_device *ua,
 			ref->gen = next;
 		}
 	}
+	/* The plug-in host's transactions keep their own list (ua_dsp_xact.c) */
+	ua_xact_ring_abandon(ua, ring, next);
 	ring->gen = next;
 }
 
@@ -651,10 +653,21 @@ static void __ua_dsp_ring_program(struct ua_device *ua,
 	ring->live = pos >= 0;
 }
 
+/*
+ * Abandon what @ring still has queued, now, without the drain wait (the
+ * plug-in host clearing a reply descriptor nobody answered, ua->lock held).
+ * The buffers behind the abandoned entries stay with their owners.
+ */
+int ua_dsp_ring_resync_now(struct ua_device *ua, struct ua_dsp_ring *ring)
+{
+	int pos = ua_dsp_ring_resync(ua, ring);
+
+	return pos < 0 ? pos : 0;
+}
+
 /* Mid-session (re)program: drains queued entries first */
-static void ua_dsp_ring_program(struct ua_device *ua,
-				struct ua_dsp_ring *ring,
-				u32 ring_base)
+void ua_dsp_ring_program(struct ua_device *ua, struct ua_dsp_ring *ring,
+			 u32 ring_base)
 {
 	__ua_dsp_ring_program(ua, ring, ring_base, true);
 }
@@ -702,6 +715,24 @@ static int ua_dsp_ring_put_entry(struct ua_device *ua,
 	return 0;
 }
 
+/*
+ * ua_dsp_ring_put_words - ua_dsp_ring_put_entry() for code outside this
+ * file (the plug-in host's transactions, ua_dsp_xact.c): one entry, no
+ * doorbell.
+ */
+int ua_dsp_ring_put_words(struct ua_device *ua, struct ua_dsp_ring *ring,
+			  u32 w0, u32 w1, u32 w2, u32 w3)
+{
+	struct ua_ring_entry entry = {
+		.word0 = cpu_to_le32(w0),
+		.word1 = cpu_to_le32(w1),
+		.word2 = cpu_to_le32(w2),
+		.word3 = cpu_to_le32(w3),
+	};
+
+	return ua_dsp_ring_put_entry(ua, ring, &entry);
+}
+
 /**
  * ua_dsp_ring_doorbell - Notify DSP of new entries
  * @ua: device
@@ -716,9 +747,8 @@ static int ua_dsp_ring_put_entry(struct ua_device *ua,
  * an active large DMA ref transfer reset the DMA engine, causing
  * permanent ring stalls for payloads > ~1.5 KB.
  */
-static void ua_dsp_ring_doorbell(struct ua_device *ua,
-				 struct ua_dsp_ring *ring,
-				 u32 ring_base)
+void ua_dsp_ring_doorbell(struct ua_device *ua, struct ua_dsp_ring *ring,
+			  u32 ring_base)
 {
 	/* Ensure all ring writes are visible before doorbell */
 	wmb();
@@ -1028,6 +1058,7 @@ void ua_dsp_rings_fini(struct ua_device *ua, bool dma_quiet)
 	}
 
 	ua_dsp_free_orphans(ua, dma_quiet);
+	ua_xact_fini(ua, dma_quiet);
 
 	ua->fw_loaded = false;
 	ua->dsps_connected = false;

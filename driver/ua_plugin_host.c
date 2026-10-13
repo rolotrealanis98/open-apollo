@@ -64,6 +64,52 @@ void ua_plugin_host_free(struct ua_device *ua)
 }
 
 /**
+ * ua_plugin_epoch_bump - what the host knows about the DSPs is over
+ * @ua: device (ua->lock held, or exclusive)
+ * @why: for the log
+ *
+ * Every transaction built before fails to publish (-ESTALE) and one still
+ * out reports -ESTALE.  The epoch is never 0.
+ */
+void ua_plugin_epoch_bump(struct ua_device *ua, const char *why)
+{
+	struct ua_plugin_host *h = ua->host;
+
+	if (!h)
+		return;
+	if (!++h->epoch)
+		h->epoch = 1;
+	if (h->active)
+		dev_dbg(&ua->pdev->dev, "plug-in host: epoch %llu (%s)\n",
+			(unsigned long long)h->epoch, why);
+}
+
+/**
+ * ua_plugin_quarantine - DSP @dsp did something nobody can prove
+ * @ua: device (ua->lock held)
+ * @dsp: DSP index
+ * @why: for the log
+ * @err: the error that ended it
+ *
+ * Nothing more is placed on that DSP until its next cold start (no reply
+ * in time, an entry a resync abandoned, a teardown the ring did not take).
+ */
+void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
+			  const char *why, int err)
+{
+	struct ua_plugin_host *h = ua->host;
+
+	lockdep_assert_held(&ua->lock);
+	if (!h || dsp >= UA_HOST_DSPS)
+		return;
+	if (!h->dsp[dsp].quarantined)
+		dev_warn(&ua->pdev->dev,
+			 "plug-in host: DSP %u quarantined until the next cold start: %s (%d)\n",
+			 dsp, why, err);
+	h->dsp[dsp].quarantined = true;
+}
+
+/**
  * ua_plugin_host_ops - UA_PLUGIN_OP_* accepted right now
  * @ua: device (ua->lock held)
  *

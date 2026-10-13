@@ -80,6 +80,107 @@ struct ua_plugin_host {
 	bool work_ready;
 };
 
+/* ---- ring primitives exported by ua_dsp.c for ua_dsp_xact.c ---- */
+struct ua_dsp_ring;
+unsigned int ua_dsp_ring_free_slots(const struct ua_dsp_ring *ring);
+int ua_dsp_ring_update_pos(struct ua_device *ua, struct ua_dsp_ring *ring);
+unsigned int ua_dsp_ring_pending(const struct ua_dsp_ring *ring);
+int ua_dsp_ring_put_words(struct ua_device *ua, struct ua_dsp_ring *ring,
+			  u32 w0, u32 w1, u32 w2, u32 w3);
+void ua_dsp_ring_doorbell(struct ua_device *ua, struct ua_dsp_ring *ring,
+			  u32 ring_base);
+void ua_dsp_ring_program(struct ua_device *ua, struct ua_dsp_ring *ring,
+			 u32 ring_base);
+int ua_dsp_ring_resync_now(struct ua_device *ua, struct ua_dsp_ring *ring);
+
+/* ---- transactions (ua_dsp_xact.c) ----
+ *
+ * One request to one DSP: inline commands and DSP commands carried by DMA
+ * pages on its command ring, and optionally reply descriptors on its
+ * response ring, published together (replies first) under ua->lock with
+ * one doorbell per ring.  The coherent buffer behind them belongs to the
+ * transaction until both rings are provably past it, whatever happens to
+ * the caller: a transaction that is not retired when its caller is done
+ * stays on the host's own bounded list (never the firmware/PCM orphans).
+ */
+#define UA_XACT_ENTS_MAX	128	/* command-ring entries, a quarter ring at most */
+#define UA_XACT_RX_MAX		8	/* reply descriptors */
+#define UA_XACT_RX_WORDS_MAX	1024	/* dwords of one reply descriptor */
+#define UA_XACT_PAYLOAD_MAX	(256u << 10)
+#define UA_XACT_PIECE		4096	/* one DMA_REF never crosses a 4 KiB page */
+#define UA_XACT_RETAIN_MAX	32	/* unretired transactions kept, at most */
+#define UA_XACT_RETAIN_BYTES	(8u << 20)
+#define UA_XACT_WAIT_MS		1000	/* the plan's 1 s bound */
+#define UA_XACT_PUBLISH_MS	50	/* room / an idle command ring, off-lock */
+
+enum ua_xact_state {
+	UA_XACT_BUILDING,	/* entries and payload being laid out */
+	UA_XACT_MAPPED,		/* coherent buffer filled, nothing published */
+	UA_XACT_PUBLISHED,	/* doorbelled: the device may read/write it */
+	UA_XACT_RETIRED,	/* both rings past it: replies valid */
+};
+
+struct ua_xact_ref {
+	struct ua_dsp_ring *ring;	/* NULL: this ring is done with it */
+	u32 gen;
+	unsigned int end;		/* producer index just past our entries */
+	unsigned int start, need;	/* abandoned by a resync */
+	bool abandoned;
+};
+
+struct ua_xact {
+	struct list_head node;		/* host->xacts while published */
+	unsigned int dsp;
+	u64 epoch;			/* host epoch it was built in */
+	int err;			/* sticky builder error */
+	enum ua_xact_state state;
+	bool released;			/* the caller is done with it */
+	bool waiting;			/* counted in host->xact_waiting */
+	bool detached;			/* ua_xact_fini() took it off the list */
+	/* layout */
+	unsigned int n;
+	u32 ent[UA_XACT_ENTS_MAX][4];	/* DMA_REF entries: word 2 = offset */
+	u8 *stage;			/* payload staging (kvmalloc) */
+	size_t cap, len;
+	unsigned int n_rx;
+	u32 rx_words[UA_XACT_RX_MAX];
+	u32 rx_off[UA_XACT_RX_MAX];	/* bytes into the reply area */
+	size_t rx_len;
+	u32 rx_fill;			/* the reply area's initial word */
+	/* mapping */
+	void *cpu;
+	dma_addr_t dma;
+	size_t size, rx_base;
+	/* publication */
+	struct ua_xact_ref ref[2];	/* [0] command ring, [1] response ring */
+	unsigned long published;	/* jiffies */
+};
+
+struct ua_xact *ua_xact_alloc(unsigned int dsp, size_t payload_cap);
+void ua_xact_inline(struct ua_xact *x, u32 w0, u32 w1, u32 w2, u32 w3);
+__le32 *ua_xact_cmd(struct ua_xact *x, unsigned int dwords);
+int ua_xact_rx(struct ua_xact *x, unsigned int dwords);
+int ua_xact_map(struct ua_device *ua, struct ua_xact *x);	/* no lock */
+int ua_xact_submit(struct ua_device *ua, struct ua_xact *x);	/* ua->lock */
+int ua_xact_poll(struct ua_device *ua, struct ua_xact *x);	/* ua->lock */
+int ua_xact_publish(struct ua_device *ua, struct ua_xact *x);	/* no lock */
+int ua_xact_wait(struct ua_device *ua, struct ua_xact *x,
+		 unsigned int timeout_ms);			/* no lock */
+int ua_xact_run(struct ua_device *ua, struct ua_xact *x,
+		unsigned int timeout_ms);	/* host->mutex, no ua->lock */
+const __le32 *ua_xact_reply(const struct ua_xact *x, unsigned int i);
+void ua_xact_done(struct ua_device *ua, struct ua_xact *x);	/* ua->lock */
+void ua_xact_discard(struct ua_device *ua, struct ua_xact *x);	/* unpublished */
+void ua_xact_reclaim(struct ua_device *ua);			/* ua->lock */
+void ua_xact_ring_abandon(struct ua_device *ua, struct ua_dsp_ring *ring,
+			  u32 next);					/* ua->lock */
+void ua_xact_fini(struct ua_device *ua, bool dma_quiet);	/* rings fini */
+
+/* ---- epoch and quarantine (ua_plugin_host.c) ---- */
+void ua_plugin_epoch_bump(struct ua_device *ua, const char *why); /* ua->lock */
+void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
+			  const char *why, int err);		/* ua->lock */
+
 /* ---- ua_plugin_host.c ---- */
 int ua_plugin_host_init(struct ua_device *ua);		/* probe */
 void ua_plugin_host_free(struct ua_device *ua);		/* chardev release */
