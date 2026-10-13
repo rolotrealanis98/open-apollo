@@ -1,0 +1,48 @@
+# Reviewed exceptions for tools/check-clean-repo.py.
+#
+# Every entry says why it is here. Never list UA bytes, UA text or a real
+# person's data: images are pinned by SHA-256 after review, and only
+# synthetic or documented example values belong in the other sections.
+# Examples should use TEST-NET addresses (192.0.2.x, RFC 5737, never
+# flagged), /home/you, and *@users.noreply.github.com.
+
+[image]
+# <path> <sha256>: raster images reviewed to hold no UA art. None yet.
+# Screenshots of console-rs show UA's art and must never be committed.
+
+[ipv4]
+# Private addresses used as documented examples (exact addresses, not
+# subnets, so a real LAN address next to them is still caught).
+192.168.1.0     # README.md: the ufw "allow from 192.168.1.0/24" example subnet
+10.0.0.2        # plugin-ui web.rs: GuiQuery parse test
+10.0.0.5        # uaconsole cli.rs, engine-model network.rs: --engine / adapter examples
+
+[email]
+# Exact addresses, or @domain for a whole domain. *@users.noreply.github.com
+# and the RFC 2606 example domains are always allowed.
+dev@rolo.work   # the project's public contact (SECURITY.md, CODE_OF_CONDUCT.md, NOTICE.md)
+
+[home]
+# Placeholder user names in /home/<name>, /Users/<name>, C:\Users\<name>
+# and drive_c/users/<name>. $VAR, <name>, {name}, ~ and * forms are
+# placeholders already.
+you             # the project's stand-in for the user's home
+me
+user
+username
+yourname
+x               # console-rs tests: /Users/x/A.uadmix
+u               # oa-setup demo: /home/u
+
+[serial]
+# Synthetic Apollo serial numbers in tests (14 digits, or 12-16 starting with 2).
+20000000000001  # mixer-engine USB fakes (DSP window)
+20000000000002  # rack settings preview
+20000000000123  # tests/test-install-report-privacy.sh: redacted from the report
+2017123456789012  # mixer-engine test_generated_device_maps: fake driver info
+
+[large]
+# Path globs allowed over the size limits (binaries 256 KiB, text 2 MiB).
+
+[skip]
+# <rule> <path glob>: a rule that does not apply to a file. Keep it rare.
