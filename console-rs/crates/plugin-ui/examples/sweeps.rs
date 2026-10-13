@@ -1,6 +1,6 @@
 //! Parameter sweeps against the live AU editor: the spec pipeline's request shots
-//! (`~/wine-ua-work/plugin-specs/agents/F/r_renders/<request>/index.json` + @2x crops, or
-//! `$PLUGIN_UI_SWEEPS`) are re-drawn by the spec panel at the same parameter values and crop,
+//! (`$PLUGIN_UI_LIVE_REFS/r_renders/<request>/index.json` + @2x crops, or `$PLUGIN_UI_SWEEPS`;
+//! maintainers only, not in this repository) are re-drawn by the spec panel at the same parameter values and crop,
 //! and compared pixel by pixel (largest channel difference > 24/255).
 //!
 //!   cargo run -p plugin-ui --example sweeps [-- <request-name-filter>] [--every N] [--out DIR]
@@ -59,7 +59,11 @@ fn live_state(root: &Path, stem: &str) -> Vec<(u16, f64, String)> {
         .filter_map(|p| {
             let (id, v) = (p["id"].as_u64()? as u16, p["value"].as_f64()?);
             let (lo, hi) = (p["min"].as_f64().unwrap_or(0.0), p["max"].as_f64().unwrap_or(1.0));
-            Some((id, if hi > lo { (v - lo) / (hi - lo) } else { v }, p["display"].as_str().unwrap_or_default().to_string()))
+            Some((
+                id,
+                if hi > lo { (v - lo) / (hi - lo) } else { v },
+                p["display"].as_str().unwrap_or_default().to_string(),
+            ))
         })
         .collect()
 }
@@ -73,31 +77,48 @@ fn off(a: &ImageData, b: &ImageData) -> f64 {
         [d.rgba[i] as f32 * al, d.rgba[i + 1] as f32 * al, d.rgba[i + 2] as f32 * al]
     };
     let n = (w * h).max(1) as f64;
-    let bad = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| px(a, x, y).iter().zip(px(b, x, y)).any(|(p, q)| (p - q).abs() > 24.0)).count();
+    let bad = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| px(a, x, y).iter().zip(px(b, x, y)).any(|(p, q)| (p - q).abs() > 24.0))
+        .count();
     bad as f64 * 100.0 / n
 }
 
 fn main() {
-    let filter = std::env::args().skip(1).find(|a| !a.starts_with("--") && Some(a.clone()) != arg("--every") && Some(a.clone()) != arg("--out"));
+    let filter = std::env::args()
+        .skip(1)
+        .find(|a| !a.starts_with("--") && Some(a.clone()) != arg("--every") && Some(a.clone()) != arg("--out"));
     let every: usize = arg("--every").and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
     let out = arg("--out").map(PathBuf::from);
-    let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
-    let f_root = std::env::var("PLUGIN_UI_LIVE_REFS").map(PathBuf::from).unwrap_or_else(|_| home.join("wine-ua-work/plugin-specs/agents/F"));
-    let sweeps = std::env::var("PLUGIN_UI_SWEEPS").map(PathBuf::from).unwrap_or_else(|_| f_root.join("r_renders"));
+    let f_root = std::env::var("PLUGIN_UI_LIVE_REFS").map(PathBuf::from).ok();
+    let Some(sweeps) = std::env::var("PLUGIN_UI_SWEEPS")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| f_root.as_ref().map(|f| f.join("r_renders")))
+    else {
+        eprintln!("sweeps: set PLUGIN_UI_LIVE_REFS (or PLUGIN_UI_SWEEPS) to the live reference shots");
+        std::process::exit(2);
+    };
     let Some(lib) = PluginSpecLibrary::locate() else {
         eprintln!("sweeps: no spec folder");
         std::process::exit(2);
     };
-    let resources = Resources::locate().unwrap_or(Resources { root: PathBuf::from("/nonexistent"), console_version: None });
-    let assets = Assets::load(resources.clone()).unwrap_or_else(|_| Assets::from_parts(resources.clone(), Appearance::default(), Arc::new(ImageCache::new(resources))));
+    let resources =
+        Resources::locate().unwrap_or(Resources { root: PathBuf::from("/nonexistent"), console_version: None });
+    let assets = Assets::load(resources.clone()).unwrap_or_else(|_| {
+        Assets::from_parts(resources.clone(), Appearance::default(), Arc::new(ImageCache::new(resources)))
+    });
     lib.attach(&assets.images);
     let Some(gpu) = gfx::Headless::new() else {
         eprintln!("sweeps: no GPU adapter");
         std::process::exit(3);
     };
-    let mut renderer = gfx::Renderer::new(&gpu.device, &gpu.queue, gfx::TextureFormat::Rgba8Unorm, assets.images.clone());
+    let mut renderer =
+        gfx::Renderer::new(&gpu.device, &gpu.queue, gfx::TextureFormat::Rgba8Unorm, assets.images.clone());
     let tmp = std::env::temp_dir().join(format!("plugin-ui-sweeps-{}.png", std::process::id()));
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&sweeps).map(|d| d.flatten().map(|e| e.path()).filter(|p| p.join("index.json").is_file()).collect()).unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&sweeps)
+        .map(|d| d.flatten().map(|e| e.path()).filter(|p| p.join("index.json").is_file()).collect())
+        .unwrap_or_default();
     dirs.sort();
     let mut all = Vec::new();
     for dir in dirs {
@@ -105,14 +126,23 @@ fn main() {
         if filter.as_ref().is_some_and(|f| !name.contains(f.as_str())) {
             continue;
         }
-        let index: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("index.json")).unwrap()).unwrap();
+        let index: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("index.json")).unwrap()).unwrap();
         let req = index.get("request").unwrap_or(&index);
         let Some(capture) = req["capture"].as_str() else { continue };
-        let region: Vec<f32> = req.get("region").or_else(|| index.get("region_pt")).and_then(|r| r.as_array()).map(|r| r.iter().filter_map(|v| v.as_f64()).map(|v| v as f32).collect()).unwrap_or_default();
+        let region: Vec<f32> = req
+            .get("region")
+            .or_else(|| index.get("region_pt"))
+            .and_then(|r| r.as_array())
+            .map(|r| r.iter().filter_map(|v| v.as_f64()).map(|v| v as f32).collect())
+            .unwrap_or_default();
         let (Some(entry), [rx, ry, rw, rh]) = (lib.entry_named(capture), region.as_slice()) else { continue };
         let spec = lib.spec(entry).unwrap();
-        let live = live_state(&f_root, entry.stem());
-        let shots: Vec<&serde_json::Value> = index["shots"].as_array().map(|s| s.iter().filter(|s| s.get("audio").is_none()).step_by(every).collect()).unwrap_or_default();
+        let live = f_root.as_deref().map(|f| live_state(f, entry.stem())).unwrap_or_default();
+        let shots: Vec<&serde_json::Value> = index["shots"]
+            .as_array()
+            .map(|s| s.iter().filter(|s| s.get("audio").is_none()).step_by(every).collect())
+            .unwrap_or_default();
         if shots.is_empty() {
             continue;
         }
@@ -121,7 +151,10 @@ fn main() {
         for shot in shots {
             let Some(file) = shot["file"].as_str() else { continue };
             let Some(theirs) = ImageData::decode_png(&dir.join(file)) else { continue };
-            let swept: HashMap<u16, f64> = shot["params"].as_object().map(|m| m.iter().filter_map(|(k, v)| Some((k.parse().ok()?, v.as_f64()?))).collect()).unwrap_or_default();
+            let swept: HashMap<u16, f64> = shot["params"]
+                .as_object()
+                .map(|m| m.iter().filter_map(|(k, v)| Some((k.parse().ok()?, v.as_f64()?))).collect())
+                .unwrap_or_default();
             let mut mock = MockParams::from_spec(&spec);
             let mut strings = HashMap::new();
             for (k, v, d) in &live {
@@ -178,6 +211,11 @@ fn main() {
     let _ = std::fs::remove_file(&tmp);
     if !all.is_empty() {
         all.sort_by(f64::total_cmp);
-        println!("all: {} shots, median {:.2}%, 90th percentile {:.2}%", all.len(), all[all.len() / 2], all[all.len() * 9 / 10]);
+        println!(
+            "all: {} shots, median {:.2}%, 90th percentile {:.2}%",
+            all.len(),
+            all[all.len() / 2],
+            all[all.len() * 9 / 10]
+        );
     }
 }
