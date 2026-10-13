@@ -8,7 +8,7 @@ pub const USAGE: &str = "\
 open-apollo-setup: set up open-apollo with your own UAD install
 
 USAGE:
-  open-apollo-setup [--demo] [--data DIR] [--repo DIR] [--step STEP] [--auto]
+  open-apollo-setup [--demo] [--data DIR] [--repo DIR] [--step STEP] [--auto] [--window-size WxH]
 
   --demo        Simulate the privileged steps (DSP programs & firmware, driver)
                 and the Console build: fake log lines, no pkexec, no builds.
@@ -21,11 +21,12 @@ USAGE:
                 console, done
   --auto        With --demo: walk through the steps by itself, stopping at --step
                 (default: done). For showing the flow and taking screenshots.
+  --window-size WxH  Initial window size in points (default 1040x720)
   -h, --help    Show this help
 
 Environment: OA_SETUP_EXTRACTOR  the firmware extractor program (default: oa-assets)";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Options {
     pub demo: bool,
     pub data: PathBuf,
@@ -35,9 +36,10 @@ pub struct Options {
     pub start: StepId,
     /// `--auto`: walk through the steps by itself and stop at this one.
     pub auto_until: Option<StepId>,
+    pub window_size: [f32; 2],
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Parsed {
     Run(Options),
     Help,
@@ -50,6 +52,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
     let mut repo = None;
     let mut step = None;
     let mut auto = false;
+    let mut window_size = [1040.0, 720.0];
     while let Some(a) = it.next() {
         let (flag, inline) = match a.split_once('=') {
             Some((f, v)) if f.starts_with("--") => (f.to_string(), Some(v.to_string())),
@@ -64,6 +67,10 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
             "--step" => {
                 let v = value("--step")?;
                 step = Some(StepId::parse(&v).ok_or(format!("unknown step {v}"))?);
+            }
+            "--window-size" => {
+                let v = value("--window-size")?;
+                window_size = parse_wxh(&v).ok_or(format!("--window-size takes WxH, e.g. 1040x900, not {v}"))?;
             }
             "-h" | "--help" => return Ok(Parsed::Help),
             other => return Err(format!("unknown option {other}")),
@@ -84,7 +91,14 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
         true => (StepId::Welcome, Some(step.unwrap_or(StepId::Done))),
         false => (step.unwrap_or(StepId::Welcome), None),
     };
-    Ok(Parsed::Run(Options { demo, data, data_is_default, repo, start, auto_until }))
+    Ok(Parsed::Run(Options { demo, data, data_is_default, repo, start, auto_until, window_size }))
+}
+
+/// `1040x900` -> [1040.0, 900.0]; at least the window's minimum size.
+fn parse_wxh(s: &str) -> Option<[f32; 2]> {
+    let (w, h) = s.split_once(['x', 'X'])?;
+    let (w, h): (f32, f32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    (w >= 860.0 && h >= 560.0 && w <= 8192.0 && h <= 8192.0).then_some([w, h])
 }
 
 fn absolute(p: PathBuf) -> PathBuf {
@@ -134,6 +148,10 @@ mod tests {
         assert!(run(&["--data"]).is_err());
         assert!(run(&["--auto"]).is_err(), "--auto needs --demo");
         assert!(run(&["--repo", "/nonexistent"]).is_err());
+        let Parsed::Run(o) = run(&["--window-size", "1100x900"]).unwrap() else { panic!() };
+        assert_eq!(o.window_size, [1100.0, 900.0]);
+        assert!(run(&["--window-size", "100x100"]).is_err());
+        assert!(run(&["--window-size=wide"]).is_err());
         let Parsed::Run(o) = run(&["--demo", "--auto", "--step", "console"]).unwrap() else { panic!() };
         assert_eq!((o.start, o.auto_until), (StepId::Welcome, Some(StepId::Console)), "--auto walks from the start");
         let Parsed::Run(o) = run(&["--demo", "--auto"]).unwrap() else { panic!() };

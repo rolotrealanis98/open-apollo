@@ -20,7 +20,7 @@ pub fn run(opts: Options) -> Result<(), String> {
         viewport: egui::ViewportBuilder::default()
             .with_title("open-apollo setup")
             .with_app_id("open-apollo-setup")
-            .with_inner_size([1040.0, 720.0])
+            .with_inner_size(opts.window_size)
             .with_min_inner_size([860.0, 560.0]),
         renderer: eframe::Renderer::Glow,
         ..Default::default()
