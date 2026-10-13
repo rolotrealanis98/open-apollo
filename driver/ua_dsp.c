@@ -5222,6 +5222,11 @@ static void ua_dsp_state_proc_read(struct snd_info_entry *entry,
 
 int ua_dsp_proc_init(struct ua_device *ua, struct snd_card *card)
 {
-	return snd_card_ro_proc_new(card, "dsp_state", ua,
-				    ua_dsp_state_proc_read);
+	int ret = snd_card_ro_proc_new(card, "dsp_state", ua,
+				       ua_dsp_state_proc_read);
+
+	/* /proc/asound/cardN/plugin_host: ownership, pools, what was sent */
+	if (!ret)
+		ret = ua_plugin_proc_init(ua, card);
+	return ret;
 }

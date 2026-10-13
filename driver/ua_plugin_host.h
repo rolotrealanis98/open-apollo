@@ -39,7 +39,8 @@ bool ua_plugin_host_enabled(void);	/* plugin_host=1 */
 struct ua_host_dsp {
 	bool owned;		/* ua->lock: see ua_plugin_dsp_start() */
 	bool quarantined;	/* ua->lock: an outcome that cannot be proven */
-	bool geom_read;		/* the pool registers were read this epoch */
+	bool geom_read;		/* the pool registers were read */
+	bool seen;		/* a start was seen for this device instance */
 	u32 boot_word;		/* at the last cold start */
 	char why[96];		/* the last ownership decision */
 	u32 regs[11];		/* pool registers: size 0-3, base 0-3, scratch 1-3 */
@@ -236,6 +237,38 @@ bool ua_catalog_resident(const struct ua_cat_entry *e, unsigned int dsp,
 			 u64 epoch);
 void ua_catalog_free_all(struct ua_device *ua);			/* exclusive */
 
+/* ---- DSP ownership, geometry, placement (ua_plugin_place.c) ----
+ *
+ * Only the host's own ledger knows what is free on a DSP (the pools live
+ * host-side; the registers only give the static map), so a DSP is this
+ * host's to use only when it found the DSP freshly powered: at its last
+ * cold start the DSP's boot word was exactly 3 (no host since power-up),
+ * and nothing outside the host (a raw DSP ioctl, a firmware load) has
+ * touched it since.  DSP 0 is shared with the input strips through the
+ * same ledger; the mixer itself is not in the pools.
+ */
+#define UA_DSP_WIN_BOOT		0x1a4	/* boot/ready word */
+#define UA_DSP_BOOT_POWERUP	0x00000003
+#define UA_DSP_WIN_SIZE		0x010	/* pool n capacity: +0x10 + 4n */
+#define UA_DSP_WIN_BASE		0x184	/* pool n base: +0x184 + 4n */
+#define UA_DSP_WIN_SCRATCH	0x190	/* pool n scratch: +0x190 + 4n, n >= 1 */
+
+u32 ua_plugin_dsp_window(unsigned int dsp);
+void ua_plugin_dsp_start(struct ua_device *ua, bool cold);	/* probe/ua->lock */
+void ua_plugin_taint(struct ua_device *ua, const char *why);	/* no lock */
+void ua_plugin_disown(struct ua_device *ua, unsigned int dsp,
+		      const char *why);				/* ua->lock */
+int ua_plugin_read_geometry(struct ua_device *ua, unsigned int dsp); /* ua->lock */
+bool ua_plugin_dsp_admitted(struct ua_device *ua, unsigned int dsp); /* ua->lock */
+int ua_plugin_place(struct ua_device *ua, unsigned int want,
+		    const struct ua_pool_request *rq, unsigned int n,
+		    unsigned int *dsp, struct ua_pool_lease *leases); /* ua->lock */
+int ua_plugin_unplace(struct ua_device *ua, unsigned int dsp,
+		      const struct ua_pool_lease *leases, unsigned int n);
+void ua_plugin_proc(struct ua_device *ua, struct snd_info_buffer *buf);
+struct snd_card;
+int ua_plugin_proc_init(struct ua_device *ua, struct snd_card *card);
+
 /* ---- epoch and quarantine (ua_plugin_host.c) ---- */
 void ua_plugin_epoch_bump(struct ua_device *ua, const char *why); /* ua->lock */
 void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
@@ -243,6 +276,7 @@ void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
 
 /* ---- ua_plugin_host.c ---- */
 int ua_plugin_host_init(struct ua_device *ua);		/* probe */
+void ua_plugin_connected(struct ua_device *ua);		/* ua->lock */
 void ua_plugin_host_free(struct ua_device *ua);		/* chardev release */
 u64 ua_plugin_host_ops(struct ua_device *ua);		/* ua->lock */
 void ua_plugin_host_caps(struct ua_device *ua, u32 *state, u32 *owned,

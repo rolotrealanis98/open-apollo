@@ -33,6 +33,7 @@
 #include <sound/initval.h>
 
 #include "ua_apollo.h"
+#include "ua_plugin_host.h"
 #include "ua_ioctl.h"
 #include "ua_models_gen.h"
 
@@ -3354,6 +3355,9 @@ post_handshake:
 				 */
 				dev_dbg(&ua->pdev->dev,
 					"  transport deferred to pcm_prepare\n");
+
+				/* plug-in host: pool maps of the owned DSPs */
+				ua_plugin_connected(ua);
 
 				return 0;
 			}

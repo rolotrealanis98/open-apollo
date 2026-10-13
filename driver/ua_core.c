@@ -3562,9 +3562,37 @@ static bool ua_ioctl_needs_rawio(unsigned int cmd)
 	}
 }
 
+/*
+ * Raw DSP access from user space (CAP_SYS_RAWIO ioctls) that can change what
+ * the DSPs' memory pools hold, or make the DSPs drop it (a ring connect):
+ * the plug-in host owns no DSP after it until the next cold start
+ * (ua_plugin_taint(); only an epoch bump when nothing is hosted).
+ */
+static bool ua_ioctl_touches_dsp_pools(unsigned int cmd)
+{
+	switch (cmd) {
+	case UA_IOCTL_WRITE_REG:
+	case UA_IOCTL_RESET_DMA:
+	case UA_IOCTL_LOAD_FIRMWARE:
+	case UA_IOCTL_DSP_CONNECT:
+	case UA_IOCTL_DSP_TEST_DMA:
+	case UA_IOCTL_DSP_TEST_SEND:
+	case UA_IOCTL_DSP_SEND_BLOCK:
+	case UA_IOCTL_RING_SEND:
+	case UA_IOCTL_DSP_SRAM_DATA:
+	case UA_IOCTL_DSP_SEND_RAW:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static long ua_ioctl_dispatch(struct ua_device *ua, struct ua_file *uf,
 			      unsigned int cmd, unsigned long arg)
 {
+	if (ua_ioctl_touches_dsp_pools(cmd))
+		ua_plugin_taint(ua, "a raw DSP ioctl");
+
 	switch (cmd) {
 	/*
 	 * Plug-in hosting (ABI 1.8): -EOPNOTSUPP unless plugin_host=1.  Not
@@ -3883,6 +3911,8 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 			 "mixer DSP alive! Skipping DMA reset to preserve state\n");
 		if (!resume)
 			ua->dsp_inherited = true;
+		/* plug-in host: a running DSP may hold another host's resources */
+		ua_plugin_dsp_start(ua, false);
 		if (ua_read(ua, UA_REG_FPGA_REV) != ua->fpga_rev) {
 			dev_err(&pdev->dev, "FPGA revision mismatch\n");
 			return -EIO;
@@ -3947,8 +3977,11 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 	 * On resume the existing rings are reprogrammed instead.
 	 */
 	/* Kext ProgramRegisters waits for the DSP boot word first (D14). */
-	if (dsp_was_dead)
+	if (dsp_was_dead) {
 		(void)ua_dsp_wait_ready(ua);
+		/* plug-in host: which DSPs no host used since power-up */
+		ua_plugin_dsp_start(ua, true);
+	}
 
 	ret = ua_dsp_rings_init(ua);
 	if (ret)

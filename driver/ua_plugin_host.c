@@ -65,6 +65,26 @@ void ua_plugin_host_free(struct ua_device *ua)
 }
 
 /**
+ * ua_plugin_connected - the audio connect is done
+ * @ua: device (ua->lock held)
+ *
+ * Reads the pool registers of every DSP the host owns into its ledger
+ * (reads only).
+ */
+void ua_plugin_connected(struct ua_device *ua)
+{
+	struct ua_plugin_host *h = ua->host;
+	unsigned int i;
+
+	lockdep_assert_held(&ua->lock);
+	if (!h || !h->active)
+		return;
+	for (i = 0; i < ua->num_dsps && i < UA_HOST_DSPS; i++)
+		if (h->dsp[i].owned)
+			(void)ua_plugin_read_geometry(ua, i);
+}
+
+/**
  * ua_plugin_epoch_bump - what the host knows about the DSPs is over
  * @ua: device (ua->lock held, or exclusive)
  * @why: for the log
