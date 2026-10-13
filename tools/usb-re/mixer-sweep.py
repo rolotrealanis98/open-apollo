@@ -12,11 +12,11 @@ pcap-mixer-decode.py script can correlate TCP commands with USB packets.
 Usage:
     # On Windows: start USBPcap on the Apollo's USB bus
     # Then from Mac (or any machine that can reach the Windows box):
-    python mixer-sweep.py --host 192.168.1.3 [--port 4710] [--delay 1.5]
+    python mixer-sweep.py --host 192.0.2.3 [--port 4710] [--delay 1.5]
 
     # Selective sweeps:
-    python mixer-sweep.py --host 192.168.1.3 --only preamp-gain
-    python mixer-sweep.py --host 192.168.1.3 --only phantom,monitor,mute
+    python mixer-sweep.py --host 192.0.2.3 --only preamp-gain
+    python mixer-sweep.py --host 192.0.2.3 --only phantom,monitor,mute
 
 Protocol (TCP:4710):
     Commands:  "set <path> <value>\\0"

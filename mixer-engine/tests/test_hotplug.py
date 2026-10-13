@@ -392,7 +392,7 @@ def fake_zc(monkeypatch):
     monkeypatch.setattr(bonjour, "Zeroconf", FakeZeroconf, raising=False)
     monkeypatch.setattr(bonjour, "ServiceInfo", FakeServiceInfo, raising=False)
     monkeypatch.setattr(bonjour, "_local_ipv4_addresses",
-                        lambda: ["192.168.1.5"])
+                        lambda: ["192.0.2.5"])
 
 
 class TestBonjour:
@@ -403,7 +403,7 @@ class TestBonjour:
         assert got == {("_uamixer._tcp.local.", 4710),
                        ("_uamixerhelper._tcp.local.", 4720)}
         assert all(i.name.startswith("Studio.") for i in FakeZeroconf.registered)
-        assert all(i.kw["parsed_addresses"] == ["192.168.1.5"]
+        assert all(i.kw["parsed_addresses"] == ["192.0.2.5"]
                    for i in FakeZeroconf.registered)
         b.stop()
         assert FakeZeroconf.registered == [] and FakeZeroconf.closed

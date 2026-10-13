@@ -1,4 +1,4 @@
-From: Rolando Trevino <rolo@trevino.dev>
+From: rolotrealanis98 <122947376+rolotrealanis98@users.noreply.github.com>
 Subject: [PATCH] ALSA: usb-audio: Add fixed-rate quirk for Universal Audio USB devices
 
 Universal Audio Apollo Solo USB, Twin USB, and Twin X USB devices
@@ -15,7 +15,7 @@ Tested with Universal Audio Apollo Solo USB (VID 0x2b5a, PID 0x000d)
 on Linux 6.17.0 — device correctly enumerates playback (6ch) and
 capture (10ch) PCM streams after this patch.
 
-Signed-off-by: Rolando Trevino <rolo@trevino.dev>
+Signed-off-by: rolotrealanis98 <122947376+rolotrealanis98@users.noreply.github.com>
 ---
  sound/usb/format.c | 3 +++
  1 file changed, 3 insertions(+)
