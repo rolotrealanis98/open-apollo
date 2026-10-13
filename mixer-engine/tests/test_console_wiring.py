@@ -387,3 +387,34 @@ class TestHeadphoneSource:
         d._handle_set(MixerClient(None, writer),
                       Command("set", self.HP1, "none"))
         assert tree.get_value(self.HP1) == "none"
+
+
+class TestCopyMixToSend:
+    """Console's COPY MIX TO posts the root `/CopyToSends {"send": i}`
+    (MAP.md): every input but the talkback mic copies its fader (and a
+    mono input its pan) to send i.  The daemon only knew the per-channel
+    form and refused it."""
+
+    def test_root_form_copies_every_input(self, tree, backend):
+        router = HardwareRouter(backend, tree)
+        tree.on_set = router.on_set
+        d = MixerDaemon(tree, router)
+        tree.set(f"{IN}/0/Mute/value", False)
+        tree.set(f"{IN}/0/FaderLevel/value", -12.0)
+        tree.set(f"{IN}/0/Pan/value", 0.5)
+        tree.set_value(f"{IN}/22/FaderLevel/value", -3.0)
+        backend.clear()
+        data, err = d.commands.execute("/CopyToSends", {"send": 2})
+        assert err is None and data["sends"] >= 20
+        assert tree.get_value(f"{IN}/0/sends/2/Gain/value") == -12.0
+        assert tree.get_value(f"{IN}/0/sends/2/GainTapered/value") == \
+            pytest.approx(hardware.fader_db_to_tapered(-12.0))
+        assert tree.get_value(f"{IN}/0/sends/2/Pan/value") == 0.5
+        assert tree.get_value(f"{IN}/22/sends/2/Gain/value") != -3.0
+        # CUE 1 (sub 1) of input 0 written at the copied level
+        assert sends(backend, 0, SUB_CUE1)
+
+    def test_missing_send_index_fails(self, tree):
+        d = MixerDaemon(tree, None)
+        data, err = d.commands.execute("/CopyToSends", {})
+        assert err is not None

@@ -320,6 +320,15 @@ fn input_sends_reach_the_mixer() {
         |b, s, v| (b, s) == (0, 3) && v == 0.0,
     );
     assert!(r.m.input_sends(&s)[0].muted);
+    // COPY MIX TO CUE 1 (fader / pan menu): the root `post /CopyToSends {"send": 2}`.
+    r.bus(
+        "COPY MIX TO CUE 1",
+        |m| m.apply(&Action::Tap(id(IN0, Control::Menu(MenuCmd::CopyMixTo(2))))),
+        |b, s, v| (b, s) == (0, 1) && near(v, coeff(-10.0)),
+    );
+    settle(&mut r.m, 400);
+    let cue1 = r.m.input_sends(&s).into_iter().find(|x| x.name == "CUE 1").unwrap();
+    assert!((cue1.level - 0.6).abs() < 1e-3, "the CUE 1 knob follows: {}", cue1.level);
 }
 
 /// AUX return: fader, MUTE, MONO, PRE / POST (rewrites the input sends that follow it), the
@@ -403,10 +412,10 @@ fn settings_reach_the_apollo() {
         mixer_param(n, a).is_some_and(|(t, _, p, _)| (t, p) == (MONITOR, 0x21))
     });
     r.mixer("MON LEVEL 14 dBu", choose("map:mon_level:/devices/0/outputs/18/Pad", 0), (MONITOR, 1, 0x32, 1));
-    r.press(
+    r.other(
         "OUTPUT REFERENCE 1-2 −10 dBV",
         choose("pair:ref_level:/devices/0/outputs/0/Pad,/devices/0/outputs/1/Pad", 0),
-        |n, a| mixer_param(n, a).is_some_and(|(t, _, _, v)| t == MONITOR && v == 1),
+        (MONITOR, 0x19, 1),
     );
     r.mixer("CLIP HOLD NONE", choose("/ClipHold", 0), (MONITOR, 0, 0x13, 0));
     r.mixer("PEAK HOLD NONE", choose("/PeakHold", 0), (MONITOR, 0, 0x14, 0));
