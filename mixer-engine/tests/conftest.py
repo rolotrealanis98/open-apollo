@@ -162,3 +162,16 @@ def tree():
 def router(backend, tree):
     from hardware import HardwareRouter
     return HardwareRouter(backend, tree)
+
+
+@pytest.fixture(scope="session")
+def _absent_ua_catalogue(tmp_path_factory):
+    return tmp_path_factory.mktemp("ua-catalogue") / "absent"
+
+
+@pytest.fixture(autouse=True)
+def _no_user_ua_catalogue(_absent_ua_catalogue, monkeypatch):
+    """Tests never read the developer's own UA import
+    (~/.local/share/open-apollo/ua-catalogue): point the daemon at a place
+    that does not exist unless a test sets its own."""
+    monkeypatch.setenv("OA_UA_CATALOGUE", str(_absent_ua_catalogue))

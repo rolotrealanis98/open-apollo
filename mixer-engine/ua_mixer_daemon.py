@@ -39,6 +39,7 @@ from protocol import (Command, parse_command, encode_response_bytes,
                       encode_error_bytes, _parse_path_with_params)
 from state_tree import StateTree
 from helper_tree import HelperTree
+import ua_catalogue
 from autogain import AutoGainService
 from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UNSUPPORTED as EVENTS_UNSUPPORTED, EVENT_NAMES,
@@ -394,6 +395,9 @@ def fill_helper_identity(helper_tree: HelperTree | None,
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_DEVICE_MAP = SCRIPT_DIR / "device_maps" / "device_map_apollo_x4.json"
 DEFAULT_HELPER_TREE = SCRIPT_DIR / "device_maps" / "helper_tree.json"
+# sha256 of the UA help strings removed from the shipped helper tree, by
+# position: ua_catalogue puts the user's imported copies back
+DEFAULT_HELPER_PINS = SCRIPT_DIR / "device_maps" / "helper_tree.pins.json"
 # Device descriptors (devices/apollo-*.json) map a driver device_type to a model
 # name, from which the matching device map filename is derived.
 DEVICES_DIR = SCRIPT_DIR.parent / "devices"
@@ -3252,6 +3256,14 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
                              f"+ {PORT_STRIDE} x device index)")
     parser.add_argument("--no-helper", action="store_true",
                         help="Disable Mixer Helper TCP:4720 server")
+    parser.add_argument("--ua-catalogue", type=Path, metavar="DIR",
+                        help="UA plug-in catalogue, factory presets and help "
+                             "text imported by `oa-assets import` (default: "
+                             "$OA_UA_CATALOGUE or "
+                             "~/.local/share/open-apollo/ua-catalogue)")
+    parser.add_argument("--no-ua-catalogue", action="store_true",
+                        help="Serve the shipped trees only (no imported UA "
+                             "catalogue)")
     parser.add_argument("--device", "-d",
                         help="Device node, e.g. /dev/ua_apollo1 (default: the first "
                              "/dev/ua_apollo*). One daemon serves one Apollo: "
@@ -3404,6 +3416,13 @@ helper 4820, WS 4821 with its own state file; pass --port/--helper-port/
         log.warning("Helper tree not found: %s — 4720 clients will use device map",
                      helper_tree_path)
     fill_helper_identity(helper_tree, info)
+
+    # UA's own content (plug-in list, factory preset menus, help text) is
+    # not shipped: overlay the user's import, before the commands publish
+    # the saved I/O presets after the factory ones
+    if not args.no_ua_catalogue:
+        ua_catalogue.apply(state, helper_tree, args.ua_catalogue,
+                           DEFAULT_HELPER_PINS)
 
     # Wire up the hardware router (backend was opened above for device detection)
     hw_router = None

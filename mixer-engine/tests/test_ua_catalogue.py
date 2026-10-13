@@ -1,0 +1,259 @@
+"""The UA catalogue overlay (ua_catalogue.py): what `oa-assets import`
+brings in from the user's UAD install is laid over the shipped maps.
+
+Every name here is synthetic: the tests carry no UA content."""
+
+import hashlib
+import json
+import logging
+import re
+from contextlib import ExitStack
+from unittest.mock import patch
+
+import pytest
+
+import ua_catalogue as uac
+import ua_mixer_daemon as daemon_mod
+from conftest import DEVICE_MAP_X4, ENGINE_DIR
+from helper_tree import HelperTree
+from state_tree import StateTree
+
+HELPER = ENGINE_DIR / "device_maps" / "helper_tree.json"
+PINS = ENGINE_DIR / "device_maps" / "helper_tree.pins.json"
+
+PRESETS = [
+    {"value": "Folder A", "type": "folder", "locked": True,
+     "children": [{"value": "Preset 1", "type": "file", "locked": True}]},
+    {"value": "Preset 2", "type": "file", "locked": True},
+]
+PLUGINS = [
+    {"name": "Test Comp", "short_names": ["TComp", "Test C"],
+     "categories": ["Dynamics", "Mixing"], "vst_id": "tst1", "render_id": 1,
+     "plugin_id": "test_comp", "unison": None, "presets": PRESETS},
+    {"name": "Test Pre", "short_names": [], "categories": ["Preamp"],
+     "vst_id": "tst2", "render_id": 2, "plugin_id": "test_pre",
+     "unison": True, "presets": []},
+]
+CHANNEL = [{"value": "Strips", "type": "folder", "locked": True,
+            "children": [{"value": "Strip 1", "type": "file", "locked": True}]}]
+
+
+def write_catalogue(d, *, plugins=PLUGINS, channel=CHANNEL, io=("Map A", "Map B"),
+                    texts=None, version=1):
+    d.mkdir(parents=True, exist_ok=True)
+
+    def put(name, part, body):
+        doc = {"format": f"{uac.FORMAT}/{part}", "version": version,
+               "source": {"uad": "0.0.0.test"}}
+        doc.update(body)
+        (d / name).write_text(json.dumps(doc))
+    put("plugins.json", "plugins", {"plugins": list(plugins)})
+    put("channel-presets.json", "channel-presets", {"presets": channel})
+    put("io-presets.json", "io-presets", {"presets": list(io)})
+    put("helper-text.json", "helper-text", {"texts": texts or {}})
+    return d
+
+
+def x4():
+    t = StateTree()
+    t.load_device_map(DEVICE_MAP_X4)
+    return t
+
+
+def channel_preset_paths(t):
+    return [p for p in t.all_paths() if uac._RE_CHANNEL_PRESET.match(p)]
+
+
+# ── locating and loading ────────────────────────────────────────────
+
+def test_default_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("OA_UA_CATALOGUE", str(tmp_path / "x"))
+    assert uac.default_dir() == tmp_path / "x"
+    monkeypatch.delenv("OA_UA_CATALOGUE")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert uac.default_dir() == tmp_path / "open-apollo" / "ua-catalogue"
+    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert uac.default_dir() == \
+        tmp_path / ".local" / "share" / "open-apollo" / "ua-catalogue"
+
+
+def test_absent_or_empty_import_is_none(tmp_path):
+    assert uac.load(tmp_path / "missing") is None
+    (tmp_path / "empty").mkdir()
+    assert uac.load(tmp_path / "empty") is None
+
+
+def test_load_reads_all_parts(tmp_path):
+    cat = uac.load(write_catalogue(tmp_path / "c", texts={"ab": "text"}))
+    assert [p["name"] for p in cat.plugins] == ["Test Comp", "Test Pre"]
+    assert cat.channel_presets == CHANNEL
+    assert cat.io_presets == ["Map A", "Map B"]
+    assert cat.helper_texts == {"ab": "text"}
+    assert cat.source["uad"] == "0.0.0.test"
+
+
+def test_other_versions_and_broken_files_are_skipped(tmp_path, caplog):
+    d = write_catalogue(tmp_path / "c", version=2)
+    with caplog.at_level(logging.WARNING):
+        assert uac.load(d) is None
+    assert "version 2" in caplog.text
+    d = write_catalogue(tmp_path / "d")
+    (d / "plugins.json").write_text("{not json")
+    (d / "io-presets.json").write_text(json.dumps({"format": "other"}))
+    cat = uac.load(d)
+    assert cat.plugins == [] and cat.io_presets == []
+    assert cat.channel_presets == CHANNEL       # the good parts still load
+
+
+# ── the state tree (4710) ───────────────────────────────────────────
+
+def test_shipped_map_has_no_catalogue():
+    t = x4()
+    assert not [p for p in t.all_paths() if p.startswith("/plugins/")]
+    assert all(t.get_prop_dict(p)["values"] == [] for p in channel_preset_paths(t))
+    assert t.get_prop_dict("/IOMapPreset")["values"] == []
+
+
+def test_plugins_get_the_engine_shape():
+    t = x4()
+    done = uac.apply_to_state(t, uac.Catalogue(directory=None, plugins=PLUGINS))
+    assert done["plugins"] == 2
+    base = "/plugins/0"
+    assert t.get_value(base + "/Type/value") == "plugin"
+    assert t.get_value(base + "/Name/value") == "Test Comp"
+    assert t.get_prop_dict(base + "/Name")["values"] == [{"value": "TComp"},
+                                                         {"value": "Test C"}]
+    assert t.get_prop_dict(base + "/Preset")["values"] == PRESETS
+    assert t.get_value(base + "/Categories/value") == "Dynamics,Mixing"
+    assert t.get_value(base + "/VstID/value") == "tst1"
+    assert t.get_value(base + "/Unison/value") is False      # unknown -> False
+    assert t.get_value("/plugins/1/Unison/value") is True
+    assert "values" not in t.get_prop_dict("/plugins/1/Name")
+    # licence state is never invented
+    assert t.get_value(base + "/Status/value") == ""
+    assert not [p for p in t.all_paths()
+                if p.startswith("/plugins/") and re.search(
+                    r"auth|licen|demo", p.rsplit("/", 1)[-1], re.I)]
+
+
+def test_channel_presets_reach_every_input_and_aux_menu():
+    t = x4()
+    done = uac.apply_to_state(t, uac.Catalogue(directory=None,
+                                               channel_presets=CHANNEL))
+    paths = channel_preset_paths(t)
+    assert done["channel_presets"] == len(paths) > 20
+    assert all(t.get_prop_dict(p)["values"] == CHANNEL for p in paths)
+    # each channel has its own copy; insert slots' Preset is not a menu
+    t.get_prop_dict(paths[0])["values"].clear()
+    assert t.get_prop_dict(paths[1])["values"] == CHANNEL
+    assert "values" not in t.get_prop_dict(
+        "/devices/0/inputs/0/effects/0/Preset")
+
+
+def test_io_presets_come_first_and_saved_ones_follow(tmp_path):
+    from hardware import HardwareRouter
+    from conftest import FakeBackend
+    t = x4()
+    uac.apply_to_state(t, uac.Catalogue(directory=None, io_presets=["Map A"]))
+    (tmp_path / "x4.iomaps.json").write_text(json.dumps(
+        {"format": "open-apollo-iomap-presets", "version": 1,
+         "order": ["mine"], "presets": {"mine": {"values": {}}}}))
+    d = daemon_mod.MixerDaemon(t, HardwareRouter(FakeBackend(), t))
+    d.commands.set_store(tmp_path, "x4")
+    assert [v["value"] for v in t.get_prop_dict("/IOMapPreset")["values"]] \
+        == ["Map A", "mine"]
+
+
+def test_a_map_with_its_own_lists_is_left_alone():
+    t = StateTree()
+    t.add_runtime_property("/plugins/0/Name", {"type": "string", "value": "Own"})
+    t.add_runtime_property("/devices/0/inputs/0/Preset",
+                           {"type": "string", "value": "", "values": [
+                               {"value": "own", "type": "file", "locked": True}]})
+    t.add_runtime_property("/IOMapPreset", {"type": "string", "value": "",
+                                            "values": [{"value": "Map A"}]})
+    done = uac.apply_to_state(t, uac.Catalogue(
+        directory=None, plugins=PLUGINS, channel_presets=CHANNEL,
+        io_presets=["Map A", "Map C"]))
+    assert done == {"plugins": 0, "channel_presets": 0, "io_presets": 1}
+    assert t.get_value("/plugins/0/Name/value") == "Own"
+    assert [v["value"] for v in t.get_prop_dict("/IOMapPreset")["values"]] \
+        == ["Map C", "Map A"]
+
+
+# ── the helper tree (4720) ──────────────────────────────────────────
+
+def test_help_text_returns_to_its_pinned_place(tmp_path):
+    pins = uac.load_pins(PINS)
+    assert pins, "the shipped pins file is missing or malformed"
+    pointer = sorted(pins)[0]
+    text = "synthetic help text"
+    sha = hashlib.sha256(text.encode()).hexdigest()
+    h = HelperTree()
+    h.load(HELPER)
+    container, key = uac._pointer_parent(h.root, pointer)
+    assert container[key] == ""                      # shipped empty
+    cat = uac.Catalogue(directory=None, helper_texts={sha: text})
+    assert uac.apply_to_helper(h.root, cat, {pointer: sha, "/nope/0": sha,
+                                             sorted(pins)[1]: "0" * 64}) == 1
+    assert container[key] == text
+    # a string that is already set is not overwritten
+    assert uac.apply_to_helper(h.root, cat, {pointer: sha}) == 0
+
+
+def test_apply_end_to_end(tmp_path, monkeypatch, caplog):
+    pins = uac.load_pins(PINS)
+    pointer = sorted(pins)[0]
+    sha = hashlib.sha256(b"help").hexdigest()
+    pins_file = tmp_path / "pins.json"
+    pins_file.write_text(json.dumps({"format": uac.PINS_FORMAT, "version": 1,
+                                     "pins": {pointer: sha}}))
+    d = write_catalogue(tmp_path / "c", texts={sha: "help"})
+    monkeypatch.setenv("OA_UA_CATALOGUE", str(d))
+    t, h = x4(), HelperTree()
+    h.load(HELPER)
+    with caplog.at_level(logging.INFO):
+        cat = uac.apply(t, h, None, pins_file)
+    assert cat is not None and "2 plug-ins" in caplog.text
+    assert t.get_value("/plugins/1/Name/value") == "Test Pre"
+    container, key = uac._pointer_parent(h.root, pointer)
+    assert container[key] == "help"
+
+
+def test_apply_without_import_changes_nothing(caplog):
+    t = x4()
+    before = json.dumps(t.root, sort_keys=True)
+    with caplog.at_level(logging.INFO):
+        assert uac.apply(t, None) is None
+    assert "No UA catalogue imported" in caplog.text
+    assert json.dumps(t.root, sort_keys=True) == before
+
+
+# ── the daemon's start-up ───────────────────────────────────────────
+
+class Reached(Exception):
+    pass
+
+
+@pytest.mark.parametrize("extra,called", [([], True),
+                                          (["--no-ua-catalogue"], False),
+                                          (["--ua-catalogue", "/x/cat"], True)])
+def test_main_overlays_the_import(extra, called, tmp_path):
+    with ExitStack() as stack:
+        stack.enter_context(patch("sys.argv", ["ua_mixer_daemon.py",
+                                               "--no-hardware", *extra]))
+        stack.enter_context(patch.object(daemon_mod, "SCRIPT_DIR", tmp_path))
+        stack.enter_context(patch.object(daemon_mod, "find_device_map",
+                                         return_value=DEVICE_MAP_X4))
+        apply = stack.enter_context(patch.object(daemon_mod.ua_catalogue, "apply"))
+        stack.enter_context(patch.object(daemon_mod, "MixerDaemon",
+                                         side_effect=Reached))
+        with pytest.raises(Reached):
+            daemon_mod.main()
+    assert apply.called is called
+    if called:
+        state, helper, directory, pins = apply.call_args.args
+        assert isinstance(state, StateTree) and isinstance(helper, HelperTree)
+        assert directory == (None if not extra else daemon_mod.Path("/x/cat"))
+        assert pins == daemon_mod.DEFAULT_HELPER_PINS
