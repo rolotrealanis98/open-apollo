@@ -152,6 +152,7 @@ def blob_arrays():
 
 
 STRIPS_STUBS = r'''
+void ua_preamp_phantom_resync(struct ua_device *ua, unsigned int mask) { (void)ua; (void)mask; }
 #define UA_DEV_APOLLO_X4 0x1F
 #define ATOMIC_INIT(v) { v }
 #define atomic_inc(a) ((a)->counter++)
@@ -761,6 +762,8 @@ static void setup(u32 type)
 	input_strips_mask = 0xff;
 	input_strips_steps = 0;
 	input_strips_form = 0;
+	input_strips_params = 0;
+	input_strips_dsp = 0;
 	chain_on = false;
 	nraw = queued = 0;
 	k_log_reset();

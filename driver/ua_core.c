@@ -2447,6 +2447,49 @@ ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 					     hw_val, hw_mask);
 }
 
+#define UA_PHANTOM_RESYNC_MS	200	/* 48V off before it goes on again */
+
+/**
+ * ua_preamp_phantom_resync - bring the phantom supply up after a cold start
+ * @ua: device (ua->lock not held; sleeps)
+ * @mask: preamps (bit = input index) to consider
+ *
+ * After a cold start the Apollo reports the 48V each preamp had, but the
+ * phantom supply only comes up on a written off -> on edge, and until then
+ * the input stays muted (titan's x4, 2026-10-13: input 1 read digital zero
+ * through a live input strip, with 48V reported on, until 48V was written
+ * 0 then 1; writing 1 alone did nothing).  UA's kext gets the edge because
+ * its first settings write zeroes every setting once.  Only preamps the
+ * Apollo already reports with 48V on are touched: phantom is never switched
+ * on where it was off.  The two writes are a setting sequence apart, so the
+ * off is not merged away.
+ */
+void ua_preamp_phantom_resync(struct ua_device *ua, unsigned int mask)
+{
+	unsigned int ch, on = 0;
+	u32 w0;
+
+	mutex_lock(&ua->lock);
+	w0 = ua->mixer_rb_data[0];
+	for (ch = 0; ch < 4; ch++) {
+		if (!(mask & BIT(ch)) || !(w0 & BIT(ch * 6 + 3)))
+			continue;
+		if (!ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_48V, 0))
+			on |= BIT(ch);
+	}
+	mutex_unlock(&ua->lock);
+	if (!on)
+		return;
+	msleep(UA_PHANTOM_RESYNC_MS);
+	mutex_lock(&ua->lock);
+	for (ch = 0; ch < 4; ch++)
+		if (on & BIT(ch))
+			ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_48V, 1);
+	mutex_unlock(&ua->lock);
+	dev_info(&ua->pdev->dev,
+		 "preamps: 48V re-applied after the cold start (preamp mask 0x%x)\n", on);
+}
+
 /**
  * ua_preamp_write_locked - write one input parameter (SEL131 type 1)
  * @ua: device (caller holds ua->lock)

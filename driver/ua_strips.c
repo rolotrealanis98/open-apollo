@@ -88,10 +88,43 @@ static unsigned int input_strips_mask = 0xff;
 module_param(input_strips_mask, uint, 0444);
 MODULE_PARM_DESC(input_strips_mask,
 		 "With input_strips=1: the analog inputs that get a strip, bit 0 = input 1 (default 0xff: every preamp input)");
-static unsigned int input_strips_form;
+static unsigned int input_strips_form = 1;
 module_param(input_strips_form, uint, 0444);
 MODULE_PARM_DESC(input_strips_form,
 		 "With input_strips=1, bring-up only: how a code page's record is sent: 0 = the recipe run on titan (architecture byte in the id word, word 2 zero; default), 1 = as UAD2System sends a registered record (word 2's upper half cleared)");
+
+/*
+ * input_strips_params=1 (bring-up): the Mic strip's parameters exactly as
+ * UA's captured Solo USB stream writes them (tools/uausb/solo-usb-init.json,
+ * byte-identical to the capture): m0[0..17], m0[38..53] and m3[1..15], with
+ * the captured 48 kHz DC blocker.  48 kHz only.  0 = the A1 recipe.
+ */
+static unsigned int input_strips_inputs;
+module_param(input_strips_inputs, uint, 0444);
+MODULE_PARM_DESC(input_strips_inputs,
+		 "With input_strips=1, bring-up only: build strips on DSP inputs 0..N-1 (N up to 8) instead of the preamp inputs; 0 = the preamps (default)");
+
+static unsigned int input_strips_route = 0x1ffff;
+module_param(input_strips_route, uint, 0444);
+MODULE_PARM_DESC(input_strips_route,
+		 "With input_strips=1, bring-up only: the DirectOutputRoute word sent to DSP 0 after each strip's SYNCH (default 0x1ffff, \"not on this DSP\"; Windows sends 0x0ffff for an input whose strip DSP 0 owns)");
+
+static unsigned int input_strips_dsp = 1;
+module_param(input_strips_dsp, uint, 0444);
+MODULE_PARM_DESC(input_strips_dsp,
+		 "With input_strips=1, bring-up only: the DSP the strips are built on (default 0)");
+/* input_strips_dsp, checked against the DSP count by ua_strips_init() */
+static unsigned int ua_strips_dsp;
+
+static bool input_strips_phantom = true;
+module_param(input_strips_phantom, bool, 0444);
+MODULE_PARM_DESC(input_strips_phantom,
+		 "With input_strips=1: after the strips go live on a cold start, write 48V off then on for every preamp the Apollo reports with 48V on, so its phantom supply comes up and the input unmutes (default: on)");
+
+static unsigned int input_strips_params = 1;
+module_param(input_strips_params, uint, 0444);
+MODULE_PARM_DESC(input_strips_params,
+		 "With input_strips=1, bring-up only: 1 writes the Mic strip's parameters as UA's captured Solo USB stream does (48 kHz only); 0 = the A1 recipe (default)");
 
 /*
  * input_strips_rebuild: writing it (root) takes every live strip down and
@@ -123,7 +156,7 @@ bool ua_strips_wanted(void)
 
 /* UA_STRIPS_PLANNER_BEGIN: no kernel calls in here, the host tests build it */
 
-#define UA_STRIP_MAX		4	/* strips per pass (x4: four preamps) */
+#define UA_STRIP_MAX		8	/* strips per pass (x4: four preamps; 8 for input_strips_inputs) */
 #define UA_STRIP_MODS		5	/* modules of the Mic strip: EB DA A5 C2 12B */
 #define UA_STRIP_PRIV		10	/* instance header, m0-m4, c0-c3 */
 
@@ -421,6 +454,27 @@ static void ua_strip_dma(struct ua_xact *x, const u32 *w, unsigned int n)
 			d[i] = cpu_to_le32(w[i]);
 }
 
+/* input_strips_params, copied in by ua_strips_init() (1: UA's captured layout) */
+static unsigned int ua_strip_params_mode;
+/* input_strips_route, copied in by ua_strips_init() */
+static u32 ua_strip_route = 0x1ffff;
+
+static const u32 ua_strip_usb_m0a[18] = {
+	0x0f1f7fe4, 0x40000000, 0x00000001, 0x00000001, 0x00000004, 0x00000100,
+	0x000000c8, 0x3a888889, 0xc0000000, 0xc0000000, 0x00000010, 0x0000004b,
+	0x41000000, 0x3ada740e, 0xffffffff, 0x00000001, 0xffffffff, 0x00000001,
+};
+static const u32 ua_strip_usb_m0b[16] = {
+	0x00000040, 0x3cae6c74, 0xbf7ff125, 0x3f7ff892, 0x3909422f, 0x3f800000,
+	0xbc2e6fd3, 0xbbc96245, 0x3cae6c74, 0xbf7ff125, 0x3f7ff892, 0x3909422f,
+	0x3f800000, 0xbc2e6fd3, 0xbbc96245, 0x00000001,
+};
+static const u32 ua_strip_usb_m3[15] = {
+	0x00000040, 0x3cae6c74, 0xbf7ff125, 0x3f7ff892, 0x3909422f, 0x3f800000,
+	0xbc2e6fd3, 0xbbc96245, 0x3e3b3f3d, 0xbf7baf04, 0x3f7dd5f1, 0x3c20d8d2,
+	0x3f7ffcd7, 0xbdbc4dc9, 0xbd565d96,
+};
+
 /*
  * One Mic Input Strip for DSP input @synch at private addresses @addr
  * (A6 steps 3-8, DSP 0's entries after the code pages): the private blocks
@@ -468,6 +522,42 @@ static int ua_strip_build(struct ua_xact *x, const u32 addr[UA_STRIP_PRIV],
 	if (steps && steps <= 4)
 		return x->err;
 
+	if (ua_strip_params_mode == 1) {
+		/*
+		 * UA's captured layout: m0[0..17], m0[38..53], m3[1..15].  At
+		 * 48 kHz the captured words verbatim (verified on titan's x4);
+		 * at other rates the same layout with this rate's ramp (k, f,
+		 * 1/(f*k)) and the SDK band's DC blocker and LowCut taps after
+		 * the captured 0x40 count word (not yet verified on hardware).
+		 */
+		bool cap = r->rate == 48000;
+
+		n = 0;
+		w[n++] = UA_STRIP_OP(UA_STRIP_OP_WRITE, 2 + ARRAY_SIZE(ua_strip_usb_m0a));
+		w[n++] = addr[1];
+		for (j = 0; j < ARRAY_SIZE(ua_strip_usb_m0a); j++)
+			w[n++] = ua_strip_usb_m0a[j];
+		if (!cap) {
+			w[n - 18 + 11] = r->k;
+			w[n - 18 + 12] = r->f;
+			w[n - 18 + 13] = r->inv;
+		}
+		w[n++] = UA_STRIP_OP(UA_STRIP_OP_WRITE, 2 + ARRAY_SIZE(ua_strip_usb_m0b));
+		w[n++] = addr[1] + 38;
+		for (j = 0; j < ARRAY_SIZE(ua_strip_usb_m0b); j++)
+			w[n++] = cap ? ua_strip_usb_m0b[j] :
+				 j == 0 || j == 15 ? ua_strip_usb_m0b[j] :
+				 r->dc[j < 8 ? j : j - 7];
+		w[n++] = UA_STRIP_OP(UA_STRIP_OP_WRITE, 2 + ARRAY_SIZE(ua_strip_usb_m3));
+		w[n++] = addr[4] + 1;
+		for (j = 0; j < ARRAY_SIZE(ua_strip_usb_m3); j++)
+			w[n++] = cap ? ua_strip_usb_m3[j] :
+				 j == 0 ? ua_strip_usb_m3[j] :
+				 j < 8 ? r->dc[j] : r->lowcut[j - 7];
+		ua_strip_dma(x, w, n);
+		goto start;
+	}
+
 	/* Sub-plugin defaults (A1): m0[0x17..0x18], m0[0x1d..0x35], m3 */
 	n = 0;
 	w[n++] = UA_STRIP_OP(UA_STRIP_OP_WRITE, 4);
@@ -496,6 +586,7 @@ static int ua_strip_build(struct ua_xact *x, const u32 addr[UA_STRIP_PRIV],
 	for (j = 0; j < 8; j++)
 		w[n++] = r->lowcut[j];
 	ua_strip_dma(x, w, n);
+start:
 	if (steps && steps <= 5)
 		return x->err;
 
@@ -509,7 +600,7 @@ static int ua_strip_build(struct ua_xact *x, const u32 addr[UA_STRIP_PRIV],
 	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_SPAN,
 		       UA_STRIP_SPAN_NONE);
 	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_ROUTE,
-		       UA_STRIP_ROUTE_NONE);
+		       ua_strip_route);
 	return x->err;
 }
 
@@ -690,6 +781,9 @@ void ua_strips_init(struct ua_device *ua)
 		return;
 	}
 	h->strips = st;
+	ua_strip_params_mode = input_strips_params;
+	ua_strips_dsp = input_strips_dsp < 4 ? input_strips_dsp : 0;
+	ua_strip_route = input_strips_route;
 	st->form = input_strips_form == 1 ? UA_STRIP_FORM_SDK :
 					    UA_STRIP_FORM_RECIPE;
 	st->rebuild_seen = atomic_read(&ua_strips_rebuilds);
@@ -709,6 +803,8 @@ void ua_strips_init(struct ua_device *ua)
 
 	m = ua_model_lookup(ua->device_type, NULL);
 	preamps = m ? min_t(unsigned int, m->preamps, UA_STRIP_MAX) : 0;
+	if (input_strips_inputs)
+		preamps = min_t(unsigned int, input_strips_inputs, UA_STRIP_MAX);
 	mask = input_strips_mask & (BIT(preamps) - 1);
 	for (i = 0; i < preamps; i++) {
 		if (!(mask & BIT(i)))
@@ -776,7 +872,7 @@ void ua_strips_connected(struct ua_device *ua)
 	if (!st)
 		return;
 	lockdep_assert_held(&ua->lock);
-	if (st->state != UA_STRIPS_IDLE || !ua_plugin_dsp_admitted(ua, 0))
+	if (st->state != UA_STRIPS_IDLE || !ua_plugin_dsp_admitted(ua, ua_strips_dsp))
 		return;
 	st->state = UA_STRIPS_ARMED;
 	st->armed = jiffies;
@@ -854,14 +950,14 @@ static void ua_strips_fail(struct ua_device *ua, struct ua_strips *st,
 static int ua_strips_begin(struct ua_device *ua, struct ua_strips *st)
 {
 	struct ua_plugin_host *h = ua->host;
-	struct ua_host_dsp *d = &h->dsp[0];
+	struct ua_host_dsp *d = &h->dsp[ua_strips_dsp];
 	u32 size[4], base[4], scratch[4];
 	unsigned int p, j;
 	char buf[64];
 	int ret;
 
 	st->state = UA_STRIPS_IDLE;
-	if (!ua->dsps_connected || !ua->dsp[0].rings_allocated) {
+	if (!ua->dsps_connected || !ua->dsp[ua_strips_dsp].rings_allocated) {
 		ua_strips_decide(ua, UA_POOLS_UNCHECKED,
 				 "DSP 0 is not ring-connected (kext_connect=0, or its connect failed)");
 		return -ENODEV;
@@ -942,12 +1038,12 @@ static int ua_strips_begin(struct ua_device *ua, struct ua_strips *st)
 static void ua_strips_unhold(struct ua_device *ua, struct ua_strips *st,
 			     bool *released)
 {
-	struct ua_host_dsp *d = &ua->host->dsp[0];
+	struct ua_host_dsp *d = &ua->host->dsp[ua_strips_dsp];
 	unsigned int k, j, p;
 
 	for (k = 0; k < st->n; k++) {
 		if (d->pools)
-			ua_plugin_unplace(ua, 0, st->strip[k].priv,
+			ua_plugin_unplace(ua, ua_strips_dsp, st->strip[k].priv,
 					  UA_STRIP_PRIV);
 		memset(st->strip[k].priv, 0, sizeof(st->strip[k].priv));
 	}
@@ -991,7 +1087,7 @@ static struct ua_xact *ua_strips_prepare(struct ua_device *ua,
 					 struct ua_strips *st, unsigned int k,
 					 int *err)
 {
-	struct ua_host_dsp *d = &ua->host->dsp[0];
+	struct ua_host_dsp *d = &ua->host->dsp[ua_strips_dsp];
 	struct ua_strip *s = &st->strip[k];
 	u32 addr[UA_STRIP_PRIV], want[UA_STRIP_PRIV];
 	struct ua_xact *x;
@@ -1011,7 +1107,7 @@ static struct ua_xact *ua_strips_prepare(struct ua_device *ua,
 			goto fail;
 		}
 	}
-	x = ua_xact_alloc(0, 3 * UA_XACT_PIECE);
+	x = ua_xact_alloc(ua_strips_dsp, 3 * UA_XACT_PIECE);
 	if (!x) {
 		ret = -ENOMEM;
 		goto fail;
@@ -1025,7 +1121,7 @@ static struct ua_xact *ua_strips_prepare(struct ua_device *ua,
 	s->header = addr[0];
 	return x;
 fail:
-	ua_plugin_unplace(ua, 0, s->priv, UA_STRIP_PRIV);
+	ua_plugin_unplace(ua, ua_strips_dsp, s->priv, UA_STRIP_PRIV);
 	memset(s->priv, 0, sizeof(s->priv));
 	*err = ret;
 	return NULL;
@@ -1048,7 +1144,7 @@ static int ua_strips_upload(struct ua_device *ua, struct ua_strips *st,
 		}
 		st->mod_state[j] = UA_MOD_UPLOADING;
 		mutex_unlock(&ua->lock);
-		ret = ua_plugin_upload(ua, 0, st->mod[j], st->dest[j], form,
+		ret = ua_plugin_upload(ua, ua_strips_dsp, st->mod[j], st->dest[j], form,
 				       st->epoch);
 		mutex_lock(&ua->lock);
 		if (st->gen != gen) {
@@ -1085,12 +1181,13 @@ void ua_strips_run(struct ua_device *ua)
 	unsigned int k, dsp;
 	unsigned long t0;
 	u32 gen;
+	bool live = false;
 	int ret = 0;
 
 	if (!st)
 		return;
 	mutex_lock(&h->mutex);
-	ua_plugin_fence_wait(ua, 0);
+	ua_plugin_fence_wait(ua, ua_strips_dsp);
 	mutex_lock(&ua->lock);
 	if (st->state != UA_STRIPS_ARMED) {
 		mutex_unlock(&ua->lock);
@@ -1143,9 +1240,9 @@ void ua_strips_run(struct ua_device *ua)
 		ret = ua_xact_run(ua, x, UA_XACT_WAIT_MS);
 		mutex_lock(&ua->lock);
 		if (x->state >= UA_XACT_PUBLISHED) {
-			h->dsp[0].zero_fills += UA_STRIP_PRIV;
-			h->dsp[0].memspecs++;
-			h->dsp[0].writes += 2;
+			h->dsp[ua_strips_dsp].zero_fills += UA_STRIP_PRIV;
+			h->dsp[ua_strips_dsp].memspecs++;
+			h->dsp[ua_strips_dsp].writes += 2;
 		}
 		ua_xact_done(ua, x);
 		if (st->gen != gen) {
@@ -1163,8 +1260,8 @@ void ua_strips_run(struct ua_device *ua)
 		st->strip[k].state = UA_STRIP_LIVE;
 		st->strip[k].ack_ms = jiffies_to_msecs(jiffies - t0);
 		/* The input is not routed from the DSPs that do not host it */
-		for (dsp = 1; dsp < ua->num_dsps; dsp++) {
-			if (!ua->dsp[dsp].rings_allocated)
+		for (dsp = 0; dsp < ua->num_dsps; dsp++) {
+			if (dsp == ua_strips_dsp || !ua->dsp[dsp].rings_allocated)
 				continue;
 			ret = ua_dsp_ring_send_raw(ua, dsp, UA_STRIP_CMD_INPUT,
 						   st->strip[k].synch,
@@ -1185,12 +1282,23 @@ void ua_strips_run(struct ua_device *ua)
 		for (k = 0; k < st->n; k++)
 			if (st->strip[k].state == UA_STRIP_LIVE)
 				dev_info(&ua->pdev->dev,
-					 "input strips: input %u: Mic Input Strip at 0x%05x on DSP 0 (taken after %u ms)\n",
+					 "input strips: input %u: Mic Input Strip at 0x%05x on DSP %u (taken after %u ms)\n",
 					 st->strip[k].input + 1,
-					 st->strip[k].header,
+					 st->strip[k].header, ua_strips_dsp,
 					 st->strip[k].ack_ms);
 	}
+	/* 48V only after a cold start: a rate change keeps the supply up */
+	live = st->gen == gen && h->phantom_pending;
+	if (live)
+		h->phantom_pending = false;
 	mutex_unlock(&ua->lock);
+	if (live && input_strips_phantom) {
+		unsigned int mask = 0;
+
+		for (k = 0; k < st->n; k++)
+			mask |= BIT(st->strip[k].input);
+		ua_preamp_phantom_resync(ua, mask);
+	}
 out:
 	mutex_unlock(&h->mutex);
 }
@@ -1230,7 +1338,7 @@ void ua_strips_teardown(struct ua_device *ua, const char *why)
 	st->gen++;
 	st->teardowns++;
 
-	x = ua_xact_alloc(0, 0);
+	x = ua_xact_alloc(ua_strips_dsp, 0);
 	if (x) {
 		x->epoch = h->epoch;
 		for (k = 0; k < st->n; k++)
@@ -1254,20 +1362,20 @@ void ua_strips_teardown(struct ua_device *ua, const char *why)
 			ua_xact_discard(ua, x);
 		ua_strips_forget(ua, st);
 		if (!x)
-			ua_plugin_disown(ua, 0, "no memory for the strips' teardown");
+			ua_plugin_disown(ua, ua_strips_dsp, "no memory for the strips' teardown");
 		return;
 	}
 	ret = ua_plugin_publish_now(ua, x);
 	if (ret) {
 		/* Nothing reaches DSP 0: what runs there is unknown */
-		ua_plugin_disown(ua, 0, "the strips' teardown could not be sent");
+		ua_plugin_disown(ua, ua_strips_dsp, "the strips' teardown could not be sent");
 		dev_warn(&ua->pdev->dev,
 			 "input strips: teardown not sent (%s, %d); DSP 0 is not used until the Apollo is power-cycled\n",
 			 why, ret);
 	} else {
-		h->dsp[0].stops += stops;
-		h->dsp[0].releases += rels;
-		ua_plugin_fence_set(ua, 0, x);
+		h->dsp[ua_strips_dsp].stops += stops;
+		h->dsp[ua_strips_dsp].releases += rels;
+		ua_plugin_fence_set(ua, ua_strips_dsp, x);
 		dev_info(&ua->pdev->dev,
 			 "input strips: %u strip(s) stopped%s (%s)\n", stops,
 			 rels ? ", modules released" : "", why);
@@ -1340,7 +1448,7 @@ void ua_strips_proc(struct ua_device *ua, struct snd_info_buffer *buf)
 		snd_iprintf(buf, "\ninput strips\toff (input_strips=0)\n");
 		return;
 	}
-	d = &h->dsp[0];
+	d = &h->dsp[ua_strips_dsp];
 	snd_iprintf(buf, "\ninput strips\ton (input_strips=1, mask 0x%x, form %s), state %s\n",
 		    input_strips_mask,
 		    st->form == UA_STRIP_FORM_SDK ? "sdk" : "recipe",

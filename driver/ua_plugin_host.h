@@ -57,6 +57,7 @@ struct ua_plugin_host {
 	struct mutex mutex;		/* long operations; before ua->lock */
 	u64 epoch;			/* ua->lock; never 0 */
 	bool active;			/* plugin_host or input_strips */
+	bool phantom_pending;		/* cold start: 48V not re-applied yet (ua->lock) */
 	struct ua_host_dsp dsp[UA_HOST_DSPS];
 
 	/* ua_dsp_xact.c: published transactions not yet retired (ua->lock) */
@@ -402,5 +403,8 @@ void ua_plugin_host_caps(struct ua_device *ua, u32 *state, u32 *owned,
 long ua_plugin_ioctl_board_query(struct ua_device *ua, unsigned long arg);
 long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 			      unsigned long arg);
+
+/* ua_core.c: re-apply 48V (off, then on) on the preamps in @mask the Apollo reports with 48V on */
+void ua_preamp_phantom_resync(struct ua_device *ua, unsigned int mask);
 
 #endif /* UA_PLUGIN_HOST_H */

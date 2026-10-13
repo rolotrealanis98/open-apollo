@@ -132,10 +132,10 @@ static bool adopt_fw_rate;
 module_param(adopt_fw_rate, bool, 0644);
 MODULE_PARM_DESC(adopt_fw_rate,
 		 "Adopt the rate the firmware reports (0xC07C bits 15:8) at the first connect after a load or resume, instead of assuming 48 kHz (default: off; the kext does this and never forces the clock at start)");
-static bool rate_ack_real;
+static bool rate_ack_real = true;
 module_param(rate_ack_real, bool, 0644);
 MODULE_PARM_DESC(rate_ack_real,
-		 "Send {0x001A0002, rate} to every DSP at connect (the firmware's rate) and after every clock change, as the macOS Mixer Engine does (default: off; the plugin chain's WAKE entry always says 44100)");
+		 "Send {0x001A0002, rate} to every DSP at connect (the firmware's rate) and after every clock change, as the macOS Mixer Engine does (default: on; a DSP that has not been told the rate does not start an input strip; the plugin chain's WAKE entry always says 44100)");
 static bool notif_irq;
 module_param(notif_irq, bool, 0644);
 MODULE_PARM_DESC(notif_irq,

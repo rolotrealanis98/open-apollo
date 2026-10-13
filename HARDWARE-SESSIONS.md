@@ -299,3 +299,53 @@ Stop the daemon (Ctrl-C) before the rollback.
 No plug-in instance is created (only `CREATE_F_CHECK`): placing and
 uploading a plug-in's own modules on DSPs 1-3, chains, routes and
 parameters are Phase P (P3 and later) and get their own sessions.
+
+## Results, 2026-10-13 (titan's x4, owner present)
+
+Driver as of this commit (input strips and plug-in host on; defaults below).
+
+- **Session 1** (defaults, warm): passed. ABI 1.8, features 0x0003f7ff as main,
+  features2 0, no operations, zero traffic.
+- **Session 2** (cold, `plugin_host=1`): passed. All four DSPs boot word 3, owned
+  0xf; pool geometry equals UA's Mac figures (free 43320 / 8062 / 16699822).
+  Board query: 134 authorized, 48 demo not started, 82 demo expired, 504
+  unavailable (the device's whole 768-entry table); 0x806 admitted, 0x830
+  refused (state 2), zero uploads.
+- **Native 1176 CREATE on DSP 3** (not in the plan; one-off script
+  `create1176.py` in the private plugin-hosting folder, inputs from
+  runs/genuine-1176-native-allocation-20261011-2): 4 modules uploaded and
+  acknowledged, code at 0xe0000 as UA places it, 6 private rows zero-filled with
+  one memspec; DESTROY released everything. Not routed or started.
+- **Session 3** (input strips): passed after four fixes, now the defaults:
+  1. `input_strips_form=1`: the arch byte must be cleared in the module id
+     (form 0 was refused: reply `80070004 f0010005 020000eb ...`, DSP quarantined).
+  2. `rate_ack_real=1`: a DSP not told the rate (`{0x001A0002, rate}`) stalls on
+     the strip's SYNCH.
+  3. `input_strips_params=1`: UA's captured layout (m0[0..17], m0[38..53],
+     m3[1..15]); the A1 layout started the strip and hung the x4 (BAR0 all ones,
+     DLL replay timeouts on 43:01.0) about 10 ms later.
+  4. `input_strips_dsp=1`: strips on DSP 0 feed the record channels but not the
+     monitor mix; on DSP 1 both.
+  Plus the phantom resync (`input_strips_phantom`, `ua_preamp_phantom_resync()`):
+  after a cold start a preamp the Apollo reports with 48V on stays muted until
+  48V is written off then on; done once per cold start, never where 48V was off.
+  Result: an SM7B on input 1 records and reaches MON L/R from a cold start with
+  nothing touched; rates 44.1/96/192/48 kHz all pass (strips rebuilt per rate).
+- **Session 4** (50 rebuilds): passed. Pool 1 back to 0 after every teardown,
+  275 uploads all acknowledged, 0 timeouts, 0 held or leaked transactions.
+- **Open:** input 2 reads digital zero with nothing plugged in, whatever is
+  toggled; test it with a source. Session 5 (daemon licence status) not run.
+
+### How these sessions were run (titan)
+
+- Power: Home Assistant Kasa outlet `switch.studio_apollo` over `ssh ha`
+  (turn_off, 10 s, turn_on; the x4 is back in about 8 s).
+- udev loads the installed DKMS `ua_apollo` the moment the x4 enumerates, even
+  with a /run/modprobe.d blacklist; load the test module while the x4 is off:
+  power off, `rmmod`, `insmod` the test .ko, power on.
+- Stop and mask the audio stack first: `pipewire.socket`, `pipewire`,
+  `wireplumber`, `pipewire-pulse(.socket)`, `pipewire-aes67` (`--runtime`) and
+  `ua-mixer-daemon` (its unit is in /etc/systemd/user, so mask it without
+  `--runtime`, and unmask it afterwards); the udev worker restarts the daemon.
+- Measure with `arecord -D hw:CARD=x4,DEV=0 -c 22 -f S32_LE -r 48000` and the
+  per-channel RMS; ALSA ch 0-3 are inputs 1-4, ch 14/15 MON L/R.

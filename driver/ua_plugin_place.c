@@ -102,6 +102,8 @@ void ua_plugin_dsp_start(struct ua_device *ua, bool cold)
 	ua_plugin_epoch_bump(ua, cold ? "cold start" : "warm start");
 	if (!h->active)
 		return;
+	if (cold)
+		h->phantom_pending = true;
 	for (i = 0; i < ua->num_dsps && i < UA_HOST_DSPS; i++) {
 		struct ua_host_dsp *d = &h->dsp[i];
 
