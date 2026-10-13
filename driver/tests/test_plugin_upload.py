@@ -144,6 +144,52 @@ int main(void)
 ''', PRE)
 
 
+def test_titan_1176_replies():
+    """The four replies the genuine 1176LN Legacy uploads got on titan's DSP 3
+    (wave34 live-1176-dsp3-resource-result.json): {0x80070004, 0, id, word 3}
+    where word 3 echoes the upload header.  Synthetic records of the same
+    ids, kinds and lengths give exactly those headers, and the replies are
+    accepted for the form those uploads used (no architecture byte in the
+    id)."""
+    build_upload_test(r'''
+static u8 buf[4096];
+static void mkrec(struct ua_cat_entry *e, u32 id, u32 w2, u32 len, u32 w4)
+{
+	memset(e, 0, sizeof(*e));
+	memset(buf, 0x5a, len);
+	put_unaligned_le32(0x6c6c6942, buf);
+	put_unaligned_le32(id, buf + 4);
+	put_unaligned_le32(w2, buf + 8);
+	put_unaligned_le32(len - 20, buf + 12);
+	put_unaligned_le32(w4, buf + 16);
+	assert(ua_bill_check(buf, len, &e->info) == 0);
+	e->blob = buf;
+	e->len = len;
+}
+int main(void)
+{
+	static const struct { u32 id, w2, len, w4, reply[4]; } live[4] = {
+		{ 0x113, 0x02000000, 2884, 708, { 2147942404u, 0, 275, 66259 } },
+		{ 0x0eb, 0x02000000, 716, 162, { 2147942404u, 0, 235, 65717 } },
+		{ 0x114, 0x02000000, 340, 72, { 2147942404u, 0, 276, 65623 } },
+		{ 0x016, 0x00000001, 156, 26, { 2147942404u, 0, 22, 262185 } },
+	};
+	struct ua_cat_entry e;
+
+	for (int i = 0; i < 4; i++) {
+		bool echo = false;
+
+		mkrec(&e, live[i].id, live[i].w2, live[i].len, live[i].w4);
+		assert(ua_upload_header(&e.info, e.len) == live[i].reply[3]);
+		assert(ua_upload_reply_check(live[i].reply, &e, UA_BILL_SDK,
+					     ua_upload_header(&e.info, e.len), &echo) == 0);
+		assert(echo);
+	}
+	return 0;
+}
+''', PRE)
+
+
 def test_reply_rules():
     build_upload_test(r'''
 int main(void)
