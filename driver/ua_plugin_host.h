@@ -269,6 +269,61 @@ void ua_plugin_proc(struct ua_device *ua, struct snd_info_buffer *buf);
 struct snd_card;
 int ua_plugin_proc_init(struct ua_device *ua, struct snd_card *card);
 
+/* ---- upload, zero-fill, memspec, release (ua_plugin_upload.c) ----
+ *
+ * Resource upload (CResourcePool::_transmitResource, Mac kext 0x33da0;
+ * framing at 0x34154-0x34174):
+ *   word 0  (pool 0 ? 0x00010000 : 0x00040000) | (record bytes / 4 + 2)
+ *   word 1  the DSP address the ledger gave
+ *   then    the whole record, normalized
+ * and the DSP's reply (accepted at 0x34708-0x34780, Windows 0xd4ff..):
+ *   {0x80070004, 0, resource id, word 3 not interpreted}
+ * which every upload waits for (review finding 17: the strips did not).
+ * Zero-fill {0x00080004, addr, 0, words}, memspec {0x0015nnnn, pairs...},
+ * releases {0x00030002, id} (code) and {0x00060003, id, kind, 0} get no
+ * reply: the command ring passing them is all there is.
+ */
+#define UA_CMD_UPLOAD_CODE	0x00010000
+#define UA_CMD_UPLOAD_DATA	0x00040000
+#define UA_REPLY_UPLOAD		0x80070004
+#define UA_CMD_ZERO		0x00080004
+#define UA_CMD_MEMSPEC		0x00150000
+#define UA_CMD_WRITE		0x00140000
+#define UA_CMD_RELEASE_CODE	0x00030002
+#define UA_CMD_RELEASE_DATA	0x00060003
+#define UA_MEMSPEC_ROWS_MAX	128
+
+/*
+ * How the record is normalized before it is sent.  UA_BILL_SDK is what
+ * UAD2System sends for a registered record (the kext's copy clears bytes
+ * 10 and 11: word 2's flag/architecture half); the genuine 1176 uploads
+ * on titan were answered with the plain id (wave34).  UA_BILL_STRIP is
+ * the input strips' recipe as built and run on titan (0e9990b): the
+ * architecture byte set in the id word (what Plugin Support does in
+ * memory on the Mac) and word 2 cleared.
+ */
+enum ua_bill_form {
+	UA_BILL_SDK,
+	UA_BILL_STRIP,
+};
+
+struct ua_memspec_row {
+	u32 pool, dwords, link, flags;
+};
+
+u32 ua_upload_header(const struct ua_bill_info *b, size_t len);
+int ua_upload_build(struct ua_xact *x, const struct ua_cat_entry *e,
+		    u32 dest, enum ua_bill_form form);
+int ua_upload_reply_check(const __le32 *r, const struct ua_cat_entry *e,
+			  enum ua_bill_form form, u32 header, bool *echo);
+int ua_memspec_compile(const struct ua_memspec_row *rows, unsigned int n,
+		       const unsigned int *desc, unsigned int n_desc,
+		       const u32 *addr, u32 *words);
+void ua_release_build(struct ua_xact *x, const struct ua_bill_info *b);
+int ua_plugin_upload(struct ua_device *ua, unsigned int dsp,
+		     struct ua_cat_entry *e, u32 dest, enum ua_bill_form form,
+		     u64 epoch);			/* host->mutex, no ua->lock */
+
 /* ---- epoch and quarantine (ua_plugin_host.c) ---- */
 void ua_plugin_epoch_bump(struct ua_device *ua, const char *why); /* ua->lock */
 void ua_plugin_quarantine(struct ua_device *ua, unsigned int dsp,
