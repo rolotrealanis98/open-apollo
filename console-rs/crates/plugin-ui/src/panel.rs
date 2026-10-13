@@ -1258,15 +1258,18 @@ impl PluginPanel {
                         n => n,
                     });
                     let sel = step_index(self.value(k, params), cells);
-                    let cw = ir.w / cells.max(1) as f32;
+                    // Cell c of the art (w / cells wide) is drawn `pitch` apart; taps take the pitch.
+                    let art = ir.w / cells.max(1) as f32;
+                    let pitch = item.pitch.map(|p| p * s).unwrap_or(art);
                     for c in 0..cells {
-                        let cell = Rect::new(ir.x + c as f32 * cw, ir.y, cw, ir.h);
+                        let cell = Rect::new(ir.x + c as f32 * pitch, ir.y, art, ir.h);
                         let selected = c == sel;
                         match &sprite {
                             Some(key) => {
                                 ui.clip(Some(cell));
                                 let frame = film_frame(ui, key, frames, selected as u32);
-                                ui.image(key, ir, None, frame, o);
+                                let shift = c as f32 * (pitch - art);
+                                ui.image(key, Rect::new(ir.x + shift, ir.y, ir.w, ir.h), None, frame, o);
                                 ui.clip(None);
                             }
                             None => {
@@ -1289,9 +1292,10 @@ impl PluginPanel {
                             }
                         }
                         if interactive {
-                            ui.hit(cell, self.id(Control::PluginStep(k, c as u16)), HitKind::Tap);
+                            let hit = Rect::new(cell.x - (pitch - art).max(0.0) / 2.0, cell.y, pitch.max(art), cell.h);
+                            ui.hit(hit, self.id(Control::PluginStep(k, c as u16)), HitKind::Tap);
                             hits.push(PanelHit {
-                                rect: cell,
+                                rect: hit,
                                 circle: None,
                                 target: Target::ToolbarSet { el: i, param: k, value: step_value(c, cells) },
                             });

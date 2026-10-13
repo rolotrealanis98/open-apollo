@@ -1,9 +1,10 @@
 //! Finding and indexing a folder of plug-in panel specs. Port of ConsoleLab's `PluginSpecLibrary`.
 //!
 //! Two folder layouts are read:
-//! - **release (schema 2)**: `PluginSpec_*.json` plus `recipes/*.json`. Sprite fields are recipe
-//!   ids; the art is generated from the user's own UA install by the importer into the art root
-//!   ([`ArtLocator`]: `Images/<id>@2x.png`, `Text/<id>.txt|.json`). Nothing UA-made ships.
+//! - **release (schema 2)**: `PluginSpec_*.json` (plus `recipes/*.json` when the recipes ship next
+//!   to the specs). Sprite fields are recipe ids; the art is generated from the user's own UA
+//!   install by the importer into the art root ([`ArtLocator`]: `Images/<id>@2x.png`,
+//!   `Text/<id>.txt|.json`, `manifest.json`). Nothing UA-made ships.
 //! - **legacy (development)**: `PluginSpec_*.json` plus `Images/<sprite>@2x.png` next to them
 //!   (ConsoleLink's stage). Ids the folder lacks are also looked up in the art root, so a stage
 //!   copy can use generated chrome art.
@@ -17,7 +18,7 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::recipes::{RecipeStatus, Recipes};
+use crate::recipes::{Manifest, RecipeStatus, Recipes};
 use crate::spec::PluginSpec;
 
 fn home() -> PathBuf {
@@ -138,8 +139,11 @@ pub struct PluginSpecLibrary {
     pub images_dir: PathBuf,
     /// The generated-art root ([`ArtLocator`]); the `spec` image scheme's root for a release folder.
     pub art_root: PathBuf,
-    /// `recipes/*.json` of a release folder (empty for a legacy folder).
+    /// `recipes/*.json` of a release folder (empty for a legacy folder or when the importer
+    /// embeds the recipes).
     pub recipes: Recipes,
+    /// The importer's `<art root>/manifest.json`, when it has run.
+    pub manifest: Option<Manifest>,
     /// Longest `name_pattern` first, so "LA-2A Silver" wins over "LA-2A".
     pub entries: Vec<Entry>,
     /// Files whose header did not decode, with the error.
@@ -188,8 +192,21 @@ impl PluginSpecLibrary {
         }
         entries.sort_by(|a, b| b.name_pattern.len().cmp(&a.name_pattern.len()).then_with(|| a.stem().cmp(b.stem())));
         let recipes_dir = folder.join("recipes");
-        let legacy = !recipes_dir.is_dir();
-        let recipes = if legacy { Recipes::default() } else { Recipes::load(&recipes_dir)? };
+        let has_images = folder.join("Images").is_dir() || folder.join("images").is_dir();
+        let legacy = has_images && !recipes_dir.is_dir();
+        let recipes = if recipes_dir.is_dir() { Recipes::load(&recipes_dir)? } else { Recipes::default() };
+        let manifest_path = art_root.join("manifest.json");
+        let manifest = if manifest_path.is_file() {
+            match Manifest::load(&manifest_path) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    eprintln!("plugin-ui: {e}; ignoring the manifest");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let images_dir = if legacy {
             let images = folder.join("Images");
             if images.is_dir() { images } else { folder.join("images") }
@@ -201,6 +218,7 @@ impl PluginSpecLibrary {
             images_dir,
             art_root: art_root.to_path_buf(),
             recipes,
+            manifest,
             entries,
             failures,
             legacy,
@@ -333,25 +351,68 @@ impl PluginSpecLibrary {
         None
     }
 
-    /// Whether `spec` can be drawn from this install. Release folders: an id whose recipe is not
-    /// buildable (or that no recipe names) makes the spec [`Availability::Unavailable`]; a
-    /// buildable id not generated yet makes it [`Availability::Pending`]. Legacy folders have no
-    /// recipes: missing files are pending.
+    /// Whether `spec` can be drawn from this install (see [`availability_of`](Self::availability_of));
+    /// the spec's stem is found through its effect name.
     pub fn availability(&self, spec: &PluginSpec) -> Availability {
+        let stem = self
+            .entries
+            .iter()
+            .find(|e| e.effect_name == spec.effect_name)
+            .map(|e| e.stem().to_string())
+            .unwrap_or_default();
+        self.availability_of(&stem, spec)
+    }
+
+    /// Whether `spec` (file stem `stem`) can be drawn from this install:
+    /// - **with the importer's manifest** (release folders): the importer must call the spec ready
+    ///   (`specs.<stem>.ready`: every used sprite built or runtime, none deferred) *and* every sprite
+    ///   the spec references must be built. A sprite the spec still names that was not built is a
+    ///   runtime id our patches did not replace, or art the importer could not make: the panel
+    ///   would have a hole, so it is [`Availability::Unavailable`]. Ids the importer can still
+    ///   make (a spec it has not processed, `missing` art, buildable recipes) are
+    ///   [`Availability::Pending`].
+    /// - **with recipes only**: an id without a buildable recipe is unavailable, one not generated
+    ///   yet is pending.
+    /// - **legacy folders**: missing files are pending.
+    pub fn availability_of(&self, stem: &str, spec: &PluginSpec) -> Availability {
         let mut pending = Vec::new();
         let mut unavailable = Vec::new();
+        let manifest = self.manifest.as_ref().filter(|_| !self.legacy);
+        let entry = manifest.and_then(|m| m.specs.get(stem));
+        // Built: the file exists and the importer lists it (manifest), or its recipe can make it
+        // (recipes only: a stray file for an id no recipe makes does not count).
+        let built = |id: &str| {
+            self.sprite_key(id).is_some()
+                && match manifest {
+                    Some(m) => m.sprites.is_empty() || m.sprites.contains_key(id),
+                    None => self.legacy || self.recipes.is_empty() || self.recipes.is_buildable(id),
+                }
+        };
         for id in spec.sprite_names() {
-            if !self.legacy && !self.recipes.is_buildable(id) {
-                unavailable.push(id.to_string());
-            } else if self.sprite_key(id).is_none() {
-                pending.push(id.to_string());
+            if built(id) {
+                continue;
             }
+            let makeable = match self.recipes.status(id) {
+                Some(s) => s.is_buildable(),
+                None => manifest.is_some() && entry.is_none(),
+            };
+            if self.legacy || makeable { pending.push(id.to_string()) } else { unavailable.push(id.to_string()) }
         }
         for id in spec.text_refs() {
-            if !self.legacy && !self.recipes.is_buildable(id) {
-                unavailable.push(id.to_string());
-            } else if self.text(id).is_none() {
-                pending.push(id.to_string());
+            if self.text(id).is_some() {
+                continue;
+            }
+            let makeable = self.recipes.status(id).map(RecipeStatus::is_buildable).unwrap_or(false)
+                || manifest.is_some_and(|m| m.texts.contains_key(id) || entry.is_none());
+            if self.legacy || makeable { pending.push(id.to_string()) } else { unavailable.push(id.to_string()) }
+        }
+        if let Some(e) = entry {
+            if e.deferred > 0 && unavailable.is_empty() {
+                unavailable.push(format!("{stem}: {} deferred sprites", e.deferred));
+            } else if !e.ready && e.missing > 0 && unavailable.is_empty() && pending.is_empty() {
+                pending.push(format!("{stem}: {} sprites missing", e.missing));
+            } else if !e.ready && unavailable.is_empty() && pending.is_empty() {
+                unavailable.push(format!("{stem}: not ready"));
             }
         }
         if !unavailable.is_empty() {

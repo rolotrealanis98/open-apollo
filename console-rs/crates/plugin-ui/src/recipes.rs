@@ -1,4 +1,4 @@
-//! The release recipes (`recipes/*.json`, schema `plugin-recipes-v1`): what plugin-ui needs to know
+//! The release recipes (`recipes/*.json`, `recipesSchema` 1 or 2): what plugin-ui needs to know
 //! about each sprite and text id a schema-2 spec references. The importer (`oa-assets`) runs the
 //! recipes against the user's own UA install and writes the results under the art root
 //! ([`crate::library::ArtLocator`]); plugin-ui never runs them. It reads only an id's `status`,
@@ -25,6 +25,9 @@ pub enum RecipeStatus {
     NoRecipe,
     /// Postponed on purpose (e.g. the code-drawn tier-4 panels): the spec opens as a generic list.
     Deferred,
+    /// Drawn by plugin-ui's own elements (toolbars, labels, shapes, lamps), never generated: a spec
+    /// that still names such an id has a hole where our element belongs.
+    Runtime,
     /// A status this runtime does not know (treated as not buildable).
     Other,
 }
@@ -38,6 +41,7 @@ impl RecipeStatus {
             "needs-tracer" => Self::NeedsTracer,
             "no-recipe" => Self::NoRecipe,
             "deferred" => Self::Deferred,
+            "runtime" => Self::Runtime,
             _ => Self::Other,
         }
     }
@@ -50,6 +54,7 @@ impl RecipeStatus {
             Self::NeedsTracer => "needs-tracer",
             Self::NoRecipe => "no-recipe",
             Self::Deferred => "deferred",
+            Self::Runtime => "runtime",
             Self::Other => "other",
         }
     }
@@ -200,7 +205,64 @@ mod tests {
         assert!(r.texts["t1"].is_list());
         assert_eq!(r.status("nope"), None);
         assert_eq!(RecipeStatus::parse("future-status"), RecipeStatus::Other);
+        assert!(!RecipeStatus::parse("runtime").is_buildable());
         let err = r.merge_json(r#"{"group": "b", "sprites": {"t1": {"status": "verified"}}}"#, "b.json").unwrap_err();
         assert!(err.contains("t1") && err.contains("a.json") && err.contains("b.json"), "{err}");
+    }
+}
+
+/// The importer's `<art root>/manifest.json` (oa-assets): what it built from this install and, per
+/// spec, whether every sprite the spec uses is built or drawn at runtime with none deferred.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct Manifest {
+    #[serde(default)]
+    pub schema: Option<i64>,
+    #[serde(default)]
+    pub sprites: HashMap<String, ManifestSprite>,
+    #[serde(default)]
+    pub texts: HashMap<String, ManifestText>,
+    #[serde(default)]
+    pub specs: HashMap<String, ManifestSpec>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ManifestSprite {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub rgba: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ManifestText {
+    #[serde(default)]
+    pub verified: bool,
+}
+
+/// Counts per spec; `ready` = every used sprite built or runtime, none deferred or without a recipe.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ManifestSpec {
+    #[serde(default)]
+    pub ready: bool,
+    #[serde(default)]
+    pub tier: Option<i64>,
+    #[serde(default)]
+    pub sprites: u32,
+    #[serde(default)]
+    pub built: u32,
+    #[serde(default)]
+    pub runtime: u32,
+    #[serde(default)]
+    pub deferred: u32,
+    #[serde(default)]
+    pub missing: u32,
+}
+
+impl Manifest {
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
     }
 }

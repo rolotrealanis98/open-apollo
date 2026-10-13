@@ -42,7 +42,7 @@ pub mod webview;
 
 pub use generic::GenericPanel;
 pub use library::{ArtLocator, Availability, Entry, PluginSpecLibrary, SpecLocator, TextValue};
-pub use recipes::{RecipeStatus, Recipes};
+pub use recipes::{Manifest, RecipeStatus, Recipes};
 pub use meters::MeterFeed;
 pub use panel::PluginPanel;
 pub use engine::{EngineSlot, MeterPoller};

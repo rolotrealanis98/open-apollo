@@ -441,3 +441,71 @@ fn release_lint_rejects_metadata_prose_and_addresses() {
         .replace("\"schema\": 2,", "\"schema\": 2, \"notes\": [],");
     assert_eq!(lint(&bad).len(), 3);
 }
+
+/// A release folder without `recipes/` (the importer embeds them) and an art root with a manifest.
+fn manifest_release(tag: &str, spec_entry: &str, built: &[&str]) -> (PathBuf, PathBuf) {
+    let (specs, art) = release(tag, RECIPES);
+    std::fs::remove_dir_all(specs.join("recipes")).unwrap();
+    let sprites: Vec<String> =
+        built.iter().map(|id| format!(r#""{id}": {{"status": "verified", "rgba": "00"}}"#)).collect();
+    let manifest = format!(
+        r#"{{"schema": 1, "generator": "test", "recipesSchema": 2, "sprites": {{{}}}, "texts": {{"v2.info": {{"verified": true}}, "v2.presets": {{"verified": true}}}},
+            "specs": {{{spec_entry}}}}}"#,
+        sprites.join(", ")
+    );
+    std::fs::write(art.join("manifest.json"), manifest).unwrap();
+    (specs, art)
+}
+
+const ALL: &[&str] = &["v2_panel", "chrome.bx.power", "chrome.bx.undo", "chrome.bx.bank"];
+
+#[test]
+fn manifest_readiness_gates_the_panel() {
+    // Ready: the importer says so and every sprite the (patched) spec draws is built.
+    let ready =
+        r#""v2_test": {"ready": true, "tier": 2, "sprites": 4, "built": 4, "runtime": 0, "deferred": 0, "missing": 0}"#;
+    let (specs, art) = manifest_release("m-ready", ready, ALL);
+    let lib = PluginSpecLibrary::open_with_art(&specs, &art).unwrap();
+    assert!(!lib.is_legacy() && lib.recipes.is_empty() && lib.manifest.is_some());
+    let s = lib.spec_for_effect("UAD V2 Test").unwrap();
+    assert_eq!(lib.availability(&s), Availability::Ready);
+    assert_eq!(PluginWindow::open(SLOT, "UAD V2 Test", "t", Some(&lib), None, false).content.kind(), "spec");
+    std::fs::remove_dir_all(specs.parent().unwrap()).ok();
+
+    // The importer calls the spec ready because a sprite is runtime (ours), but the spec still
+    // names it (no patch replaced it): a hole, so the generic list. A stale file without a
+    // manifest entry does not count as built.
+    let (specs, art) = manifest_release("m-hole", ready, &["v2_panel", "chrome.bx.power", "chrome.bx.bank"]);
+    let lib = PluginSpecLibrary::open_with_art(&specs, &art).unwrap();
+    let s = lib.spec_for_effect("UAD V2 Test").unwrap();
+    assert_eq!(lib.availability(&s), Availability::Unavailable(vec!["chrome.bx.undo".into()]));
+    assert!(matches!(
+        PluginWindow::open(SLOT, "UAD V2 Test", "t", Some(&lib), None, false).content,
+        Content::Generic(_)
+    ));
+    std::fs::remove_dir_all(specs.parent().unwrap()).ok();
+
+    // Deferred (tier 4): never the panel, even with every file present.
+    let deferred = r#""v2_test": {"ready": false, "tier": 4, "sprites": 4, "built": 3, "runtime": 0, "deferred": 1, "missing": 0}"#;
+    let (specs, art) = manifest_release("m-deferred", deferred, ALL);
+    let lib = PluginSpecLibrary::open_with_art(&specs, &art).unwrap();
+    let s = lib.spec_for_effect("UAD V2 Test").unwrap();
+    assert!(matches!(lib.availability(&s), Availability::Unavailable(_)));
+    assert!(matches!(
+        PluginWindow::open(SLOT, "UAD V2 Test", "t", Some(&lib), None, false).content,
+        Content::Generic(_)
+    ));
+    std::fs::remove_dir_all(specs.parent().unwrap()).ok();
+
+    // A spec the importer has not processed yet: pending (run it and reopen).
+    let other = r#""someone_else": {"ready": true}"#;
+    let (specs, art) = manifest_release("m-pending", other, &["v2_panel"]);
+    std::fs::remove_file(art.join("Images/chrome.bx.undo@2x.png")).unwrap();
+    let lib = PluginSpecLibrary::open_with_art(&specs, &art).unwrap();
+    let s = lib.spec_for_effect("UAD V2 Test").unwrap();
+    match lib.availability(&s) {
+        Availability::Pending(ids) => assert_eq!(ids, vec!["chrome.bx.bank", "chrome.bx.power", "chrome.bx.undo"]),
+        other => panic!("{other:?}"),
+    }
+    std::fs::remove_dir_all(specs.parent().unwrap()).ok();
+}

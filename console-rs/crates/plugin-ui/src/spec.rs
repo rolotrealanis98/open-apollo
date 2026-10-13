@@ -646,6 +646,10 @@ pub struct ToolbarItem {
     /// `bank`: number of cells (default: the parameter's steps, else 4).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cells: Option<u32>,
+    /// `bank`: distance between cell origins in points when the shell spaces the cells wider than
+    /// the art (default: `w / cells`, the art's own cells side by side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<f32>,
     /// Drawn when the sprite is not available: `power`, `undo`, `redo` (vector glyphs) or text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glyph: Option<String>,
