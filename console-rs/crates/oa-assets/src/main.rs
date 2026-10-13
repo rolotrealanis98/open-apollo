@@ -11,6 +11,8 @@ oa-assets: use your own UAD install with open-apollo
 USAGE:
   oa-assets scan   [--from PATH]... [--json]   find UAD installs (Windows volumes, Wine prefixes)
   oa-assets mount  DEVICE                      mount a Windows partition read-only, then scan it
+  oa-assets attach IMAGE                       attach a (shut down) VM's raw disk image read-only, then scan it
+  oa-assets detach IMAGE|LOOPDEVICE            unmount an attached image and release it
   oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs
   oa-assets status                             show what has been imported
 
@@ -58,6 +60,8 @@ fn main() -> ExitCode {
     let result = match args.cmd.as_str() {
         "scan" => scan(&args),
         "mount" => mount(&args),
+        "attach" => attach(&args),
+        "detach" => detach(&args),
         "import" => run_import(&args),
         "status" => status(&args),
         "help" => {
@@ -155,6 +159,32 @@ fn mount(args: &Args) -> Result<(), String> {
     let at = discover::mount_readonly(dev)?;
     println!("Mounted {dev} read-only at {}\n", at.display());
     print_install(&detect::inspect(&Root { path: at, source: Source::Given }));
+    Ok(())
+}
+
+fn attach(args: &Args) -> Result<(), String> {
+    let image = args.device.as_deref().ok_or("attach needs a disk image, e.g. ~/.windows/data.img")?;
+    let a = discover::attach_image(std::path::Path::new(image))?;
+    println!("Attached {image} read-only as {}\n", a.loop_device);
+    if a.roots.is_empty() {
+        println!("No Windows partition found in the image.");
+    }
+    for r in &a.roots {
+        print_install(&detect::inspect(r));
+    }
+    println!("When done: oa-assets detach {image}");
+    Ok(())
+}
+
+fn detach(args: &Args) -> Result<(), String> {
+    let what = args.device.as_deref().ok_or("detach needs the image or its loop device")?;
+    let dev = if what.starts_with("/dev/") {
+        what.to_string()
+    } else {
+        discover::existing_loop(std::path::Path::new(what)).ok_or(format!("{what} isn't attached"))?
+    };
+    discover::detach(&dev)?;
+    println!("Detached {dev}");
     Ok(())
 }
 
