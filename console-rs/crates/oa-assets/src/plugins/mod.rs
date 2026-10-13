@@ -272,7 +272,7 @@ pub fn build_with(
     let texts = build_texts(&groups, &paths, out);
     results.sort_by(|a, b| a.id.cmp(&b.id));
     let manifest = merge_manifest(out, &book, built, &texts, root)?;
-    let specs_out = readiness(&book, &groups, &manifest);
+    let specs_out = readiness(&book, &manifest);
     write_atomic(
         &out.join("manifest.json"),
         (serde_json::to_string_pretty(&with_specs(manifest, &specs_out)).map_err(|e| e.to_string())? + "\n").as_bytes(),
@@ -423,7 +423,11 @@ fn merge_manifest(
     }
     // drop entries whose file is gone or whose recipe no longer exists
     if let Some(obj) = m["sprites"].as_object_mut() {
-        obj.retain(|id, _| book.sprite(id).is_some() && out.join("Images").join(format!("{id}@2x.png")).is_file());
+        // keep what the current recipes still describe (same expected hash) and is on disk
+        obj.retain(|id, v| {
+            book.sprite(id).is_some_and(|(_, s)| current(s, v))
+                && out.join("Images").join(format!("{id}@2x.png")).is_file()
+        });
     }
     if !m["texts"].is_object() {
         m["texts"] = json!({});
@@ -436,11 +440,19 @@ fn merge_manifest(
     Ok(m)
 }
 
-fn readiness(book: &Book, groups: &[&RecipeFile], manifest: &Value) -> Vec<SpecResult> {
-    let have = |id: &str| manifest["sprites"].get(id).is_some();
-    let all: Vec<&RecipeFile> = book.files.iter().collect();
-    let _ = groups;
-    all.iter()
+/// A manifest entry still matches the recipe: built from it, with the hash the recipe expects.
+fn current(s: &recipe::Sprite, entry: &Value) -> bool {
+    let want = s.output.as_ref().and_then(|o| o.rgba.as_deref());
+    s.status.buildable() && want.is_none_or(|w| entry["rgba"].as_str() == Some(w))
+}
+
+fn readiness(book: &Book, manifest: &Value) -> Vec<SpecResult> {
+    let have = |id: &str| {
+        let e = &manifest["sprites"][id];
+        !e.is_null() && book.sprite(id).is_some_and(|(_, s)| current(s, e))
+    };
+    book.files
+        .iter()
         .map(|g| {
             let mut s = SpecResult {
                 id: g.group.clone(),

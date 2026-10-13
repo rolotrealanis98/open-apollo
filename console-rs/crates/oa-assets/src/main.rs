@@ -15,7 +15,7 @@ USAGE:
   oa-assets attach IMAGE                       attach a (shut down) VM's raw disk image read-only, then scan it
   oa-assets detach IMAGE|LOOPDEVICE            unmount an attached image and release it
   oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs
-  oa-assets status                             show what has been imported
+  oa-assets status [--out DIR]                 show what has been imported and built
   oa-assets firmware [--from PATH] [--out DIR] [--accept-unknown] [--verify-golden] [--json]
                                                extract the DSP modules and USB boot images the Apollo
                                                needs (default --out /lib/firmware/universal-audio)
@@ -284,6 +284,20 @@ fn status(args: &Args) -> Result<(), String> {
             c["from"].as_str().unwrap_or("?")
         ),
         None => println!("Nothing imported yet. Run `oa-assets scan`, then `oa-assets import`."),
+    }
+    let art = args.out.clone().unwrap_or_else(oa_assets::plugins::default_out);
+    let pm = import::read_manifest(&art);
+    match (pm["sprites"].as_object(), pm["specs"].as_object()) {
+        (Some(sprites), Some(specs)) => {
+            let ready = specs.values().filter(|s| s["ready"] == true).count();
+            println!(
+                "Plug-in art: {} images, {ready}/{} panels ready, in {}",
+                sprites.len(),
+                specs.len(),
+                art.display()
+            );
+        }
+        _ => println!("Plug-in art: not built yet. Run `oa-assets plugins`."),
     }
     Ok(())
 }
