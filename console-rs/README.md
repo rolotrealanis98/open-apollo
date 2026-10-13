@@ -25,7 +25,7 @@ bash scripts/install-uaconsole.sh
 The script:
 
 1. builds `uaconsole` with `cargo build --release`
-2. installs it to `~/.local/bin/uaconsole`, along with the `open-apollo-console` launcher
+2. installs it to `~/.local/bin/uaconsole`
 3. adds an **Open Apollo Console** menu entry (`~/.local/share/applications/uaconsole.desktop`)
    with a generic mixer icon
 4. checks for the Console art, the fonts and a Vulkan driver, and tells you what is missing
@@ -56,8 +56,7 @@ with `scripts/install-uaconsole.sh` instead.
 
 ## Run
 
-1. Start the mixer daemon. The open-apollo installer and the tray's **Restart Daemon** do
-   this; by hand:
+1. Start the mixer daemon. The open-apollo installer does this; by hand:
 
    ```bash
    python3 mixer-engine/ua_mixer_daemon.py
@@ -65,9 +64,7 @@ with `scripts/install-uaconsole.sh` instead.
 
 2. Open the console in any of these ways:
    - the **Open Apollo Console** menu entry
-   - **Open Console** in the open-apollo tray menu
    - the `uaconsole` command
-   - the `open-apollo-console` command
 
 uaconsole connects to the local daemon on `127.0.0.1:4710` by default. To use an engine on
 another machine, pass `--engine`:
@@ -76,25 +73,6 @@ another machine, pass `--engine`:
 uaconsole --engine 192.168.1.20        # port 4710
 uaconsole --engine studio-pc.local:4710
 ```
-
-### Native or Wine: the `open-apollo-console` launcher
-
-The tray's **Open Console** item and the `open-apollo-console` command
-(`tools/open-apollo-console.sh` in the repo) start uaconsole when it is installed. Without it,
-they fall back to UA's Windows UAD Console under Wine. The menu item reads **Open Console
-(Wine)** when it will use Wine. The launcher passes `--engine 127.0.0.1:4710` to uaconsole
-unless you choose another engine.
-
-| Variable | Meaning |
-|---|---|
-| `OPEN_APOLLO_CONSOLE` | `auto` (default), `native` or `wine` |
-| `UACONSOLE_BIN` | uaconsole binary to use (default: next to the launcher, then `uaconsole` on `PATH`, then `~/.local/bin/uaconsole`) |
-| `UACONSOLE_ENGINE` | engine for uaconsole (default `127.0.0.1:4710`) |
-| `OPEN_APOLLO_WINE_CONSOLE` | executable that starts the Windows Console under Wine, such as your own script that installs a rendering shim first. Without it, the launcher runs `wine "UAD Console.exe"` from the prefix, which may open a blank window on stock Wine. |
-| `WINEPREFIX` | Wine prefix with UAD Console installed (default `~/wine-ua`) |
-
-`open-apollo-console --which` prints which console it would start. The tray writes the
-console's output to `~/.cache/open-apollo/console.log`.
 
 ## Where the art comes from
 
@@ -170,10 +148,9 @@ pins. Like the Console art, these files are for your own machine only.
 | `UAD Console resources not found` | Run `bash scripts/install-uaconsole.sh --check`, then see [Where the art comes from](#where-the-art-comes-from). Point uaconsole at any folder with `CONSOLE_RESOURCES=/path/to/Resources`. |
 | `no GPU adapter`, or a black window | Check that `vulkaninfo --summary` lists your GPU, and install your distribution's Vulkan driver (`mesa-vulkan-drivers`, `vulkan-radeon`, `vulkan-intel`). Try another backend with `WGPU_BACKEND=gl` or `WGPU_BACKEND=vulkan`. `--render` reads this variable; the window may not yet. |
 | Labels look too wide or narrow, or use the wrong typeface | Install Nimbus Sans and Liberation Sans (table above). Check with `fc-list "Nimbus Sans"`. |
-| Nothing moves, or no connection | Check that the daemon is listening: `ss -tln \| grep 4710`. Start it, or use **Restart Daemon** in the tray. |
+| Nothing moves, or no connection | Check that the daemon is listening: `ss -tln \| grep 4710`. Start it (`systemctl --user start ua-mixer-daemon`, or by hand as under [Run](#run)). |
 | Nix build on a non-NixOS system finds no GPU | Use nixGL (see [Nix](#nix)). |
 | Wayland issues | Force X11 for one run: `env -u WAYLAND_DISPLAY uaconsole`. |
-| The tray offers **Open Console (Wine)** although uaconsole is installed | The tray could not find `uaconsole` on its `PATH` or in `~/.local/bin`. Set `UACONSOLE_BIN`, or log out and back in after the install. |
 
 ## Development
 

@@ -128,12 +128,6 @@ pub fn console(home: &Path, resources: &Path) -> Vec<(Duration, String)> {
     s.raw(600, "    Finished `release` profile [optimized + debuginfo] target(s) in 1m 04s");
     s.header(200, "Installing");
     s.ok(200, &format!("{home}/.local/bin/uaconsole"));
-    s.ok(
-        100,
-        &format!(
-            "{home}/.local/bin/open-apollo-console (opens uaconsole, or the Wine Console if uaconsole is missing)"
-        ),
-    );
     s.ok(100, &format!("{home}/.local/share/applications/uaconsole.desktop"));
     s.header(200, "Console resources");
     s.ok(300, &format!("Found UAD Console resources: {}", resources.display()));
@@ -145,7 +139,7 @@ pub fn console(home: &Path, resources: &Path) -> Vec<(Duration, String)> {
     s.header(200, "Done");
     s.raw(
         100,
-        "  Open the console:        uaconsole   (or open-apollo-console, or 'Open Apollo Console' in your menu)",
+        "  Open the console:        uaconsole   (or 'Open Apollo Console' in your menu)",
     );
     s.lines
 }

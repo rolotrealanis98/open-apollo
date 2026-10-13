@@ -12,7 +12,7 @@
 Open Apollo brings Linux support to Universal Audio's Apollo audio interfaces.
 Built through clean-room reverse engineering, this community-driven project
 provides a native kernel driver for Thunderbolt models and a pure-userspace
-stack for USB models, along with a mixer daemon and system tray indicator.
+stack for USB models, along with a mixer daemon and a native mixer console (console-rs).
 
 > **⚠️ Experimental** — This project is under active development and not yet ready
 > for production use. Expect rough edges, kernel stability issues on some
@@ -45,7 +45,6 @@ Each square is one thing UA's own drivers do (left), one task of the work plan (
 - **WebRTC capture** — clean audio in Chromium-based browsers (webcam mic tests, Discord web)
 - **pw-record/pw-play** — zero-dropout capture and playback verified
 - **Guided installer** — `sudo bash scripts/install.sh` with hardware validation gates + audio test
-- **System tray indicator** — real-time hardware status
 
 ## What Works (Apollo Solo USB)
 
@@ -172,7 +171,7 @@ The installer is a guided walkthrough that:
 2. Deploys PipeWire/WirePlumber/UCM2 configs
 3. Guides you through an Apollo power cycle for clean Thunderbolt initialization
 4. Loads the driver, verifies DSP handshake, sets up virtual I/O devices
-5. Starts the mixer daemon and tray indicator
+5. Starts the mixer daemon
 6. Plays a test tone so you can verify audio output
 
 ### NixOS (Thunderbolt)
@@ -291,8 +290,7 @@ normal user:
 bash scripts/install-uaconsole.sh
 ```
 
-Then open it from your app menu (**Open Apollo Console**), with **Open Console** in the tray,
-or with `uaconsole`. It draws UA's art from your own UAD Console install; open-apollo does not
+Then open it from your app menu (**Open Apollo Console**) or with `uaconsole`. It draws UA's art from your own UAD Console install; open-apollo does not
 include it. See [console-rs/README.md](console-rs/README.md) for requirements, Nix and
 troubleshooting.
 

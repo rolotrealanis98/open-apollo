@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- The web console (`console-web/`) and the system tray indicator (`tools/open-apollo-tray.py`, its icons and autostart entry, and the AppIndicator dependency): the native console (console-rs, `uaconsole`) replaces both. The `open-apollo-console` launcher and its fallback to UA's Windows Console under Wine are gone too; the menu entry runs `uaconsole`. The uninstallers still remove what older installs left behind.
+
+### Changed
+- Mixer daemon: the WebSocket API (port 4721, for UA Connect-style clients; the web console was its user) is off by default. Start it with `--ws` or `--ws-port N`; `--no-ws` is still accepted.
+
+### Security
+- Install report: no user name, host name, home path, machine id or serial numbers. PipeWire state is reduced to the Apollo's own objects (allowlisted properties) plus a count of other audio objects by class, instead of the first 500 lines of `pw-dump` with every client's user and host and the user's other devices; the Apollo serial in the driver log is redacted. The report is still sent only when you opt in.
+
 ### Added
 - Status map in the README (`docs/status/`, `tools/gen-status-graph.py`): one square per behaviour of UA's drivers in the parity map, per task of the work plan and per Apollo model, coloured verified on hardware / done in code / partial / still to figure out / understood, not done / plugin hosting / needs hardware, with per-area numbers and the open tasks in `docs/status/README.md`. CI checks it is up to date.
 - `tools/extract-ua-dsp-modules.py`: copies UA Console's built-in input-strip DSP modules (Mic Input Strip 0EB/0DA/0A5/0C2/12B, Input Strip 0DB, Talkback 0C9) from the user's own UA install (Windows, Wine or macOS) to `/lib/firmware/ua_apollo/dsp/`, for the driver's input strips; nothing UA-made is shipped. Found all seven in the Windows install on titan.

@@ -406,18 +406,6 @@ check_install_deps() {
     else
         ok "python zeroconf"
     fi
-    # AppIndicator3 for tray indicator
-    if ! python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
-        missing+=("appindicator")
-        case "$PKG_MGR" in
-            dnf)    missing_pkgs+=("libappindicator-gtk3") ;;
-            apt)    missing_pkgs+=("gir1.2-appindicator3-0.1") ;;
-            pacman) missing_pkgs+=("libappindicator-gtk3") ;;
-            zypper) missing_pkgs+=("typelib-1_0-AppIndicator3-0_1") ;;
-        esac
-    else
-        ok "appindicator"
-    fi
 
     if [ ${#missing[@]} -eq 0 ]; then
         ok "All required dependencies present"
@@ -1455,18 +1443,6 @@ main() {
                     AUDIO_VERIFIED="fail"
                 fi
             fi
-        fi
-    fi
-
-    # Launch tray indicator
-    pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-    tray_script="$PROJECT_DIR/tools/open-apollo-tray.py"
-    if [ -n "$pw_user" ] && [ -f "$tray_script" ] && python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
-        if ! pgrep -f "open-apollo-tray" > /dev/null 2>&1; then
-            info "Starting Open Apollo tray indicator..."
-            sudo -u "$pw_user" python3 "$tray_script" &>/dev/null &
-            disown
-            ok "Tray indicator running"
         fi
     fi
 

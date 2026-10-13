@@ -35,9 +35,7 @@ open-apollo/
 │   └── check-deps.sh    # Dependency checker
 │
 └── tools/               # Utilities
-    ├── apollo-init.sh   # Hardware initialization
-    ├── open-apollo-console.sh  # Opens uaconsole, or the Windows Console under Wine
-    └── open-apollo-tray.py  # System tray indicator
+    └── apollo-init.sh   # Hardware initialization
 ```
 
 ## Data Flow
