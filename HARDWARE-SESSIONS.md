@@ -263,7 +263,36 @@ Expected:
 
 ## Session 5: L3, the daemon's plug-in status (any `plugin_host=1` load, 10 min)
 
-Filled in below once the daemon part is reviewed (see the end of this file).
+With the test module loaded with `plugin_host=1` (session 2 or 3 load), run
+the branch's daemon in a terminal instead of the installed one (the service
+stays masked), with the UA catalogue imported as usual:
+
+```sh
+cd ~/github/oa-hosting/mixer-engine && python3 ua_mixer_daemon.py
+# in another terminal (the daemon listens on 4710 for /dev/ua_apollo0)
+T=~/github/oa-hosting/tools/oa-daemon-client.py
+python3 $T --port 4710 get /plugins/0/Name/value
+python3 $T --port 4710 get /plugins/0/Status/value
+```
+
+Expected:
+- daemon log: `Plug-in host on: licence status of N plug-ins from the device
+  (M with a render id)` and `Plug-in licences from the device: A authorized,
+  D demo running, S demo not started, E demo expired, ...` (counts only;
+  the table is never logged).
+- For the 1176LN Legacy entry: `Authorized` true, `Status` `Authorized for
+  all devices`, `Demoing` true (what the Mac engine reported for authorized
+  plug-ins); for the 4K Buss Compressor: `Authorized` false, `Status` `Demo
+  not started`, `Demoing` false.  Find their N with `get /plugins/N/Name/value`
+  (catalogue order).  Compare a few with UA Console's plug-in list.
+- `post /PluginStartDemo` (from a client) fails: demos are started in UA's
+  own software, open-apollo never starts one.
+- A rate change (session 3's sweep) or a reconnect blanks the status and the
+  daemon asks again (at most once per 5 s).
+- With a driver loaded without `plugin_host=1`, nothing changes: Status
+  stays empty as before.
+
+Stop the daemon (Ctrl-C) before the rollback.
 
 ## Not in these sessions
 

@@ -25,6 +25,8 @@ Usage:
 
 import argparse
 import asyncio
+import errno
+import functools
 import importlib.util
 import json
 import logging
@@ -70,6 +72,7 @@ from commands import (CommandEngine, ERR_FAILED, parse_cmdparams,
 from session_dirty import SessionDirty
 from plugin_lifecycle import PluginLifecycle, is_plugin_slot_path
 from plugin_remote import PluginRemote
+import plugin_license
 from ubjson_codec import encode_response as ubjson_encode_response
 from json_frame_codec import JsonFrameError, encode_frame as json_encode_frame
 from wire_command_framer import WireCommandFramer, WireError
@@ -567,6 +570,20 @@ class MixerDaemon:
         self.session_dirty = SessionDirty(
             state, ready=lambda: self._session_ready, helper=helper_tree)
 
+        # Plug-in licence status (plugin_license): /plugins/N/Authorized,
+        # Status, Demoing and DemoDaysRemaining from the device's own
+        # answer.  Only when the driver hosts plug-ins (plugin_host=1,
+        # UA_FEAT2_PLUGIN_HOST) and a catalogue is loaded; otherwise
+        # nothing here ever runs (see _license_session_start).
+        self._catalogue = catalogue
+        self.licenses: plugin_license.LicenseMirror | None = None
+        self.plugin_manifest = None   # None: plugin_license.DEFAULT_MANIFEST
+        self._license_active = False
+        self._license_busy = False    # a query runs on the executor
+        self._license_wanted = False  # another query was asked for
+        self._license_timer = None    # a query waiting for the rate limit
+        self._license_retries = 0
+
         # Hot-plug state (see _device_watchdog).  When the daemon starts
         # without the device, the watchdog owns the init push, so the
         # late-init paths (timer, meter pump) must leave it alone.
@@ -697,6 +714,7 @@ class MixerDaemon:
     def _device_lost(self, now: float):
         log.warning("Apollo device lost — daemon stays up, reopening with backoff")
         self._events_detach()
+        self._license_stop()
         self._cancel_settle()
         self._set_hw_paused(False)   # the next connection starts clean
         self._hw_online = False
@@ -1474,6 +1492,7 @@ class MixerDaemon:
         self._publish_pcie_link(info)
         self._check_firmware(info)
         self._poll_transport()
+        self._license_session_start()
 
     def _publish_clock_sources(self, info: dict | None = None,
                                notify: bool = True) -> bool:
@@ -1654,8 +1673,11 @@ class MixerDaemon:
             if self._last_rate_index not in (None, arg):
                 self._mute_until_settle()
             self._last_rate_index = arg
+            self._license_epoch_changed()
         elif code in (UA_EVT_CONNECTED, UA_EVT_RATE_INFO):
             self._poll_driver_rate(force=True)
+            if code == UA_EVT_CONNECTED:
+                self._license_epoch_changed()
         elif code == UA_EVT_CLOCK_CHANGED:
             self._refresh_clock_source(arg)
         elif code == UA_EVT_CLOCK_LOCK:
@@ -1681,9 +1703,167 @@ class MixerDaemon:
             log.warning("Driver event queue overflowed (%d dropped): "
                         "refreshing everything", arg)
             self._refresh_all_from_driver()
+            # a dropped CONNECTED or RATE_CHANGED may be among them
+            self._license_epoch_changed()
         elif code in (UA_EVT_IODESC_IN, UA_EVT_IODESC_OUT,
                       UA_EVT_NOTIF_STATUS):
             pass    # raw firmware notifications: the decoded events follow
+
+    # ── Plug-in licence status (L3) ──────────────────────────────────
+    #
+    # The device's own answer (UA_IOCTL_BOARD_QUERY, read-only) mirrored on
+    # /plugins/N by plugin_license.LicenseMirror.  Only with a driver
+    # loaded with plugin_host=1 and a catalogue on /plugins; a driver
+    # without UA_FEAT2_PLUGIN_HOST leaves every property as before.  The
+    # query blocks for up to ~2 s, so it runs on the event loop's default
+    # executor (a worker thread) and its answer is published back on the
+    # loop thread.  Asked once per device session and again on CONNECTED
+    # and RATE_CHANGED (each of which first withdraws the answer shown),
+    # at most once per plugin_license.MIN_QUERY_INTERVAL.
+
+    # Failures worth asking again for (busy, the epoch moved, no answer in
+    # time), at most _LICENSE_RETRIES times in a row
+    _LICENSE_RETRY_ERRNOS = (errno.EBUSY, errno.ESTALE, errno.ETIMEDOUT)
+    _LICENSE_RETRIES = 3
+
+    def _license_plugins(self) -> list:
+        """The catalogue's plug-ins when they are the tree's /plugins/0..N
+        (ua_catalogue laid them on in this order), else []."""
+        plugins = list(getattr(self._catalogue, "plugins", None) or [])
+        for i, p in enumerate(plugins):
+            if self.state.get_value(f"/plugins/{i}/Name") != p.get("name"):
+                log.warning("Plug-in licence status off: /plugins/%d is not "
+                            "the catalogue's entry %d", i, i)
+                return []
+        return plugins
+
+    def _license_session_start(self):
+        """A device session starts: mirror the device's licence answer when
+        the driver hosts plug-ins and a catalogue is loaded."""
+        be = self.hw_router.backend if self.hw_router else None
+        if be is None or not be.connected or self._catalogue is None:
+            return
+        if not plugin_license.plugin_host_available(be):
+            self._license_stop()
+            return
+        if self.licenses is None:
+            plugins = self._license_plugins()
+            if not plugins:
+                return
+            self.licenses = plugin_license.LicenseMirror(
+                self._publish_license, plugins, {}, self._license_query)
+        self.licenses.render_ids = plugin_license.load_render_ids(
+            self.plugin_manifest)
+        log.info("Plug-in host on: licence status of %d plug-ins from the "
+                 "device (%d with a render id)", len(self.licenses.plugins),
+                 sum(r is not None for r in plugin_license.catalogue_render_ids(
+                     self.licenses.plugins, self.licenses.render_ids)))
+        self._license_active = True
+        self._license_retries = 0
+        self._license_request()
+
+    def _license_stop(self):
+        """The device session ended (or has no plug-in host): no answer
+        stays on show and nothing more is asked."""
+        self._license_active = False
+        self._license_wanted = False
+        if self._license_timer is not None:
+            self._license_timer.cancel()
+            self._license_timer = None
+        if self.licenses is not None:
+            self.licenses.invalidate()
+
+    def _license_epoch_changed(self):
+        """CONNECTED / RATE_CHANGED: the answer on show belongs to the old
+        epoch.  Withdraw it and ask again."""
+        if not self._license_active or self.licenses is None:
+            return
+        self.licenses.invalidate()
+        self._license_retries = 0
+        self._license_request()
+
+    def _license_query(self):
+        """The read-only board query, on the worker thread."""
+        return self.hw_router.backend.board_query()
+
+    def _license_request(self):
+        """Ask the device again: now, or once the rate limit allows (asks
+        made meanwhile are one).  Without a running event loop (tests,
+        tools) the query runs in place."""
+        if not self._license_active or self.licenses is None:
+            return
+        self._license_wanted = True
+        if self._license_busy or self._license_timer is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is None:
+            if self.licenses.refresh():
+                self._license_wanted = False
+            return
+        delay = self.licenses.wait_time()
+        if delay > 0:
+            self._license_timer = loop.call_later(delay,
+                                                  self._license_timer_due)
+            return
+        token = self.licenses.begin()
+        if token is None:
+            return
+        try:
+            fut = loop.run_in_executor(None, self.licenses.fetch)
+        except RuntimeError as e:     # the executor is shutting down
+            log.debug("Plug-in licence query not started: %s", e)
+            return
+        self._license_wanted = False
+        self._license_busy = True
+        fut.add_done_callback(functools.partial(self._license_done, token))
+
+    def _license_timer_due(self):
+        self._license_timer = None
+        self._license_request()
+
+    def _license_done(self, token, fut):
+        """The worker's result, back on the loop thread: publish it (unless
+        the session ended or the epoch changed meanwhile)."""
+        self._license_busy = False
+        if fut.cancelled():
+            result = OSError(errno.ECANCELED, "query cancelled")
+        else:
+            result = fut.exception() or fut.result()
+        if self._license_active and self.licenses is not None:
+            if self.licenses.apply(result, token):
+                err = self.licenses.last_error
+                if err is None:
+                    self._license_retries = 0
+                elif (err in self._LICENSE_RETRY_ERRNOS and
+                      self._license_retries < self._LICENSE_RETRIES):
+                    self._license_retries += 1
+                    self._license_wanted = True
+        if self._license_wanted:
+            self._license_request()
+
+    def _publish_license(self, path: str, value, kind: str):
+        """One licence property, published like other device status: the
+        state tree's (and the helper tree's) subscribers are told, nothing
+        reaches the hardware, nothing is saved and /Dirty does not move.
+        Unchanged values are not sent again."""
+        prop = self.state.get_prop_dict(path)
+        if prop is not None and type(prop.get("value")) is type(value) \
+                and prop.get("value") == value:
+            return
+        with self.session_dirty.suppress():
+            if prop is None:
+                self.state.add_runtime_property(path, {"type": kind,
+                                                       "value": value})
+            else:
+                prop["value"] = value
+            self.state._dirty.pop(path + "/value", None)
+            self.state._notify_subscribers(path + "/value", value)
+            if self.helper_tree and \
+                    self.helper_tree.set_value(path, value) != "ok":
+                self.helper_tree._notify(path, value)
 
     # ── Sleep / wake (04 H6) ─────────────────────────────────────────
 

@@ -45,6 +45,7 @@ byte for byte against a Windows capture of a Solo USB.
 
 from __future__ import annotations
 
+import errno
 import glob
 import json
 import logging
@@ -433,6 +434,16 @@ class HardwareUSB:
 
     def has_feature(self, bit: int) -> bool:
         return False
+
+    def features2(self) -> int:
+        return 0
+
+    def plugin_host_available(self) -> bool:
+        """No plug-in host on the USB parts: no plug-in licence state."""
+        return False
+
+    def board_query(self):
+        raise OSError(errno.EOPNOTSUPP, "no plug-in host on a USB Apollo")
 
     def get_version(self):
         return None
