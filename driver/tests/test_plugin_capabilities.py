@@ -1,11 +1,13 @@
-"""UA_IOCTL_GET_PLUGIN_CAPS: a read-only report that says no plugin
-operation exists.
+"""UA_IOCTL_GET_PLUGIN_CAPS: a read-only report of the plug-in operations
+the driver accepts right now (none unless plugin_host=1) and its state.
 
 The struct and ioctl number come from ua_ioctl.h and the handler from
-ua_core.c, compiled as they are.  Checks the fixed 64-byte layout, that the
-number is not shared with another ioctl (Codex's version used 0x04, which is
-GET_VERSION here), the feature bit and ABI minor, operations == 0 and the
-state bits.  Adapted from the parallel Codex work (test_plugin_capabilities).
+ua_core.c, compiled as they are with the host's two helpers stubbed.
+Checks the fixed 64-byte layout and the ABI 1.8 fields (owned and
+quarantined DSPs, instances), that the number is not shared with another
+ioctl (the Codex foundation commit 199bb21 used 0x04, which is GET_VERSION
+here: task A1 keeps 0x07), the state bits and that operations come only
+from the host.
 """
 import re
 import csrc
@@ -19,14 +21,19 @@ PREFIX = r'''
 #include <string.h>
 /* The Linux asm-generic ioctl encoding, whatever the host's is */
 #define _IOC_READ 2U
+#define _IOC_WRITE 1U
 #define _IOC(d, t, n, s) (((d) << 30) | ((t) << 8) | (n) | ((s) << 16))
 #define _IOR(t, n, type) _IOC(_IOC_READ, (t), (n), (unsigned)sizeof(type))
+#define _IOWR(t, n, type) _IOC(_IOC_READ | _IOC_WRITE, (t), (n), (unsigned)sizeof(type))
 #define _IOC_NR(c) ((c) & 0xff)
 #define _IOC_DIR(c) (((c) >> 30) & 3)
 #define _IOC_SIZE(c) (((c) >> 16) & 0x3fff)
 typedef uint32_t __u32;
 typedef uint64_t __u64;
 typedef uint16_t __u16;
+typedef uint8_t __u8;
+typedef uint32_t u32;
+typedef uint64_t u64;
 #define UA_IOCTL_MAGIC 'U'
 #define UA_MAX_DSPS 8
 #define __user
@@ -43,6 +50,15 @@ struct ua_device { int lock; bool fw_loaded, dsps_connected, plugins_activated;
 		   struct ua_audio audio; unsigned int num_dsps;
 		   struct ua_dsp_state dsp[UA_MAX_DSPS];
 		   unsigned int dma_orphan_count; };
+/* The host's answers (ua_plugin_host.c), set by the test */
+static u64 host_ops;
+static u32 host_state, host_owned, host_quar, host_inst;
+static u64 ua_plugin_host_ops(struct ua_device *ua)
+{ assert(ua->lock); return host_ops; }
+static void ua_plugin_host_caps(struct ua_device *ua, u32 *state, u32 *owned,
+				u32 *quar, u32 *inst)
+{ assert(ua->lock); *state |= host_state; *owned = host_owned;
+  *quar = host_quar; *inst = host_inst; }
 '''
 
 MAIN = r'''
@@ -53,22 +69,28 @@ int main(void)
 
 	assert(sizeof(c) == 64);
 	assert(offsetof(struct ua_plugin_caps, operations) == 8);
-	assert(offsetof(struct ua_plugin_caps, reserved) == 28);
+	assert(offsetof(struct ua_plugin_caps, owned_dsps) == 28);
+	assert(offsetof(struct ua_plugin_caps, quarantined_dsps) == 32);
+	assert(offsetof(struct ua_plugin_caps, instances) == 36);
+	assert(offsetof(struct ua_plugin_caps, reserved) == 40);
 	assert(_IOC_NR(UA_IOCTL_GET_PLUGIN_CAPS) == 7);
 	assert(_IOC_DIR(UA_IOCTL_GET_PLUGIN_CAPS) == _IOC_READ);
 	assert(_IOC_SIZE(UA_IOCTL_GET_PLUGIN_CAPS) == 64);
-	assert(UA_ABI_MAJOR == 1 && UA_ABI_MINOR >= 3);
+	assert(UA_ABI_MAJOR == 1 && UA_ABI_MINOR >= 8);
 	assert(UA_FEAT_PLUGIN_CAPS == 1u << 13);
+	assert(UA_PLUGIN_OP_BOARD_QUERY == 1 && UA_PLUGIN_OP_CREATE == 2 &&
+	       UA_PLUGIN_OP_DESTROY == 4);
 
 	/* Nothing set: no operations, no state */
 	memset(&c, 0xff, sizeof(c));
 	assert(ua_ioctl_get_plugin_caps(&ua, (unsigned long)&c) == 0);
 	assert(c.struct_size == 64 && c.operations == 0 && c.state == 0);
 	assert(c.num_dsps == 4 && c.dsp_rings == 0 && c.dma_orphans == 0);
-	for (unsigned int i = 0; i < 9; i++)
+	assert(!c.owned_dsps && !c.quarantined_dsps && !c.instances);
+	for (unsigned int i = 0; i < 6; i++)
 		assert(c.reserved[i] == 0);
 
-	/* Observations only; operations stays 0 whatever the state */
+	/* Observations; operations are the host's only */
 	ua.fw_loaded = ua.dsps_connected = ua.plugins_activated = true;
 	ua.audio.connected = true;
 	ua.dsp[0].rings_allocated = ua.dsp[3].rings_allocated = true;
@@ -80,6 +102,16 @@ int main(void)
 			   UA_PLUGIN_STATE_INIT_CHAIN |
 			   UA_PLUGIN_STATE_AUDIO_CONNECTED));
 	assert(c.dsp_rings == 0x9 && c.dma_orphans == 2);
+
+	host_ops = UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE;
+	host_state = UA_PLUGIN_STATE_HOST | UA_PLUGIN_STATE_STRIPS;
+	host_owned = 0xe;
+	host_quar = 0x4;
+	host_inst = 3;
+	assert(ua_ioctl_get_plugin_caps(&ua, (unsigned long)&c) == 0);
+	assert(c.operations == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE));
+	assert(c.state & UA_PLUGIN_STATE_HOST && c.state & UA_PLUGIN_STATE_STRIPS);
+	assert(c.owned_dsps == 0xe && c.quarantined_dsps == 0x4 && c.instances == 3);
 
 	/* A num_dsps past the array never reads past it */
 	ua.num_dsps = 100;
@@ -98,7 +130,7 @@ def header_abi():
     hdr = csrc.source('ua_ioctl.h')
     parts = [
         '\n'.join(re.findall(r'^#define UA_(?:ABI_M\w+|FEAT_PLUGIN_CAPS|'
-                             r'PLUGIN_STATE_\w+)\s.*$', hdr, re.M)),
+                             r'PLUGIN_STATE_\w+|PLUGIN_OP_\w+)\s.*$', hdr, re.M)),
         csrc.between(hdr, 'struct ua_plugin_caps {', '#define UA_IOCTL_GET_PLUGIN_CAPS'),
         re.search(r'^#define UA_IOCTL_GET_PLUGIN_CAPS.*$', hdr, re.M).group(0),
     ]
@@ -124,5 +156,6 @@ def test_number_is_unique_and_wired():
     # Read-only: open to whoever may open the node, like GET_SYSTEM_INFO
     rawio = csrc.extract(core, 'static bool ua_ioctl_needs_rawio(')
     assert 'GET_PLUGIN_CAPS' not in rawio
-    # No operation bit exists to advertise
-    assert 'UA_PLUGIN_OP_' not in re.sub(r'/\*.*?\*/', '', hdr, flags=re.S)
+    # Operations come from the host only, under ua->lock
+    caps = csrc.extract(core, 'static long ua_ioctl_get_plugin_caps(')
+    assert 'caps.operations = ua_plugin_host_ops(ua);' in caps

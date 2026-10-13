@@ -1477,6 +1477,8 @@ struct ua_dsp_ext {
 	u32 msg_last[UA_MAX_DSPS][5];	/* last message, raw words */
 };
 
+struct ua_plugin_host;
+
 struct ua_device {
 	struct pci_dev *pdev;
 	void __iomem *regs;         /* BAR0 MMIO base */
@@ -1616,6 +1618,13 @@ struct ua_device {
 	 */
 	u64 kext_param[6];
 	u32 kext_param_set;
+
+	/*
+	 * Plug-in host (ua_plugin_host.h): DSP ownership, transactions, the
+	 * module catalog, instances and the input strips.  Allocated at probe,
+	 * freed by ua_chardev_release().
+	 */
+	struct ua_plugin_host *host;
 
 	/* DSP ring extras (ua_dsp.c); keep last */
 	struct ua_dsp_ext dspx;

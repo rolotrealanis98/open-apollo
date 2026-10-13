@@ -539,12 +539,14 @@ struct ua_dma_test {
  *     must get -ENOTTY here, not a different operation;
  *   - ioctls 0x90-0x9f are reserved for plugin hosting, events for it start
  *     at 0x1010;
- *   - feature bit 31 is reserved as a continuation bit: when the last free
- *     bit is needed, reserved[0] becomes a second feature word and bit 31
- *     says it is valid (an older driver leaves reserved[] zero).
+ *   - feature bit 31 is a continuation bit: reserved[0] is a second feature
+ *     word (UA_FEAT2_*) and bit 31 says it is valid (an older driver leaves
+ *     reserved[] zero).  From ABI 1.8 on, bit 31 is set whenever reserved[0]
+ *     carries a bit, so a driver with no UA_FEAT2_* bit to report returns
+ *     the same features word as before.
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		7
+#define UA_ABI_MINOR		8
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -564,6 +566,16 @@ struct ua_dma_test {
 #define UA_FEAT_KEXT_DRIVER_PARAMS (1u << 15) /* UA_DRIVER_PARAM_KEXT(1..5) (ABI 1.5) */
 #define UA_FEAT_DSP_LOAD	(1u << 16) /* load words in ua_dsp_info (ABI 1.6) */
 #define UA_FEAT_CLOCK_SOURCES	(1u << 17) /* UA_IOCTL_GET_CLOCK_SOURCES (ABI 1.7) */
+#define UA_FEAT_FEATURES2	(1u << 31) /* reserved[0] = UA_FEAT2_* (ABI 1.8) */
+
+/*
+ * Second feature word: ua_version.reserved[0], valid when UA_FEAT_FEATURES2
+ * is set.  UA_FEAT2_PLUGIN_HOST: the module was loaded with plugin_host=1,
+ * so UA_IOCTL_BOARD_QUERY and UA_IOCTL_PLUGIN_INSTANCE are served (ABI
+ * 1.8).  Which operations are accepted right now is what
+ * GET_PLUGIN_CAPS.operations says.
+ */
+#define UA_FEAT2_PLUGIN_HOST	(1u << 0)
 
 struct ua_version {
 	__u32 abi_major;
@@ -571,7 +583,7 @@ struct ua_version {
 	__u32 driver_version;	/* 0x00MMmmpp: 0.2.0 = 0x000200 */
 	__u32 features;		/* UA_FEAT_* */
 	char driver_name[16];	/* NUL-terminated version string, e.g. "0.2.0" */
-	__u32 reserved[4];
+	__u32 reserved[4];	/* [0]: UA_FEAT2_* when UA_FEAT_FEATURES2 */
 };
 
 #define UA_IOCTL_GET_VERSION	_IOR(UA_IOCTL_MAGIC, 0x04, struct ua_version)
@@ -696,11 +708,18 @@ struct ua_pause_info {
  * Plugin capabilities (UA_IOCTL_GET_PLUGIN_CAPS, read-only, ABI 1.3,
  * UA_FEAT_PLUGIN_CAPS).
  *
- * The driver supports no DSP plugin operation: nothing loads, places,
- * parameterises or removes a plugin on the DSPs, so `operations` is 0.
- * A client that presents plugins (a Console/plugin bridge) must treat
- * every one as unavailable on the hardware.  An operation the driver
- * gains later gets a UA_PLUGIN_OP_* bit; until then no bit is defined.
+ * `operations` has a UA_PLUGIN_OP_* bit for each plug-in hosting operation
+ * the driver accepts right now, and only then: the module was loaded with
+ * plugin_host=1 (UA_FEAT2_PLUGIN_HOST), the device is up and connected, and
+ * DSP 0's rings run.  With plugin_host=0 (the default) it is 0, as it was
+ * before ABI 1.8, and a client that presents plug-ins must treat every one
+ * as unavailable on the hardware.  A bit that is clear means the ioctl
+ * fails now (-EOPNOTSUPP, -ENODEV, ...), not that it does not exist.
+ *   UA_PLUGIN_OP_BOARD_QUERY  UA_IOCTL_BOARD_QUERY
+ *   UA_PLUGIN_OP_CREATE       UA_IOCTL_PLUGIN_INSTANCE, UA_PLUGIN_INST_CREATE
+ *                             (the device's own authorization answer for the
+ *                             plug-in is read first; see below)
+ *   UA_PLUGIN_OP_DESTROY      UA_IOCTL_PLUGIN_INSTANCE, UA_PLUGIN_INST_DESTROY
  *
  * `state` reports what the driver last did, not a verified DSP state:
  *   UA_PLUGIN_STATE_FW_LOADED       a DSP firmware load completed: the
@@ -713,24 +732,46 @@ struct ua_pause_info {
  *                                   (ua-apollo-plugin-chain.bin) was sent:
  *                                   fixed module setup, not a plugin load
  *   UA_PLUGIN_STATE_AUDIO_CONNECTED the audio extension is connected
+ *   UA_PLUGIN_STATE_HOST            plugin_host=1 (ABI 1.8)
+ *   UA_PLUGIN_STATE_STRIPS          the driver's Console input strips run
+ *                                   on DSP 0 (input_strips=1, ABI 1.8)
  * dsp_rings: bit n set = DSP n has its command and response rings.
  * dma_orphans: DMA buffers a timed-out ring command may still reference;
  * the driver frees each once the ring is provably past it.
- * Reserved words are 0.
+ * ABI 1.8 (0 before):
+ * owned_dsps: bit n = this driver owns DSP n's memory pools: it found the
+ *   DSP freshly powered (no host since power-up) at its last cold start and
+ *   nothing outside the plug-in host (a raw DSP ioctl, another firmware
+ *   load) has touched it since.  Only owned DSPs ever get strips or
+ *   plug-ins.
+ * quarantined_dsps: bit n = an operation on DSP n ended with an outcome the
+ *   driver cannot prove (a reply that never came, a teardown the ring did
+ *   not take); nothing more is placed there until the next cold start.
+ * instances: plug-in instances that exist (all open files).
+ * Other reserved words are 0.
  */
 #define UA_PLUGIN_STATE_FW_LOADED	(1u << 0)
 #define UA_PLUGIN_STATE_DSPS_CONNECTED	(1u << 1)
 #define UA_PLUGIN_STATE_INIT_CHAIN	(1u << 2)
 #define UA_PLUGIN_STATE_AUDIO_CONNECTED	(1u << 3)
+#define UA_PLUGIN_STATE_HOST		(1u << 4)
+#define UA_PLUGIN_STATE_STRIPS		(1u << 5)
+
+#define UA_PLUGIN_OP_BOARD_QUERY	(1ull << 0)
+#define UA_PLUGIN_OP_CREATE		(1ull << 1)
+#define UA_PLUGIN_OP_DESTROY		(1ull << 2)
 
 struct ua_plugin_caps {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_caps) */
 	__u32 state;		/* UA_PLUGIN_STATE_* */
-	__u64 operations;	/* UA_PLUGIN_OP_*: none exist, always 0 */
+	__u64 operations;	/* UA_PLUGIN_OP_*: accepted right now */
 	__u32 num_dsps;
 	__u32 dsp_rings;	/* bit n: DSP n's rings are allocated */
 	__u32 dma_orphans;	/* parked DMA buffers, see above */
-	__u32 reserved[9];
+	__u32 owned_dsps;	/* ABI 1.8, see above */
+	__u32 quarantined_dsps;	/* ABI 1.8 */
+	__u32 instances;	/* ABI 1.8 */
+	__u32 reserved[6];
 };
 
 #define UA_IOCTL_GET_PLUGIN_CAPS	_IOR(UA_IOCTL_MAGIC, 0x07, struct ua_plugin_caps)
@@ -919,5 +960,145 @@ struct ua_event {
 #define UA_ERR_AX_FAULT		3
 #define UA_ERR_DSP_VECTOR	4
 #define UA_ERR_BLOCK_SEND	5
+
+/*
+ * Plug-in hosting (ABI 1.8, UA_FEAT2_PLUGIN_HOST).  Served only when the
+ * module was loaded with plugin_host=1 (default off); otherwise both
+ * ioctls fail with -EOPNOTSUPP.  Neither needs CAP_SYS_RAWIO: everything
+ * that reaches the device is built by the driver (no address, command word
+ * or code byte comes from user space; modules are read by the driver from
+ * /lib/firmware/universal-audio/plugins/modules/<sha256>.bill).
+ *
+ * Numbers: 0x90 BOARD_QUERY, 0x94 PLUGIN_INSTANCE.  0x91 and 0x92 are never
+ * assigned (an earlier prototype's registration and host-backing
+ * transports); 0x93 is kept for a catalog ioctl.
+ *
+ * Licensing.  The driver hosts only plug-ins the device itself says are
+ * authorized, and never anything else:
+ *   - The device's answer is its board table: 768 words, the word for
+ *     plug-in id R (0x800 <= R < 0xB00, the plug-in's render id) at index
+ *     R - 0x800.  The driver asks for it with the date from the system
+ *     clock (days since 2007-01-01 UTC << 12, plus the minute of the day);
+ *     there is no way to give it another date.  The query updates the
+ *     device's date as UA's own driver does on every query.
+ *   - UA_IOCTL_BOARD_QUERY returns the table as the device sent it.  The
+ *     driver keeps no copy: every query and every CREATE asks the device
+ *     again, and a table is never reused across an epoch (a reconnect, a
+ *     rate change, a cold start, a replug).
+ *   - UA_PLUGIN_INST_CREATE reads a fresh table first, in the same
+ *     operation and the same epoch as the upload that follows, and refuses
+ *     (-EACCES, before anything is placed or sent) unless the word admits
+ *     the plug-in, exactly as UA's SDK decides:
+ *       0x81000000, 0x82000000   UA_PLUGIN_LICENSE_AUTHORIZED  admitted
+ *       any other word but the   UA_PLUGIN_LICENSE_DEMO        admitted
+ *         three below            (a demo is running)
+ *       0x80000000               UA_PLUGIN_LICENSE_NOT_STARTED refused
+ *       0x00000000               UA_PLUGIN_LICENSE_EXPIRED     refused
+ *       0x83000000               UA_PLUGIN_LICENSE_UNAVAILABLE refused
+ *     A query that fails, a reply that does not match, an id outside the
+ *     table or an epoch that changed: refused too (UA_PLUGIN_LICENSE_UNKNOWN).
+ *   - Nothing here starts a demo or changes what the device holds.  Demos
+ *     are started in UA's own software.
+ */
+
+#define UA_BOARD_QUERY_WORDS	768
+#define UA_BOARD_QUERY_BASE	0x800	/* words[i]: plug-in id 0x800 + i */
+
+/*
+ * UA_IOCTL_BOARD_QUERY: the device's board table, fresh.  Fill struct_size
+ * and leave everything else 0.  On success words[] is the table exactly as
+ * the device returned it, date the date word that went with the query and
+ * epoch the plug-in host epoch it belongs to.  -EBUSY while another query
+ * or plug-in operation runs, -ETIMEDOUT when the device did not answer in
+ * 2 s, -EPROTO for an answer that is not the query's, -ESTALE when the
+ * epoch changed meanwhile, -ERANGE when the system clock is before 2007.
+ * Nothing is copied back on an error.
+ */
+struct ua_board_query {
+	__u32 struct_size;	/* in: sizeof(struct ua_board_query) */
+	__u32 flags;		/* in: 0 */
+	__u32 date;		/* out: the date word sent with the query */
+	__u32 reserved;		/* 0 */
+	__u64 epoch;		/* out */
+	__u32 words[UA_BOARD_QUERY_WORDS];	/* out */
+};
+
+#define UA_IOCTL_BOARD_QUERY	_IOWR(UA_IOCTL_MAGIC, 0x90, struct ua_board_query)
+
+#define UA_PLUGIN_LICENSE_AUTHORIZED	0u
+#define UA_PLUGIN_LICENSE_DEMO		1u
+#define UA_PLUGIN_LICENSE_NOT_STARTED	2u
+#define UA_PLUGIN_LICENSE_EXPIRED	3u
+#define UA_PLUGIN_LICENSE_UNAVAILABLE	4u
+#define UA_PLUGIN_LICENSE_UNKNOWN	0xffffffffu
+
+/*
+ * UA_IOCTL_PLUGIN_INSTANCE: plug-in instances, owned by the open file that
+ * created them.  Closing the file destroys them; so does the device going
+ * away.  A reconnect, a rate change or a cold start ends them too: their
+ * handle then fails with -ESTALE and DESTROY just forgets it.
+ *
+ * UA_PLUGIN_INST_CREATE  in: render_id, dsp (UA_PLUGIN_DSP_ANY or an index),
+ *   n_resources + resources (the plug-in's DSP modules by SHA-256),
+ *   n_private + privates (its private memory rows, head row first with
+ *   link 0xffffffff, every other row's link = row index << 24 | word
+ *   offset), flags.  The device's authorization answer for render_id is read
+ *   first (see above).  Then the modules are read from the module store and
+ *   checked, placed on a DSP this driver owns (shared modules once per DSP),
+ *   uploaded (each acknowledged by the DSP), and the private rows are
+ *   zero-filled and linked.  Nothing is routed or started: the instance
+ *   processes no audio yet.
+ *   out: handle, dsp, epoch, license_state, license_word (the device's word
+ *   for render_id), also on -EACCES.
+ *   UA_PLUGIN_CREATE_F_CHECK: stop after the authorization answer (no
+ *   instance, nothing placed or sent; handle 0).
+ * UA_PLUGIN_INST_DESTROY  in: handle.  Releases what the instance placed:
+ *   modules whose last user it was are released on the DSP, the memory goes
+ *   back to the pools.
+ *
+ * Errors: -EOPNOTSUPP (plugin_host=0), -EINVAL, -EACCES (the device does not
+ * authorize the plug-in), -ENOENT (a module is not in the store), -ENOSPC
+ * (no owned DSP has room), -EBUSY, -ETIMEDOUT/-EPROTO (the device did not
+ * answer as expected; the DSP is quarantined until the next cold start),
+ * -ESTALE.
+ */
+#define UA_PLUGIN_INST_CREATE		1u
+#define UA_PLUGIN_INST_DESTROY		2u
+
+#define UA_PLUGIN_CREATE_F_CHECK	(1u << 0)
+
+#define UA_PLUGIN_DSP_ANY		0xffffffffu
+#define UA_PLUGIN_RES_MAX		64
+#define UA_PLUGIN_PRIV_MAX		128
+
+struct ua_plugin_resource {
+	__u8 sha256[32];
+};
+
+struct ua_plugin_private {
+	__u32 pool;		/* 1, 2 or 3 */
+	__u32 dwords;
+	__u32 link;		/* row << 24 | word offset; 0xffffffff: none */
+	__u32 flags;		/* 0 or 2 */
+};
+
+struct ua_plugin_instance {
+	__u32 struct_size;	/* sizeof(struct ua_plugin_instance) */
+	__u32 op;		/* UA_PLUGIN_INST_* */
+	__u32 flags;		/* CREATE: UA_PLUGIN_CREATE_F_*; else 0 */
+	__u32 handle;		/* CREATE: out; DESTROY: in */
+	__u32 render_id;	/* CREATE: absolute plug-in id */
+	__u32 dsp;		/* CREATE: in, then the DSP used */
+	__u32 n_resources;	/* CREATE: 1..UA_PLUGIN_RES_MAX */
+	__u32 n_private;	/* CREATE: 1..UA_PLUGIN_PRIV_MAX */
+	__u64 resources;	/* CREATE: user pointer */
+	__u64 privates;		/* CREATE: user pointer */
+	__u64 epoch;		/* out */
+	__u32 license_state;	/* out: UA_PLUGIN_LICENSE_* */
+	__u32 license_word;	/* out */
+	__u32 reserved[6];
+};
+
+#define UA_IOCTL_PLUGIN_INSTANCE _IOWR(UA_IOCTL_MAGIC, 0x94, struct ua_plugin_instance)
 
 #endif /* UA_IOCTL_H */

@@ -35,6 +35,7 @@
 #include <sound/control.h>
 
 #include "ua_apollo.h"
+#include "ua_plugin_host.h"
 #include "ua_ioctl.h"
 
 #define DRIVER_NAME	"ua_apollo"
@@ -989,6 +990,15 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 	if (ua_dsp_solo_flag_honoured())
 		v.features |= UA_FEAT_BUS_SOLO_FLAG;
 
+	/*
+	 * Second feature word (ABI 1.8): bit 31 only when it carries a bit,
+	 * so with plugin_host=0 the features word is what it always was.
+	 */
+	if (ua_plugin_host_enabled())
+		v.reserved[0] |= UA_FEAT2_PLUGIN_HOST;
+	if (v.reserved[0])
+		v.features |= UA_FEAT_FEATURES2;
+
 	strscpy(v.driver_name, DRIVER_VERSION, sizeof(v.driver_name));
 	if (copy_to_user((void __user *)arg, &v, sizeof(v)))
 		return -EFAULT;
@@ -1092,8 +1102,8 @@ static long ua_ioctl_get_pause_info(struct ua_device *ua, unsigned long arg)
 }
 
 /*
- * UA_IOCTL_GET_PLUGIN_CAPS: no plugin operation exists (operations = 0);
- * the state bits are what the driver last did.  No register access.
+ * UA_IOCTL_GET_PLUGIN_CAPS: the plug-in operations accepted right now (none
+ * unless plugin_host=1) and what the driver last did.  No register access.
  */
 static long ua_ioctl_get_plugin_caps(struct ua_device *ua, unsigned long arg)
 {
@@ -1116,6 +1126,9 @@ static long ua_ioctl_get_plugin_caps(struct ua_device *ua, unsigned long arg)
 		if (ua->dsp[i].rings_allocated)
 			caps.dsp_rings |= BIT(i);
 	caps.dma_orphans = ua->dma_orphan_count;
+	ua_plugin_host_caps(ua, &caps.state, &caps.owned_dsps,
+			    &caps.quarantined_dsps, &caps.instances);
+	caps.operations = ua_plugin_host_ops(ua);
 	mutex_unlock(&ua->lock);
 
 	if (copy_to_user((void __user *)arg, &caps, sizeof(caps)))
@@ -3549,10 +3562,20 @@ static bool ua_ioctl_needs_rawio(unsigned int cmd)
 	}
 }
 
-static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
-			      unsigned long arg)
+static long ua_ioctl_dispatch(struct ua_device *ua, struct ua_file *uf,
+			      unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
+	/*
+	 * Plug-in hosting (ABI 1.8): -EOPNOTSUPP unless plugin_host=1.  Not
+	 * raw: every word that reaches the device is the driver's own.
+	 */
+	case UA_IOCTL_BOARD_QUERY:
+		return ua_plugin_ioctl_board_query(ua, arg);
+
+	case UA_IOCTL_PLUGIN_INSTANCE:
+		return ua_plugin_ioctl_instance(ua, uf, arg);
+
 	case UA_IOCTL_GET_DEVICE_INFO:
 		return ua_ioctl_get_device_info(ua, arg);
 
@@ -3773,7 +3796,7 @@ static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (ua->removed || atomic_read(&ua->shutdown))
 		ret = -ENODEV;
 	else
-		ret = ua_ioctl_dispatch(ua, cmd, arg);
+		ret = ua_ioctl_dispatch(ua, uf, cmd, arg);
 	up_read(&ua->ioctl_sem);
 	return ret;
 }
@@ -4200,6 +4223,7 @@ static void ua_chardev_release(struct device *dev)
 {
 	struct ua_device *ua = container_of(dev, struct ua_device, chardev);
 
+	ua_plugin_host_free(ua);
 	pci_dev_put(ua->pdev);
 	kfree(ua);
 }
@@ -4325,6 +4349,11 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	INIT_LIST_HEAD(&ua->unit_node);
 	atomic_set(&ua->pause_mask, 0);
 	pci_set_drvdata(pdev, ua);
+
+	/* Plug-in host state (DSP ownership, strips, instances) */
+	ret = ua_plugin_host_init(ua);
+	if (ret)
+		goto err_put;
 
 	/* Enable device */
 	ret = pcim_enable_device(pdev);
