@@ -30,7 +30,8 @@
 "b28":{"in":"dll:UAD SSL E Channel Strip.dll","res":"10/8217/1033","sha":"479b6bb2c2c729027164bc8a1d201bd4d6256faaef26ea6c1b42152b881e2cd2","dec":"png"},
 "b29":{"in":"dll:UAD SSL E Channel Strip.dll","res":"10/8214/1033","sha":"bf92f3363b22c852e03e40222915d4fa8c91965a6992528a021d914e9951f87d","dec":"png"},
 "b30":{"in":"dll:UAD SSL E Channel Strip.dll","res":"10/8226/1033","sha":"a5c4cba2b283a99be02c14269674ed6ebc7f1673bc1e9df5d1f969251bf7aa6a","dec":"png"},
-"b31":{"in":"dll:UAD SSL E Channel Strip.dll","res":"10/8207/1033","sha":"a19c095f9636bdd9bb063ab2a46d0b463c71d71363044847fa2100153c7adc81","dec":"png"}
+"b31":{"in":"dll:UAD SSL E Channel Strip.dll","res":"10/8207/1033","sha":"a19c095f9636bdd9bb063ab2a46d0b463c71d71363044847fa2100153c7adc81","dec":"png"},
+"b32":{"in":"dll:UAD SSL E Channel Strip.dll","res":"10/8191/1033","sha":"f580cdc7a6cdec2c2a2ea406d676834e25dc5cdfdd40b6d5aa16a2206fa364e2","dec":"png"}
 },"sprites":{
 "SSL_E_CS_background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":902,"h":1400,"rgba":"78668e1e4859b3a1c1b891840d9edc8fcb9f3ede506f6e49b722f558f4050e78"}},
 "SSL_E_CS_knob_blue":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":140,"h":13332,"rgba":"643ac262144d46af2081352046cf1095c566c31cc19443b90ddb2396174c93c3"}},
@@ -64,5 +65,5 @@
 "SSL_E_CS_switch_pre_dyn":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b29"},{"op":"lanczos2x"}],"output":{"w":70,"h":378,"rgba":"ce41f16925c500c071236f402eeb397d97ca58f2c8ae8b46d44feedc0dc59db2"}},
 "SSL_E_CS_switch_pre_dyn_alt":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b30"},{"op":"lanczos2x"}],"output":{"w":100,"h":252,"rgba":"67f3208ec459337fa25ecb54e4c9dbe4ab9c733b9a30a9a294a25222d4ca8436"}},
 "SSL_E_CS_switch_select":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b31"},{"op":"lanczos2x"}],"output":{"w":100,"h":124,"rgba":"c49eec422a6f80e4b98e116672f29cc2ae87b0062eee78d6271835245411126d"}},
-"synth_uadsslechannelstrip_level-fader":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"}
+"synth_uadsslechannelstrip_level-fader":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b32"},{"op":"lanczos2x"}],"n":101,"w":184,"h":844,"x":[0,0,0],"y":[0,646,-1],"clip":true}],"output":{"w":184,"h":85244,"rgba":"c3ac12cd7bad3a8c90e014a3f87c3d3e734768842354b77c3561389440648110"}}
 }}

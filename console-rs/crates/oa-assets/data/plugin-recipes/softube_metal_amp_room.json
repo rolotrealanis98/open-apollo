@@ -11,12 +11,13 @@
 "b9":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1004/1053","sha":"446b7284ff85b21094b64b50fcdbd878506e9e2d636fbaaacfc19adf1bba2f9e","dec":"png-raw"},
 "b10":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1005/1053","sha":"3fa80dce272e3d5f937f3df7644780badf4283f69487dcf4eb5b2332dcccdfdb","dec":"png-raw"},
 "b11":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1012/1053","sha":"f3e9461ebdf8ed0c36d028daa484a73bd964d6b58710e2bdd6ca955f488f2f39","dec":"png"},
-"b12":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1013/1053","sha":"13931eac96467c25f2dd5d08047c3d5afae273891c2fbb251da2d1e602fbca10","dec":"png"},
-"b13":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1014/1053","sha":"b473158f1a6a2f3df0431bbdfa479afc433346a59471e1850a5b5404c9e7c0fd","dec":"png"},
-"b14":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1016/1053","sha":"20ac0573102226369f70e9fe16d5a83c233eaac7ff61cf4f726468ae3aee3985","dec":"png"},
-"b15":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1017/1053","sha":"544f16d8ed9d58f2c9d52fca0b577b2438af757ae9cb83bec7f9ff453c9464ab","dec":"png"},
-"b16":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1018/1053","sha":"7eeb3d0673e768ff319c1a5a644bf6227b0408334c3cb90fdcc8d93629e98786","dec":"png"},
-"b17":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1001/1053","sha":"a83cf2c2278e133b6de3b765a74169ef3d3c36db5c90e21e2a85b115a20484fe","dec":"png"}
+"b12":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1003/1053","sha":"c41e2eac397ffef02b29c1697a1c51e835b858335c72f6721c83a5011c1dc894","dec":"png"},
+"b13":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1013/1053","sha":"13931eac96467c25f2dd5d08047c3d5afae273891c2fbb251da2d1e602fbca10","dec":"png"},
+"b14":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1014/1053","sha":"b473158f1a6a2f3df0431bbdfa479afc433346a59471e1850a5b5404c9e7c0fd","dec":"png"},
+"b15":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1016/1053","sha":"20ac0573102226369f70e9fe16d5a83c233eaac7ff61cf4f726468ae3aee3985","dec":"png"},
+"b16":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1017/1053","sha":"544f16d8ed9d58f2c9d52fca0b577b2438af757ae9cb83bec7f9ff453c9464ab","dec":"png"},
+"b17":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1018/1053","sha":"7eeb3d0673e768ff319c1a5a644bf6227b0408334c3cb90fdcc8d93629e98786","dec":"png"},
+"b18":{"in":"dll:UAD Softube Metal Amp Room.dll","res":"MPACK/1001/1053","sha":"a83cf2c2278e133b6de3b765a74169ef3d3c36db5c90e21e2a85b115a20484fe","dec":"png"}
 },"sprites":{
 "K_MetalRoom_bypass0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":176,"h":64,"rgba":"9eadd1e093007f074cb14c9dda70f738c58ddaefcf3ac056b5649bd6c02bb2b5"}},
 "K_MetalRoom_bypass1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":176,"h":64,"rgba":"e4c4c969e1e2977a09964889bb1f7108e863cd2569cbfdc7220afa9afdd71823"}},
@@ -31,12 +32,12 @@
 "K_MetalRoom_room0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b11"},{"op":"crop","box":[25,60,480,447]},{"op":"lanczos2x"}],"output":{"w":960,"h":894,"rgba":"f90a2e91bb36a021f9ee9fa976fc7fefe8236887627cbb2739d6450252c939c1"}},
 "K_MetalRoom_room1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b11"},{"op":"crop","box":[280,0,480,447]},{"op":"lanczos2x"}],"output":{"w":960,"h":894,"rgba":"5c59391f30e03f00e04cdf7680300775f63be03bd011b9c20115e93412954453"}},
 "K_softube_metal_amp_room_toolbar":{"status":"runtime","basis":"live","owner":"plugin-ui/chrome","kind":"chrome"},
-"STB_Softube_Metal_Amp_Room_1003_slider":{"status":"no-recipe","basis":"derived","kind":"todo"},
-"STB_Softube_Metal_Amp_Room_1013":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b12"},{"op":"lanczos2x"}],"output":{"w":130,"h":10400,"rgba":"7be250a7c14e7a5ddb3137b43a5d920d834c1c9376730b469b04f5ae5945f2a1"}},
-"STB_Softube_Metal_Amp_Room_1014":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b13"},{"op":"lanczos2x"}],"output":{"w":132,"h":12000,"rgba":"23c1b13d18cdc770f8d5a548cde2956a6fe633a70b38755846e6fdb2a40f46c2"}},
-"STB_Softube_Metal_Amp_Room_1016":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b14"},{"op":"lanczos2x"}],"output":{"w":960,"h":178,"rgba":"7229d8f3d6ab649694ff9f1e118ba4909099421d91ff187ec3fa69f22c1ed255"}},
-"STB_Softube_Metal_Amp_Room_1017":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b15"},{"op":"lanczos2x"}],"output":{"w":126,"h":252,"rgba":"bb92ef2bbaababcff59731cb7464a6870b9856fd7616d79fa82ca12fb8b3a050"}},
-"STB_Softube_Metal_Amp_Room_1018":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b16"},{"op":"lanczos2x"}],"output":{"w":126,"h":160,"rgba":"54543133f3d095cb760bf8b0c6cdfcd18903d86901223b87ac6eac70e9767f46"}},
-"STB_Softube_Metal_Amp_Room_strip0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b17"},{"op":"crop","box":[0,0,480,85]},{"op":"lanczos2x"}],"output":{"w":960,"h":170,"rgba":"3c60f2fedef2d5afa1f5e15e41dd56bb45bd46bf63b4a77cc9f85eb92c42f546"}},
-"STB_Softube_Metal_Amp_Room_strip1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b17"},{"op":"crop","box":[500,0,480,85]},{"op":"lanczos2x"}],"output":{"w":960,"h":170,"rgba":"23dc55aee53f40134f2d384a4bcadb3fd232aba8e52734b151c5def9d831f15a"}}
+"STB_Softube_Metal_Amp_Room_1003_slider":{"status":"verified","basis":"derived","build":[{"op":"slide","thumb":[{"op":"load","blob":"b12"}],"n":81,"w":116,"h":49,"x":[0,92,-1],"y":[0,0,-1]},{"op":"lanczos2x"}],"output":{"w":232,"h":7938,"rgba":"b46c3396d42e3bd75b72466f946ea45ad8ae4a5330b404181245879f4c3fbb63"}},
+"STB_Softube_Metal_Amp_Room_1013":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b13"},{"op":"lanczos2x"}],"output":{"w":130,"h":10400,"rgba":"7be250a7c14e7a5ddb3137b43a5d920d834c1c9376730b469b04f5ae5945f2a1"}},
+"STB_Softube_Metal_Amp_Room_1014":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b14"},{"op":"lanczos2x"}],"output":{"w":132,"h":12000,"rgba":"23c1b13d18cdc770f8d5a548cde2956a6fe633a70b38755846e6fdb2a40f46c2"}},
+"STB_Softube_Metal_Amp_Room_1016":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b15"},{"op":"lanczos2x"}],"output":{"w":960,"h":178,"rgba":"7229d8f3d6ab649694ff9f1e118ba4909099421d91ff187ec3fa69f22c1ed255"}},
+"STB_Softube_Metal_Amp_Room_1017":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b16"},{"op":"lanczos2x"}],"output":{"w":126,"h":252,"rgba":"bb92ef2bbaababcff59731cb7464a6870b9856fd7616d79fa82ca12fb8b3a050"}},
+"STB_Softube_Metal_Amp_Room_1018":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b17"},{"op":"lanczos2x"}],"output":{"w":126,"h":160,"rgba":"54543133f3d095cb760bf8b0c6cdfcd18903d86901223b87ac6eac70e9767f46"}},
+"STB_Softube_Metal_Amp_Room_strip0":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b18"},{"op":"crop","box":[0,0,480,85]},{"op":"lanczos2x"}],"output":{"w":960,"h":170,"rgba":"3c60f2fedef2d5afa1f5e15e41dd56bb45bd46bf63b4a77cc9f85eb92c42f546"}},
+"STB_Softube_Metal_Amp_Room_strip1":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b18"},{"op":"crop","box":[500,0,480,85]},{"op":"lanczos2x"}],"output":{"w":960,"h":170,"rgba":"23dc55aee53f40134f2d384a4bcadb3fd232aba8e52734b151c5def9d831f15a"}}
 }}

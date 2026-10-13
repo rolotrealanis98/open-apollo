@@ -31,7 +31,8 @@
 "b29":{"in":"dll:UAD API Vision Channel Strip.dll","res":"10/8585/1033","sha":"66c3e25b458f50e24d9dbe305575e87f4b5916ed56a40dd26a25b08315379677","dec":"png"},
 "b30":{"in":"dll:UAD API Vision Channel Strip.dll","res":"10/8588/1033","sha":"00203299286b6055d5b537c91952225cdbf34a743d0c23cb417499b3f82e21f7","dec":"png"},
 "b31":{"in":"dll:UAD API Vision Channel Strip.dll","res":"10/8589/1033","sha":"74db7e06aba5195960200c5a5d5d601349147e8c069b11165e3110eb657513db","dec":"png"},
-"b32":{"in":"dll:UAD Hitsville EQ.dll","res":"10/8646/1033","sha":"c29332d4704b3cf950558478d4530cc3a11de3fd81346bdd4cd241c797d8144f","dec":"png"}
+"b32":{"in":"dll:UAD API Vision Channel Strip.dll","res":"10/8587/1033","sha":"d6228bd1fd0ebd86ab3ff872429c040949dcf526848de6a4408325ec956b330e","dec":"png"},
+"b33":{"in":"dll:UAD Hitsville EQ.dll","res":"10/8646/1033","sha":"c29332d4704b3cf950558478d4530cc3a11de3fd81346bdd4cd241c797d8144f","dec":"png"}
 },"sprites":{
 "UA_API-CS_button_ON":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":98,"h":144,"rgba":"89d7107ec7ca43fce6ff7247103d519069c448a8c2c1b4e444b23bc1d8db44a4"}},
 "UA_API-CS_button_SIDECHAIN":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":98,"h":144,"rgba":"8e116c9d290bbaf7efdd73d816aa9d7d8174545dc0f26cae6fa60ed41a1b0f63"}},
@@ -65,6 +66,6 @@
 "UA_API_VISION-Channel-Strip_buttons_TYPE-ON":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b29"},{"op":"lanczos2x"}],"output":{"w":130,"h":456,"rgba":"5ba340c7a37f663c696435fe492a67a2cccdc316cefdf7a5e5c3d246b0b3ce56"}},
 "UA_API_VISION-Channel-Strip_panel-550L":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b30"},{"op":"lanczos2x"}],"output":{"w":1040,"h":1280,"rgba":"7764d0ab4dbb8f58ff961bda471eef21fe71386e6387e0f46462bd8401bf4c9d"}},
 "UA_API_VISION-Channel-Strip_panel-560L":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b31"},{"op":"lanczos2x"}],"output":{"w":1040,"h":1280,"rgba":"bc746f52ac6fbdfd3ee5ccb422ab9a8cadfece84bfa5b45d0374649248e1990f"}},
-"synth_uadapivisionchannelstrip_channel-fader":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"transparent":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b32"},{"op":"crop","box":[4,1342,62,24]},{"op":"lanczos2x"}],"output":{"w":124,"h":48,"rgba":"dfc1dbb4cdc9e6a31bc8904b090a1661952993802451869c081566aeb665fc99"}}
+"synth_uadapivisionchannelstrip_channel-fader":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b32"},{"op":"lanczos2x"}],"n":101,"w":142,"h":908,"x":[0,0,0],"y":[0,710,-1],"clip":true}],"output":{"w":142,"h":91708,"rgba":"3d2b67cc6817d27be99ffa4e87c72b208fa3ab039fc5eece29791131e4a5b994"}},
+"transparent":{"status":"verified","basis":"derived","build":[{"op":"load","blob":"b33"},{"op":"crop","box":[4,1342,62,24]},{"op":"lanczos2x"}],"output":{"w":124,"h":48,"rgba":"dfc1dbb4cdc9e6a31bc8904b090a1661952993802451869c081566aeb665fc99"}}
 }}

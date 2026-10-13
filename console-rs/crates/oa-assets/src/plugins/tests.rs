@@ -402,3 +402,137 @@ fn builtin_recipes_are_consistent() {
         }
     }
 }
+
+#[test]
+fn frame_and_alpha_ops_match_reference() {
+    let src = synth(37, 23, 1, Alpha::Mixed);
+    let mut t = src.clone();
+    t.tint([255, 65, 47]);
+    assert_eq!(t.hash(), "a1992dfc8d2affbbd51acdc0234b589f1df7daffc7e536c07fa453937b26525a");
+    let mut t = src.clone();
+    t.feather(6.0);
+    assert_eq!(t.hash(), "cad15154dd0be73b13f714109d33d59b416732da8612deced430376e3231896d");
+    let mut t = src.clone();
+    t.feather(2.5);
+    assert_eq!(t.hash(), "fe89ab9e95ccd6808bd6dde2062212a2d8b3ebffd395e0b437abb77ce6df541f");
+    let tall = synth(10, 24, 9, Alpha::Mixed);
+    let r = super::run::reorder(&tall, 4, &[3, 2, 1, 0, 0]).unwrap();
+    assert_eq!(r.hash(), "1db61fe1e9fcac05927d0e2947bc4c4a6dfd8f910d7b2ee2ca98797161039a8f");
+    assert!(super::run::reorder(&tall, 5, &[0]).is_err());
+}
+
+#[test]
+fn lines_match_pillow_imagedraw() {
+    type Case = ((u32, u32), [i32; 4], u32, [u8; 4], &'static str);
+    let cases: &[Case] = &[
+        (
+            (40, 30),
+            [3, 4, 35, 22],
+            1,
+            [255, 0, 0, 255],
+            "bd56dfd9c03c533bcbf818b4fb441c15b3508a4f0e1101a396efb809d4479960",
+        ),
+        (
+            (40, 30),
+            [35, 2, 5, 27],
+            5,
+            [10, 200, 30, 128],
+            "0959e98aa23b962427bfad36b672a5058bf265a7c90b54f1b0c7305ad802545d",
+        ),
+        (
+            (64, 64),
+            [32, 60, 50, -5],
+            9,
+            [0, 0, 0, 255],
+            "2c1b718812b65f29e75eb600ede0ef4d23569d0b770488e9ae75981450bcc878",
+        ),
+        (
+            (50, 20),
+            [-10, 10, 70, 11],
+            4,
+            [1, 2, 3, 4],
+            "8314abcbd806a46e7228e74f2fe17eddaa2460b6daaa207d87b65b6b529e1309",
+        ),
+        (
+            (30, 30),
+            [15, 15, 15, 15],
+            7,
+            [9, 9, 9, 9],
+            "69effe712b1cae63598e7b92b07c6313234523e20cfc6763b924946b9afa1609",
+        ),
+        (
+            (30, 30),
+            [2, 2, 28, 2],
+            3,
+            [200, 100, 50, 255],
+            "5c6cb90c3e26f3f03aa815266cb91a7b67af9517a3bce2c4f5bc9d0d2c458cd4",
+        ),
+        (
+            (30, 40),
+            [5, 1, 6, 39],
+            12,
+            [77, 66, 55, 44],
+            "f5db44fde395f97ac0e401bf4cd3efc9a4c8bfc42438262e1ab935a4037c2530",
+        ),
+        (
+            (30, 30),
+            [1, 1, 20, 20],
+            0,
+            [255, 255, 255, 255],
+            "9ecf880c79c87baf01f0ee57fe3e96c83a542e6e1dea6252777b0cb601ead468",
+        ),
+    ];
+    for &((w, h), xy, width, rgba, want) in cases {
+        assert_eq!(super::draw::line(w, h, xy, width, rgba).hash(), want, "{xy:?} width {width}");
+    }
+}
+
+#[test]
+fn affine_matches_pillow_transform() {
+    let src = synth(37, 23, 1, Alpha::Mixed);
+    let cases: &[([f64; 6], &str)] = &[
+        (
+            [
+                0.956304755963035,
+                -0.292371704722737,
+                4.170636618995326,
+                0.292371704722737,
+                0.956304755963035,
+                -4.906381230945534,
+            ],
+            "a92c809d105dd4213140a42145e543982ca3ffe80e52fcf248386d836babeba3",
+        ),
+        (
+            [
+                -0.681998360062499,
+                0.73135370161917,
+                13.16321509252914,
+                -0.73135370161917,
+                -0.681998360062499,
+                15.723528816504196,
+            ],
+            "0cdb015e86d77abd4d5f2255543cf5c4422459ab784608bb62f641ad91785ea6",
+        ),
+        ([0.0, -1.0, 29.0, 1.0, 0.0, -7.0], "858e81ba0f7a795bd9678976bc5eecd8f7d5f4b48e66644dc8140279888cbe8d"),
+    ];
+    for (m, want) in cases {
+        assert_eq!(super::geometry::affine_bicubic(&src, *m).hash(), *want, "{m:?}");
+    }
+    // recipe numbers parse to the exact doubles (serde_json float_roundtrip)
+    let v: [f64; 1] = serde_json::from_str("[0.956304755963035]").unwrap();
+    assert_eq!(v[0], 0.956304755963035);
+}
+
+#[test]
+fn raw_deflate_loads_check_length() {
+    use std::io::Write;
+    let data = b"some bytes some bytes some bytes";
+    let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    z.write_all(data).unwrap();
+    let z = z.finish().unwrap();
+    assert_eq!(super::run::inflate_raw(&z, data.len()).unwrap(), data);
+    assert!(super::run::inflate_raw(&z, data.len() + 1).is_err());
+    let mut trailing = z.clone();
+    trailing.push(0);
+    assert!(super::run::inflate_raw(&trailing, data.len()).is_err());
+}

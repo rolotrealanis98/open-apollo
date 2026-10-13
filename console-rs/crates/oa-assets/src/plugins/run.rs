@@ -145,7 +145,9 @@ impl<'a> Runner<'a> {
 
     /// The blob a `load` step names, from the file's `blobs` table or inline.
     fn resolve(&self, op: &Op, fi: usize) -> Result<Blob, String> {
-        let Op::Load { blob, input, res, carve, sha, dec } = op else { return Err("not a load".into()) };
+        let Op::Load { blob, input, res, carve, sha, inflate, size, dec } = op else {
+            return Err("not a load".into());
+        };
         if let Some(k) = blob {
             return self.book.files[fi].blobs.get(k).cloned().ok_or_else(|| format!("unknown blob {k}"));
         }
@@ -154,6 +156,8 @@ impl<'a> Runner<'a> {
             res: res.clone(),
             carve: *carve,
             sha: sha.clone().ok_or("load needs sha")?,
+            inflate: inflate.clone(),
+            size: *size,
             dec: dec.clone().ok_or("load needs dec")?,
         })
     }
@@ -162,13 +166,18 @@ impl<'a> Runner<'a> {
         let (first, rest) = ops.split_first().ok_or("empty pipeline")?;
         let mut im: Rgba = match first {
             Op::Load { .. } => {
-                let Blob { input, res, carve, sha, dec } = self.resolve(first, fi)?;
-                let key = format!("{input}|{res:?}|{carve:?}|{dec}");
+                let Blob { input, res, carve, sha, inflate, size, dec } = self.resolve(first, fi)?;
+                let key = format!("{input}|{res:?}|{carve:?}|{inflate:?}|{dec}");
                 if let Some(b) = self.blobs.get(&key) {
                     (**b).clone()
                 } else {
                     let how = Decode::parse(&dec).ok_or_else(|| format!("unknown decode {dec}"))?;
-                    let bytes = self.blob(&input, res.as_deref(), carve, &sha)?;
+                    let mut bytes = self.blob(&input, res.as_deref(), carve, &sha)?;
+                    match inflate.as_deref() {
+                        None => {}
+                        Some("deflate-raw") => bytes = inflate_raw(&bytes, size.ok_or("inflate needs size")?)?,
+                        Some(other) => return Err(format!("unknown inflate {other}")),
+                    }
                     let im = Arc::new(decode(&bytes, how)?);
                     self.blobs.insert(key, im.clone());
                     (*im).clone()
@@ -188,11 +197,12 @@ impl<'a> Runner<'a> {
                 let thumb = self.pipeline(thumb, depth, fi)?;
                 thumb_fader(&track, &thumb, *w, *h, *k)?
             }
-            Op::Slide { thumb, n, w, h, x, y } => {
+            Op::Slide { thumb, n, w, h, x, y, clip } => {
                 let thumb = self.pipeline(thumb, depth, fi)?;
-                slide(&thumb, *n, *w, *h, *x, *y)?
+                slide(&thumb, *n, *w, *h, *x, *y, *clip)?
             }
             Op::Layers { n, layers } => self.layers(*n, layers, depth, fi)?,
+            Op::Line { w, h, xy, width, rgba } => super::draw::line(*w, *h, *xy, *width, *rgba),
             other => return Err(format!("pipeline must start with a source, not {other:?}")),
         };
         for op in rest {
@@ -209,7 +219,8 @@ impl<'a> Runner<'a> {
             | Op::Stack { .. }
             | Op::ThumbFader { .. }
             | Op::Slide { .. }
-            | Op::Layers { .. } => {
+            | Op::Layers { .. }
+            | Op::Line { .. } => {
                 return Err("a source step can only start a pipeline".into());
             }
             Op::Crop { bx: [x, y, w, h] } => {
@@ -248,6 +259,26 @@ impl<'a> Runner<'a> {
                 out.premul_tint(*rgb, *a);
                 out
             }
+            Op::Reorder { n, order } => reorder(&im, *n, order)?,
+            Op::Affine { matrix, resample } => {
+                if resample != "bicubic" {
+                    return Err(format!("affine: resample {resample} is not supported"));
+                }
+                super::geometry::affine_bicubic(&im, *matrix)
+            }
+            Op::Feather { px } => {
+                if *px <= 0.0 {
+                    return Err("feather: px must be > 0".into());
+                }
+                let mut out = im;
+                out.feather(*px);
+                out
+            }
+            Op::Tint { rgb } => {
+                let mut out = im;
+                out.tint(*rgb);
+                out
+            }
             Op::JucePremulRoundtrip => {
                 let mut out = im;
                 out.juce_premul_roundtrip();
@@ -277,6 +308,17 @@ impl<'a> Runner<'a> {
         }
         Ok(sheet)
     }
+}
+
+/// A raw DEFLATE stream that must end exactly where the bytes end and give `size` bytes.
+pub(crate) fn inflate_raw(b: &[u8], size: usize) -> Result<Vec<u8>, String> {
+    let mut d = flate2::Decompress::new(false);
+    let mut out = Vec::with_capacity(size + 1);
+    let st = d.decompress_vec(b, &mut out, flate2::FlushDecompress::Finish).map_err(|e| format!("inflate: {e}"))?;
+    if st != flate2::Status::StreamEnd || d.total_in() as usize != b.len() || out.len() != size {
+        return Err("inflate: stream does not end exactly or has the wrong size".into());
+    }
+    Ok(out)
 }
 
 fn find_from(h: &[u8], needle: &[u8], from: usize) -> Option<usize> {
@@ -328,7 +370,7 @@ fn thumb_fader(track: &Rgba, thumb: &Rgba, w: u32, h: u32, k: u32) -> Result<Rgb
     Ok(out)
 }
 
-fn slide(thumb: &Rgba, n: u32, w: u32, h: u32, x: [i64; 3], y: [i64; 3]) -> Result<Rgba, String> {
+fn slide(thumb: &Rgba, n: u32, w: u32, h: u32, x: [i64; 3], y: [i64; 3], clip: bool) -> Result<Rgba, String> {
     if n < 2 {
         return Err("slide needs at least 2 frames".into());
     }
@@ -343,7 +385,12 @@ fn slide(thumb: &Rgba, n: u32, w: u32, h: u32, x: [i64; 3], y: [i64; 3]) -> Resu
             }
         };
         let (px, py) = (pos(x).max(0), pos(y).max(0));
-        out.composite(thumb, px, (i * h) as i64 + py);
+        if clip {
+            let (cw, ch) = ((w as i64 - px).clamp(0, thumb.w as i64), (h as i64 - py).clamp(0, thumb.h as i64));
+            out.composite(&thumb.crop(0, 0, cw as u32, ch as u32), px, (i * h) as i64 + py);
+        } else {
+            out.composite(thumb, px, (i * h) as i64 + py);
+        }
     }
     Ok(out)
 }
@@ -365,6 +412,21 @@ fn meter_fill(src: &Rgba, n: u32, vertical: bool) -> Result<Rgba, String> {
             let part = src.crop(0, 0, cut.max(0) as u32, h2 as u32);
             out.paste(&part, 0, k * h2);
         }
+    }
+    Ok(out)
+}
+
+pub(crate) fn reorder(im: &Rgba, n: u32, order: &[u32]) -> Result<Rgba, String> {
+    if n == 0 || !im.h.is_multiple_of(n) {
+        return Err(format!("reorder: height {} is not {n} frames", im.h));
+    }
+    let fh = im.h / n;
+    let mut out = Rgba::new(im.w, fh * order.len() as u32);
+    for (i, &j) in order.iter().enumerate() {
+        if j >= n {
+            return Err(format!("reorder: frame {j} out of range"));
+        }
+        out.paste(&im.crop(0, (j * fh) as i64, im.w, fh), 0, (i as u32 * fh) as i64);
     }
     Ok(out)
 }

@@ -16,7 +16,8 @@
 "b14":{"in":"dll:UAD Lexicon 224.dll","res":"10/7118/1033","sha":"a75ce7ddcb05976dc21356e4ae2f0907d1250f84b4c4ed7aebbc46604abcda53","dec":"png"},
 "b15":{"in":"dll:UAD Lexicon 224.dll","res":"10/7114/1033","sha":"81278c7b3ae1ab183bde0c2db820602e2fbcc537bb82d83a19c164a56c3a5911","dec":"png"},
 "b16":{"in":"dll:UAD Lexicon 224.dll","res":"10/7113/1033","sha":"493853b21b2c602fd57baf45b0d70fc4b0c03c09f829b36ac90ec5f53dd75dde","dec":"png"},
-"b17":{"in":"dll:UAD Lexicon 224.dll","res":"10/7115/1033","sha":"3feb48ef9115e2ecdd7c2fe0e8bc1df229275b35c88d81485a6f34f844123071","dec":"png"}
+"b17":{"in":"dll:UAD Lexicon 224.dll","res":"10/7115/1033","sha":"3feb48ef9115e2ecdd7c2fe0e8bc1df229275b35c88d81485a6f34f844123071","dec":"png"},
+"b18":{"in":"dll:UAD Lexicon 224.dll","res":"10/7109/1033","sha":"89d61ea3760e40bfe29338ff204f6eb2ae18997d4c55355f1a25665f5b7f2417","dec":"png"}
 },"sprites":{
 "UA_Lexicon224_LED":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":34,"h":68,"rgba":"97a5ba3494e6782a5d8edf6bd580520acd130c0a999094e9683e8246a0be2d23"}},
 "UA_Lexicon224_LED-dp":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"crop","box":[47,1,50,60]}],"output":{"w":50,"h":60,"rgba":"bbe33494ce05a92a9b22a9e0361fb63cc3ca913d6fadebef982ae4cd21324147"}},
@@ -38,10 +39,10 @@
 "UA_Lexicon224_switch_small_C":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b15"},{"op":"lanczos2x"}],"output":{"w":70,"h":480,"rgba":"7ea952eb3ef6520a0b4fdc7c19cc90f387dbc63236590366a37a60a12c10e706"}},
 "UA_Lexicon224_switch_small_L":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b16"},{"op":"lanczos2x"}],"output":{"w":70,"h":480,"rgba":"ad6227c38c975b5b3266bdae97c4d9671cabf9aff016816eec775659c6af5e81"}},
 "UA_Lexicon224_switch_small_R":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b17"},{"op":"lanczos2x"}],"output":{"w":70,"h":480,"rgba":"1908a528c6a7aa56dff655082fccb2794e6666a29f4a7f16f4f034b8bffd8621"}},
-"synth_uadlexicon224_anon-11":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadlexicon224_anon-13":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadlexicon224_anon-15":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadlexicon224_anon-17":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadlexicon224_anon-19":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadlexicon224_anon-9":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"}
+"synth_uadlexicon224_anon-11":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b18"},{"op":"lanczos2x"}],"n":101,"w":96,"h":318,"x":[0,0,0],"y":[0,228,-1],"clip":true}],"output":{"w":96,"h":32118,"rgba":"101866ac2c536662498a5d9b018c5e5a51583e9e3912927963ff69a672afb476"}},
+"synth_uadlexicon224_anon-13":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b18"},{"op":"lanczos2x"}],"n":101,"w":96,"h":318,"x":[0,0,0],"y":[0,228,-1],"clip":true}],"output":{"w":96,"h":32118,"rgba":"101866ac2c536662498a5d9b018c5e5a51583e9e3912927963ff69a672afb476"}},
+"synth_uadlexicon224_anon-15":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b18"},{"op":"lanczos2x"}],"n":101,"w":96,"h":318,"x":[0,0,0],"y":[0,228,-1],"clip":true}],"output":{"w":96,"h":32118,"rgba":"101866ac2c536662498a5d9b018c5e5a51583e9e3912927963ff69a672afb476"}},
+"synth_uadlexicon224_anon-17":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b18"},{"op":"lanczos2x"}],"n":101,"w":96,"h":318,"x":[0,0,0],"y":[0,228,-1],"clip":true}],"output":{"w":96,"h":32118,"rgba":"101866ac2c536662498a5d9b018c5e5a51583e9e3912927963ff69a672afb476"}},
+"synth_uadlexicon224_anon-19":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b18"},{"op":"lanczos2x"}],"n":101,"w":96,"h":318,"x":[0,0,0],"y":[0,228,-1],"clip":true}],"output":{"w":96,"h":32118,"rgba":"101866ac2c536662498a5d9b018c5e5a51583e9e3912927963ff69a672afb476"}},
+"synth_uadlexicon224_anon-9":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b18"},{"op":"lanczos2x"}],"n":101,"w":96,"h":318,"x":[0,0,0],"y":[0,228,-1],"clip":true}],"output":{"w":96,"h":32118,"rgba":"101866ac2c536662498a5d9b018c5e5a51583e9e3912927963ff69a672afb476"}}
 }}

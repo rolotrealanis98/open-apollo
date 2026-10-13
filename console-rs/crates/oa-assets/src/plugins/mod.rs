@@ -9,6 +9,8 @@
 //! (default `~/.local/share/open-apollo/generated`).
 
 pub mod decode;
+pub mod draw;
+pub mod geometry;
 pub mod img;
 pub mod jpeg;
 pub mod pe;
@@ -41,9 +43,14 @@ pub fn default_out() -> PathBuf {
 
 /// The recipes compiled into this binary.
 pub fn builtin_book() -> Result<Book, String> {
+    use std::io::Read;
     let mut files = Vec::new();
-    for (name, text) in RECIPES {
-        let f: RecipeFile = serde_json::from_str(text).map_err(|e| format!("recipes {name}: {e}"))?;
+    for (name, packed) in RECIPES {
+        let mut text = Vec::new();
+        flate2::read::DeflateDecoder::new(*packed)
+            .read_to_end(&mut text)
+            .map_err(|e| format!("recipes {name}: {e}"))?;
+        let f: RecipeFile = serde_json::from_slice(&text).map_err(|e| format!("recipes {name}: {e}"))?;
         files.push(f);
     }
     Book::new(files)

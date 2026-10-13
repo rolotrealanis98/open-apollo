@@ -44,6 +44,12 @@ pub struct Blob {
     pub carve: Option<[u64; 2]>,
     /// SHA-256 of the blob bytes.
     pub sha: String,
+    /// "deflate-raw": the bytes are a raw DEFLATE stream (a ZIP member) that
+    /// inflates to exactly `size` bytes before decoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inflate: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<usize>,
     pub dec: String,
 }
 
@@ -142,8 +148,15 @@ pub enum Op {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        inflate: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         dec: Option<String>,
     },
+    /// A transparent `w`×`h` layer with Pillow's `ImageDraw.line` from (x0, y0)
+    /// to (x1, y1) set to `rgba` (no blending); width 0 draws nothing.
+    Line { w: u32, h: u32, xy: [i32; 4], width: u32, rgba: [u8; 4] },
     /// A new image filled with `rgba` (default transparent black).
     Canvas {
         w: u32,
@@ -187,17 +200,37 @@ pub enum Op {
     ThumbFader { track: Vec<Op>, thumb: Vec<Op>, w: u32, h: u32, k: u32 },
     /// A thumb moved across `n` frames of `w`×`h`. Per axis `[base, span, dir]`:
     /// position = base + round(t * span), t = v (dir 1), 1 - v (dir -1) or 0,
-    /// v = i / (n - 1); composited at (max(x, 0), i*h + max(y, 0)).
-    Slide { thumb: Vec<Op>, n: u32, w: u32, h: u32, x: [i64; 3], y: [i64; 3] },
+    /// v = i / (n - 1); composited at (max(x, 0), i*h + max(y, 0)). `clip`: the
+    /// thumb is cut at its frame's right and bottom edge instead of running on.
+    Slide {
+        thumb: Vec<Op>,
+        n: u32,
+        w: u32,
+        h: u32,
+        x: [i64; 3],
+        y: [i64; 3],
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        clip: bool,
+    },
     /// A level meter from its lit image: frame k of `n` shows the bar filled to k/(n-1).
     MeterFill { n: u32, vertical: bool },
     /// `n` frames, each the "over" composite of frame k of every layer (a layer with `frames` 1 repeats).
     Layers { n: u32, layers: Vec<Layer> },
     /// Mirror: "x" left-right, "y" top-bottom.
     Flip { axis: String },
+    /// Pillow `transform(size, AFFINE, matrix, BICUBIC)`: output (x, y) samples the
+    /// input at (a(x+.5) + b(y+.5) + c, d(x+.5) + e(y+.5) + f).
+    Affine { matrix: [f64; 6], resample: String },
     /// Brainworx "disabled" tint: every pixel with alpha > 0 moves toward `rgb`
     /// by `a`/256 after scaling colour by alpha/256, rounded half to even (integer form).
     PremulTint { rgb: [u8; 3], a: u32 },
+    /// The image as `n` equal vertical frames; output frame i is input frame `order[i]` (exact copy).
+    Reorder { n: u32, order: Vec<u32> },
+    /// Linear alpha ramp `px` wide at every edge: alpha *= min(d_y/px, 1) * min(d_x/px, 1)
+    /// in f64 (d = distance to the nearer edge in pixels), truncated.
+    Feather { px: f64 },
+    /// Colourise (multiply): each colour channel becomes `(c * rgb + 127) / 255`; alpha unchanged.
+    Tint { rgb: [u8; 3] },
     /// JUCE's load-time premultiply (`(c * a + 127) >> 8`, skipped at alpha 255)
     /// undone by an integer divide, as the art looked in the plug-in's memory.
     JucePremulRoundtrip,

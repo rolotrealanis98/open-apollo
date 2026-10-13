@@ -27,8 +27,9 @@
 "b25":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8785/1033","sha":"c9a313d8485afd7e99234a6aaf65185104e09751eb07e0465701644164e6d5c4","dec":"png"},
 "b26":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8786/1033","sha":"21f27a523f0764fb7b5b2c4ffffff5e6d68618856a940344ad9dff44ace2bd49","dec":"png"},
 "b27":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8788/1033","sha":"7508cc471142a78c8592eb98ccbee4e27c8a4efad7ec9309ca29e68383e6f3d6","dec":"png"},
-"b28":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8789/1033","sha":"a1c7f5e67989137d835debb288e510b30e4724b5305a3f3e97f9fab412484f81","dec":"png"},
-"b29":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8793/1033","sha":"6718f0af3bffa9b94d5cf8510a4e311225bd968359169bbbc71b187bb681ab37","dec":"png"}
+"b28":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8782/1033","sha":"c2a737cc6625eec682b6b00b1e4a44c30ad00c2fd851b2046ab1091d696e6ec5","dec":"png"},
+"b29":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8789/1033","sha":"a1c7f5e67989137d835debb288e510b30e4724b5305a3f3e97f9fab412484f81","dec":"png"},
+"b30":{"in":"dll:UAD A-Type Multiband Enhancer.dll","res":"10/8793/1033","sha":"6718f0af3bffa9b94d5cf8510a4e311225bd968359169bbbc71b187bb681ab37","dec":"png"}
 },"sprites":{
 "G_a_type_multiband_enhancer__knob":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":476,"h":47124,"rgba":"7c001ee5db5f8403064743e39af09657626c675dcf42a7ac8d30cad4889a5e14"}},
 "Q_atype_band0_rect":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
@@ -69,9 +70,9 @@
 "switch_meter_slider":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b25"},{"op":"lanczos2x"}],"output":{"w":142,"h":192,"rgba":"78bbb7197fa0b9c6e94136e7c096c1a4fbcd729ce77987325506ffe94805756c"}},
 "switch_mode_off":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b26"},{"op":"lanczos2x"}],"output":{"w":666,"h":1140,"rgba":"9de1ac1410efa27fc2779c5c9514064e2eaa9c2832245ebb41f6b4c6cffca92e"}},
 "switch_small":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b27"},{"op":"lanczos2x"}],"output":{"w":140,"h":216,"rgba":"50a0eff6ac0a29bfbc51aae97e0fcc56594973b0098d95f8c7e48265a2f04a49"}},
-"synth_uadatypemultibandenhancer_atk_knee-slider":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadatypemultibandenhancer_output-slider":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadatypemultibandenhancer_release-slider":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"tooltip_filmstrip":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b28"},{"op":"lanczos2x"}],"output":{"w":1148,"h":2400,"rgba":"1ad3aab164f2b1e3a777ad1d7e94015ba59a9d90bdcc951758b80c5907991272"}},
-"trimpot_headroom":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b29"},{"op":"lanczos2x"}],"output":{"w":48,"h":336,"rgba":"66a806f4719a51f1351813714d694bf1f6fa900773c18c2d0bc1b5ee2284630c"}}
+"synth_uadatypemultibandenhancer_atk_knee-slider":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b28"},{"op":"lanczos2x"}],"n":101,"w":100,"h":256,"x":[0,0,0],"y":[0,136,-1],"clip":true}],"output":{"w":100,"h":25856,"rgba":"9519566aa6013bf5c05b967078984288393bb161812eaa3f5bd9e1e17cd6a135"}},
+"synth_uadatypemultibandenhancer_output-slider":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b28"},{"op":"lanczos2x"}],"n":101,"w":100,"h":256,"x":[0,0,0],"y":[0,136,-1],"clip":true}],"output":{"w":100,"h":25856,"rgba":"9519566aa6013bf5c05b967078984288393bb161812eaa3f5bd9e1e17cd6a135"}},
+"synth_uadatypemultibandenhancer_release-slider":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b28"},{"op":"lanczos2x"}],"n":101,"w":100,"h":256,"x":[0,0,0],"y":[0,136,-1],"clip":true}],"output":{"w":100,"h":25856,"rgba":"9519566aa6013bf5c05b967078984288393bb161812eaa3f5bd9e1e17cd6a135"}},
+"tooltip_filmstrip":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b29"},{"op":"lanczos2x"}],"output":{"w":1148,"h":2400,"rgba":"1ad3aab164f2b1e3a777ad1d7e94015ba59a9d90bdcc951758b80c5907991272"}},
+"trimpot_headroom":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b30"},{"op":"lanczos2x"}],"output":{"w":48,"h":336,"rgba":"66a806f4719a51f1351813714d694bf1f6fa900773c18c2d0bc1b5ee2284630c"}}
 }}

@@ -43,7 +43,8 @@
 "b41":{"in":"dll:UAD Hitsville Reverb Chambers.dll","res":"10/8698/1033","sha":"8a89aad8ee1a411252ec30d56d2af33c6d9428f413e95b7ba06615675e4180b5","dec":"png"},
 "b42":{"in":"dll:UAD Hitsville Reverb Chambers.dll","res":"10/8763/1033","sha":"0495b653a1b9ddd9bd1236ff492bec206d435df93712151762affe8b7e939bc0","dec":"png"},
 "b43":{"in":"dll:UAD Hitsville Reverb Chambers.dll","res":"10/8764/1033","sha":"e621c82b0c34b8edfa35385e0d91a701173f053ad691b100ff3fa98959f9b3d8","dec":"png"},
-"b44":{"in":"dll:UAD Hitsville Reverb Chambers.dll","res":"10/8760/1033","sha":"8c09fa71db98d037cf5d5fa145a1654a8077aa7212a9ca84df645ef7708a24fb","dec":"png"}
+"b44":{"in":"dll:UAD Hitsville Reverb Chambers.dll","res":"10/8760/1033","sha":"8c09fa71db98d037cf5d5fa145a1654a8077aa7212a9ca84df645ef7708a24fb","dec":"png"},
+"b45":{"in":"dll:UAD Hitsville Reverb Chambers.dll","res":"10/8750/1033","sha":"16ff81c5d36bc1d36eaf084e692cea9810912f92c6814b180788d092f84b315e","dec":"png"}
 },"sprites":{
 "UA_Hitsville-Chambers_DISTANCE_slider-background":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b0"},{"op":"lanczos2x"}],"output":{"w":528,"h":54,"rgba":"4be4559cb33f9b086207abd408291619b16199497e939594b73eae1debe81685"}},
 "UA_Hitsville-Chambers_INFO_button":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b1"},{"op":"lanczos2x"}],"output":{"w":56,"h":112,"rgba":"6f8c72aeae5b76e7ae7862e4064b77aaa27ae5c518f6da4e56e558ba1984376c"}},
@@ -90,6 +91,6 @@
 "UA_Hitsville-Chambers_switch_MONO":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b42"},{"op":"lanczos2x"}],"output":{"w":124,"h":352,"rgba":"f497b427bc2309ed24bba21429322b868a60a00e5512d0ae3b9feaee4debd81e"}},
 "UA_Hitsville-Chambers_switch_POWER":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b43"},{"op":"lanczos2x"}],"output":{"w":124,"h":408,"rgba":"d99cff257a896c36a9039009851e7640b7f9dbef4884d568e170e78d2dbff899"}},
 "UA_Hitsville-Chambers_switch_SOLO":{"status":"fallback","basis":"equivalent","build":[{"op":"load","blob":"b44"},{"op":"lanczos2x"}],"output":{"w":124,"h":352,"rgba":"50f7b886f5f819086a64dafe5f9a28a3cca93c0d762c13842f0f94f5b3e55ccc"}},
-"synth_uadhitsvillereverbchambers_distance-slider-2644":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"},
-"synth_uadhitsvillereverbchambers_distance-slider-2648":{"status":"runtime","basis":"synth","owner":"plugin-ui/chrome","kind":"vector"}
+"synth_uadhitsvillereverbchambers_distance-slider-2644":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b45"},{"op":"lanczos2x"}],"n":101,"w":528,"h":30,"x":[0,498,1],"y":[0,0,0],"clip":true}],"output":{"w":528,"h":3030,"rgba":"4e0aaa71bb760a4ce88effdc9c1a99ee7c189edd8be82e45c2cf365639722a69"}},
+"synth_uadhitsvillereverbchambers_distance-slider-2648":{"status":"fallback","basis":"equivalent","build":[{"op":"slide","thumb":[{"op":"load","blob":"b45"},{"op":"lanczos2x"}],"n":101,"w":528,"h":30,"x":[0,498,1],"y":[0,0,0],"clip":true}],"output":{"w":528,"h":3030,"rgba":"4e0aaa71bb760a4ce88effdc9c1a99ee7c189edd8be82e45c2cf365639722a69"}}
 }}

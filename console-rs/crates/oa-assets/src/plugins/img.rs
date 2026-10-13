@@ -186,6 +186,27 @@ impl Rgba {
         }
     }
 
+    /// Fade alpha linearly to the edges over `px` pixels (agent R's cut-out feather):
+    /// `a = trunc(a * ry * rx)` with `r = min(min(i, n - 1 - i) / px, 1)` in f64.
+    pub fn feather(&mut self, px: f64) {
+        let ramp = |n: u32| -> Vec<f64> { (0..n).map(|i| ((i.min(n - 1 - i)) as f64 / px).min(1.0)).collect() };
+        let (rx, ry) = (ramp(self.w), ramp(self.h));
+        let w = self.w as usize;
+        for (k, p) in self.px.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let m = ry[k / w] * rx[k % w];
+            p[3] = (p[3] as f64 * m) as u8;
+        }
+    }
+
+    /// Multiply colour by `rgb` (white art takes the colour): `(c * t + 127) / 255`.
+    pub fn tint(&mut self, rgb: [u8; 3]) {
+        for p in self.px.as_chunks_mut::<4>().0 {
+            for (c, t) in p[..3].iter_mut().zip(rgb) {
+                *c = ((*c as u32 * t as u32 + 127) / 255) as u8;
+            }
+        }
+    }
+
     /// JUCE premultiplies 8-bit art on load (`(c * a + 127) >> 8`, not at alpha
     /// 255); dumping it back divides by alpha (integer floor). Alpha 0 clears colour.
     pub fn juce_premul_roundtrip(&mut self) {
