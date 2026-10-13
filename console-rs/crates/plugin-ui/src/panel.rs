@@ -2606,5 +2606,6 @@ fn draw_text(ui: &mut Ui, text: &str, t: Option<&spec::TextStyle>, r: Rect, opac
         }
         _ => r,
     };
-    ui.text(&text, TextStyle { family: family.into(), size: size * scale, bold, italic: false, color }, r, align);
+    let italic = t.and_then(|t| t.italic) == Some(true);
+    ui.text(&text, TextStyle { family: family.into(), size: size * scale, bold, italic, color }, r, align);
 }
