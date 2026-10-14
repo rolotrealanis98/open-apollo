@@ -87,6 +87,50 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(h.get_value(self.slot + "/parameters/3/Name"), "Gain")
         self.assertFalse(s.path_exists(self.slot + "/parameters/3/control_id"))
 
+    def test_uppercase_type_preserved_in_both_views_and_control_readback(self):
+        s, h, p = self.model()
+        result = self.result(ident=3)
+        props = result.parameters[0]["properties"]
+        props["Type"] = props.pop("type")
+        del props["control_id"]
+        p.stage(self.slot, result).commit()
+        path = self.slot + "/parameters/3"
+        self.assertEqual(s.get_value(path + "/Type/value"), "parameter")
+        self.assertEqual(h.get_value(path + "/Type"), "parameter")
+        self.assertFalse(s.path_exists(path + "/type"))
+        self.assertIsNone(h.get_value(path + "/type"))
+        self.assertFalse(s.path_exists(path + "/control_id"))
+        values = p.snapshot_control(self.slot, result.handle,
+                                    "parameters/3/NormalizedValue")
+        self.assertEqual(values.values["NormalizedValue"], 0.5)
+
+    def test_dual_type_aliases_rejected_even_when_equal(self):
+        for alternate in ("parameter", "effect_control"):
+            with self.subTest(alternate=alternate):
+                s, h, p = self.model()
+                before = copy.deepcopy((s.root, h.root))
+                result = self.result()
+                result.parameters[0]["properties"]["Type"] = {
+                    "type": "string", "value": alternate,
+                }
+                with self.assertRaises(PublicationError):
+                    p.stage(self.slot, result)
+                self.assertEqual(before, (s.root, h.root))
+                self.assertEqual(p.version, 0)
+
+    def test_invalid_uppercase_type_rejected(self):
+        for meta in ({"type": "int", "value": "parameter"},
+                     {"type": "string", "value": "plugin"}):
+            with self.subTest(meta=meta):
+                s, h, p = self.model()
+                result = self.result()
+                props = result.parameters[0]["properties"]
+                del props["type"]
+                props["Type"] = meta
+                with self.assertRaises(PublicationError):
+                    p.stage(self.slot, result)
+                self.assertEqual(p.version, 0)
+
     def test_original_metadata_reaches_both_parameter_paths(self):
         for kind in ("parameter", "effect_control"):
             s, h, p = self.model()

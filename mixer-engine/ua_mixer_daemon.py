@@ -508,6 +508,9 @@ class MixerDaemon:
         self.plugin_lifecycle = PluginLifecycle(
             state, plugin_backend, helper_tree=helper_tree,
             transactions=plugin_transactions)
+        candidate = getattr(plugin_transactions, 'backend', None)
+        self._native_plugin_backend = (candidate if getattr(
+            candidate, 'native_single_insert', False) is True else None)
         self._plugin_publication_active = False
         self.plugin_remote = PluginRemote(state, backend=plugin_remote_backend,
                                           lease_provider=plugin_transactions)
@@ -713,6 +716,8 @@ class MixerDaemon:
 
     def _device_lost(self, now: float):
         log.warning("Apollo device lost — daemon stays up, reopening with backoff")
+        if self._native_plugin_backend:
+            self._native_plugin_backend.invalidate()
         self._events_detach()
         self._license_stop()
         self._cancel_settle()
@@ -1666,6 +1671,10 @@ class MixerDaemon:
 
     def _on_driver_event(self, code: int, arg: int, time_ns: int = 0):
         """One struct ua_event from the driver (see events.py)."""
+        if self._native_plugin_backend and (
+                code in (UA_EVT_RATE_CHANGED, UA_EVT_CONNECTED, UA_EVT_EVENTS_LOST)
+                or (code == UA_EVT_PAUSED and arg & UA_PAUSE_DEVICE)):
+            self._native_plugin_backend.invalidate()
         name = EVENT_NAMES.get(code, f"0x{code:x}")
         log.debug("driver event %s arg=0x%x", name, arg)
         if code == UA_EVT_RATE_CHANGED:
@@ -2718,6 +2727,14 @@ class MixerDaemon:
             return
 
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
+        native = self._native_plugin_backend
+        if native and not is_plugin_slot_path(path) and (
+                self._console_owns_set(path, cmd.value)
+                or path.removesuffix('/value').split('/')[-1] in (
+                    'SampleRate', 'ClockSource', 'BufferSize', 'Stereo', 'StereoLink', 'Link')):
+            self._send_local_plugin_error(
+                client, path, 'openapollo.native_operation_unsupported', resp_params)
+            return
         if self._handle_clock_set(client, path, cmd.value, resp_params):
             return
         if self.plugins_enabled and self._plugin_publication_active and \
@@ -3166,6 +3183,12 @@ class MixerDaemon:
                     1.0, self._fire_init_complete)
             return
 
+        # This first native mode has no transactional bulk/undo/preset adapter.
+        if self._native_plugin_backend:
+            self._send_post_reply(client, cmd.path, None,
+                                  'openapollo.native_operation_unsupported', resp_params)
+            return
+
         # Mixer Helper /auto_gain/{start,stop}_auto_gain
         if client.helper and self.autogain.owns(cmd.path):
             data, error = self.autogain.execute(
@@ -3589,6 +3612,9 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                                help="Exit (status 1) when the device node "
                                     "cannot be opened at start, instead of "
                                     "waiting for it")
+    parser.add_argument("--native-plugin-provider", type=Path, metavar="FILE",
+                        help="Experimental single-insert hosting through an explicitly "
+                             "trusted local Python provider; requires --preserve-hardware")
     parser.add_argument("--preserve-hardware", action="store_true",
                         help="Attach to a running Apollo without the init "
                              "sequence: publish what the hardware reports "
@@ -3651,6 +3677,9 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     parser.add_argument("--factory-presets-dir", type=Path,
                         help="Read-only factory .fxp/.uadchannel directory")
     args = parser.parse_args()
+    if args.native_plugin_provider and (
+            not args.preserve_hardware or args.no_hardware or args.usb or args.no_helper):
+        parser.error("native hosting requires --preserve-hardware, PCIe hardware and helper")
 
     # Logging
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -3726,9 +3755,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     if isinstance(serial, str):
         seed_state_file(state_file, state_file_for(device_map, index))
     state_file.parent.mkdir(exist_ok=True)
-    # No plugin backend is wired here, so saved effect-slot values restore
-    # as before (a backend defers them with restore_filter)
-    state.enable_persistence(state_file)
+    # Persisted intent never establishes a native DSP lease.
+    state.enable_persistence(state_file, restore_filter=(
+        (lambda key: not is_plugin_slot_path(key))
+        if args.native_plugin_provider else None))
     store_stem = state_file.name.removesuffix(".state.json")
     network_id = load_network_id(state_file.with_name(
         state_file.name.removesuffix(".state.json") + ".network.json"))
@@ -3782,6 +3812,15 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     elif args.no_hardware:
         log.info("Software-only mode (--no-hardware)")
 
+    native_backend = native_transactions = None
+    if args.native_plugin_provider:
+        from plugin_native import load_provider, register_native
+        try:
+            native_backend, native_transactions = register_native(
+                state, helper_tree, backend, load_provider(args.native_plugin_provider))
+        except Exception as error:
+            parser.error(f"native hosting unavailable: {type(error).__name__}")
+
     # Initialize software metering (through PipeWire when it holds the
     # Apollo, else ALSA capture)
     if not args.no_hardware and not args.no_metering:
@@ -3807,7 +3846,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                          software_only=args.no_hardware,
                          presets_dir=args.presets_dir,
                          factory_presets=args.factory_presets_dir,
-                         catalogue=catalogue)
+                         catalogue=catalogue,
+                         plugin_transactions=native_transactions,
+                         plugin_remote_backend=native_backend,
+                         plugin_hosting=bool(native_backend))
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}
@@ -3871,6 +3913,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     except KeyboardInterrupt:
         log.info("Shutting down...")
     finally:
+        if native_backend:
+            native_backend.invalidate()
+            # The borrowed owner fd closes here; the driver retires its leases.
+            backend.close()
         metering.stop()
         state.save_now()
         if bonjour:

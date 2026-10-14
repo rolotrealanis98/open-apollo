@@ -30,7 +30,7 @@ class LoadedPlugin:
     handle: OwnedHandle
     power: bool
     latency: int
-    parameters: tuple  # {id, properties:{type,Name,NormalizedValue,StringValue[,control_id,StepValue]}}
+    parameters: tuple  # Original fields include Type (or legacy type), Name and values.
 
 
 @dataclass(frozen=True)
@@ -105,10 +105,11 @@ class Publisher:
             ids.add(ident)
             if (
                 not isinstance(props, dict)
-                or not {"type", "Name", "NormalizedValue", "StringValue"}
-                <= set(props)
+                or not {"Name", "NormalizedValue", "StringValue"} <= set(props)
+                or len({"Type", "type"} & set(props)) != 1
                 or set(props)
                 - {
+                    "Type",
                     "type",
                     "control_id",
                     "Name",
@@ -123,7 +124,8 @@ class Publisher:
             # Genuine Rack metadata walker accepts these node kinds and resolves
             # optional control_id or actual ordinal plus matching genuine cached Name.
             # Numeric tree IDs are not synthesized control IDs.
-            kind = props["type"]
+            # Preserve the original spelling; dual aliases are ambiguous.
+            kind = props["Type"] if "Type" in props else props["type"]
             control_id = props.get("control_id")
             if (
                 not isinstance(kind, dict)
