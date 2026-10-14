@@ -85,6 +85,10 @@ pub enum PanelResponse {
 
 /// Something drawn above the mixer.
 pub trait Panel {
+    /// Whether this panel already edits the requested insert.
+    fn matches_plugin(&self, _strip_id: &str, _slot: u8, _model: &dyn MixerModel) -> bool {
+        false
+    }
     /// Preferred size in window points; the stack centres it in the visible area.
     fn size(&self) -> (f32, f32);
     /// Draws into `rect` (window points; drawing is clipped to it). Hit regions added to `ui`
@@ -283,8 +287,13 @@ impl OverlayStack {
         self.captured = false;
     }
 
-    /// Asks the hook for a panel for `strip_id`/`slot` and opens it. Returns whether one opened.
+    /// Raises an existing insert panel, or asks the hook to open it.
     pub fn on_open_plugin(&mut self, strip_id: &str, slot: u8, model: &dyn MixerModel) -> bool {
+        if let Some(index) = self.panels.iter().position(|p| p.matches_plugin(strip_id, slot, model)) {
+            let panel = self.panels.remove(index);
+            self.push(panel);
+            return true;
+        }
         match self.hook.on_open_plugin(strip_id, slot, model) {
             Some(p) => {
                 self.push(p);
@@ -419,6 +428,45 @@ pub enum Routed {
 mod tests {
     use super::*;
     use rack::PreviewMixer;
+
+    #[test]
+    fn reopening_insert_raises_same_panel_and_closed_insert_can_reopen() {
+        use std::{cell::Cell, rc::Rc};
+        struct InsertPanel(String, u8);
+        impl Panel for InsertPanel {
+            fn matches_plugin(&self, strip: &str, slot: u8, _: &dyn MixerModel) -> bool {
+                self.0 == strip && self.1 == slot
+            }
+            fn size(&self) -> (f32, f32) { (100.0, 100.0) }
+            fn build(&mut self, _: &mut Ui, _: Rect) {}
+        }
+        struct Hook(Rc<Cell<usize>>);
+        impl PluginHook for Hook {
+            fn on_open_plugin(&mut self, strip: &str, slot: u8, _: &dyn MixerModel) -> Option<Box<dyn Panel>> {
+                self.0.set(self.0.get() + 1);
+                Some(Box::new(InsertPanel(strip.into(), slot)))
+            }
+        }
+        let model = PreviewMixer::default();
+        let opens = Rc::new(Cell::new(0));
+        let mut stack = OverlayStack::new(Box::new(Hook(opens.clone())));
+        for (strip, slot) in [("in0", 0), ("in0", 1), ("in1", 0)] {
+            assert!(stack.on_open_plugin(strip, slot, &model));
+        }
+        let first = &*stack.panels[0] as *const dyn Panel;
+        for _ in 0..5 {
+            stack.captured = true;
+            assert!(stack.on_open_plugin("in0", 0, &model));
+            assert_eq!(stack.panels.len(), 3);
+            assert!(std::ptr::eq(first, &**stack.panels.last().unwrap()));
+            assert!(!stack.captured);
+        }
+        assert_eq!(opens.get(), 3);
+        assert!(stack.dismiss_top());
+        assert!(stack.on_open_plugin("in0", 0, &model));
+        assert_eq!(opens.get(), 4);
+        assert_eq!(stack.panels.len(), 3);
+    }
 
     #[test]
     fn placeholder_opens_and_dismisses() {
