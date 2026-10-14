@@ -28,7 +28,7 @@ or plug-in binary. The kernel still requires the device's authorization answer.
 - DESTROY and owning-fd close restore the retained plain strip. Uncertain I/O
   invalidates the native session. Device/rate changes require a daemon restart;
   saved slot properties never recreate DSP leases.
-- Bulk scene/preset/undo operations and clock/link changes are refused in this
+- Bulk scene/preset/undo operations and clock/link/input-compensation changes are refused in this
   mode because they do not yet participate in the native transaction contract.
 - Slot Power needs its own provider contract. An effect's Power parameter does
   not implicitly implement slot Power.
@@ -47,8 +47,12 @@ restart have passed real hardware tests. Four analog inputs passed sequential
 insert/remove tests; simultaneous multiple inserts and stereo have not.
 
 The captured recipe's Mic Input Strip recording delay differs from the plain
-strip's delay. A private lab provider may align these after evidence-backed
-validation. Do not infer general delay-compensation policy, absolute latency, or
+strip's delay. Console input delay compensation is adjustable: Off, Short,
+Medium, Medium-Long, and Long correspond to 0, 100, 200, 300, and 1000 samples
+in the recovered settings table. The private bench provider aligns at Medium
+(200); it does not implement runtime compensation changes or the warning when
+a chain exceeds the chosen budget. MaxDelayComp writes are refused in native
+mode until that shared strip/chain contract is implemented. Do not infer general delay-compensation policy, absolute latency, or
 other-rate support from that single-path result.
 
 GUI interaction, broader providers, automatic reconnect, and distribution-ready

@@ -2731,7 +2731,8 @@ class MixerDaemon:
         if native and not is_plugin_slot_path(path) and (
                 self._console_owns_set(path, cmd.value)
                 or path.removesuffix('/value').split('/')[-1] in (
-                    'SampleRate', 'ClockSource', 'BufferSize', 'Stereo', 'StereoLink', 'Link')):
+                    'SampleRate', 'ClockSource', 'BufferSize', 'MaxDelayComp',
+                    'Stereo', 'StereoLink', 'Link')):
             self._send_local_plugin_error(
                 client, path, 'openapollo.native_operation_unsupported', resp_params)
             return

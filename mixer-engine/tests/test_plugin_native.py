@@ -202,7 +202,8 @@ def test_real_daemon_dispatch_and_bulk_paths_are_blocked():
     daemon.console.set = Mock(side_effect=AssertionError('bypassed lifecycle'))
     daemon.console.post = Mock(side_effect=AssertionError('bypassed lifecycle'))
     daemon.commands.execute = Mock(side_effect=AssertionError('bypassed lifecycle'))
-    for path in ('/UndoRedo', '/SampleRate', '/devices/0/inputs/2/Preset'):
+    for path in ('/UndoRedo', '/SampleRate', '/MaxDelayComp',
+                 '/MaxDelayComp/value', '/devices/0/inputs/2/Preset'):
         daemon._handle_set(client, Command('set', path, 'unsafe'))
         assert json.loads(writer.frames[-1].rstrip(b'\0'))['error']
     for path in ('/MoveInsert', '/PasteInsert', '/SceneOperation', '/OpenSession', '/Undo'):
