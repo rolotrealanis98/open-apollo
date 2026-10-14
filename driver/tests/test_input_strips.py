@@ -673,6 +673,7 @@ static int ua_dsp_ring_send_raw(struct ua_device *ua, unsigned int dsp, u32 w0,
 STRIPS_ONLY = r'''
 bool ua_plugin_host_enabled(void) { return false; }
 /* No plug-in instances in these tests (test_plugin_license.py has them) */
+bool ua_instances_strips_busy(struct ua_device *ua) { (void)ua; return false; }
 void ua_instances_teardown(struct ua_device *ua, const char *why) { (void)ua; (void)why; }
 void ua_instances_dsp_gone(struct ua_device *ua, unsigned int dsp) { (void)ua; (void)dsp; }
 '''

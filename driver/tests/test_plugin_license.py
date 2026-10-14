@@ -135,6 +135,10 @@ void ua_strips_teardown(struct ua_device *ua, const char *why) { (void)ua; (void
 void ua_strips_lost(struct ua_device *ua) { (void)ua; }
 void ua_strips_service(struct ua_device *ua) { (void)ua; }
 bool ua_strips_live(struct ua_device *ua) { (void)ua; return false; }
+int ua_strips_override_target(struct ua_device *ua, unsigned int dsp, u32 synch, u64 epoch, u32 *generation)
+{ (void)ua; (void)dsp; (void)synch; (void)epoch; (void)generation; return -ESTALE; }
+int ua_strips_restore(struct ua_device *ua, struct ua_xact *x, u32 synch, u32 generation)
+{ (void)ua; (void)x; (void)synch; (void)generation; return -ESTALE; }
 /* user memory: plain memory here */
 #define u64_to_user_ptr(x) ((void *)(uintptr_t)(x))
 static unsigned long copy_from_user(void *to, const void *from, unsigned long n)
@@ -156,7 +160,7 @@ static void *kvmalloc_array(size_t n, size_t s, int f) { return kvmalloc(n * s, 
 '''
 
 
-def build_license(main):
+def build_license(main, *, real_strips=False):
     host = csrc.source('ua_plugin_host.c')
     host_fns = '\n'.join(csrc.extract(host, sig) for sig in (
         'void ua_plugin_connected(', 'void ua_plugin_epoch_bump(',
@@ -170,16 +174,21 @@ def build_license(main):
                     line.startswith('#define UA_BOARD_QUERY'))
     structs = (csrc.between(hdr_abi, 'struct ua_board_query {', '#define UA_IOCTL_BOARD_QUERY') +
                csrc.between(hdr_abi, 'struct ua_plugin_resource {', '#define UA_IOCTL_PLUGIN_INSTANCE'))
+    lic_stubs = LIC_STUBS
+    if real_strips:
+        begin = lic_stubs.index('/* the strips are not part')
+        end = lic_stubs.index('/* user memory:')
+        lic_stubs = lic_stubs[:begin] + lic_stubs[end:]
     code = ('#define UA_REAL_QUARANTINE 1\n' + khost.PREFIX + strips.HOST_FAKE +
             abi + '\n' + structs +
             'struct ua_file { struct ua_device *ua; };\n' +
             khost.header('ua_resource_pool.h') + khost.header('ua_plugin_host.h') +
-            strips.STRIPS_STUBS + strips.HOST_STUBS + LIC_STUBS + fake.FPGA +
+            strips.STRIPS_STUBS + strips.HOST_STUBS + lic_stubs + fake.FPGA +
             khost.body('ua_resource_pool.c') + khost.body('ua_dsp_xact.c') +
             khost.body('ua_plugin_catalog.c') + khost.body('ua_plugin_upload.c') +
             khost.body('ua_plugin_place.c') + host_fns +
             khost.body('ua_plugin_license.c') + khost.body('ua_plugin_instance.c') +
-            GLUE + main)
+            (khost.body('ua_strips.c') if real_strips else '') + GLUE + main)
     code = code.replace('#define offsetof_ok 1', '')
     return csrc.build_and_run(code, extra=('-Wno-unused-const-variable',
                                            '-Wno-unused-parameter',
@@ -739,7 +748,7 @@ int main(void)
 	dev.audio.connected = true;
 	mutex_lock(&dev.lock);
 	ops = ua_plugin_host_ops(&dev);
-	assert(ops == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_DESTROY));
+	assert(ops == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_DESTROY | UA_PLUGIN_OP_SERVICE));
 	for (int i = 0; i < 4; i++)
 		host.dsp[i].quarantined = true;
 	assert(ua_plugin_host_ops(&dev) == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_DESTROY));

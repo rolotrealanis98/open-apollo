@@ -364,6 +364,7 @@ int ua_plugin_admit(struct ua_device *ua, u32 render_id, u32 *state,
 
 /* ---- plug-in instances (ua_plugin_instance.c) ---- */
 void ua_instances_teardown(struct ua_device *ua, const char *why); /* ua->lock */
+bool ua_instances_strips_busy(struct ua_device *ua); /* ua->lock */
 void ua_instances_dsp_gone(struct ua_device *ua, unsigned int dsp); /* ua->lock */
 void ua_plugin_file_release(struct ua_file *uf);	/* no lock */
 
@@ -376,6 +377,10 @@ void ua_strips_run(struct ua_device *ua);		/* host work */
 void ua_strips_teardown(struct ua_device *ua, const char *why); /* ua->lock */
 void ua_strips_lost(struct ua_device *ua);		/* ua->lock */
 void ua_strips_service(struct ua_device *ua);		/* ua->lock */
+int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
+			     u32 synch, u64 epoch, u32 *generation); /* ua->lock */
+int ua_strips_restore(struct ua_device *ua, struct ua_xact *x,
+		      u32 synch, u32 generation); /* ua->lock */
 bool ua_strips_live(struct ua_device *ua);		/* ua->lock */
 void ua_strips_proc(struct ua_device *ua, struct snd_info_buffer *buf);
 

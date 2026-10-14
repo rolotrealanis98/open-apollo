@@ -17,8 +17,8 @@
  *      the answer (else -ESTALE);
  *   5. each module not resident there uploaded and acknowledged;
  *   6. the private rows zero-filled and linked (memspec), taken by the DSP.
- * Nothing is routed or started: no audio reaches the instance yet (the
- * chain, SYNCH and parameters are later work).  Any failure after
+ * F_START then writes parameters and starts the chain; SERVICE updates
+ * parameters and reads back private rows on that instance. Any failure after
  * placement takes down what was placed; an outcome that cannot be proven
  * quarantines the DSP.
  */
@@ -53,12 +53,15 @@ struct ua_plugin_inst {
 	bool lost;			/* taken down by the host, or the DSP gone */
 	bool started;			/* SYNCH'd on a DSP input (F_START) */
 	u32 synch;			/* in1 | in2 << 16 */
+	bool strip_override;		/* reserves the retained plain strip */
+	u32 strip_generation;
 	u32 scratch_prev[UA_POOLS];	/* scratch before F_START raised it */
 	u8 scratch_raised;		/* bit p: pool p raised by this instance */
 	unsigned int n_res, n_priv;
 	struct ua_cat_entry **res;	/* catalog references */
 	struct ua_pool_lease *lease;	/* n_res modules, then n_priv rows */
 	u8 *ident;			/* n_priv: one identity per private row */
+	struct ua_memspec_row *rows;	/* immutable bounds and link ownership */
 };
 
 static void ua_inst_free(struct ua_device *ua, struct ua_plugin_inst *in)
@@ -71,6 +74,7 @@ static void ua_inst_free(struct ua_device *ua, struct ua_plugin_inst *in)
 	kfree(in->res);
 	kfree(in->lease);
 	kfree(in->ident);
+	kfree(in->rows);
 	kfree(in);
 }
 
@@ -121,30 +125,38 @@ static int ua_inst_scratch_raise(struct ua_pool_owner *o,
  * had are released on the DSP, everything goes back to the ledger.  With
  * @send the release words are published as the DSP's fence (no wait);
  * without, or when the DSP is not the host's any more, nothing is sent.
- * Returns the number of releases published.
+ * Returns 1 for a published fence, 0 for no work, or a retirement error.
  */
-static unsigned int ua_inst_unplace(struct ua_device *ua,
-				    struct ua_plugin_inst *in, bool send)
+static int ua_inst_unplace(struct ua_device *ua,
+			   struct ua_plugin_inst *in, bool send, bool restore)
 {
 	struct ua_plugin_host *h = ua->host;
 	struct ua_host_dsp *d = &h->dsp[in->dsp];
 	struct ua_xact *x = NULL;
 	unsigned int i, rels = 0;
 	bool stops;
+	int ret = 0;
 
 	if (!in->placed)
 		return 0;
 	in->placed = false;
 	if (!d->pools)
 		return 0;		/* the ledger went with the DSP */
-	if (send && d->owned)
+	if (send && ua_plugin_dsp_admitted(ua, in->dsp)) {
 		x = ua_xact_alloc(in->dsp, 0);
+		if (!x)
+			ret = -ENOMEM;
+	} else if (restore && in->started && !in->lost) {
+		ret = -ESTALE;
+	}
 	if (x)
-		x->epoch = h->epoch;
+		x->epoch = in->epoch;
 	/* a started instance stops before anything of it is released */
 	if (x && in->started && !in->lost)
 		ua_xact_inline(x, UA_INST_CMD_SYNCH, in->synch, 0, 0);
 	stops = x && in->started && !in->lost;
+	if (stops && restore && in->strip_override)
+		ret = ua_strips_restore(ua, x, in->synch, in->strip_generation);
 	in->started = false;
 	for (i = 0; i < in->n_res; i++) {
 		struct ua_cat_entry *e = in->res[i];
@@ -166,19 +178,27 @@ static unsigned int ua_inst_unplace(struct ua_device *ua,
 	ua_plugin_unplace(ua, in->dsp, in->lease + in->n_res, in->n_priv);
 	memset(in->lease + in->n_res, 0, in->n_priv * sizeof(*in->lease));
 	ua_inst_scratch_restore(d->pools, in);
+	if (ret) {
+		if (x)
+			ua_xact_discard(ua, x);
+		ua_plugin_quarantine(ua, in->dsp, "plug-in retirement unproven", ret);
+		return ret;
+	}
 	if (!x)
 		return 0;
 	if (!rels && !stops) {
 		ua_xact_discard(ua, x);
 		return 0;
 	}
-	if (ua_plugin_publish_now(ua, x)) {
-		ua_plugin_disown(ua, in->dsp, "a plug-in teardown could not be sent");
-		return 0;
+	ret = ua_plugin_publish_now(ua, x);
+	if (ret) {
+		ua_plugin_quarantine(ua, in->dsp,
+				     "a plug-in teardown could not be sent", ret);
+		return ret;
 	}
 	d->releases += rels;
 	ua_plugin_fence_set(ua, in->dsp, x);
-	return rels;
+	return 1;	/* A stop-only transaction still needs its fence proved. */
 }
 
 /**
@@ -198,7 +218,7 @@ void ua_instances_teardown(struct ua_device *ua, const char *why)
 	list_for_each_entry(in, &h->instances, node) {
 		if (in->lost)
 			continue;
-		ua_inst_unplace(ua, in, true);
+		ua_inst_unplace(ua, in, true, false);
 		in->lost = true;
 		in->loaded = false;
 		n++;
@@ -206,6 +226,18 @@ void ua_instances_teardown(struct ua_device *ua, const char *why)
 	if (n)
 		dev_info(&ua->pdev->dev,
 			 "plug-in host: %u instance(s) taken down (%s)\n", n, why);
+}
+
+/* Rebuild must not free the plain strip a pending/running insert will restore. */
+bool ua_instances_strips_busy(struct ua_device *ua)
+{
+	struct ua_plugin_inst *in;
+
+	lockdep_assert_held(&ua->lock);
+	list_for_each_entry(in, &ua->host->instances, node)
+		if (in->placed && in->strip_override && !in->lost)
+			return true;
+	return false;
 }
 
 /* DSP @dsp is no longer the host's (ua->lock): its instances are gone */
@@ -499,7 +531,7 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 	struct ua_plugin_inst *in = NULL;
 	unsigned int i, n, dsp = 0;
 	u64 epoch;
-	int ret;
+	int ret, retired;
 
 	if (mutex_lock_killable(&h->mutex))
 		return -EINTR;
@@ -526,10 +558,12 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 	in->lease = kcalloc(in->n_res + in->n_priv, sizeof(*in->lease),
 			    GFP_KERNEL);
 	in->ident = kzalloc(in->n_priv, GFP_KERNEL);
+	in->rows = kcalloc(in->n_priv, sizeof(*in->rows), GFP_KERNEL);
 	n = in->n_res + in->n_priv;
 	rq = kcalloc(n, sizeof(*rq), GFP_KERNEL);
-	if (!in->res || !in->lease || !in->ident || !rq)
+	if (!in->res || !in->lease || !in->ident || !in->rows || !rq)
 		goto fail;
+	memcpy(in->rows, rows, in->n_priv * sizeof(*rows));
 	for (i = 0; i < in->n_res; i++) {
 		ret = ua_catalog_get(ua, sha[i], &in->res[i]);
 		if (ret)
@@ -563,7 +597,23 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 				       req->reserved[4] >> 16, req->reserved[5] };
 
 		ret = 0;
-		if (need[1] || need[2] || need[3])
+		if (req->flags & UA_PLUGIN_CREATE_F_START) {
+			struct ua_plugin_inst *other;
+
+			ret = ua_strips_override_target(ua, req->dsp,
+					 req->reserved[0], epoch, &in->strip_generation);
+			/* Scratch restoration is not composable across started chains. */
+			list_for_each_entry(other, &h->instances, node)
+				if (other->dsp == req->dsp && other->placed &&
+				    !other->lost &&
+				    (other->started || other->strip_override))
+					ret = -EBUSY;
+			if (!ret) {
+				in->strip_override = true;
+				in->synch = req->reserved[0];
+			}
+		}
+		if (!ret && (need[1] || need[2] || need[3]))
 			ret = ua_inst_scratch_raise(h->dsp[req->dsp].pools, in, need);
 		if (!ret)
 			ret = ua_plugin_place(ua, req->dsp, rq, n, &dsp, in->lease);
@@ -633,12 +683,20 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 
 takedown:
 	mutex_lock(&ua->lock);
-	ua_inst_unplace(ua, in, !h->dsp[in->dsp].quarantined);
+	retired = ua_inst_unplace(ua, in, !h->dsp[in->dsp].quarantined, true);
 	list_del(&in->node);
 	h->n_instances--;
 	ua_inst_free(ua, in);
 	mutex_unlock(&ua->lock);
 	in = NULL;
+	if (retired > 0) {
+		int fenced = ua_plugin_fence_wait(ua, dsp);
+
+		if (fenced)
+			ret = fenced;
+	} else if (retired < 0) {
+		ret = retired;
+	}
 	goto unlock;
 fail:
 	mutex_lock(&ua->lock);
@@ -669,7 +727,10 @@ static int ua_plugin_destroy(struct ua_device *ua, struct ua_file *uf,
 		ret = -ENOENT;
 	} else {
 		dsp = in->dsp;
-		sent = ua_inst_unplace(ua, in, !in->lost) > 0;
+		ret = ua_inst_unplace(ua, in, !in->lost, true);
+		sent = ret > 0;
+		if (sent)
+			ret = 0;
 		list_del(&in->node);
 		h->n_instances--;
 		ua_inst_free(ua, in);
@@ -692,6 +753,7 @@ void ua_plugin_file_release(struct ua_file *uf)
 	struct ua_plugin_inst *in, *tmp;
 	u32 fences = 0;
 	unsigned int i;
+	int retired;
 
 	if (!h || !ua_plugin_host_enabled())
 		return;
@@ -700,8 +762,12 @@ void ua_plugin_file_release(struct ua_file *uf)
 	list_for_each_entry_safe(in, tmp, &h->instances, node) {
 		if (in->owner != uf)
 			continue;
-		if (ua_inst_unplace(ua, in, !in->lost))
+		retired = ua_inst_unplace(ua, in, !in->lost, true);
+		if (retired > 0)
 			fences |= BIT(in->dsp);
+		else if (retired < 0)
+			dev_warn(&ua->pdev->dev,
+				 "plug-in close retirement failed (%d)\n", retired);
 		list_del(&in->node);
 		h->n_instances--;
 		ua_inst_free(ua, in);
@@ -711,6 +777,129 @@ void ua_plugin_file_release(struct ua_file *uf)
 		if (fences & BIT(i))
 			ua_plugin_fence_wait(ua, i);
 	mutex_unlock(&h->mutex);
+}
+
+
+/* SERVICE uses the CREATE layout, never caller-supplied DSP addresses. */
+static int ua_plugin_instance_service(struct ua_device *ua, struct ua_file *uf,
+				      const struct ua_plugin_instance *req,
+				      const u32 *cmd, u32 *values)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_plugin_inst *in;
+	struct ua_xact *x = NULL;
+	const __le32 *reply;
+	__le32 *dest;
+	unsigned int nw = req->reserved[1], nr = req->reserved[4];
+	unsigned int row = req->reserved[0] >> 24, i, ncmd = 0;
+	u32 word = req->reserved[0] & 0xffffff;
+	int ret;
+
+	if (mutex_lock_killable(&h->mutex))
+		return -EINTR;
+	mutex_lock(&ua->lock);
+	in = ua_inst_find(h, uf, req->handle);
+	if (!in) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+	if (in->lost || !in->placed || in->epoch != h->epoch ||
+	    req->epoch != in->epoch || !ua_plugin_dsp_admitted(ua, in->dsp)) {
+		ret = -ESTALE;
+		goto unlock;
+	}
+	if (!in->loaded || !in->started) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+	if (nw) {
+		ret = ua_inst_check_cmds(in->rows, in->n_priv, cmd, nw);
+		if (ret < 0)
+			goto unlock;
+	}
+	if (nr && (row >= in->n_priv || word >= in->rows[row].dwords ||
+		   nr > in->rows[row].dwords - word)) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+	x = ua_xact_alloc(in->dsp, nw ? UA_XACT_PIECE : 0);
+	if (!x) {
+		ret = -ENOMEM;
+		goto unlock;
+	}
+	x->epoch = in->epoch;
+	if (nw) {
+		dest = ua_xact_cmd(x, nw);
+		if (dest)
+			ncmd = ua_inst_cmd_copy(dest, cmd, nw, in->lease + in->n_res);
+	}
+	if (nr) {
+		x->rx_fill = 0xffcccccc;
+		ua_xact_rx(x, nr + 2);
+		ua_xact_inline(x, 0x000c0004,
+			       in->lease[in->n_res + row].base + word, nr, word);
+	}
+	mutex_unlock(&ua->lock);
+	ret = ua_xact_run(ua, x, UA_XACT_WAIT_MS);
+	mutex_lock(&ua->lock);
+	if (x->state >= UA_XACT_PUBLISHED)
+		h->dsp[in->dsp].writes += ncmd;
+	if (!ret && (in->lost || h->epoch != in->epoch))
+		ret = -ESTALE;
+	if (!ret && nr) {
+		reply = ua_xact_reply(x, 0);
+		if (!reply || le32_to_cpu(reply[0]) != (0x80010000u | (nr + 2)) ||
+		    le32_to_cpu(reply[1]) != word) {
+			ret = -EPROTO;
+		} else {
+			for (i = 0; i < nr; i++)
+				values[i] = le32_to_cpu(reply[i + 2]);
+		}
+	}
+	ua_xact_done(ua, x);
+unlock:
+	mutex_unlock(&ua->lock);
+	mutex_unlock(&h->mutex);
+	return ret;
+}
+
+static long ua_plugin_ioctl_service(struct ua_device *ua, struct ua_file *uf,
+				    const struct ua_plugin_instance *req)
+{
+	u32 *cmd = NULL, *values = NULL;
+	unsigned int nw = req->reserved[1], nr = req->reserved[4];
+	long ret = -ENOMEM;
+
+	if (!req->handle || !req->epoch || req->flags || req->render_id ||
+	    req->dsp || req->n_resources || req->n_private || req->resources ||
+	    req->reserved[5] || nw > UA_PLUGIN_CMD_WORDS_MAX ||
+	    (nw && nw < 4) || nr > UA_PLUGIN_READ_WORDS_MAX || (!nw && !nr) ||
+	    (!nw && (req->reserved[2] || req->reserved[3])) ||
+	    (!nr && (req->reserved[0] || req->privates)) || (nr && !req->privates))
+		return -EINVAL;
+	if (nw) {
+		cmd = kvmalloc_array(nw, sizeof(*cmd), GFP_KERNEL);
+		if (!cmd)
+			goto out;
+		if (copy_from_user(cmd, u64_to_user_ptr((u64)req->reserved[3] << 32 |
+						       req->reserved[2]), nw * sizeof(*cmd))) {
+			ret = -EFAULT;
+			goto out;
+		}
+	}
+	if (nr) {
+		values = kvmalloc_array(nr, sizeof(*values), GFP_KERNEL);
+		if (!values)
+			goto out;
+	}
+	ret = ua_plugin_instance_service(ua, uf, req, cmd, values);
+	if (!ret && nr && copy_to_user(u64_to_user_ptr(req->privates), values,
+				      nr * sizeof(*values)))
+		ret = -EFAULT;
+out:
+	kvfree(cmd);
+	kvfree(values);
+	return ret;
 }
 
 /* UA_INSTANCE_END */
@@ -735,10 +924,16 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 		return -EOPNOTSUPP;
 	if (copy_from_user(&req, (void __user *)arg, sizeof(req)))
 		return -EFAULT;
+	if (req.struct_size != sizeof(req) || req.license_state || req.license_word)
+		return -EINVAL;
+	if (req.op == UA_PLUGIN_INST_SERVICE)
+		return ua_plugin_ioctl_service(ua, uf, &req);
 	if (req.op == UA_PLUGIN_INST_CREATE &&
 	    (req.flags & UA_PLUGIN_CREATE_F_START)) {
 		nw = req.reserved[1];
-		if (nw < 4 || nw > UA_PLUGIN_CMD_WORDS_MAX ||
+		if (req.dsp == UA_PLUGIN_DSP_ANY ||
+		    (req.reserved[0] >> 16) != 0x20 ||
+		    nw < 4 || nw > UA_PLUGIN_CMD_WORDS_MAX ||
 		    ((req.reserved[4] || req.reserved[5]) &&
 		     req.dsp == UA_PLUGIN_DSP_ANY))
 			return -EINVAL;

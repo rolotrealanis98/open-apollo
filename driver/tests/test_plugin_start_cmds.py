@@ -128,7 +128,7 @@ def test_ioctl_takes_the_commands_and_the_scratch():
     assert 'req.dsp == UA_PLUGIN_DSP_ANY' in ioctl
     create = csrc.extract(SRC, 'static int ua_plugin_create(')
     assert create.index('ua_inst_scratch_raise(') < create.index('ua_plugin_place(')
-    unplace = csrc.extract(SRC, 'static unsigned int ua_inst_unplace(')
+    unplace = csrc.extract(SRC, 'static int ua_inst_unplace(')
     assert unplace.index('ua_plugin_unplace(') < unplace.index('ua_inst_scratch_restore(')
     # zero-fills cover the even extent the ledger hands out
     assert 'rows[i].dwords + (rows[i].dwords & 1)' in SRC

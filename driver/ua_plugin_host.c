@@ -355,7 +355,7 @@ u64 ua_plugin_host_ops(struct ua_device *ua)
 	ops |= UA_PLUGIN_OP_BOARD_QUERY;
 	for (i = 0; i < ua->num_dsps && i < UA_HOST_DSPS; i++)
 		if (ua_plugin_dsp_admitted(ua, i))
-			return ops | UA_PLUGIN_OP_CREATE;
+			return ops | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_SERVICE;
 	return ops;
 }
 

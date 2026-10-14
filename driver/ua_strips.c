@@ -856,6 +856,65 @@ bool ua_strips_live(struct ua_device *ua)
 	return st && st->state == UA_STRIPS_LIVE;
 }
 
+/* Only a complete, retained mono strip on this DSP can be overridden. */
+int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
+			     u32 synch, u64 epoch, u32 *generation)
+{
+	struct ua_strips *st = ua->host ? ua->host->strips : NULL;
+	unsigned int k, j;
+
+	lockdep_assert_held(&ua->lock);
+	if (!st || input_strips_steps || dsp != ua_strips_dsp ||
+	    (synch >> 16) != UA_STRIP_SYNCH_MONO ||
+	    st->state != UA_STRIPS_LIVE || st->epoch != epoch ||
+	    ua->host->epoch != epoch || !ua_plugin_dsp_admitted(ua, dsp))
+		return -ESTALE;
+	for (k = 0; k < st->n; k++) {
+		struct ua_strip *s = &st->strip[k];
+
+		if (s->synch != (synch & 0xffff))
+			continue;
+		if (s->state != UA_STRIP_LIVE || !s->header ||
+		    s->header != s->priv[0].base)
+			return -ESTALE;
+		for (j = 0; j < UA_STRIP_PRIV; j++)
+			if (!s->priv[j].cookie)
+				return -ESTALE;
+		*generation = st->gen;
+		return 0;
+	}
+	return -ENOENT;
+}
+
+/* Append to the instance's stop fence, without allocating or resetting a strip. */
+int ua_strips_restore(struct ua_device *ua, struct ua_xact *x,
+		      u32 synch, u32 generation)
+{
+	struct ua_strips *st = ua->host->strips;
+	u32 live_generation;
+	unsigned int k;
+	int ret;
+
+	ret = ua_strips_override_target(ua, x->dsp, synch, x->epoch, &live_generation);
+	if (ret)
+		return ret;
+	if (generation != live_generation)
+		return -ESTALE;
+	for (k = 0; k < st->n; k++)
+		if (st->strip[k].synch == (synch & 0xffff)) {
+			ua_xact_inline(x, UA_STRIP_CMD_SYNCH, synch,
+				       st->strip[k].header, 0);
+			ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch & 0xffff,
+				       UA_STRIP_INPUT_SPAN, UA_STRIP_SPAN_NONE);
+			ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch & 0xffff,
+				       UA_STRIP_INPUT_SPAN, UA_STRIP_SPAN_NONE);
+			ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch & 0xffff,
+				       UA_STRIP_INPUT_ROUTE, ua_strip_route);
+			return x->err;
+		}
+	return -ENOENT;
+}
+
 /**
  * ua_strips_connected - the audio connect is done: start a pass soon
  * @ua: device (ua->lock held)
@@ -1420,7 +1479,8 @@ void ua_strips_service(struct ua_device *ua)
 	want = atomic_read(&ua_strips_rebuilds);
 	if (want == st->rebuild_seen)
 		return;
-	if (st->state == UA_STRIPS_CREATING || st->state == UA_STRIPS_ARMED)
+	if (h->fence[ua_strips_dsp] || ua_instances_strips_busy(ua) ||
+	    st->state == UA_STRIPS_CREATING || st->state == UA_STRIPS_ARMED)
 		return;		/* after the pass */
 	st->rebuild_seen = want;
 	if (st->state != UA_STRIPS_LIVE)

@@ -64,7 +64,7 @@ PLUGIN_INSTANCE = _iowr(0x94, INSTANCE.size)
 
 UA_FEAT_FEATURES2 = 1 << 31
 UA_FEAT2_PLUGIN_HOST = 1
-OPS = {1: 'BOARD_QUERY', 2: 'CREATE', 4: 'DESTROY'}
+OPS = {1: 'BOARD_QUERY', 2: 'CREATE', 4: 'DESTROY', 8: 'SERVICE'}
 STATE_BITS = {1: 'fw_loaded', 2: 'dsps_connected', 4: 'init_chain',
               8: 'audio_connected', 16: 'plugin_host', 32: 'input_strips'}
 UA_PLUGIN_INST_CREATE = 1

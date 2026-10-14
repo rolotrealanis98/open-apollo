@@ -760,6 +760,7 @@ struct ua_pause_info {
 #define UA_PLUGIN_OP_BOARD_QUERY	(1ull << 0)
 #define UA_PLUGIN_OP_CREATE		(1ull << 1)
 #define UA_PLUGIN_OP_DESTROY		(1ull << 2)
+#define UA_PLUGIN_OP_SERVICE		(1ull << 3)
 
 struct ua_plugin_caps {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_caps) */
@@ -1064,6 +1065,7 @@ struct ua_board_query {
  */
 #define UA_PLUGIN_INST_CREATE		1u
 #define UA_PLUGIN_INST_DESTROY		2u
+#define UA_PLUGIN_INST_SERVICE		3u
 
 #define UA_PLUGIN_CREATE_F_CHECK	(1u << 0)
 
@@ -1103,12 +1105,27 @@ struct ua_plugin_private {
  * (0: none): the chain's scratch (the largest of its descriptors'
  * AllocInfo 0xa9c / 0xa98 / 0xaa0), raised on the DSP before placement and
  * put back when the instance goes; needs an explicit dsp.
- * DESTROY and close stop it before anything is released.
+ * Requires mono, an explicit DSP matching a retained live input strip, and
+ * at most one START instance on that DSP. DESTROY/close stop the instance
+ * and restore only that retained strip before releasing modules; both wait
+ * for the retirement fence. Epoch/loss teardown never restores a strip.
  */
 #define UA_PLUGIN_CREATE_F_START	(1u << 1)
 #define UA_PLUGIN_CMD_WORDS_MAX		1016	/* one 4 KiB DMA page, room left */
+#define UA_PLUGIN_READ_WORDS_MAX	64
 #define UA_PLUGIN_CMD_WRITE		0x0014	/* opcode half of a parameter WRITE */
 
+/*
+ * UA_PLUGIN_INST_SERVICE (experimental): handle and epoch from CREATE.
+ * reserved[1..3] = WRITE count and pointer, as F_START (count 0: no writes).
+ * Optional read: reserved[0] = row << 24 | word, reserved[4] = word count
+ * (1..UA_PLUGIN_READ_WORDS_MAX), privates = output __u32 pointer.
+ * All other fields zero except struct_size/op. At least one write or read.
+ * Writes are checked against the retained CREATE layout; read ranges must
+ * stay in one private row. No raw DSP addresses are accepted. Writes precede
+ * the read. Only the owning file may service a live, started instance, in
+ * its CREATE epoch. Malformed/stale replies never copy data to the caller.
+ */
 struct ua_plugin_instance {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_instance) */
 	__u32 op;		/* UA_PLUGIN_INST_* */
@@ -1120,7 +1137,7 @@ struct ua_plugin_instance {
 	__u32 n_private;	/* CREATE: 1..UA_PLUGIN_PRIV_MAX */
 	__u64 resources;	/* CREATE: user pointer */
 	__u64 privates;		/* CREATE: user pointer */
-	__u64 epoch;		/* out */
+	__u64 epoch;		/* CREATE: out; SERVICE: expected epoch */
 	__u32 license_state;	/* out: UA_PLUGIN_LICENSE_* */
 	__u32 license_word;	/* out */
 	__u32 reserved[6];
