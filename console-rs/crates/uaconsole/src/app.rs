@@ -445,7 +445,11 @@ impl App {
                         strip,
                         control: Control::Insert(slot),
                     })) => {
-                        self.overlays.on_open_plugin(&strip, slot, &*self.model);
+                        if self.overlays.on_open_plugin(&strip, slot, &*self.model) {
+                            if let Some(id) = self.overlays.top_layer_id() {
+                                self.popups.focus(&id);
+                            }
+                        }
                     }
                     Effect::Model(a) => self.model.apply(&a),
                     Effect::SetText(id, text) => self.model.set_text(&id, &text),

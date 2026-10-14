@@ -287,6 +287,10 @@ impl OverlayStack {
         self.captured = false;
     }
 
+    pub fn top_layer_id(&self) -> Option<String> {
+        self.panels.len().checked_sub(1).map(|i| format!("plugin:{i}"))
+    }
+
     /// Raises an existing insert panel, or asks the hook to open it.
     pub fn on_open_plugin(&mut self, strip_id: &str, slot: u8, model: &dyn MixerModel) -> bool {
         if let Some(index) = self.panels.iter().position(|p| p.matches_plugin(strip_id, slot, model)) {
@@ -458,6 +462,7 @@ mod tests {
             stack.captured = true;
             assert!(stack.on_open_plugin("in0", 0, &model));
             assert_eq!(stack.panels.len(), 3);
+            assert_eq!(stack.top_layer_id().as_deref(), Some("plugin:2"));
             assert!(std::ptr::eq(first, &**stack.panels.last().unwrap()));
             assert!(!stack.captured);
         }
