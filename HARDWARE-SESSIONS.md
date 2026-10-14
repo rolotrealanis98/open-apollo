@@ -349,3 +349,100 @@ Driver as of this commit (input strips and plug-in host on; defaults below).
   `--runtime`, and unmask it afterwards); the udev worker restarts the daemon.
 - Measure with `arecord -D hw:CARD=x4,DEV=0 -c 22 -f S32_LE -r 48000` and the
   per-channel RMS; ALSA ch 0-3 are inputs 1-4, ch 14/15 MON L/R.
+
+## Results, 2026-10-14: corrected 1176 insert
+
+The pending HANDOFF.md section 6 run passed on the Apollo x4 at 48 kHz.
+Source: private `feat/plugin-hosting` at `ba1a24a`; loaded module srcversion
+`EBCB6AAB18002A16F1E8F35`. No source changes or pushes were needed.
+
+### Observed
+
+- Cold-loaded the corrected driver with `input_strips=1 plugin_host=1`.
+  All four strips started on DSP 1. No AER failure occurred.
+- Offline checks passed for 16 rows: default 11 WRITEs / 160 words;
+  Input 0.8: 12 WRITEs / 166 words.
+- Both CREATE+START calls completed in approximately 11 ms, after the device
+  authorization gate admitted the plug-in. Both instances were destroyed.
+- The default insert sustained audio through its 20-second hold. Input 0.8
+  sustained audio through its 10-second hold. Inputs 3/4 retained their
+  approximately -107 dBFS noise floor throughout.
+- One explicit strip rebuild after removal succeeded. Input 1 and monitor
+  audio returned without another cold cycle or a DSP timeout.
+- After rebuild: all four DSPs owned, zero quarantined DSPs, zero instances,
+  zero parked DMA buffers. All five previously active audio services were
+  unmasked and restarted successfully. The corrected hosting driver remains
+  loaded with working strips.
+
+### Measurements
+
+Two-second recordings, RMS dBFS. Source was the live input-1 mic/room signal,
+which varied between recordings; these are not calibrated gain measurements.
+
+| Stage | Input 1 | Monitor L/R |
+|---|---:|---:|
+| Dry immediately before default insert | -52.0 | -55.0 |
+| Default insert, start | -49.2 | -52.2 |
+| Default insert, end | -42.6 | -45.6 |
+| Input 0.8 insert, start | -30.5 | -33.3 |
+| Input 0.8 insert, end | -34.3 | -37.2 |
+| Plain strips restored | -51.1 | -54.1 |
+
+The first samples differ by +18.7 dB between default and Input 0.8, consistent
+with the Mac reference but not proof of exact gain parity. Input 2 remained
+digital zero, as previously observed with no source connected.
+
+The second script labels its pre-insert measurement "dry (plain strip)".
+That label is incorrect in this sequence: `--no-restore` had removed the
+first chain without rebuilding input 1. Its zero reading is expected and
+must not be used as a dry gain reference.
+
+## Results, 2026-10-14: live controls, restoration, native daemon
+
+Private source commits: `3614d9f` (INSTANCE SERVICE and retained-strip restore),
+`18c1bba` (native daemon backend). Tested module srcversion
+`C5EA0ACFCFA057CEF51FCE4`; Apollo x4, 48 kHz. No pushes.
+
+- SERVICE validates retained row/link bounds, owner and epoch, then delivers live
+  parameter writes and validated private-row reads. A generic borrowed-fd Python
+  client and native daemon backend now exercise that API.
+- DESTROY and fd close restore only the affected retained plain strip. Stop-only
+  transactions prove their fence; pending inserts/fences defer strip rebuild.
+  START is deliberately restricted to mono, the matching live-strip DSP, and
+  one running insert per DSP.
+- All seven 1176LN Legacy controls and all five ratios passed exact hardware
+  coefficient readback. Private producer validation covered 1405 stateful cases
+  and 112400 exact coefficient comparisons against the genuine emulated setter.
+  Runtime requires no Wine or UA DLL; no vendor pages enter this repository.
+- Stable Input/Output gain sweeps matched expected changes within 0.002 dB.
+  Meter comparisons at calibrated input levels differed from the captured UA
+  reference by 0.29–2.78% (+4/+8) and 7.55% (GR at -12 dBFS). This bounded agreement
+  compares a mono insert with the retained stereo reference.
+- Four separate carriers reached the four analog inputs: 700, 1100, 1500, 1900 Hz.
+  Eight cycles covered every input using both DESTROY and owning-fd close, with
+  336 live updates. Other carriers changed at most 0.042 dB; restored levels at
+  most 0.032 dB. Pool state returned exactly to baseline after every cycle, with
+  no global rebuild, timeout, quarantine, or AER failure.
+- Burst audio established distinct Attack/Release response. The original recipe
+  also added exactly 800 samples of relative recording delay: its Mic strip
+  compensation is 1000 versus the plain strip's 200. Recovered source identifies
+  the field; a single-field hardware test removed/restored exactly 800 samples.
+  The private 48 kHz mono bench provider now verifies delay 200 while retaining the
+  captured 2048-word buffers. This is not a general compensation policy.
+- The real engine/helper protocol passed load, all sevencontrols, all ratios, fresh
+  meter reads, refused unsupported mutations, unload, daemon exit with a live
+  insert, and restart without restoring a stale lease. The final provider
+  passed again with the imported catalogue. A native daemon-created insert
+  measured 0added samples relative to the simultaneously driven plain input.
+- Native GUI interaction, stereo/multiple inserts, other rates/plug-ins,
+  reconnect replay, and distribution-ready provider generation remain open.
+  See `mixer-engine/NATIVE-HOSTING.md` for the opt-in contract.
+
+Validation: 131 driver tests; 2004 mixer-engine tests plus 89 subtests; module build
+and diff check passed. Earlier harness failures (quiet-source broadband noise,
+insufficient meter settling, helper query shape, one ALSA capture overrun) retain
+private artifacts and were corrected before the passing runs above.
+
+End state: normal daemon/PipeWire/WirePlumber/Pulse/AES67 services restored,
+all tones and lab daemons stopped, all four DSPs owned, zero instances, zero held,
+awaiting, or leaked transactions. Tested module remains loaded; DKMS unchanged.
