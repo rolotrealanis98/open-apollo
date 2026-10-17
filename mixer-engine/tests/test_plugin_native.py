@@ -98,7 +98,7 @@ class Provider:
         self.word = plan.state
 
 
-def model(fault=None):
+def model(fault=None, provider_class=Provider):
     state, helper = StateTree(), HelperTree()
     for name, kind, value in [('EffectName', 'string', ''),
                               ('EffectInstance', 'pointer', 0),
@@ -106,7 +106,7 @@ def model(fault=None):
                               ('Status', 'string', '')]:
         state.add_runtime_property(SLOT + '/' + name, {'type': kind, 'value': value})
     publisher = Publisher(state, helper, owner='synthetic')
-    driver, provider = Driver(), Provider()
+    driver, provider = Driver(), provider_class()
     backend = NativePluginBackend(publisher, driver, provider)
     transactions = PluginTransactions(publisher, backend, publication_fault=fault)
     return state, helper, driver, provider, backend, transactions
@@ -287,3 +287,62 @@ def test_real_remote_protocol_fresh_allowlisted_scalar_only():
     daemon._handle_get(client, Command('get', path, raw_params={'floats': '9'}))
     assert json.loads(writer.frames[-1].rstrip(b'\0'))['error']
     assert not backend.publisher.connected
+
+
+class Coupled(Provider):
+    """Two parameters; writing parameter 0 also moves parameter 1 (a Sync-style switch)."""
+
+    def __init__(self):
+        self.words = [50, 10]
+
+    def initial(self, lease):
+        loaded = super().initial(lease)
+        second = copy.deepcopy(loaded.parameters[0])
+        second['id'] = 1
+        second['properties']['NormalizedValue']['value'] = 0.1
+        second['properties']['StringValue']['value'] = '10'
+        return LoadedPlugin(loaded.name, lease, True, 0, loaded.parameters + (second,))
+
+    def _values(self, word):
+        return {'NormalizedValue': word / 100, 'StringValue': str(word)}
+
+    def plan(self, field, word, seen=None):
+        # the fake driver has one shared word; `seen` is what it reads back for this plan
+        return ControlPlan((0x00140004, 0, 0, word), ((0, 0, (word if seen is None else seen,)),),
+                           self._values(word), (int(field.split('/')[1]), word))
+
+    def snapshot(self, field):
+        index = int(field.split('/')[1])
+        return self.plan(field, self.words[index], self.words[0])
+
+    def accept(self, plan):
+        index, word = plan.state
+        self.words[index] = word
+        if index == 0:
+            self.words[1] = word // 5
+
+    def current_values(self, field):
+        return self._values(self.words[int(field.split('/')[1])])
+
+
+class Uncoupled(Coupled):
+    current_values = None  # provider without the optional hook
+
+
+def test_coupled_parameter_is_published_and_next_control_succeeds():
+    state, helper, driver, provider, backend, tx = model(provider_class=Coupled)
+    assert tx.load(SLOT, provider.name).committed
+    second = SLOT + '/parameters/1/NormalizedValue'
+    assert tx.control(SLOT, FIELD, 0.5 + 0.2).committed
+    assert state.get_value(second) == 0.14
+    assert helper.get_value(SLOT + '/parameters/1/StringValue') == '14'
+    result = tx.control(SLOT, 'parameters/1/NormalizedValue', 0.3)
+    assert result.committed and not result.error
+    assert state.get_value(second) == 0.3
+
+
+def test_provider_without_current_values_publishes_no_coupled_change():
+    state, helper, driver, provider, backend, tx = model(provider_class=Uncoupled)
+    assert tx.load(SLOT, provider.name).committed
+    assert tx.control(SLOT, FIELD, 0.7).committed
+    assert state.get_value(SLOT + '/parameters/1/NormalizedValue') == 0.1
