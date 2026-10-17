@@ -14,7 +14,7 @@ import traceback
 
 from plugin_remote import RemoteReadback
 from plugin_driver import PluginDriver
-from plugin_publication import ControlReadback, LoadedPlugin, OwnedHandle, Publisher
+from plugin_publication import ControlReadback, LoadedPlugin, OwnedHandle, PublicationError, Publisher
 from plugin_transactions import (
     ActivateOutcome, ApplyControlOutcome, FinalizeOutcome, Outcome,
     PluginTransactions, PreparedControl, PreparedPlugin, PrepareControlOutcome,
@@ -379,7 +379,28 @@ class NativePluginBackend:
         return ControlReadback(prepared.handle, prepared.field, copy.deepcopy(plan.values))
 
     def apply_control(self, prepared):
-        return ApplyControlOutcome(Outcome.CONFIRMED, self._apply(prepared, False))
+        readback = self._apply(prepared, False)
+        return ApplyControlOutcome(Outcome.CONFIRMED, readback, coupled=self._coupled(prepared))
+
+    def _coupled(self, prepared):
+        """Other parameters the original setter moved with this one (e.g. a Sync switch that
+        sets a rate): their provider values, where they differ from what is published."""
+        slot = prepared.token[0].provider.slot
+        current = getattr(self._owned(slot, prepared.handle).provider, 'current_values', None)
+        if current is None or not prepared.field.startswith('parameters/'):
+            return ()
+        changed, index = [], 0
+        while True:
+            field = f'parameters/{index}/NormalizedValue'
+            try:
+                published = self.publisher.snapshot_control(slot, prepared.handle, field)
+            except PublicationError:
+                return tuple(changed)
+            if field.split('/')[1] != prepared.field.split('/')[1]:
+                values = current(field)
+                if values != published.values:
+                    changed.append(ControlReadback(prepared.handle, field, values))
+            index += 1
 
     def restore_control(self, prepared):
         # A failed SERVICE invalidates PluginDriver; it cannot fabricate restore.
