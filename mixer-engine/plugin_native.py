@@ -30,6 +30,29 @@ class ControlPlan:
     state: object
 
 
+SERVICE_WORDS = 1016  # PluginDriver.service command bound
+
+
+def _write_chunks(words, maximum=SERVICE_WORDS):
+    """Split WRITE commands ({0x0014LLLL, ...}, LLLL = total block words) into service-sized
+    chunks at whole-block boundaries; one chunk when they already fit."""
+    words = tuple(words)
+    if len(words) <= maximum:
+        return (words,)
+    chunks, current, i = [], [], 0
+    while i < len(words):
+        n = words[i] & 0xffff
+        if words[i] >> 16 != 0x14 or n < 4 or i + n > len(words) or n > maximum:
+            raise ValueError('bounded WRITE blocks required to split a long control')
+        if current and len(current) + n > maximum:
+            chunks.append(tuple(current))
+            current = []
+        current.extend(words[i:i + n])
+        i += n
+    chunks.append(tuple(current))
+    return tuple(chunks)
+
+
 @dataclass
 class _Lease:
     native: object
@@ -342,7 +365,10 @@ class NativePluginBackend:
         plan = restoration if restore else proposal
         if plan.writes:
             try:
-                self.driver.service(lease.native, writes=plan.writes)
+                # UA's host spreads long parameter pages over several calls; one SERVICE
+                # takes at most 1016 command words, so split at whole WRITE-block boundaries.
+                for chunk in _write_chunks(plan.writes):
+                    self.driver.service(lease.native, writes=chunk)
             except OSError:
                 self.invalidate()
                 raise
