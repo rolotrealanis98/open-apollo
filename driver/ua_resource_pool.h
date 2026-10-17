@@ -10,7 +10,7 @@
 #include <linux/types.h>
 
 #define UA_POOLS		4	/* 0 code, 1-3 data */
-#define UA_POOL_BATCH_MAX	64
+#define UA_POOL_BATCH_MAX	192	/* CREATE: 64 resources + 128 private rows */
 
 /*
  * One pool as the DSP's register window gives it (CPcieDSP::GetProperty(6):

@@ -409,3 +409,41 @@ def test_hooks_are_wired():
 
 
 
+
+
+
+def test_create_maximum_combined_resources_and_private_rows_place():
+    run(r"""
+int main(void)
+{
+	struct ua_pool_request requests[192];
+	struct ua_pool_lease leases[192];
+	struct ua_pool_usage before[4], after[4];
+	unsigned int chosen = 99;
+	int identities[192];
+
+	setup(true);
+	host_param = true;
+	start(true);
+	connect_all();
+	assert(ua_plugin_dsp_admitted(&dev, 1));
+	assert(ua_pool_read_usage(host.dsp[1].pools, before) == 0);
+	for (unsigned int n = 0; n < 192; n++)
+		requests[n] = (struct ua_pool_request) {
+			.kind = n < 64 ? 0 : 1 + n % 3, .words = 2,
+			.identity = &identities[n], .shared = n < 64 };
+	mutex_lock(&dev.lock);
+	assert(ua_plugin_place(&dev, 1, requests, 192, &chosen, leases) == 0);
+	assert(chosen == 1 && leases[191].cookie);
+	assert(ua_plugin_unplace(&dev, chosen, leases, 192) == 0);
+	chosen = 99;
+	assert(ua_plugin_place(&dev, 1, NULL, 193, &chosen, leases) == -EINVAL);
+	assert(chosen == 99);
+	mutex_unlock(&dev.lock);
+	assert(ua_pool_read_usage(host.dsp[1].pools, after) == 0 &&
+	       !memcmp(before, after, sizeof(before)));
+	setup(false);
+	assert(!k_objects);
+	return 0;
+}
+""")

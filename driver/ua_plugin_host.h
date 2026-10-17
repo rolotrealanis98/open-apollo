@@ -52,6 +52,14 @@ struct ua_host_dsp {
 	u32 memspecs, writes, releases, stops, timeouts;
 };
 
+/* Accepted setting images. Physical readback covers flags and GainC only. */
+#define UA_UNISON_SETTINGS 38
+struct ua_unison_image {
+	u32 value[UA_UNISON_SETTINGS], mask[UA_UNISON_SETTINGS];
+	u32 synch;
+	bool valid;
+};
+
 struct ua_plugin_host {
 	struct ua_device *ua;
 	struct mutex mutex;		/* long operations; before ua->lock */
@@ -75,6 +83,8 @@ struct ua_plugin_host {
 	struct list_head instances;
 	unsigned int n_instances;
 	u32 next_handle;
+	bool analog_write; /* ua->lock: narrowly scoped internal lease write */
+	u32 analog_block[UA_UNISON_SETTINGS]; /* unknown completion: until reprobe */
 
 	/* ua_plugin_license.c: queries and decisions since probe */
 	u32 board_queries, board_query_failures, admitted, refused;
@@ -362,11 +372,22 @@ int ua_plugin_board_query(struct ua_device *ua, u32 *words, u32 *date,
 int ua_plugin_admit(struct ua_device *ua, u32 render_id, u32 *state,
 		    u32 *word, u64 *epoch);	/* host->mutex, no ua->lock */
 
+int ua_plugin_admit_chain(struct ua_device *ua, const u32 *ids, unsigned int n,
+			  u32 *state, u32 *word, u64 *epoch);
+
 /* ---- plug-in instances (ua_plugin_instance.c) ---- */
 void ua_instances_teardown(struct ua_device *ua, const char *why); /* ua->lock */
 bool ua_instances_strips_busy(struct ua_device *ua); /* ua->lock */
 void ua_instances_dsp_gone(struct ua_device *ua, unsigned int dsp); /* ua->lock */
 void ua_plugin_file_release(struct ua_file *uf);	/* no lock */
+
+bool ua_instances_analog_conflict(struct ua_device *, unsigned int, u32);
+void ua_unison_set_owned_locked(struct ua_device *, u32, bool);
+int ua_unison_capture_locked(struct ua_device *, u32, struct ua_unison_image *);
+int ua_unison_apply_locked(struct ua_device *, const struct ua_unison_image *);
+int ua_unison_patch_locked(struct ua_device *, struct ua_unison_image *, const u32 *, unsigned int);
+int ua_unison_drain(struct ua_device *, u64, u32 *);
+int ua_unison_restore(struct ua_device *, u64, const struct ua_unison_image *);
 
 /* ---- Console input strips on DSP 0 (ua_strips.c, input_strips=1) ---- */
 bool ua_strips_wanted(void);
@@ -411,5 +432,9 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 
 /* ua_core.c: re-apply 48V (off, then on) on the preamps in @mask the Apollo reports with 48V on */
 void ua_preamp_phantom_resync(struct ua_device *ua, unsigned int mask);
+
+long ua_plugin_ioctl_delay(struct ua_device *ua, unsigned long arg);
+int ua_strips_delay(struct ua_device *ua, u64 *epoch, u32 *generation,
+		    unsigned int fields, u32 values[3][4]);
 
 #endif /* UA_PLUGIN_HOST_H */

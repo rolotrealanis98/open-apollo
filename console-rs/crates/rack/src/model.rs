@@ -327,6 +327,9 @@ pub struct PluginEntry {
     pub favorite: bool,
     /// Badge of an inactive plug-in (`Plugin-Badge-*`).
     pub badge: Option<PluginBadge>,
+    /// Optional native host support, independent of the device licence.
+    pub native_supported: Option<bool>,
+    pub native_hint: Option<String>,
 }
 
 /// `Rack_PluginsTreeViewBadgedItem` badges (`Rack_PluginsBrowserManager::_GetRowData`).
@@ -359,6 +362,8 @@ impl PluginEntry {
             enabled,
             favorite: false,
             badge: (!enabled).then_some(PluginBadge::Demo),
+            native_supported: None,
+            native_hint: None,
         }
     }
     /// Listed under `category` (any of its categories).
@@ -598,6 +603,10 @@ pub trait MixerModel {
     }
     fn plugin_catalog(&self) -> Vec<PluginEntry> {
         Vec::new()
+    }
+    /// Latest assignment refusal or engine error, displayed in the browser.
+    fn plugin_notice(&self) -> Option<&str> {
+        None
     }
     fn plugin_categories(&self) -> Vec<String> {
         PLUGIN_CATEGORIES.iter().map(|c| c.to_string()).collect()

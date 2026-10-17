@@ -995,7 +995,10 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 	 * so with plugin_host=0 the features word is what it always was.
 	 */
 	if (ua_plugin_host_enabled())
-		v.reserved[0] |= UA_FEAT2_PLUGIN_HOST;
+		v.reserved[0] |= UA_FEAT2_PLUGIN_HOST | UA_FEAT2_PLUGIN_MULTI_INPUT |
+				 UA_FEAT2_PLUGIN_STEREO | UA_FEAT2_PLUGIN_SWAP |
+				 UA_FEAT2_PLUGIN_CHAIN | UA_FEAT2_PLUGIN_DELAY |
+				 UA_FEAT2_PLUGIN_UNISON | UA_FEAT2_PLUGIN_ANALOG_LEASE;
 	if (v.reserved[0])
 		v.features |= UA_FEAT_FEATURES2;
 
@@ -1431,6 +1434,9 @@ int ua_mixer_write_setting_locked(struct ua_device *ua,
 			 "mixer_write: not ready (index=%u)\n", index);
 		return -EAGAIN;
 	}
+
+	if (ua_instances_analog_conflict(ua, index, mask))
+		return -EBUSY;
 
 	/* Merge into cache (read-modify-write with mask) */
 	ua->mixer_val[index] = (ua->mixer_val[index] & ~mask) | (value & mask);
@@ -2522,12 +2528,12 @@ void ua_preamp_phantom_resync(struct ua_device *ua, unsigned int mask)
  * Returns the setting write result, or -EINVAL where the kext returns -8
  * (param > 0x17, channel beyond the device's preamps, param not on the kind).
  */
-int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
-			   u32 param_id, u32 value)
+static int ua_preamp_setting(struct ua_device *ua, unsigned int ch, u32 param_id, u32 value,
+			     u32 *index, u32 *mask, u32 *encoded)
 {
-	static const u8 imp_shift[4] = { 9, 16, 20, 24 };
+	static const u8 imp_shift[4] = {9, 16, 20, 24};
 	unsigned int setting_idx, shift;
-	unsigned int dsp_phase_ch, hiz_inputs;
+	unsigned int hiz_inputs;
 	int kind = ua_mixer_kind(ua);
 	int max_arm_ch;
 	bool hi_bank = ch > 3;
@@ -2536,34 +2542,13 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 	if (param_id > UA_PREAMP_PARAM_RAW_REC)
 		return -EINVAL;
 
-	/* DSP-side params: no mixer setting at all */
-	if (param_id == UA_PREAMP_PARAM_ROUTE)
-		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_ROUTE,
-					      value);
-	if (param_id == UA_PREAMP_PARAM_LEVEL)
-		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_SPAN, value);
-
-	/* Highest ARM preamp channel by kind: 3 on the x4 (kind 14) */
 	max_arm_ch = ua_kind_max_arm_ch(kind);
-	/* Phase goes to the DSP from the first channel without a preamp */
-	dsp_phase_ch = ua->audio.num_preamps ? ua->audio.num_preamps :
-					       max_arm_ch + 1;
-	if (param_id == UA_PREAMP_PARAM_PHASE && ch >= dsp_phase_ch) {
-		/* Scale float: +1.0f normal, -1.0f invert (0 / 1 accepted) */
-		if (value == 0)
-			value = 0x3f800000;
-		else if (value == 1)
-			value = 0xbf800000;
-		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_SCALE,
-					      value);
-	}
 
 	if ((int)ch > max_arm_ch)
 		return -EINVAL;
 
 	/* HiZ inputs of the model (2 without model data, as before) */
-	hiz_inputs = ua->audio.model ? min_t(unsigned int,
-					     ua->audio.num_hiz, 2) : 2;
+	hiz_inputs = ua->audio.model ? min_t(unsigned int, ua->audio.num_hiz, 2) : 2;
 
 	switch (param_id) {
 	case UA_PREAMP_PARAM_MIC_LINE:
@@ -2592,7 +2577,7 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 	case UA_PREAMP_PARAM_LINK:
 		/* The kext links a pair from its even channel, both bits at once */
 		if (ch & 1)
-			return 0;
+			return -EINVAL;
 		setting_idx = hi_bank ? 12 : 0;
 		hw_mask = 0x104u << (12 * ((ch & 3) >> 1));
 		hw_val = value ? hw_mask : 0;
@@ -2673,7 +2658,297 @@ int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch,
 		return -EINVAL;
 	}
 
-	return ua_mixer_write_setting_locked(ua, setting_idx, hw_val, hw_mask);
+	*index = setting_idx;
+	*mask = hw_mask;
+	*encoded = hw_val;
+	return 0;
+}
+
+int ua_preamp_write_locked(struct ua_device *ua, unsigned int ch, u32 param_id, u32 value)
+{
+	u32 index, mask, encoded;
+	int ret;
+	if (param_id == UA_PREAMP_PARAM_LINK && (ch & 1))
+		return 0;
+	if (param_id == UA_PREAMP_PARAM_ROUTE)
+		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_ROUTE, value);
+	if (param_id == UA_PREAMP_PARAM_LEVEL)
+		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_SPAN, value);
+	if (param_id == UA_PREAMP_PARAM_PHASE &&
+	    ch >= (ua->audio.num_preamps ? ua->audio.num_preamps
+					 : ua_kind_max_arm_ch(ua_mixer_kind(ua)) + 1)) {
+		if (value == 0)
+			value = 0x3f800000;
+		else if (value == 1)
+			value = 0xbf800000;
+		return ua_dsp_set_input_param(ua, ch, UA_DSP_INPUT_SCALE, value);
+	}
+	ret = ua_preamp_setting(ua, ch, param_id, value, &index, &mask, &encoded);
+	return ret ? ret : ua_mixer_write_setting_locked(ua, index, encoded, mask);
+}
+
+/* Logical ownership begins before hardware CUSTOM: original launch first resets
+ * PGA to zero, waits, and only then enables CUSTOM. Preserve ordinary gain for
+ * that entire interval; refresh it only after a successful baseline restore. */
+void ua_unison_set_owned_locked(struct ua_device *ua, u32 synch, bool owned)
+{
+	unsigned int k, ch;
+	u32 input[2] = {synch & 0xffff, synch >> 16};
+	for (k = 0; k < 2; k++) {
+		ch = input[k];
+		if (ch == 0x20)
+			continue;
+		ua->audio.preamp[ch].unison_owned = owned;
+		if (!owned && !ua->audio.preamp[ch].custom)
+			ua->audio.preamp[ch].gain = ua_preamp_gain_db_from_code(
+			    UA_RB_PREAMP_GAINC(ua->mixer_val[ch < 4 ? 3 : 14], ch & 3));
+	}
+}
+
+/* ua->lock held. Readback flags/gain supersede the write cache at acquisition.
+ * Other fields retain accepted-cache provenance, not physical verification. */
+int ua_unison_capture_locked(struct ua_device *ua, u32 synch, struct ua_unison_image *im)
+{
+	unsigned int k, ch, p, i;
+	u32 inputs[2] = {synch & 0xffff, synch >> 16}, mask, val;
+	if (!ua->mixer_ready || !ua->mixer_rb_seen || ua->mixer_dirty ||
+	    ua_read(ua, UA_REG_MIXER_SEQ_RD) != ua->mixer_seq_wr || ua->mixer_rb_data[38] == ~0u ||
+	    ua->mixer_rb_data[39] == ~0u)
+		return -EAGAIN;
+	memset(im, 0, sizeof(*im));
+	im->synch = synch;
+	memcpy(im->value, ua->mixer_val, sizeof(im->value));
+	for (k = 0; k < 2; k++) {
+		ch = inputs[k];
+		if (ch == 0x20)
+			continue;
+		if (ch >= ua->audio.num_preamps || ch >= UA_MAX_PREAMP_CH)
+			return -EINVAL;
+		if (ua->audio.preamp[ch].custom || ua->audio.preamp[ch].unison_owned)
+			return -EBUSY;
+		for (p = 0; p <= UA_PREAMP_PARAM_RAW_REC; p++) {
+			if (p == UA_PREAMP_PARAM_LINK)
+				continue; /* pair-wide writes are forbidden */
+			if (!ua_preamp_setting(ua, ch, p, 0, &i, &mask, &val))
+				im->mask[i] |= mask;
+		}
+		i = ch < 4 ? 0 : 12;
+		mask = 0x3fu << (6 * (ch & 3));
+		im->mask[i] |= mask;
+		im->value[i] = (im->value[i] & ~mask) | (ua->mixer_rb_data[ch < 4 ? 0 : 5] & mask);
+		i = ch < 4 ? 3 : 14;
+		p = 6 * (ch & 3) + ((ch & 2) ? 4 : 0);
+		mask = 0x3fu << p;
+		im->value[i] = (im->value[i] & ~mask) | (ua->mixer_rb_data[ch < 4 ? 3 : 7] & mask);
+		if (ch < 2 && ch < ua->audio.num_hiz) {
+			mask = BIT(24 + ch);
+			im->value[0] = (im->value[0] & ~mask) | (ua->mixer_rb_data[0] & mask);
+		}
+		/* Ordinary GainA/B follow physical GainC, not a stale write cache. */
+		val = ua_preamp_gain_db_from_code((im->value[i] >> p) & 63);
+		val = val >= 10 ? val - 10 : 0;
+		for (p = 9; p <= 10; p++) {
+			ua_preamp_setting(ua, ch, p, val, &i, &mask, &val);
+			im->value[i] = (im->value[i] & ~mask) | val;
+			val = ua_preamp_gain_db_from_code(
+			    UA_RB_PREAMP_GAINC(ua->mixer_rb_data[ch < 4 ? 3 : 7], ch & 3));
+			val = val >= 10 ? val - 10 : 0;
+		}
+	}
+	for (i = 0; i < UA_UNISON_SETTINGS; i++)
+		if (ua_instances_analog_conflict(ua, i, im->mask[i]))
+			return -EBUSY;
+	im->valid = true;
+	return 0;
+}
+
+static int ua_unison_write_image_locked(struct ua_device *ua, const struct ua_unison_image *im,
+					const u32 *masks)
+{
+	unsigned int i, k, ch;
+	u32 inputs[2] = {im->synch & 0xffff, im->synch >> 16};
+	if (!im->valid || !ua->mixer_ready)
+		return -EAGAIN;
+	ua->host->analog_write = true;
+	for (i = 0; i < UA_UNISON_SETTINGS; i++)
+		if (masks[i])
+			ua_mixer_write_setting_locked(ua, i, im->value[i], masks[i]);
+	ua->host->analog_write = false;
+	for (k = 0; k < 2; k++) {
+		ch = inputs[k];
+		if (ch == 0x20)
+			continue;
+		ua->audio.preamp[ch].custom = !!(im->value[11] & BIT(8 + ch));
+		if (!ua->audio.preamp[ch].custom && !ua->audio.preamp[ch].unison_owned)
+			ua->audio.preamp[ch].gain = ua_preamp_gain_db_from_code(
+			    UA_RB_PREAMP_GAINC(im->value[ch < 4 ? 3 : 14], ch & 3));
+	}
+	ua_mixer_flush_settings(ua);
+	return 0;
+}
+
+/* Compare cache values by original parameter fields, never by differing bits.
+ * Firmware field writes retain the exact masks used by ua_preamp_write_locked. */
+static void ua_unison_changed_masks(struct ua_device *ua, const struct ua_unison_image *im,
+				    u32 *masks)
+{
+	unsigned int k, ch, p;
+	u32 input[2] = {im->synch & 0xffff, im->synch >> 16};
+	u32 index, mask, encoded;
+	memset(masks, 0, UA_UNISON_SETTINGS * sizeof(*masks));
+	for (k = 0; k < 2; k++) {
+		ch = input[k];
+		if (ch == 0x20)
+			continue;
+		for (p = 0; p <= UA_PREAMP_PARAM_RAW_REC; p++) {
+			if (p == UA_PREAMP_PARAM_LINK)
+				continue;
+			if (ua_preamp_setting(ua, ch, p, 0, &index, &mask, &encoded))
+				continue;
+			if ((mask & im->mask[index]) == mask &&
+			    (mask & (im->value[index] ^ ua->mixer_val[index])))
+				masks[index] |= mask;
+		}
+	}
+}
+
+int ua_unison_apply_locked(struct ua_device *ua, const struct ua_unison_image *im)
+{
+	u32 masks[UA_UNISON_SETTINGS];
+	ua_unison_changed_masks(ua, im, masks);
+	return ua_unison_write_image_locked(ua, im, masks);
+}
+
+/* Validate the entire journal before changing either cache or mailbox. */
+int ua_unison_patch_locked(struct ua_device *ua, struct ua_unison_image *im, const u32 *words,
+			   unsigned int nw)
+{
+	struct ua_unison_image next = *im;
+	unsigned int n;
+	u32 requested[UA_UNISON_SETTINGS] = {0};
+	u32 ch, param, value, index, mask, encoded;
+	int ret;
+	for (n = 0; n < nw; n += 3) {
+		ch = words[n];
+		param = words[n + 1];
+		value = words[n + 2];
+		if (ch != (im->synch & 0xffff) && ch != (im->synch >> 16))
+			return -EPERM;
+		if (ch == 0x20 || param == UA_PREAMP_PARAM_LINK)
+			return -EINVAL;
+		ret = ua_preamp_setting(ua, ch, param, value, &index, &mask, &encoded);
+		if (ret)
+			return ret;
+		if ((mask & im->mask[index]) != mask)
+			return -EPERM;
+		requested[index] |= mask;
+		next.value[index] = (next.value[index] & ~mask) | encoded;
+	}
+	ret = ua_unison_write_image_locked(ua, &next, requested);
+	if (!ret)
+		*im = next;
+	return ret;
+}
+
+/* Firmware consumption fence plus a subsequent guarded service readback.
+ * This is not an assertion of analog settling or verification of every field. */
+int ua_unison_drain(struct ua_device *ua, u64 epoch, u32 *seq)
+{
+	unsigned int n;
+	u64 after = 0;
+	bool drained = false;
+	int ret;
+	for (n = 0; n < 100; n++) {
+		mutex_lock(&ua->lock);
+		ret = (ua->host->epoch != epoch || !ua->mixer_ready) ? -ESTALE : -EAGAIN;
+		if (ret == -EAGAIN) {
+			ua_mixer_flush_settings(ua);
+			if (!ua->mixer_dirty &&
+			    ua_read(ua, UA_REG_MIXER_SEQ_RD) == ua->mixer_seq_wr) {
+				if (!drained) {
+					after = ua->mixer_rb_generation;
+					drained = true;
+				}
+				if (ua->mixer_rb_seen && ua->mixer_rb_generation != after &&
+				    ua->mixer_rb_data[38] != ~0u && ua->mixer_rb_data[39] != ~0u) {
+					if (seq)
+						*seq = ua->mixer_seq_wr;
+					ret = 0;
+				}
+			}
+		}
+		mutex_unlock(&ua->lock);
+		if (ret != -EAGAIN)
+			return ret;
+		msleep(5);
+	}
+	return -ETIMEDOUT;
+}
+
+/* Original exit schedules ordinary gain restoration after custom-header removal.
+ * Do not send GainC before CUSTOM0 in the same ascending-index batch. */
+int ua_unison_restore(struct ua_device *ua, u64 epoch, const struct ua_unison_image *base)
+{
+	u32 before_gain[UA_UNISON_SETTINGS], gain[UA_UNISON_SETTINGS] = {0};
+	u32 input[2] = {base->synch & 0xffff, base->synch >> 16};
+	u32 index, mask, encoded;
+	unsigned int k, ch, p;
+	int ret;
+	mutex_lock(&ua->lock);
+	if (ua->host->epoch != epoch) {
+		ret = -ESTALE;
+		goto unlock;
+	}
+	ua_unison_changed_masks(ua, base, before_gain);
+	for (k = 0; k < 2; k++) {
+		ch = input[k];
+		if (ch == 0x20)
+			continue;
+		ua_preamp_setting(ua, ch, UA_PREAMP_PARAM_CUSTOM, 0, &index, &mask, &encoded);
+		before_gain[index] |= mask;
+		for (p = 0; p < 3; p++) {
+			u32 param = p == 0   ? UA_PREAMP_PARAM_GAIN_C
+				    : p == 1 ? UA_PREAMP_PARAM_GAIN_A
+					     : UA_PREAMP_PARAM_GAIN_B;
+			ua_preamp_setting(ua, ch, param, 0, &index, &mask, &encoded);
+			before_gain[index] &= ~mask;
+			gain[index] |= mask;
+		}
+	}
+	ret = ua_unison_write_image_locked(ua, base, before_gain);
+	mutex_unlock(&ua->lock);
+	if (ret)
+		return ret;
+	ret = ua_unison_drain(ua, epoch, NULL);
+	if (ret)
+		return ret;
+	msleep(80); /* original CUSTOM-off settling precedes deferred ordinary gain */
+	mutex_lock(&ua->lock);
+	if (ua->host->epoch != epoch) {
+		ret = -ESTALE;
+		goto unlock;
+	}
+	ret = ua_unison_write_image_locked(ua, base, gain);
+	mutex_unlock(&ua->lock);
+	if (ret)
+		return ret;
+	ret = ua_unison_drain(ua, epoch, NULL);
+	if (ret)
+		return ret;
+	mutex_lock(&ua->lock);
+	for (k = 0; k < 2; k++) {
+		ch = input[k];
+		if (ch == 0x20)
+			continue;
+		if (UA_RB_PREAMP_GAINC(ua->mixer_rb_data[ch < 4 ? 3 : 7], ch & 3) !=
+		    UA_RB_PREAMP_GAINC(base->value[ch < 4 ? 3 : 14], ch & 3)) {
+			ret = -EIO;
+			break;
+		}
+	}
+unlock:
+	mutex_unlock(&ua->lock);
+	return ret;
 }
 
 /* ----------------------------------------------------------------
@@ -2783,9 +3058,15 @@ ua_ioctl_set_mixer_param(struct ua_device *ua, unsigned long arg)
 			ua->audio.preamp[ch].phase = !!(param.value & BIT(31));
 			ctl_name = "Line %u Phase Invert Switch";
 			break;
+		case UA_PREAMP_PARAM_CUSTOM:
+			ua->audio.preamp[ch].custom = !!param.value;
+			break;
 		case UA_PREAMP_PARAM_GAIN_C:
-			ua->audio.preamp[ch].gain = (int)param.value;
-			ctl_name = "Line %u Capture Volume";
+			if (!ua->audio.preamp[ch].custom && !ua->audio.preamp[ch].unison_owned) {
+				ua->audio.preamp[ch].gain =
+					ua_preamp_gain_db_from_code(param.value);
+				ctl_name = "Line %u Capture Volume";
+			}
 			break;
 		case UA_PREAMP_PARAM_HIZ_IMP:
 			if (param.value < 8)
@@ -3652,6 +3933,9 @@ static long ua_ioctl_dispatch(struct ua_device *ua, struct ua_file *uf,
 
 	case UA_IOCTL_PLUGIN_INSTANCE:
 		return ua_plugin_ioctl_instance(ua, uf, arg);
+
+	case UA_IOCTL_PLUGIN_DELAY:
+		return ua_plugin_ioctl_delay(ua, arg);
 
 	case UA_IOCTL_GET_DEVICE_INFO:
 		return ua_ioctl_get_device_info(ua, arg);

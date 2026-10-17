@@ -971,7 +971,9 @@ struct ua_dsp_state {
 
 /* Per-channel preamp state cache (write-through) */
 struct ua_preamp_state {
-	int gain;       /* dB value (-144..65) */
+	int gain;       /* ordinary preamp dB; retained while custom is active */
+	bool custom;    /* accepted custom flag; physical readback has no inverse */
+	bool unison_owned; /* logical lease also covers PGA preparation before CUSTOM */
 	bool phantom;   /* 48V phantom power */
 	bool pad;       /* Pad engaged */
 	bool hiz;       /* Hi-Z mode (hardware auto-detect only) */
@@ -982,6 +984,13 @@ struct ua_preamp_state {
 			 * the readback has no field for it; 0 = 2.2M until a
 			 * user changes it (nothing is written before that) */
 };
+
+/* Original ordinary GainC decode; custom PGA requests have no unique inverse. */
+static inline int ua_preamp_gain_db_from_code(u32 code)
+{
+	code &= 0x3f;
+	return code ? (code < 57 ? code + 9 : 65) : 0;
+}
 
 /* Monitor section state cache (write-through) */
 struct ua_monitor_state {
@@ -1556,6 +1565,7 @@ struct ua_device {
 	u32 mixer_seq_wr;                      /* Our cached SEQ_WR */
 	bool mixer_dirty;                      /* Any setting changed since last flush */
 	bool mixer_ready;                      /* Batch protocol initialized */
+	u64 mixer_rb_generation;              /* valid service readbacks, ua->lock */
 	bool mixer_rb_seen;                    /* DSP produced at least one readback */
 	u32 mixer_rb_data[UA_MIXER_RB_WORDS];  /* Cached readback (filled by service loop) */
 	u32 mixer_rb_status;                   /* Cached readback status */
@@ -1856,6 +1866,7 @@ void ua_audio_notif_irq(struct ua_device *ua, u32 status_hi);
 bool ua_notif_irq_enabled(void);
 void ua_audio_period_wd_cancel(struct ua_device *ua);
 void ua_audio_stop_period_timer(struct ua_device *ua);
+bool ua_audio_plugin_rate_ready(struct ua_device *ua);
 int ua_audio_set_clock(struct ua_device *ua, unsigned int rate);
 int ua_audio_set_clock_source(struct ua_device *ua, unsigned int source);
 bool ua_clock_source_valid(const struct ua_device *ua, unsigned int source);

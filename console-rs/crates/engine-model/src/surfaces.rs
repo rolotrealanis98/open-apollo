@@ -114,7 +114,11 @@ impl EngineMixer {
                     }
                 });
                 let category = categories.first().cloned().unwrap_or_default();
-                Some(PluginEntry { name, category, categories, enabled, favorite: false, badge })
+                Some(PluginEntry {
+                    name, category, categories, enabled, favorite: false, badge,
+                    native_supported: flag("NativeLoadSupported"),
+                    native_hint: self.str_at(&format!("{base}/NativeLoadHint")).map(str::to_owned),
+                })
             })
             .collect()
     }
@@ -303,7 +307,11 @@ impl EngineMixer {
                 let loaded = self.str_at(&slot.effect_name()).filter(|n| !n.is_empty()).map(str::to_owned);
                 match (&id.control, loaded) {
                     (Control::InsertPower(_), Some(_)) => self.toggle(&slot.power(), true),
-                    (Control::InsertRemove(_), Some(_)) => self.store.commit(&slot.effect_name(), String::new()),
+                    (Control::InsertRemove(_), Some(_)) => {
+                        self.native_load_notice = None;
+                        self.store.clear_error();
+                        self.store.commit(&slot.effect_name(), String::new());
+                    }
                     // The COPY modifier: a loaded slot copies, an empty one pastes.
                     (Control::InsertCopy(_), Some(name)) => self.copy_insert(&slot, name),
                     (Control::InsertCopy(_), None) => self.paste_insert(&slot, k),

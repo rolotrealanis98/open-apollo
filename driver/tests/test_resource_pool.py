@@ -287,3 +287,59 @@ int main(void)
 	return 0;
 }
 ''')
+
+
+
+def test_full_create_batch_and_late_failure_restore_shared_holds():
+    """CREATE allows 64 resource holds plus 128 private rows on one DSP."""
+    run(r"""
+int main(void)
+{
+	struct ua_pool_geometry g[4] = {
+		{ 0, 4096, 0 }, { 10000, 4096, 0 },
+		{ 20000, 4096, 0 }, { 30000, 4096, 0 } };
+	struct ua_pool_owner *o;
+	struct ua_pool_request rq[193];
+	struct ua_pool_lease leases[193], zero[193] = { 0 }, existing;
+	struct ua_pool_usage before[4], after[4];
+	int identities[193], objects;
+
+	assert(UA_POOL_BATCH_MAX == 192);
+	assert(ua_pool_owner_create(g, &o) == 0);
+	for (unsigned int n = 0; n < 193; n++) {
+		rq[n] = (struct ua_pool_request) {
+			.kind = n < 64 ? 0 : 1 + n % 3,
+			.words = 2, .identity = &identities[n], .shared = n < 64 };
+	}
+	/* An existing shared code hold must survive a late batch failure. */
+	assert(ua_pool_reserve(o, 0, 2, &identities[0], true, &existing) == 0);
+	assert(ua_pool_read_usage(o, before) == 0);
+	objects = k_objects;
+	rq[191].words = 4096;
+	memset(leases, 0xff, sizeof(leases));
+	assert(ua_pool_reserve_batch(o, rq, 192, leases) == -ENOSPC);
+	assert(!memcmp(leases, zero, 192 * sizeof(*leases)));
+	assert(k_objects == objects);
+	assert(ua_pool_read_usage(o, after) == 0 && !memcmp(before, after, sizeof(before)));
+	rq[191].words = 2;
+	assert(ua_pool_reserve_batch(o, rq, 192, leases) == 0);
+	assert(leases[0].base == existing.base && leases[0].cookie != existing.cookie);
+	assert(leases[191].cookie);
+	assert(ua_pool_read_usage(o, after) == 0 && after[0].holds == 65 &&
+	       after[1].holds + after[2].holds + after[3].holds == 128);
+	for (unsigned int n = 192; n-- > 0;)
+		assert(ua_pool_release(o, &leases[n]) == 0);
+	assert(ua_pool_read_usage(o, after) == 0 && !memcmp(before, after, sizeof(before)));
+	/* Count rejection happens before reading requests or clearing output. */
+	memset(leases, 0xa5, sizeof(leases));
+	assert(ua_pool_reserve_batch(o, NULL, 193, leases) == -EINVAL);
+	for (unsigned int n = 0; n < sizeof(leases); n++)
+		assert(((unsigned char *)leases)[n] == 0xa5);
+	assert(k_objects == objects);
+	assert(ua_pool_read_usage(o, after) == 0 && !memcmp(before, after, sizeof(before)));
+	assert(ua_pool_release(o, &existing) == 0);
+	ua_pool_owner_destroy(o);
+	assert(!k_objects);
+	return 0;
+}
+""")

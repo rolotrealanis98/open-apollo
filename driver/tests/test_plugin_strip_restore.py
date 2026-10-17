@@ -135,7 +135,7 @@ int main(void)
     unsigned int sent;
     setup_plain();
     sent = nputs;
-    assert(start(&file_a, 0x00010000, 1, &q) == -EINVAL);
+    assert(start(&file_a, 0x00000000, 1, &q) == -EINVAL);
     assert(start(&file_a, 0x00200000, UA_PLUGIN_DSP_ANY, &q) == -EINVAL);
     assert(nputs == sent);
     assert(start(&file_a, 0x00200000, 2, &q) == -ESTALE);
@@ -143,7 +143,7 @@ int main(void)
     assert(!uploads());
     assert(start(&file_a, 0x00200000, 1, &q) == 0);
     assert(start(&file_b, 0x00200000, 1, &other) == -EBUSY);
-    assert(start(&file_b, 0x00200001, 1, &other) == -EBUSY);
+    assert(start(&file_b, 0x00200001, 1, &other) == 0);
     ua_strips_rebuild_set("1", NULL);
     mutex_lock(&dev.lock);
     ua_strips_service(&dev);
@@ -293,6 +293,137 @@ int main(void)
     ua_strips_service(&dev);
     assert(plain->gen == 10 && !plain->strip[0].header);
     mutex_unlock(&dev.lock);
+    cleanup_plain();
+    return 0;
+}
+''')
+
+
+def test_stereo_claims_both_inputs_and_restores_both_retained_strips():
+    run(r'''
+int main(void)
+{
+    struct ua_plugin_instance q, conflict;
+    unsigned int c;
+    setup_plain();
+    assert(start(&file_a, 0x00010000, 1, &q) == 0);
+    /* Two mono stops, initialization block, stereo start, routes for both. */
+    c = (dev.dsp[1].cmd.write_ptr - 10) & 1023;
+    assert(slots[2][c][0] == 0x001f0004 && slots[2][c][1] == 0x00200000);
+    assert(slots[2][(c+1)&1023][0] == 0x001f0004);
+    assert(slots[2][(c+1)&1023][1] == 0x00200001);
+    assert(slots[2][(c+3)&1023][0] == 0x001f0004);
+    assert(slots[2][(c+3)&1023][1] == 0x00010000);
+    for (unsigned int ch=0; ch<2; ch++)
+        for (unsigned int j=0; j<3; j++) {
+            unsigned int pos = (c+4+ch*3+j)&1023;
+            assert(slots[2][pos][0] == 0x001e0004);
+            assert(slots[2][pos][1] == ch);
+            assert(slots[2][pos][2] == (j<2 ? 8u : 7u));
+        }
+    assert(start(&file_b, 0x00200000, 1, &conflict) == -EBUSY);
+    assert(start(&file_b, 0x00200001, 1, &conflict) == -EBUSY);
+    assert(start(&file_b, 0x00000001, 1, &conflict) == -EBUSY);
+    c = dev.dsp[1].cmd.write_ptr;
+    assert(destroy(&file_a, q.handle) == 0);
+    assert(slots[2][c][0] == 0x001f0004 && slots[2][c][1] == 0x00010000);
+    for (unsigned int ch=0; ch<2; ch++) {
+        unsigned int pos = (c+1+ch*4)&1023;
+        assert(slots[2][pos][0] == 0x001f0004);
+        assert(slots[2][pos][1] == (0x00200000u|ch));
+        assert(slots[2][pos][2] == plain->strip[ch].header);
+    }
+    assert(!host.n_instances && !host.fence[1] && !host.dsp[1].quarantined);
+    /* A mono owner also rejects an overlapping stereo create. */
+    assert(start(&file_b, 0x00200001, 1, &q) == 0);
+    assert(start(&file_a, 0x00010000, 1, &conflict) == -EBUSY);
+    cleanup_plain();
+    return 0;
+}
+''')
+
+
+def test_scratch_claims_survive_arbitrary_unload_and_failed_growth():
+    run(r'''
+int main(void)
+{
+    struct ua_plugin_instance q[2];
+    struct ua_pool_usage baseline[UA_POOLS], usage[UA_POOLS];
+    struct ua_plugin_inst *in[2], failed;
+    u32 need[UA_POOLS];
+    for (unsigned int order=0; order<2; order++) {
+        setup_plain();
+        assert(ua_pool_read_usage(host.dsp[1].pools, baseline) == 0);
+        assert(start(&file_a, 0x00200000, 1, &q[0]) == 0);
+        assert(start(&file_b, 0x00200001, 1, &q[1]) == 0);
+        in[0]=ua_inst_find(&host,&file_a,q[0].handle);
+        in[1]=ua_inst_find(&host,&file_b,q[1].handle);
+        mutex_lock(&dev.lock);
+        memset(need,0,sizeof(need));
+        need[1]=baseline[1].scratch_words+32;
+        assert(ua_inst_scratch_raise(&host,in[0],need)==0);
+        need[1]=baseline[1].scratch_words+16;
+        need[2]=baseline[2].scratch_words+24;
+        assert(ua_inst_scratch_raise(&host,in[1],need)==0);
+        memset(&failed,0,sizeof(failed)); failed.dsp=1;
+        need[1]=baseline[1].scratch_words+64;
+        need[3]=0xffffffff;
+        assert(ua_inst_scratch_raise(&host,&failed,need)==-EINVAL);
+        assert(!failed.scratch_claim);
+        mutex_unlock(&dev.lock);
+        assert(ua_pool_read_usage(host.dsp[1].pools,usage)==0);
+        assert(usage[1].scratch_words==baseline[1].scratch_words+32);
+        assert(usage[2].scratch_words==baseline[2].scratch_words+24);
+        assert(destroy(order?&file_b:&file_a,q[order].handle)==0);
+        assert(ua_pool_read_usage(host.dsp[1].pools,usage)==0);
+        assert(usage[1].scratch_words==baseline[1].scratch_words+(order?32:16));
+        assert(usage[2].scratch_words==baseline[2].scratch_words+(order?0:24));
+        assert(host.n_instances==1 && !host.dsp[1].quarantined);
+        ua_plugin_file_release(order?&file_a:&file_b);
+        assert(ua_pool_read_usage(host.dsp[1].pools,usage)==0);
+        for (unsigned int p=1;p<UA_POOLS;p++)
+            assert(usage[p].scratch_words==baseline[p].scratch_words);
+        cleanup_plain();
+    }
+    return 0;
+}
+''')
+
+
+def test_stereo_requires_both_retained_strips_before_any_upload():
+    run(r'''
+int main(void)
+{
+    struct ua_plugin_instance q;
+    setup_plain();
+    assert(start(&file_a, 0x00020000, 1, &q) == -ENOENT);
+    plain->strip[1].header = 0;
+    assert(start(&file_a, 0x00010000, 1, &q) == -ESTALE);
+    assert(!uploads() && !host.n_instances);
+    cleanup_plain();
+    return 0;
+}
+''')
+
+
+def test_disowned_dsp_drops_scratch_claims_with_its_pool_generation():
+    run(r'''
+int main(void)
+{
+    struct ua_plugin_instance q;
+    struct ua_plugin_inst *in;
+    u32 need[UA_POOLS] = {0, 64, 64, 0};
+    setup_plain();
+    assert(start(&file_a, 0x00200000, 1, &q) == 0);
+    in=ua_inst_find(&host,&file_a,q.handle);
+    mutex_lock(&dev.lock);
+    assert(ua_inst_scratch_raise(&host,in,need)==0);
+    assert(in->scratch_claim);
+    ua_plugin_disown(&dev,1,"test pool generation");
+    assert(!in->scratch_claim && !in->placed && in->lost);
+    assert(!host.dsp[1].pools);
+    mutex_unlock(&dev.lock);
+    assert(destroy(&file_a,q.handle)==0);
     cleanup_plain();
     return 0;
 }

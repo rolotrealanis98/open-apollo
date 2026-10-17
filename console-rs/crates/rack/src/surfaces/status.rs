@@ -101,7 +101,15 @@ pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: boo
         // 696). Positions measured on p1, the block's width from its name.
         let scene = st.scene.clone().unwrap_or_else(|| "(NONE)".into());
         let scene_w = helvetica_width(&scene, val.size).round() + 72.0;
-        if scene_info && st.plugin_scenes && SCENE_X + scene_w <= r.w {
+        let warning = model.properties().and_then(|src| src.prop("/InputDelayCompWarning"))
+            .and_then(|value| value.as_str().map(str::to_owned)).filter(|s| !s.is_empty());
+        if let Some(warning) = warning {
+            let area = Rect::new(SCENE_X, 4.0, (r.w - SCENE_X - 8.0).max(0.0), r.h - 8.0);
+            let mut style = val.clone();
+            style.color = Rgba::rgb8(255, 190, 45);
+            ui.text(&warning, style, area, Align::Left);
+            ui.hit(area, ControlId { strip: "delay-comp".into(), control: Control::ShowSettings }, HitKind::Tap);
+        } else if scene_info && st.plugin_scenes && SCENE_X + scene_w <= r.w {
             let end = SCENE_X + scene_w;
             sep(ui, 576.0);
             ui.text("SCENE", key.clone(), Rect::new(587.5, ty, 44.0, th), Align::Left);

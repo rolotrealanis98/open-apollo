@@ -23,6 +23,7 @@
  * quarantines the DSP.
  */
 
+#include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -52,17 +53,103 @@ struct ua_plugin_inst {
 	bool loaded;			/* everything taken by the DSP */
 	bool lost;			/* taken down by the host, or the DSP gone */
 	bool started;			/* SYNCH'd on a DSP input (F_START) */
+	bool route_pending;		/* START reserves its inputs before publication */
 	u32 synch;			/* in1 | in2 << 16 */
+	bool unison, analog_owned, unison_begun;
+	struct ua_unison_image analog_base, analog_current, analog_rollback;
 	bool strip_override;		/* reserves the retained plain strip */
 	u32 strip_generation;
-	u32 scratch_prev[UA_POOLS];	/* scratch before F_START raised it */
-	u8 scratch_raised;		/* bit p: pool p raised by this instance */
+	u32 scratch_base[UA_POOLS];	/* baseline shared by this DSP's claims */
+	u32 scratch_need[UA_POOLS];	/* this chain's minimum scratch */
+	bool scratch_claim;
 	unsigned int n_res, n_priv;
 	struct ua_cat_entry **res;	/* catalog references */
 	struct ua_pool_lease *lease;	/* n_res modules, then n_priv rows */
 	u8 *ident;			/* n_priv: one identity per private row */
 	struct ua_memspec_row *rows;	/* immutable bounds and link ownership */
 };
+
+/* ua->lock held; generic ALSA/ioctl/raw writes cannot cross an owned lane. */
+bool ua_instances_analog_conflict(struct ua_device *ua, unsigned int index, u32 mask)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_plugin_inst *in;
+	if (!h || h->analog_write || index >= UA_UNISON_SETTINGS)
+		return false;
+	if (h->analog_block[index] & mask)
+		return true;
+	list_for_each_entry (in, &h->instances, node)
+		if (in->analog_owned && (in->analog_base.mask[index] & mask))
+			return true;
+	return false;
+}
+
+static void ua_inst_analog_failed(struct ua_device *ua, struct ua_plugin_inst *in, int ret)
+{
+	unsigned int i;
+	for (i = 0; i < UA_UNISON_SETTINGS; i++)
+		ua->host->analog_block[i] |= in->analog_base.mask[i];
+	in->analog_owned = false;
+	ua_plugin_quarantine(ua, in->dsp, "Unison analog completion unproven", ret);
+}
+
+/* Original pre-insert PGA0 and 80ms. CUSTOM remains an explicit later journal
+ * after userspace has resumed the original worker and activated the graph. */
+static int ua_inst_analog_bootstrap(struct ua_device *ua, struct ua_plugin_inst *in, u32 *seq)
+{
+	u32 words[6], input[2] = {in->synch & 0xffff, in->synch >> 16};
+	unsigned int k, nw = 0;
+	int ret;
+	for (k = 0; k < 2; k++) {
+		if (input[k] == UA_INST_SPAN_NONE)
+			continue;
+		words[nw++] = input[k];
+		words[nw++] = 6u; /* GainC */
+		words[nw++] = 0u;
+	}
+	mutex_lock(&ua->lock);
+	ret = (in->lost || !in->analog_owned || ua->host->epoch != in->epoch ||
+	       !ua_plugin_dsp_admitted(ua, in->dsp))
+		  ? -ESTALE
+		  : 0;
+	if (!ret)
+		ret = ua_unison_patch_locked(ua, &in->analog_current, words, nw);
+	mutex_unlock(&ua->lock);
+	if (!ret)
+		ret = ua_unison_drain(ua, in->epoch, seq);
+	if (!ret)
+		msleep(80);
+	mutex_lock(&ua->lock);
+	if (!ret &&
+	    (in->lost || ua->host->epoch != in->epoch || !ua_plugin_dsp_admitted(ua, in->dsp)))
+		ret = -ESTALE;
+	if (ret)
+		ua_inst_analog_failed(ua, in, ret);
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
+/* Route retirement must be acknowledged before ordinary analog restoration. */
+static int ua_inst_analog_restore(struct ua_device *ua, struct ua_plugin_inst *in, int ret)
+{
+	bool owns;
+	mutex_lock(&ua->lock);
+	owns = in->analog_owned;
+	if (owns && !ret && in->lost)
+		ret = -ESTALE;
+	mutex_unlock(&ua->lock);
+	if (owns && !ret)
+		ret = ua_unison_restore(ua, in->epoch, &in->analog_base);
+	mutex_lock(&ua->lock);
+	if (owns && ret)
+		ua_inst_analog_failed(ua, in, ret);
+	else if (owns) {
+		ua_unison_set_owned_locked(ua, in->synch, false);
+		in->analog_owned = false;
+	}
+	mutex_unlock(&ua->lock);
+	return ret;
+}
 
 static void ua_inst_free(struct ua_device *ua, struct ua_plugin_inst *in)
 {
@@ -78,27 +165,42 @@ static void ua_inst_free(struct ua_device *ua, struct ua_plugin_inst *in)
 	kfree(in);
 }
 
-/* Put back the scratch @in raised (ua->lock held) */
-static void ua_inst_scratch_restore(struct ua_pool_owner *o,
-				    struct ua_plugin_inst *in)
+/*
+ * Scratch is shared by sequential chains on a DSP. Every claimant retains
+ * the same pre-chain baseline; releasing any claimant recomputes the maximum
+ * over the survivors. A previous-value stack is unsafe for out-of-order close.
+ * ua->lock held, and host->mutex serializes placement and retirement.
+ */
+static void ua_inst_scratch_restore(struct ua_plugin_host *h,
+                                    struct ua_plugin_inst *in)
 {
+	struct ua_pool_owner *o = h->dsp[in->dsp].pools;
+	struct ua_plugin_inst *other;
+	u32 need[UA_POOLS];
 	unsigned int p;
 
+	if (!in->scratch_claim)
+		return;
+	in->scratch_claim = false;
+	if (!o)
+		return;
+	memcpy(need, in->scratch_base, sizeof(need));
+	list_for_each_entry(other, &h->instances, node)
+		if (other->dsp == in->dsp && other->scratch_claim)
+			for (p = 1; p < UA_POOLS; p++)
+				need[p] = max_t(u32, need[p], other->scratch_need[p]);
+	/* These are only reductions from already-reserved scratch. */
 	for (p = 1; p < UA_POOLS; p++)
-		if (o && (in->scratch_raised & (1u << p)))
-			ua_pool_set_scratch(o, p, in->scratch_prev[p]);
-	in->scratch_raised = 0;
+		ua_pool_set_scratch(o, p, need[p]);
 }
 
-/*
- * F_START: raise the DSP's scratch to what the chain needs before anything
- * is placed there, as CResourcePool::ChangeScratchSize does (nothing is
- * sent: the DSP has no scratch register).  ua->lock held.
- */
-static int ua_inst_scratch_raise(struct ua_pool_owner *o,
-				 struct ua_plugin_inst *in,
-				 const u32 need[UA_POOLS])
+/* Claim the maximum scratch before placing any rows; nothing is sent to DSP. */
+static int ua_inst_scratch_raise(struct ua_plugin_host *h,
+                                 struct ua_plugin_inst *in,
+                                 const u32 need[UA_POOLS])
 {
+	struct ua_pool_owner *o = h->dsp[in->dsp].pools;
+	struct ua_plugin_inst *other;
 	struct ua_pool_usage u[UA_POOLS];
 	unsigned int p;
 	int ret;
@@ -106,18 +208,28 @@ static int ua_inst_scratch_raise(struct ua_pool_owner *o,
 	if (!o)
 		return -ENODEV;
 	ret = ua_pool_read_usage(o, u);
-	for (p = 1; !ret && p < UA_POOLS; p++) {
+	if (ret)
+		return ret;
+	for (p = 1; p < UA_POOLS; p++)
+		in->scratch_base[p] = u[p].scratch_words;
+	list_for_each_entry(other, &h->instances, node)
+		if (other->dsp == in->dsp && other->scratch_claim) {
+			memcpy(in->scratch_base, other->scratch_base,
+			       sizeof(in->scratch_base));
+			break;
+		}
+	memcpy(in->scratch_need, need, sizeof(in->scratch_need));
+	in->scratch_claim = true;
+	for (p = 1; p < UA_POOLS; p++) {
 		if (need[p] <= u[p].scratch_words)
 			continue;
 		ret = ua_pool_set_scratch(o, p, need[p]);
-		if (!ret) {
-			in->scratch_prev[p] = u[p].scratch_words;
-			in->scratch_raised |= 1u << p;
+		if (ret) {
+			ua_inst_scratch_restore(h, in);
+			return ret;
 		}
 	}
-	if (ret)
-		ua_inst_scratch_restore(o, in);
-	return ret;
+	return 0;
 }
 
 /*
@@ -177,7 +289,7 @@ static int ua_inst_unplace(struct ua_device *ua,
 	}
 	ua_plugin_unplace(ua, in->dsp, in->lease + in->n_res, in->n_priv);
 	memset(in->lease + in->n_res, 0, in->n_priv * sizeof(*in->lease));
-	ua_inst_scratch_restore(d->pools, in);
+	ua_inst_scratch_restore(h, in);
 	if (ret) {
 		if (x)
 			ua_xact_discard(ua, x);
@@ -219,6 +331,8 @@ void ua_instances_teardown(struct ua_device *ua, const char *why)
 		if (in->lost)
 			continue;
 		ua_inst_unplace(ua, in, true, false);
+		if (in->analog_owned)
+			ua_inst_analog_failed(ua, in, -ESTALE);
 		in->lost = true;
 		in->loaded = false;
 		n++;
@@ -249,9 +363,12 @@ void ua_instances_dsp_gone(struct ua_device *ua, unsigned int dsp)
 	list_for_each_entry(in, &h->instances, node) {
 		if (in->dsp != dsp || !in->placed)
 			continue;
+		if (in->analog_owned)
+			ua_inst_analog_failed(ua, in, -ESTALE);
 		/* the ledger is about to go: forget the leases, send nothing */
 		memset(in->lease, 0, (in->n_res + in->n_priv) * sizeof(*in->lease));
 		in->placed = false;
+		in->scratch_claim = false;
 		in->loaded = false;
 		in->lost = true;
 	}
@@ -349,6 +466,91 @@ static int ua_inst_check_cmds(const struct ua_memspec_row *rows,
 	return cmds;
 }
 
+/* Recover the original head directory from checked initialization WRITEs.
+ * No caller-provided license list can omit a directory member. Head word 5
+ * is the sub count; each pointer/ID pair begins at word 6. The first sub is
+ * the built-in Mic strip, followed by at most four licensed effects, or
+ * (UNISON) a licensed integrated header followed by zero to four effects.
+ */
+static int ua_inst_chain_ids(const struct ua_memspec_row *rows, unsigned int nr,
+			     const u32 *cmd, unsigned int nw, bool chain, bool unison,
+			     u32 primary, u32 ids[5], unsigned int *nids)
+{
+	u32 head[16] = {0};
+	u8 seen[16] = {0};
+	unsigned int i, k, pos, len, n, j, links, first = unison ? 0 : 1;
+
+	*nids = 0;
+	for (i = 0; i < nw; i += len) {
+		len = cmd[i] & 0xffff;
+		if (cmd[i + 1] >> 24)
+			continue;
+		pos = cmd[i + 1] & 0xffffff;
+		for (k = 0; k < len - 3; k++, pos++) {
+			while (pos > (cmd[i + 1] & 0xffffff) &&
+			       pos - (cmd[i + 1] & 0xffffff) - 1 < 32 &&
+			       (cmd[i + 2] >> (pos - (cmd[i + 1] & 0xffffff) - 1)) & 1)
+				pos++;
+			if (pos < ARRAY_SIZE(head)) {
+				if (seen[pos] && (pos == 0 || pos == 5 ||
+						 (pos >= 7 && (pos & 1))))
+					return -EINVAL;
+				seen[pos] = 1;
+				head[pos] = cmd[i + 3 + k];
+			}
+		}
+	}
+	if (!chain)
+		return seen[5] && head[5] > 2 ? -EOPNOTSUPP : 0;
+	n = head[5];
+	if (!seen[0] || head[0] != 0x40000000 || !seen[5] ||
+	    n < (unison ? 1 : 2) || n > 5 ||
+	    rows[0].pool != 1 || rows[0].dwords != 6 + 2 * n ||
+	    !seen[7] || (!unison && head[7] != 0x846))
+		return -EINVAL;
+	for (i = 0; i < n; i++) {
+		if (!seen[7 + 2 * i])
+			return -EINVAL;
+		links = 0;
+		for (j = 1; j < nr; j++)
+			if (rows[j].link == 6 + 2 * i)
+				links++;
+		if (links != 1)
+			return -EINVAL;
+		if (i >= first) {
+			if (head[7 + 2 * i] < UA_BOARD_QUERY_BASE ||
+			    head[7 + 2 * i] >= UA_BOARD_QUERY_BASE + UA_BOARD_QUERY_WORDS)
+				return -EACCES;
+			ids[i - first] = head[7 + 2 * i];
+		}
+	}
+	if (ids[0] != primary)
+		return -EINVAL;
+	*nids = n - first;
+	return 0;
+}
+
+/* Topology changes require a freshly admitted allocation, never SERVICE. */
+static bool ua_inst_writes_directory(const u32 *cmd, unsigned int nw)
+{
+	unsigned int i, k, pos, word, len;
+
+	for (i = 0; i < nw; i += len) {
+		len = cmd[i] & 0xffff;
+		if (cmd[i + 1] >> 24)
+			continue;
+		word = cmd[i + 1] & 0xffffff;
+		for (k = 0, pos = word; k < len - 3; k++, pos++) {
+			while (pos > word && pos - word - 1 < 32 &&
+			       (cmd[i + 2] >> (pos - word - 1)) & 1)
+				pos++;
+			if (pos == 0 || pos == 5 || (pos >= 7 && (pos & 1)))
+				return true;
+		}
+	}
+	return false;
+}
+
 /*
  * A module with the same id and architecture but other bytes than one the
  * host already uses (the strips' or another instance's): the DSP knows a
@@ -374,8 +576,11 @@ static int ua_inst_check_set(struct ua_plugin_inst *in)
 	for (i = 0; i < in->n_res; i++) {
 		const struct ua_bill_info *b = &in->res[i]->info;
 
-		/* code and data memory only for now (kind 2/3 pools: later) */
-		if (b->kind != 0 && b->kind != 1 && b->kind != 4)
+		/* SDK LoadPlugin maps kinds 0..3 directly to their pools;
+		 * kind 4 maps to pool 1. Nonzero pools use the DATA path.
+		 * Kind 3 is qualified for ordinary, non-overwritable records.
+		 */
+		if (b->kind > 4 || (b->kind == 3 && b->flags))
 			return -EOPNOTSUPP;
 		/* the Apollo's DSPs take architecture 0 and 2 records */
 		if (b->arch == 1)
@@ -475,30 +680,47 @@ static unsigned int ua_inst_cmd_copy(__le32 *d, const u32 *cmd,
  * is placed (EnableSynchProcessing, MoveInputToDSP).  Marked started
  * before the run, so a failure still stops it at the takedown.
  */
-static int ua_inst_start(struct ua_device *ua, struct ua_plugin_inst *in,
-			 const u32 *cmd, unsigned int nw, u32 synch)
+static int ua_inst_start(struct ua_device *ua, struct ua_plugin_inst *in, const u32 *cmd,
+			 unsigned int nw, u32 synch, bool start)
 {
 	struct ua_plugin_host *h = ua->host;
-	u32 in1 = synch & 0xffff;
+	u32 input[2] = {synch & 0xffff, synch >> 16};
+	unsigned int k;
 	unsigned int n = 0;
 	struct ua_xact *x;
 	__le32 *d;
 	int ret;
 
+	if (start && in->unison && (!in->analog_owned || !in->unison_begun))
+		return -EPERM;
 	x = ua_xact_alloc(in->dsp, UA_XACT_PIECE);
 	if (!x)
 		return -ENOMEM;
 	x->epoch = in->epoch;
-	ua_xact_inline(x, UA_INST_CMD_SYNCH, synch, 0, 0);
-	d = ua_xact_cmd(x, nw);
-	if (d)
-		n = ua_inst_cmd_copy(d, cmd, nw, in->lease + in->n_res);
-	ua_xact_inline(x, UA_INST_CMD_SYNCH, synch, in->lease[in->n_res].base, 0);
-	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_SPAN, UA_INST_SPAN_NONE);
-	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_SPAN, UA_INST_SPAN_NONE);
-	ua_xact_inline(x, UA_INST_CMD_INPUT, in1, UA_INST_INPUT_ROUTE, UA_INST_ROUTE_NONE);
+	for (k = 0; start && k < 2; k++)
+		if (input[k] != UA_INST_SPAN_NONE)
+			ua_xact_inline(x, UA_INST_CMD_SYNCH, UA_INST_SPAN_NONE << 16 | input[k], 0,
+				       0);
+	if (nw) {
+		d = ua_xact_cmd(x, nw);
+		if (d)
+			n = ua_inst_cmd_copy(d, cmd, nw, in->lease + in->n_res);
+	}
+	if (start)
+		ua_xact_inline(x, UA_INST_CMD_SYNCH, synch, in->lease[in->n_res].base, 0);
+	for (k = 0; start && k < 2; k++) {
+		if (input[k] == UA_INST_SPAN_NONE)
+			continue;
+		ua_xact_inline(x, UA_INST_CMD_INPUT, input[k], UA_INST_INPUT_SPAN,
+			       UA_INST_SPAN_NONE);
+		ua_xact_inline(x, UA_INST_CMD_INPUT, input[k], UA_INST_INPUT_SPAN,
+			       UA_INST_SPAN_NONE);
+		ua_xact_inline(x, UA_INST_CMD_INPUT, input[k], UA_INST_INPUT_ROUTE,
+			       UA_INST_ROUTE_NONE);
+	}
 	mutex_lock(&ua->lock);
-	in->started = true;
+	in->started = start;
+	in->route_pending = false;
 	in->synch = synch;
 	mutex_unlock(&ua->lock);
 	ret = ua_xact_run(ua, x, UA_XACT_WAIT_MS);
@@ -508,6 +730,16 @@ static int ua_inst_start(struct ua_device *ua, struct ua_plugin_inst *in,
 	ua_xact_done(ua, x);
 	mutex_unlock(&ua->lock);
 	return ret;
+}
+
+/* Both actual SYNCH inputs are owned; 0x20 is the mono sentinel. */
+static bool ua_inst_inputs_overlap(u32 a, u32 b)
+{
+	u32 a1 = a & 0xffff, a2 = a >> 16;
+	u32 b1 = b & 0xffff, b2 = b >> 16;
+
+	return a1 == b1 || a1 == b2 || a2 == b1 ||
+	       (a2 != UA_INST_SPAN_NONE && a2 == b2);
 }
 
 /**
@@ -523,8 +755,8 @@ static int ua_inst_start(struct ua_device *ua, struct ua_plugin_inst *in,
  */
 static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 			    struct ua_plugin_instance *req, const u8 (*sha)[32],
-			    const struct ua_memspec_row *rows,
-			    const u32 *cmd)
+			    const struct ua_memspec_row *rows, const u32 *cmd, const u32 *ids,
+			    unsigned int nids)
 {
 	struct ua_plugin_host *h = ua->host;
 	struct ua_pool_request *rq = NULL;
@@ -537,8 +769,12 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 		return -EINTR;
 
 	/* 1. The device's answer, fresh: nothing else unless it admits */
-	ret = ua_plugin_admit(ua, req->render_id, &req->license_state,
-			      &req->license_word, &epoch);
+	if (nids)
+		ret = ua_plugin_admit_chain(ua, ids, nids, &req->license_state, &req->license_word,
+					    &epoch);
+	else
+		ret = ua_plugin_admit(ua, req->render_id, &req->license_state, &req->license_word,
+				      &epoch);
 	req->epoch = epoch;
 	if (ret || (req->flags & UA_PLUGIN_CREATE_F_CHECK))
 		goto unlock;
@@ -550,13 +786,13 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 		goto unlock;
 	INIT_LIST_HEAD(&in->node);
 	in->owner = uf;
+	in->unison = !!(req->flags & UA_PLUGIN_CREATE_F_UNISON);
 	in->render_id = req->render_id;
 	in->epoch = epoch;
 	in->n_res = req->n_resources;
 	in->n_priv = req->n_private;
 	in->res = kcalloc(in->n_res, sizeof(*in->res), GFP_KERNEL);
-	in->lease = kcalloc(in->n_res + in->n_priv, sizeof(*in->lease),
-			    GFP_KERNEL);
+	in->lease = kcalloc(in->n_res + in->n_priv, sizeof(*in->lease), GFP_KERNEL);
 	in->ident = kzalloc(in->n_priv, GFP_KERNEL);
 	in->rows = kcalloc(in->n_priv, sizeof(*in->rows), GFP_KERNEL);
 	n = in->n_res + in->n_priv;
@@ -579,11 +815,11 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 
 	/* 4. One placement, in the answer's epoch */
 	for (i = 0; i < in->n_res; i++)
-		rq[i] = (struct ua_pool_request){ in->res[i]->info.pool,
-			in->res[i]->info.words, in->res[i], true };
+		rq[i] = (struct ua_pool_request){in->res[i]->info.pool, in->res[i]->info.words,
+						 in->res[i], true};
 	for (i = 0; i < in->n_priv; i++)
-		rq[in->n_res + i] = (struct ua_pool_request){ rows[i].pool,
-			rows[i].dwords, &in->ident[i], false };
+		rq[in->n_res + i] =
+		    (struct ua_pool_request){rows[i].pool, rows[i].dwords, &in->ident[i], false};
 	mutex_lock(&ua->lock);
 	for (i = 0; i < in->n_res; i++)
 		if (ua_inst_conflicts(h, in->res[i]))
@@ -593,32 +829,35 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 	} else if (h->epoch != epoch) {
 		ret = -ESTALE;
 	} else {
-		u32 need[UA_POOLS] = { 0, req->reserved[4] & 0xffff,
-				       req->reserved[4] >> 16, req->reserved[5] };
+		u32 need[UA_POOLS] = {0, req->reserved[4] & 0xffff, req->reserved[4] >> 16,
+				      req->reserved[5]};
 
 		ret = 0;
-		if (req->flags & UA_PLUGIN_CREATE_F_START) {
+		if (req->flags & (UA_PLUGIN_CREATE_F_START | UA_PLUGIN_CREATE_F_STAGE)) {
 			struct ua_plugin_inst *other;
 
-			ret = ua_strips_override_target(ua, req->dsp,
-					 req->reserved[0], epoch, &in->strip_generation);
-			/* Scratch restoration is not composable across started chains. */
-			list_for_each_entry(other, &h->instances, node)
-				if (other->dsp == req->dsp && other->placed &&
-				    !other->lost &&
-				    (other->started || other->strip_override))
+			ret = ua_strips_override_target(ua, req->dsp, req->reserved[0], epoch,
+							&in->strip_generation);
+			/* Each input has exactly one routed owner, regardless of file. */
+			list_for_each_entry (other, &h->instances, node)
+				if ((req->flags & UA_PLUGIN_CREATE_F_START) &&
+				    other->dsp == req->dsp && other->placed &&
+				    ua_inst_inputs_overlap(other->synch, req->reserved[0]) &&
+				    !other->lost && (other->started || other->route_pending))
 					ret = -EBUSY;
 			if (!ret) {
 				in->strip_override = true;
+				in->route_pending = !!(req->flags & UA_PLUGIN_CREATE_F_START);
 				in->synch = req->reserved[0];
 			}
 		}
+		in->dsp = req->dsp;
 		if (!ret && (need[1] || need[2] || need[3]))
-			ret = ua_inst_scratch_raise(h->dsp[req->dsp].pools, in, need);
+			ret = ua_inst_scratch_raise(h, in, need);
 		if (!ret)
 			ret = ua_plugin_place(ua, req->dsp, rq, n, &dsp, in->lease);
-		if (ret && in->scratch_raised)
-			ua_inst_scratch_restore(h->dsp[req->dsp].pools, in);
+		if (ret && in->scratch_claim)
+			ua_inst_scratch_restore(h, in);
 		if (!ret) {
 			in->dsp = dsp;
 			in->placed = true;
@@ -639,13 +878,12 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 		bool resident;
 
 		mutex_lock(&ua->lock);
-		resident = ua_catalog_resident(e, dsp, epoch) &&
-			   e->res[dsp].base == in->lease[i].base;
+		resident =
+		    ua_catalog_resident(e, dsp, epoch) && e->res[dsp].base == in->lease[i].base;
 		mutex_unlock(&ua->lock);
 		if (resident)
 			continue;
-		ret = ua_plugin_upload(ua, dsp, e, in->lease[i].base,
-				       UA_BILL_SDK, epoch);
+		ret = ua_plugin_upload(ua, dsp, e, in->lease[i].base, UA_BILL_SDK, epoch);
 		if (ret)
 			goto takedown;
 	}
@@ -656,8 +894,9 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 		goto takedown;
 
 	/* 7. Bring-up only: parameters, then started on the DSP input */
-	if (req->flags & UA_PLUGIN_CREATE_F_START) {
-		ret = ua_inst_start(ua, in, cmd, req->reserved[1], req->reserved[0]);
+	if (req->flags & (UA_PLUGIN_CREATE_F_START | UA_PLUGIN_CREATE_F_STAGE)) {
+		ret = ua_inst_start(ua, in, cmd, req->reserved[1], req->reserved[0],
+				    !!(req->flags & UA_PLUGIN_CREATE_F_START));
 		if (ret)
 			goto takedown;
 	}
@@ -673,8 +912,7 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 	mutex_unlock(&ua->lock);
 	if (ret)
 		goto takedown;
-	dev_info(&ua->pdev->dev,
-		 "plug-in host: plug-in 0x%03x instance %u placed on DSP %u (%s)\n",
+	dev_info(&ua->pdev->dev, "plug-in host: plug-in 0x%03x instance %u placed on DSP %u (%s)\n",
 		 in->render_id, in->handle, dsp,
 		 in->started ? "started on its DSP input" : "not routed");
 	kfree(rq);
@@ -684,19 +922,26 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 takedown:
 	mutex_lock(&ua->lock);
 	retired = ua_inst_unplace(ua, in, !h->dsp[in->dsp].quarantined, true);
+	mutex_unlock(&ua->lock);
+	if (retired > 0) {
+		int fenced = ua_plugin_fence_wait(ua, dsp);
+
+		if (fenced) {
+			ret = fenced;
+			retired = fenced;
+		}
+	} else if (retired < 0) {
+		ret = retired;
+	}
+	retired = ua_inst_analog_restore(ua, in, retired < 0 ? retired : 0);
+	if (retired)
+		ret = retired;
+	mutex_lock(&ua->lock);
 	list_del(&in->node);
 	h->n_instances--;
 	ua_inst_free(ua, in);
 	mutex_unlock(&ua->lock);
 	in = NULL;
-	if (retired > 0) {
-		int fenced = ua_plugin_fence_wait(ua, dsp);
-
-		if (fenced)
-			ret = fenced;
-	} else if (retired < 0) {
-		ret = retired;
-	}
 	goto unlock;
 fail:
 	mutex_lock(&ua->lock);
@@ -709,73 +954,51 @@ unlock:
 	return ret;
 }
 
-/* UA_PLUGIN_INST_DESTROY: released on the DSP, proven, then forgotten */
-static int ua_plugin_destroy(struct ua_device *ua, struct ua_file *uf,
-			     u32 handle)
+/* host->mutex held; retain lane ownership until both fences complete. */
+static int ua_inst_retire(struct ua_device *ua, struct ua_plugin_inst *in)
+{
+	int ret;
+	mutex_lock(&ua->lock);
+	ret = ua_inst_unplace(ua, in, !in->lost, true);
+	mutex_unlock(&ua->lock);
+	if (ret > 0)
+		ret = ua_plugin_fence_wait(ua, in->dsp);
+	ret = ua_inst_analog_restore(ua, in, ret);
+	mutex_lock(&ua->lock);
+	list_del(&in->node);
+	ua->host->n_instances--;
+	ua_inst_free(ua, in);
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
+static int ua_plugin_destroy(struct ua_device *ua, struct ua_file *uf, u32 handle)
 {
 	struct ua_plugin_host *h = ua->host;
 	struct ua_plugin_inst *in;
-	unsigned int dsp = 0;
-	bool sent = false;
-	int ret = 0;
-
+	int ret;
 	if (mutex_lock_killable(&h->mutex))
 		return -EINTR;
 	mutex_lock(&ua->lock);
 	in = ua_inst_find(h, uf, handle);
-	if (!in) {
-		ret = -ENOENT;
-	} else {
-		dsp = in->dsp;
-		ret = ua_inst_unplace(ua, in, !in->lost, true);
-		sent = ret > 0;
-		if (sent)
-			ret = 0;
-		list_del(&in->node);
-		h->n_instances--;
-		ua_inst_free(ua, in);
-	}
 	mutex_unlock(&ua->lock);
-	if (sent)
-		ret = ua_plugin_fence_wait(ua, dsp);
+	ret = in ? ua_inst_retire(ua, in) : -ENOENT;
 	mutex_unlock(&h->mutex);
 	return ret;
 }
 
-/**
- * ua_plugin_file_release - the open file is closed: its instances go
- * @uf: the file (no lock held)
- */
 void ua_plugin_file_release(struct ua_file *uf)
 {
 	struct ua_device *ua = uf->ua;
 	struct ua_plugin_host *h = ua->host;
 	struct ua_plugin_inst *in, *tmp;
-	u32 fences = 0;
-	unsigned int i;
-	int retired;
-
 	if (!h || !ua_plugin_host_enabled())
 		return;
 	mutex_lock(&h->mutex);
-	mutex_lock(&ua->lock);
-	list_for_each_entry_safe(in, tmp, &h->instances, node) {
-		if (in->owner != uf)
-			continue;
-		retired = ua_inst_unplace(ua, in, !in->lost, true);
-		if (retired > 0)
-			fences |= BIT(in->dsp);
-		else if (retired < 0)
-			dev_warn(&ua->pdev->dev,
-				 "plug-in close retirement failed (%d)\n", retired);
-		list_del(&in->node);
-		h->n_instances--;
-		ua_inst_free(ua, in);
+	list_for_each_entry_safe (in, tmp, &h->instances, node) {
+		if (in->owner == uf)
+			ua_inst_retire(ua, in);
 	}
-	mutex_unlock(&ua->lock);
-	for (i = 0; i < UA_HOST_DSPS; i++)
-		if (fences & BIT(i))
-			ua_plugin_fence_wait(ua, i);
 	mutex_unlock(&h->mutex);
 }
 
@@ -808,7 +1031,7 @@ static int ua_plugin_instance_service(struct ua_device *ua, struct ua_file *uf,
 		ret = -ESTALE;
 		goto unlock;
 	}
-	if (!in->loaded || !in->started) {
+	if (!in->loaded || (!in->started && !in->strip_override)) {
 		ret = -EINVAL;
 		goto unlock;
 	}
@@ -816,6 +1039,10 @@ static int ua_plugin_instance_service(struct ua_device *ua, struct ua_file *uf,
 		ret = ua_inst_check_cmds(in->rows, in->n_priv, cmd, nw);
 		if (ret < 0)
 			goto unlock;
+		if (in->strip_override && ua_inst_writes_directory(cmd, nw)) {
+			ret = -EINVAL;
+			goto unlock;
+		}
 	}
 	if (nr && (row >= in->n_priv || word >= in->rows[row].dwords ||
 		   nr > in->rows[row].dwords - word)) {
@@ -902,6 +1129,305 @@ out:
 	return ret;
 }
 
+/* A reversible route handoff. Neither allocation is retired by SWAP. */
+static int ua_plugin_swap(struct ua_device *ua, struct ua_file *uf,
+			  const struct ua_plugin_instance *req)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_plugin_inst *from, *to;
+	struct ua_xact *x = NULL;
+	u32 generation, input[2];
+	unsigned int k;
+	int ret;
+
+	if (!req->handle || !req->epoch || !req->reserved[0] || req->handle == req->reserved[0] ||
+	    req->flags || req->render_id || req->dsp || req->n_resources || req->n_private ||
+	    req->resources || req->privates ||
+	    memchr_inv(req->reserved + 1, 0, sizeof(req->reserved) - sizeof(u32)))
+		return -EINVAL;
+	if (mutex_lock_killable(&h->mutex))
+		return -EINTR;
+	mutex_lock(&ua->lock);
+	from = ua_inst_find(h, uf, req->handle);
+	to = ua_inst_find(h, uf, req->reserved[0]);
+	if (!from || !to) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+	if (from->lost || to->lost || !from->placed || !to->placed || from->epoch != req->epoch ||
+	    to->epoch != req->epoch || h->epoch != req->epoch ||
+	    !ua_plugin_dsp_admitted(ua, from->dsp)) {
+		ret = -ESTALE;
+		goto unlock;
+	}
+	if (!from->loaded || !to->loaded || !from->started || to->started ||
+	    !from->strip_override || !to->strip_override || from->dsp != to->dsp ||
+	    from->synch != to->synch) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+	ret = ua_strips_override_target(ua, from->dsp, from->synch, req->epoch, &generation);
+	if (ret)
+		goto unlock;
+	if (generation != from->strip_generation || generation != to->strip_generation) {
+		ret = -ESTALE;
+		goto unlock;
+	}
+	if (to->unison) {
+		if (from->analog_owned) {
+			to->analog_base = from->analog_base;
+			if (!to->analog_current.valid)
+				to->analog_current = from->analog_current;
+		} else if (!to->analog_owned || !to->unison_begun) {
+			ret = -EPERM;
+			goto unlock;
+		}
+	}
+	x = ua_xact_alloc(from->dsp, 0);
+	if (!x) {
+		ret = -ENOMEM;
+		goto unlock;
+	}
+	x->epoch = req->epoch;
+	ua_xact_inline(x, UA_INST_CMD_SYNCH, from->synch, 0, 0);
+	ua_xact_inline(x, UA_INST_CMD_SYNCH, to->synch, to->lease[to->n_res].base, 0);
+	input[0] = to->synch & 0xffff;
+	input[1] = to->synch >> 16;
+	for (k = 0; k < 2; k++) {
+		if (input[k] == UA_INST_SPAN_NONE)
+			continue;
+		ua_xact_inline(x, UA_INST_CMD_INPUT, input[k], UA_INST_INPUT_SPAN,
+			       UA_INST_SPAN_NONE);
+		ua_xact_inline(x, UA_INST_CMD_INPUT, input[k], UA_INST_INPUT_SPAN,
+			       UA_INST_SPAN_NONE);
+		ua_xact_inline(x, UA_INST_CMD_INPUT, input[k], UA_INST_INPUT_ROUTE,
+			       UA_INST_ROUTE_NONE);
+	}
+	mutex_unlock(&ua->lock);
+	ret = ua_xact_run(ua, x, UA_XACT_WAIT_MS);
+	mutex_lock(&ua->lock);
+	if (!ret && (from->lost || to->lost || h->epoch != req->epoch))
+		ret = -ESTALE;
+	if (!ret) {
+		/* Ownership is transferred only after the route transaction is proven. */
+		if (to->unison) {
+			if (from->analog_owned)
+				to->analog_base = from->analog_base;
+			ret = ua_unison_apply_locked(ua, &to->analog_current);
+		} else if (from->analog_owned) {
+			mutex_unlock(&ua->lock);
+			ret = ua_unison_restore(ua, req->epoch, &from->analog_base);
+			mutex_lock(&ua->lock);
+		}
+		if (!ret && to->unison) {
+			mutex_unlock(&ua->lock);
+			ret = ua_unison_drain(ua, req->epoch, NULL);
+			mutex_lock(&ua->lock);
+		}
+		if (!ret) {
+			if (from->analog_owned && !to->unison)
+				ua_unison_set_owned_locked(ua, from->synch, false);
+			from->analog_owned = false;
+			to->analog_owned = to->unison;
+			from->started = false;
+			to->started = true;
+			to->unison_begun = false;
+			to->route_pending = false;
+		}
+	}
+	if (ret && (from->analog_owned || to->unison)) {
+		ua_inst_analog_failed(ua, from, ret);
+		ua_inst_analog_failed(ua, to, ret);
+	}
+	ua_xact_done(ua, x);
+unlock:
+	mutex_unlock(&ua->lock);
+	mutex_unlock(&h->mutex);
+	return ret;
+}
+
+static long ua_plugin_unison_lifecycle(struct ua_device *ua, struct ua_file *uf,
+				       struct ua_plugin_instance *req)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_plugin_inst *in, *other;
+	u32 generation, seq = 0;
+	int ret;
+	bool begin = req->op == UA_PLUGIN_INST_BEGIN_UNISON;
+	if (!req->handle || !req->epoch || req->flags || req->render_id || req->dsp ||
+	    req->n_resources || req->n_private || req->resources || req->privates ||
+	    memchr_inv(req->reserved, 0, sizeof(req->reserved)))
+		return -EINVAL;
+	if (mutex_lock_killable(&h->mutex))
+		return -EINTR;
+	mutex_lock(&ua->lock);
+	in = ua_inst_find(h, uf, req->handle);
+	ret = !in ? -ENOENT : 0;
+	if (!ret && (in->lost || !in->placed || in->epoch != req->epoch || h->epoch != req->epoch ||
+		     !ua_plugin_dsp_admitted(ua, in->dsp)))
+		ret = -ESTALE;
+	if (!ret && (!in->unison || !in->loaded || in->started))
+		ret = -EPERM;
+	if (ret)
+		goto out;
+	ret = ua_strips_override_target(ua, in->dsp, in->synch, req->epoch, &generation);
+	if (ret)
+		goto out;
+	if (generation != in->strip_generation) {
+		ret = -ESTALE;
+		goto out;
+	}
+	if (begin) {
+		list_for_each_entry (other, &h->instances, node) {
+			if (other != in && other->owner != uf && other->placed && !other->lost &&
+			    (other->started || other->route_pending) &&
+			    ua_inst_inputs_overlap(in->synch, other->synch)) {
+				ret = -EBUSY;
+				goto out;
+			}
+		}
+		if (in->analog_owned || in->unison_begun) {
+			ret = -EALREADY;
+			goto out;
+		}
+		mutex_unlock(&ua->lock);
+		ret = ua_unison_drain(ua, in->epoch, NULL);
+		mutex_lock(&ua->lock);
+		if (!ret && (in->lost || h->epoch != req->epoch))
+			ret = -ESTALE;
+		if (!ret)
+			ret = ua_unison_capture_locked(ua, in->synch, &in->analog_base);
+		if (!ret) {
+			in->analog_rollback = in->analog_current;
+			in->analog_current = in->analog_base;
+			in->analog_owned = true;
+			in->unison_begun = true;
+			in->route_pending = true;
+			ua_unison_set_owned_locked(ua, in->synch, true);
+		}
+		mutex_unlock(&ua->lock);
+		if (!ret)
+			ret = ua_inst_analog_bootstrap(ua, in, &seq);
+		mutex_lock(&ua->lock);
+	} else {
+		if (!in->analog_owned || !in->unison_begun) {
+			ret = -EPERM;
+			goto out;
+		}
+		list_for_each_entry (other, &h->instances, node)
+			if (other != in && other->placed && !other->lost &&
+			    (other->started || other->route_pending) &&
+			    ua_inst_inputs_overlap(in->synch, other->synch)) {
+				ret = -EBUSY;
+				goto out;
+			}
+		mutex_unlock(&ua->lock);
+		ret = ua_inst_start(ua, in, NULL, 0, in->synch, true);
+		if (!ret)
+			ret = ua_unison_drain(ua, in->epoch, &seq);
+		mutex_lock(&ua->lock);
+		if (!ret && (in->lost || h->epoch != req->epoch))
+			ret = -ESTALE;
+		if (ret)
+			ua_inst_analog_failed(ua, in, ret);
+		else
+			in->unison_begun = false;
+	}
+out:
+	if (!ret) {
+		req->reserved[4] = seq;
+		req->reserved[5] = 1;
+	}
+	mutex_unlock(&ua->lock);
+	mutex_unlock(&h->mutex);
+	return ret;
+}
+
+static long ua_plugin_unison_params(struct ua_device *ua, struct ua_file *uf,
+				    struct ua_plugin_instance *req)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_plugin_inst *in;
+	u32 *words = NULL, nw = req->reserved[1], seq = 0;
+	u64 ptr = (u64)req->reserved[3] << 32 | req->reserved[2];
+	int ret;
+	if (!req->handle || !req->epoch || req->flags || req->render_id || req->dsp ||
+	    req->n_resources || req->n_private || req->resources || req->privates ||
+	    req->reserved[0] || req->reserved[4] || req->reserved[5] || nw % 3 ||
+	    nw > UA_PLUGIN_UNISON_WORDS_MAX || (!nw && ptr) || (nw && !ptr))
+		return -EINVAL;
+	if (nw) {
+		words = kvmalloc_array(nw, sizeof(*words), GFP_KERNEL);
+		if (!words)
+			return -ENOMEM;
+		if (copy_from_user(words, u64_to_user_ptr(ptr), nw * sizeof(*words))) {
+			kvfree(words);
+			return -EFAULT;
+		}
+	}
+	if (mutex_lock_killable(&h->mutex)) {
+		kvfree(words);
+		return -EINTR;
+	}
+	mutex_lock(&ua->lock);
+	in = ua_inst_find(h, uf, req->handle);
+	ret = !in ? -ENOENT : 0;
+	if (!ret && (in->lost || in->epoch != req->epoch || h->epoch != req->epoch ||
+		     !ua_plugin_dsp_admitted(ua, in->dsp)))
+		ret = -ESTALE;
+	if (!ret && (!in->unison || (!in->started && !in->unison_begun) || !in->loaded ||
+		     !in->analog_owned))
+		ret = -EPERM;
+	if (!ret && nw)
+		ret = ua_unison_patch_locked(ua, &in->analog_current, words, nw);
+	mutex_unlock(&ua->lock);
+	if (!ret) {
+		ret = ua_unison_drain(ua, req->epoch, &seq);
+		if (ret) {
+			mutex_lock(&ua->lock);
+			ua_inst_analog_failed(ua, in, ret);
+			mutex_unlock(&ua->lock);
+		}
+	}
+	if (!ret) {
+		req->reserved[4] = seq;
+		req->reserved[5] = 1;
+	}
+	mutex_unlock(&h->mutex);
+	kvfree(words);
+	return ret;
+}
+
+long ua_plugin_ioctl_delay(struct ua_device *ua, unsigned long arg)
+{
+	struct ua_plugin_delay q;
+	u32 values[3][4];
+	int ret;
+
+	if (!ua_plugin_host_enabled())
+		return -EOPNOTSUPP;
+	if (copy_from_user(&q, (void __user *)arg, sizeof(q)))
+		return -EFAULT;
+	if (q.struct_size != sizeof(q) || q.flags & ~7u ||
+	    (q.flags && (!q.epoch || q.input_mask != 0xf)) ||
+	    (!q.flags && (q.epoch || q.generation || q.input_mask ||
+			 memchr_inv(q.record, 0, sizeof(q.record)) ||
+			 memchr_inv(q.monitor, 0, sizeof(q.monitor)) ||
+			 memchr_inv(q.capacity, 0, sizeof(q.capacity)))))
+		return -EINVAL;
+	memcpy(values[0], q.record, sizeof(q.record));
+	memcpy(values[1], q.monitor, sizeof(q.monitor));
+	memcpy(values[2], q.capacity, sizeof(q.capacity));
+	ret = ua_strips_delay(ua, &q.epoch, &q.generation, q.flags, values);
+	if (ret)
+		return ret;
+	memcpy(q.record, values[0], sizeof(q.record));
+	memcpy(q.monitor, values[1], sizeof(q.monitor));
+	memcpy(q.capacity, values[2], sizeof(q.capacity));
+	q.input_mask = 0xf;
+	return copy_to_user((void __user *)arg, &q, sizeof(q)) ? -EFAULT : 0;
+}
+
 /* UA_INSTANCE_END */
 
 /*
@@ -917,7 +1443,8 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 	struct ua_memspec_row *rows = NULL;
 	u32 *cmd = NULL;
 	u8 (*sha)[32] = NULL;
-	unsigned int i, nw = 0;
+	unsigned int i, nw = 0, nids = 0;
+	u32 ids[5];
 	long ret;
 
 	if (!ua_plugin_host_enabled())
@@ -926,13 +1453,31 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 		return -EFAULT;
 	if (req.struct_size != sizeof(req) || req.license_state || req.license_word)
 		return -EINVAL;
+	if (req.op == UA_PLUGIN_INST_BEGIN_UNISON || req.op == UA_PLUGIN_INST_ACTIVATE_UNISON) {
+		ret = ua_plugin_unison_lifecycle(ua, uf, &req);
+		if (!ret && copy_to_user((void __user *)arg, &req, sizeof(req)))
+			ret = -EFAULT;
+		return ret;
+	}
+	if (req.op == UA_PLUGIN_INST_UNISON_PARAMS) {
+		ret = ua_plugin_unison_params(ua, uf, &req);
+		if (!ret && copy_to_user((void __user *)arg, &req, sizeof(req)))
+			ret = -EFAULT;
+		return ret;
+	}
 	if (req.op == UA_PLUGIN_INST_SERVICE)
 		return ua_plugin_ioctl_service(ua, uf, &req);
+	if (req.op == UA_PLUGIN_INST_SWAP)
+		return ua_plugin_swap(ua, uf, &req);
 	if (req.op == UA_PLUGIN_INST_CREATE &&
-	    (req.flags & UA_PLUGIN_CREATE_F_START)) {
+	    (req.flags & (UA_PLUGIN_CREATE_F_START | UA_PLUGIN_CREATE_F_STAGE))) {
 		nw = req.reserved[1];
-		if (req.dsp == UA_PLUGIN_DSP_ANY ||
-		    (req.reserved[0] >> 16) != 0x20 ||
+		if ((req.flags & (UA_PLUGIN_CREATE_F_START | UA_PLUGIN_CREATE_F_STAGE)) ==
+		    (UA_PLUGIN_CREATE_F_START | UA_PLUGIN_CREATE_F_STAGE) ||
+		    req.dsp == UA_PLUGIN_DSP_ANY ||
+		    (req.reserved[0] & 0xffff) >= UA_INST_SPAN_NONE ||
+		    (req.reserved[0] >> 16) > UA_INST_SPAN_NONE ||
+		    (req.reserved[0] & 0xffff) == (req.reserved[0] >> 16) ||
 		    nw < 4 || nw > UA_PLUGIN_CMD_WORDS_MAX ||
 		    ((req.reserved[4] || req.reserved[5]) &&
 		     req.dsp == UA_PLUGIN_DSP_ANY))
@@ -955,8 +1500,22 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 		return -EINVAL;
 	}
 
+ if ((req.flags & (UA_PLUGIN_CREATE_F_UNISON | UA_PLUGIN_CREATE_F_START)) ==
+     (UA_PLUGIN_CREATE_F_UNISON | UA_PLUGIN_CREATE_F_START))
+  return -EOPNOTSUPP;
+	if ((req.flags & UA_PLUGIN_CREATE_F_UNISON) &&
+	    !(req.flags & UA_PLUGIN_CREATE_F_CHAIN))
+		return -EINVAL;
+	if ((req.flags & UA_PLUGIN_CREATE_F_CHAIN) &&
+	    (!(req.flags & (UA_PLUGIN_CREATE_F_START | UA_PLUGIN_CREATE_F_STAGE)) ||
+	     (req.flags & UA_PLUGIN_CREATE_F_CHECK)))
+		return -EINVAL;
 	if (req.handle ||
-	    (req.flags & ~(UA_PLUGIN_CREATE_F_CHECK | UA_PLUGIN_CREATE_F_START)) ||
+	    (req.flags & ~(UA_PLUGIN_CREATE_F_CHECK | UA_PLUGIN_CREATE_F_START |
+		       UA_PLUGIN_CREATE_F_STAGE | UA_PLUGIN_CREATE_F_CHAIN |
+		       UA_PLUGIN_CREATE_F_UNISON)) ||
+	    ((req.flags & UA_PLUGIN_CREATE_F_CHECK) &&
+	     (req.flags & UA_PLUGIN_CREATE_F_STAGE)) ||
 	    (req.dsp != UA_PLUGIN_DSP_ANY && req.dsp >= ua->num_dsps))
 		return -EINVAL;
 	if (!(req.flags & UA_PLUGIN_CREATE_F_CHECK) &&
@@ -1001,9 +1560,16 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 			if (ret < 0)
 				goto out;
 		}
+		if (nw) {
+			ret = ua_inst_chain_ids(rows, req.n_private, cmd, nw,
+				!!(req.flags & UA_PLUGIN_CREATE_F_CHAIN),
+				!!(req.flags & UA_PLUGIN_CREATE_F_UNISON), req.render_id, ids, &nids);
+			if (ret)
+				goto out;
+		}
 	}
 
-	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows, cmd);
+	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows, cmd, ids, nids);
 	if ((!ret || ret == -EACCES) &&
 	    copy_to_user((void __user *)arg, &req, sizeof(req)))
 		ret = -EFAULT;

@@ -7,7 +7,8 @@ docs/re-notes/macos-dsp-module-load.md, Track A section A6 (the first
 strip on an empty DSP 0, the per-strip shifts) and A1 (the sub-plugin
 defaults per rate), written out here, not taken from the C code; the
 planner-equivalence test checks that the code-page uploads plus the strip
-transaction carry exactly the words 0e9990b's single batch did.  The
+transaction preserves the original recipe apart from enlarged 2048-word
+delay buffers and their resulting pool-3 addresses.  The
 lifecycle tests compile the whole host (ledger, transactions on the fake
 FPGA of test_dsp_xact.py, catalog with a fake /lib/firmware, upload,
 ownership, the strips) and run passes: each code page waits for its reply,
@@ -36,14 +37,14 @@ CODE = [(0x0eb, 0xe0000, 0xb5), (0x0da, 0xe006c, 0x2fb),
 
 # A6.3: zero-fills of the first strip, in order
 ZERO = [(0x9d1b0, 8), (0x9d178, 0x38), (0xc6fee, 0x10), (0x9d168, 0x10),
-        (0x8ffdff0, 0x10), (0x9d164, 4), (0x8ffdef0, 0x100),
-        (0x8ffddf0, 0x100), (0x8ffdcf0, 0x100), (0x8ffdbf0, 0x100)]
+        (0x8ffdff0, 0x10), (0x9d164, 4), (0x8ffd7f0, 0x800),
+        (0x8ffcff0, 0x800), (0x8ffc7f0, 0x800), (0x8ffbff0, 0x800)]
 
 # A6.4: memspec of the first strip
 MEMSPEC = [0x00150013, 0x9d1b6, 0x9d178, 0x9d1ae, 0xc6fee, 0x9d1af,
            0x9d168, 0x9d193, 0x8ffdff0, 0x9d194, 0x9d164, 0x9d186,
-           0x8ffdef0, 0x9d187, 0x8ffddf0, 0x9d17e, 0x8ffdcf0, 0x9d17f,
-           0x8ffdbf0]
+           0x8ffd7f0, 0x9d187, 0x8ffcff0, 0x9d17e, 0x8ffc7f0, 0x9d17f,
+           0x8ffbff0]
 
 # A6.5: header parameters
 HEADER = [0x00140009, 0x9d1b0, 0x24, 0x40000000, 1, 1, 0x22, 1, 0x846]
@@ -76,9 +77,9 @@ RAMP = {44100: (69, 0x41000000, 0x3aed7304, 0),
 
 
 def shift(addr, k):
-    """A6.3: strip k sits lower by 0x54 (pool 1), 0x10 (pool 2), 0x410 (3)"""
+    """A6.3: strip k sits lower by 0x54 (pool 1), 0x10 (pool 2), 0x2010 (3)"""
     if addr >= 0x08000000:
-        return addr - 0x410 * k
+        return addr - 0x2010 * k
     if addr >= 0xc0000:
         return addr - 0x10 * k
     return addr - 0x54 * k
@@ -110,7 +111,7 @@ def sub_params(k, rate):
 
 
 def expected(k, synch, rate, with_code):
-    """(inline words, DMA stream bytes) of strip k as 0e9990b sent it."""
+    """Original strip framing with enlarged delay buffers and relocated links."""
     hdr = shift(0x9d1b0, k)
     inl = []
     for addr, size in ZERO:
@@ -348,7 +349,7 @@ int main(void)
 
 def test_strips_1_to_3_shift():
     """Slots 1-3: every pool-1 address lower by 0x54 per strip, pool 2 by
-    0x10, pool 3 by 0x410; no code pages (the modules are resident)."""
+    0x10, pool 3 by 0x2010; no code pages (the modules are resident)."""
     parts = ''
     calls = ''
     for k in (1, 2, 3):
@@ -576,6 +577,9 @@ static bool fatal_signal_pending(struct task_struct *t) { (void)t; return false;
 '''
 
 HOST_STUBS = r'''
+static bool plugin_rate_ready = true;
+static bool ua_audio_plugin_rate_ready(struct ua_device *ua)
+{ (void)ua; return plugin_rate_ready; }
 /* DSP register windows: the boot words and DSP 0's pool map (A6.1) */
 static u32 regs[4][0x200];
 static unsigned int reg_reads;
@@ -867,7 +871,7 @@ int main(void)
 		assert(ua_pool_read_usage(host.dsp[0].pools, u) == 0);
 		assert(u[0].used_words == 0x6c + 0x1f0 + 0x130 + 0x16 + 0x40);
 		assert(u[0].holds == 5 && u[1].used_words == 4 * 0x54 &&
-		       u[2].used_words == 4 * 0x10 && u[3].used_words == 4 * 0x410);
+		       u[2].used_words == 4 * 0x10 && u[3].used_words == 4 * 0x2010);
 		assert(u[1].scratch_words == 0x1c0);
 	}
 	assert(strstr(proc(), "strip 0: input 1 (DSP input 0), instance 0x9d1b0, live"));
@@ -1297,3 +1301,29 @@ def test_waits_are_off_lock():
     hooks = re.findall(r'ua_strips_\w+\(', csrc.source('ua_core.c') +
                        csrc.source('ua_audio.c') + csrc.source('ua_dsp.c'))
     assert set(hooks) <= {'ua_strips_init(', 'ua_strips_proc('}, hooks
+
+
+def test_strip_start_waits_for_confirmed_clock_without_acquiring_resources():
+    build_host(r'''
+int main(void)
+{
+    setup(0x1f);
+    ua_strips_init(&dev);
+    cold_connect();
+    plugin_rate_ready=false;
+    for(unsigned int i=0;i<3;i++) {
+        int q=queued;
+        ua_strips_run(&dev);
+        assert(host.strips->state==UA_STRIPS_ARMED);
+        assert(!host.strips->passes && !host.strips->created);
+        assert(queued==q+1 && !host.dsp[0].uploads);
+        assert(ua_pool_owner_idle(host.dsp[0].pools));
+    }
+    plugin_rate_ready=true;
+    ua_strips_run(&dev);
+    assert(host.strips->state==UA_STRIPS_LIVE && host.strips->created==1);
+    teardown_host();
+    assert(!k_objects && !dma_live);
+    return 0;
+}
+''')

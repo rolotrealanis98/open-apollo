@@ -420,6 +420,13 @@ impl Store {
         &self.subscribed
     }
 
+    /// Clear the previous failure when starting an explicit retry.
+    pub fn clear_error(&mut self) {
+        if self.last_error.take().is_some() {
+            self.model.revision += 1;
+        }
+    }
+
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
     }
@@ -606,6 +613,19 @@ impl Store {
             }
             Update::Error { path, message } => {
                 log::debug!("engine error {path}: {message}");
+                self.last_error = Some(format!("{message} ({path})"));
+                self.model.revision += 1;
+                let property = path::property_path(&path);
+                let (node, field) = path::split(property);
+                if field == "EffectName"
+                    && node.starts_with("/devices/")
+                    && node.rsplit_once("/effects/").is_some_and(|(_, slot)| slot.parse::<u32>().is_ok())
+                {
+                    // Failed loads must not leave the optimistic name/parameter tree on screen.
+                    // Drop any stale echo hold and re-read the authoritative slot, read-only.
+                    self.model.holds.remove(property);
+                    self.refresh(node);
+                }
             }
             Update::Other(_) => {}
         }
@@ -1133,5 +1153,57 @@ impl Store {
             })
             .ok();
         self.simulation = Some(Simulation { stop, thread });
+    }
+}
+
+#[cfg(test)]
+mod error_notice_tests {
+    use super::*;
+
+    #[test]
+    fn failed_insert_assignment_refreshes_authoritative_slot() {
+        let slot = "/devices/0/inputs/2/effects/0";
+        let property = format!("{slot}/EffectName");
+        let mut tree = Tree::new();
+        tree.set_value(&property, "".into());
+        let server = crate::MockEngine::start(tree, crate::MockOptions::default()).unwrap();
+        let mut store = Store::new();
+        store.connect(server.endpoint(), crate::Options::default());
+        let end = Instant::now() + Duration::from_secs(5);
+        while store.status != Status::Live {
+            assert!(Instant::now() < end);
+            store.drain();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        store.model.set_value(&property, "Rejected plug-in".into());
+        store.model.holds.insert(property.clone(), Hold {
+            until: Instant::now() + Duration::from_secs(30), latest: Some("Rejected plug-in".into()),
+        });
+        store.handle_update(Update::Error {
+            path: format!("{property}/value"), message: "Device refused this plug-in".into(),
+        });
+        assert!(!store.model.holds.contains_key(&property));
+        assert!(store.refresh_due.contains_key(slot));
+        while store.value(&property).and_then(Value::as_str) != Some("") {
+            assert!(Instant::now() < end, "failed assignment was not refreshed");
+            store.drain();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(server.write_commands().is_empty(), "recovery must be read-only");
+        assert!(store.last_error().unwrap().contains("Device refused"));
+    }
+
+    #[test]
+    fn engine_refusal_is_visible_and_marks_the_model_changed() {
+        let mut store = Store::new();
+        let previous = store.model.revision;
+        store.handle_update(Update::Error {
+            path: "/devices/0/inputs/2/effects/0/EffectName".into(),
+            message: "Native provider validation failed".into(),
+        });
+        assert!(store.last_error().unwrap().starts_with("Native provider validation failed"));
+        assert!(store.model.revision > previous);
+        store.clear_error();
+        assert!(store.last_error().is_none());
     }
 }

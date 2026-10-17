@@ -338,7 +338,9 @@ static const u32 ua_strip_scratch[4] = { 0, 0x1c0, 0x80, 0 };
  * 8-dword instance header (the chain head), then the Mic sub-plugin's
  * m0-m4 and the input strip commons c0-c3.  @link is the memspec link
  * (ua_memspec_compile()): m0's first word 6 of the head's row 0; the
- * others a word of m0 (row 0 of their own descriptor).
+ * others a word of m0 (row 0 of their own descriptor). The four delay
+ * buffers reserve 2048 words so 48 kHz compensation can grow without
+ * relocating retained strips; word5 still selects the active capacity.
  */
 static const struct ua_memspec_row ua_strip_rows[UA_STRIP_PRIV] = {
 	{ 1, 0x008, 0xffffffff, 0 },	/* instance header */
@@ -347,10 +349,10 @@ static const struct ua_memspec_row ua_strip_rows[UA_STRIP_PRIV] = {
 	{ 1, 0x010, 0x00000037, 0 },	/* m2 -> m0[0x37] */
 	{ 3, 0x010, 0x0000001b, 0 },	/* m3 -> m0[0x1b] */
 	{ 1, 0x004, 0x0000001c, 0 },	/* m4 -> m0[0x1c] */
-	{ 3, 0x100, 0x0000000e, 0 },	/* c0 -> m0[0x0e] */
-	{ 3, 0x100, 0x0000000f, 0 },	/* c1 -> m0[0x0f] */
-	{ 3, 0x100, 0x00000006, 0 },	/* c2 -> m0[0x06] */
-	{ 3, 0x100, 0x00000007, 0 },	/* c3 -> m0[0x07] */
+	{ 3, 0x800, 0x0000000e, 0 },	/* c0 -> m0[0x0e] */
+	{ 3, 0x800, 0x0000000f, 0 },	/* c1 -> m0[0x0f] */
+	{ 3, 0x800, 0x00000006, 0 },	/* c2 -> m0[0x06] */
+	{ 3, 0x800, 0x00000007, 0 },	/* c3 -> m0[0x07] */
 };
 static const unsigned int ua_strip_desc[2] = { 0, 1 };	/* head, Mic */
 
@@ -689,6 +691,7 @@ struct ua_strips {
 	unsigned long armed;			/* jiffies */
 	int rebuild_seen;
 	bool scratch_set;
+	bool delay_busy;		/* pins plain rows against manual rebuild */
 	unsigned int passes, created, teardowns, failures;
 };
 
@@ -856,43 +859,51 @@ bool ua_strips_live(struct ua_device *ua)
 	return st && st->state == UA_STRIPS_LIVE;
 }
 
-/* Only a complete, retained mono strip on this DSP can be overridden. */
+/* Every actual input must have a complete retained mono strip on this DSP. */
 int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 			     u32 synch, u64 epoch, u32 *generation)
 {
 	struct ua_strips *st = ua->host ? ua->host->strips : NULL;
-	unsigned int k, j;
+	u32 input[2] = { synch & 0xffff, synch >> 16 };
+	unsigned int k, j, ch;
 
 	lockdep_assert_held(&ua->lock);
 	if (!st || input_strips_steps || dsp != ua_strips_dsp ||
-	    (synch >> 16) != UA_STRIP_SYNCH_MONO ||
+	    input[0] >= UA_STRIP_SYNCH_MONO || input[1] > UA_STRIP_SYNCH_MONO ||
+	    input[0] == input[1] ||
 	    st->state != UA_STRIPS_LIVE || st->epoch != epoch ||
 	    ua->host->epoch != epoch || !ua_plugin_dsp_admitted(ua, dsp))
 		return -ESTALE;
-	for (k = 0; k < st->n; k++) {
-		struct ua_strip *s = &st->strip[k];
-
-		if (s->synch != (synch & 0xffff))
+	for (ch = 0; ch < 2; ch++) {
+		if (input[ch] == UA_STRIP_SYNCH_MONO)
 			continue;
-		if (s->state != UA_STRIP_LIVE || !s->header ||
-		    s->header != s->priv[0].base)
-			return -ESTALE;
-		for (j = 0; j < UA_STRIP_PRIV; j++)
-			if (!s->priv[j].cookie)
+		for (k = 0; k < st->n; k++) {
+			struct ua_strip *s = &st->strip[k];
+
+			if (s->synch != input[ch])
+				continue;
+			if (s->state != UA_STRIP_LIVE || !s->header ||
+			    s->header != s->priv[0].base)
 				return -ESTALE;
-		*generation = st->gen;
-		return 0;
+			for (j = 0; j < UA_STRIP_PRIV; j++)
+				if (!s->priv[j].cookie)
+					return -ESTALE;
+			break;
+		}
+		if (k == st->n)
+			return -ENOENT;
 	}
-	return -ENOENT;
+	*generation = st->gen;
+	return 0;
 }
 
-/* Append to the instance's stop fence, without allocating or resetting a strip. */
+/* Append both retained mono strips to the instance's stop fence. */
 int ua_strips_restore(struct ua_device *ua, struct ua_xact *x,
 		      u32 synch, u32 generation)
 {
 	struct ua_strips *st = ua->host->strips;
-	u32 live_generation;
-	unsigned int k;
+	u32 live_generation, input[2] = { synch & 0xffff, synch >> 16 };
+	unsigned int k, ch;
 	int ret;
 
 	ret = ua_strips_override_target(ua, x->dsp, synch, x->epoch, &live_generation);
@@ -900,19 +911,185 @@ int ua_strips_restore(struct ua_device *ua, struct ua_xact *x,
 		return ret;
 	if (generation != live_generation)
 		return -ESTALE;
-	for (k = 0; k < st->n; k++)
-		if (st->strip[k].synch == (synch & 0xffff)) {
-			ua_xact_inline(x, UA_STRIP_CMD_SYNCH, synch,
-				       st->strip[k].header, 0);
-			ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch & 0xffff,
-				       UA_STRIP_INPUT_SPAN, UA_STRIP_SPAN_NONE);
-			ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch & 0xffff,
-				       UA_STRIP_INPUT_SPAN, UA_STRIP_SPAN_NONE);
-			ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch & 0xffff,
-				       UA_STRIP_INPUT_ROUTE, ua_strip_route);
-			return x->err;
+	for (ch = 0; ch < 2; ch++) {
+		if (input[ch] == UA_STRIP_SYNCH_MONO)
+			continue;
+		for (k = 0; k < st->n; k++)
+			if (st->strip[k].synch == input[ch]) {
+				ua_xact_inline(x, UA_STRIP_CMD_SYNCH,
+					       UA_STRIP_SYNCH_MONO << 16 | input[ch],
+					       st->strip[k].header, 0);
+				ua_xact_inline(x, UA_STRIP_CMD_INPUT, input[ch],
+					       UA_STRIP_INPUT_SPAN, UA_STRIP_SPAN_NONE);
+				ua_xact_inline(x, UA_STRIP_CMD_INPUT, input[ch],
+					       UA_STRIP_INPUT_SPAN, UA_STRIP_SPAN_NONE);
+				ua_xact_inline(x, UA_STRIP_CMD_INPUT, input[ch],
+					       UA_STRIP_INPUT_ROUTE, ua_strip_route);
+				break;
+			}
+	}
+	return x->err;
+}
+
+/* Fixed Mic fields only: record16, monitor8, enabled capacity5. */
+static int ua_strips_delay_xact(struct ua_device *ua, struct ua_strips *st,
+			       const u32 base[4], unsigned int fields,
+			       u32 values[3][4], u32 generation)
+{
+	static const unsigned int offset[3] = {16, 8, 5};
+	struct ua_xact *x;
+	const __le32 *reply;
+	__le32 *cmd;
+	u32 observed[3][4];
+	unsigned int i, f, n = 0;
+	int ret;
+
+	x = ua_xact_alloc(ua_strips_dsp, fields ? UA_XACT_PIECE : 0);
+	if (!x)
+		return -ENOMEM;
+	x->epoch = st->epoch;
+	x->rx_fill = 0xffcccccc;
+	if (fields) {
+		cmd = ua_xact_cmd(x, 4 * 4 * hweight32(fields));
+		if (cmd)
+			for (i = 0; i < 4; i++)
+				for (f = 0; f < 3; f++)
+					if (fields & BIT(f)) {
+						cmd[n++] = cpu_to_le32(0x00140004);
+						cmd[n++] = cpu_to_le32(base[i] + offset[f]);
+						cmd[n++] = 0;
+						cmd[n++] = cpu_to_le32(values[f][i]);
+					}
+	}
+	for (i = 0; i < 4; i++) {
+		ua_xact_rx(x, 14);
+		ua_xact_inline(x, 0x000c0004, base[i] + 5, 12, 5);
+	}
+	/* Check generation under the same lock that publishes the addresses. */
+	ret = ua_xact_map(ua, x);
+	mutex_lock(&ua->lock);
+	if (!ret && (st->state != UA_STRIPS_LIVE || st->gen != generation ||
+		     st->epoch != x->epoch || ua->host->epoch != x->epoch))
+		ret = -ESTALE;
+	if (!ret)
+		ret = ua_xact_submit(ua, x);
+	mutex_unlock(&ua->lock);
+	if (!ret)
+		ret = ua_xact_wait(ua, x, UA_XACT_WAIT_MS);
+	if (ret == -EAGAIN)
+		ret = -EBUSY;
+	mutex_lock(&ua->lock);
+	if (!ret && (st->state != UA_STRIPS_LIVE || st->gen != generation ||
+		     st->epoch != x->epoch || ua->host->epoch != x->epoch))
+		ret = -ESTALE;
+	for (i = 0; !ret && i < 4; i++) {
+		reply = ua_xact_reply(x, i);
+		if (!reply || le32_to_cpu(reply[0]) != 0x8001000e ||
+		    le32_to_cpu(reply[1]) != 5) {
+			ret = -EPROTO;
+			break;
 		}
-	return -ENOENT;
+		for (f = 0; f < 3; f++) {
+			observed[f][i] = le32_to_cpu(reply[2 + offset[f] - 5]);
+			if ((fields & BIT(f)) && observed[f][i] != values[f][i])
+				ret = -EPROTO;
+		}
+	}
+	if (ret && x->state >= UA_XACT_PUBLISHED)
+		ua_plugin_quarantine(ua, ua_strips_dsp, "strip delay update unproven", ret);
+	if (!ret)
+		memcpy(values, observed, sizeof(observed));
+	ua_xact_done(ua, x);
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
+/* All four retained strips, including ones currently overridden by inserts.
+ * Caller receives only proved values. No user address reaches DSP commands.
+ */
+int ua_strips_delay(struct ua_device *ua, u64 *epoch, u32 *generation,
+		    unsigned int fields, u32 values[3][4])
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_strips *st = h ? h->strips : NULL;
+	u32 base[4], accepted[3][4], mask = 0, gen;
+	unsigned int i, j, f;
+	int ret = 0;
+
+	if (!st || fields & ~7u)
+		return -EINVAL;
+	if (mutex_lock_killable(&h->mutex))
+		return -EINTR;
+	mutex_lock(&ua->lock);
+	if (st->state != UA_STRIPS_LIVE || st->n != 4 || input_strips_steps ||
+	    ua->audio.sample_rate != 48000 || !ua_audio_plugin_rate_ready(ua) ||
+	    !ua_plugin_dsp_admitted(ua, ua_strips_dsp) || st->epoch != h->epoch ||
+	    (fields && (*epoch != st->epoch || *generation != st->gen))) {
+		ret = -ESTALE;
+		goto unlock;
+	}
+	for (i = 0; i < 4; i++) {
+		struct ua_strip *s = &st->strip[i];
+
+		if (s->input >= 4 || (mask & BIT(s->input)) ||
+		    s->state != UA_STRIP_LIVE || s->header != s->priv[0].base) {
+			ret = -ESTALE;
+			goto unlock;
+		}
+		for (j = 0; j < UA_STRIP_PRIV; j++)
+			if (!s->priv[j].cookie ||
+			    s->priv[j].owner != h->dsp[ua_strips_dsp].pools ||
+			    s->priv[j].words < ua_strip_rows[j].dwords) {
+				ret = -ESTALE;
+				goto unlock;
+			}
+		mask |= BIT(s->input);
+		base[s->input] = s->priv[1].base;
+	}
+	gen = st->gen;
+	st->delay_busy = true;
+	mutex_unlock(&ua->lock);
+	ret = ua_strips_delay_xact(ua, st, base, 0, accepted, gen);
+	if (ret)
+		goto done;
+	if (fields) {
+		for (f = 0; f < 3; f++)
+			if (fields & BIT(f))
+				memcpy(accepted[f], values[f], sizeof(accepted[f]));
+		for (i = 0; i < 4; i++) {
+			u32 cap = accepted[2][i];
+
+			if (cap > 2048 || (cap && (cap < 128 || (cap & (cap - 1)))) ||
+			    accepted[0][i] > 2047 || accepted[1][i] > 2047 ||
+			    (cap && (accepted[0][i] + 48 > cap || accepted[1][i] + 48 > cap)) ||
+			    (!cap && (accepted[0][i] || accepted[1][i]))) {
+				ret = -EINVAL;
+				goto done;
+			}
+		}
+		/* Recheck after the read: a concurrent strip rebuild changes gen. */
+		mutex_lock(&ua->lock);
+		if (st->gen != gen || st->epoch != h->epoch || st->state != UA_STRIPS_LIVE)
+			ret = -ESTALE;
+		mutex_unlock(&ua->lock);
+		if (ret)
+			goto done;
+		ret = ua_strips_delay_xact(ua, st, base, fields, accepted, gen);
+		if (ret)
+			goto done;
+	}
+	memcpy(values, accepted, sizeof(accepted));
+	*epoch = st->epoch;
+	*generation = gen;
+	goto done;
+unlock:
+	mutex_unlock(&ua->lock);
+done:
+	mutex_lock(&ua->lock);
+	st->delay_busy = false;
+	mutex_unlock(&ua->lock);
+	mutex_unlock(&h->mutex);
+	return ret;
 }
 
 /**
@@ -1252,6 +1429,17 @@ void ua_strips_run(struct ua_device *ua)
 		mutex_unlock(&ua->lock);
 		goto out;
 	}
+	/* First connect may acknowledge the firmware's retained rate while the
+	 * host still defaults to 48 kHz. Wait for the actual clock and DSP ack,
+	 * rather than building at the default before the first PCM clock write.
+	 * Each retry is deferred; no polling sleep or resource lease is held.
+	 */
+	if (!ua_audio_plugin_rate_ready(ua)) {
+		queue_delayed_work(system_wq, &h->work,
+				   msecs_to_jiffies(UA_STRIPS_SETTLE_MS));
+		mutex_unlock(&ua->lock);
+		goto out;
+	}
 	if (ua_strips_begin(ua, st)) {
 		ua_strips_unhold(ua, st, NULL);
 		mutex_unlock(&ua->lock);
@@ -1479,7 +1667,7 @@ void ua_strips_service(struct ua_device *ua)
 	want = atomic_read(&ua_strips_rebuilds);
 	if (want == st->rebuild_seen)
 		return;
-	if (h->fence[ua_strips_dsp] || ua_instances_strips_busy(ua) ||
+	if (st->delay_busy || h->fence[ua_strips_dsp] || ua_instances_strips_busy(ua) ||
 	    st->state == UA_STRIPS_CREATING || st->state == UA_STRIPS_ARMED)
 		return;		/* after the pass */
 	st->rebuild_seen = want;

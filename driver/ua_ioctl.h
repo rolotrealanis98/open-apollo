@@ -576,6 +576,18 @@ struct ua_dma_test {
  * GET_PLUGIN_CAPS.operations says.
  */
 #define UA_FEAT2_PLUGIN_HOST	(1u << 0)
+/* Concurrent non-overlapping inputs with shared scratch claims. */
+#define UA_FEAT2_PLUGIN_MULTI_INPUT (1u << 1)
+/* F_START accepts two distinct actual inputs and restores both mono strips. */
+#define UA_FEAT2_PLUGIN_STEREO	(1u << 2)
+/* Initialized unrouted candidates and reversible same-input handoff. */
+#define UA_FEAT2_PLUGIN_SWAP	(1u << 3)
+/* Bounded original chain head, every effect admitted by the device. */
+#define UA_FEAT2_PLUGIN_CHAIN	(1u << 4)
+#define UA_FEAT2_PLUGIN_DELAY	(1u << 5)
+/* CHAIN may begin with a licensed integrated preamp instead of Mic0x846. */
+#define UA_FEAT2_PLUGIN_UNISON	(1u << 6)
+#define UA_FEAT2_PLUGIN_ANALOG_LEASE (1u << 7)
 
 struct ua_version {
 	__u32 abi_major;
@@ -761,6 +773,10 @@ struct ua_pause_info {
 #define UA_PLUGIN_OP_CREATE		(1ull << 1)
 #define UA_PLUGIN_OP_DESTROY		(1ull << 2)
 #define UA_PLUGIN_OP_SERVICE		(1ull << 3)
+#define UA_PLUGIN_OP_SWAP		(1ull << 4)
+#define UA_PLUGIN_OP_UNISON_PARAMS	(1ull << 5)
+#define UA_PLUGIN_OP_BEGIN_UNISON	(1ull << 6)
+#define UA_PLUGIN_OP_ACTIVATE_UNISON	(1ull << 7)
 
 struct ua_plugin_caps {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_caps) */
@@ -1066,6 +1082,11 @@ struct ua_board_query {
 #define UA_PLUGIN_INST_CREATE		1u
 #define UA_PLUGIN_INST_DESTROY		2u
 #define UA_PLUGIN_INST_SERVICE		3u
+#define UA_PLUGIN_INST_SWAP		4u
+#define UA_PLUGIN_INST_UNISON_PARAMS	5u
+#define UA_PLUGIN_INST_BEGIN_UNISON	6u
+#define UA_PLUGIN_INST_ACTIVATE_UNISON	7u
+#define UA_PLUGIN_UNISON_WORDS_MAX	192u
 
 #define UA_PLUGIN_CREATE_F_CHECK	(1u << 0)
 
@@ -1105,12 +1126,21 @@ struct ua_plugin_private {
  * (0: none): the chain's scratch (the largest of its descriptors'
  * AllocInfo 0xa9c / 0xa98 / 0xaa0), raised on the DSP before placement and
  * put back when the instance goes; needs an explicit dsp.
- * Requires mono, an explicit DSP matching a retained live input strip, and
- * at most one START instance on that DSP. DESTROY/close stop the instance
- * and restore only that retained strip before releasing modules; both wait
+ * Requires an explicit DSP with retained live mono strips for each input.
+ * With UA_FEAT2_PLUGIN_STEREO, in2 may name a distinct actual input (0..31);
+ * otherwise in2 must be 0x20. With UA_FEAT2_PLUGIN_MULTI_INPUT, disjoint
+ * input chains can coexist on one DSP; scratch is their maximum, not a sum.
+ * An input may belong to only one START instance. DESTROY/close stop the
+ * instance and restore its retained mono strips before releasing modules; both wait
  * for the retirement fence. Epoch/loss teardown never restores a strip.
  */
 #define UA_PLUGIN_CREATE_F_START	(1u << 1)
+/* Same layout as START, but initialize without stopping or routing inputs. */
+#define UA_PLUGIN_CREATE_F_STAGE	(1u << 2)
+/* START/STAGE chain: Mic carrier followed by one to four licensed effects. */
+#define UA_PLUGIN_CREATE_F_CHAIN	(1u << 3)
+/* Requires CHAIN: one licensed integrated header plus zero to four inserts. */
+#define UA_PLUGIN_CREATE_F_UNISON	(1u << 4)
 #define UA_PLUGIN_CMD_WORDS_MAX		1016	/* one 4 KiB DMA page, room left */
 #define UA_PLUGIN_READ_WORDS_MAX	64
 #define UA_PLUGIN_CMD_WRITE		0x0014	/* opcode half of a parameter WRITE */
@@ -1121,9 +1151,64 @@ struct ua_plugin_private {
  * Optional read: reserved[0] = row << 24 | word, reserved[4] = word count
  * (1..UA_PLUGIN_READ_WORDS_MAX), privates = output __u32 pointer.
  * All other fields zero except struct_size/op. At least one write or read.
+ * CHAIN requires START or STAGE and UA_FEAT2_PLUGIN_CHAIN. Head row zero
+ * must be pool1, size6+2*N, N2..5 in word5; word0=0x40000000; word7 is
+ * the built-in Mic carrier0x846 and word7+2*i each effect render ID. Each
+ * pointer word6+2*i has exactly one linked private row. Count and all IDs
+ * must be explicitly initialized once. render_id matches the first effect.
+ * Every effect is admitted from the same fresh board query before placement.
+ * UNISON additionally requires CHAIN and UA_FEAT2_PLUGIN_UNISON: N1..5,
+ * member0 is licensed (not the implicit Mic carrier), and render_id matches
+ * that member. All N members are admitted from the same fresh board answer.
+ * UA_FEAT2_PLUGIN_ANALOG_LEASE requires staged Unison activation: UNISON with
+ * START returns EOPNOTSUPP. STAGE owns no analog settings and does not route.
+ * BEGIN_UNISON (op6): handle/epoch, all other fields zero except struct_size/op.
+ * Captures the ordinary baseline, reserves logical analog ownership, performs
+ * PGA0, waits for consumption/readback, then80ms. No graph routing occurs.
+ * The caller then replays the original worker's DSP/property timeline.
+ * ACTIVATE_UNISON (op7): same fields as BEGIN. Routes the initialized begun
+ * stage without rewriting coefficients or enabling hardware CUSTOM. Refuses
+ * an existing native route owner; use SWAP for that replacement instead.
+ * After activation the caller explicitly journals CUSTOM1 and its80ms wait.
+ * UNISON_PARAMS is accepted during BEGIN as well as after activation.
+ * SWAP between Unison owners transfers the baseline and restores the
+ * candidate's accepted image. Ordinary-to-Unison SWAP/re-entry requires BEGIN
+ * plus the caller's worker timeline first. BEGIN retains the previous accepted
+ * image separately as analog_rollback; it never invents a worker replay.
+ * DESTROY/close also restore the baseline for begun-but-unrouted stages.
+ * Unknown completion blocks that input's settings until driver reprobe.
+ * UNISON_PARAMS (op5): handle/epoch identify the begun or active Unison owner. All
+ * fields zero except struct_size/op and reserved[1]=word count (multiple of3,
+ * max192), reserved[2:3]=pointer to u32 triples {input,parameter,value}.
+ * Count0 is a consumption/readback fence only. Input must belong to SYNCH;
+ * DSP route/span and pair link parameters are rejected. The whole batch is
+ * validated before any write. A batch applies its final setting image in
+ * setting-index order and coalesces duplicate fields. Separate fenced calls
+ * are required to preserve original per-record ordering or settling delays.
+ * On success reserved[4]=consumed mailbox seq,
+ * reserved[5]=1 (baseline uses guarded physical flags/GainC and accepted-cache
+ * custom fields). A later service readback is required, but analog settling
+ * and cached-only fields are not asserted physically verified. Physical data
+ * comes from GET_HW_READBACK, not the setting mailbox GET_MIXER_READBACK.
+ * Generic/ALSA/raw writes touching an owned analog lane return EBUSY.
+ * Multi-effect heads without CHAIN refuse. SERVICE cannot rewrite head type,
+ * count or render IDs; topology changes require a new admitted allocation.
+ *
+ * STAGE is exclusive with START/CHECK and requires UA_FEAT2_PLUGIN_SWAP.
+ * Staged candidates retain scratch and plain-strip generation, but do not
+ * own the input route. Their parameters may be serviced before activation.
+ *
+ * SWAP: handle = current routed instance; reserved[0] = candidate handle;
+ * epoch = both instances' CREATE epoch. Other fields zero. Both must belong
+ * to this file, be initialized on exactly the same DSP and input pair, and
+ * retain the current strip generation. After proved handoff only the
+ * candidate is started; the old allocation remains intact. Inverse SWAP
+ * restores it. DESTROY of an inactive instance never changes input routing.
+ * No zero-glitch guarantee. Unproven publication quarantines the DSP.
+ *
  * Writes are checked against the retained CREATE layout; read ranges must
  * stay in one private row. No raw DSP addresses are accepted. Writes precede
- * the read. Only the owning file may service a live, started instance, in
+ * the read. Only the owning file may service an initialized instance, in
  * its CREATE epoch. Malformed/stale replies never copy data to the caller.
  */
 struct ua_plugin_instance {
@@ -1142,6 +1227,25 @@ struct ua_plugin_instance {
 	__u32 license_word;	/* out */
 	__u32 reserved[6];
 };
+
+/* Retained plain Mic strips at 48 kHz, including overridden inputs.
+ * flags=0 queries all four. Apply flags select record(1), monitor(2),
+ * capacity(4); expected epoch/generation and input_mask0xf are mandatory.
+ * Capacity is0 (disabled) or a power of two128..2048. Scalars0..2047 plus
+ * 48 samples (32 processing +16 safety) must fit enabled capacity; disabled capacity requires both scalar delays0.
+ * All values are read back before success. An unproven write quarantines
+ * the DSP; callers must never interpret a timeout as rollback confirmation.
+ */
+#define UA_PLUGIN_DELAY_RECORD 1u
+#define UA_PLUGIN_DELAY_MONITOR 2u
+#define UA_PLUGIN_DELAY_CAPACITY 4u
+struct ua_plugin_delay {
+	__u32 struct_size, flags;
+	__u64 epoch;
+	__u32 generation, input_mask;
+	__u32 record[4], monitor[4], capacity[4];
+};
+#define UA_IOCTL_PLUGIN_DELAY _IOWR(UA_IOCTL_MAGIC, 0x95, struct ua_plugin_delay)
 
 #define UA_IOCTL_PLUGIN_INSTANCE _IOWR(UA_IOCTL_MAGIC, 0x94, struct ua_plugin_instance)
 

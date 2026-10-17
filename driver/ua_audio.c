@@ -2433,6 +2433,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 			ua->mixer_rb_data[i] = data[i];
 		}
 		ua->mixer_rb_status = 1;
+		ua->mixer_rb_generation++;
 		ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
 
 		/* Front-panel changes → ALSA controls (no write back) */
@@ -5147,6 +5148,21 @@ static int ua_pcm_silence(struct snd_pcm_substream *sub, int channel,
  * Clock Source control used to write it for "Internal").  Caller holds
  * ua->lock.
  */
+/* Input strips must use the same rate as the acknowledged, settled DSP clock. */
+bool ua_audio_plugin_rate_ready(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	u32 info;
+
+	lockdep_assert_held(&ua->lock);
+	if (atomic_read(&ua->shutdown) || !audio->connected ||
+	    !audio->sample_rate || audio->rate_acked != audio->sample_rate)
+		return false;
+	info = ua_read(ua, UA_REG_NOTIF_RATE_INFO);
+	return info != 0xffffffff && (info & 3) == 1 &&
+	       ((info >> 8) & 0xff) == audio->rate_index;
+}
+
 static void ua_audio_post_start_clock(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
@@ -5292,6 +5308,7 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 				ua->mixer_rb_data[i] =
 					ua_read(ua, UA_REG_MIXER_RB_DATA + i * 4);
 			ua->mixer_rb_status = 1;
+			ua->mixer_rb_generation++;
 			ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
 		}
 		/* The connect-time mixer batch, after the loop's 5-cycle delay */
@@ -5344,6 +5361,7 @@ static u32 ua_audio_service_step(struct ua_device *ua)
 			ua->mixer_rb_data[i] =
 				ua_read(ua, UA_REG_MIXER_RB_DATA + i * 4);
 		ua->mixer_rb_status = 1;
+		ua->mixer_rb_generation++;
 		ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
 	}
 	ua_mixer_flush_settings(ua);
@@ -6919,6 +6937,10 @@ static int ua_preamp_gain_put(struct snd_kcontrol *kctl,
 	a = newval - 10;
 	c = newval - 9;
 	mutex_lock(&ua->lock);
+	if (ua->audio.preamp[ch].custom || ua->audio.preamp[ch].unison_owned) {
+		mutex_unlock(&ua->lock);
+		return -EBUSY;
+	}
 	ret = ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_GAIN_A, a);
 	if (!ret)
 		ret = ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_GAIN_B, a);
@@ -8348,12 +8370,13 @@ void ua_mixer_sync_readback(struct ua_device *ua)
 			ua_sync_bool(ua, &st->hiz, UA_RB_HIZ_DETECT(rb[0], ch),
 				     name);
 		}
-		if (UA_RB_PREAMP_GAINC(chg[wg], lane)) {
+		if (!st->custom && !st->unison_owned && UA_RB_PREAMP_GAINC(chg[wg], lane)) {
 			snprintf(name, sizeof(name), "Line %u Capture Volume",
 				 ch + 1);
 			ua_sync_int(ua, &st->gain,
 				    min_t(int, max_t(int,
-					    UA_RB_PREAMP_GAIN_DB(rb[wg], lane),
+					    ua_preamp_gain_db_from_code(
+					    UA_RB_PREAMP_GAINC(rb[wg], lane)),
 					    UA_PREAMP_GAIN_MIN_DB),
 					  UA_PREAMP_GAIN_MAX_DB), name);
 		}

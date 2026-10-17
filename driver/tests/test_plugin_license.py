@@ -139,6 +139,8 @@ int ua_strips_override_target(struct ua_device *ua, unsigned int dsp, u32 synch,
 { (void)ua; (void)dsp; (void)synch; (void)epoch; (void)generation; return -ESTALE; }
 int ua_strips_restore(struct ua_device *ua, struct ua_xact *x, u32 synch, u32 generation)
 { (void)ua; (void)x; (void)synch; (void)generation; return -ESTALE; }
+int ua_strips_delay(struct ua_device *ua, u64 *epoch, u32 *gen, unsigned int fields, u32 values[3][4])
+{ (void)ua; (void)epoch; (void)gen; (void)fields; (void)values; return -ESTALE; }
 /* user memory: plain memory here */
 #define u64_to_user_ptr(x) ((void *)(uintptr_t)(x))
 static unsigned long copy_from_user(void *to, const void *from, unsigned long n)
@@ -183,7 +185,7 @@ def build_license(main, *, real_strips=False):
             abi + '\n' + structs +
             'struct ua_file { struct ua_device *ua; };\n' +
             khost.header('ua_resource_pool.h') + khost.header('ua_plugin_host.h') +
-            strips.STRIPS_STUBS + strips.HOST_STUBS + lic_stubs + fake.FPGA +
+            strips.STRIPS_STUBS + strips.HOST_STUBS + lic_stubs + fake.FPGA + ANALOG_STUBS +
             khost.body('ua_resource_pool.c') + khost.body('ua_dsp_xact.c') +
             khost.body('ua_plugin_catalog.c') + khost.body('ua_plugin_upload.c') +
             khost.body('ua_plugin_place.c') + host_fns +
@@ -748,7 +750,7 @@ int main(void)
 	dev.audio.connected = true;
 	mutex_lock(&dev.lock);
 	ops = ua_plugin_host_ops(&dev);
-	assert(ops == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_DESTROY | UA_PLUGIN_OP_SERVICE));
+	assert(ops == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_DESTROY | UA_PLUGIN_OP_SERVICE | UA_PLUGIN_OP_SWAP | UA_PLUGIN_OP_UNISON_PARAMS | UA_PLUGIN_OP_BEGIN_UNISON | UA_PLUGIN_OP_ACTIVATE_UNISON));
 	for (int i = 0; i < 4; i++)
 		host.dsp[i].quarantined = true;
 	assert(ua_plugin_host_ops(&dev) == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_DESTROY));
@@ -799,3 +801,61 @@ def test_the_gate_is_inside_create():
     query = csrc.extract(lic, 'int ua_plugin_board_query(')
     assert 'ktime_get_real_seconds()' in query
     assert 'cookie' in query and 'UA_BQ_REPLY' in query
+
+
+# Instance lifecycle tests model the separately tested setting/firmware fence.
+ANALOG_STUBS = r'''
+static u32 analog_physical = 19;
+static unsigned int analog_captures, analog_applies, analog_drains;
+static int analog_drain_error;
+static unsigned int analog_drain_fail_at;
+static bool analog_custom;
+static unsigned int analog_settle_sleeps, analog_pga_puts, analog_custom_puts;
+static void msleep(unsigned int ms) {
+ assert(ms==80 && !dev.lock.held && host.mutex.held);
+ assert(analog_physical==0);
+ assert(!analog_custom);
+ analog_settle_sleeps++;
+}
+void ua_unison_set_owned_locked(struct ua_device *ua, u32 synch, bool owned)
+{ lockdep_assert_held(&ua->lock); (void)synch; (void)owned; }
+int ua_unison_capture_locked(struct ua_device *ua, u32 synch, struct ua_unison_image *im)
+{
+ lockdep_assert_held(&ua->lock); analog_captures++;
+ memset(im,0,sizeof(*im)); im->synch=synch; im->valid=true;
+ im->mask[3]=0x3f; im->value[3]=analog_physical;
+ if (ua_instances_analog_conflict(ua,3,0x3f)) return -EBUSY;
+ return 0;
+}
+int ua_unison_apply_locked(struct ua_device *ua, const struct ua_unison_image *im)
+{
+ lockdep_assert_held(&ua->lock); assert(im->valid); analog_applies++;
+ analog_physical=im->value[3]; analog_custom=!!im->value[11]; return 0;
+}
+int ua_unison_patch_locked(struct ua_device *ua, struct ua_unison_image *im, const u32 *w, unsigned int nw)
+{
+ unsigned int n;
+ lockdep_assert_held(&ua->lock);
+ for(n=0;n<nw;n+=3) if(w[n] != (im->synch&0xffff) || (w[n+1]!=6 && w[n+1]!=8)) return -EINVAL;
+ for(n=0;n<nw;n+=3) {
+  if(w[n+1]==6) {im->value[3]=w[n+2]; analog_pga_puts=nputs;}
+  else {im->value[11]=w[n+2]; analog_custom_puts=nputs;}
+ }
+ return ua_unison_apply_locked(ua,im);
+}
+int ua_unison_drain(struct ua_device *ua, u64 epoch, u32 *seq)
+{
+ assert(!ua->lock.held); analog_drains++;
+ if(epoch != ua->host->epoch) return -ESTALE;
+ if(seq) *seq=analog_drains;
+ if(analog_drain_fail_at==analog_drains) return -ETIMEDOUT;
+ return analog_drain_error;
+}
+int ua_unison_restore(struct ua_device *ua, u64 epoch, const struct ua_unison_image *base)
+{
+ int ret;
+ mutex_lock(&ua->lock);ret=ua_unison_apply_locked(ua,base);mutex_unlock(&ua->lock);
+ return ret ? ret : ua_unison_drain(ua,epoch,NULL);
+}
+
+'''

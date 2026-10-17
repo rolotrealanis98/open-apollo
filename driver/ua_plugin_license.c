@@ -243,6 +243,46 @@ refused:
 	return ret;
 }
 
+/* One fresh board answer admits every effect in the immutable chain head. */
+int ua_plugin_admit_chain(struct ua_device *ua, const u32 *ids, unsigned int n,
+			  u32 *state, u32 *word, u64 *epoch)
+{
+	struct ua_plugin_host *h = ua->host;
+	u32 date, *words;
+	unsigned int i;
+	int ret;
+
+	*state = UA_PLUGIN_LICENSE_UNKNOWN;
+	*word = 0;
+	*epoch = 0;
+	if (!n || n > 5)
+		return -EINVAL;
+	for (i = 0; i < n; i++)
+		if (ids[i] < UA_BQ_BASE || ids[i] >= UA_BQ_BASE + UA_BQ_WORDS)
+			return -EACCES;
+	words = kvmalloc(UA_BQ_WORDS * sizeof(*words), GFP_KERNEL);
+	if (!words)
+		return -ENOMEM;
+	ret = ua_plugin_board_query(ua, words, &date, epoch);
+	if (!ret)
+		for (i = 0; i < n; i++) {
+			*word = words[ids[i] - UA_BQ_BASE];
+			*state = ua_plugin_license_state(*word);
+			if (!ua_plugin_license_admits(*state)) {
+				ret = -EACCES;
+				break;
+			}
+		}
+	kvfree(words);
+	mutex_lock(&ua->lock);
+	if (ret)
+		h->refused++;
+	else
+		h->admitted++;
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
 /* UA_LICENSE_END */
 
 /*

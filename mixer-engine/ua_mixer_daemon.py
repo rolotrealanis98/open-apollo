@@ -641,6 +641,140 @@ class MixerDaemon:
             log.info("Preserving the hardware's current settings: no init "
                      "sequence for this connection")
 
+        self._publish_native_capabilities()
+
+    def _publish_native_capabilities(self):
+        """Advertise executable providers separately from catalogue and licence status.
+
+        This is an optional Open Apollo extension. A missing extension keeps legacy
+        clients/engines unchanged; advertised support is never a licence grant.
+        """
+        native = self._native_plugin_backend
+        if native is None:
+            return
+        capabilities = native.capabilities()
+        by_name = {}
+        for cap in capabilities:
+            entry = by_name.setdefault(cap['name'], dict(
+                slots=[], mono=[], stereo=[], sample_rate=cap['sample_rate']))
+            entry['slots'].extend(slot for slot in cap['slots']
+                                  if slot not in entry['slots'])
+            layout = 'stereo' if len(cap.get('channels', [0])) == 2 else 'mono'
+            entry[layout].extend(slot for slot in cap['slots'] if slot not in entry[layout])
+        self._publish_license('/NativePluginHosting', True, 'bool')
+        self._publish_license('/NativeMaxInstances', native.max_instances, 'int')
+        self._publish_license('/NativeMaxInserts', getattr(native, 'max_inserts', 1), 'int')
+        self._publish_license('/NativeChainSupported', getattr(native, 'chain_supported', False), 'bool')
+        self._publish_license('/NativeUnisonSupported', getattr(native, 'unison', False), 'bool')
+        self._publish_license('/NativeReplacementSupported', native.replacement, 'bool')
+        self._publish_license('/NativeDelayCompSupported', getattr(native, 'compensation_supported', False), 'bool')
+        self._publish_native_delay_status()
+        for path in list(self.state._props):
+            if not re_mod.fullmatch(r'/plugins/\d+/Name', path):
+                continue
+            name = self.state.get_value(path)
+            cap = by_name.get(name)
+            base = path.rsplit('/', 1)[0]
+            slots = cap['slots'] if cap else []
+            rate = cap['sample_rate'] if cap else 0
+            if cap:
+                labels = []
+                for slot in slots:
+                    match = re_mod.fullmatch(r'/devices/(\d+)/inputs/(\d+)/effects/(\d+)', slot)
+                    if match:
+                        labels.append(f'input {int(match[2]) + 1}, insert {int(match[3]) + 1}')
+                    else:
+                        match = re_mod.fullmatch(r'/devices/(\d+)/inputs/(\d+)/preamps/0/effects/0', slot)
+                        if match:
+                            labels.append(f'input {int(match[2]) + 1}, Unison preamp')
+                location = '; '.join(labels) or 'configured slot'
+                layouts = 'mono/stereo' if cap['mono'] and cap['stereo'] else ('stereo' if cap['stereo'] else 'mono')
+                limit = ('Independent input chains; replacement supported.' if native.replacement
+                         else 'One insert at a time.' if native.max_instances == 1
+                         else 'Independent input chains; remove to replace.')
+                hint = f'Native DSP: {location}; {layouts}, {rate / 1000:g} kHz. {limit}'
+            else:
+                hint = 'No native DSP loader for this plug-in.'
+            for key, value, kind in (
+                    ('NativeLoadSupported', cap is not None, 'bool'),
+                    ('NativeLoadSlots', ','.join(slots), 'string'),
+                    ('NativeMonoSlots', ','.join(cap['mono']) if cap else '', 'string'),
+                    ('NativeStereoSlots', ','.join(cap['stereo']) if cap else '', 'string'),
+                    ('NativeSampleRate', rate, 'int'),
+                    ('NativeLoadHint', hint, 'string')):
+                self._publish_license(base + '/' + key, value, kind)
+
+    def _publish_native_delay_status(self):
+        native = self._native_plugin_backend
+        if native is None:
+            return
+        inputs = getattr(native, 'compensation_inputs', ())
+        overloaded = [item for item in inputs if item.overloaded]
+        messages = []
+        for item in overloaded:
+            channels = '/'.join(str(i + 1) for i in item.channels)
+            suggestion = (f'Increase Input Delay Compensation to {item.suggested} in Settings > Hardware'
+                          if item.suggested else 'Remove a plug-in to reduce input latency')
+            messages.append(f'Input {channels} needs {item.required} samples. {suggestion}.')
+        self._publish_license('/InputDelayCompOverloaded', bool(overloaded), 'bool')
+        self._publish_license('/InputDelayCompWarning', ' '.join(messages), 'string')
+
+    def _handle_native_delay_set(self, client, path, value, params):
+        from plugin_transactions import Outcome
+        native = self._native_plugin_backend
+        transactions = self.plugin_lifecycle.transactions
+        if not getattr(native, 'compensation_supported', False):
+            self._send_local_plugin_error(client, path, 'openapollo.native_operation_unsupported', params)
+            return
+        if (type(value) is not str or value not in MAX_DELAY_COMP_SAMPLES
+                or self._plugin_publication_active or transactions.quarantined):
+            self._send_local_plugin_error(client, path, 'openapollo.invalid_plugin_value', params)
+            return
+        # Subscriber callbacks may synchronously issue another SET. Keep both
+        # public views, warnings and latency updates inside the same guard.
+        self._plugin_publication_active = True
+        phase = 'Compensation transaction'
+        try:
+            result = native.set_compensation(value)
+            if result.status is Outcome.FAILED:
+                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_failed', params)
+                return
+            if result.status is Outcome.INDETERMINATE:
+                transactions.quarantined = True
+                transactions.quarantine_reason = result.detail
+                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params)
+                return
+            if result.status is not Outcome.CONFIRMED or result.setting != value:
+                raise RuntimeError('Backend did not confirm the requested compensation setting')
+            phase = 'Compensation publication'
+            # The device transaction has completed. Publish only its accepted setting.
+            if not self.state.set('/MaxDelayComp/value', value, source_client=client.id, hardware=False):
+                raise RuntimeError('State tree refused the accepted compensation setting')
+            # MaxDelayComp is an engine property; the standard helper schema
+            # does not contain it. Mirror only a helper that exposes it.
+            if self.helper_tree and self.helper_tree.get_value('/MaxDelayComp') is not None:
+                helper_result = self.helper_tree.set_value('/MaxDelayComp', value)
+                if helper_result != 'ok':
+                    raise RuntimeError(f'Helper tree refused compensation setting: {helper_result}')
+            self._publish_native_delay_status()
+            self._refresh_latency(force=True)
+        except Exception as exc:
+            # Hardware may already have changed. Do not acknowledge success or
+            # permit another transaction against incomplete public state.
+            transactions.quarantined = True
+            transactions.quarantine_reason = f'{phase} failed: {exc}'
+            try:
+                native.invalidate()
+            except Exception:
+                log.exception('Could not invalidate native compensation backend')
+            log.warning('%s', transactions.quarantine_reason)
+            self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params)
+            return
+        finally:
+            self._plugin_publication_active = False
+        if 'func_id' in params:
+            self._send_response(client, path, value, params)
+
     async def start(self):
         """Start TCP servers on both ports (runs forever)."""
         self.server = await asyncio.start_server(
@@ -2727,12 +2861,35 @@ class MixerDaemon:
             return
 
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
+        # /Sleep is a per-connection meter-consumer hint (Console), never
+        # mixer state: it does not dirty the session or reach the tree,
+        # so it is handled before the native-mode guards refuse console state
+        if path.lower().removesuffix("/value") == "/sleep":
+            if not isinstance(cmd.value, bool):
+                self._send_error(client, path, "set", resp_params)
+            else:
+                client.sleep = cmd.value
+                if resp_params:
+                    self._send_response(client, path, cmd.value, resp_params)
+            return
+
         native = self._native_plugin_backend
-        if native and not is_plugin_slot_path(path) and (
+        canonical = path.removesuffix('/value')
+        if native and (canonical.startswith('/Native') or canonical in (
+                '/InputDelayCompOverloaded', '/InputDelayCompWarning')
+                or re_mod.fullmatch(r'/plugins/\d+/Native\w+', canonical)):
+            self._send_local_plugin_error(client, path, 'openapollo.read_only', resp_params)
+            return
+        if native and canonical == '/MaxDelayComp':
+            self._handle_native_delay_set(client, path, cmd.value, resp_params)
+            return
+        native_allows_idle_link = (native and hasattr(native, 'allows_idle_mixer_link_change')
+                                   and native.allows_idle_mixer_link_change(canonical))
+        if native and not native_allows_idle_link and not is_plugin_slot_path(path) and (
                 self._console_owns_set(path, cmd.value)
                 or path.removesuffix('/value').split('/')[-1] in (
                     'SampleRate', 'ClockSource', 'BufferSize', 'MaxDelayComp',
-                    'Stereo', 'StereoLink', 'Link')):
+                    'Stereo', 'StereoLink', 'Link', 'DelayCompGroup')):
             self._send_local_plugin_error(
                 client, path, 'openapollo.native_operation_unsupported', resp_params)
             return
@@ -2756,17 +2913,6 @@ class MixerDaemon:
                                               resp_params)
             elif "func_id" in resp_params:
                 self._send_response(client, path, cmd.value, resp_params)
-            return
-
-        # /Sleep is a per-connection meter-consumer hint (Console), never
-        # mixer state: it does not dirty the session or reach the tree
-        if path.lower().removesuffix("/value") == "/sleep":
-            if not isinstance(cmd.value, bool):
-                self._send_error(client, path, "set", resp_params)
-            else:
-                client.sleep = cmd.value
-                if resp_params:
-                    self._send_response(client, path, cmd.value, resp_params)
             return
 
         old_value = self.commands.value_of(path)
@@ -2923,6 +3069,7 @@ class MixerDaemon:
         self._plugin_publication_active = True
         try:
             self._publish_plugin_commit_inner(events)
+            self._publish_native_delay_status()
         finally:
             self._plugin_publication_active = False
 
