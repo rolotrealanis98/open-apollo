@@ -3967,7 +3967,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
             native_backend, native_transactions = register_native(
                 state, helper_tree, backend, load_provider(args.native_plugin_provider))
         except Exception as error:
-            parser.error(f"native hosting unavailable: {type(error).__name__}")
+            parser.error(f"native hosting unavailable: {type(error).__name__}: {error}")
 
     # Initialize software metering (through PipeWire when it holds the
     # Apollo, else ALSA capture)
