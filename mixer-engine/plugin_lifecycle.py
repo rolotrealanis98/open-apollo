@@ -205,6 +205,11 @@ class PluginLifecycle:
             "set_parameter",
         ):
             result = self.transactions.control(slot, field, value)
+            if result.error:
+                log.warning(
+                    "Plugin control refused slot=%s field=%s error=%s detail=%s",
+                    slot, field, result.error, result.detail,
+                )
             return PluginResult(
                 result.error, result.detail, result.committed, result.events
             )
