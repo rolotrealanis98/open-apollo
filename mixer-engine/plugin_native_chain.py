@@ -6,6 +6,7 @@ instances and maps each stable logical identity to its current instance and rows
 import copy
 
 from dataclasses import dataclass, field
+import logging
 import re
 
 from plugin_native import NativePluginBackend, _Lease
@@ -15,6 +16,8 @@ from plugin_transactions import (
     ActivateOutcome, FinalizeOutcome, Outcome, PreparedPlugin, PrepareOutcome,
     RetireOutcome, RollbackOutcome,
 )
+
+log = logging.getLogger(__name__)
 
 
 class _UnconfirmedDeviceOperation(RuntimeError):
@@ -334,6 +337,7 @@ class NativeChainBackend(NativePluginBackend):
         try:
             change = self._plan_batch(slot, channels, sources)
         except Exception:
+            log.exception('native chain: compensation plan refused a load on %s', slot)
             return PrepareOutcome(Outcome.FAILED, detail='Prospective compensation validation failed')
         self._serial += 1
         status = self._allocate_batch(change, self._serial)
@@ -351,6 +355,7 @@ class NativeChainBackend(NativePluginBackend):
             sources = {path: source for path, source in previous.sources.items() if path != slot}
             change = self._plan_batch(slot, previous.channels, sources)
         except Exception:
+            log.exception('native chain: compensation plan refused a removal on %s', slot)
             return RetireOutcome(Outcome.FAILED, handle, previous_retained=True,
                                  detail='Surviving compensation validation failed')
         status = self._allocate_batch(change, 0)
