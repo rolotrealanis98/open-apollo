@@ -140,7 +140,9 @@ class NativePluginBackend:
 
     @staticmethod
     def _validate_observations(observations):
-        if type(observations) is not tuple or not 1 <= len(observations) <= 256:
+        # Local safety bound: large plug-ins (thousands of shadow runs) are audited in full once at
+        # load; control changes audit only the words they write.
+        if type(observations) is not tuple or not 1 <= len(observations) <= 4096:
             raise ValueError('bounded authoritative observation plan required')
         for row, offset, expected in observations:
             if (type(row) is not int or not 0 <= row < 128
