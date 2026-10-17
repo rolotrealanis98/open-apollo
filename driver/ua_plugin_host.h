@@ -211,7 +211,7 @@ void ua_xact_fini(struct ua_device *ua, bool dma_quiet);	/* rings fini */
  */
 #define UA_BILL_HDR		20	/* "Bill", id, w2, payload bytes, w4 */
 #define UA_BILL_MAGIC		0x6c6c6942
-#define UA_BILL_MAX		(128u << 10)
+#define UA_BILL_MAX		((256u << 10) - 8)	/* one upload transaction: PAGE_ALIGN(len + 8) <= UA_XACT_PAYLOAD_MAX */
 #define UA_CATALOG_MAX		256
 #define UA_CATALOG_BYTES	(32u << 20)
 
