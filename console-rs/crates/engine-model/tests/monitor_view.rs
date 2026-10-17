@@ -63,8 +63,29 @@ fn talkback_to_monitor_toggles_talkback_in_physical_cr() {
     assert_eq!(m.monitor_options().talkback_to_monitor, Some(false));
     let mut v = ViewState::default();
     v.dispatch(Action::Tap(monitor(Control::TalkbackToMonitor)), &mut m);
-    let w = writes_after(&server, 3);
-    assert_eq!(sets(&w), ["set /TalkbackInPhysicalCR/value true"]);
+    // Toggled on press, unbracketed (`Rack_Talkback` 0x181489be0, UAClnt_Values::Set).
+    let w = writes_after(&server, 1);
+    assert_eq!(w, ["set /TalkbackInPhysicalCR/value true"]);
+}
+
+/// TALK: a press writes the opposite of `/TalkbackOn` at once, with no /UndoRecording bracket;
+/// a release after a long press (`HitKind::Latch` → `Set(Talkback, 0)`) writes false.
+#[test]
+fn talk_latches_on_press_and_releases_after_a_long_press() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    assert_eq!(m.monitor_options().talkback, Some(false));
+    let mut v = ViewState::default();
+    v.dispatch(Action::Toggle(monitor(Control::Talkback)), &mut m);
+    assert_eq!(m.monitor_options().talkback, Some(true), "the button lights at once");
+    assert_eq!(writes_after(&server, 1), ["set /TalkbackOn/value true"]);
+    v.dispatch(Action::Set(monitor(Control::Talkback), 0.0), &mut m);
+    assert_eq!(writes_after(&server, 2), ["set /TalkbackOn/value true", "set /TalkbackOn/value false"]);
+    assert_eq!(m.monitor_options().talkback, Some(false));
+    // A release when TALK is already off writes nothing more.
+    v.dispatch(Action::Set(monitor(Control::Talkback), 0.0), &mut m);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(server.write_commands().len(), 2);
 }
 
 #[test]
@@ -105,4 +126,28 @@ fn view_menu_monitor_sections_toggle_the_layout() {
     assert_eq!(m.devices(), [rack::model::DeviceInfo { index: 0, name: "Apollo x4".into(), online: false }]);
     assert!(v.run_command_id("show_offline_devices", &mut m));
     assert!(v.show_offline_devices);
+}
+
+/// The front Hi-Z jack (`preamps/0/HiZ`, a hardware read-back) shows on the source button as
+/// HI-Z, and the SOURCE menu shows it ticked and disabled.
+#[test]
+fn hi_z_jack_shows_on_the_source_button() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let s = m.inputs().into_iter().find(|s| &*s.id == "/devices/0/inputs/0").unwrap();
+    assert_ne!(m.preamp(&s).unwrap().source, "HI-Z");
+    server.push("/devices/0/inputs/0/preamps/0/HiZ", true);
+    let end = Instant::now() + Duration::from_secs(10);
+    while m.preamp(&s).unwrap().source != "HI-Z" {
+        assert!(Instant::now() < end, "HI-Z never shown");
+        m.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(m.strip_menu_state(&s).hi_z);
+    server.push("/devices/0/inputs/0/preamps/0/HiZ", false);
+    while m.preamp(&s).unwrap().source == "HI-Z" {
+        assert!(Instant::now() < end, "HI-Z never cleared");
+        m.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }

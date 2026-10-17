@@ -3,7 +3,8 @@
   dspcmd    the DSP command language (the same one the PCIe command ring
             carries) and the USB bulk framing around it
   soloinit  the Apollo Solo USB DSP bring-up, built from that language
-            instead of replayed (J1)
+            instead of replayed (J1), from the user's extracted DSP
+            modules and solo-usb-init.json (what else the capture held)
   device    vendor control requests: register map, DSP-ready poll (J3),
             info blocks (U36), the 40-word readback (J2)
   mixer     the 38 mixer settings as a one-shot mailbox and the

@@ -114,8 +114,9 @@ docs: update supported devices table
 ## Code Style
 
 - **C (driver):** Linux kernel coding style (`scripts/checkpatch.pl` compatible)
-- **Python (mixer daemon):** PEP 8
-- **TypeScript (console UI):** Standard ES6+ conventions
+- **Python (mixer daemon, tools):** PEP 8; CI runs `ruff check --select E9,F63,F7,F82`
+- **Rust (console-rs):** `rustfmt` with `console-rs/rustfmt.toml`; `cargo test --workspace` must pass
+- **Shell (installers):** `bash`; `shellcheck --severity=error` must pass, and installer changes come with a test in `tests/`
 - **File size:** Keep files under 200 lines where practical — split into focused modules
 
 ## Reporting Issues

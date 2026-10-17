@@ -21,10 +21,13 @@ Bytes 0-1 read as a little-endian u16 are the word count whenever the flags
 byte is 0, which is how the other notes describe the header.  A command may
 continue into the next frame; the frames are one dword stream.
 
-Checked against: tools/usb-re/init-bulk-sequence.bin (38 frames, a Windows
-capture of a Solo USB) decodes completely into 128 commands and re-encodes
-byte for byte (mixer-engine/tests/test_usb_dspcmd.py).  It holds no connect
-or rate-ack command (those come before it in a Windows session; the
+Checked against: a Windows capture of a Solo USB's DSP bring-up (38
+frames) decodes completely into 128 commands and re-encodes byte for byte.
+The capture held UA's DSP modules, so it is not in the repository;
+soloinit's facts (uausb/solo-usb-init.json) keep its SHA-256 and
+mixer-engine/tests/test_usb_dspcmd.py rebuilds it from the user's
+extracted modules when they are installed.  It holds no connect or
+rate-ack command (those come before it in a Windows session; the
 Cauldron 1.3 capture behind tools/usb-dsp-init.py has them).  The EEPROM
 write of DeviceRequest sub-command 0x0F is DSP command 0x13 on PCIe and on
 USB alike (UAD2Usb.sys 0x140005afc); it is decoded here, never built.  The device answers
@@ -345,10 +348,10 @@ def plan_of(frames: Sequence[Frame]) -> list:
     return [len(f.words) for f in frames]
 
 
-# ── tools/usb-re/init-bulk-sequence.bin container ──────────────────────
+# ── URB container (the file format a captured init stream is kept in) ──
 
 def read_urb_file(path) -> list:
-    """The URB list of an init-bulk-sequence.bin style file:
+    """The URB list of a captured init stream file:
     u32 count, then u32 length + bytes per URB (little-endian)."""
     with open(path, "rb") as f:
         return parse_urb_container(f.read())

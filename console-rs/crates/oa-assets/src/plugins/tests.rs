@@ -362,6 +362,13 @@ fn builtin_recipes_are_consistent() {
         for id in &f.uses {
             assert!(book.sprite(id).is_some(), "{}: uses unknown sprite {id}", f.group);
         }
+        assert!(f.shared || f.attach.is_empty(), "{}: only shared groups attach", f.group);
+        for (spec, ids) in &f.attach {
+            assert!(book.group(spec).is_some_and(|g| !g.shared), "{}: attaches to unknown spec {spec}", f.group);
+            for id in ids {
+                assert!(f.sprites.contains_key(id) || f.texts.contains_key(id), "{}: attaches unknown {id}", f.group);
+            }
+        }
         for (id, s) in &f.sprites {
             match s.status {
                 Status::Verified | Status::Fallback => {
@@ -535,4 +542,23 @@ fn raw_deflate_loads_check_length() {
     let mut trailing = z.clone();
     trailing.push(0);
     assert!(super::run::inflate_raw(&trailing, data.len()).is_err());
+}
+
+#[test]
+fn shared_groups_attach_to_specs() {
+    use super::recipe::{Book, RecipeFile};
+    let file = |v: serde_json::Value| -> RecipeFile { serde_json::from_value(v).unwrap() };
+    let rt = serde_json::json!({"status": "runtime", "owner": "plugin-ui/chrome", "kind": "chrome"});
+    let book = Book::new(vec![
+        file(
+            serde_json::json!({"recipesSchema": 2, "group": "a", "inputs": {}, "uses": ["a1"], "sprites": {"a1": rt}}),
+        ),
+        file(serde_json::json!({"recipesSchema": 2, "group": "b", "inputs": {}, "uses": [], "sprites": {}})),
+        file(serde_json::json!({"recipesSchema": 2, "group": "chrome", "shared": true, "inputs": {},
+            "attach": {"a": ["a.tb.x"]}, "uses": ["a.tb.x", "chrome.icon"],
+            "sprites": {"a.tb.x": rt, "chrome.icon": rt}})),
+    ])
+    .unwrap();
+    assert_eq!(book.shared_for("a"), vec!["a.tb.x".to_string(), "chrome.icon".to_string()]);
+    assert_eq!(book.shared_for("b"), vec!["chrome.icon".to_string()]);
 }

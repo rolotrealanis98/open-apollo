@@ -2,9 +2,10 @@
 # test-setup-root.sh — unit test for scripts/setup-root.sh, the setup wizard's
 # one privileged run: flag parsing, the order of its steps, the ::step markers,
 # failing early on an unusable source (before anything is removed),
-# --keep-current, --mount (ntfs3, the ntfs-3g fallback, an already open
+# --keep-current, the plug-in panel specs (--panels), --mount (ntfs3, the ntfs-3g fallback, an already open
 # partition) and the unmount after success and failure.  setup-root.sh runs
-# from a copy of scripts/ next to fake uninstall.sh and install.sh, with a fake
+# from a copy of scripts/ next to fake uninstall.sh, install.sh and
+# install-panels.sh, with a fake
 # oa-assets, on a PATH holding only harmless tools and logging stubs (id,
 # runuser, mount, umount, findmnt): nothing real is mounted, removed or
 # installed, and nothing needs root.
@@ -44,6 +45,9 @@ check "--keep-current" test "$KEEP_CURRENT" = 1
 check "--send-report" test "$SEND_REPORT" = 1
 check "--oa-assets" test "$OA_ASSETS" = /x/oa-assets
 check "--data" test "$DATA_DIR" = /d
+parse_args --user tester --from /mnt/w --panels /t/p.tar.gz --panels-sha256 abc
+check "--panels" test "$PANELS_FROM" = /t/p.tar.gz
+check "--panels-sha256" test "$PANELS_SHA" = abc
 # shellcheck disable=SC2034  # parse_args reads them
 bad() { (TARGET_USER="" FROM="" MOUNT_DEV=""; parse_args "$@") 2>/dev/null; test $? = 2; }
 check "--user is required" bad --from /mnt/w
@@ -131,6 +135,11 @@ echo "uninstall.sh \$* SUDO_USER=\$SUDO_USER" >> "$log"
 echo "── Earlier install ──"
 exit "\$(cat "$state/uninstall_rc" 2>/dev/null || echo 0)"
 EOF
+cat > "$repo/scripts/install-panels.sh" <<EOF
+#!/bin/bash
+echo "install-panels.sh \$*" >> "$log"
+exit "\$(cat "$state/panels_rc" 2>/dev/null || echo 0)"
+EOF
 cat > "$repo/scripts/install.sh" <<EOF
 #!/bin/bash
 echo "install.sh \$* SUDO_USER=\$SUDO_USER" >> "$log"
@@ -178,6 +187,9 @@ check "nothing is mounted for a folder" hasnt "$log" "mount "
 check "the output has headers" has "$tmp_dir/out" "── Checking your UAD install ──"
 check "without a plugins command it says so" has "$tmp_dir/out" "can't generate it yet"
 check "the plug-in art isn't attempted" hasnt "$log" "oa-assets plugins"
+check "the panel specs are installed after the Console art" before "oa-assets import --from $win" "install-panels.sh"
+check "the panel specs are installed as root, from the pinned release" grep -qx "install-panels.sh " "$log"
+check "the panel specs come before the firmware" before "install-panels.sh" "oa-assets firmware"
 
 reset
 touch "$state/plugins"
@@ -185,6 +197,17 @@ run -- --user tester --from "$win" --oa-assets "$oa" --send-report
 check "--send-report reaches install.sh" has "$log" "install.sh --yes --send-report"
 check "with a plugins command it makes the plug-in art" has "$log" "oa-assets plugins --from $win"
 check "the plug-in art is made as the user too" test "$(grep -c '^runuser -u tester' "$log")" = 2
+check "with specs and art the import is done" has "$tmp_dir/out" "::step import done Console art, plug-in panels"
+
+reset
+touch "$state/plugins"; echo 3 > "$state/panels_rc"
+run -- --user tester --from "$win" --oa-assets "$oa" --panels /t/p.tar.gz --panels-sha256 abc
+check "a failed panel install doesn't fail setup" test $? = 0
+check "--panels and --panels-sha256 reach install-panels.sh" has "$log" "install-panels.sh --from /t/p.tar.gz --sha256 abc"
+check "a failed panel install only warns" \
+    has "$tmp_dir/out" "::step import warn Console and plug-in art imported; plug-in panel specs not installed"
+check "the plug-in art is still made" has "$log" "oa-assets plugins --from $win"
+check "and setup goes on to the driver" has "$log" "install.sh --yes SUDO_USER=tester"
 
 reset
 check "without a dsp command no DSP modules are collected" hasnt "$log" "oa-assets dsp"

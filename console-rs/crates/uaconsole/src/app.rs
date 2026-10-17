@@ -388,6 +388,10 @@ impl App {
         if self.model.pump() || self.live_meters {
             self.dirty = true;
         }
+        // Console blinks an outline round CLOCK while the clock is not locked.
+        if self.mixer.tick_blink(Instant::now()) && self.model.status().clock_locked == Some(false) {
+            self.dirty = true;
+        }
         if self.dirty || self.show_stats {
             self.rebuild();
         }

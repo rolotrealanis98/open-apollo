@@ -327,6 +327,8 @@ impl App {
             data: (!self.opts.data_is_default).then(|| self.opts.data.clone()),
             keep_current: self.keep_current,
             send_report: self.send_report,
+            panels: std::env::var_os("OA_PANELS_TARBALL").filter(|v| !v.is_empty()).map(|p| absolute(Path::new(&p))),
+            panels_sha256: std::env::var("OA_PANELS_SHA256").ok().filter(|v| !v.is_empty()),
         })
     }
 
@@ -851,6 +853,8 @@ impl App {
         }
         let Some(bin) = self.console_bin.clone() else { return };
         let mut cmd = Command::new(&bin);
+        // The user's mixer: it controls the Apollo (plain uaconsole starts read-only).
+        cmd.arg("--writes");
         if !self.opts.data_is_default {
             cmd.env("CONSOLE_RESOURCES", self.opts.data.join(oa_assets::import::CONSOLE_DIR));
         }

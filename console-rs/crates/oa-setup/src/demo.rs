@@ -60,6 +60,7 @@ pub fn earlier(home: &Path) -> Vec<Leftover> {
         ("config", format!("{h}/.config/wireplumber/wireplumber.conf.d/51-ua-apollo.conf")),
         ("udev", "/etc/udev/rules.d/91-ua-apollo.rules".into()),
         ("console", format!("{h}/.local/bin/uaconsole")),
+        ("panels", "/usr/share/open-apollo/plugin-specs".into()),
         ("firmware", "/lib/firmware/universal-audio".into()),
         ("firmware", "/lib/firmware/ua_apollo".into()),
         ("data", format!("{h}/.local/share/open-apollo")),
@@ -94,6 +95,8 @@ fn uninstall(s: &mut Script, found: &[Leftover]) {
     s.ok(300, "PipeWire started again");
     s.header(300, "Console");
     removed(s, "console");
+    s.header(300, "Plug-in panel specs");
+    removed(s, "panels");
     s.header(300, "Audio settings");
     if removed(s, "config") {
         s.ok(500, "Restarted PipeWire and WirePlumber");
@@ -164,8 +167,12 @@ pub fn setup(d: &SetupDemo) -> Vec<(Duration, String)> {
             d.home.display()
         ),
     );
-    s.info(100, "Plug-in art: this oa-assets can't generate it yet; plug-in windows show a plain panel");
-    s.raw(100, "::step import done Console art imported");
+    s.info(100, "Downloading the plug-in panel specs 2026.10.13");
+    s.ok(900, "Installed 224 plug-in panel specs (2026.10.13) in /usr/share/open-apollo/plugin-specs");
+    s.raw(2500, "Images: 4165 written (2582 verified against the reference art, 1583 our own fallbacks), 0 failed");
+    s.raw(100, "Texts: 34/34 written");
+    s.raw(100, "Panels ready: 206/224");
+    s.raw(100, "::step import done Console art, plug-in panels and their art imported");
     s.raw(200, "::step firmware start");
     s.header(0, "Extracting DSP programs and firmware");
     s.lines.extend(firmware(root, d.powered, fw));

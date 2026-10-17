@@ -36,7 +36,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::web::{GuiQuery, LunaComponent, LunaLibrary, percent_decode};
 
-/// The scheme name (`FUN_01a44280` returns it).
+/// The scheme name Console registers for its content.
 pub const SCHEME: &str = "ua-content";
 /// The URL host Console writes (`"://gui"`); the handler ignores it.
 pub const HOST: &str = "gui";
@@ -192,7 +192,10 @@ fn standardize(path: &str) -> Option<Vec<String>> {
             }
             s => {
                 // A segment must stay one path component (no drive prefixes, no NUL).
-                if s.contains('\0') || Path::new(s).components().count() != 1 || !matches!(Path::new(s).components().next(), Some(Component::Normal(_))) {
+                if s.contains('\0')
+                    || Path::new(s).components().count() != 1
+                    || !matches!(Path::new(s).components().next(), Some(Component::Normal(_)))
+                {
                     return None;
                 }
                 out.push(s.to_string());
@@ -270,13 +273,19 @@ mod tests {
         assert_eq!(one.resolve("/..%2f..%2f..%2fsecret.txt"), None);
         // A component-qualified path reaches only registered components.
         assert_eq!(one.resolve("/uaudio_ua_1176_rev_a/bundle.js"), Some(a.html_dir.join("bundle.js")));
-        assert_eq!(one.resolve("/uaudio_ssl_g_bus_compressor/bundle.js"), Some(a.html_dir.join("uaudio_ssl_g_bus_compressor/bundle.js")));
+        assert_eq!(
+            one.resolve("/uaudio_ssl_g_bus_compressor/bundle.js"),
+            Some(a.html_dir.join("uaudio_ssl_g_bus_compressor/bundle.js"))
+        );
 
         let lib = LunaLibrary { folders: vec![dir.clone()], components: vec![a.clone(), b.clone()] };
         let all = ContentRoots::for_library(&lib, None);
         assert_eq!(all.resolve("/uaudio_ssl_g_bus_compressor/index.html"), Some(b.html_dir.join("index.html")));
         assert_eq!(all.resolve("/index.html"), None, "no default root");
-        assert_eq!(all.resolve("/uaudio_ssl_g_bus_compressor/../uaudio_ua_1176_rev_a/index.html"), Some(a.html_dir.join("index.html")));
+        assert_eq!(
+            all.resolve("/uaudio_ssl_g_bus_compressor/../uaudio_ua_1176_rev_a/index.html"),
+            Some(a.html_dir.join("index.html"))
+        );
         // A root outside the allowed folders is refused.
         let mut stray = ContentRoots::for_component(&a);
         stray.allowed = vec![dir.join("elsewhere")];

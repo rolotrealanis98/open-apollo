@@ -7,12 +7,19 @@ strip instances in pools 1-3, memspec, parameters, SYNCH enables), sends it
 on the bulk pipe, then sets the UAC2 clock.  This configures the FPGA
 routing matrix so capture channels receive signal.
 
-The code blobs and strip parameter blocks are read from
-usb-re/init-bulk-sequence.bin (a Windows capture of a Solo USB); at 48 kHz
-the frames sent are byte-identical to replaying that file.  --rate N puts
-N in a rate-ack frame ({0x001A0002, N}, sent first; also with --rate-ack
-at 48 kHz) and in the Mic strips' ramp constants.  --replay sends the file
-as before, with the old fixed timing.
+The code blobs are UA's DSP modules from your own UAD install, extracted
+by the setup wizard (open-apollo-setup) or `oa-assets firmware` into
+/lib/firmware/universal-audio/dsp (--dsp-dir DIR elsewhere); each one's
+SHA-256 must match uausb/solo-usb-init.json.  That file (the facts) holds
+the rest of what a Windows capture of a Solo USB recorded: the strip
+parameter blocks and the frame sizes.  At 48 kHz the frames sent are
+byte-identical to that capture (the facts carry its SHA-256, and the log
+says whether the stream matches).  --rate N puts N in a rate-ack frame
+({0x001A0002, N}, sent first; also with --rate-ack at 48 kHz) and in the
+Mic strips' ramp constants.  --replay sends the 48 kHz stream with the
+old fixed timing.  --capture FILE takes the code, parameters and framing
+from a capture of your own instead (with --replay: sends it as captured).
+--check verifies the extracted modules and touches no device.
 
 DSP-ready (issues #62, #69).  Before the stream the script polls the DSP
 boot word over vendor request 0x04 (FPGA word 0x1069 = DSP 0 window +0x1A4)
@@ -27,6 +34,7 @@ are checked against captures only.
 
 Usage: sudo python3 tools/usb-full-init.py [--rate 48000] [--replay]
        sudo python3 tools/usb-full-init.py --part teardown,code   # U38 bisection
+       python3 tools/usb-full-init.py --check [--dsp-dir DIR]
        python3 tools/usb-full-init.py --dry-run [--write-bin out.bin]
 
 After running, reload snd-usb-audio:
@@ -58,10 +66,10 @@ SOLO_PID = 0x000D
 
 EP_BULK_OUT = 0x01
 EP_BULK_IN = 0x81
-# Look for init sequence in both repo layout and installed layout
-INIT_BIN = os.path.join(_script_dir, "usb-re", "init-bulk-sequence.bin")
-if not os.path.exists(INIT_BIN):
-    INIT_BIN = os.path.join(_script_dir, "init-bulk-sequence.bin")
+# The extracted DSP modules (setup wizard / oa-assets firmware).  The facts
+# are uausb/solo-usb-init.json, next to this script in the repository and
+# in the installed layout (/usr/local/lib/ua-usb) alike.
+DSP_DIR = "/lib/firmware/universal-audio/dsp"
 
 # Old replay pacing (kept for --replay and as the generated path's fallback)
 DSP_PROGRAM_END = 23            # last DSP program load packet
@@ -129,20 +137,33 @@ def _write_with_retries(dev, usb, i, pkt_data, sleep, timeout=10000):
             _drain(dev, usb, 100)
 
 
-def replay_init_sequence(dev, bin_path, usb, sleep=time.sleep):
-    """Replay the captured init bulk sequence (the old path, unchanged).
+def read_capture(bin_path):
+    """The frames of a capture file: u32 count, then u32 length + bytes
+    per frame (little-endian).  Needs no uausb package."""
+    with open(bin_path, "rb") as f:
+        count = struct.unpack("<I", f.read(4))[0]
+        out = []
+        for _ in range(count):
+            pkt_len = struct.unpack("<I", f.read(4))[0]
+            out.append(f.read(pkt_len))
+    return out
+
+
+def replay_frames(dev, frames, usb, sleep=time.sleep):
+    """Send frames with the old replay's fixed timing.
 
     The DSP needs time to process program loads before accepting routing
     writes.  Windows UA Console leaves 1+ second gaps between phases.
     """
-    with open(bin_path, "rb") as f:
-        count = struct.unpack("<I", f.read(4))[0]
-        print(f"Replaying {count} bulk OUT packets...")
-        for i in range(count):
-            pkt_len = struct.unpack("<I", f.read(4))[0]
-            pkt_data = f.read(pkt_len)
-            _send_old_paced(dev, usb, i, pkt_data, sleep)
-    print(f"  Sent all {count} packets")
+    print(f"Replaying {len(frames)} bulk OUT packets...")
+    for i, pkt_data in enumerate(frames):
+        _send_old_paced(dev, usb, i, pkt_data, sleep)
+    print(f"  Sent all {len(frames)} packets")
+
+
+def replay_init_sequence(dev, bin_path, usb, sleep=time.sleep):
+    """Replay a capture file of your own (the old path, unchanged)."""
+    replay_frames(dev, read_capture(bin_path), usb, sleep)
 
 
 def _send_old_paced(dev, usb, i, pkt_data, sleep, pause=True):
@@ -168,10 +189,28 @@ def _send_old_paced(dev, usb, i, pkt_data, sleep, pause=True):
     _drain(dev, usb, 1000 if pkt_len > 512 else 500)
 
 
-def build_plan(rate=48000, rate_ack=True, connect=False, bin_path=None,
+def load_template(capture=None, dsp_dir=None, facts=None,
+                  accept_unknown=False):
+    """The generator's template: from a capture of your own, else the
+    extracted DSP modules plus the facts.  Raises soloinit.TemplateError
+    (FirmwareError for a missing or unknown module) with the reason."""
+    if capture:
+        try:
+            return soloinit.Template.from_file(capture)
+        except OSError as e:
+            raise soloinit.TemplateError(
+                f"cannot read {capture}: {e.strerror or e}") from None
+        except dspcmd.DspCommandError as e:
+            raise soloinit.TemplateError(f"{capture}: {e}") from None
+    return soloinit.Template.from_firmware(dsp_dir or DSP_DIR, facts,
+                                           verify=not accept_unknown)
+
+
+def build_plan(rate=48000, rate_ack=True, connect=False, template=None,
                now=time.time, parts=None):
     """The generated init (uausb.soloinit.InitPlan) for the Solo USB."""
-    template = soloinit.Template.from_file(bin_path or INIT_BIN)
+    if template is None:
+        template = load_template()
     date = dspcmd.connect_date_word(now()) if connect else None
     tag = int(now() * 1000) & 0xFFFFFFFF
     return soloinit.build_init(template, rate=rate, rate_ack=rate_ack,
@@ -326,12 +365,44 @@ def want_rate_ack(args):
     return args.rate != CAPTURE_RATE
 
 
+def identity_note(plan):
+    """How the generated strip stream compares with the captured one."""
+    if plan.capture_sha256 is None:
+        return "no captured stream to compare with"
+    if plan.byte_identical:
+        return "byte-identical to the captured stream"
+    return "differs from the captured stream" + (
+        "" if plan.rate == CAPTURE_RATE else f" (rate {plan.rate})")
+
+
+def template_args(args):
+    return dict(capture=args.capture, dsp_dir=args.dsp_dir,
+                facts=args.facts, accept_unknown=args.accept_unknown_modules)
+
+
+def check(args):
+    """--check: the modules and the facts are usable; no device."""
+    template = load_template(**template_args(args))
+    plan = build_plan(CAPTURE_RATE, False, template=template)
+    if args.capture:
+        print(f"Capture {args.capture}: modules "
+              + " ".join(f"{m:03x}" for m in template.blobs))
+    else:
+        print(f"DSP modules OK in {args.dsp_dir}: "
+              + " ".join(f"{m:03x}" for m in template.blobs))
+    print(f"Init stream: {len(plan.frames)} frames, "
+          f"{len(plan.commands())} commands, {identity_note(plan)}")
+    return 0
+
+
 def dry_run(args):
+    template = load_template(**template_args(args))
     plan = build_plan(args.rate, want_rate_ack(args), args.connect,
-                      parts=parse_parts(args.part))
+                      template=template, parts=parse_parts(args.part))
     print(f"{len(plan.frames)} frames ({plan.preamble} preamble), "
           f"{len(plan.commands())} commands, rate {plan.rate}, "
-          f"capture framing {'yes' if plan.capture_framing else 'no'}")
+          f"capture framing {'yes' if plan.capture_framing else 'no'}, "
+          f"{identity_note(plan)}")
     for tx in plan.transactions:
         for c in tx:
             print("  " + c.describe())
@@ -349,14 +420,30 @@ def main(argv=None, usb=None, sleep=time.sleep):
                          "and the UAC2 clock (default 48000; only 48000 "
                          "matches a capture)")
     ap.add_argument("--replay", action="store_true",
-                    help="send usb-re/init-bulk-sequence.bin as before "
-                         "(old fixed timing, no rate ack)")
+                    help="send the 48 kHz stream with the old fixed timing "
+                         "(no rate ack, no ready poll); with --capture, the "
+                         "capture file as it is")
+    ap.add_argument("--dsp-dir", metavar="DIR", default=DSP_DIR,
+                    help="the DSP modules extracted from your UAD install "
+                         f"(default {DSP_DIR})")
+    ap.add_argument("--facts", metavar="FILE",
+                    help="the init facts (default uausb/solo-usb-init.json "
+                         "next to this script)")
+    ap.add_argument("--capture", metavar="FILE",
+                    help="take the code, parameters and framing from a "
+                         "capture of your own (u32 count, then u32 length + "
+                         "bytes per bulk OUT frame) instead of the "
+                         "extracted modules and the facts")
+    ap.add_argument("--accept-unknown-modules", action="store_true",
+                    help="use .bill files whose SHA-256 is not the captured "
+                         "version (an experiment: the stream then differs "
+                         "from the capture)")
     ack = ap.add_mutually_exclusive_group()
     ack.add_argument("--rate-ack", dest="rate_ack", action="store_true",
                      default=None,
                      help="send the {0x1A0002, rate} frame first (default: "
                           "only when --rate is not the captured 48000, so "
-                          "the default stream is the replay's bytes)")
+                          "the default stream is the capture's bytes)")
     ack.add_argument("--no-rate-ack", dest="rate_ack", action="store_false",
                      help="never send the rate-ack frame")
     ap.add_argument("--connect", action="store_true",
@@ -373,18 +460,25 @@ def main(argv=None, usb=None, sleep=time.sleep):
                     help="send only these phases of the generated init, "
                          "comma-separated: teardown, code, strips, enable "
                          "(the U38 bisection; default all)")
+    ap.add_argument("--check", action="store_true",
+                    help="check the extracted DSP modules and the facts, "
+                         "touch no device")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the generated commands, touch no device")
     ap.add_argument("--write-bin", metavar="PATH",
-                    help="with --dry-run: write the frames in the "
-                         "init-bulk-sequence.bin format")
+                    help="with --dry-run: write the frames as a capture "
+                         "file (u32 count, then u32 length + bytes per frame)")
     args = ap.parse_args(argv)
 
-    if args.dry_run:
+    if args.check or args.dry_run:
         if soloinit is None:
             print("uausb package missing next to this script")
             return 1
-        return dry_run(args)
+        try:
+            return check(args) if args.check else dry_run(args)
+        except soloinit.TemplateError as e:
+            print(f"error: {e}")
+            return 1
 
     if usb is None:
         import usb.core
@@ -398,18 +492,41 @@ def main(argv=None, usb=None, sleep=time.sleep):
         return 1
     print(f"Found: {model} — {dev.product}")
 
-    if not os.path.exists(INIT_BIN):
-        print(f"Missing: {INIT_BIN}")
-        return 1
-
-    replay = args.replay or soloinit is None
-    if soloinit is None and not args.replay:
-        print("uausb package missing: replaying the capture")
+    replay = args.replay
     if pid != SOLO_PID:
         print(f"warning: the init stream is the Apollo Solo USB's; on a "
               f"{model} it is known to stall the DSP (issue #69)")
         if not args.generate:
             replay = True
+
+    # What to send, before touching the device's interface
+    frames = plan = None
+    if args.capture and not os.path.exists(args.capture):
+        print(f"Missing: {args.capture}")
+        return 1
+    if soloinit is None:
+        if not (args.capture and replay):
+            print("uausb package missing next to this script: reinstall "
+                  "(scripts/install-usb.sh), or send a capture of your own "
+                  "with --capture FILE --replay")
+            return 1
+        frames = read_capture(args.capture)
+    elif replay and args.capture:
+        frames = read_capture(args.capture)
+    else:
+        try:
+            template = load_template(**template_args(args))
+        except soloinit.TemplateError as e:
+            print(f"error: {e}")
+            return 1
+        if replay:
+            # the 48 kHz stream as the old replay sent it
+            plan = build_plan(CAPTURE_RATE, False, template=template)
+            frames = plan.urbs()
+            print(f"Replay: {len(frames)} frames, {identity_note(plan)}")
+        else:
+            plan = build_plan(args.rate, want_rate_ack(args), args.connect,
+                              template=template, parts=parse_parts(args.part))
 
     # Only detach Interface 0 (vendor DSP). Leave audio interfaces for snd-usb-audio.
     try:
@@ -443,15 +560,14 @@ def main(argv=None, usb=None, sleep=time.sleep):
     rate = args.rate
     if replay:
         # Step 1: Full init sequence (FPGA + routing + DSP programs)
-        replay_init_sequence(dev, INIT_BIN, usb, sleep)
-        rate = 48000
+        replay_frames(dev, frames, usb, sleep)
+        rate = CAPTURE_RATE
     else:
-        plan = build_plan(rate, want_rate_ack(args), args.connect,
-                          parts=parse_parts(args.part))
         print(f"Generated init: {len(plan.frames)} frames, "
               f"{len(plan.commands())} commands, rate {rate}"
-              + ("" if rate == 48000 else
-                 " (strip filters keep their 48 kHz coefficients)"))
+              + ("" if rate == CAPTURE_RATE else
+                 " (strip filters keep their 48 kHz coefficients)")
+              + f"; {identity_note(plan)}")
         ready = False
         if not args.no_ready_poll:
             ready = wait_ready(dev, sleep=sleep)

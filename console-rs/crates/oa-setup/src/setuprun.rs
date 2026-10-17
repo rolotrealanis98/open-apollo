@@ -335,6 +335,9 @@ pub enum Source {
     Partition(String),
 }
 
+/// Where setup-root.sh installs the plug-in panel specs (scripts/install-panels.sh).
+pub const PANEL_SPECS_DIR: &str = "/usr/share/open-apollo/plugin-specs";
+
 /// What the Install button runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
@@ -345,6 +348,10 @@ pub struct Plan {
     pub data: Option<PathBuf>,
     pub keep_current: bool,
     pub send_report: bool,
+    /// `--panels`: a plug-in panel specs tarball instead of the pinned download
+    /// (`$OA_PANELS_TARBALL`, for testing a panels build), with its `--panels-sha256`.
+    pub panels: Option<PathBuf>,
+    pub panels_sha256: Option<String>,
 }
 
 impl Plan {
@@ -366,6 +373,12 @@ impl Plan {
         }
         if self.send_report {
             a.push("--send-report".into());
+        }
+        if let Some(p) = &self.panels {
+            a.extend(["--panels".into(), p.into()]);
+        }
+        if let Some(h) = &self.panels_sha256 {
+            a.extend(["--panels-sha256".into(), h.into()]);
         }
         a
     }
@@ -426,6 +439,7 @@ pub const KINDS: &[(&str, &str)] = &[
     ("config", "Audio settings"),
     ("udev", "udev rules and helpers"),
     ("console", "Console (uaconsole)"),
+    ("panels", "Plug-in panel specs"),
     ("legacy", "Old tray and launcher"),
     ("usb", "USB install"),
     ("firmware", "Extracted firmware"),
@@ -741,6 +755,8 @@ mod tests {
             data: None,
             keep_current: false,
             send_report: true,
+            panels: None,
+            panels_sha256: None,
         };
         assert_eq!(
             plan.command_line("pkexec", Path::new("/repo/scripts/setup-root.sh")),
@@ -757,6 +773,9 @@ mod tests {
         };
         let args: Vec<String> = plan.args().iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args, ["--user", "me", "--mount", "/dev/nvme0n1p3", "--data", "/tmp/d", "--keep-current"]);
+        let plan = Plan { panels: Some("/tmp/p.tar.gz".into()), panels_sha256: Some("ab12".into()), ..plan };
+        let args: Vec<String> = plan.args().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args[args.len() - 4..], ["--panels", "/tmp/p.tar.gz", "--panels-sha256", "ab12"]);
     }
 
     #[test]

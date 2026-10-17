@@ -41,8 +41,10 @@ The script:
 
 ### With the setup wizard
 
-`open-apollo-setup` (crate `oa-setup`) builds and installs uaconsole for you at the end of a
-full install. Setup always reinstalls cleanly: one privileged run (`scripts/setup-root.sh`,
+`bash scripts/setup.sh` builds and starts `open-apollo-setup` (crate `oa-setup`), which
+builds and installs uaconsole for you at the end of a full install, after importing the
+Console art and the plug-in panels from your UAD install (see the
+[install guide](../docs/install.md)). Setup always reinstalls cleanly: one privileged run (`scripts/setup-root.sh`,
 one password prompt) removes every trace of an earlier open-apollo install, uaconsole and the
 imported art included (`uninstall.sh --yes --purge`), then imports the art, extracts the firmware
 and installs a freshly built driver; uaconsole is then built as you and the mixer daemon
@@ -51,8 +53,7 @@ restarted so it sees the imported art. To remove everything by hand:
 uaconsole).
 
 ```bash
-cargo build --release -p oa-setup -p oa-assets
-target/release/open-apollo-setup          # --demo: simulated install, nothing changes
+bash scripts/setup.sh          # from the repository root; --demo: simulated install, nothing changes
 ```
 
 ### Nix
@@ -79,8 +80,10 @@ with `scripts/install-uaconsole.sh` instead.
    ```
 
 2. Open the console in any of these ways:
-   - the **Open Apollo Console** menu entry
-   - the `uaconsole` command
+   - the **Open Apollo Console** menu entry, which runs `uaconsole --writes`: the console
+     controls your Apollo;
+   - the `uaconsole` command, which shows the mixer and changes nothing until you turn on
+     Settings › WRITES (or start it with `--writes`).
 
 uaconsole connects to the local daemon on `127.0.0.1:4710` by default. To use an engine on
 another machine, pass `--engine`:
@@ -93,14 +96,15 @@ uaconsole --engine studio-pc.local:4710
 ## Where the art comes from
 
 UA's images, layouts, `Appearance.json` and Console fonts are **not** in this repository or in
-any package built from it, and uaconsole never downloads them. It reads them at run time from
-the UAD Console that you installed, in this order:
+any package built from it, and uaconsole never downloads them. The setup wizard imports them
+from your UAD install ([Getting a UAD install](../docs/uad-install.md)); uaconsole reads them at
+run time, in this order:
 
 1. `$CONSOLE_RESOURCES`
 2. an imported or copied folder: `~/.local/share/open-apollo/console-resources`
    (`oa-assets import` puts it there; see below)
 3. macOS: `/Applications/Universal Audio/UAD Console.app/Contents/Resources`
-4. a Wine install: `$WINEPREFIX` (default `~/wine-ua`) +
+4. a Wine install: `$WINEPREFIX` (default `~/.wine`) +
    `drive_c/Program Files (x86)/Universal Audio/UAD Console/Resources`
 
 Plug-in icons come from `Resources/Plug-In Icons` (Windows) or
@@ -114,8 +118,9 @@ If you have none of these, get the `Resources` folder from your own UAD Console 
 - **Windows VM:** install UAD in the VM, shut Windows down, then
   `oa-assets attach <raw disk image>` (Omarchy: `~/.windows/data.img`), `oa-assets import`, and
   `oa-assets detach <image>`.
-- **Wine:** install UA's Windows UAD Console into a Wine prefix (open-apollo's Wine tooling uses
-  `~/wine-ua`). uaconsole finds it there. For another prefix, set `WINEPREFIX`.
+- **Wine:** if UA's Windows UAD Console is installed in a Wine prefix, `oa-assets import` finds
+  `~/.wine` and `~/wine…` prefixes (`--from` for others). uaconsole also reads it in place from
+  `$WINEPREFIX`, or `~/.wine` when that isn't set.
 - **Copy:** copy the `Resources` folder from a Windows computer
   (`C:\Program Files (x86)\Universal Audio\UAD Console\Resources`) or a Mac
   (`/Applications/Universal Audio/UAD Console.app/Contents/Resources`), then run
@@ -185,16 +190,17 @@ rust-analyzer and Python. It also sets `LD_LIBRARY_PATH` and `FONTCONFIG_FILE` s
 
 ### Command-line flags
 
-`uaconsole --help` is the authoritative list. `--render` (with `--compact` and `--scale`) is
-available now; the other flags come with the windowed app shell.
+`uaconsole --help` is the authoritative list. The main ones:
 
 | Flag | Purpose |
 |---|---|
-| `--render out.png [--compact] [--scale N]` | Headless render of one frame to a PNG: no window, no engine. Use it to compare against reference screenshots. |
-| `--snapshot f.json` | With `--render`, draw a saved engine snapshot instead of the built-in preview data. |
-| `--bench` | Headless timing of frame build and draw. |
 | `--engine HOST[:PORT]` | Engine to connect to. The default is `127.0.0.1:4710`, the local open-apollo daemon; the port defaults to 4710. |
-| `--mock` | Run without an engine, using the built-in preview mixer, for UI work. |
+| `--writes` | Let the console change the engine (`set`/`post`) from the start; otherwise it only reads until you turn on Settings › WRITES. The menu entry passes it. |
+| `--compact`, `--fit`, `--1to1` | Start in the compact view, or fitted / at 1:1 scale. |
+| `--mock snapshot.json`, `--preview` | Run without an engine, from a saved snapshot or the built-in preview mixer, for UI work. |
+| `--open SHEET`, `--open-plugin STRIP:SLOT`, `--view SPEC` | Start with a window, a plug-in panel or a mixer view open (see `--help`). |
+| `--render out.png [--compact] [--scale N] [--size WxH]` | Headless render of one frame to a PNG: no window, no engine. Use it to compare against reference screenshots. |
+| `--bench N` | Headless timing of N frames. |
 
 To test against a daemon that cannot touch hardware, run it software-only on a spare port:
 

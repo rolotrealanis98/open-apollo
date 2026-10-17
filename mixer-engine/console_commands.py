@@ -90,6 +90,14 @@ class ConsoleCommands:
             if not self.inserts.software_only:
                 raise ValueError("CUE3/4 hardware encoding has not been verified")
             return False
+        elif prop.endswith("/MixInSource") and value in ("default", "none") and \
+                self.state.get_value(prop.removesuffix("/MixInSource") + "/IOType") == "Headphone":
+            # A headphone output's MON / NONE: the hardware takes CUE 1 / CUE 2
+            # only (other param 0x3f / 0x40, 0 / 1); the router would write
+            # CUE 1 for either, so it is refused like CUE 3/4
+            if not self.inserts.software_only:
+                raise ValueError("headphone source encoding has not been verified")
+            return False
         elif prop == "/UndoRecording":
             self.history.bracket(client, value)
         elif prop == "/UndoRedo":

@@ -478,7 +478,12 @@ impl MixerModel for EngineMixer {
                 self.f64_at(&p.gain_db()).unwrap_or(10.0).round() as i64
             ),
         };
+        // The front Hi-Z jack (`preamps/0/HiZ`, sensed by the unit) overrides MIC / LINE: Console
+        // shows HI-Z on the source button (`Input-HiZ-Big`) and a ticked, disabled Hi-Z in its
+        // menu.
+        let hi_z = p.has_hi_z && self.bool_at(&p.hi_z()) == Some(true);
         let source = match surfaces::source_label(&io).as_str() {
+            _ if hi_z => "HI-Z",
             "LINE" => "LINE",
             "HI-Z" => "HI-Z",
             _ => "MIC",
@@ -546,6 +551,7 @@ impl MixerModel for EngineMixer {
                 name: s.name.to_uppercase(),
                 level: self.f64_at(&s.gain()).unwrap_or(0.0),
                 muted: self.bool_at(&s.bypass()).unwrap_or(false),
+                pan: 0.5,
             })
             .collect()
     }

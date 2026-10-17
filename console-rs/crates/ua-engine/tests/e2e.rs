@@ -544,3 +544,51 @@ fn console_hello_sleep_hint_and_midi_poll() {
     let polls = || server.received_commands().iter().filter(|c| c.starts_with("get /MidiInputDevice/values?func_id=")).count();
     drain_until(&mut store, "two MIDI polls", Duration::from_secs(5), |_| polls() >= 2);
 }
+
+/// A write the engine refuses (`{"error":"Unable to set value."}`, nothing pushed) does not
+/// leave the optimistic local value: the store drops the echo hold and re-reads the property.
+#[test]
+fn refused_write_snaps_back_to_the_engine_value() {
+    let server = mock(MockOptions::default());
+    server.refuse("/SampleRate", 192_000);
+    let mut store = live_store(&server, Options { allow_writes: true, ..Options::default() });
+    store.set_writes_enabled(true);
+    store.commit("/SampleRate", 192_000);
+    assert_eq!(store.value("/SampleRate"), Some(&Value::Number(192_000.0)), "shown at once");
+    let asked = Instant::now();
+    drain_until(&mut store, "rate back", T, |s| s.value("/SampleRate") == Some(&Value::Number(48_000.0)));
+    assert!(asked.elapsed() < Duration::from_secs(2));
+    let r: Vec<_> = store.refusals().collect();
+    assert_eq!(r.len(), 1);
+    assert_eq!((r[0].path.as_str(), r[0].message.as_str()), ("/SampleRate", "Unable to set value."));
+    // An accepted rate stays.
+    store.commit("/SampleRate", 96_000);
+    wait_until("96k", T, || server.value("/SampleRate") == Some(Value::Number(96_000.0)));
+    std::thread::sleep(Duration::from_millis(400));
+    store.drain();
+    assert_eq!(store.value("/SampleRate"), Some(&Value::Number(96_000.0)));
+    assert_eq!(store.refusals().count(), 1);
+}
+
+/// Settings' WRITES switch opens the connection's gate too: launched read-only, nothing went
+/// out even with the writer on.
+#[test]
+fn engine_writes_switch_opens_and_closes_the_connection_gate() {
+    let server = mock(MockOptions::default());
+    let mut store = live_store(&server, Options::default());
+    let strip = store.topology().inputs[0].clone();
+    store.set_writes_enabled(true);
+    store.commit(&strip.mute(), true);
+    store.drain();
+    assert!(server.set_commands().iter().all(|c| !c.contains("/Mute/")), "{:?}", server.set_commands());
+    store.set_engine_writes(true);
+    assert!(store.connection().unwrap().allows_writes());
+    store.commit(&strip.mute(), false);
+    wait_until("mute set", T, || server.set_commands().iter().any(|c| c == &format!("set {}/value false", strip.mute())));
+    store.set_engine_writes(false);
+    let n = server.set_commands().len();
+    store.commit(&strip.mute(), true);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(server.set_commands().len(), n);
+    assert!(!store.connection().unwrap().allows_writes());
+}

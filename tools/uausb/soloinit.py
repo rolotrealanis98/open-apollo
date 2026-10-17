@@ -1,8 +1,8 @@
 """The Apollo Solo USB DSP bring-up, built from the DSP command language (J1).
 
-tools/usb-full-init.py used to replay the 38 bulk frames of
-tools/usb-re/init-bulk-sequence.bin byte for byte.  This module builds the
-same stream from a model of what the UA driver does (apollo-linux
+tools/usb-full-init.py used to replay the 38 bulk frames of a Windows
+capture of a Solo USB byte for byte.  This module builds the same stream
+from a model of what the UA driver does (apollo-linux
 docs/re-notes/macos-dsp-module-load.md, "native generation spec"):
 
   * teardown: every Console input strip is stopped (SYNCH with address 0,
@@ -17,14 +17,28 @@ docs/re-notes/macos-dsp-module-load.md, "native generation spec"):
 The pool layout comes from the device's DSP window (11 words; the Windows
 driver reads them at bring-up) and the Solo USB values are below.  With
 them the model reproduces all 128 commands of the captured stream, and
-with the capture's frame sizes every byte of all 38 frames
-(mixer-engine/tests/test_usb_dspcmd.py).
+with the capture's frame sizes every byte of all 38 frames.
 
-What is taken from the capture file at run time, not stored here: the five
-code blobs (Bill modules A5, C2, EB, DA, 12B; UA's code) and the strip
-parameter blocks (plugin defaults).  The plan below (which strips, in which
-order) is the Solo USB Console's, as captured; Twin USB and Twin X USB need
-their own (no capture exists).
+Where the rest comes from.  The repository ships no UA bytes, so the
+capture is not in it:
+
+  * the five code blobs (Bill modules A5, C2, EB, DA, 12B; UA's code) are
+    the user's own, extracted from their UAD install by the setup wizard
+    or `oa-assets firmware` into /lib/firmware/universal-audio/dsp/<id>.bill
+    (the on-disk record; on USB word 2 is sent as 0).  Template.from_firmware
+    reads them and checks each one's SHA-256 against the facts;
+  * solo-usb-init.json next to this file (the "facts") holds what else the
+    capture had: the strip parameter blocks (plugin defaults), the frame
+    sizes and first sequence number, the module ids with their SHA-256,
+    and the SHA-256 of the whole captured stream, so byte identity can be
+    checked without the capture (mixer-engine/tests/test_usb_dspcmd.py,
+    when the modules are installed).  tools/usb-re/make-solo-init-facts.py
+    writes it from a capture.
+
+A maintainer with a capture of their own can still take everything from it
+(Template.from_file).  The plan below (which strips, in which order) is the
+Solo USB Console's, as captured; Twin USB and Twin X USB need their own (no
+capture exists).
 
 Sample rate.  The capture is a 48 kHz session.  build_init(rate=...)
 puts the rate in the rate-ack command and recomputes the Mic strip's ramp
@@ -37,8 +51,11 @@ capture.  UNTESTED ON HARDWARE.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import struct
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Sequence
 
 from . import dspcmd as dc
@@ -69,7 +86,7 @@ class MemoryMap:
 # Read by the Windows driver from a Solo USB's DSP window (request 0x04 at
 # 0x1004-0x1007 and 0x1061-0x1067, tools/usb-re/apollo-init.pcap).  The tops
 # they give (0x9D1B8, 0xC6FFE, 0x08FFE000) are the ones every address in
-# init-bulk-sequence.bin is allocated from.
+# the captured init stream is allocated from.
 SOLO_USB_MEMORY_MAP = MemoryMap(
     sizes=(0x4000, 0xA9B9, 0x1FFF, 0xFF51B2),
     bases=(0xE0000, 0x92800, 0xC5000, 0x08008E4E),
@@ -180,23 +197,167 @@ MIC_RAMP_COUNT_INDEX = 10
 MIC_RAMP_INDEX = 11
 
 
-# ── Capture template: blobs and parameter blocks ───────────────────────
+# ── Template: code blobs, parameter blocks, framing ────────────────────
+
+# The facts (tools/usb-re/make-solo-init-facts.py writes them from a capture)
+FACTS_PATH = Path(__file__).resolve().with_name("solo-usb-init.json")
+FACTS_FORMAT = "open-apollo-usb-init-facts/1"
+# Where the setup wizard and `oa-assets firmware` put the DSP modules
+FIRMWARE_DIR = "/lib/firmware/universal-audio"
+DEFAULT_DSP_DIR = FIRMWARE_DIR + "/dsp"
+CAPTURE_RATE = 48000            # the rate of the captured session
+
+BILL_HDR_WORDS = 5              # 'Bill', id, word 2, payload size, w4
+BILL_W2_DISK = 0x02000000       # word 2 on disk (oa-assets); 0 on USB
+
+HOW_TO_EXTRACT = (
+    "The DSP modules are UA's code and come from your own UAD install: run "
+    "the setup wizard (open-apollo-setup), or `sudo oa-assets firmware "
+    "--from <the folder holding Windows' C:\\ or a Wine prefix> --out "
+    f"{FIRMWARE_DIR}`.")
 
 
 class TemplateError(ValueError):
     pass
 
 
+class FirmwareError(TemplateError):
+    """An extracted DSP module is missing, unreadable or not the version
+    the facts were captured with."""
+
+
+def module_file(module: int) -> str:
+    """File name of a module under the DSP folder (oa-assets firmware)."""
+    return f"{module:03x}.bill"
+
+
+def usb_blob(record: bytes, module: int | None = None) -> list:
+    """The blob words a USB code load carries for an on-disk Bill record
+    ('Bill', id, 0x02000000, payload size, w4, payload): the same record
+    with the id's arch byte and word 2 cleared."""
+    n = len(record)
+    if n < 4 * BILL_HDR_WORDS or n % 4:
+        raise TemplateError(f"not a Bill record ({n} bytes)")
+    words = list(struct.unpack(f"<{n // 4}I", record))
+    magic, ident, _w2, size, w4 = words[:BILL_HDR_WORDS]
+    if magic != dc.BILL_MAGIC:
+        raise TemplateError("not a Bill record (no 'Bill' magic)")
+    if module is not None and ident & 0xFFFF != module:
+        raise TemplateError(f"the record is module {ident & 0xFFFF:#x}, "
+                            f"expected {module:#x}")
+    if size != n - 4 * BILL_HDR_WORDS:
+        raise TemplateError(f"the record says {size} payload bytes but "
+                            f"holds {n - 4 * BILL_HDR_WORDS}")
+    if not 0 < w4 <= size:
+        raise TemplateError(f"w4 {w4:#x} out of range")
+    words[1] = ident & 0x00FFFFFF
+    words[2] = 0
+    return words
+
+
+def disk_record(blob: Sequence[int]) -> bytes:
+    """The on-disk Bill record of a USB code-load blob (word 2 back to
+    0x02000000): the bytes `oa-assets firmware` writes and
+    firmware-pins.json hashes."""
+    words = list(blob)
+    words[2] = BILL_W2_DISK
+    return struct.pack(f"<{len(words)}I", *words)
+
+
+def params_to_json(params: dict) -> dict:
+    return {kind: [{"private": idx, "offset": off,
+                    "words": [f"0x{w:08x}" for w in words]}
+                   for idx, off, words in blocks]
+            for kind, blocks in params.items()}
+
+
+def params_from_json(doc: dict) -> dict:
+    return {kind: [(int(b["private"]), int(b["offset"]),
+                    [int(w, 16) for w in b["words"]]) for b in blocks]
+            for kind, blocks in doc.items()}
+
+
+def load_facts(path=None) -> dict:
+    """The facts file (default: solo-usb-init.json next to this module)."""
+    path = Path(path) if path is not None else FACTS_PATH
+    try:
+        facts = json.loads(path.read_text())
+    except OSError as e:
+        raise TemplateError(f"cannot read the init facts {path}: "
+                            f"{e.strerror or e}") from None
+    except ValueError as e:
+        raise TemplateError(f"{path}: not JSON ({e})") from None
+    if not isinstance(facts, dict) or facts.get("format") != FACTS_FORMAT:
+        got = facts.get("format") if isinstance(facts, dict) else None
+        raise TemplateError(f"{path}: format {got!r}, expected {FACTS_FORMAT!r}")
+    return facts
+
+
 @dataclass
 class Template:
-    """What the generator takes from a captured init stream."""
+    """What the generator takes beyond its model: the code blobs, the strip
+    parameter blocks and, to cut the frames as captured, the capture's
+    frame sizes, first sequence number and flags."""
 
-    blobs: dict                     # module id -> Bill blob words
+    blobs: dict                     # module id -> Bill blob words (USB form)
     params: dict                    # kind -> [(private index, offset, words)]
-    stream: dc.InitStream | None = None
+    stream: dc.InitStream | None = None     # the capture, when read from one
+    plan: list | None = None        # dword count of each captured frame
+    seq0: int = 0
+    flags: int = 0
+    capture_sha256: str | None = None   # stream_sha256 of the capture
+
+    @classmethod
+    def from_firmware(cls, dsp_dir=DEFAULT_DSP_DIR, facts=None,
+                      verify: bool = True) -> "Template":
+        """Code blobs from the extracted modules (<dsp_dir>/<id>.bill), the
+        rest from the facts (a dict, a path, or None for solo-usb-init.json).
+
+        verify: every module's SHA-256 must be the one in the facts.  A
+        missing, unreadable or different file raises FirmwareError naming
+        it and saying how to extract the modules.
+        """
+        if not isinstance(facts, dict):
+            facts = load_facts(facts)
+        dsp_dir = Path(dsp_dir)
+        blobs: dict = {}
+        for m in facts["modules"]:
+            module = int(m["id"], 16)
+            path = dsp_dir / module_file(module)
+            try:
+                record = path.read_bytes()
+            except FileNotFoundError:
+                raise FirmwareError(f"{path} is missing. {HOW_TO_EXTRACT}") \
+                    from None
+            except OSError as e:
+                raise FirmwareError(f"cannot read {path}: {e.strerror or e}") \
+                    from None
+            want = m["sha256"].lower()
+            got = hashlib.sha256(record).hexdigest()
+            if verify and got != want:
+                raise FirmwareError(
+                    f"{path} is not the module version this init was "
+                    f"captured with (SHA-256 {got[:16]}..., expected "
+                    f"{want[:16]}...). {HOW_TO_EXTRACT}")
+            try:
+                blobs[module] = usb_blob(record, module)
+            except TemplateError as e:
+                raise FirmwareError(f"{path}: {e}. {HOW_TO_EXTRACT}") from None
+        return cls.from_facts(facts, blobs)
+
+    @classmethod
+    def from_facts(cls, facts: dict, blobs: dict) -> "Template":
+        """The facts' parameter blocks and framing with these code blobs."""
+        s = facts["stream"]
+        return cls(dict(blobs), params_from_json(facts["params"]),
+                   plan=[int(n) for n in s["frame_words"]],
+                   seq0=int(s["seq0"]), flags=int(s["flags"]),
+                   capture_sha256=s["sha256"].lower())
 
     @classmethod
     def from_file(cls, path) -> "Template":
+        """Everything from a capture of your own (the URB container format,
+        dspcmd.read_urb_file)."""
         return cls.from_stream(dc.InitStream.from_file(path))
 
     @classmethod
@@ -231,13 +392,94 @@ class Template:
                 i = j
                 continue
             i += 1
-        return cls(blobs, params, stream)
+        return cls(blobs, params, stream, plan=stream.plan, seq0=stream.seq0,
+                   flags=stream.flags,
+                   capture_sha256=stream_sha256(stream.frames))
 
     def blob(self, module: int) -> list:
         try:
             return self.blobs[module]
         except KeyError:
-            raise TemplateError(f"module {module:#x} is not in the capture") from None
+            raise TemplateError(f"module {module:#x} is not in the template") \
+                from None
+
+
+def blank_code(cmd: dc.Command) -> dc.Command:
+    """A code load with its Bill payload zeroed (header kept); any other
+    command unchanged."""
+    a = cmd.args
+    n = 1 + BILL_HDR_WORDS
+    if cmd.op == dc.OP_LOAD_CODE and len(a) >= n and a[1] == dc.BILL_MAGIC:
+        return dc.Command(cmd.op, a[:n] + (0,) * (len(a) - n))
+    return cmd
+
+
+def stream_sha256(frames: Sequence[dc.Frame], blank: bool = False) -> str:
+    """SHA-256 of frames written as a URB container (the format a capture
+    is kept in, dspcmd.build_urb_container).
+
+    blank: with every code load's payload zeroed first, so the stream
+    without UA's code can be compared (the facts' code_blanked_sha256).
+    """
+    frames = list(frames)
+    if blank:
+        words = dc.encode_commands(blank_code(c) for c in
+                                   dc.decode_commands(dc.deframe(frames)))
+        out, pos = [], 0
+        for f in frames:
+            n = len(f.words)
+            out.append(dc.Frame(words[pos:pos + n], f.seq, f.flags, f.magic))
+            pos += n
+        frames = out
+    data = dc.build_urb_container([f.to_bytes() for f in frames])
+    return hashlib.sha256(data).hexdigest()
+
+
+FACTS_ABOUT = (
+    "What tools/uausb/soloinit.py needs, besides UA's code, to build the "
+    "Apollo Solo USB DSP bring-up that a Windows capture recorded (a 48 kHz "
+    "Console start): the strip parameter blocks (plug-in defaults), the "
+    "captured frame sizes and first sequence number, the DSP modules it "
+    "loads (id, length, w4 and the SHA-256 of the on-disk Bill record that "
+    "`oa-assets firmware` writes to /lib/firmware/universal-audio/dsp), and "
+    "the SHA-256 of the captured stream as a URB container, whole and with "
+    "the code payloads zeroed. No UA code. Written by "
+    "tools/usb-re/make-solo-init-facts.py.")
+
+
+def make_facts(stream: dc.InitStream, rate: int = CAPTURE_RATE) -> dict:
+    """The facts of a captured init stream.  Raises TemplateError unless
+    the generator rebuilds the capture byte for byte from them plus its
+    code blobs."""
+    t = Template.from_stream(stream)
+    plan = build_init(t, rate=rate, rate_ack=False)
+    if not plan.byte_identical:
+        raise TemplateError("the generator does not rebuild this capture "
+                            "byte for byte; its facts would not describe it")
+    modules = []
+    for module, blob in t.blobs.items():
+        rec = disk_record(blob)
+        modules.append({"id": f"{module:03x}", "length": len(rec),
+                        "w4": blob[4],
+                        "sha256": hashlib.sha256(rec).hexdigest()})
+    container = dc.build_urb_container([f.to_bytes() for f in stream.frames])
+    return {
+        "format": FACTS_FORMAT,
+        "about": FACTS_ABOUT,
+        "rate": rate,
+        "modules": modules,
+        "params": params_to_json(t.params),
+        "stream": {
+            "bytes": len(container),
+            "frames": len(stream.frames),
+            "commands": len(stream.commands),
+            "seq0": stream.seq0,
+            "flags": stream.flags,
+            "frame_words": stream.plan,
+            "sha256": hashlib.sha256(container).hexdigest(),
+            "code_blanked_sha256": stream_sha256(stream.frames, blank=True),
+        },
+    }
 
 
 def _kind_of(plugin_id: int, in_ch: int, nprivs: int) -> str | None:
@@ -404,12 +646,26 @@ class InitPlan:
     preamble: int               # frames before the strip stream
     rate: int
     capture_framing: bool       # frame sizes copied from the capture
+    capture_sha256: str | None = None   # the template's captured stream
 
     def urbs(self) -> list:
         return [f.to_bytes() for f in self.frames]
 
     def commands(self) -> list:
         return [c for tx in self.transactions for c in tx]
+
+    def body(self) -> list:
+        """The strip stream's frames (the preamble left out)."""
+        return self.frames[self.preamble:]
+
+    def stream_sha256(self, blank: bool = False) -> str:
+        return stream_sha256(self.body(), blank)
+
+    @property
+    def byte_identical(self) -> bool:
+        """The strip stream is the captured one, byte for byte."""
+        return (self.capture_sha256 is not None
+                and self.stream_sha256() == self.capture_sha256)
 
 
 def build_init(template: Template, rate: int = 48000, rate_ack: bool = True,
@@ -421,11 +677,12 @@ def build_init(template: Template, rate: int = 48000, rate_ack: bool = True,
     preamble: the Windows bring-up's connect ({0x230002, 1}, the date word
     twice, the 0x11 query; only with connect_date) and the rate ack
     ({0x1A0002, rate}, with rate_ack), each its own frame as captured.
-    Then the strip stream: with capture_framing and a template stream of
-    the same length, cut exactly as the capture was (byte-identical to the
-    replay at 48 kHz), else one transaction per frame.  The strip stream
-    keeps the capture's first sequence number (255); the preamble takes
-    the numbers before it.
+    Then the strip stream: with capture_framing and a template whose
+    captured frame sizes cover a stream of the same length, cut exactly as
+    the capture was (byte-identical to it at 48 kHz with the captured
+    modules), else one transaction per frame.  The strip stream keeps the
+    capture's first sequence number (255); the preamble takes the numbers
+    before it.
     """
     txs = build_transactions(template, rate, memory_map, parts=parts)
     words = dc.encode_commands(c for tx in txs for c in tx)
@@ -436,13 +693,11 @@ def build_init(template: Template, rate: int = 48000, rate_ack: bool = True,
     if rate_ack:
         pre.append([dc.rate_ack(rate)])
 
-    src = template.stream
-    seq0 = src.seq0 if src is not None else 0
-    flags = src.flags if src is not None else 0
-    use_capture = (capture_framing and src is not None
-                   and sum(src.plan) == len(words))
+    seq0, flags, cut = template.seq0, template.flags, template.plan
+    use_capture = (capture_framing and cut is not None
+                   and sum(cut) == len(words))
     if use_capture:
-        body = dc.frame_stream(words, seq0, src.plan, flags)
+        body = dc.frame_stream(words, seq0, cut, flags)
     else:
         body = dc.frame_transactions(txs, seq0, flags)
     pre_frames = []
@@ -450,4 +705,4 @@ def build_init(template: Template, rate: int = 48000, rate_ack: bool = True,
         pre_frames.append(dc.Frame(dc.encode_commands(tx),
                                    (seq0 - len(pre) + k) & 0xFF, flags))
     return InitPlan(pre + txs, pre_frames + body, len(pre_frames), rate,
-                    use_capture)
+                    use_capture, template.capture_sha256)

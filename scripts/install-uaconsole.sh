@@ -16,7 +16,7 @@
 #   --uninstall       remove what this script installed (keeps copied resources)
 #   -h, --help        show this help
 #
-# Environment: CARGO (default: cargo), CONSOLE_RESOURCES, WINEPREFIX (default: ~/wine-ua)
+# Environment: CARGO (default: cargo), CONSOLE_RESOURCES, WINEPREFIX (default: ~/.wine)
 set -euo pipefail
 
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -85,7 +85,7 @@ resource_candidates() {
     if [[ -n "${CONSOLE_RESOURCES:-}" ]]; then
         printf '%s\n' "$CONSOLE_RESOURCES"
     fi
-    printf '%s\n' "${WINEPREFIX:-$HOME/wine-ua}/drive_c/$CONSOLE_SUBDIR/Resources"
+    printf '%s\n' "${WINEPREFIX:-$HOME/.wine}/drive_c/$CONSOLE_SUBDIR/Resources"
     printf '%s\n' "/Applications/Universal Audio/UAD Console.app/Contents/Resources"
     printf '%s\n' "$RESOURCES_COPY"
 }
@@ -177,10 +177,10 @@ report_resources() {
       uaconsole draws the mixer with the art from UA's own UAD Console.
       open-apollo does not include or download it. Get it from your own install:
 
-      1. Install UA's Windows UAD Console into a Wine prefix (open-apollo's Wine
-         tooling uses ~/wine-ua). uaconsole then finds
-           \$WINEPREFIX/drive_c/$CONSOLE_SUBDIR/Resources
-         by itself. For another prefix: export WINEPREFIX=/path/to/prefix
+      1. Run the setup wizard (open-apollo-setup), or import it yourself from the
+         folder that holds Windows' C:\ (a Windows partition, a VM disk) or a Wine prefix:
+           oa-assets import --from /path/to/that/folder
+         which copies it to $RESOURCES_COPY
 
       2. Or copy the Resources folder from a computer where UAD Console is installed:
            Windows: C:\\Program Files (x86)\\Universal Audio\\UAD Console\\Resources
@@ -338,7 +338,9 @@ install_files() {
     mkdir -p -- "$APPS_DIR"
     while IFS= read -r line; do
         case "$line" in
-            Exec=*) printf 'Exec=%s\n' "$exec_value" ;;
+            # The menu entry is the user's mixer: it controls the Apollo.  Plain
+            # uaconsole (scripts, tests) stays read-only.
+            Exec=*) printf 'Exec=%s --writes\n' "$exec_value" ;;
             Icon=*) printf 'Icon=%s\n' "$icon_value" ;;
             *) printf '%s\n' "$line" ;;
         esac
@@ -404,6 +406,11 @@ main() {
         else
             warn "Skipping the smoke test: no Console resources."
         fi
+    fi
+
+    if [[ ! -d "${XDG_DATA_HOME:-$HOME/.local/share}/open-apollo/plugin-specs" && ! -d /usr/share/open-apollo/plugin-specs ]]; then
+        info "No plug-in panel specs: plug-in windows show a parameter list. Setup installs them;"
+        info "  without it: bash $REPO/scripts/install-panels.sh, then oa-assets plugins for their art"
     fi
 
     header "Done"

@@ -16,26 +16,29 @@ use serde::Deserialize;
 
 /// Where lunacomponents are looked for; every existing folder is scanned and the first copy of a
 /// component id wins:
-/// 1. `$UACONSOLE_LUNA_COMPONENTS`
-/// 2. `~/.local/share/open-apollo/lunacomponents` (a copied `Plug-Ins` folder)
+/// 1. `$OA_LUNA_COMPONENTS` (or the older `$UACONSOLE_LUNA_COMPONENTS`)
+/// 2. `$XDG_DATA_HOME/open-apollo/lunacomponents` (`~/.local/share/…`; a copied `Plug-Ins` folder)
 /// 3. `/Library/Application Support/Universal Audio/Plug-Ins` (macOS install)
-/// 4. `~/wine-ua-work/lunacomponents` (development copy)
 pub struct LunaLocator;
 
 impl LunaLocator {
-    pub const ENV: &'static str = "UACONSOLE_LUNA_COMPONENTS";
+    pub const ENV: &'static str = "OA_LUNA_COMPONENTS";
+    /// Accepted until the app is renamed.
+    pub const ENV_ALIAS: &'static str = "UACONSOLE_LUNA_COMPONENTS";
 
     pub fn candidates() -> Vec<PathBuf> {
-        let mut out = Vec::new();
-        if let Ok(p) = std::env::var(Self::ENV) {
-            if !p.is_empty() {
-                out.push(PathBuf::from(p));
-            }
-        }
-        let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
-        out.push(home.join(".local/share/open-apollo/lunacomponents"));
+        let mut out: Vec<PathBuf> = [Self::ENV, Self::ENV_ALIAS]
+            .iter()
+            .filter_map(|e| std::env::var(e).ok())
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        let data = match std::env::var("XDG_DATA_HOME") {
+            Ok(p) if !p.is_empty() => PathBuf::from(p),
+            _ => std::env::var("HOME").map(PathBuf::from).unwrap_or_default().join(".local/share"),
+        };
+        out.push(data.join("open-apollo/lunacomponents"));
         out.push(PathBuf::from("/Library/Application Support/Universal Audio/Plug-Ins"));
-        out.push(home.join("wine-ua-work/lunacomponents"));
         out
     }
 }
@@ -109,9 +112,11 @@ impl LunaComponent {
             return None;
         }
         let read = |p: PathBuf| std::fs::read_to_string(p).ok();
-        let gui: GuiManifest = read(html_dir.join("manifest.json")).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        let algo: AlgoManifest =
-            read(root.join("algo.bundle/Contents/Resources/manifest.json")).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let gui: GuiManifest =
+            read(html_dir.join("manifest.json")).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let algo: AlgoManifest = read(root.join("algo.bundle/Contents/Resources/manifest.json"))
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
         let stem = root.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
         let id = if algo.plugin_id.is_empty() { stem } else { algo.plugin_id };
         let name = [gui.name, algo.name].into_iter().find(|n| !n.is_empty()).unwrap_or_else(|| id.clone());
@@ -195,7 +200,11 @@ impl GuiQuery {
     }
 
     pub fn to_query(&self) -> String {
-        let mut parts = vec![format!("host={}", encode(&self.ip)), format!("port={}", self.port), format!("path={}", encode(&self.path))];
+        let mut parts = vec![
+            format!("host={}", encode(&self.ip)),
+            format!("port={}", self.port),
+            format!("path={}", encode(&self.path)),
+        ];
         if let Some(id) = &self.plugin_id {
             parts.push(format!("plugin_id={}", encode(id)));
         }
@@ -246,9 +255,16 @@ impl GuiQuery {
         let get = |pairs: &[(String, String)], key: &str| pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
         // The GUI goes offline when getURLParams finds no `path` (`n2 = !t2.path`); a bare query
         // has no href, so doConnect's copy is all there is.
-        let path = if whole.is_empty() { get(&connect, "path") } else { get(&url_params, "path") }.filter(|p| !p.is_empty())?;
-        let ip = get(&connect, "ip").or_else(|| get(&connect, "host")).or_else(|| get(&url_params, "deviceId")).unwrap_or_default();
-        let port = get(&url_params, "port").or_else(|| get(&connect, "port")).and_then(|p| p.parse().ok()).unwrap_or(CLIENT_DEFAULT_PORT);
+        let path = if whole.is_empty() { get(&connect, "path") } else { get(&url_params, "path") }
+            .filter(|p| !p.is_empty())?;
+        let ip = get(&connect, "ip")
+            .or_else(|| get(&connect, "host"))
+            .or_else(|| get(&url_params, "deviceId"))
+            .unwrap_or_default();
+        let port = get(&url_params, "port")
+            .or_else(|| get(&connect, "port"))
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(CLIENT_DEFAULT_PORT);
         let plugin_id = get(&connect, "plugin_id").or_else(|| get(&url_params, "plugin_id")).filter(|p| !p.is_empty());
         let known = ["ip", "host", "deviceId", "port", "path", "plugin_id"];
         let extra = connect.iter().filter(|(k, _)| !known.contains(&k.as_str())).cloned().collect();
@@ -277,8 +293,11 @@ impl LunaLibrary {
         let mut lib = Self::default();
         for folder in folders {
             let Ok(dir) = std::fs::read_dir(folder) else { continue };
-            let mut found: Vec<PathBuf> =
-                dir.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "lunacomponent")).collect();
+            let mut found: Vec<PathBuf> = dir
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "lunacomponent"))
+                .collect();
             if found.is_empty() {
                 continue;
             }
@@ -408,13 +427,19 @@ mod tests {
         let c = component("1176 Rev A", "uaudio_ua_1176_rev_a", &[]);
         let q = GuiQuery::console("127.0.0.1", 41234, "/devices/0/inputs/2/effects/3/", &c.id);
         let url = c.content_url(&q);
-        assert_eq!(url, "ua-content://gui/index.html?host=127.0.0.1&port=41234&path=/devices/0/inputs/2/effects/3&plugin_id=uaudio_ua_1176_rev_a");
+        assert_eq!(
+            url,
+            "ua-content://gui/index.html?host=127.0.0.1&port=41234&path=/devices/0/inputs/2/effects/3&plugin_id=uaudio_ua_1176_rev_a"
+        );
         // The GUI's view of it: host from doConnect, port/path from getURLParams.
         assert_eq!(GuiQuery::parse(&url), Some(q.clone()));
         // The file:// (1.2.x) form reads the same.
         let file = c.url(&GuiQuery::new("127.0.0.1", 41234, "/devices/0/inputs/2/effects/3"));
         let back = GuiQuery::parse(&file).unwrap();
-        assert_eq!((back.ip.as_str(), back.port, back.path.as_str(), back.plugin_id), ("127.0.0.1", 41234, "/devices/0/inputs/2/effects/3", None));
+        assert_eq!(
+            (back.ip.as_str(), back.port, back.path.as_str(), back.plugin_id),
+            ("127.0.0.1", 41234, "/devices/0/inputs/2/effects/3", None)
+        );
         // `ip` beats `host`; `deviceId` is the fallback; the default port is 4718.
         let p = GuiQuery::parse("ua-content://gui/index.html?x=1&deviceId=10.0.0.2&path=%2Fa%2Fb").unwrap();
         assert_eq!((p.ip.as_str(), p.port, p.path.as_str()), ("10.0.0.2", 4718, "/a/b"));

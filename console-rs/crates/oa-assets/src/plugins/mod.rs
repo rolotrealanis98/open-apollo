@@ -164,12 +164,18 @@ pub fn build_with(
             .map(|s| book.group(s).ok_or_else(|| format!("no recipes for spec {s}")))
             .collect::<Result<_, _>>()?
     };
-    // sprite ids to make: what the groups draw
+    // sprite and text ids to make: what the groups draw, plus the shared art each spec needs
     let mut want: BTreeSet<String> = BTreeSet::new();
     for g in &groups {
         want.extend(g.uses.iter().cloned());
         want.extend(g.sprites.keys().cloned());
+        want.extend(g.texts.keys().cloned());
+        if !specs.is_empty() && !g.shared {
+            want.extend(book.shared_for(&g.group));
+        }
     }
+    let want_texts: BTreeSet<String> = want.iter().filter(|id| book.text_at.contains_key(*id)).cloned().collect();
+    want.retain(|id| !want_texts.contains(id));
     let mut results = Vec::new();
     let mut jobs: Vec<(String, String)> = Vec::new(); // (primary input, id)
     let mut needed_inputs: BTreeSet<String> = BTreeSet::new();
@@ -213,8 +219,8 @@ pub fn build_with(
         needed_inputs.extend(ins.iter().cloned());
         jobs.push((ins.first().cloned().unwrap_or_default(), id.clone()));
     }
-    for g in &groups {
-        for t in g.texts.values() {
+    for id in &want_texts {
+        if let Some(t) = book.text(id) {
             needed_inputs.insert(t.input.clone());
         }
     }
@@ -269,7 +275,7 @@ pub fn build_with(
         }
     });
 
-    let texts = build_texts(&groups, &paths, out);
+    let texts = build_texts(&book, &want_texts, &paths, out);
     results.sort_by(|a, b| a.id.cmp(&b.id));
     let manifest = merge_manifest(out, &book, built, &texts, root)?;
     let specs_out = readiness(&book, &manifest);
@@ -352,11 +358,17 @@ pub fn resolve_inputs(root: &Path, book: &Book, needed: &BTreeSet<String>) -> Ha
     out
 }
 
-fn build_texts(groups: &[&RecipeFile], paths: &HashMap<String, PathBuf>, out: &Path) -> Vec<(String, Outcome)> {
+fn build_texts(
+    book: &Book,
+    ids: &BTreeSet<String>,
+    paths: &HashMap<String, PathBuf>,
+    out: &Path,
+) -> Vec<(String, Outcome)> {
     let dir = out.join("Text");
     let mut res = Vec::new();
-    for g in groups {
-        for (id, t) in &g.texts {
+    for id in ids {
+        {
+            let Some(t) = book.text(id) else { continue };
             let o = (|| -> Result<(), String> {
                 let path = paths.get(&t.input).ok_or_else(|| format!("{} not found in the install", t.input))?;
                 let b = std::fs::read(path).map_err(|e| e.to_string())?;
@@ -453,18 +465,34 @@ fn readiness(book: &Book, manifest: &Value) -> Vec<SpecResult> {
     };
     book.files
         .iter()
+        .filter(|g| !g.shared)
         .map(|g| {
+            // the spec's own sprites plus what shared groups attach to it
+            let attached: Vec<&String> = book
+                .files
+                .iter()
+                .filter(|f| f.shared)
+                .flat_map(|f| f.attach.get(&g.group).into_iter().flatten())
+                .collect();
             let mut s = SpecResult {
                 id: g.group.clone(),
                 tier: g.tier,
-                sprites: g.uses.len(),
+                sprites: g.uses.len() + attached.len(),
                 built: 0,
                 runtime: 0,
                 deferred: 0,
                 missing: Vec::new(),
                 ready: false,
             };
-            for id in &g.uses {
+            for id in g.uses.iter().chain(attached) {
+                if book.text_at.contains_key(id) {
+                    if manifest["texts"].get(id).is_some() {
+                        s.built += 1;
+                    } else {
+                        s.missing.push(id.clone());
+                    }
+                    continue;
+                }
                 match book.sprite(id).map(|(_, r)| r.status) {
                     Some(Status::Runtime) => s.runtime += 1,
                     Some(Status::Deferred) => s.deferred += 1,

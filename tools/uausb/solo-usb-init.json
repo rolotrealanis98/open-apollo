@@ -1,0 +1,80 @@
+{
+  "format": "open-apollo-usb-init-facts/1",
+  "about": "What tools/uausb/soloinit.py needs, besides UA's code, to build the Apollo Solo USB DSP bring-up that a Windows capture recorded (a 48 kHz Console start): the strip parameter blocks (plug-in defaults), the captured frame sizes and first sequence number, the DSP modules it loads (id, length, w4 and the SHA-256 of the on-disk Bill record that `oa-assets firmware` writes to /lib/firmware/universal-audio/dsp), and the SHA-256 of the captured stream as a URB container, whole and with the code payloads zeroed. No UA code. Written by tools/usb-re/make-solo-init-facts.py.",
+  "rate": 48000,
+  "modules": [
+    {
+      "id": "0a5",
+      "length": 1940,
+      "w4": 456,
+      "sha256": "1fe90428f88b7f8c0a35b01ea0cfca3937d4b365b7c6ef427d24cfee65ee6c81"
+    },
+    {
+      "id": "0c2",
+      "length": 184,
+      "w4": 33,
+      "sha256": "ad0946b371df47c9a7d459c7b5b288d58aad9690b6a9a39a6c5895ac36720a2f"
+    },
+    {
+      "id": "0eb",
+      "length": 716,
+      "w4": 162,
+      "sha256": "2b879e0824970650f4ae0de110bb4bdb22897d0833d85156dd36f51986c15ea7"
+    },
+    {
+      "id": "0da",
+      "length": 3044,
+      "w4": 744,
+      "sha256": "37cd9c2df53ec742d61353437ad7f7212633e27801f1cf1f57e3818cbe47dd06"
+    },
+    {
+      "id": "12b",
+      "length": 452,
+      "w4": 96,
+      "sha256": "ff60952444ae492aa1a8b85dae686ad8445b9971260174202ad1ce13c73ba02d"
+    }
+  ],
+  "params": {
+    "input": [
+      {
+        "private": 1,
+        "offset": 0,
+        "words": ["0x00df7fe4", "0x40000000", "0x00000001", "0x00000001", "0x00000004", "0x00000100", "0x000000c8", "0x3a888889", "0x3b83126f"]
+      }
+    ],
+    "mic": [
+      {
+        "private": 1,
+        "offset": 0,
+        "words": ["0x0f1f7fe4", "0x40000000", "0x00000001", "0x00000001", "0x00000004", "0x00000100", "0x000000c8", "0x3a888889", "0xc0000000", "0xc0000000", "0x00000010", "0x0000004b", "0x41000000", "0x3ada740e", "0xffffffff", "0x00000001", "0xffffffff", "0x00000001"]
+      },
+      {
+        "private": 1,
+        "offset": 38,
+        "words": ["0x00000040", "0x3cae6c74", "0xbf7ff125", "0x3f7ff892", "0x3909422f", "0x3f800000", "0xbc2e6fd3", "0xbbc96245", "0x3cae6c74", "0xbf7ff125", "0x3f7ff892", "0x3909422f", "0x3f800000", "0xbc2e6fd3", "0xbbc96245", "0x00000001"]
+      },
+      {
+        "private": 4,
+        "offset": 1,
+        "words": ["0x00000040", "0x3cae6c74", "0xbf7ff125", "0x3f7ff892", "0x3909422f", "0x3f800000", "0xbc2e6fd3", "0xbbc96245", "0x3e3b3f3d", "0xbf7baf04", "0x3f7dd5f1", "0x3c20d8d2", "0x3f7ffcd7", "0xbdbc4dc9", "0xbd565d96"]
+      }
+    ],
+    "aux": [
+      {
+        "private": 1,
+        "offset": 0,
+        "words": ["0x00fffffc", "0x40000000", "0x00000002", "0x00000002", "0x3b83126f"]
+      }
+    ]
+  },
+  "stream": {
+    "bytes": 9324,
+    "frames": 38,
+    "commands": 128,
+    "seq0": 255,
+    "flags": 0,
+    "frame_words": [16, 16, 6, 16, 16, 16, 12, 4, 26, 2, 255, 232, 48, 20, 4, 11, 20, 24, 11, 20, 181, 255, 255, 253, 115, 32, 8, 19, 64, 40, 19, 64, 8, 3, 16, 11, 16, 120],
+    "sha256": "dad4767dbef46ea50b55e0d0fce02815badba23dfbb3ddedce500391535fae0d",
+    "code_blanked_sha256": "ce83d375c9a89b085122271dfab48b6ba00dc2d2c8e306e75be0590a1b66d461"
+  }
+}

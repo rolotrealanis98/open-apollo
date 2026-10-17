@@ -43,12 +43,27 @@ fn field_rect(label_x: f32) -> Rect {
     Rect::new((label_x - 6.0).floor(), 9.5, 140.0, 21.5)
 }
 
-pub fn draw_status_bar(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
-    draw_status_bar_with(ui, model, true, r);
+/// A `Keyboard-Focus`-style outline skin (`color-outline`, `outline-thickness`,
+/// `inset-outline` l,t,r,b) round `r`: Console's amber focus ring (184, 138, 40).
+fn focus_outline(ui: &mut Ui, key: &str, r: Rect) {
+    let skin = ui.skin("backgrounds", key).or_else(|| ui.skin("views", key));
+    let color = skin.and_then(|s| s.color("color-outline")).unwrap_or(Rgba::rgb8(184, 138, 40));
+    let t = skin.and_then(|s| s.number("outline-thickness")).unwrap_or(1.0) as f32;
+    let i = skin.and_then(|s| s.insets("inset-outline")).unwrap_or_default();
+    let o = r.inset(i.l, i.t, i.r, i.b);
+    ui.fill(Rect::new(o.x, o.y, o.w, t), color);
+    ui.fill(Rect::new(o.x, o.max_y() - t, o.w, t), color);
+    ui.fill(Rect::new(o.x, o.y + t, t, o.h - 2.0 * t), color);
+    ui.fill(Rect::new(o.max_x() - t, o.y + t, t, o.h - 2.0 * t), color);
 }
 
-/// `scene_info`: the window has created its SCENE field ([`crate::ViewState::scene_info`]).
-pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: bool, r: Rect) {
+pub fn draw_status_bar(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
+    draw_status_bar_with(ui, model, true, false, r);
+}
+
+/// `scene_info`: the window has created its SCENE field ([`crate::ViewState::scene_info`]);
+/// `blink`: the blink phase ([`crate::ViewState::blink`]).
+pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: bool, blink: bool, r: Rect) {
     let st = model.status();
     let key = ui.style("fonts", "Info-Bridge-Label");
     let val = ui.style("fonts", "Info-Bridge-Value");
@@ -82,6 +97,12 @@ pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: boo
             ui.text(&v, v_style, Rect::new(f.value_x, ty, f.arrow_x - f.value_x, th), Align::Left);
             arrow(ui, f.arrow_x);
             sep(ui, f.sep_x);
+            // An unlocked clock (`/ClockLocked` false): `Rack_ClockInfo::paint` (0x181547d00)
+            // draws `Info-Focus` over the item while the blink flag is on (blink callback
+            // 0x181547980 repaints while `IsClockLocked` 0x181545a10 is false); text unchanged.
+            if f.control == Control::StatusClock && !offline && blink && st.clock_locked == Some(false) {
+                focus_outline(ui, "Info-Focus", field_rect(f.label_x));
+            }
             ui.hit(field_rect(f.label_x), sid(f.control), HitKind::Tap);
         }
 

@@ -28,7 +28,7 @@ impl Resources {
             .unwrap_or_else(|| home.join(".local/share"));
         out.push(data.join("open-apollo/console-resources"));
         out.push(PathBuf::from("/Applications/Universal Audio/UAD Console.app/Contents/Resources"));
-        let prefix = std::env::var("WINEPREFIX").map(PathBuf::from).unwrap_or_else(|_| home.join("wine-ua"));
+        let prefix = std::env::var("WINEPREFIX").map(PathBuf::from).unwrap_or_else(|_| home.join(".wine"));
         out.push(prefix.join("drive_c/Program Files (x86)/Universal Audio/UAD Console/Resources"));
         out
     }

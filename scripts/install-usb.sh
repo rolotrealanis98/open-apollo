@@ -228,30 +228,39 @@ else
     FW_FILE="ApolloSolo.bin"
 fi
 
+# open-apollo ships no Universal Audio files: the USB boot images and the DSP
+# modules come from the user's own UAD install.
+EXTRACT_SHOWN=0
+how_to_extract() {
+    [ "$EXTRACT_SHOWN" = "1" ] && return 0
+    EXTRACT_SHOWN=1
+    echo ""
+    info "open-apollo ships no Universal Audio files. They come from your own UAD"
+    info "install (a Windows partition, a Wine prefix or a Windows VM's disk):"
+    echo ""
+    echo "  Option A: the setup wizard"
+    echo "    open-apollo-setup"
+    echo ""
+    echo "  Option B: oa-assets"
+    echo "    sudo oa-assets firmware --from <the folder holding Windows' C:\\ or a Wine prefix> \\"
+    echo "        --out $FW_DIR"
+    echo "    (build it with: cargo build --release --manifest-path console-rs/Cargo.toml -p oa-assets)"
+    echo ""
+    info "Either one extracts ApolloSolo.bin, ApolloTwin.bin, ApolloTwinX.bin and the"
+    info "DSP modules ($FW_DIR/dsp/*.bill), then re-run this installer."
+    echo ""
+}
+
 if [ "$NEEDS_FW_LOAD" -eq 0 ]; then
     ok "Device already has firmware loaded — skipping firmware check"
 elif [ -f "$FW_DIR/$FW_FILE" ]; then
     ok "Firmware found: $FW_DIR/$FW_FILE"
 else
     warn "Firmware not found: $FW_DIR/$FW_FILE"
-    echo ""
-    info "The Apollo USB needs firmware uploaded on every power-on."
-    info "UA doesn't allow redistribution, so you need to get it yourself:"
-    echo ""
-    echo "  Option A: Download from UA"
-    echo "    1. Go to https://help.uaudio.com/hc/en-us/articles/26454031439892"
-    echo "    2. Download the firmware package"
-    echo "    3. Extract $FW_FILE"
-    echo ""
-    echo "  Option B: Copy from a Windows install of UA Connect"
-    echo "    C:\\Program Files (x86)\\Universal Audio\\Powered Plugins\\Firmware\\USB\\"
-    echo ""
-    echo "  Then place it:"
-    echo "    sudo mkdir -p $FW_DIR"
-    echo "    sudo cp $FW_FILE $FW_DIR/"
-    echo ""
+    info "The Apollo USB needs this boot image uploaded on every power-on."
+    how_to_extract
     FWPATH=""
-    prompt FWPATH "Enter path to $FW_FILE (or press Enter to skip): "
+    prompt FWPATH "Or enter the path of a $FW_FILE you already have (Enter to skip): "
     if [ -n "${FWPATH:-}" ] && [ -f "${FWPATH:-}" ]; then
         run_sudo mkdir -p "$FW_DIR"
         run_sudo cp "$FWPATH" "$FW_DIR/$FW_FILE"
@@ -259,6 +268,21 @@ else
     else
         warn "Skipping firmware — you'll need to install it before audio works"
     fi
+fi
+
+# The DSP init (tools/usb-full-init.py) loads UA's DSP modules from
+# $FW_DIR/dsp and checks each one's SHA-256 against
+# tools/uausb/solo-usb-init.json.  Stop here, before the audio stack is
+# touched, when they are missing: without them the init cannot start capture.
+DSP_DIR="$FW_DIR/dsp"
+if DSP_CHECK=$(python3 "$PROJECT_DIR/tools/usb-full-init.py" --check --dsp-dir "$DSP_DIR" 2>&1); then
+    ok "DSP modules found: $DSP_DIR"
+else
+    fail "The DSP modules the USB init needs are missing or unusable:"
+    while IFS= read -r line; do echo "    $line"; done <<< "$DSP_CHECK"
+    how_to_extract
+    info "Install will NOT touch the audio stack — your current driver is untouched."
+    exit 1
 fi
 
 # ================================================================
@@ -693,11 +717,13 @@ run_sudo mkdir -p "$UA_USB_LIB"
 run_sudo cp "$PROJECT_DIR/tools/fx3-load.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-full-init.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-dsp-init.py" "$UA_USB_LIB/"
-run_sudo cp "$PROJECT_DIR/tools/usb-re/init-bulk-sequence.bin" "$UA_USB_LIB/"
-# usb-full-init.py builds its stream with the uausb package (it replays the
-# capture when the package is missing)
+# usb-full-init.py builds its stream with the uausb package from the DSP
+# modules in $FW_DIR/dsp and the init facts (uausb/solo-usb-init.json)
 run_sudo mkdir -p "$UA_USB_LIB/uausb"
-run_sudo cp "$PROJECT_DIR"/tools/uausb/*.py "$UA_USB_LIB/uausb/"
+run_sudo cp "$PROJECT_DIR"/tools/uausb/*.py "$PROJECT_DIR/tools/uausb/solo-usb-init.json" \
+    "$UA_USB_LIB/uausb/"
+# An earlier install's copy of the Windows capture
+run_sudo rm -f "$UA_USB_LIB/init-bulk-sequence.bin"
 run_sudo cp "$PROJECT_DIR/scripts/ua-usb-init.sh" "$UA_USB_BIN/ua-usb-init"
 run_sudo cp "$PROJECT_DIR/scripts/ua-usb-dsp-init.sh" "$UA_USB_BIN/ua-usb-dsp-init"
 run_sudo chmod +x "$UA_USB_BIN/ua-usb-init" "$UA_USB_BIN/ua-usb-dsp-init"
@@ -715,7 +741,7 @@ run_sudo cp "$PROJECT_DIR/configs/systemd/ua-usb-dsp-init.service" /etc/systemd/
 run_sudo systemctl daemon-reload
 
 ok "udev rules + systemd units installed — Apollo will auto-init on power-on/reboot"
-info "Firmware must be in $FW_DIR/ for auto-load to work"
+info "The firmware and DSP modules must stay in $FW_DIR/ for auto-init to work"
 
 # ================================================================
 # Step 6c: Mixer daemon (UA Console control over USB)

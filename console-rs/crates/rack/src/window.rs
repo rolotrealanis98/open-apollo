@@ -378,7 +378,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     if l.monitor {
         draw_monitor_column(ui, model, view, monitor_rect(l.monitor_x(), height));
     }
-    draw_status_bar_with(ui, model, view.scene_info, Rect::new(0.0, status_y, width, W::STATUS_BAR.1));
+    draw_status_bar_with(ui, model, view.scene_info, view.blink, Rect::new(0.0, status_y, width, W::STATUS_BAR.1));
     // Last of the chrome: its bottom line covers the first point of the columns below.
     title_bar(ui, model, view, width);
 
@@ -887,7 +887,9 @@ fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos)
     if let Some((talk, to_mons)) = g.talkback {
         let opts = model.monitor_options();
         let on = opts.talkback.unwrap_or(false);
-        ui.toggle("Switch-Large", Some("TALK"), on, true, talk, Some(ControlId { strip: "monitor".into(), control: Control::Talkback }), None);
+        // A click latches, a long press is momentary (`HitKind::Latch`).
+        ui.toggle("Switch-Large", Some("TALK"), on, true, talk, None, None);
+        ui.hit(talk, ControlId { strip: "monitor".into(), control: Control::Talkback }, HitKind::Latch);
         let to_mon = ControlId { strip: "monitor".into(), control: Control::TalkbackToMonitor };
         ui.toggle("Switch-Large", Some("TALKBACK\nTO MONITOR"), opts.talkback_to_monitor.unwrap_or(false), opts.talkback_to_monitor.is_some(), to_mons, Some(to_mon), None);
     }
