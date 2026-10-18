@@ -38,9 +38,9 @@ Each square is one thing UA's own drivers do (left), one task of the work plan (
 
 - **Full duplex audio** — 4 analog inputs + 6 analog outputs verified (24/22 total ALSA channels exposed, mapped to the firmware's channel slots by ID; S/PDIF, ADAT, and virtual channels are unverified)
 - **All sample rates** — 44.1, 48, 88.2, 96, 176.4, 192 kHz (playback and capture share one clock; a Hi-band restart takes about a second longer)
-- **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching (PAD, 48V and mic/line need the `driver-v2` branch; they did nothing on v1.0.0)
+- **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching
 - **Monitor control** — volume, mute, dim, mono, headphone routing, talkback button state
-- **Level meters and status** — meters read from the Apollo's DSP, HiZ jack detect and clock lock (`driver-v2`)
+- **Level meters and status** — meters read from the Apollo's DSP, HiZ jack detect and clock lock
 - **DSP mixer** — input faders, pan, sends (AUX1/AUX2, CUE1/CUE2), solo, mute
 - **PipeWire virtual I/O** — named Mic 1-4, Line In 3+4, Monitor L/R, Line Out devices
 - **Desktop audio** — YouTube, system sounds, GNOME volume control all work through Apollo Monitor
@@ -48,6 +48,7 @@ Each square is one thing UA's own drivers do (left), one task of the work plan (
 - **pw-record/pw-play** — zero-dropout capture and playback verified
 - **Setup wizard** — `bash scripts/setup.sh`: finds your UAD install, asks for your password once, installs everything fresh
 - **Mixer console** — `uaconsole`, a native Linux rebuild of UA's UAD Console, drawn with the art from your own install
+- **Plug-in windows** — 206 of 224 UAD plug-in panels drawn from [open-apollo-panels](https://github.com/rolotrealanis98/open-apollo-panels) specs and art made from your own Powered plug-ins (the rest show a parameter list)
 
 ## What Works (Apollo Solo USB)
 
@@ -86,7 +87,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 | **Ardour JACK routing** — Ardour via JACK can steal ALSA device from PipeWire | Moderate | Launch with `pw-jack ardour7`; restart PipeWire if audio stops |
 | **Audacity ALSA-only** — Ubuntu's Audacity package lacks PipeWire backend | Minor | Install Audacity via Flatpak for PipeWire support |
 | **GNOME Sound Settings** — input level meter may not show activity | Cosmetic | Audio works; meter is a GNOME UI limitation with pro-audio devices |
-| **Warm reboot requires Apollo power cycle** — on v1.0.0, rebooting Linux while Apollo stays powered leaves firmware in a stale state; audio won't work until Apollo is power-cycled. `driver-v2` quiesces the Apollo at reboot, power-off and unload and reconnects on the next load; not yet re-tested on a release build | Moderate | After reboot: turn Apollo off, wait 5s, turn back on. Hot-replug auto-recovers within ~7s. Cold boot (Apollo powered on after Linux) works without issues. |
+| **Warm reboot requires Apollo power cycle** — on v1.0.0, rebooting Linux while Apollo stays powered leaves firmware in a stale state; audio won't work until Apollo is power-cycled. The driver now quiesces the Apollo at reboot, power-off and unload and reconnects on the next load; not yet re-tested on this release | Moderate | After reboot: turn Apollo off, wait 5s, turn back on. Hot-replug auto-recovers within ~7s. Cold boot (Apollo powered on after Linux) works without issues. |
 | **No hot-plug on desktop Thunderbolt add-in cards** — powering on the Apollo while Linux runs produces no PCIe hotplug event at all; only cold boot enumerates it. The TB bridge/NHI/ports runtime-suspend to D3cold, and a port in D3cold cannot signal presence-detect | Moderate | Fixed by `configs/udev/60-thunderbolt-no-rtd3.rules` (deployed by `configs/deploy.sh`), which pins the Maple Ridge bridge/ports (`0x1136`) and NHI (`0x1137`) to `power/control=on` and `d3cold_allowed=0` |
 
 ## App Compatibility
@@ -106,7 +107,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 ## Not Yet Implemented
 
-Talkback audio routing, virtual/monitor loopback, parts of the console (see [console-rs/WIRING.md](console-rs/WIRING.md) for what is wired), multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), and running UAD plug-ins on the Apollo's DSP (not supported). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
+Talkback audio routing, virtual/monitor loopback, parts of the console (see [console-rs/WIRING.md](console-rs/WIRING.md) for what is wired), multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), and running UAD plug-ins on the Apollo's DSP (in development, not in this release; setup already stores the plug-ins' DSP modules from your install). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
 
 ## Supported Devices
 
@@ -157,6 +158,10 @@ You need a supported Apollo, a Linux distribution with a desktop, [Rust](https:/
 partition, a Windows VM, a Wine prefix or a folder copied from a Windows PC. open-apollo
 includes no Universal Audio files, so it reads what your Apollo needs from that install;
 [Getting a UAD install](docs/uad-install.md) explains each option.
+
+No Windows on this computer? Install UA's software in a Windows VM, or on a Windows boot disk
+on an external USB SSD, then run setup: both are step by step in
+[Getting a UAD install](docs/uad-install.md#option-2-a-windows-virtual-machine).
 
 ```bash
 git clone https://github.com/rolotrealanis98/open-apollo.git
@@ -321,7 +326,8 @@ Plug-in panel specs live in their own repository,
 In this repository ([docs/README.md](docs/README.md) lists everything):
 
 - [Install guide](docs/install.md): requirements, the setup wizard, command-line and USB installs, NixOS, uninstalling, troubleshooting
-- [Getting a UAD install](docs/uad-install.md): dual boot, a Windows VM, Wine, or a copied folder
+- [Getting a UAD install](docs/uad-install.md): dual boot, a Windows boot disk, a Windows VM, Wine, or a copied folder
+- [Getting help](SUPPORT.md): what to check first, and what to attach to an issue
 - [Mixer console](console-rs/README.md) and [what it controls](console-rs/WIRING.md)
 - [Testing your Apollo](tools/TESTING.md): device reports for models we haven't verified
 - [Architecture](ARCHITECTURE.md) and [contributing](CONTRIBUTING.md)

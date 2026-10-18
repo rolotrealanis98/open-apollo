@@ -8,6 +8,7 @@ have**, because it includes no Universal Audio files. The setup wizard does ever
 - [Command-line install](#command-line-install) (step by step, or without a desktop)
 - [USB Apollos](#usb-apollos)
 - [NixOS](#nixos)
+- [Plug-ins](#plug-ins)
 - [Updating, reinstalling and uninstalling](#updating-reinstalling-and-uninstalling)
 - [Where things go](#where-things-go)
 - [Troubleshooting](#troubleshooting)
@@ -60,7 +61,8 @@ The wizard's pages:
    - **Import assets**: copies UAD Console's art, installs the plug-in panel specs and makes
      the panels' art. The panel specs and art are optional: without them, plug-in windows show
      a plain parameter list.
-   - **DSP programs & firmware**: extracts them to `/lib/firmware/universal-audio`.
+   - **DSP programs & firmware**: extracts them to `/lib/firmware/universal-audio`, and
+     stores every plug-in's DSP modules in its `plugins/` folder for a later release.
    - **Driver**: builds the driver with DKMS and installs the audio settings and the mixer
      daemon (`install.sh --yes`).
 
@@ -90,6 +92,7 @@ Below, `/path/to/windows` is the folder that holds Windows' `C:\` (or a Wine pre
 
 ```bash
 sudo $OA firmware --from /path/to/windows      # DSP modules, USB boot images -> /lib/firmware/universal-audio
+sudo $OA dsp --from /path/to/windows           # plug-ins' DSP modules -> /lib/firmware/universal-audio/plugins (optional)
 $OA import --from /path/to/windows             # UAD Console's art -> ~/.local/share/open-apollo
 sudo bash scripts/install-panels.sh            # plug-in panel specs -> /usr/share/open-apollo/plugin-specs
 $OA plugins --from /path/to/windows            # plug-in panels' art -> ~/.local/share/open-apollo/generated
@@ -140,6 +143,20 @@ PipeWire and the packages it needs. The console is `nix run github:rolotrealanis
 (see [console-rs/README.md](../console-rs/README.md#nix)). Run the `oa-assets` steps above by
 hand for the Console art and the plug-in panels.
 
+## Plug-ins
+
+What this release does with UAD plug-ins:
+
+| | |
+|---|---|
+| Plug-in windows | The Console draws each plug-in's window from the panel specs and the art setup made from your Powered plug-ins: 206 of 224 with a UAD 12 install, the rest as a plain parameter list. |
+| Plug-in DSP modules | Setup stores them in `/lib/firmware/universal-audio/plugins/`. Nothing loads them yet. |
+| Running plug-ins on the Apollo's DSP | Not in this release. It is being developed and will only load plug-ins your Apollo itself reports as authorized. |
+
+You don't need plug-in licences for any of this. To rebuild the panels' art alone, for
+example after a UAD update, run `oa-assets plugins --from /path/to/windows`; `oa-assets status`
+says what is there.
+
 ## Updating, reinstalling and uninstalling
 
 To update, pull the repository and run `bash scripts/setup.sh` again. setup always reinstalls
@@ -167,6 +184,7 @@ It ends with a check that lists anything still there. `--yes` asks nothing.
 |---|---|---|
 | Driver (DKMS) | `/usr/src/ua_apollo-*`, `/lib/modules/*/updates/dkms/` | `uninstall.sh` |
 | DSP modules, USB boot images (from your UAD install) | `/lib/firmware/universal-audio/` | `uninstall.sh --purge` |
+| Plug-ins' DSP modules (from your UAD install) | `/lib/firmware/universal-audio/plugins/` | `uninstall.sh --purge` |
 | UAD Console's art (from your UAD install) | `~/.local/share/open-apollo/console-resources/` | `uninstall.sh --purge` |
 | Plug-in panels' art (made from your UAD install) | `~/.local/share/open-apollo/generated/` | `uninstall.sh --purge` |
 | Plug-in panel specs | `/usr/share/open-apollo/plugin-specs/` | `uninstall.sh` |
