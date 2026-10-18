@@ -211,6 +211,20 @@ class TestManifest:
         ids = pl.load_render_ids(p)
         assert ids == {k: v for k, v in RENDER.items() if v is not None}
 
+    def test_registry_id_is_the_licence_id(self, tmp_path):
+        reg = lambda *r: [{"renderid": x} for x in r]
+        p = write_manifest(tmp_path / "manifest.json", extra=[
+            {"plugin_id": "fam_a", "render_id": 2187, "ua_xml": reg(2064)},
+            {"plugin_id": "fam_b", "render_id": 2188, "ua_xml": reg(2064)},
+            {"plugin_id": "se", "render_id": None, "ua_xml": reg(2089)},
+            {"plugin_id": "typo", "render_id": 2776, "ua_xml": reg(2276)},
+            {"plugin_id": "two", "render_id": 2100, "ua_xml": reg(2064, 2065)},
+            {"plugin_id": "none", "render_id": 2101, "ua_xml": []}])
+        ids = pl.load_render_ids(p)
+        assert (ids["fam_a"], ids["fam_b"], ids["se"], ids["typo"]) == (
+            2064, 2064, 2089, 2276)
+        assert (ids["two"], ids["none"]) == (2100, 2101)
+
     def test_conflicting_entries_are_left_out(self, tmp_path, caplog):
         p = write_manifest(tmp_path / "manifest.json", extra=[
             {"plugin_id": "t_auth", "render_id": 0x820},

@@ -175,6 +175,17 @@ def plugin_host_available(backend) -> bool:
 
 # ── Render ids ──────────────────────────────────────────────────────
 
+def _licence_id(entry: dict):
+    """The id the board table is keyed by: UA.xml's registry render id when
+    the entry has exactly one (UA licenses a family under it, e.g. Precision
+    Mix Rack 2064, and its per-plug-in manifest id can be a DSP id or a typo:
+    Neve 1084 says 2776, the registry 2276), else the manifest's own."""
+    ids = {u.get("renderid") for u in entry.get("ua_xml") or []
+           if isinstance(u, dict) and isinstance(u.get("renderid"), int)
+           and not isinstance(u.get("renderid"), bool)}
+    return ids.pop() if len(ids) == 1 else entry.get("render_id")
+
+
 def load_render_ids(path: str | Path | None = None) -> dict[str, int]:
     """{plugin_id: render_id} from the plug-in DSP manifest (`path`, else
     DEFAULT_MANIFEST).  A plug-in whose render id is null, or that two
@@ -201,7 +212,7 @@ def load_render_ids(path: str | Path | None = None) -> dict[str, int]:
     for entry in doc["plugins"]:
         if not isinstance(entry, dict):
             continue
-        pid, rid = entry.get("plugin_id"), entry.get("render_id")
+        pid, rid = entry.get("plugin_id"), _licence_id(entry)
         if not isinstance(pid, str) or not pid:
             continue
         if isinstance(rid, bool) or not isinstance(rid, int) or rid < 0:
