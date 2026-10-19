@@ -33,6 +33,10 @@ with:
 - where your UAD install came from (dual boot, boot disk, VM, Wine, copied folder) and its
   UAD and UAD Console versions;
 - what the wizard showed: the page, and the step that failed with its message;
+- the run's log from `~/.local/state/open-apollo/` (the wizard's Done page, or the page where
+  a step failed, shows its name; the scripts print it at the end). It leaves out your user
+  name, host name, machine id and serial numbers; read it before you attach it. See
+  [Install logs](docs/install.md#install-logs-and-the-install-report);
 - the report from `bash tools/apollo-report.sh` (it leaves out the host name, user name, serial
   numbers and network details; read it before you attach it).
 

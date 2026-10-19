@@ -67,6 +67,11 @@ body:
       description: "Run: `console-rs/target/release/oa-assets status`. Never attach files from your UAD install."
       render: shell
   - type: textarea
+    id: install-log
+    attributes:
+      label: Setup or install log
+      description: "Drag in the run's log from ~/.local/state/open-apollo/ (the setup wizard shows its name; the scripts print it at the end). User and host names and serials are already taken out; read it first."
+  - type: textarea
     id: dmesg
     attributes:
       label: dmesg output

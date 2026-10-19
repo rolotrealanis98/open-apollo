@@ -8,8 +8,11 @@
 # install-panels.sh, with a fake
 # oa-assets, on a PATH holding only harmless tools and logging stubs (id,
 # runuser, mount, umount, findmnt): nothing real is mounted, removed or
-# installed, and nothing needs root.
+# installed, and nothing needs root.  The run's log (scripts/oa-log.sh) goes
+# to the fake user's ~/.local/state/open-apollo, or to --log FILE.
 
+# The stubs' bodies (single-quoted) are shell code, expanded when a stub runs.
+# shellcheck disable=SC2016
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -48,6 +51,9 @@ check "--data" test "$DATA_DIR" = /d
 parse_args --user tester --from /mnt/w --panels /t/p.tar.gz --panels-sha256 abc
 check "--panels" test "$PANELS_FROM" = /t/p.tar.gz
 check "--panels-sha256" test "$PANELS_SHA" = abc
+parse_args --user tester --from /mnt/w --send-report --no-plugin-report --log /h/.local/state/open-apollo/s.log
+check "--no-plugin-report" test "$PLUGIN_REPORT" = 0
+check "--log" test "$LOG_TO" = /h/.local/state/open-apollo/s.log
 # shellcheck disable=SC2034  # parse_args reads them
 bad() { (TARGET_USER="" FROM="" MOUNT_DEV=""; parse_args "$@") 2>/dev/null; test $? = 2; }
 check "--user is required" bad --from /mnt/w
@@ -56,6 +62,7 @@ check "--from and --mount together are refused" bad --user tester --from /mnt/w 
 check "--mount takes a /dev path" bad --user tester --mount sda3
 check "an option without its value is refused" bad --user
 check "an unknown option is refused" bad --user tester --from /mnt/w --bogus
+check "--log takes an absolute path" bad --user tester --from /mnt/w --log setup.log
 (parse_args --help) > "$tmp_dir/help"
 check "--help documents the markers" has "$tmp_dir/help" "::step <id>"
 
@@ -68,8 +75,9 @@ repo="$tmp_dir/repo"
 win="$tmp_dir/win"
 home="$tmp_dir/home"
 mkdir -p "$bin" "$state" "$repo/scripts" "$win" "$home" "$tmp_dir/tmp"
-cp "$PROJECT_DIR/scripts/setup-root.sh" "$repo/scripts/"
-for tool in bash env rm rmdir sed grep head cut tee mktemp cat dirname mkdir touch; do
+cp "$PROJECT_DIR/scripts/setup-root.sh" "$PROJECT_DIR/scripts/oa-log.sh" "$PROJECT_DIR/scripts/oa_redact.py" "$repo/scripts/"
+for tool in bash env rm rmdir sed grep head cut tee mktemp cat dirname mkdir touch \
+            python3 date uname basename seq find wc tr; do
     ln -s "$(command -v "$tool")" "$bin/$tool"
 done
 stub() {
@@ -195,8 +203,11 @@ reset
 touch "$state/plugins"
 run -- --user tester --from "$win" --oa-assets "$oa" --send-report
 check "--send-report reaches install.sh" has "$log" "install.sh --yes --send-report"
+check "the authorized plug-ins stay in the report by default" hasnt "$log" "--no-plugin-report"
 check "with a plugins command it makes the plug-in art" has "$log" "oa-assets plugins --from $win"
-check "the plug-in art is made as the user too" test "$(grep -c '^runuser -u tester' "$log")" = 2
+check "the plug-in art is made as the user too" test "$(grep -c '^runuser -u tester -- env' "$log")" = 2
+run -- --user tester --from "$win" --oa-assets "$oa" --send-report --no-plugin-report
+check "--no-plugin-report reaches install.sh" has "$log" "install.sh --yes --send-report --no-plugin-report"
 check "with specs and art the import is done" has "$tmp_dir/out" "::step import done Console art, plug-in panels"
 
 reset
@@ -356,6 +367,33 @@ check "without root nothing runs" test -z "$(grep -vE '^id ' "$log")"
 reset
 run -- --user nobody-here --from "$win" --oa-assets "$oa"
 check "an unknown user exits 1 before anything" test $? = 1 -a -z "$(grep -E '^(oa-assets|mount)' "$log")"
+
+# ---- the run's log ----
+
+logdir="$home/.local/state/open-apollo"
+rm -rf "$logdir"
+reset
+run -- --user tester --from "$win" --oa-assets "$oa"
+check "a run leaves one log" test "$(find "$logdir" -name 'setup-*.log' 2>/dev/null | wc -l | tr -d ' ')" = 1
+runlog=$(find "$logdir" -name 'setup-*.log' 2>/dev/null | head -1)
+check "the log holds the whole run" has "$runlog" "::step driver done"
+check "the log holds the children's output" has "$runlog" "── Summary ──"
+check "the log has no colour codes" test -z "$(grep -l $'\x1b' "$runlog")"
+check "the user name is taken out of the log" hasnt "$runlog" "tester"
+check "the window still sees every line" has "$tmp_dir/out" "::step driver done"
+check "the last line says where the log is" has "$tmp_dir/out" "Setup log (attach it to a bug report): $logdir/setup-"
+own="$tmp_dir/wizard.log"
+: > "$own"
+rm -rf "$logdir"
+reset
+run -- --user tester --from "$win" --oa-assets "$oa" --log "$own"
+check "--log appends to the wizard's log" has "$own" "::step driver done"
+check "--log makes no second log" test ! -e "$logdir"
+reset
+echo 1 > "$state/install_rc"
+run -- --user tester --from "$win" --oa-assets "$oa" --log "$own"
+check "a failed run's log says so" has "$own" "::step driver failed"
+reset
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed"

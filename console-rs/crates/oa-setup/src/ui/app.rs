@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui;
 use oa_assets::discover::{self, Attached, Root};
@@ -16,6 +16,7 @@ use crate::importer;
 use crate::installlog::{INSTALL_UACONSOLE_SH, Line, Outcome, Progress};
 use crate::jobs::{Job, JobMsg, Waker};
 use crate::options::{self, Options};
+use crate::runlog::{self, Redactor, RunLog};
 use crate::scan::{self, Found, Origin, Scan};
 use crate::setuprun::{self, Leftover, Plan, RootStep, SetupRun, Source};
 use crate::steps::{Status, StepId, Steps};
@@ -48,6 +49,8 @@ pub(super) struct Run {
     pub demo: bool,
     /// What runs, for the log and for running it by hand.
     pub command: String,
+    /// The setup log it appends to.
+    pub log: Option<PathBuf>,
 }
 
 impl Run {
@@ -55,12 +58,20 @@ impl Run {
         self.progress.is_running()
     }
 
-    /// Feed new output; `Some(outcome)` once it ends.
-    fn pump(&mut self) -> Option<Outcome> {
+    /// Feed new output; `Some(outcome)` once it ends. A `--demo` replay's
+    /// lines go to `log` (a real script writes its own).
+    fn pump(&mut self, mut log: Option<&mut RunLog>) -> Option<Outcome> {
         let mut ended = false;
         for m in self.job.poll() {
             match m {
-                JobMsg::Line(l) => self.progress.feed(&l),
+                JobMsg::Line(l) => {
+                    if self.demo
+                        && let Some(log) = log.as_deref_mut()
+                    {
+                        log.line(&l);
+                    }
+                    self.progress.feed(&l)
+                }
                 JobMsg::Exit(code) => {
                     self.progress.finish(code, false);
                     ended = true;
@@ -89,16 +100,26 @@ pub(super) struct Install {
     pub plan: Plan,
     /// The command with sudo, for a terminal.
     pub terminal: String,
+    /// The setup log (setup-root.sh --log appends to it).
+    pub log: Option<PathBuf>,
 }
 
 impl Install {
-    /// Feed new output: the sections that started, and whether it ended.
-    fn pump(&mut self) -> (Vec<RootStep>, bool) {
+    /// Feed new output: the sections that started, and whether it ended. A
+    /// `--demo` replay's lines go to `log` (setup-root.sh writes its own).
+    fn pump(&mut self, mut log: Option<&mut RunLog>) -> (Vec<RootStep>, bool) {
         let mut opened = Vec::new();
         let mut ended = false;
         for m in self.job.poll() {
             match m {
-                JobMsg::Line(l) => opened.extend(self.run.feed(&l)),
+                JobMsg::Line(l) => {
+                    if self.demo
+                        && let Some(log) = log.as_deref_mut()
+                    {
+                        log.line(&l);
+                    }
+                    opened.extend(self.run.feed(&l))
+                }
                 JobMsg::Exit(code) => {
                     self.run.finish(code, !self.demo);
                     ended = true;
@@ -138,6 +159,7 @@ pub(super) enum Action {
     CheckEarlier,
     KeepCurrent(bool),
     SendReport(bool),
+    PluginReport(bool),
     PluginHosting(bool),
     StartInstall,
     SkipInstall,
@@ -177,11 +199,15 @@ pub struct App {
     pub(super) keep_current: bool,
     /// --send-report: upload install.sh's report (opt-in, off by default).
     pub(super) send_report: bool,
+    /// With --send-report: include the authorized plug-ins (on by default; off: --no-plugin-report).
+    pub(super) plugin_report: bool,
     /// --plugin-hosting: host UA plug-ins on the Apollo's DSP (experimental, off by default).
     pub(super) plugin_hosting: bool,
     pub(super) extractor: Option<Extractor>,
     pub(super) extractor_ok: Option<bool>,
     pub(super) install: Option<Install>,
+    /// This run's setup log (~/.local/state/open-apollo/setup-*.log), while it is written.
+    run_log: Option<RunLog>,
     /// Move to each section's page as the install reaches it, until the user navigates.
     follow: bool,
     // Console
@@ -226,10 +252,12 @@ impl App {
             earlier_checking: false,
             keep_current: false,
             send_report: false,
+            plugin_report: true,
             plugin_hosting: false,
             extractor: Extractor::locate(),
             extractor_ok: None,
             install: None,
+            run_log: None,
             follow: false,
             console: None,
             console_bin: options::installed_console(),
@@ -331,6 +359,7 @@ impl App {
             data: (!self.opts.data_is_default).then(|| self.opts.data.clone()),
             keep_current: self.keep_current,
             send_report: self.send_report,
+            plugin_report: self.plugin_report,
             plugin_hosting: self.plugin_hosting,
             panels: std::env::var_os("OA_PANELS_TARBALL").filter(|v| !v.is_empty()).map(|p| absolute(Path::new(&p))),
             panels_sha256: std::env::var("OA_PANELS_SHA256").ok().filter(|v| !v.is_empty()),
@@ -352,7 +381,7 @@ impl App {
         }
         if let Some(i) = self.install.as_mut() {
             let running = i.running();
-            let (opened, ended) = i.pump();
+            let (opened, ended) = i.pump(self.run_log.as_mut());
             // Once it has ended, its result stays put (a new pick resets the steps).
             if running {
                 self.sync_install_steps();
@@ -366,7 +395,8 @@ impl App {
                 self.on_install_end();
             }
         }
-        if let Some(o) = self.console.as_mut().and_then(Run::pump) {
+        if let Some(o) = self.console.as_mut().and_then(|r| r.pump(self.run_log.as_mut())) {
+            self.log_line(&format!("Console build ended: {}", o.message));
             self.steps.set(StepId::Console, o.status);
             if !self.opts.demo {
                 self.console_bin = options::installed_console();
@@ -408,6 +438,8 @@ impl App {
     fn on_install_end(&mut self) {
         let Some(i) = &self.install else { return };
         let ok = i.run.outcome.as_ref().is_some_and(|o| o.status != Status::Failed);
+        let ended = i.run.outcome.as_ref().map(|o| o.message.clone()).unwrap_or_default();
+        self.log_line(&format!("Setup ended: {ended}"));
         self.sys_refresh();
         if !self.opts.demo {
             self.console_bin = options::installed_console();
@@ -522,7 +554,13 @@ impl App {
                 self.earlier_checking = false;
                 self.earlier = Some(r);
             }
-            Msg::DaemonRestarted(r) => self.daemon = Some(r),
+            Msg::DaemonRestarted(r) => {
+                self.log_line(&match &r {
+                    Ok(()) => "Mixer daemon restarted".to_string(),
+                    Err(e) => format!("Mixer daemon restart failed: {e}"),
+                });
+                self.daemon = Some(r)
+            }
         }
     }
 
@@ -648,6 +686,11 @@ impl App {
             Action::SendReport(on) => {
                 if !self.install_running() {
                     self.send_report = on;
+                }
+            }
+            Action::PluginReport(on) => {
+                if !self.install_running() {
+                    self.plugin_report = on;
                 }
             }
             Action::PluginHosting(on) => {
@@ -776,6 +819,7 @@ impl App {
         let Ok(plan) = self.install_plan() else { return };
         let script = self.setup_script();
         let terminal = plan.command_line("sudo", &script);
+        let log = self.open_run_log("Install", Some(&plan), &terminal);
         let job = if self.opts.demo {
             let (distro, kernel) = self.sys.as_ref().map(|s| (s.distro.clone(), s.kernel.clone())).unwrap_or_default();
             let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
@@ -798,6 +842,9 @@ impl App {
             let bash = ["/usr/bin/bash", "/bin/bash"].into_iter().find(|b| Path::new(b).is_file()).unwrap_or("bash");
             let mut cmd = Command::new("pkexec");
             cmd.arg(bash).arg(&script).args(plan.args());
+            if let Some(p) = &log {
+                cmd.arg("--log").arg(p);
+            }
             Job::spawn(cmd, self.wake.clone())
         };
         for s in [StepId::Remove, StepId::Import, StepId::Firmware, StepId::Driver, StepId::Console] {
@@ -809,10 +856,14 @@ impl App {
         self.daemon = None;
         self.restart_daemon = false;
         self.follow = true;
-        self.install = Some(Install { run: SetupRun::new(), job, demo: self.opts.demo, plan, terminal });
+        self.install = Some(Install { run: SetupRun::new(), job, demo: self.opts.demo, plan, terminal, log });
     }
 
     fn start_console(&mut self) {
+        if self.run_log.is_none() {
+            self.open_run_log("Console build", None, "");
+        }
+        let log = self.run_log.as_ref().map(|l| l.path().to_path_buf());
         let run = if self.opts.demo {
             let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
             let res = self.opts.data.join(oa_assets::import::CONSOLE_DIR);
@@ -821,22 +872,79 @@ impl App {
                 job: Job::replay(crate::demo::console(&home, &res), 0, self.wake.clone()),
                 demo: true,
                 command: "bash scripts/install-uaconsole.sh".into(),
+                log: log.clone(),
             }
         } else {
             let Some(repo) = self.opts.repo.clone() else { return };
             let script = repo.join("scripts/install-uaconsole.sh");
             let mut cmd = Command::new("bash");
             cmd.arg(&script);
+            // install-uaconsole.sh appends its output to the setup log.
+            cmd.env_remove("OA_LOG_CAPTURED");
+            match &log {
+                Some(p) => cmd.env("OA_INSTALL_LOG", p),
+                None => cmd.env_remove("OA_INSTALL_LOG"),
+            };
             Run {
                 progress: Progress::new(INSTALL_UACONSOLE_SH),
                 job: Job::spawn(cmd, self.wake.clone()),
                 demo: false,
                 command: format!("bash {}", firmware::shell_quote(&script.to_string_lossy())),
+                log: log.clone(),
             }
         };
+        self.log_line(&format!("Building the Console: {}", run.command));
         self.console = Some(run);
         self.launched = None;
         self.steps.set(StepId::Console, Status::Running);
+    }
+
+    /// A new setup log for this run, opened with what was chosen. `None` (and
+    /// no log) when it can't be written; the install goes on without one.
+    fn open_run_log(&mut self, what: &str, plan: Option<&Plan>, command: &str) -> Option<PathBuf> {
+        let mut log = RunLog::create(&runlog::log_dir(), SystemTime::now(), Redactor::from_env()).ok();
+        if let Some(l) = log.as_mut() {
+            let yes = |b: bool| if b { "yes" } else { "no" };
+            l.line(&format!(
+                "open-apollo setup log: {}, open-apollo-setup {}{}",
+                runlog::iso_utc(SystemTime::now()),
+                env!("CARGO_PKG_VERSION"),
+                if self.opts.demo { " (--demo: nothing is installed)" } else { "" }
+            ));
+            if let Some(s) = &self.sys {
+                l.line(&format!("System: {}, kernel {}", s.distro, s.kernel));
+            }
+            match plan {
+                Some(plan) => l.line(&format!(
+                    "{what}. From: {}. Keep the current install: {}. Send the install report: {}{}. Plug-ins on the Apollo: {}.",
+                    match plan.source {
+                        Source::Folder(_) => "a folder",
+                        Source::Partition(_) => "a Windows partition, opened read-only",
+                    },
+                    yes(plan.keep_current),
+                    yes(plan.send_report),
+                    if plan.send_report {
+                        format!(" (authorized plug-ins: {})", yes(plan.plugin_report))
+                    } else {
+                        String::new()
+                    },
+                    yes(plan.plugin_hosting),
+                )),
+                None => l.line(&format!("{what}.")),
+            }
+            if !command.is_empty() {
+                l.line(&format!("Command: {command}"));
+            }
+        }
+        let path = log.as_ref().map(|l| l.path().to_path_buf());
+        self.run_log = log;
+        path
+    }
+
+    fn log_line(&mut self, text: &str) {
+        if let Some(l) = self.run_log.as_mut() {
+            l.line(text);
+        }
     }
 
     /// The daemon reads the imported catalogue when it starts.

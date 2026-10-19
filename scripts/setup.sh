@@ -26,7 +26,7 @@ ok()   { echo -e "${GREEN}[ OK ]${NC}  $*"; }
 fail() { echo -e "${RED}[FAIL]${NC}  $*" >&2; }
 
 case "${1:-}" in
-    -h|--help) sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"; exit 0 ;;
 esac
 
 if [[ "$(id -u)" -eq 0 ]]; then

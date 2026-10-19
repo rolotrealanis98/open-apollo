@@ -11,8 +11,18 @@ use crate::setuprun::{self, RootStep, Section, Source};
 use crate::steps::{Status, StepId};
 use crate::syscheck::Level;
 
-/// Where install.sh --send-report uploads its report (scripts/install.sh TELEMETRY_URL).
-const REPORT_URL: &str = "open-apollo-api.rolotrealanis.workers.dev";
+/// What the install report holds (scripts/install.sh generate_report) and where it goes
+/// (install.sh TELEMETRY_URL), word for word on Review.
+const REPORT_CONTENTS: &str = "It holds your distro, kernel, CPU, RAM, PCI and sound devices, PipeWire's Apollo devices, \
+each install step's result and the driver's kernel log lines, with your user name, host name, machine id and serial \
+numbers taken out. It goes to open-apollo-api.rolotrealanis.workers.dev; a copy stays in \
+/tmp/open-apollo-install-report.json. Nothing is sent without this box.";
+
+/// What the plug-in part adds (mixer-engine/plugin_report.py), word for word on Review.
+const PLUGIN_REPORT_CONTENTS: &str = "Adds the render ids (UA's plug-in product numbers, such as 2276) of the plug-ins \
+your Apollo itself says are authorized, and which of those built for the Apollo on this computer, so open-apollo can \
+test the plug-ins people own first. Nothing else: no demo or licence details, no serial number, account, names or \
+files. Your Apollo answers this only with Plug-ins on the Apollo on; otherwise the report says it couldn't ask.";
 
 type Acts = Vec<Action>;
 
@@ -526,14 +536,21 @@ impl App {
         {
             act.push(Action::SendReport(send));
         }
-        ui.add(
-            egui::Label::new(
-                RichText::new(format!("It holds your distro, kernel, CPU, PCI and sound devices, PipeWire's device list, each install step's result and the driver's kernel log lines, and goes to {REPORT_URL}; a copy stays in /tmp/open-apollo-install-report.json."))
-                    .small()
-                    .color(WEAK),
-            )
-            .wrap(),
-        );
+        ui.add(egui::Label::new(RichText::new(REPORT_CONTENTS).small().color(WEAK)).wrap());
+        ui.horizontal(|ui| {
+            ui.add_space(24.0);
+            let mut plugins = self.plugin_report;
+            if ui
+                .add_enabled(
+                    idle && self.send_report,
+                    egui::Checkbox::new(&mut plugins, "Include the plug-ins my Apollo is authorized for"),
+                )
+                .changed()
+            {
+                act.push(Action::PluginReport(plugins));
+            }
+        });
+        ui.add(egui::Label::new(RichText::new(PLUGIN_REPORT_CONTENTS).small().color(WEAK)).wrap());
         if let Some(sys) = &self.sys
             && sys.apollo.pci.is_empty()
             && !sys.apollo.usb.is_empty()
@@ -1015,14 +1032,16 @@ impl App {
             if self.steps.status(StepId::Driver).is_success() {
                 rows.push(("Driver", "ua_apollo kernel module, kept up to date by DKMS".into()));
                 rows.push(("", "PipeWire, WirePlumber and UCM2 settings; mixer daemon on 127.0.0.1:4710".into()));
-                let sent = self.install.as_ref().is_some_and(|i| i.plan.send_report);
-                rows.push((
-                    "",
-                    format!(
-                        "Install report: /tmp/open-apollo-install-report.json ({})",
-                        if sent { "also sent" } else { "not uploaded" }
-                    ),
-                ));
+                let plan = self.install.as_ref().map(|i| &i.plan);
+                let sent = match plan {
+                    Some(p) if p.send_report && p.plugin_report => "also sent, with the authorized plug-ins",
+                    Some(p) if p.send_report => "also sent, without plug-ins",
+                    _ => "not uploaded",
+                };
+                rows.push(("", format!("Install report: /tmp/open-apollo-install-report.json ({sent})")));
+            }
+            if let Some(log) = self.install.as_ref().and_then(|i| i.log.as_ref()) {
+                rows.push(("Setup log", format!("{}  (attach it to a bug report)", tilde(log))));
             }
             if self.steps.status(StepId::Console).is_success() {
                 rows.push(("Console", "~/.local/bin/uaconsole, and \"Open Apollo Console\" in your app menu".into()));
@@ -1246,6 +1265,7 @@ fn failed_help(ui: &mut Ui, act: &mut Acts, i: &Install, with_outcome: bool) {
     if !i.run.other.is_empty() && i.run.nothing_changed() {
         log_view(ui, "install-other", &i.run.other, 80.0);
     }
+    log_hint(ui, i.log.as_deref());
     ui.label(RichText::new("You can also run it in a terminal to see everything:").small().color(WEAK));
     command(ui, &i.terminal);
     if secondary(ui, "Back to Review and install", true).clicked() {
@@ -1258,9 +1278,20 @@ fn run_outcome(ui: &mut Ui, run: &Run) {
     if let Some(o) = &run.progress.outcome {
         callout(ui, o.status, &o.message, "");
         if o.status == Status::Failed {
+            log_hint(ui, run.log.as_deref());
             ui.label(RichText::new("You can also run it in a terminal to see everything:").small().color(WEAK));
             command(ui, &run.command);
         }
+    }
+}
+
+/// Where the whole run's output is, for a bug report.
+fn log_hint(ui: &mut Ui, log: Option<&std::path::Path>) {
+    if let Some(log) = log {
+        ui.label(
+            RichText::new("Everything it printed is in this log (attach it to a bug report):").small().color(WEAK),
+        );
+        command(ui, &tilde(log));
     }
 }
 

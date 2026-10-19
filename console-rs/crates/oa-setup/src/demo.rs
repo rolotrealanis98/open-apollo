@@ -255,6 +255,7 @@ pub fn driver(distro: &str, kernel: &str, send_report: bool) -> Vec<(Duration, S
     s.ok(500, "Report saved: /tmp/open-apollo-install-report.json");
     s.header(100, "Telemetry");
     if send_report {
+        s.info(300, "Authorized plug-ins not in the report: plugin_host_off");
         s.info(100, "Sending report to https://open-apollo-api.rolotrealanis.workers.dev/reports...");
         s.ok(600, "Report sent — thank you! (demo: nothing was sent)");
     } else {
