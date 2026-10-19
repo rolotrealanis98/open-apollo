@@ -104,7 +104,7 @@ pub fn read_manifest(data: &Path) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
-fn record(data: &Path, key: &str, value: Value) -> io::Result<()> {
+pub(crate) fn record(data: &Path, key: &str, value: Value) -> io::Result<()> {
     let mut m = read_manifest(data);
     m["schema"] = json!(1);
     m[key] = value;
@@ -112,7 +112,7 @@ fn record(data: &Path, key: &str, value: Value) -> io::Result<()> {
     std::fs::write(data.join(MANIFEST), text + "\n")
 }
 
-fn unix_now() -> u64 {
+pub(crate) fn unix_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
