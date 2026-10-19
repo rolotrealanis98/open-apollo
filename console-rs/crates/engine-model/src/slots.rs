@@ -249,7 +249,11 @@ impl EngineMixer {
     fn uad2_slot(&self, slot: &InsertPaths) -> Option<SlotInfo> {
         let name = self.str_at(&slot.effect_name()).filter(|n| !n.is_empty())?;
         let device = slot.base.split('/').nth(2).and_then(|s| s.parse().ok()).unwrap_or(self.store.topology().device);
-        let (label, italic) = self.plugin_label_on_device(name, device);
+        let (mut label, italic) = self.plugin_label_on_device(name, device);
+        // Console has no loading look of its own (its loads are instant): "…" until it runs.
+        if self.slot_loading(slot) {
+            label.push('…');
+        }
         Some(SlotInfo {
             state: InsertState::Loaded {
                 name: name.to_owned(),
