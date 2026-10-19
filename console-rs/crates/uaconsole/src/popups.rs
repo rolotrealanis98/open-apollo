@@ -65,6 +65,13 @@ pub fn toplevel(l: &Layer) -> bool {
     l.kind == LayerKind::Window || l.id.starts_with("plugin:")
 }
 
+/// The plug-in window layer whose panel takes the input of window `id`: its own, or the one
+/// whose menu it is (`plugin-menu:…`). None for every other window.
+pub fn plugin_layer(id: &str) -> Option<String> {
+    let key = id.strip_prefix("plugin:").or_else(|| id.strip_prefix("plugin-menu:"))?;
+    Some(format!("plugin:{key}"))
+}
+
 /// Window › Next / Previous Window: the window after (before) `current` among the mixer (None)
 /// and the free windows `ids` (layer order), wrapping round.
 pub fn cycle(ids: &[String], current: Option<&str>, forward: bool) -> Option<String> {
@@ -318,6 +325,15 @@ mod tests {
         assert_eq!(cycle(&ids, Some("plugin:in0:1"), true), None, "back to the mixer");
         assert_eq!(cycle(&ids, None, false).as_deref(), Some("plugin:in0:1"));
         assert_eq!(cycle(&[], None, true), None);
+    }
+
+    #[test]
+    fn only_plug_in_windows_and_their_menus_feed_the_overlays() {
+        assert_eq!(plugin_layer("plugin:in0:1").as_deref(), Some("plugin:in0:1"));
+        assert_eq!(plugin_layer("plugin-menu:in0:1").as_deref(), Some("plugin:in0:1"));
+        for other in ["settings", "panel:about", "menu:0", "channels", "popover"] {
+            assert_eq!(plugin_layer(other), None, "{other}");
+        }
     }
 
     #[test]

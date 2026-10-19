@@ -424,7 +424,9 @@ impl App {
             let ids: Vec<&str> = self.frame.layers.iter().map(|l| l.id.as_str()).collect();
             eprintln!("frame: menu open {}, windowing {}, layers {ids:?}, size {:?}", self.mixer.menu.is_some(), self.mixer.windowing.is_some(), self.frame.layout.size());
         }
-        // Separate windows follow the frame's layers (opened, moved, closed).
+        // Separate windows follow the frame's layers (opened, moved, closed). `active` is an
+        // index into them: keep it on the same window, or none when that one closed.
+        let active = self.active.and_then(|i| self.popups.wins.get(i)).map(|w| w.window.id());
         match (&self.gpu, self.mixer.windowing.is_some()) {
             (Some(g), true) => {
                 // Unplaced (Wayland) there is no position; placed, follow the mixer's.
@@ -443,9 +445,7 @@ impl App {
                 w.window.focus_window();
             }
         }
-        if self.active.is_some_and(|i| i >= self.popups.wins.len()) {
-            self.active = None;
-        }
+        self.active = active.and_then(|id| self.popups.index_of(id));
         let Some(g) = self.gpu.as_mut() else { return };
         let size = g.surface.size();
         let Some(frame) = g.surface.acquire() else {
@@ -542,8 +542,11 @@ impl App {
 
     fn route(&mut self, ev: PointerEvent) -> bool {
         if let Some(w) = self.active.and_then(|i| self.popups.wins.get(i)) {
-            // Input in a plug-in window is that window's panel's (the stack serves the top one).
-            let id = w.id.clone();
+            // Input in a plug-in window (or its menu's) is that window's panel's (the stack
+            // serves the top one). Any other window's (Settings, panels, menus) is never the
+            // overlays': their rects overlap a plug-in window's in mixer points, most of all
+            // unplaced, where every free window is centred on the mixer.
+            let Some(id) = crate::popups::plugin_layer(&w.id) else { return false };
             self.overlays.raise(&id);
         } else if self.separate && !self.popups.placed && self.active_part() == Some(0) {
             // Unplaced, plug-in windows are elsewhere: nothing in the mixer window is theirs.
@@ -635,7 +638,12 @@ impl App {
         }
         if self.mixer.drag_pending.is_some() || self.mixer.dragging() {
             let copy = self.copy_modifier();
-            if self.mixer.drag_motion(active_hits!(self), x, y, copy, &*self.model) {
+            // Placed, a separate window covers the mixer under it: a slot hidden there is no
+            // drop target (the mixer keeps the pointer during the drag).
+            let covered =
+                self.popups.placed && self.active.is_none() && self.popups.wins.iter().any(|w| w.rect.contains(x, y));
+            let hits = if covered { &[][..] } else { active_hits!(self) };
+            if self.mixer.drag_motion(hits, x, y, copy, &*self.model) {
                 self.changed();
             }
         } else if self.interaction.is_dragging() {

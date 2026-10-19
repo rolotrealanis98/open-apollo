@@ -185,7 +185,7 @@ impl ViewState {
         let d = self.drag.take()?;
         // A forbidden slot still gets the assignment: the model refuses it without writing,
         // and keeps the reason for the browser and the slot.
-        let Some(target) = d.target.or(d.forbidden.map(|(hit, _)| hit)) else { return Some(Vec::new()) };
+        let Some(target) = d.target.or_else(|| d.forbidden.map(|(hit, _)| hit)) else { return Some(Vec::new()) };
         if matches!(d.payload, DragPayload::Plugin { .. }) {
             self.drop_notice = Some(DropNotice { rect: target.rect, until: Instant::now() + NOTICE_FOR });
         }
