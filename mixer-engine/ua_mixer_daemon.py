@@ -486,11 +486,11 @@ def learn_native_defaults(providers):
     try:
         from native_profiled_carrier_provider import load_defaults
     except Exception:
-        return
-    paths = sorted({str(p.bundle_path) for p in providers if getattr(p, 'bundle_path', None)})
-    missing = [p for p in paths if load_defaults(p) is None]
+        return {}
+    names = {str(p.bundle_path): p.name for p in providers if getattr(p, 'bundle_path', None)}
+    missing = [p for p in sorted(names) if load_defaults(p) is None]
     if not missing:
-        return
+        return {}
     workers = max(1, min(4, (os.cpu_count() or 2) - 1))
     script = str(Path(__file__).resolve().parent / "native_profiled_carrier_provider.py")
     log.info("Native plug-ins: learning the load-time state of %d bundles in the background "
@@ -504,7 +504,8 @@ def learn_native_defaults(providers):
                                  start_new_session=True)
             except OSError as error:
                 log.warning("Native plug-ins: load-time state not learned: %s", error)
-                return
+                return {}
+    return {p: names[p] for p in missing}
 
 
 def native_unavailable_reason(error) -> str:
@@ -556,6 +557,12 @@ class MixerClient:
         """Queue data for sending to this client.  `data` is a UBJS frame
         or NUL-terminated JSON text; the latter goes out as a JSON frame
         while the client is in command_format 1."""
+        closing = getattr(self.writer, "is_closing", None)
+        if not self.closed and callable(closing) and closing():
+            # The connection broke (a send failed, or the peer went away): asyncio would log
+            # "socket.send() raised exception" for every later write. Stop writing to it.
+            self.closed = True
+            log.info("%s: connection lost; no more writes", self.id)
         if not self.closed:
             try:
                 text = None
@@ -629,6 +636,11 @@ class MixerDaemon:
         # other than 48 kHz): _native_attach retries it, the reason is published meanwhile.
         self._native_attach = None
         self._native_unavailable_reason = ""
+        self._native_retries = 0
+        # Bundles whose load-time state is still being learned ({path: plug-in name}): a load of
+        # one of them starts its emulator first (a few seconds), so the slot says "Preparing".
+        self._native_preparing: dict = {}
+        self._native_prepare_total = 0
         # Maps the mapper builds on this machine (profiled_bundle_registry.BundleWatcher), offered
         # as they land; None without --native-plugin-bundles.
         self.plugin_maps = None
@@ -869,7 +881,7 @@ class MixerDaemon:
                                        else None)
         self._native_attach = None
         self._native_unavailable_reason = ""
-        log.info("Native plug-in hosting on")
+        log.info("Native plug-in hosting on%s", " (it was unavailable at start)" if self._native_retries else "")
         self._publish_native_capabilities()
 
     def _native_hosting_try(self) -> bool:
@@ -877,9 +889,15 @@ class MixerDaemon:
         attach = self._native_attach
         if attach is None:
             return True
+        self._native_retries += 1
         router = self.hw_router
         if router is None or not getattr(router.backend, 'connected', False):
             return False
+        # The first failure was logged in full at start; a retry that fails the same way is quiet
+        # (the chain logs every unconfirmed device operation with its traceback).
+        chain_log = logging.getLogger("plugin_native_chain")
+        level = chain_log.level
+        chain_log.setLevel(logging.CRITICAL)
         try:
             backend, transactions = attach()
         except Exception as error:
@@ -889,8 +907,39 @@ class MixerDaemon:
                 self._native_unavailable_reason = reason
                 self._publish_native_capabilities()
             return False
+        finally:
+            chain_log.setLevel(level)
         self.attach_native(backend, transactions)
         return True
+
+    def _native_prepare_poll(self):
+        """Publish how many plug-ins are ready to load at once (their load-time state learned):
+        /NativePluginsReady, /NativePluginsPreparing and /NativePluginHostingStatus."""
+        if not self._native_preparing and not self._native_prepare_total:
+            return
+        try:
+            from native_profiled_carrier_provider import load_defaults
+        except Exception:
+            return
+        for path in [p for p in self._native_preparing if load_defaults(p) is not None]:
+            del self._native_preparing[path]
+        preparing = set(self._native_preparing.values())
+        native = self._native_plugin_backend
+        names = {p.name for p in native.providers.values()} if native is not None else set()
+        self._native_prepare_total = max(self._native_prepare_total, len(names))
+        ready = len(names - preparing)
+        status = (f"Preparing plug-ins: {ready} of {len(names)} ready (the others load a few seconds slower)"
+                  if preparing and names else "")
+        self._publish_license("/NativePluginsPreparing", len(preparing), "int")
+        self._publish_license("/NativePluginsReady", ready, "int")
+        self._publish_license("/NativePluginHostingStatus", status, "string")
+        if not preparing:
+            self._native_prepare_total = 0
+
+    async def _native_prepare_watch(self, interval: float = 3.0):
+        while True:
+            self._native_prepare_poll()
+            await asyncio.sleep(interval)
 
     async def _native_hosting_retry(self, interval: float = 5.0):
         """Keep trying until the driver's plug-in host is usable (a cold start after the driver
@@ -973,7 +1022,7 @@ class MixerDaemon:
         if providers:
             log.info("Plug-in maps: now offering %s", watcher.summary())
             self._publish_native_capabilities()
-            learn_native_defaults(providers)   # so their first load does not wait for an emulator
+            self._native_preparing.update(learn_native_defaults(providers))
 
     async def _plugin_maps_watch(self, interval: float = 3.0):
         while self.plugin_maps is not None:
@@ -3306,7 +3355,8 @@ class MixerDaemon:
         loading = (path.removesuffix("/value").endswith("/EffectName")
                    and isinstance(cmd.value, str) and cmd.value != "")
         if loading:
-            self._publish_license(slot + "/Status", "Loading", "string")
+            preparing = isinstance(cmd.value, str) and cmd.value in self._native_preparing.values()
+            self._publish_license(slot + "/Status", "Preparing plug-in…" if preparing else "Loading", "string")
         self._native_busy = True
 
         def on_loop(publish):
@@ -3332,7 +3382,7 @@ class MixerDaemon:
                 log.exception("Native plug-in transaction on %s raised", path)
                 result = PluginResult("openapollo.plugin_transaction_indeterminate", repr(error))
             self._native_busy = False
-            if loading and self.state.get_value(slot + "/Status") == "Loading":
+            if loading and self.state.get_value(slot + "/Status") in ("Loading", "Preparing plug-in…"):
                 self._publish_license(slot + "/Status", "", "string")
             self._finish_plugin_set(client, path, cmd, resp_params, result)
             while self._native_waiting and not self._native_busy:
@@ -4605,6 +4655,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
         log.info("Software-only mode (--no-hardware)")
 
     native_backend = native_transactions = native_attach = plugin_maps = None
+    native_preparing = {}
     native_reason = ""
     if native_enabled:
         from plugin_native import load_provider, register_native
@@ -4621,8 +4672,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
             providers = None
             native_reason = f"Plug-in maps unreadable: {type(error).__name__}: {error}"
             log.error("Native plug-in hosting off: %s", native_reason)
-        if providers is not None and args.native_plugin_bundles:
-            learn_native_defaults(providers)
+        native_preparing = (learn_native_defaults(providers)
+                            if providers is not None and args.native_plugin_bundles else {})
         if providers is not None:
             def native_attach():
                 return register_native(state, helper_tree, backend, providers)
@@ -4666,6 +4717,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                          plugin_hosting=native_enabled)
     daemon._native_attach = native_attach if native_backend is None else None
     daemon._native_unavailable_reason = native_reason
+    daemon._native_preparing.update(native_preparing)
     if native_backend is None and native_enabled:
         daemon._publish_native_capabilities()   # NativePluginHosting false and why
     daemon.plugin_maps = plugin_maps if native_enabled else None
@@ -4727,6 +4779,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
         ]
         if daemon._native_attach is not None:
             tasks.append(asyncio.create_task(daemon._native_hosting_retry()))
+        if native_enabled:
+            tasks.append(asyncio.create_task(daemon._native_prepare_watch()))
         if daemon.plugin_maps is not None:
             tasks.append(asyncio.create_task(daemon._plugin_maps_watch()))
         if ws_server:

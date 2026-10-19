@@ -76,3 +76,44 @@ def test_a_quarantine_is_logged_and_published(caplog):
                               {}, type('R', (), {'committed': False, 'error': None})())
     assert state.get_value('/NativePluginHosting') is False
     assert 'restart the mixer daemon' in state.get_value('/NativePluginHostingReason')
+
+
+def test_retries_are_quiet_and_recovery_is_one_line(caplog):
+    import logging
+    p = provider(1)
+    _, driver, backend, tx = rig((p,), max_instances=4)
+    daemon = MixerDaemon(backend.publisher.state, None, helper_tree=backend.publisher.helper, plugin_hosting=True)
+    daemon.hw_router = Router()
+    tries = []
+
+    def attach():
+        tries.append(1)
+        if len(tries) < 4:
+            logging.getLogger('plugin_native_chain').exception('native chain: compensation device operation raised')
+            raise ValueError('initial native compensation could not be confirmed')
+        return backend, tx
+    daemon._native_attach = attach
+    with caplog.at_level('INFO'):
+        while not daemon._native_hosting_try():
+            pass
+    text = caplog.text
+    assert 'compensation device operation raised' not in text           # no traceback every 5 s
+    assert text.count('still unavailable') == 1 and text.count('Native plug-in hosting on') == 1
+
+
+def test_preparation_progress_and_preparing_status(tmp_path, monkeypatch):
+    import native_profiled_carrier_provider as npc
+    p = provider(1)
+    state, driver, backend, tx = rig((p,), max_instances=4)
+    daemon = MixerDaemon(state, None, helper_tree=backend.publisher.helper,
+                         plugin_transactions=tx, plugin_hosting=True)
+    learned = set()
+    monkeypatch.setattr(npc, 'load_defaults', lambda path: (1,) if path in learned else None)
+    daemon._native_preparing = {'/maps/x-mono': p.name}
+    daemon._native_prepare_poll()
+    assert state.get_value('/NativePluginsPreparing') == 1 and state.get_value('/NativePluginsReady') == 0
+    assert state.get_value('/NativePluginHostingStatus').startswith('Preparing plug-ins: 0 of 1 ready')
+    learned.add('/maps/x-mono')
+    daemon._native_prepare_poll()
+    assert state.get_value('/NativePluginsPreparing') == 0 and state.get_value('/NativePluginsReady') == 1
+    assert state.get_value('/NativePluginHostingStatus') == ''
