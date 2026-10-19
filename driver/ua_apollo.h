@@ -1955,6 +1955,7 @@ int ua_dsp_set_bus_param_flags(struct ua_device *ua, u32 bus_id, u32 param,
 int ua_dsp_replay_bus_params(struct ua_device *ua);	/* ua->lock */
 int ua_dsp_replay_if_pending(struct ua_device *ua, const char *why); /* ua->lock */
 int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus_id, u32 dsp_idx);
+int ua_dsp_move_bus(struct ua_device *ua, u32 bus_id, u32 dsp_idx); /* ua->lock */
 int ua_dsp_set_bus_enable(struct ua_device *ua, u32 bus_idx, int enable);
 u32 ua_dsp_get_bus_enable_mask(struct ua_device *ua);
 int ua_dsp_set_input_param(struct ua_device *ua, u32 input, u32 sub,

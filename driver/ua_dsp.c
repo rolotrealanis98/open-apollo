@@ -3783,8 +3783,8 @@ static int ua_dsp_bus_cmd_send(struct ua_device *ua, unsigned int dsp,
  *
  * Where it goes (CUAD2DeviceMixer::SetMixerBusParam 0x3031e, parity/14 B4):
  * the DSP that hosts the bus, and also DSP 0 when that is another DSP.
- * Every bus is hosted by DSP 0 on the Apollo x4 (table default 0, nothing
- * moves an input yet), so one entry goes to DSP 0 exactly as before.
+ * Every bus starts on DSP 0; the input strips move their inputs' buses to
+ * the DSP they run on (ua_dsp_move_bus()), and those get both entries.
  * The kext additionally follows the span links of a spanned input (an
  * origin bus's coefficient is reused, and the partner is re-synced); that
  * needs the DSP strip engine's placement and is not implemented here.
@@ -3846,10 +3846,8 @@ int ua_dsp_set_bus_param(struct ua_device *ua, u32 bus_id,
  * @dsp_idx: hosting DSP; 0 is the default every bus starts with
  *
  * The kext's per-bus hosting table (this+0x1560[bus], changed by
- * MoveInputToDSP and spanning).  Nothing moves an input on the x4, so
- * nothing calls this yet; it is the hook for the strip engine.  Only
- * coefficients sent afterwards follow the new owner; call
- * ua_dsp_replay_bus_params() to re-send the cache.
+ * MoveInputToDSP and spanning).  Only coefficients sent afterwards follow
+ * the new owner; ua_dsp_move_bus() also re-sends the bus's cache.
  */
 int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus_id, u32 dsp_idx)
 {
@@ -3857,6 +3855,51 @@ int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus_id, u32 dsp_idx)
 		return -EINVAL;
 	ua->dspx.bus_owner[bus_id] = dsp_idx;
 	return 0;
+}
+
+/**
+ * ua_dsp_move_bus - Host a mixer bus on another DSP (kext MoveInputToDSP)
+ * @ua: device (caller must hold ua->lock)
+ * @bus_id: bus 0-31
+ * @dsp_idx: the DSP that now runs the input's strip
+ *
+ * Records the new owner, then re-sends that bus's cached coefficients to
+ * it.  The DSP that runs an input's strip is the one that mixes it: with
+ * the strips on DSP 1, coefficients sent only to DSP 0 leave the input in
+ * the monitor mix at DSP 1's own level, so fader, pan, mute and solo do
+ * nothing (2026-10-19, x4 on the Mac Studio).  Later coefficients go to
+ * the owner and DSP 0, as ua_dsp_set_bus_param_flags() does.  Sleeps when
+ * a ring is full.
+ *
+ * Returns 0, or the first error (the remaining cells are still sent).
+ */
+int ua_dsp_move_bus(struct ua_device *ua, u32 bus_id, u32 dsp_idx)
+{
+	unsigned int owner, param, side;
+	int ret, err = 0;
+
+	lockdep_assert_held(&ua->lock);
+
+	ret = ua_dsp_set_bus_owner(ua, bus_id, dsp_idx);
+	if (ret)
+		return ret;
+	owner = ua_dsp_bus_owner(ua, bus_id);
+	if (!owner)
+		return 0;
+
+	for (param = 0; param < UA_BUS_COEF_PARAMS; param++)
+		for (side = 0; side < UA_BUS_COEF_SIDES; side++) {
+			if (!test_bit(ua_bus_coef_cell(bus_id, param, side),
+				      ua->dspx.bus_coef_valid))
+				continue;
+			ret = ua_dsp_bus_cmd_send(ua, owner, bus_id, param,
+						  side,
+						  ua->dspx.bus_coef[bus_id][param][side],
+						  true);
+			if (ret && !err)
+				err = ret;
+		}
+	return err;
 }
 
 /**
