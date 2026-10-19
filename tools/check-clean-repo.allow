@@ -46,3 +46,4 @@ u               # oa-setup demo: /home/u
 
 [skip]
 # <rule> <path glob>: a rule that does not apply to a file. Keep it rare.
+panel-spec console-rs/tools/drive/fixtures/specs/PluginSpec_test_*.json  # synthetic one-knob "UAD Test Comp" spec for the GUI drive suite, no UA data
