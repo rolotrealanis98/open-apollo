@@ -235,6 +235,15 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
             ui.hit(close, bid(Control::BrowserHintClose), HitKind::Tap);
             y = hr.max_y() + MARGIN;
         }
+        // open-apollo's hosting state (hosting off and why, plug-ins preparing or mapping).
+        for line in model.plugin_hosting_banner() {
+            let width = list.w - 2.0 * MARGIN;
+            for l in wrap(&line, ((width / 5.5) as usize).max(12)).iter().take(4) {
+                ui.text(l, bold(10.0, Rgba::rgb8(227, 227, 228)), Rect::new(list.x + MARGIN, y, width, 15.0), Align::Left);
+                y += 15.0;
+            }
+            y += MARGIN / 2.0;
+        }
         let catalog = model.plugin_catalog();
         let selected_hint = b.selected.and_then(|i| catalog.get(i as usize)).and_then(|p| p.native_hint.as_deref());
         // A refused assignment keeps its target (assign mode or the selected row) and says why.

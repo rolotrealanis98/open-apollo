@@ -1,0 +1,13 @@
+# Plug-ins still preparing and mapping show at the top of the browser; a load the daemon must first
+# learn says "Preparing plug-in…" on its locked window, then goes live.
+#: --catalogue --specs --daemon-arg=--load-delay --daemon-arg=3 "--daemon-arg=--loading-status=Preparing plug-in…" --daemon-arg=--root-prop "--daemon-arg=NativePluginHostingStatus=Preparing plug-ins: 28 of 111 ready" --daemon-arg=--root-prop "--daemon-arg=NativePluginMapsStatus=Mapping plug-ins 12/37 · ~4 min left"
+settle
+text Preparing plug-ins: 28 of 111 ready
+text Mapping plug-ins 12/37
+dragto browser:BrowserItem(0) /devices/0/inputs/0:Insert(0)
+wait 300
+layer plugin:/devices/0/inputs/0:0
+text Preparing plug-in…
+wait 3500
+notext Preparing plug-in…
+layer plugin:/devices/0/inputs/0:0

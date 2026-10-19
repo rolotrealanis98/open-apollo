@@ -48,6 +48,13 @@ impl EngineMixer {
     /// An advertised native host is a restricted loader, not the entire licensed catalogue.
     /// Older engines omit this extension and retain their original assignment behavior.
     pub(crate) fn native_assignment_refusal(&self, slot: &InsertPaths, name: &str) -> Option<String> {
+        // Hosting off with the daemon's reason (open-apollo: the DSPs have not cold-started, a
+        // quarantine): every load would be refused, so say why at once.
+        if !name.is_empty() && self.bool_at("/NativePluginHosting") == Some(false) {
+            if let Some(reason) = self.str_at("/NativePluginHostingReason").filter(|r| !r.is_empty()) {
+                return Some(reason.to_owned());
+            }
+        }
         if name.is_empty() || self.bool_at("/NativePluginHosting") != Some(true) {
             return None;
         }

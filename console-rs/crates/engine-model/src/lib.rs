@@ -689,6 +689,18 @@ impl MixerModel for EngineMixer {
         self.surface_catalog()
     }
 
+    fn plugin_hosting_banner(&self) -> Vec<String> {
+        let reason = (self.bool_at("/NativePluginHosting") == Some(false))
+            .then(|| self.str_at("/NativePluginHostingReason"))
+            .flatten();
+        [reason, self.str_at("/NativePluginHostingStatus"), self.str_at("/NativePluginMapsStatus")]
+            .into_iter()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
     fn plugin_notice(&self) -> Option<&str> {
         self.native_load_notice.as_deref().or_else(|| self.store.last_error())
     }

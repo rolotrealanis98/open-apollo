@@ -663,6 +663,12 @@ pub trait MixerModel {
     fn plugin_notice(&self) -> Option<&str> {
         None
     }
+    /// open-apollo's plug-in hosting state, shown at the top of the plug-in browser while any is
+    /// non-empty: why hosting is off (`/NativePluginHostingReason`), plug-ins still preparing
+    /// (`/NativePluginHostingStatus`), plug-ins still being mapped (`/NativePluginMapsStatus`).
+    fn plugin_hosting_banner(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// Why plug-in `name` cannot load on insert `slot` (a `Control::Insert` id), when the model
     /// knows before asking the engine (native hosting's per-plug-in slot lists).
     fn insert_refusal(&self, _slot: &ControlId, _name: &str) -> Option<String> {

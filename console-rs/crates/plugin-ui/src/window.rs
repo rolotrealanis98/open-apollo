@@ -297,6 +297,8 @@ pub struct PluginWindow {
     /// A load is in flight: the panel shows dimmed with "LOADING…" and takes no input (the shell
     /// keeps only Close) until the engine reports the plug-in live.
     pub loading: bool,
+    /// What the locked panel says: the slot's `Status` ("Preparing plug-in…"), else "LOADING…".
+    pub loading_text: String,
 }
 
 /// `OA_PLUGIN_WIREFRAME=1`: open spec panels even when their art is not all generated
@@ -356,6 +358,7 @@ impl PluginWindow {
             inline_popover: true,
             availability,
             loading: false,
+            loading_text: String::new(),
         }
     }
 
@@ -442,7 +445,8 @@ impl PluginWindow {
         if self.loading {
             ui.fill(l.editor, BLACK.with_alpha(0.55));
             let style = Ui::plain_style("Helvetica", 12.0, true, LABEL);
-            ui.text("LOADING…", style, l.editor, Align::Center);
+            let text = if self.loading_text.is_empty() { "LOADING…" } else { &self.loading_text };
+            ui.text(text, style, l.editor, Align::Center);
         }
         if let Some(f) = l.footer {
             self.footer(ui, &l, f);

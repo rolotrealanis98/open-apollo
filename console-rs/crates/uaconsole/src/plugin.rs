@@ -247,6 +247,7 @@ impl WindowPanel {
             if let Some(slot) = &mut self.engine {
                 slot.sync(store);
                 self.window.loading = slot.loading();
+                self.window.loading_text = slot.loading_text(store).unwrap_or_default();
                 self.snapshot = ParamSnapshot::capture(&slot.view(store));
                 if let Some(p) = slot.power(store) {
                     self.window.chrome.power = p;
