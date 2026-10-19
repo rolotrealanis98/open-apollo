@@ -136,6 +136,23 @@ class TransactionResult:
     quarantined: bool = False
 
 
+
+def slot_views(publisher, slot):
+    """Publication serial plus this slot's subtree in both views. A control transaction can
+    run beside the daemon's event loop, which keeps the rest of the tree current; only a
+    publication or an edit to this slot invalidates it."""
+    node, _ = publisher.state._resolve_path(slot)
+    helper = publisher.helper.root
+    for part in slot.strip("/").split("/"):
+        helper = next(
+            (c for c in helper.get("children", []) if c.get("path") == part), None
+        )
+        if helper is None:
+            break
+    return copy.deepcopy(
+        (publisher.version, publisher.generation, node, helper)
+    )
+
 class PluginTransactions:
     """Replacement, confirmed retirement, and owned-lease control transactions.
 
@@ -665,9 +682,7 @@ class PluginTransactions:
                     or value not in meta.get("values", [])
                 ):
                     return TransactionResult("openapollo.invalid_plugin_value")
-            before = copy.deepcopy(
-                (p.version, p.generation, p.state.root, p.helper.root)
-            )
+            before = slot_views(p, slot)
         except Exception as exc:
             return TransactionResult(
                 "openapollo.plugin_publication_unavailable",
@@ -765,12 +780,7 @@ class PluginTransactions:
                         "Exact prior restoration unconfirmed"
                     )
                 p.stage_control(slot, restored.readback)
-                if before != (
-                    p.version,
-                    p.generation,
-                    p.state.root,
-                    p.helper.root,
-                ):
+                if before != slot_views(p, slot):
                     raise PublicationError(
                         "Publication changed during control/restore"
                     )
@@ -784,12 +794,7 @@ class PluginTransactions:
             )
 
         def views_unchanged():
-            return before == (
-                p.version,
-                p.generation,
-                p.state.root,
-                p.helper.root,
-            )
+            return before == slot_views(p, slot)
 
         if not same_session() or not views_unchanged():
             return TransactionResult(
