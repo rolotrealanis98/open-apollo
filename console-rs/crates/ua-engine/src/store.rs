@@ -622,7 +622,7 @@ impl Store {
                 let failed_load = (field == "EffectName"
                     && node.starts_with("/devices/")
                     && node.rsplit_once("/effects/").is_some_and(|(_, slot)| slot.parse::<u32>().is_ok()))
-                    .then(|| node.to_owned());
+                .then(|| node.to_owned());
                 self.refused(&path, message);
                 if let Some(node) = failed_load {
                     self.refresh(&node);
@@ -743,7 +743,11 @@ impl Store {
             self.model.holds.iter().filter(|(_, h)| h.until <= now).map(|(k, _)| k.clone()).collect();
         for p in expired {
             if let Some(Hold { latest: Some(v), .. }) = self.model.holds.remove(&p) {
+                // A push came in while held: show it, then ask the engine what it holds now
+                // (`reread`: a newer write or push still wins), so a slow or missing echo of
+                // our own write cannot leave the control on a stale value.
                 self.model.set_value(&p, v);
+                self.reread(&p);
             }
         }
     }
@@ -1220,13 +1224,17 @@ mod error_notice_tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         store.model.set_value(&property, "Rejected plug-in".into());
-        store.model.holds.insert(property.clone(), Hold {
-            until: Instant::now() + Duration::from_secs(30),
-            latest: Some("Rejected plug-in".into()),
-            local: "Rejected plug-in".into(),
-        });
+        store.model.holds.insert(
+            property.clone(),
+            Hold {
+                until: Instant::now() + Duration::from_secs(30),
+                latest: Some("Rejected plug-in".into()),
+                local: "Rejected plug-in".into(),
+            },
+        );
         store.handle_update(Update::Error {
-            path: format!("{property}/value"), message: "Device refused this plug-in".into(),
+            path: format!("{property}/value"),
+            message: "Device refused this plug-in".into(),
         });
         assert!(!store.model.holds.contains_key(&property));
         assert!(store.refresh_due.contains_key(slot));

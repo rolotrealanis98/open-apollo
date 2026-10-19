@@ -207,6 +207,29 @@ fn echoes_do_not_pull_back_a_drag() {
 }
 
 #[test]
+fn a_release_rereads_when_the_engine_never_echoes() {
+    // The engine applies our writes but echoes nothing (lossy or very slow): a push held
+    // during the drag must not stick after the release; the store re-reads the engine.
+    let server = mock(MockOptions { withhold_echoes: true, ..MockOptions::default() });
+    let mut store = live_store(&server, Options { allow_writes: true, ..Options::default() });
+    let fader = store.topology().inputs[0].fader();
+    store.set_writes_enabled(true);
+    store.set_echo_hold(Duration::from_millis(300));
+    store.begin_gesture();
+    store.set(&fader, 0.6);
+    server.push(&fader, 0.3); // stale, from another client
+    let marker = "/devices/0/inputs/0/Name";
+    server.push(marker, "echo-marker");
+    drain_until(&mut store, "the stale push is in", T, |s| {
+        s.value(marker) == Some(&Value::String("echo-marker".into()))
+    });
+    assert_eq!(store.value(&fader), Some(&Value::Number(0.6)));
+    store.end_gesture();
+    drain_until(&mut store, "the engine took 0.6", T, |_| server.value(&fader) == Some(Value::Number(0.6)));
+    drain_until(&mut store, "0.6 after the release", T, |s| s.value(&fader) == Some(&Value::Number(0.6)));
+}
+
+#[test]
 fn reconnects_and_reloads() {
     let server = mock(MockOptions::default());
     let mut store = live_store(&server, Options { min_backoff: Duration::from_millis(100), ..Options::default() });
