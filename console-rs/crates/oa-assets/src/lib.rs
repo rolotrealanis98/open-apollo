@@ -16,6 +16,7 @@ pub mod detect;
 pub mod discover;
 pub mod dsp;
 pub mod firmware;
+pub mod icons;
 pub mod import;
 pub mod pe;
 pub mod plugins;

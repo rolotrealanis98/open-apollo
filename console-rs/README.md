@@ -94,6 +94,9 @@ run time, in this order:
 
 Plug-in icons come from `Resources/Plug-In Icons` (Windows) or
 `/Library/Application Support/Universal Audio/Plug-In Icons` (macOS). They are optional.
+On Linux, `oa-assets import` also copies them into `console-resources/Plug-In Icons`, from your
+install's `Plug-In Icons` folder or, if UAD never saw an Apollo, from the `apollo-32bit.msi` in
+Windows' installer cache (`oa-assets icons` repeats just that step).
 
 If you have none of these, get the `Resources` folder from your own UAD Console install:
 
