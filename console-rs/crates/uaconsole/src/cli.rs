@@ -22,7 +22,8 @@ usage:
 
   --open settings[:hardware|io-matrix|options|midi|network], cue-outputs,
   monitor-controller[:1], headphone-correction, plugin-scenes, meters, talkback,
-  aux-sends:N, add-device, io-presets, input-source:N, tempo or about opens that window.
+  aux-sends:N, add-device, io-presets, input-source:N, tempo or about opens that window;
+  snapshots shows the Snapshots section.
   --view sets the mixer view at start (window and --render), comma-separated items:
   inputs|inserts|sends|fader=0|1, small|large, fixed=0|1, overview=0|1, scroll=F, aux-scroll=F,
   browser=0|1, tab=plugins|presets, hint=0|1, aux=0|1, ctrl=0|1, scenes=0|1, scene-info=0|1,
