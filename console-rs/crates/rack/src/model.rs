@@ -429,6 +429,8 @@ pub struct EngineSettings {
     pub connected: bool,
     pub sample_rate: Option<u32>,
     pub sample_rates: Vec<u32>,
+    /// The engine's per-rate `enabled` flag, parallel to `sample_rates`; missing = enabled.
+    pub sample_rate_enabled: Vec<bool>,
     pub clock_source: Option<String>,
     pub clock_sources: Vec<String>,
     /// `/BufferSize` (Windows engine only).
@@ -857,6 +859,7 @@ impl Default for PreviewMixer {
                 connected: false,
                 sample_rate: Some(48_000),
                 sample_rates: vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
+                sample_rate_enabled: Vec::new(),
                 clock_source: Some("Internal".into()),
                 clock_sources: vec!["Internal".into(), "S/PDIF".into(), "Word Clock".into()],
                 buffer_size: Some(256),

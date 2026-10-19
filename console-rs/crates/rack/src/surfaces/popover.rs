@@ -279,7 +279,8 @@ pub fn sample_rate_menu(model: &dyn MixerModel) -> PopupMenu {
         m.push(PopupItem::new("OFFLINE", gid(Control::SampleRate(0))).enabled(false));
     }
     for (i, hz) in st.sample_rates.iter().enumerate() {
-        m.push(PopupItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).ticked(Some(*hz) == st.sample_rate));
+        let on = st.sample_rate_enabled.get(i).copied().unwrap_or(true);
+        m.push(PopupItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).ticked(Some(*hz) == st.sample_rate).enabled(on));
     }
     m
 }
