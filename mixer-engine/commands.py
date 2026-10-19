@@ -678,13 +678,16 @@ class CommandEngine:
             raise CommandError(f"no object {path}")
         return node
 
-    def _collect(self, base: str, skip_names=_CHANNEL_SKIP_NAMES) -> dict:
-        """{relative path: value} of the writable properties under `base`."""
+    def _collect(self, base: str, skip_names=_CHANNEL_SKIP_NAMES,
+                 readonly: bool = False) -> dict:
+        """{relative path: value} of the writable properties under `base`
+        (and the read-only ones with `readonly`)."""
         out: dict = {}
 
         def walk(prefix: str, node: dict):
             for name, meta in node.get("properties", {}).items():
-                if (meta.get("readonly") or "value" not in meta
+                if ((meta.get("readonly") and not readonly)
+                        or "value" not in meta
                         or name in skip_names):
                     continue
                 out[prefix + name] = meta["value"]
@@ -1097,7 +1100,9 @@ class CommandEngine:
             if not self.state.path_exists(f"/{root}"):
                 continue
             try:
-                rel = self._collect(f"/{root}", frozenset({"Type"}))
+                # the routes' Active is read-only to a client SET, but a
+                # preset is what sets it
+                rel = self._collect(f"/{root}", frozenset({"Type"}), True)
             except CommandError:
                 continue
             for r, v in rel.items():

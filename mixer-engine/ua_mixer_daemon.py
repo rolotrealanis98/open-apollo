@@ -2684,6 +2684,13 @@ class MixerDaemon:
                     self._send_response(client, path, cmd.value, resp_params)
             return
 
+        # The engine refuses a client SET of a read-only value (the daemon's
+        # own writers call state.set and are not subject to this)
+        if self.state.is_readonly(path):
+            self._send_engine_error(client, path, "uasrv.read_only",
+                                    resp_params)
+            return
+
         old_value = self.commands.value_of(path)
 
         # Console host properties (console_commands): insert EffectName,
@@ -2727,7 +2734,9 @@ class MixerDaemon:
                     client.send(ubjson_encode_response(resp))
                 return
             if result == "not_found":
-                self.state.set(path, cmd.value)
+                if not self.state.set(path, cmd.value):
+                    self._send_unresolved_set(client, path, resp_params)
+                    return
             else:
                 # Helper tree updated — also route to hardware.
                 # Helper SET paths may omit /value suffix; normalize for
@@ -2744,7 +2753,9 @@ class MixerDaemon:
                 # Suppress readback echo for this path (300ms window)
                 self._readback_suppress[path] = time.monotonic()
         else:
-            self.state.set(path, cmd.value)
+            if not self.state.set(path, cmd.value):
+                self._send_unresolved_set(client, path, resp_params)
+                return
             # Suppress readback echo for 4710 clients too (prevents
             # gain LED blinking from readback pushing old values back)
             self._readback_suppress[path] = time.monotonic()
@@ -2961,6 +2972,14 @@ class MixerDaemon:
         if "func_id" in params:
             self._send_response(client, path, result.value, params)
         return True
+
+    def _send_unresolved_set(self, client: MixerClient, path: str,
+                             params: dict | None = None):
+        """A SET of a path the tree does not have: refused, nothing changed
+        (the engine's "Unable to resolve path for set.")."""
+        log.info("%s: SET %s refused (unknown path)", client.id, path)
+        self._send_engine_error(client, path,
+                                "Unable to resolve path for set.", params)
 
     def _send_engine_error(self, client: MixerClient, path: str, error: str,
                            params: dict | None = None):

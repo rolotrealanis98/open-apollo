@@ -22,12 +22,32 @@ and "Gain/value" as its current value. We replicate this.
 
 import json
 import logging
+import re
 import threading
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
 log = logging.getLogger(__name__)
+
+# Property patterns the engine publishes as `readonly` (N = any index); names
+# only (device_maps/readonly_properties.json)
+READONLY_PATTERNS = Path(__file__).resolve().parent / "device_maps" / \
+    "readonly_properties.json"
+
+
+def _readonly_regex(path: Path = READONLY_PATTERNS):
+    try:
+        patterns = json.loads(Path(path).read_text())["readonly"]
+    except (OSError, ValueError, KeyError):
+        log.warning("No readonly property list at %s", path)
+        return None
+    return re.compile("^(?:%s)$" % "|".join(
+        "/".join(r"\d+" if part == "N" else re.escape(part)
+                 for part in pattern.split("/")) for pattern in patterns))
+
+
+_READONLY_RE = _readonly_regex()
 
 
 class StateTree:
@@ -112,6 +132,12 @@ class StateTree:
         for key in ("type", "value", "min", "max", "values", "readonly"):
             if overrides.get(key) is not None:
                 prop[key] = overrides[key]
+
+    def is_readonly(self, path: str) -> bool:
+        """Whether a client SET of `path` is refused (`uasrv.read_only`).
+        Daemon-internal writers call set() and are not subject to it."""
+        prop = self.get_prop_dict(path)
+        return bool(prop and prop.get("readonly"))
 
     def get_prop_dict(self, path: str) -> dict | None:
         """Get the raw property dict for a path (for direct mutation)."""
@@ -227,7 +253,8 @@ class StateTree:
             prop_data["default"] = ctrl["default"]
         if "value" in ctrl:
             prop_data["value"] = ctrl["value"]
-        if ctrl.get("readonly"):
+        if ctrl.get("readonly") or (
+                _READONLY_RE and _READONLY_RE.match(ctrl_path)):
             prop_data["readonly"] = True
 
         props = node.setdefault("properties", {})

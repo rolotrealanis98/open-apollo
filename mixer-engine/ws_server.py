@@ -208,6 +208,8 @@ class WsServer:
         if refused_set(path, cmd.value):
             return [encode_ws_error(path, "Unable to resolve path for set.",
                                     cmd.message_id)]
+        if self.state.is_readonly(path):
+            return [encode_ws_error(path, "uasrv.read_only", cmd.message_id)]
         old = self.commands.value_of(path) if self.commands is not None \
             else None
         value, hardware = cmd.value, True
@@ -229,7 +231,10 @@ class WsServer:
             if self.state.get_value(canonical) == result.value:
                 return []       # unchanged: nothing to publish or save
             path, value, hardware = canonical, result.value, False
-        self.state.set(path, value, source_client=client.id, hardware=hardware)
+        if not self.state.set(path, value, source_client=client.id,
+                              hardware=hardware):
+            return [encode_ws_error(path, "Unable to resolve path for set.",
+                                    cmd.message_id)]
         if self.commands is not None:
             self.commands.on_set(path, value, old=old, client=client.id)
         return []
