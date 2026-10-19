@@ -85,7 +85,8 @@ def test_registry_offers_each_verified_layout_from_its_own_bundle(tmp_path, monk
 
 def test_a_native_transaction_runs_off_the_event_loop(monkeypatch):
     """The load runs on the daemon's worker thread: gets are served meanwhile, the slot reads
-    Loading, and a set waits (in order) until the load has committed."""
+    Loading, a set waits (in order) until the load has committed, and state the loop changes
+    meanwhile (a hardware readback) survives the publication, which is staged on the loop."""
     import asyncio, threading
     from test_plugin_native_layouts import provider, rig
     from test_plugin_native import FIELD
@@ -114,6 +115,7 @@ def test_a_native_transaction_runs_off_the_event_loop(monkeypatch):
         assert json.loads(writer.frames[-1].rstrip(b"\0"))["data"] == "Loading"  # served while loading
         daemon._handle_set(client, Command("set", f"{p.slot}/{FIELD}/value", .75, raw_params={"func_id": "9"}))
         assert len(writer.frames) == 1  # waits for the load
+        state.add_runtime_property("/devices/0/Readback", {"type": "int", "value": 3})
         gate.set()
         for _ in range(500):
             if len(writer.frames) == 3:
@@ -125,6 +127,7 @@ def test_a_native_transaction_runs_off_the_event_loop(monkeypatch):
     assert [r["parameters"]["func_id"] for r in replies] == [7, 9] and not any("error" in r for r in replies)
     assert state.get_value(p.slot + "/EffectName") == p.name and state.get_value(p.slot + "/Status") == ""
     assert list(driver.instances.values()) == [75]
+    assert state.get_value("/devices/0/Readback/value") == 3
 
 
 def test_known_good_list_holds_no_dsp_data():

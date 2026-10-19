@@ -3108,8 +3108,9 @@ class MixerDaemon:
         A load runs the plug-in's original code in the emulator and reads back up to tens of
         thousands of DSP words (minutes for the largest), so inline it would stop the daemon
         answering anyone. The publication commit needs the state tree unchanged since it was
-        staged, so while the transaction runs every SET waits in a queue (in order) and gets
-        are served as usual; a load's slot reads Status "Loading" meanwhile."""
+        staged, so it is staged and committed on the loop (publish_on); while the transaction
+        runs every SET waits in a queue (in order) and gets are served as usual; a load's slot
+        reads Status "Loading" meanwhile."""
         transactions = self.plugin_lifecycle.transactions
         if not hasattr(transactions, "owned_by_current_thread"):
             return False
@@ -3129,9 +3130,21 @@ class MixerDaemon:
             self._publish_license(slot + "/Status", "Loading", "string")
         self._native_busy = True
 
+        def on_loop(publish):
+            # The loop owns the state tree: stage and commit there, between its own updates.
+            return asyncio.run_coroutine_threadsafe(_call(publish), loop).result()
+
+        async def _call(publish):
+            return publish()
+
         def run():
-            with transactions.owned_by_current_thread():
-                return self.plugin_lifecycle.handle(path, cmd.value)
+            inline = transactions.publish_on
+            transactions.publish_on = on_loop
+            try:
+                with transactions.owned_by_current_thread():
+                    return self.plugin_lifecycle.handle(path, cmd.value)
+            finally:
+                transactions.publish_on = inline
 
         def finish(done):
             try:

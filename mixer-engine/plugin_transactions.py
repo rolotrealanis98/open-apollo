@@ -159,6 +159,9 @@ class PluginTransactions:
         self.publisher = publisher
         self.backend = backend
         self.publication_fault = publication_fault
+        # Runs each publication (stage + commit) on the thread that owns the views. The daemon
+        # sets it to hop onto its event loop while a transaction runs on its worker thread.
+        self.publish_on = lambda publish: publish()
         self.quarantined = False
         self.quarantine_reason = ""
         # Retain unresolved tokens; never silently forget potentially live DMA.
@@ -399,7 +402,14 @@ class PluginTransactions:
                 prepared, "Prepared identity changed during activation"
             )
         try:
-            events = transaction.commit(fault=self.publication_fault)
+            # Stage again against the views as they are now: activation can take seconds
+            # beside the daemon's event loop, which keeps its views current meanwhile.
+            # Validation already passed before activating.
+            events = self.publish_on(
+                lambda: self.publisher.stage(slot, prepared.loaded).commit(
+                    fault=self.publication_fault
+                )
+            )
         except Exception as exc:
             return self._rollback(
                 prepared, f"Publication failed: {type(exc).__name__}"
@@ -550,7 +560,10 @@ class PluginTransactions:
             return self._quarantine("Terminal retirement unconfirmed", lease)
         self._current_leases.pop(slot, None)
         try:
-            events = transaction.commit(fault=self.publication_fault)
+            # Stage again: retirement can run beside the daemon's event loop.
+            events = self.publish_on(
+                lambda: p.stage(slot, None).commit(fault=self.publication_fault)
+            )
         except Exception as exc:
             # Hardware is already retired. Never claim rollback to the old
             # allocation just because its stale tree could not be cleared.
@@ -822,8 +835,6 @@ class PluginTransactions:
                 or applied.readback.field != field
             ):
                 raise PublicationError("Control readback identity mismatch")
-            transaction = p.stage_control(slot, applied.readback)
-            events = list(transaction.commit(fault=self.publication_fault))
             for coupled in applied.coupled:
                 if (
                     not isinstance(coupled, ControlReadback)
@@ -831,9 +842,20 @@ class PluginTransactions:
                     or coupled.field == field
                 ):
                     raise PublicationError("Coupled readback identity mismatch")
-                events += p.stage_control(slot, coupled).commit(
-                    fault=self.publication_fault
+
+            def publish():
+                events = list(
+                    p.stage_control(slot, applied.readback).commit(
+                        fault=self.publication_fault
+                    )
                 )
+                for coupled in applied.coupled:
+                    events += p.stage_control(slot, coupled).commit(
+                        fault=self.publication_fault
+                    )
+                return events
+
+            events = self.publish_on(publish)
         except Exception as exc:
             return restore(f"Control publication failed: {type(exc).__name__}")
         if not same_session():
