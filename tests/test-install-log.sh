@@ -115,7 +115,7 @@ spec.loader.exec_module(real)
 sanitize = real.sanitize
 if __name__ == "__main__":
     open("$tmp_dir/queried", "a").write(" ".join(sys.argv[1:]) + "\n")
-    print(json.dumps({"schema": "x", "available": True, "serial": "2000000000123",
+    print(json.dumps({"schema": "x", "available": True, "serial": "20000000000123",
                       "authorized": [2276, 2100, "2300", 99, 3000, True],
                       "native": {"built_mono": [2276, 2400], "failed": [2100], "names": ["UAD Neve 1084"]},
                       "demo_days": {"2200": 13}, "account": "someone@example.com",
@@ -142,7 +142,7 @@ check "only valid authorized render ids" test "$(python3 -c '
 import json, sys; print(json.load(open(sys.argv[1]))["plugins"]["authorized"])' "$REPORT_FILE")" = "[2100, 2276]"
 check "native ids must be authorized" test "$(python3 -c '
 import json, sys; print(json.load(open(sys.argv[1]))["plugins"]["native"])' "$REPORT_FILE")" = "{'built_mono': [2276], 'built_stereo': [], 'failed': [2100]}"
-for secret in 2000000000123 "UAD Neve" demo_days 13 someone@example.com "$(hostname)" serial account; do
+for secret in 20000000000123 "UAD Neve" demo_days 13 someone@example.com "$(hostname)" serial account; do
     check "nothing else reaches the report: $secret" hasnt "$REPORT_FILE" "$secret"
 done
 check "the output says how many" has "$tmp_dir/out" "Authorized plug-ins in the report: 2 (render ids only)"

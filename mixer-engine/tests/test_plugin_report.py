@@ -38,13 +38,13 @@ MANIFEST = {"format": pl.MANIFEST_FORMAT, "plugins": [
 ]}
 
 INDEX = {"schema": "open-apollo-plugin-bundles/1",
-         "uad_sdk": "/home/alex/win/Windows/System32/UAD2SDK.dll",
+         "uad_sdk": "/home/yourname/win/Windows/System32/UAD2SDK.dll",
          "bundles": [
              {"name": "UAD Neve 1084", "layout": "mono", "file": "x.json"},
              {"name": "UAD Neve 1084", "layout": "stereo", "file": "y.json"},
              {"name": "UAD Demo Thing", "layout": "mono", "file": "z.json"},   # not authorized
          ],
-         "failures": {"UAD Pultec EQP-1A (stereo)": "execution timeout: /home/alex/x",
+         "failures": {"UAD Pultec EQP-1A (stereo)": "execution timeout: /home/yourname/x",
                       "UAD Neve 1084 (stereo)": "execution crash",            # built anyway
                       "UAD Demo Thing": "not installed"}}
 
@@ -65,7 +65,7 @@ def test_report_shape_and_native_status():
 
 def test_nothing_identifying_is_in_the_report():
     text = json.dumps(pr.build(WORDS, MANIFEST, INDEX))
-    for secret in ("alex", "UAD", "Neve", "timeout", "home", "Demo", "13", "x.json"):
+    for secret in ("yourname", "UAD", "Neve", "timeout", "home", "Demo", "13", "x.json"):
         assert secret not in text
 
 
@@ -95,7 +95,7 @@ def test_sanitize_drops_everything_else():
 def test_sanitize_unavailable_keeps_only_a_known_reason():
     assert pr.sanitize({"available": False, "reason": "plugin_host_off", "x": 1}) == {
         "schema": pr.SCHEMA, "available": False, "reason": "plugin_host_off"}
-    assert pr.sanitize({"available": False, "reason": "/home/alex: EIO"})["reason"] == "query_failed"
+    assert pr.sanitize({"available": False, "reason": "/home/yourname: EIO"})["reason"] == "query_failed"
     assert pr.sanitize(None) == pr.unavailable("query_failed")
     assert pr.sanitize({"available": "yes", "authorized": [2276]}) == pr.unavailable("query_failed")
 

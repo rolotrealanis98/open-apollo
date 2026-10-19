@@ -21,7 +21,7 @@ spec = importlib.util.spec_from_file_location("oa_redact", SCRIPT)
 oa_redact = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(oa_redact)
 
-WORDS = oa_redact.words_for("alex", "/home/alex", "studio.lan",
+WORDS = oa_redact.words_for("yourname", "/home/yourname", "studio.lan",
                             "0123456789abcdef0123456789abcdef")
 
 
@@ -43,7 +43,7 @@ def test_enough_shared_cases():
 
 
 def test_scrub_walks_nested_reports():
-    doc = {"a": ["/home/alex/x", {"b": "serial: 20000000000123"}], "n": 3, "t": True}
+    doc = {"a": ["/home/yourname/x", {"b": "serial: 20000000000123"}], "n": 3, "t": True}
     assert oa_redact.scrub(doc, WORDS) == {
         "a": ["<home>/x", {"b": "serial: <redacted>"}], "n": 3, "t": True}
 

@@ -272,7 +272,7 @@ mod tests {
     use std::time::Duration;
 
     fn r() -> Redactor {
-        Redactor::new("alex", "/home/alex", "studio.lan", "0123456789abcdef0123456789abcdef")
+        Redactor::new("yourname", "/home/yourname", "studio.lan", "0123456789abcdef0123456789abcdef")
     }
 
     /// The same cases as mixer-engine/tests/test_oa_redact.py (tests/fixtures/redact-cases.tsv).
@@ -320,7 +320,7 @@ mod tests {
         let b = RunLog::create(&dir, at, r()).unwrap();
         assert_eq!(a.path().file_name().unwrap(), "setup-20261019-150405.log");
         assert_eq!(b.path().file_name().unwrap(), "setup-20261019-150405-1.log");
-        a.line("\x1b[1m── Installing ──\x1b[0m from /home/alex/win on studio, S/N: 2000123456");
+        a.line("\x1b[1m── Installing ──\x1b[0m from /home/yourname/win on studio, S/N: 2000123456");
         let text = std::fs::read_to_string(a.path()).unwrap();
         assert!(text.ends_with(" ── Installing ── from <home>/win on <host>, S/N: <redacted>\n"), "{text}");
         #[cfg(unix)]
