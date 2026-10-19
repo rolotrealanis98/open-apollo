@@ -67,6 +67,7 @@ pub struct EngineMixer {
     taps: Vec<ControlId>,
     /// Plug-in name copied with the COPY modifier / insert menu, pasted into an empty slot.
     clipboard: Option<String>,
+    native_load_notice: Option<String>,
     /// The read-only UA Mixer Helper (4720): native inserts and helper state.
     helper: Option<ua_engine::HelperStore>,
     /// Console's client-side preferences (Settings › OPTIONS / MIDI). Saved to `prefs_path`
@@ -87,6 +88,7 @@ impl EngineMixer {
             live_meters: true,
             taps: Vec::new(),
             clipboard: None,
+            native_load_notice: None,
             helper: None,
             prefs: rack::settings::Prefs::default(),
             prefs_path: None,
@@ -646,6 +648,10 @@ impl MixerModel for EngineMixer {
     }
     fn plugin_catalog(&self) -> Vec<PluginEntry> {
         self.surface_catalog()
+    }
+
+    fn plugin_notice(&self) -> Option<&str> {
+        self.native_load_notice.as_deref().or_else(|| self.store.last_error())
     }
 
     fn plugin_scenes(&self) -> Vec<String> {

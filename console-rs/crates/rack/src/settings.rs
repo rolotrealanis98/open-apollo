@@ -763,7 +763,17 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
                 f.extend(mapped(src, "dante_latency", "/DanteDeviceLatency", "DANTE LATENCY CONTROL", 0));
             }
             // Row 1 (y 78): INPUT DELAY COMPENSATION, PT MODE, CUE BUS COUNT, ALT COUNT, FCN.
-            f.extend(engine_choice(src, "/MaxDelayComp", "INPUT DELAY COMPENSATION", 1));
+            if let Some(mut delay) = engine_choice(src, "/MaxDelayComp", "INPUT DELAY COMPENSATION", 1) {
+                if bool_at(src, "/NativePluginHosting") == Some(true)
+                    && bool_at(src, "/NativeDelayCompSupported") != Some(true) {
+                    delay.enabled = false;
+                }
+                f.push(delay);
+            }
+            if let Some(warning) = str_at(src, "/InputDelayCompWarning").filter(|s| !s.is_empty()) {
+                f.push(SettingField::new("/InputDelayCompWarning", "INPUT DELAY COMPENSATION EXCEEDED",
+                    FieldKind::Readout(warning), 3).width(720.0));
+            }
             if windows {
                 f.extend(bool_choice(src, "/PTMode", "PT MODE", ["OFF", "ON"], 1));
             }

@@ -391,6 +391,15 @@ impl WindowPanel {
 }
 
 impl Panel for WindowPanel {
+    fn matches_plugin(&self, strip_id: &str, slot: u8, model: &dyn MixerModel) -> bool {
+        let Some(strip) = resolve_strip(model, strip_id) else { return false };
+        if self.slot != slot || strip.id != self.strip {
+            return false;
+        }
+        let state = if slot == UNISON_SLOT { Some(model.unison(&strip)) } else { model.inserts(&strip).get(slot as usize).cloned() };
+        matches!(state, Some(InsertState::Loaded { name, .. }) if name == self.window.effect_name)
+    }
+
     fn size(&self) -> (f32, f32) {
         self.window.size(&self.snapshot)
     }
@@ -685,6 +694,10 @@ mod tests {
         hook.scales = Rc::new(RefCell::new(PluginScales::default()));
         let mut model = with_presets();
         let mut panel = hook.on_open_plugin("in0", 1, &model).unwrap();
+        assert!(panel.matches_plugin("in0", 1, &model));
+        assert!(panel.matches_plugin("/devices/0/inputs/0", 1, &model));
+        assert!(!panel.matches_plugin("in0", 0, &model));
+        assert!(!panel.matches_plugin("in1", 1, &model));
         panel.sync(&mut model);
         let preset = |m: &EngineMixer| {
             m.store().value("/devices/0/inputs/0/effects/1/Preset").and_then(|v| v.as_str().map(str::to_owned))

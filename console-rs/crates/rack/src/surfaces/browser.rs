@@ -228,6 +228,28 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
             ui.hit(close, bid(Control::BrowserHintClose), HitKind::Tap);
             y = hr.max_y() + MARGIN;
         }
+        let catalog = model.plugin_catalog();
+        let selected_hint = b.selected.and_then(|i| catalog.get(i as usize)).and_then(|p| p.native_hint.as_deref());
+        if let Some(notice) = model.plugin_notice().or(selected_hint) {
+            // Keep a visible reason even if the original assign hint was dismissed.
+            let width = list.w - 2.0 * MARGIN;
+            let chars_per_line = ((width / 5.5) as usize).max(12);
+            let mut lines = vec![String::new()];
+            for word in notice.split_whitespace() {
+                let last = lines.last_mut().unwrap();
+                if !last.is_empty() && last.len() + word.len() + 1 > chars_per_line {
+                    lines.push(word.to_owned());
+                } else {
+                    if !last.is_empty() { last.push(' '); }
+                    last.push_str(word);
+                }
+            }
+            for line in lines.iter().take(4) {
+                ui.text(line, bold(10.0, AMBER), Rect::new(list.x + MARGIN, y, width, 15.0), Align::Left);
+                y += 15.0;
+            }
+            y += MARGIN;
+        }
         plugin_list(ui, model, view, Rect::new(list.x, y, list.w, list.max_y() - MARGIN - y));
     });
 }
@@ -475,7 +497,13 @@ fn entry_row(ui: &mut Ui, p: &PluginEntry, i: usize, view: &ViewState, row: Rect
     // Names stop 19 pt before the badge (refpairs/p2: "Valley People Dyna-mi").
     let text_right = if badge.is_some() { badge_r.x - 19.0 } else { row.max_x() - 4.0 };
     ui.clip(Some(Rect::new(text_x, row.y, text_right - text_x, row.h)));
-    ui.text(p.display_name(), bold(11.0, Rgba::rgb8(230, 230, 230)), Rect::new(text_x, row.y - 0.5, 400.0, row.h), Align::Left);
+    let unavailable = p.native_supported == Some(false);
+    let color = if unavailable { Rgba::rgb8(145, 145, 145) } else { Rgba::rgb8(230, 230, 230) };
+    let name_h = if b.large_rows && p.native_supported.is_some() { row.h - 14.0 } else { row.h };
+    ui.text(p.display_name(), bold(11.0, color), Rect::new(text_x, row.y - 0.5, 400.0, name_h), Align::Left);
+    if b.large_rows && p.native_supported.is_some() {
+        ui.text(if unavailable { "DSP loader unavailable" } else { "Native DSP loader" }, bold(9.0, color), Rect::new(text_x, row.max_y() - 19.0, 400.0, 14.0), Align::Left);
+    }
     ui.clip(None);
     if let Some(badge) = badge {
         if let Some(img) = ui.skin("views", badge.skin()).and_then(|s| s.image("image")) {

@@ -813,7 +813,12 @@ impl ViewState {
             C::ShowBrowser => self.show_browser ^= true,
             C::ShowPluginScenes => self.toggle_scenes(model),
             C::ShowSettings => {
-                self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) };
+                if id.strip.as_ref() == "delay-comp" {
+                    self.sheet = Some(Sheet::Settings);
+                    self.settings.tab = SettingsTab::Hardware;
+                } else {
+                    self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) };
+                }
                 self.settings.scroll = 0.0;
                 self.settings.child = None;
             }

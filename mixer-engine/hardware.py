@@ -40,6 +40,7 @@ Ioctl interface (from driver/ua_ioctl.h):
     UA_IOCTL_WRITE_MIXER_SETTING _IOW('U', 0x36, struct ua_mixer_setting)
     UA_IOCTL_READ_MIXER_SETTING  _IOWR('U', 0x37, struct ua_mixer_setting)
     UA_IOCTL_CLI_COMMAND         _IOWR('U', 0x40, struct ua_cli_command)
+    UA_IOCTL_BOARD_QUERY         _IOWR('U', 0x90, struct ua_board_query)
 """
 
 import errno
@@ -242,6 +243,34 @@ UA_FEAT_CLOCK_SOURCES = 1 << 17
 _CLOCK_SOURCES_SIZE = 16 + 16 * 40
 UA_IOCTL_GET_CLOCK_SOURCES = _IOR(UA_IOCTL_MAGIC, 0x08, _CLOCK_SOURCES_SIZE)
 UA_CLOCK_SRC_F_DEVICE_NAME = 0x1
+
+# ABI 1.8: feature bit 31 says ua_version.reserved[0] is a second feature
+# word (UA_FEAT2_*); an older driver leaves it 0 and never sets bit 31.
+# UA_FEAT2_PLUGIN_HOST: the module was loaded with plugin_host=1, so the
+# plug-in host ioctls (0x90 BOARD_QUERY, 0x94 PLUGIN_INSTANCE) are served.
+UA_FEAT_FEATURES2 = 1 << 31
+UA_FEAT2_PLUGIN_HOST = 1 << 0
+UA_FEAT2_PLUGIN_MULTI_INPUT = 1 << 1
+UA_FEAT2_PLUGIN_STEREO = 1 << 2
+UA_FEAT2_PLUGIN_SWAP = 1 << 3
+UA_FEAT2_PLUGIN_CHAIN = 1 << 4
+UA_FEAT2_PLUGIN_DELAY_COMP = 1 << 5
+UA_FEAT2_PLUGIN_UNISON = 1 << 6
+UA_FEAT2_PLUGIN_ANALOG_LEASE = 1 << 7
+
+# UA_IOCTL_BOARD_QUERY (ABI 1.8, UA_FEAT2_PLUGIN_HOST): the device's own
+# per-plug-in authorization answer, read fresh by the driver every time.
+# struct ua_board_query { u32 struct_size, flags, date, reserved;
+#                         u64 epoch; u32 words[768]; } = 3096 bytes.
+# words[i] is the answer for the plug-in whose render id is 0x800 + i.
+# Read-only (no CAP_SYS_RAWIO); it waits for the device, up to ~2 s, so
+# the daemon never calls it on its event loop thread.
+UA_BOARD_QUERY_WORDS = 768
+UA_BOARD_QUERY_BASE = 0x800
+_BOARD_QUERY_HEAD = '<IIIIQ'
+_BOARD_QUERY_SIZE = struct.calcsize(_BOARD_QUERY_HEAD) + \
+    4 * UA_BOARD_QUERY_WORDS
+UA_IOCTL_BOARD_QUERY = _IOWR(UA_IOCTL_MAGIC, 0x90, _BOARD_QUERY_SIZE)
 
 _FW_LOAD_SIZE = 16
 UA_IOCTL_LOAD_FIRMWARE = _IOW(UA_IOCTL_MAGIC, 0x50, _FW_LOAD_SIZE)
@@ -1371,6 +1400,8 @@ class HardwareBackend:
         self._cli_frozen = False     # Set True on first CLI timeout — stops all CLI
         self.last_errno = 0          # errno of the last failed set_mixer_param
         self._features: int | None = None   # GET_VERSION feature bits, cached
+        # UA_FEAT2_* bits, read together with _features (valid while it is)
+        self._features2 = 0
         self._toslink_in_bit: bool | None = None   # module parameter, cached
         # True while the driver says the device is paused for system
         # suspend (UA_PAUSE_DEVICE): every write is refused, see
@@ -2231,7 +2262,10 @@ class HardwareBackend:
 
         Returns {abi_major, abi_minor, driver_version, features,
         driver_name}, or None when the driver predates the ioctl (ENOTTY),
-        there is no device, or the call fails.  Informational only.
+        there is no device, or the call fails.  Informational only.  When
+        the driver sets UA_FEAT_FEATURES2 (ABI 1.8) the dict also has
+        `features2`, the UA_FEAT2_* word (ua_version.reserved[0]); without
+        that bit the reserved words mean nothing and the key is left out.
         """
         if self.fd < 0:
             return None
@@ -2243,13 +2277,16 @@ class HardwareBackend:
                 log.debug("get_version: %s", e)
             return None
         major, minor, drv, feats, name = struct.unpack_from('<IIII16s', raw)
-        return {
+        ver = {
             "abi_major": major,
             "abi_minor": minor,
             "driver_version": drv,
             "features": feats,
             "driver_name": name.split(b'\0', 1)[0].decode('ascii', 'replace'),
         }
+        if feats & UA_FEAT_FEATURES2 and len(raw) >= 36:
+            ver["features2"] = struct.unpack_from('<I', raw, 32)[0]
+        return ver
 
     def features(self) -> int:
         """UA_FEAT_* bits of the open driver (0 for a driver without
@@ -2260,12 +2297,58 @@ class HardwareBackend:
         if self._features is None:
             ver = self.get_version()
             self._features = int(ver["features"]) if ver else 0
-            log.info("Driver features: 0x%x%s", self._features,
+            self._features2 = int(ver.get("features2", 0)) if ver else 0
+            log.info("Driver features: 0x%x%s%s", self._features,
+                     f" features2 0x{self._features2:x}"
+                     if self._features & UA_FEAT_FEATURES2 else "",
                      "" if ver else " (no GET_VERSION: pre-ABI driver)")
         return self._features
 
     def has_feature(self, bit: int) -> bool:
         return bool(self.features() & bit)
+
+    def features2(self) -> int:
+        """UA_FEAT2_* bits (ABI 1.8): the second feature word, 0 unless
+        the driver sets UA_FEAT_FEATURES2.  Read and cached with
+        features(), for the same device session."""
+        if not self.features() & UA_FEAT_FEATURES2:
+            return 0
+        return self._features2
+
+    def plugin_host_available(self) -> bool:
+        """True when the driver was loaded with plugin_host=1
+        (UA_FEAT2_PLUGIN_HOST): UA_IOCTL_BOARD_QUERY is served.  With
+        plugin_host=0 (the default) or an older driver, False."""
+        return bool(self.features2() & UA_FEAT2_PLUGIN_HOST)
+
+    def board_query(self) -> tuple[int, int, tuple]:
+        """UA_IOCTL_BOARD_QUERY: the device's per-plug-in authorization
+        answer, read fresh from the device by the driver.
+
+        Returns (date, epoch, words): the date word the driver sent with
+        the query, the plug-in host epoch the answer belongs to and the
+        768 words exactly as the device returned them (words[i] is for the
+        plug-in with render id 0x800 + i; plugin_license decodes them).
+        Raises OSError on any failure, the driver's errno unchanged:
+        EOPNOTSUPP (plugin_host=0), EBUSY, ETIMEDOUT, EPROTO, ESTALE,
+        ERANGE, ENODEV; ENOTTY from a driver without the ioctl.
+
+        Read-only: nothing about authorization is sent but this query, and
+        nothing is kept.  It blocks until the device answers (up to ~2 s):
+        callers run it off the event loop thread.
+        """
+        fd = self.fd
+        if fd < 0:
+            raise OSError(errno.ENODEV, "no device open")
+        # Filled in place: an immutable argument is limited to 1024 bytes
+        buf = bytearray(_BOARD_QUERY_SIZE)
+        struct.pack_into('<I', buf, 0, _BOARD_QUERY_SIZE)
+        fcntl.ioctl(fd, UA_IOCTL_BOARD_QUERY, buf, True)
+        _size, _flags, date, _reserved, epoch = struct.unpack_from(
+            _BOARD_QUERY_HEAD, buf, 0)
+        words = struct.unpack_from(f'<{UA_BOARD_QUERY_WORDS}I', buf,
+                                   struct.calcsize(_BOARD_QUERY_HEAD))
+        return date, epoch, words
 
     def get_system_info(self) -> dict | None:
         """UA_IOCTL_GET_SYSTEM_INFO as a dict (every field of

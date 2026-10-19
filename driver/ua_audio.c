@@ -33,6 +33,7 @@
 #include <sound/initval.h>
 
 #include "ua_apollo.h"
+#include "ua_plugin_host.h"
 #include "ua_ioctl.h"
 #include "ua_models_gen.h"
 
@@ -131,10 +132,10 @@ static bool adopt_fw_rate;
 module_param(adopt_fw_rate, bool, 0644);
 MODULE_PARM_DESC(adopt_fw_rate,
 		 "Adopt the rate the firmware reports (0xC07C bits 15:8) at the first connect after a load or resume, instead of assuming 48 kHz (default: off; the kext does this and never forces the clock at start)");
-static bool rate_ack_real;
+static bool rate_ack_real = true;
 module_param(rate_ack_real, bool, 0644);
 MODULE_PARM_DESC(rate_ack_real,
-		 "Send {0x001A0002, rate} to every DSP at connect (the firmware's rate) and after every clock change, as the macOS Mixer Engine does (default: off; the plugin chain's WAKE entry always says 44100)");
+		 "Send {0x001A0002, rate} to every DSP at connect (the firmware's rate) and after every clock change, as the macOS Mixer Engine does (default: on; a DSP that has not been told the rate does not start an input strip; the plugin chain's WAKE entry always says 44100)");
 static bool notif_irq;
 module_param(notif_irq, bool, 0644);
 MODULE_PARM_DESC(notif_irq,
@@ -2432,6 +2433,7 @@ static void ua_dsp_service_handler(struct work_struct *work)
 			ua->mixer_rb_data[i] = data[i];
 		}
 		ua->mixer_rb_status = 1;
+		ua->mixer_rb_generation++;
 		ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
 
 		/* Front-panel changes → ALSA controls (no write back) */
@@ -2450,6 +2452,9 @@ static void ua_dsp_service_handler(struct work_struct *work)
 	 * so mixer re-init flushes promptly. */
 	if (audio->dsp_service_count >= 5)
 		ua_mixer_flush_settings(ua);
+
+	/* plug-in host: input_strips_rebuild requests, never a wait */
+	ua_plugin_service(ua);
 
 	seq_wr = ua_read(ua, UA_REG_MIXER_SEQ_WR);
 	seq_rd = ua_read(ua, UA_REG_MIXER_SEQ_RD);
@@ -3355,6 +3360,9 @@ post_handshake:
 				dev_dbg(&ua->pdev->dev,
 					"  transport deferred to pcm_prepare\n");
 
+				/* plug-in host: pool maps of the owned DSPs */
+				ua_plugin_connected(ua);
+
 				return 0;
 			}
 
@@ -3394,6 +3402,9 @@ static void ua_audio_disconnect_hw(struct ua_device *ua)
 
 	if (!audio->connected)
 		return;
+
+	/* plug-in host: strips and instances down before the reconnect */
+	ua_plugin_teardown(ua, "disconnect");
 
 	/* Stop transport first — clear ALL control bits */
 	ua_write(ua, UA_REG_AX_CONTROL, 0);
@@ -3455,6 +3466,9 @@ int ua_audio_reconnect(struct ua_device *ua)
 	int ret;
 
 	mutex_lock(&ua->lock);
+
+	/* plug-in host: strips and instances down before the reconnect */
+	ua_plugin_teardown(ua, "reconnect");
 
 	/* Reset connection state so ua_audio_connect() will retry */
 	audio->connected = false;
@@ -4494,6 +4508,7 @@ static int ua_audio_set_clock_cfg(struct ua_device *ua, unsigned int rate,
 				  int source)
 {
 	struct ua_audio *audio = &ua->audio;
+	bool host_down = false;
 	int rate_idx;
 	u32 clock_config;
 	int ret;
@@ -4538,6 +4553,11 @@ static int ua_audio_set_clock_cfg(struct ua_device *ua, unsigned int rate,
 		 rate, rate_idx, clock_config);
 
 	ua_pause_set(ua, UA_PAUSE_RATE);
+	/* plug-in host: the strips' parameters follow the rate (A6.9) */
+	if ((unsigned int)rate_idx != audio->rate_index) {
+		ua_plugin_teardown(ua, "rate change");
+		host_down = true;
+	}
 	ret = ua_audio_clock_change_locked(ua, clock_config);
 	if (ret == -ETIMEDOUT) {
 		dev_info(&ua->pdev->dev, "  retrying clock change once\n");
@@ -4569,6 +4589,9 @@ static int ua_audio_set_clock_cfg(struct ua_device *ua, unsigned int rate,
 			"clock change to %u Hz (config 0x%08x) failed: %d\n",
 			rate, clock_config, ret);
 	}
+	/* Rebuilt at whatever rate the device runs at now */
+	if (host_down && audio->connected)
+		ua_plugin_connected(ua);
 out:
 	ua_pause_clear(ua, UA_PAUSE_RATE);
 	mutex_unlock(&ua->lock);
@@ -5125,6 +5148,21 @@ static int ua_pcm_silence(struct snd_pcm_substream *sub, int channel,
  * Clock Source control used to write it for "Internal").  Caller holds
  * ua->lock.
  */
+/* Input strips must use the same rate as the acknowledged, settled DSP clock. */
+bool ua_audio_plugin_rate_ready(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	u32 info;
+
+	lockdep_assert_held(&ua->lock);
+	if (atomic_read(&ua->shutdown) || !audio->connected ||
+	    !audio->sample_rate || audio->rate_acked != audio->sample_rate)
+		return false;
+	info = ua_read(ua, UA_REG_NOTIF_RATE_INFO);
+	return info != 0xffffffff && (info & 3) == 1 &&
+	       ((info >> 8) & 0xff) == audio->rate_index;
+}
+
 static void ua_audio_post_start_clock(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
@@ -5270,6 +5308,7 @@ static void ua_audio_hi_from_hi(struct ua_device *ua, unsigned int rate)
 				ua->mixer_rb_data[i] =
 					ua_read(ua, UA_REG_MIXER_RB_DATA + i * 4);
 			ua->mixer_rb_status = 1;
+			ua->mixer_rb_generation++;
 			ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
 		}
 		/* The connect-time mixer batch, after the loop's 5-cycle delay */
@@ -5322,6 +5361,7 @@ static u32 ua_audio_service_step(struct ua_device *ua)
 			ua->mixer_rb_data[i] =
 				ua_read(ua, UA_REG_MIXER_RB_DATA + i * 4);
 		ua->mixer_rb_status = 1;
+		ua->mixer_rb_generation++;
 		ua_write(ua, UA_REG_MIXER_RB_STATUS, 0);
 	}
 	ua_mixer_flush_settings(ua);
@@ -5349,6 +5389,9 @@ static int ua_audio_rate_change_kext(struct ua_device *ua, unsigned int rate)
 	dev_info(&ua->pdev->dev, "rate change %u -> %u Hz (transport stopped)\n",
 		 audio->sample_rate, rate);
 
+	/* plug-in host: down now, rebuilt for the new rate below (A6.9) */
+	ua_plugin_teardown(ua, "rate change");
+
 	if (audio->transport_running) {
 		/* Callback never takes ua->lock: safe to wait for it here */
 		audio->period_timer_running = false;
@@ -5366,6 +5409,8 @@ static int ua_audio_rate_change_kext(struct ua_device *ua, unsigned int rate)
 		dev_err(&ua->pdev->dev,
 			"clock change to %u Hz (config 0x%08x) failed: %d\n",
 			rate, cfg, ret);
+		/* The old rate stays: its strips come back */
+		ua_plugin_connected(ua);
 		return ret;
 	}
 
@@ -5399,6 +5444,8 @@ static int ua_audio_rate_change_kext(struct ua_device *ua, unsigned int rate)
 	/* io_map=1: the descriptors for the new rate */
 	ua_io_map_rate_changed(ua);
 	ua_audio_read_fw_latency(ua, "rate_change=1");
+	/* plug-in host: rebuilt at the new rate (after the settle time) */
+	ua_plugin_connected(ua);
 	return 0;
 }
 
@@ -6890,6 +6937,10 @@ static int ua_preamp_gain_put(struct snd_kcontrol *kctl,
 	a = newval - 10;
 	c = newval - 9;
 	mutex_lock(&ua->lock);
+	if (ua->audio.preamp[ch].custom || ua->audio.preamp[ch].unison_owned) {
+		mutex_unlock(&ua->lock);
+		return -EBUSY;
+	}
 	ret = ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_GAIN_A, a);
 	if (!ret)
 		ret = ua_preamp_write_locked(ua, ch, UA_PREAMP_PARAM_GAIN_B, a);
@@ -8319,12 +8370,13 @@ void ua_mixer_sync_readback(struct ua_device *ua)
 			ua_sync_bool(ua, &st->hiz, UA_RB_HIZ_DETECT(rb[0], ch),
 				     name);
 		}
-		if (UA_RB_PREAMP_GAINC(chg[wg], lane)) {
+		if (!st->custom && !st->unison_owned && UA_RB_PREAMP_GAINC(chg[wg], lane)) {
 			snprintf(name, sizeof(name), "Line %u Capture Volume",
 				 ch + 1);
 			ua_sync_int(ua, &st->gain,
 				    min_t(int, max_t(int,
-					    UA_RB_PREAMP_GAIN_DB(rb[wg], lane),
+					    ua_preamp_gain_db_from_code(
+					    UA_RB_PREAMP_GAINC(rb[wg], lane)),
 					    UA_PREAMP_GAIN_MIN_DB),
 					  UA_PREAMP_GAIN_MAX_DB), name);
 		}
@@ -9248,6 +9300,12 @@ int ua_audio_resume(struct ua_device *ua, enum ua_resume_how how)
 	int ret = 0;
 
 	mutex_lock(&ua->lock);
+	/*
+	 * plug-in host: the suspend quiesce took everything down already;
+	 * after PCI error recovery (no quiesce) the connect starts afresh
+	 */
+	if (how != UA_RESUME_CONTROLS)
+		ua_plugin_teardown(ua, "resume");
 	audio->connected = false;
 	audio->transport_running = false;
 	audio->adopt_pending = true;

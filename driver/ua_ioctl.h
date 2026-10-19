@@ -539,12 +539,14 @@ struct ua_dma_test {
  *     must get -ENOTTY here, not a different operation;
  *   - ioctls 0x90-0x9f are reserved for plugin hosting, events for it start
  *     at 0x1010;
- *   - feature bit 31 is reserved as a continuation bit: when the last free
- *     bit is needed, reserved[0] becomes a second feature word and bit 31
- *     says it is valid (an older driver leaves reserved[] zero).
+ *   - feature bit 31 is a continuation bit: reserved[0] is a second feature
+ *     word (UA_FEAT2_*) and bit 31 says it is valid (an older driver leaves
+ *     reserved[] zero).  From ABI 1.8 on, bit 31 is set whenever reserved[0]
+ *     carries a bit, so a driver with no UA_FEAT2_* bit to report returns
+ *     the same features word as before.
  */
 #define UA_ABI_MAJOR		1
-#define UA_ABI_MINOR		7
+#define UA_ABI_MINOR		8
 
 #define UA_FEAT_EVENTS		(1u << 0)  /* read()/poll() event channel */
 #define UA_FEAT_PUBLIC_TYPE	(1u << 1)  /* ua_device_info.public_type */
@@ -564,6 +566,28 @@ struct ua_dma_test {
 #define UA_FEAT_KEXT_DRIVER_PARAMS (1u << 15) /* UA_DRIVER_PARAM_KEXT(1..5) (ABI 1.5) */
 #define UA_FEAT_DSP_LOAD	(1u << 16) /* load words in ua_dsp_info (ABI 1.6) */
 #define UA_FEAT_CLOCK_SOURCES	(1u << 17) /* UA_IOCTL_GET_CLOCK_SOURCES (ABI 1.7) */
+#define UA_FEAT_FEATURES2	(1u << 31) /* reserved[0] = UA_FEAT2_* (ABI 1.8) */
+
+/*
+ * Second feature word: ua_version.reserved[0], valid when UA_FEAT_FEATURES2
+ * is set.  UA_FEAT2_PLUGIN_HOST: the module was loaded with plugin_host=1,
+ * so UA_IOCTL_BOARD_QUERY and UA_IOCTL_PLUGIN_INSTANCE are served (ABI
+ * 1.8).  Which operations are accepted right now is what
+ * GET_PLUGIN_CAPS.operations says.
+ */
+#define UA_FEAT2_PLUGIN_HOST	(1u << 0)
+/* Concurrent non-overlapping inputs with shared scratch claims. */
+#define UA_FEAT2_PLUGIN_MULTI_INPUT (1u << 1)
+/* F_START accepts two distinct actual inputs and restores both mono strips. */
+#define UA_FEAT2_PLUGIN_STEREO	(1u << 2)
+/* Initialized unrouted candidates and reversible same-input handoff. */
+#define UA_FEAT2_PLUGIN_SWAP	(1u << 3)
+/* Bounded original chain head, every effect admitted by the device. */
+#define UA_FEAT2_PLUGIN_CHAIN	(1u << 4)
+#define UA_FEAT2_PLUGIN_DELAY	(1u << 5)
+/* CHAIN may begin with a licensed integrated preamp instead of Mic0x846. */
+#define UA_FEAT2_PLUGIN_UNISON	(1u << 6)
+#define UA_FEAT2_PLUGIN_ANALOG_LEASE (1u << 7)
 
 struct ua_version {
 	__u32 abi_major;
@@ -571,7 +595,7 @@ struct ua_version {
 	__u32 driver_version;	/* 0x00MMmmpp: 0.2.0 = 0x000200 */
 	__u32 features;		/* UA_FEAT_* */
 	char driver_name[16];	/* NUL-terminated version string, e.g. "0.2.0" */
-	__u32 reserved[4];
+	__u32 reserved[4];	/* [0]: UA_FEAT2_* when UA_FEAT_FEATURES2 */
 };
 
 #define UA_IOCTL_GET_VERSION	_IOR(UA_IOCTL_MAGIC, 0x04, struct ua_version)
@@ -696,11 +720,18 @@ struct ua_pause_info {
  * Plugin capabilities (UA_IOCTL_GET_PLUGIN_CAPS, read-only, ABI 1.3,
  * UA_FEAT_PLUGIN_CAPS).
  *
- * The driver supports no DSP plugin operation: nothing loads, places,
- * parameterises or removes a plugin on the DSPs, so `operations` is 0.
- * A client that presents plugins (a Console/plugin bridge) must treat
- * every one as unavailable on the hardware.  An operation the driver
- * gains later gets a UA_PLUGIN_OP_* bit; until then no bit is defined.
+ * `operations` has a UA_PLUGIN_OP_* bit for each plug-in hosting operation
+ * the driver accepts right now, and only then: the module was loaded with
+ * plugin_host=1 (UA_FEAT2_PLUGIN_HOST), the device is up and connected, and
+ * DSP 0's rings run.  With plugin_host=0 (the default) it is 0, as it was
+ * before ABI 1.8, and a client that presents plug-ins must treat every one
+ * as unavailable on the hardware.  A bit that is clear means the ioctl
+ * fails now (-EOPNOTSUPP, -ENODEV, ...), not that it does not exist.
+ *   UA_PLUGIN_OP_BOARD_QUERY  UA_IOCTL_BOARD_QUERY
+ *   UA_PLUGIN_OP_CREATE       UA_IOCTL_PLUGIN_INSTANCE, UA_PLUGIN_INST_CREATE
+ *                             (the device's own authorization answer for the
+ *                             plug-in is read first; see below)
+ *   UA_PLUGIN_OP_DESTROY      UA_IOCTL_PLUGIN_INSTANCE, UA_PLUGIN_INST_DESTROY
  *
  * `state` reports what the driver last did, not a verified DSP state:
  *   UA_PLUGIN_STATE_FW_LOADED       a DSP firmware load completed: the
@@ -713,24 +744,51 @@ struct ua_pause_info {
  *                                   (ua-apollo-plugin-chain.bin) was sent:
  *                                   fixed module setup, not a plugin load
  *   UA_PLUGIN_STATE_AUDIO_CONNECTED the audio extension is connected
+ *   UA_PLUGIN_STATE_HOST            plugin_host=1 (ABI 1.8)
+ *   UA_PLUGIN_STATE_STRIPS          the driver's Console input strips run
+ *                                   on DSP 0 (input_strips=1, ABI 1.8)
  * dsp_rings: bit n set = DSP n has its command and response rings.
  * dma_orphans: DMA buffers a timed-out ring command may still reference;
  * the driver frees each once the ring is provably past it.
- * Reserved words are 0.
+ * ABI 1.8 (0 before):
+ * owned_dsps: bit n = this driver owns DSP n's memory pools: it found the
+ *   DSP freshly powered (no host since power-up) at its last cold start and
+ *   nothing outside the plug-in host (a raw DSP ioctl, another firmware
+ *   load) has touched it since.  Only owned DSPs ever get strips or
+ *   plug-ins.
+ * quarantined_dsps: bit n = an operation on DSP n ended with an outcome the
+ *   driver cannot prove (a reply that never came, a teardown the ring did
+ *   not take); nothing more is placed there until the next cold start.
+ * instances: plug-in instances that exist (all open files).
+ * Other reserved words are 0.
  */
 #define UA_PLUGIN_STATE_FW_LOADED	(1u << 0)
 #define UA_PLUGIN_STATE_DSPS_CONNECTED	(1u << 1)
 #define UA_PLUGIN_STATE_INIT_CHAIN	(1u << 2)
 #define UA_PLUGIN_STATE_AUDIO_CONNECTED	(1u << 3)
+#define UA_PLUGIN_STATE_HOST		(1u << 4)
+#define UA_PLUGIN_STATE_STRIPS		(1u << 5)
+
+#define UA_PLUGIN_OP_BOARD_QUERY	(1ull << 0)
+#define UA_PLUGIN_OP_CREATE		(1ull << 1)
+#define UA_PLUGIN_OP_DESTROY		(1ull << 2)
+#define UA_PLUGIN_OP_SERVICE		(1ull << 3)
+#define UA_PLUGIN_OP_SWAP		(1ull << 4)
+#define UA_PLUGIN_OP_UNISON_PARAMS	(1ull << 5)
+#define UA_PLUGIN_OP_BEGIN_UNISON	(1ull << 6)
+#define UA_PLUGIN_OP_ACTIVATE_UNISON	(1ull << 7)
 
 struct ua_plugin_caps {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_caps) */
 	__u32 state;		/* UA_PLUGIN_STATE_* */
-	__u64 operations;	/* UA_PLUGIN_OP_*: none exist, always 0 */
+	__u64 operations;	/* UA_PLUGIN_OP_*: accepted right now */
 	__u32 num_dsps;
 	__u32 dsp_rings;	/* bit n: DSP n's rings are allocated */
 	__u32 dma_orphans;	/* parked DMA buffers, see above */
-	__u32 reserved[9];
+	__u32 owned_dsps;	/* ABI 1.8, see above */
+	__u32 quarantined_dsps;	/* ABI 1.8 */
+	__u32 instances;	/* ABI 1.8 */
+	__u32 reserved[6];
 };
 
 #define UA_IOCTL_GET_PLUGIN_CAPS	_IOR(UA_IOCTL_MAGIC, 0x07, struct ua_plugin_caps)
@@ -919,5 +977,276 @@ struct ua_event {
 #define UA_ERR_AX_FAULT		3
 #define UA_ERR_DSP_VECTOR	4
 #define UA_ERR_BLOCK_SEND	5
+
+/*
+ * Plug-in hosting (ABI 1.8, UA_FEAT2_PLUGIN_HOST).  Served only when the
+ * module was loaded with plugin_host=1 (default off); otherwise both
+ * ioctls fail with -EOPNOTSUPP.  Neither needs CAP_SYS_RAWIO: everything
+ * that reaches the device is built by the driver (no address, command word
+ * or code byte comes from user space; modules are read by the driver from
+ * /lib/firmware/universal-audio/plugins/modules/<sha256>.bill).
+ *
+ * Numbers: 0x90 BOARD_QUERY, 0x94 PLUGIN_INSTANCE.  0x91 and 0x92 are never
+ * assigned (an earlier prototype's registration and host-backing
+ * transports); 0x93 is kept for a catalog ioctl.
+ *
+ * Licensing.  The driver hosts only plug-ins the device itself says are
+ * authorized, and never anything else:
+ *   - The device's answer is its board table: 768 words, the word for
+ *     plug-in id R (0x800 <= R < 0xB00, the plug-in's render id) at index
+ *     R - 0x800.  The driver asks for it with the date from the system
+ *     clock (days since 2007-01-01 UTC << 12, plus the minute of the day);
+ *     there is no way to give it another date.  The query updates the
+ *     device's date as UA's own driver does on every query.
+ *   - UA_IOCTL_BOARD_QUERY returns the table as the device sent it.  The
+ *     driver keeps no copy: every query and every CREATE asks the device
+ *     again, and a table is never reused across an epoch (a reconnect, a
+ *     rate change, a cold start, a replug).
+ *   - UA_PLUGIN_INST_CREATE reads a fresh table first, in the same
+ *     operation and the same epoch as the upload that follows, and refuses
+ *     (-EACCES, before anything is placed or sent) unless the word admits
+ *     the plug-in, exactly as UA's SDK decides:
+ *       0x81000000, 0x82000000   UA_PLUGIN_LICENSE_AUTHORIZED  admitted
+ *       any other word but the   UA_PLUGIN_LICENSE_DEMO        admitted
+ *         three below            (a demo is running)
+ *       0x80000000               UA_PLUGIN_LICENSE_NOT_STARTED refused
+ *       0x00000000               UA_PLUGIN_LICENSE_EXPIRED     refused
+ *       0x83000000               UA_PLUGIN_LICENSE_UNAVAILABLE refused
+ *     A query that fails, a reply that does not match, an id outside the
+ *     table or an epoch that changed: refused too (UA_PLUGIN_LICENSE_UNKNOWN).
+ *   - Nothing here starts a demo or changes what the device holds.  Demos
+ *     are started in UA's own software.
+ */
+
+#define UA_BOARD_QUERY_WORDS	768
+#define UA_BOARD_QUERY_BASE	0x800	/* words[i]: plug-in id 0x800 + i */
+
+/*
+ * UA_IOCTL_BOARD_QUERY: the device's board table, fresh.  Fill struct_size
+ * and leave everything else 0.  On success words[] is the table exactly as
+ * the device returned it, date the date word that went with the query and
+ * epoch the plug-in host epoch it belongs to.  -EBUSY while another query
+ * or plug-in operation runs, -ETIMEDOUT when the device did not answer in
+ * 2 s, -EPROTO for an answer that is not the query's, -ESTALE when the
+ * epoch changed meanwhile, -ERANGE when the system clock is before 2007.
+ * Nothing is copied back on an error.
+ */
+struct ua_board_query {
+	__u32 struct_size;	/* in: sizeof(struct ua_board_query) */
+	__u32 flags;		/* in: 0 */
+	__u32 date;		/* out: the date word sent with the query */
+	__u32 reserved;		/* 0 */
+	__u64 epoch;		/* out */
+	__u32 words[UA_BOARD_QUERY_WORDS];	/* out */
+};
+
+#define UA_IOCTL_BOARD_QUERY	_IOWR(UA_IOCTL_MAGIC, 0x90, struct ua_board_query)
+
+#define UA_PLUGIN_LICENSE_AUTHORIZED	0u
+#define UA_PLUGIN_LICENSE_DEMO		1u
+#define UA_PLUGIN_LICENSE_NOT_STARTED	2u
+#define UA_PLUGIN_LICENSE_EXPIRED	3u
+#define UA_PLUGIN_LICENSE_UNAVAILABLE	4u
+#define UA_PLUGIN_LICENSE_UNKNOWN	0xffffffffu
+
+/*
+ * UA_IOCTL_PLUGIN_INSTANCE: plug-in instances, owned by the open file that
+ * created them.  Closing the file destroys them; so does the device going
+ * away.  A reconnect, a rate change or a cold start ends them too: their
+ * handle then fails with -ESTALE and DESTROY just forgets it.
+ *
+ * UA_PLUGIN_INST_CREATE  in: render_id, dsp (UA_PLUGIN_DSP_ANY or an index),
+ *   n_resources + resources (the plug-in's DSP modules by SHA-256),
+ *   n_private + privates (its private memory rows, head row first with
+ *   link 0xffffffff, every other row's link = row index << 24 | word
+ *   offset), flags.  The device's authorization answer for render_id is read
+ *   first (see above).  Then the modules are read from the module store and
+ *   checked, placed on a DSP this driver owns (shared modules once per DSP),
+ *   uploaded (each acknowledged by the DSP), and the private rows are
+ *   zero-filled and linked.  Nothing is routed or started: the instance
+ *   processes no audio yet.
+ *   out: handle, dsp, epoch, license_state, license_word (the device's word
+ *   for render_id), also on -EACCES.
+ *   UA_PLUGIN_CREATE_F_CHECK: stop after the authorization answer (no
+ *   instance, nothing placed or sent; handle 0).
+ * UA_PLUGIN_INST_DESTROY  in: handle.  Releases what the instance placed:
+ *   modules whose last user it was are released on the DSP, the memory goes
+ *   back to the pools.
+ *
+ * Errors: -EOPNOTSUPP (plugin_host=0), -EINVAL, -EACCES (the device does not
+ * authorize the plug-in), -ENOENT (a module is not in the store), -ENOSPC
+ * (no owned DSP has room), -EBUSY, -ETIMEDOUT/-EPROTO (the device did not
+ * answer as expected; the DSP is quarantined until the next cold start),
+ * -ESTALE.
+ */
+#define UA_PLUGIN_INST_CREATE		1u
+#define UA_PLUGIN_INST_DESTROY		2u
+#define UA_PLUGIN_INST_SERVICE		3u
+#define UA_PLUGIN_INST_SWAP		4u
+#define UA_PLUGIN_INST_UNISON_PARAMS	5u
+#define UA_PLUGIN_INST_BEGIN_UNISON	6u
+#define UA_PLUGIN_INST_ACTIVATE_UNISON	7u
+#define UA_PLUGIN_UNISON_WORDS_MAX	192u
+
+#define UA_PLUGIN_CREATE_F_CHECK	(1u << 0)
+
+#define UA_PLUGIN_DSP_ANY		0xffffffffu
+#define UA_PLUGIN_RES_MAX		64
+#define UA_PLUGIN_PRIV_MAX		128
+
+struct ua_plugin_resource {
+	__u8 sha256[32];
+};
+
+struct ua_plugin_private {
+	__u32 pool;		/* 1, 2 or 3 */
+	__u32 dwords;
+	__u32 link;		/* row << 24 | word offset; 0xffffffff: none */
+	__u32 flags;		/* 0 or 2 */
+};
+
+/*
+ * UA_PLUGIN_CREATE_F_START (bring-up, experimental): after the rows are
+ * zero-filled and linked, one transaction stops whatever runs on the DSP
+ * input, sends the parameter commands, starts the instance there (SYNCH
+ * with the head row) and sends the input's span and route words.
+ * reserved[0] = in1 | in2 << 16 (in2 0x20 = mono).
+ * reserved[1] = command word count (4..UA_PLUGIN_CMD_WORDS_MAX),
+ * reserved[2] / [3] = low / high half of a user pointer to the __u32
+ * command words: UA's parameter-block WRITEs, as UA Mixer Engine leaves
+ * them in the ParamBuffer (Mac E7 capture, UAD2System _setParamsAux):
+ *   {0x0014LLLL, row << 24 | word, skip mask, L - 3 values}, L >= 4.
+ * Row is a private row index.  The run starts at the word and spans
+ * L - 3 + popcount(mask) words of the row; bit i of the mask leaves word
+ * + i + 1 untouched (the masks UA sends skip exactly the words the memspec
+ * links), so no value may land on a word a row links into.  Each goes out
+ * with word 1 relocated to the row's DSP address (UAD2System
+ * _fixParameterAddresses).
+ * reserved[4] = pool 1 | pool 2 << 16 scratch words, reserved[5] = pool 3
+ * (0: none): the chain's scratch (the largest of its descriptors'
+ * AllocInfo 0xa9c / 0xa98 / 0xaa0), raised on the DSP before placement and
+ * put back when the instance goes; needs an explicit dsp.
+ * Requires an explicit DSP with retained live mono strips for each input.
+ * With UA_FEAT2_PLUGIN_STEREO, in2 may name a distinct actual input (0..31);
+ * otherwise in2 must be 0x20. With UA_FEAT2_PLUGIN_MULTI_INPUT, disjoint
+ * input chains can coexist on one DSP; scratch is their maximum, not a sum.
+ * An input may belong to only one START instance. DESTROY/close stop the
+ * instance and restore its retained mono strips before releasing modules; both wait
+ * for the retirement fence. Epoch/loss teardown never restores a strip.
+ */
+#define UA_PLUGIN_CREATE_F_START	(1u << 1)
+/* Same layout as START, but initialize without stopping or routing inputs. */
+#define UA_PLUGIN_CREATE_F_STAGE	(1u << 2)
+/* START/STAGE chain: Mic carrier followed by one to four licensed effects. */
+#define UA_PLUGIN_CREATE_F_CHAIN	(1u << 3)
+/* Requires CHAIN: one licensed integrated header plus zero to four inserts. */
+#define UA_PLUGIN_CREATE_F_UNISON	(1u << 4)
+#define UA_PLUGIN_CMD_WORDS_MAX		1016	/* one 4 KiB DMA page, room left */
+#define UA_PLUGIN_READ_WORDS_MAX	64
+#define UA_PLUGIN_CMD_WRITE		0x0014	/* opcode half of a parameter WRITE */
+
+/*
+ * UA_PLUGIN_INST_SERVICE (experimental): handle and epoch from CREATE.
+ * reserved[1..3] = WRITE count and pointer, as F_START (count 0: no writes).
+ * Optional read: reserved[0] = row << 24 | word, reserved[4] = word count
+ * (1..UA_PLUGIN_READ_WORDS_MAX), privates = output __u32 pointer.
+ * All other fields zero except struct_size/op. At least one write or read.
+ * CHAIN requires START or STAGE and UA_FEAT2_PLUGIN_CHAIN. Head row zero
+ * must be pool1, size6+2*N, N2..5 in word5; word0=0x40000000; word7 is
+ * the built-in Mic carrier0x846 and word7+2*i each effect render ID. Each
+ * pointer word6+2*i has exactly one linked private row. Count and all IDs
+ * must be explicitly initialized once. render_id matches the first effect.
+ * Every effect is admitted from the same fresh board query before placement.
+ * UNISON additionally requires CHAIN and UA_FEAT2_PLUGIN_UNISON: N1..5,
+ * member0 is licensed (not the implicit Mic carrier), and render_id matches
+ * that member. All N members are admitted from the same fresh board answer.
+ * UA_FEAT2_PLUGIN_ANALOG_LEASE requires staged Unison activation: UNISON with
+ * START returns EOPNOTSUPP. STAGE owns no analog settings and does not route.
+ * BEGIN_UNISON (op6): handle/epoch, all other fields zero except struct_size/op.
+ * Captures the ordinary baseline, reserves logical analog ownership, performs
+ * PGA0, waits for consumption/readback, then80ms. No graph routing occurs.
+ * The caller then replays the original worker's DSP/property timeline.
+ * ACTIVATE_UNISON (op7): same fields as BEGIN. Routes the initialized begun
+ * stage without rewriting coefficients or enabling hardware CUSTOM. Refuses
+ * an existing native route owner; use SWAP for that replacement instead.
+ * After activation the caller explicitly journals CUSTOM1 and its80ms wait.
+ * UNISON_PARAMS is accepted during BEGIN as well as after activation.
+ * SWAP between Unison owners transfers the baseline and restores the
+ * candidate's accepted image. Ordinary-to-Unison SWAP/re-entry requires BEGIN
+ * plus the caller's worker timeline first. BEGIN retains the previous accepted
+ * image separately as analog_rollback; it never invents a worker replay.
+ * DESTROY/close also restore the baseline for begun-but-unrouted stages.
+ * Unknown completion blocks that input's settings until driver reprobe.
+ * UNISON_PARAMS (op5): handle/epoch identify the begun or active Unison owner. All
+ * fields zero except struct_size/op and reserved[1]=word count (multiple of3,
+ * max192), reserved[2:3]=pointer to u32 triples {input,parameter,value}.
+ * Count0 is a consumption/readback fence only. Input must belong to SYNCH;
+ * DSP route/span and pair link parameters are rejected. The whole batch is
+ * validated before any write. A batch applies its final setting image in
+ * setting-index order and coalesces duplicate fields. Separate fenced calls
+ * are required to preserve original per-record ordering or settling delays.
+ * On success reserved[4]=consumed mailbox seq,
+ * reserved[5]=1 (baseline uses guarded physical flags/GainC and accepted-cache
+ * custom fields). A later service readback is required, but analog settling
+ * and cached-only fields are not asserted physically verified. Physical data
+ * comes from GET_HW_READBACK, not the setting mailbox GET_MIXER_READBACK.
+ * Generic/ALSA/raw writes touching an owned analog lane return EBUSY.
+ * Multi-effect heads without CHAIN refuse. SERVICE cannot rewrite head type,
+ * count or render IDs; topology changes require a new admitted allocation.
+ *
+ * STAGE is exclusive with START/CHECK and requires UA_FEAT2_PLUGIN_SWAP.
+ * Staged candidates retain scratch and plain-strip generation, but do not
+ * own the input route. Their parameters may be serviced before activation.
+ *
+ * SWAP: handle = current routed instance; reserved[0] = candidate handle;
+ * epoch = both instances' CREATE epoch. Other fields zero. Both must belong
+ * to this file, be initialized on exactly the same DSP and input pair, and
+ * retain the current strip generation. After proved handoff only the
+ * candidate is started; the old allocation remains intact. Inverse SWAP
+ * restores it. DESTROY of an inactive instance never changes input routing.
+ * No zero-glitch guarantee. Unproven publication quarantines the DSP.
+ *
+ * Writes are checked against the retained CREATE layout; read ranges must
+ * stay in one private row. No raw DSP addresses are accepted. Writes precede
+ * the read. Only the owning file may service an initialized instance, in
+ * its CREATE epoch. Malformed/stale replies never copy data to the caller.
+ */
+struct ua_plugin_instance {
+	__u32 struct_size;	/* sizeof(struct ua_plugin_instance) */
+	__u32 op;		/* UA_PLUGIN_INST_* */
+	__u32 flags;		/* CREATE: UA_PLUGIN_CREATE_F_*; else 0 */
+	__u32 handle;		/* CREATE: out; DESTROY: in */
+	__u32 render_id;	/* CREATE: absolute plug-in id */
+	__u32 dsp;		/* CREATE: in, then the DSP used */
+	__u32 n_resources;	/* CREATE: 1..UA_PLUGIN_RES_MAX */
+	__u32 n_private;	/* CREATE: 1..UA_PLUGIN_PRIV_MAX */
+	__u64 resources;	/* CREATE: user pointer */
+	__u64 privates;		/* CREATE: user pointer */
+	__u64 epoch;		/* CREATE: out; SERVICE: expected epoch */
+	__u32 license_state;	/* out: UA_PLUGIN_LICENSE_* */
+	__u32 license_word;	/* out */
+	__u32 reserved[6];
+};
+
+/* Retained plain Mic strips at 48 kHz, including overridden inputs.
+ * flags=0 queries all four. Apply flags select record(1), monitor(2),
+ * capacity(4); expected epoch/generation and input_mask0xf are mandatory.
+ * Capacity is0 (disabled) or a power of two128..2048. Scalars0..2047 plus
+ * 48 samples (32 processing +16 safety) must fit enabled capacity; disabled capacity requires both scalar delays0.
+ * All values are read back before success. An unproven write quarantines
+ * the DSP; callers must never interpret a timeout as rollback confirmation.
+ */
+#define UA_PLUGIN_DELAY_RECORD 1u
+#define UA_PLUGIN_DELAY_MONITOR 2u
+#define UA_PLUGIN_DELAY_CAPACITY 4u
+struct ua_plugin_delay {
+	__u32 struct_size, flags;
+	__u64 epoch;
+	__u32 generation, input_mask;
+	__u32 record[4], monitor[4], capacity[4];
+};
+#define UA_IOCTL_PLUGIN_DELAY _IOWR(UA_IOCTL_MAGIC, 0x95, struct ua_plugin_delay)
+
+#define UA_IOCTL_PLUGIN_INSTANCE _IOWR(UA_IOCTL_MAGIC, 0x94, struct ua_plugin_instance)
 
 #endif /* UA_IOCTL_H */

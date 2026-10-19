@@ -104,7 +104,7 @@ impl ViewState {
             },
             Control::BrowserItem(i) if self.browser.tab == BrowserTab::Plugins && self.browser.assign_to.is_none() => {
                 let p = model.plugin_catalog().into_iter().nth(i as usize)?;
-                p.enabled.then(|| (DragPayload::Plugin { name: p.name }, hit.rect))
+                (p.enabled && p.native_supported != Some(false)).then(|| (DragPayload::Plugin { name: p.name }, hit.rect))
             }
             // A PRESETS file row with no assign target (`Rack_PresetDropTargetHelper`): drags
             // its "[folder/]name" onto a strip.

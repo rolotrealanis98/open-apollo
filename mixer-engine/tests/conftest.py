@@ -182,3 +182,14 @@ def _no_user_ua_catalogue(_absent_ua_catalogue, monkeypatch):
     (~/.local/share/open-apollo/ua-catalogue): point the daemon at a place
     that does not exist unless a test sets its own."""
     monkeypatch.setenv("OA_UA_CATALOGUE", str(_absent_ua_catalogue))
+
+
+@pytest.fixture(autouse=True)
+def _no_live_pipewire_rate(monkeypatch):
+    """Clock tests must not reconfigure the developer's live audio server.
+
+    Tests exercising PipeWire acceptance can replace this stub explicitly.
+    """
+    import hardware
+    monkeypatch.setattr(hardware, "pipewire_force_rate",
+                        lambda rate, device=None: False)

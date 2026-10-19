@@ -99,6 +99,7 @@ class ApplyControlOutcome:
     readback: Any = None
     unchanged: bool = False
     detail: str = ""
+    coupled: tuple = ()  # ControlReadbacks of other parameters the setter moved
 
 
 @dataclass(frozen=True)
@@ -808,7 +809,17 @@ class PluginTransactions:
             ):
                 raise PublicationError("Control readback identity mismatch")
             transaction = p.stage_control(slot, applied.readback)
-            events = transaction.commit(fault=self.publication_fault)
+            events = list(transaction.commit(fault=self.publication_fault))
+            for coupled in applied.coupled:
+                if (
+                    not isinstance(coupled, ControlReadback)
+                    or not exact_handle(coupled.handle)
+                    or coupled.field == field
+                ):
+                    raise PublicationError("Coupled readback identity mismatch")
+                events += p.stage_control(slot, coupled).commit(
+                    fault=self.publication_fault
+                )
         except Exception as exc:
             return restore(f"Control publication failed: {type(exc).__name__}")
         if not same_session():

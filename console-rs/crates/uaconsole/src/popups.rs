@@ -100,6 +100,15 @@ impl Popups {
         self.wins.iter().any(|w| w.focused)
     }
 
+    /// Reopening an existing panel must raise its OS window, not just its drawn layer.
+    pub fn focus(&self, layer_id: &str) {
+        if let Some(w) = self.wins.iter().find(|w| w.id == layer_id) {
+            w.window.set_minimized(false);
+            w.window.focus_window();
+        }
+    }
+
+    /// Opens, moves, resizes and closes windows so there is exactly one per layer, at its rect.
     /// The frame part (window) each layer is drawn in, for `rack::layers::split_into`: placed,
     /// its own (`k + 1`); unplaced, toplevel layers their own and the rest the toplevel window
     /// they opened from (`from`, the one the pointer was last in; None: the mixer, part 0).

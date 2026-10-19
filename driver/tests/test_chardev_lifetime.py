@@ -30,10 +30,11 @@ static bool cap;
 static atomic_int entered, release_, dispatched;
 static bool capable(int c) { assert(c == CAP_SYS_RAWIO); return cap; }
 static bool ua_ioctl_needs_rawio(unsigned int cmd) { return cmd == 2; }
-static long ua_ioctl_dispatch(struct ua_device *ua, unsigned int cmd,
-			      unsigned long arg)
+static long ua_ioctl_dispatch(struct ua_device *ua, struct ua_file *uf,
+			      unsigned int cmd, unsigned long arg)
 {
 	(void)ua; (void)cmd; (void)arg;
+	assert(uf && uf->ua == ua);	/* the open file reaches the dispatch */
 	atomic_fetch_add(&dispatched, 1);
 	atomic_store(&entered, 1);
 	while (!atomic_load(&release_))

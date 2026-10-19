@@ -25,6 +25,8 @@ Usage:
 
 import argparse
 import asyncio
+import errno
+import functools
 import importlib.util
 import json
 import logging
@@ -71,6 +73,7 @@ from enabled_meta import install as install_enabled_meta
 from session_dirty import SessionDirty
 from plugin_lifecycle import PluginLifecycle, is_plugin_slot_path
 from plugin_remote import PluginRemote
+import plugin_license
 from ubjson_codec import encode_response as ubjson_encode_response
 from json_frame_codec import JsonFrameError, encode_frame as json_encode_frame
 from wire_command_framer import WireCommandFramer, WireError
@@ -197,6 +200,31 @@ _LEVEL_COMPANION = {"FaderLevelTapered": "FaderLevel",
 # open fd every DEVICE_WATCH_INTERVAL; after a loss it retries the open
 # with a doubling delay (MIN..MAX) and, once the node is back, waits
 # DEVICE_SETTLE for the plugin chain/DSP before re-running the init path.
+# Native plug-in hosting owns the inserts and is bound to the start-up sample
+# rate (plugin_native.register_native).  While it runs, the daemon refuses only
+# what it has no transactional adapter for: the rate and clock, links (unless
+# the backend allows an idle one), and host state that reloads inserts
+# (channel presets, undo/redo, sessions).  Ordinary mixer controls still work.
+_NATIVE_REFUSED_PROPS = frozenset({
+    'SampleRate', 'ClockSource', 'BufferSize', 'MaxDelayComp', 'DelayCompGroup',
+    'Stereo', 'StereoLink', 'Link', 'Preset'})
+_NATIVE_REFUSED_PATHS = frozenset({'/UndoRedo', '/Session', '/ModifiedSessions'})
+# Posts that change only the mixer, never an insert.
+_NATIVE_MIXER_POSTS = frozenset({
+    'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
+
+
+def native_refuses_set(canonical: str) -> bool:
+    """Whether native hosting refuses a non-slot SET (path without /value)."""
+    return (canonical in _NATIVE_REFUSED_PATHS
+            or canonical.rsplit('/', 1)[-1] in _NATIVE_REFUSED_PROPS)
+
+
+def native_allows_post(path: str) -> bool:
+    """Whether a POST runs while native hosting owns the inserts."""
+    return path.rstrip('/').rsplit('/', 1)[-1] in _NATIVE_MIXER_POSTS
+
+
 DEVICE_WATCH_INTERVAL = 0.25
 DEVICE_REOPEN_MIN = 0.5
 DEVICE_REOPEN_MAX = 5.0
@@ -517,6 +545,9 @@ class MixerDaemon:
         self.plugin_lifecycle = PluginLifecycle(
             state, plugin_backend, helper_tree=helper_tree,
             transactions=plugin_transactions)
+        candidate = getattr(plugin_transactions, 'backend', None)
+        self._native_plugin_backend = (candidate if getattr(
+            candidate, 'native_single_insert', False) is True else None)
         self._plugin_publication_active = False
         self.plugin_remote = PluginRemote(state, backend=plugin_remote_backend,
                                           lease_provider=plugin_transactions)
@@ -578,6 +609,20 @@ class MixerDaemon:
         self._session_ready = False
         self.session_dirty = SessionDirty(
             state, ready=lambda: self._session_ready, helper=helper_tree)
+
+        # Plug-in licence status (plugin_license): /plugins/N/Authorized,
+        # Status, Demoing and DemoDaysRemaining from the device's own
+        # answer.  Only when the driver hosts plug-ins (plugin_host=1,
+        # UA_FEAT2_PLUGIN_HOST) and a catalogue is loaded; otherwise
+        # nothing here ever runs (see _license_session_start).
+        self._catalogue = catalogue
+        self.licenses: plugin_license.LicenseMirror | None = None
+        self.plugin_manifest = None   # None: plugin_license.DEFAULT_MANIFEST
+        self._license_active = False
+        self._license_busy = False    # a query runs on the executor
+        self._license_wanted = False  # another query was asked for
+        self._license_timer = None    # a query waiting for the rate limit
+        self._license_retries = 0
 
         # Hot-plug state (see _device_watchdog).  When the daemon starts
         # without the device, the watchdog owns the init push, so the
@@ -651,6 +696,140 @@ class MixerDaemon:
                 self._sync_hw_readback(rb, {})
             log.info("Preserving the hardware's current settings: no init "
                      "sequence for this connection")
+
+        self._publish_native_capabilities()
+
+    def _publish_native_capabilities(self):
+        """Advertise executable providers separately from catalogue and licence status.
+
+        This is an optional Open Apollo extension. A missing extension keeps legacy
+        clients/engines unchanged; advertised support is never a licence grant.
+        """
+        native = self._native_plugin_backend
+        if native is None:
+            return
+        capabilities = native.capabilities()
+        by_name = {}
+        for cap in capabilities:
+            entry = by_name.setdefault(cap['name'], dict(
+                slots=[], mono=[], stereo=[], sample_rate=cap['sample_rate']))
+            entry['slots'].extend(slot for slot in cap['slots']
+                                  if slot not in entry['slots'])
+            layout = 'stereo' if len(cap.get('channels', [0])) == 2 else 'mono'
+            entry[layout].extend(slot for slot in cap['slots'] if slot not in entry[layout])
+        self._publish_license('/NativePluginHosting', True, 'bool')
+        self._publish_license('/NativeMaxInstances', native.max_instances, 'int')
+        self._publish_license('/NativeMaxInserts', getattr(native, 'max_inserts', 1), 'int')
+        self._publish_license('/NativeChainSupported', getattr(native, 'chain_supported', False), 'bool')
+        self._publish_license('/NativeUnisonSupported', getattr(native, 'unison', False), 'bool')
+        self._publish_license('/NativeReplacementSupported', native.replacement, 'bool')
+        self._publish_license('/NativeDelayCompSupported', getattr(native, 'compensation_supported', False), 'bool')
+        self._publish_native_delay_status()
+        for path in list(self.state._props):
+            if not re_mod.fullmatch(r'/plugins/\d+/Name', path):
+                continue
+            name = self.state.get_value(path)
+            cap = by_name.get(name)
+            base = path.rsplit('/', 1)[0]
+            slots = cap['slots'] if cap else []
+            rate = cap['sample_rate'] if cap else 0
+            if cap:
+                labels = []
+                for slot in slots:
+                    match = re_mod.fullmatch(r'/devices/(\d+)/inputs/(\d+)/effects/(\d+)', slot)
+                    if match:
+                        labels.append(f'input {int(match[2]) + 1}, insert {int(match[3]) + 1}')
+                    else:
+                        match = re_mod.fullmatch(r'/devices/(\d+)/inputs/(\d+)/preamps/0/effects/0', slot)
+                        if match:
+                            labels.append(f'input {int(match[2]) + 1}, Unison preamp')
+                location = '; '.join(labels) or 'configured slot'
+                layouts = 'mono/stereo' if cap['mono'] and cap['stereo'] else ('stereo' if cap['stereo'] else 'mono')
+                limit = ('Independent input chains; replacement supported.' if native.replacement
+                         else 'One insert at a time.' if native.max_instances == 1
+                         else 'Independent input chains; remove to replace.')
+                hint = f'Native DSP: {location}; {layouts}, {rate / 1000:g} kHz. {limit}'
+            else:
+                hint = 'No native DSP loader for this plug-in.'
+            for key, value, kind in (
+                    ('NativeLoadSupported', cap is not None, 'bool'),
+                    ('NativeLoadSlots', ','.join(slots), 'string'),
+                    ('NativeMonoSlots', ','.join(cap['mono']) if cap else '', 'string'),
+                    ('NativeStereoSlots', ','.join(cap['stereo']) if cap else '', 'string'),
+                    ('NativeSampleRate', rate, 'int'),
+                    ('NativeLoadHint', hint, 'string')):
+                self._publish_license(base + '/' + key, value, kind)
+
+    def _publish_native_delay_status(self):
+        native = self._native_plugin_backend
+        if native is None:
+            return
+        inputs = getattr(native, 'compensation_inputs', ())
+        overloaded = [item for item in inputs if item.overloaded]
+        messages = []
+        for item in overloaded:
+            channels = '/'.join(str(i + 1) for i in item.channels)
+            suggestion = (f'Increase Input Delay Compensation to {item.suggested} in Settings > Hardware'
+                          if item.suggested else 'Remove a plug-in to reduce input latency')
+            messages.append(f'Input {channels} needs {item.required} samples. {suggestion}.')
+        self._publish_license('/InputDelayCompOverloaded', bool(overloaded), 'bool')
+        self._publish_license('/InputDelayCompWarning', ' '.join(messages), 'string')
+
+    def _handle_native_delay_set(self, client, path, value, params):
+        from plugin_transactions import Outcome
+        native = self._native_plugin_backend
+        transactions = self.plugin_lifecycle.transactions
+        if not getattr(native, 'compensation_supported', False):
+            self._send_local_plugin_error(client, path, 'openapollo.native_operation_unsupported', params)
+            return
+        if (type(value) is not str or value not in MAX_DELAY_COMP_SAMPLES
+                or self._plugin_publication_active or transactions.quarantined):
+            self._send_local_plugin_error(client, path, 'openapollo.invalid_plugin_value', params)
+            return
+        # Subscriber callbacks may synchronously issue another SET. Keep both
+        # public views, warnings and latency updates inside the same guard.
+        self._plugin_publication_active = True
+        phase = 'Compensation transaction'
+        try:
+            result = native.set_compensation(value)
+            if result.status is Outcome.FAILED:
+                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_failed', params)
+                return
+            if result.status is Outcome.INDETERMINATE:
+                transactions.quarantined = True
+                transactions.quarantine_reason = result.detail
+                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params)
+                return
+            if result.status is not Outcome.CONFIRMED or result.setting != value:
+                raise RuntimeError('Backend did not confirm the requested compensation setting')
+            phase = 'Compensation publication'
+            # The device transaction has completed. Publish only its accepted setting.
+            if not self.state.set('/MaxDelayComp/value', value, source_client=client.id, hardware=False):
+                raise RuntimeError('State tree refused the accepted compensation setting')
+            # MaxDelayComp is an engine property; the standard helper schema
+            # does not contain it. Mirror only a helper that exposes it.
+            if self.helper_tree and self.helper_tree.get_value('/MaxDelayComp') is not None:
+                helper_result = self.helper_tree.set_value('/MaxDelayComp', value)
+                if helper_result != 'ok':
+                    raise RuntimeError(f'Helper tree refused compensation setting: {helper_result}')
+            self._publish_native_delay_status()
+            self._refresh_latency(force=True)
+        except Exception as exc:
+            # Hardware may already have changed. Do not acknowledge success or
+            # permit another transaction against incomplete public state.
+            transactions.quarantined = True
+            transactions.quarantine_reason = f'{phase} failed: {exc}'
+            try:
+                native.invalidate()
+            except Exception:
+                log.exception('Could not invalidate native compensation backend')
+            log.warning('%s', transactions.quarantine_reason)
+            self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params)
+            return
+        finally:
+            self._plugin_publication_active = False
+        if 'func_id' in params:
+            self._send_response(client, path, value, params)
 
     async def start(self):
         """Start TCP servers on both ports (runs forever)."""
@@ -727,7 +906,10 @@ class MixerDaemon:
 
     def _device_lost(self, now: float):
         log.warning("Apollo device lost — daemon stays up, reopening with backoff")
+        if self._native_plugin_backend:
+            self._native_plugin_backend.invalidate()
         self._events_detach()
+        self._license_stop()
         self._cancel_settle()
         self._set_hw_paused(False)   # the next connection starts clean
         self._hw_online = False
@@ -1609,6 +1791,7 @@ class MixerDaemon:
         self._publish_pcie_link(info)
         self._check_firmware(info)
         self._poll_transport()
+        self._license_session_start()
 
     def _publish_clock_sources(self, info: dict | None = None,
                                notify: bool = True) -> bool:
@@ -1782,6 +1965,10 @@ class MixerDaemon:
 
     def _on_driver_event(self, code: int, arg: int, time_ns: int = 0):
         """One struct ua_event from the driver (see events.py)."""
+        if self._native_plugin_backend and (
+                code in (UA_EVT_RATE_CHANGED, UA_EVT_CONNECTED, UA_EVT_EVENTS_LOST)
+                or (code == UA_EVT_PAUSED and arg & UA_PAUSE_DEVICE)):
+            self._native_plugin_backend.invalidate()
         name = EVENT_NAMES.get(code, f"0x{code:x}")
         log.debug("driver event %s arg=0x%x", name, arg)
         if code == UA_EVT_RATE_CHANGED:
@@ -1789,8 +1976,11 @@ class MixerDaemon:
             if self._last_rate_index not in (None, arg):
                 self._mute_until_settle()
             self._last_rate_index = arg
+            self._license_epoch_changed()
         elif code in (UA_EVT_CONNECTED, UA_EVT_RATE_INFO):
             self._poll_driver_rate(force=True)
+            if code == UA_EVT_CONNECTED:
+                self._license_epoch_changed()
         elif code == UA_EVT_CLOCK_CHANGED:
             self._refresh_clock_source(arg)
         elif code == UA_EVT_CLOCK_LOCK:
@@ -1816,9 +2006,167 @@ class MixerDaemon:
             log.warning("Driver event queue overflowed (%d dropped): "
                         "refreshing everything", arg)
             self._refresh_all_from_driver()
+            # a dropped CONNECTED or RATE_CHANGED may be among them
+            self._license_epoch_changed()
         elif code in (UA_EVT_IODESC_IN, UA_EVT_IODESC_OUT,
                       UA_EVT_NOTIF_STATUS):
             pass    # raw firmware notifications: the decoded events follow
+
+    # ── Plug-in licence status (L3) ──────────────────────────────────
+    #
+    # The device's own answer (UA_IOCTL_BOARD_QUERY, read-only) mirrored on
+    # /plugins/N by plugin_license.LicenseMirror.  Only with a driver
+    # loaded with plugin_host=1 and a catalogue on /plugins; a driver
+    # without UA_FEAT2_PLUGIN_HOST leaves every property as before.  The
+    # query blocks for up to ~2 s, so it runs on the event loop's default
+    # executor (a worker thread) and its answer is published back on the
+    # loop thread.  Asked once per device session and again on CONNECTED
+    # and RATE_CHANGED (each of which first withdraws the answer shown),
+    # at most once per plugin_license.MIN_QUERY_INTERVAL.
+
+    # Failures worth asking again for (busy, the epoch moved, no answer in
+    # time), at most _LICENSE_RETRIES times in a row
+    _LICENSE_RETRY_ERRNOS = (errno.EBUSY, errno.ESTALE, errno.ETIMEDOUT)
+    _LICENSE_RETRIES = 3
+
+    def _license_plugins(self) -> list:
+        """The catalogue's plug-ins when they are the tree's /plugins/0..N
+        (ua_catalogue laid them on in this order), else []."""
+        plugins = list(getattr(self._catalogue, "plugins", None) or [])
+        for i, p in enumerate(plugins):
+            if self.state.get_value(f"/plugins/{i}/Name") != p.get("name"):
+                log.warning("Plug-in licence status off: /plugins/%d is not "
+                            "the catalogue's entry %d", i, i)
+                return []
+        return plugins
+
+    def _license_session_start(self):
+        """A device session starts: mirror the device's licence answer when
+        the driver hosts plug-ins and a catalogue is loaded."""
+        be = self.hw_router.backend if self.hw_router else None
+        if be is None or not be.connected or self._catalogue is None:
+            return
+        if not plugin_license.plugin_host_available(be):
+            self._license_stop()
+            return
+        if self.licenses is None:
+            plugins = self._license_plugins()
+            if not plugins:
+                return
+            self.licenses = plugin_license.LicenseMirror(
+                self._publish_license, plugins, {}, self._license_query)
+        self.licenses.render_ids = plugin_license.load_render_ids(
+            self.plugin_manifest)
+        log.info("Plug-in host on: licence status of %d plug-ins from the "
+                 "device (%d with a render id)", len(self.licenses.plugins),
+                 sum(r is not None for r in plugin_license.catalogue_render_ids(
+                     self.licenses.plugins, self.licenses.render_ids)))
+        self._license_active = True
+        self._license_retries = 0
+        self._license_request()
+
+    def _license_stop(self):
+        """The device session ended (or has no plug-in host): no answer
+        stays on show and nothing more is asked."""
+        self._license_active = False
+        self._license_wanted = False
+        if self._license_timer is not None:
+            self._license_timer.cancel()
+            self._license_timer = None
+        if self.licenses is not None:
+            self.licenses.invalidate()
+
+    def _license_epoch_changed(self):
+        """CONNECTED / RATE_CHANGED: the answer on show belongs to the old
+        epoch.  Withdraw it and ask again."""
+        if not self._license_active or self.licenses is None:
+            return
+        self.licenses.invalidate()
+        self._license_retries = 0
+        self._license_request()
+
+    def _license_query(self):
+        """The read-only board query, on the worker thread."""
+        return self.hw_router.backend.board_query()
+
+    def _license_request(self):
+        """Ask the device again: now, or once the rate limit allows (asks
+        made meanwhile are one).  Without a running event loop (tests,
+        tools) the query runs in place."""
+        if not self._license_active or self.licenses is None:
+            return
+        self._license_wanted = True
+        if self._license_busy or self._license_timer is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is None:
+            if self.licenses.refresh():
+                self._license_wanted = False
+            return
+        delay = self.licenses.wait_time()
+        if delay > 0:
+            self._license_timer = loop.call_later(delay,
+                                                  self._license_timer_due)
+            return
+        token = self.licenses.begin()
+        if token is None:
+            return
+        try:
+            fut = loop.run_in_executor(None, self.licenses.fetch)
+        except RuntimeError as e:     # the executor is shutting down
+            log.debug("Plug-in licence query not started: %s", e)
+            return
+        self._license_wanted = False
+        self._license_busy = True
+        fut.add_done_callback(functools.partial(self._license_done, token))
+
+    def _license_timer_due(self):
+        self._license_timer = None
+        self._license_request()
+
+    def _license_done(self, token, fut):
+        """The worker's result, back on the loop thread: publish it (unless
+        the session ended or the epoch changed meanwhile)."""
+        self._license_busy = False
+        if fut.cancelled():
+            result = OSError(errno.ECANCELED, "query cancelled")
+        else:
+            result = fut.exception() or fut.result()
+        if self._license_active and self.licenses is not None:
+            if self.licenses.apply(result, token):
+                err = self.licenses.last_error
+                if err is None:
+                    self._license_retries = 0
+                elif (err in self._LICENSE_RETRY_ERRNOS and
+                      self._license_retries < self._LICENSE_RETRIES):
+                    self._license_retries += 1
+                    self._license_wanted = True
+        if self._license_wanted:
+            self._license_request()
+
+    def _publish_license(self, path: str, value, kind: str):
+        """One licence property, published like other device status: the
+        state tree's (and the helper tree's) subscribers are told, nothing
+        reaches the hardware, nothing is saved and /Dirty does not move.
+        Unchanged values are not sent again."""
+        prop = self.state.get_prop_dict(path)
+        if prop is not None and type(prop.get("value")) is type(value) \
+                and prop.get("value") == value:
+            return
+        with self.session_dirty.suppress():
+            if prop is None:
+                self.state.add_runtime_property(path, {"type": kind,
+                                                       "value": value})
+            else:
+                prop["value"] = value
+            self.state._dirty.pop(path + "/value", None)
+            self.state._notify_subscribers(path + "/value", value)
+            if self.helper_tree and \
+                    self.helper_tree.set_value(path, value) != "ok":
+                self.helper_tree._notify(path, value)
 
     # ── Sleep / wake (04 H6) ─────────────────────────────────────────
 
@@ -2697,6 +3045,35 @@ class MixerDaemon:
             return
 
         resp_params = dict(cmd.raw_params) if cmd.raw_params else {}
+        # /Sleep is a per-connection meter-consumer hint (Console), never
+        # mixer state: it does not dirty the session or reach the tree,
+        # so it is handled before the native-mode guards refuse console state
+        if path.lower().removesuffix("/value") == "/sleep":
+            if not isinstance(cmd.value, bool):
+                self._send_error(client, path, "set", resp_params)
+            else:
+                client.sleep = cmd.value
+                if resp_params:
+                    self._send_response(client, path, cmd.value, resp_params)
+            return
+
+        native = self._native_plugin_backend
+        canonical = path.removesuffix('/value')
+        if native and (canonical.startswith('/Native') or canonical in (
+                '/InputDelayCompOverloaded', '/InputDelayCompWarning')
+                or re_mod.fullmatch(r'/plugins/\d+/Native\w+', canonical)):
+            self._send_local_plugin_error(client, path, 'openapollo.read_only', resp_params)
+            return
+        if native and canonical == '/MaxDelayComp':
+            self._handle_native_delay_set(client, path, cmd.value, resp_params)
+            return
+        native_allows_idle_link = (native and hasattr(native, 'allows_idle_mixer_link_change')
+                                   and native.allows_idle_mixer_link_change(canonical))
+        if native and not native_allows_idle_link and not is_plugin_slot_path(path) \
+                and native_refuses_set(canonical):
+            self._send_local_plugin_error(
+                client, path, 'openapollo.native_operation_unsupported', resp_params)
+            return
         if self._handle_clock_set(client, path, cmd.value, resp_params):
             return
         if self.plugins_enabled and self._plugin_publication_active and \
@@ -2717,17 +3094,6 @@ class MixerDaemon:
                                               resp_params)
             elif "func_id" in resp_params:
                 self._send_response(client, path, cmd.value, resp_params)
-            return
-
-        # /Sleep is a per-connection meter-consumer hint (Console), never
-        # mixer state: it does not dirty the session or reach the tree
-        if path.lower().removesuffix("/value") == "/sleep":
-            if not isinstance(cmd.value, bool):
-                self._send_error(client, path, "set", resp_params)
-            else:
-                client.sleep = cmd.value
-                if resp_params:
-                    self._send_response(client, path, cmd.value, resp_params)
             return
 
         # The engine refuses a client SET of a read-only value (the daemon's
@@ -2919,6 +3285,7 @@ class MixerDaemon:
         self._plugin_publication_active = True
         try:
             self._publish_plugin_commit_inner(events)
+            self._publish_native_delay_status()
         finally:
             self._plugin_publication_active = False
 
@@ -3193,6 +3560,13 @@ class MixerDaemon:
                 self._init_fired = True
                 asyncio.get_event_loop().call_later(
                     1.0, self._fire_init_complete)
+            return
+
+        # This first native mode has no transactional bulk/undo/preset adapter:
+        # only mixer-only commands run while it owns the inserts.
+        if self._native_plugin_backend and not native_allows_post(cmd.path):
+            self._send_post_reply(client, cmd.path, None,
+                                  'openapollo.native_operation_unsupported', resp_params)
             return
 
         # Mixer Helper /auto_gain/{start,stop}_auto_gain
@@ -3618,6 +3992,9 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                                help="Exit (status 1) when the device node "
                                     "cannot be opened at start, instead of "
                                     "waiting for it")
+    parser.add_argument("--native-plugin-provider", type=Path, metavar="FILE",
+                        help="Experimental single-insert hosting through an explicitly "
+                             "trusted local Python provider; requires --preserve-hardware")
     parser.add_argument("--preserve-hardware", action="store_true",
                         help="Attach to a running Apollo without the init "
                              "sequence: publish what the hardware reports "
@@ -3680,6 +4057,9 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     parser.add_argument("--factory-presets-dir", type=Path,
                         help="Read-only factory .fxp/.uadchannel directory")
     args = parser.parse_args()
+    if args.native_plugin_provider and (
+            not args.preserve_hardware or args.no_hardware or args.usb or args.no_helper):
+        parser.error("native hosting requires --preserve-hardware, PCIe hardware and helper")
 
     # Logging
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -3755,9 +4135,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     if isinstance(serial, str):
         seed_state_file(state_file, state_file_for(device_map, index))
     state_file.parent.mkdir(exist_ok=True)
-    # No plugin backend is wired here, so saved effect-slot values restore
-    # as before (a backend defers them with restore_filter)
-    state.enable_persistence(state_file)
+    # Persisted intent never establishes a native DSP lease.
+    state.enable_persistence(state_file, restore_filter=(
+        (lambda key: not is_plugin_slot_path(key))
+        if args.native_plugin_provider else None))
     store_stem = state_file.name.removesuffix(".state.json")
     network_id = load_network_id(state_file.with_name(
         state_file.name.removesuffix(".state.json") + ".network.json"))
@@ -3811,6 +4192,15 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     elif args.no_hardware:
         log.info("Software-only mode (--no-hardware)")
 
+    native_backend = native_transactions = None
+    if args.native_plugin_provider:
+        from plugin_native import load_provider, register_native
+        try:
+            native_backend, native_transactions = register_native(
+                state, helper_tree, backend, load_provider(args.native_plugin_provider))
+        except Exception as error:
+            parser.error(f"native hosting unavailable: {type(error).__name__}: {error}")
+
     # Initialize software metering (through PipeWire when it holds the
     # Apollo, else ALSA capture)
     if not args.no_hardware and not args.no_metering:
@@ -3836,7 +4226,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                          software_only=args.no_hardware,
                          presets_dir=args.presets_dir,
                          factory_presets=args.factory_presets_dir,
-                         catalogue=catalogue)
+                         catalogue=catalogue,
+                         plugin_transactions=native_transactions,
+                         plugin_remote_backend=native_backend,
+                         plugin_hosting=bool(native_backend))
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}
@@ -3902,6 +4295,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     except KeyboardInterrupt:
         log.info("Shutting down...")
     finally:
+        if native_backend:
+            native_backend.invalidate()
+            # The borrowed owner fd closes here; the driver retires its leases.
+            backend.close()
         metering.stop()
         state.save_now()
         if bonjour:

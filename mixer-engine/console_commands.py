@@ -154,7 +154,11 @@ class ConsoleCommands:
         if command == "PluginStartDemo":
             plugin = args.get("pluginPath", "")
             if not self.inserts.software_only:
-                raise ValueError("native demo activation requires the vendor backend")
+                # With hardware a demo is the device's own record and only
+                # UA's software starts one: nothing is sent, nothing changes
+                # (the licence status shown is the device's, plugin_license)
+                raise ValueError("demos are started in UA's own software; "
+                                 "open-apollo never starts one")
             if not isinstance(plugin, str) or not re.fullmatch(r"/plugins/\d+", plugin) or not self.state.get_value(plugin + "/DemoAvailable"):
                 raise ValueError("demo is unavailable")
             self.publish(plugin + "/Demoing", True)

@@ -123,6 +123,9 @@ pub struct App {
     main_focused: bool,
     focus_check: bool,
     pending_menu: Option<String>,
+    /// `--open-plugin` against a live engine: retried on rebuilds until the deadline, since
+    /// the engine's state arrives after connect.
+    pending_open: Option<(String, u8, Instant)>,
     /// A press on a drag source (`rack::dnd`): its tap fires on release unless it became a drag.
     deferred_tap: Option<rack::Hit>,
     /// The plug-in windows Window › Show/Hide Floating Windows hid (Some while hidden).
@@ -161,9 +164,15 @@ impl App {
             crate::source::preview("preview")
         });
         let mut overlays = OverlayStack::new(Box::new(crate::plugin::PluginUiHook::new(&assets.images)));
+        let mut pending_open = None;
         if let Some((strip, slot)) = &opts.open_plugin {
             if !overlays.on_open_plugin(strip, *slot, &*model) {
-                eprintln!("uaconsole: --open-plugin {strip}:{slot}: no plug-in loaded there");
+                if live_meters {
+                    // ponytail: fixed 10 s window; use an engine "initial state complete" signal if one is added.
+                    pending_open = Some((strip.clone(), *slot, Instant::now() + Duration::from_secs(10)));
+                } else {
+                    eprintln!("uaconsole: --open-plugin {strip}:{slot}: no plug-in loaded there");
+                }
             }
         }
         overlays.sync(&mut *model);
@@ -220,6 +229,7 @@ impl App {
             main_focused: true,
             focus_check: false,
             pending_menu: opts.menu,
+            pending_open,
         }
     }
 
@@ -320,6 +330,14 @@ impl App {
             text,
             px_per_pt: tf.scale,
         });
+        if let Some((strip, slot, deadline)) = &self.pending_open {
+            if self.overlays.on_open_plugin(strip, *slot, &*self.model) {
+                self.pending_open = None;
+            } else if Instant::now() > *deadline {
+                eprintln!("uaconsole: --open-plugin {strip}:{slot}: no plug-in loaded there");
+                self.pending_open = None;
+            }
+        }
         self.overlays.sync(&mut *self.model);
         self.frame = build_frame(
             &self.assets,
@@ -477,7 +495,11 @@ impl App {
                         strip,
                         control: Control::Insert(slot),
                     })) => {
-                        self.overlays.on_open_plugin(&strip, slot, &*self.model);
+                        if self.overlays.on_open_plugin(&strip, slot, &*self.model) {
+                            if let Some(id) = self.overlays.top_layer_id() {
+                                self.popups.focus(&id);
+                            }
+                        }
                     }
                     Effect::Model(a) => self.model.apply(&a),
                     Effect::SetText(id, text) => self.model.set_text(&id, &text),
