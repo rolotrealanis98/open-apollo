@@ -1,6 +1,6 @@
 {
  "schema": "open-apollo-native-known-good/1",
- "note": "Plug-ins whose user-built runtime bundles reached live control on an Apollo x4 at 48 kHz (Titan, Oct 2026). Names, stage, discovery family, Console latency in samples and the positions (row, word) of DSP-owned words the daemon must not verify. No DSP data.",
+ "note": "Plug-ins whose user-built runtime bundles passed a live gate on an Apollo x4 at 48 kHz, per layout (mono: one input; stereo: a linked pair). Names, stage, discovery family, Console latency in samples and the positions (row, word) of DSP-owned words the daemon must not verify. No DSP data, no UA text.",
  "sample_rate": 48000,
  "device": "Apollo x4",
  "plugins": [
@@ -8,35 +8,42 @@
    "name": "UAD ADA Flanger",
    "stage": "live",
    "family": "vst2_bx",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD AMS DMX 15-80 S",
    "stage": "live",
    "family": "dspaudioprocessor",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD AMS RMX16",
    "stage": "live",
    "family": "vst2",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD AMS RMX16 Expanded",
    "stage": "live",
    "family": "vst2",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD API 2500",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -119,69 +126,87 @@
      17,
      99
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD API 550A",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD API 560",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD API Preamp",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD API Vision Channel Strip Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Ampeg B15N",
    "stage": "live",
    "family": "vst2_bx",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Ampeg SVT3Pro",
    "stage": "live",
    "family": "vst2_bx",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Ampeg SVTVR",
    "stage": "live",
    "family": "vst2_bx",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Ampeg SVTVR Classic",
    "stage": "live",
    "family": "vst2_bx",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Ampex ATR-102",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 2262,
    "dynamic_refs": [
     [
@@ -192,13 +217,15 @@
      10,
      157
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Auto-Tune Realtime Access",
    "stage": "live",
    "family": "dspaudioprocessor",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -217,13 +244,15 @@
      10,
      1357
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Auto-Tune Realtime Advanced",
    "stage": "live",
    "family": "dspaudioprocessor",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -238,13 +267,15 @@
      10,
      1357
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Auto-Tune Realtime X",
    "stage": "live",
    "family": "paramobj",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -263,109 +294,135 @@
      10,
      1358
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Avalon VT-737sp",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Bermuda Triangle",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 88
+   "latency_samples": 88,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Brigade Chorus",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      9
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD C-Suite C-Vox",
    "stage": "live",
    "family": "dspaudioprocessor",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Cambridge",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Capitol Chambers",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 320
+   "latency_samples": 320,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Century Tube Channel Strip",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Cooper Time Cube",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      334
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD DreamVerb",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD EMT 140",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD ENGL E765 RT",
    "stage": "live",
    "family": "vst2_bx",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD EP-34 Tape Echo",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Empirical Labs Distressor",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 55,
    "dynamic_refs": [
     [
@@ -384,13 +441,15 @@
      18,
      57
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Empirical Labs FATSO Jr",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 55,
    "dynamic_refs": [
     [
@@ -405,13 +464,15 @@
      17,
      18
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Empirical Labs FATSO Sr",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 55,
    "dynamic_refs": [
     [
@@ -426,66 +487,78 @@
      17,
      18
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Fairchild 660",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      44
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Fairchild 670",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      44
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Fairchild 670 Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      5
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Fender 55 Tweed Deluxe",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 87
+   "latency_samples": 87,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Galaxy Tape Echo",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Harrison 32C",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -496,13 +569,15 @@
      10,
      18
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Harrison 32C SE",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -513,20 +588,24 @@
      10,
      18
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Helios Type 69",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Helios Type 69 Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -537,104 +616,132 @@
      10,
      18
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Hitsville EQ",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Hitsville EQ Mastering",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Hitsville Reverb Chambers",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 320
+   "latency_samples": 320,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Korg SDD-3000",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 87
+   "latency_samples": 87,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD LA-6176 Channel Strip",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 110
+   "latency_samples": 110,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Lexicon 480L",
    "stage": "live",
    "family": "vst2_relab",
-   "channels": 2,
-   "latency_samples": 64
+   "latency_samples": 64,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Little Labs IBP",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Little Labs VOG",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD MXR Flanger-Doubler",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 31
+   "latency_samples": 31,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Manley Massive Passive",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Manley Massive Passive MST",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Manley Reference Mic Preamp",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Manley VOXBOX",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Manley Variable Mu",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -665,13 +772,15 @@
      22,
      15
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Moog Multimode Filter",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 55,
    "dynamic_refs": [
     [
@@ -686,13 +795,15 @@
      10,
      93
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Moog Multimode Filter SE",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -707,20 +818,24 @@
      10,
      93
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Neve 1073",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Neve 1073 Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -731,41 +846,51 @@
      10,
      18
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Neve 1073SE Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Neve 1084",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Neve 2254 E",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Neve 2254 E Dual",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Neve 33609 C",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -780,13 +905,15 @@
      11,
      9
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Neve 33609SE",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -801,20 +928,24 @@
      11,
      9
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Neve 88RS",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Neve 88RS Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -829,46 +960,54 @@
      10,
      88
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Neve Preamp",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Oxford Dynamic EQ",
    "stage": "live",
    "family": "vstmain",
-   "channels": 2,
    "latency_samples": 50,
    "dynamic_refs": [
     [
      10,
      592
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Oxford Inflator",
    "stage": "live",
    "family": "sonnox",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      44
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Oxford Limiter",
    "stage": "live",
    "family": "sonnox",
-   "channels": 2,
    "latency_samples": 148,
    "dynamic_refs": [
     [
@@ -879,86 +1018,102 @@
      10,
      2191
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Oxford SuprEsser DS",
    "stage": "live",
    "family": "vstmain",
-   "channels": 2,
-   "latency_samples": 178
+   "latency_samples": 178,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Oxide Tape",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 55,
    "dynamic_refs": [
     [
      10,
      10
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision Buss Compressor",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Precision Channel Strip",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      340
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision De-Esser",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Precision Delay Mod",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      42
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision Delay Mod L",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      42
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision Enhancer Hz",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -973,33 +1128,39 @@
      10,
      18
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Precision Enhancer kHz",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Precision Equalizer",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 31,
    "dynamic_refs": [
     [
      10,
      17
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision K-Stereo",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1094,13 +1255,15 @@
      47,
      3
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision Limiter",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 69,
    "dynamic_refs": [
     [
@@ -1143,46 +1306,54 @@
      10,
      114
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision Maximizer",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Precision Multiband",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 16896,
    "dynamic_refs": [
     [
      10,
      5
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Precision Reflection Engine",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      35
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Pultec EQP-1A",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1201,13 +1372,15 @@
      10,
      50
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Pultec EQP-1A Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1218,20 +1391,24 @@
      10,
      18
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Pultec HLF-3C",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Pultec MEQ-5",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1250,41 +1427,51 @@
      10,
      45
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Pure Plate",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Raw",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 44
+   "latency_samples": 44,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD RealVerb-Pro",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD SSL E Channel Strip",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD SSL E Channel Strip Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 31,
    "dynamic_refs": [
     [
@@ -1299,13 +1486,15 @@
      10,
      124
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD SSL G Bus Compressor",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1324,80 +1513,96 @@
      11,
      6
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD SSL G Bus Compressor Legacy",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      15,
      14
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Sound Machine Wood Works",
    "stage": "live",
    "family": "dspaudioprocessor",
-   "channels": 2,
-   "latency_samples": 48
+   "latency_samples": 48,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Sphere Mic Collection",
    "stage": "live",
    "family": "vstmain",
-   "channels": 2,
-   "latency_samples": 24
+   "latency_samples": 24,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Sphere Mic Collection 180",
    "stage": "live",
    "family": "vstmain",
-   "channels": 2,
-   "latency_samples": 24
+   "latency_samples": 24,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Studer A800",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 55,
    "dynamic_refs": [
     [
      10,
      10
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD Studio D Chorus",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
    "latency_samples": 0,
    "dynamic_refs": [
     [
      10,
      9
     ]
+   ],
+   "layouts": [
+    "stereo"
    ]
   },
   {
    "name": "UAD TS Overdrive",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 88
+   "latency_samples": 88,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Teletronix LA-2",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1420,13 +1625,15 @@
      11,
      97
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Teletronix LA-2A Gray",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1449,13 +1656,15 @@
      11,
      97
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Teletronix LA-2A Silver",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1478,27 +1687,33 @@
      11,
      97
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD Teletronix LA-3A",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD Thermionic Culture Vulture",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD Trident A-Range",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1509,13 +1724,15 @@
      10,
      18
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD UA 1176 Rev A",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1526,13 +1743,15 @@
      10,
      161
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD UA 1176AE",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
    "latency_samples": 0,
    "dynamic_refs": [
     [
@@ -1543,63 +1762,82 @@
      10,
      161
     ]
+   ],
+   "layouts": [
+    "mono"
    ]
   },
   {
    "name": "UAD UA 1176LN Rev E",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD UA 175-B",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD UA 176",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD UA 610-A",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD UA 610-B",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   },
   {
    "name": "UAD V76 Preamp",
    "stage": "live",
    "family": "generic",
-   "channels": 2,
-   "latency_samples": 55
+   "latency_samples": 55,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD bx_tuner",
    "stage": "live",
    "family": "vst2_bx",
-   "channels": 2,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "stereo"
+   ]
   },
   {
    "name": "UAD dbx 160",
    "stage": "live",
    "family": "generic",
-   "channels": 1,
-   "latency_samples": 0
+   "latency_samples": 0,
+   "layouts": [
+    "mono"
+   ]
   }
  ],
  "excluded": {

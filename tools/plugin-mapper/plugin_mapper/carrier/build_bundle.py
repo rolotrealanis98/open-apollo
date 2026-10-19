@@ -14,14 +14,21 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def build(execution, profile, metadata, latency):
+def build(execution, profile, metadata, latency, layout='mono'):
     """execution: run_profile.py result (offline_pass); profile: the executed profile;
-    metadata: the parameter metadata document the run used; latency: samples at 48 kHz or None."""
+    metadata: the parameter metadata document the run used; latency: samples at 48 kHz or None;
+    layout: 'mono' or 'stereo', the host layout the execution answered the plug-in with."""
     name = execution['name']
     if execution.get('status') != 'offline_pass':
         raise ValueError(f'{name}: offline pass required')
     if profile.get('name') != name:
         raise ValueError(f'{name}: executed profile identity differs')
+    channels = 2 if layout == 'stereo' else 1
+    if layout not in ('mono', 'stereo') or bool(profile.get('stereo_channel_request')) != (channels == 2):
+        raise ValueError(f'{name}: the execution was not run for a {layout} host')
+    if channels == 2 and (tuple(execution['descriptor'].get('io', ())) != (2, 2)
+                          or execution['descriptor'].get('configured_input_channels') != 2):
+        raise ValueError(f'{name}: a stereo bundle needs a 2-in/2-out descriptor configured for two channels')
     ids = sorted({int(item['path'].split('/parameters/')[1].split('/')[0])
                   for item in metadata['controls'] if '/parameters/' in item['path']})
     if ids != list(range(execution['parameters']['count'])):
@@ -53,7 +60,8 @@ def build(execution, profile, metadata, latency):
         'status': 'pass',
         'scope': 'built offline from the local install; not a hardware qualification claim',
         'name': name,
-        'carrier_channels': 2 if tuple(descriptor.get('io', ())) == (2, 2) else 1,
+        'layout': layout,
+        'carrier_channels': channels,
         'latency_source': 'known_good' if latency is not None else 'unknown',
         'dll': {'path': profile['dll']['path'], 'sha256': descriptor['plugin_sha256']},
         'descriptor': descriptor,

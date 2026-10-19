@@ -57,30 +57,34 @@ class StereoStub(Stub):
 
 def bundles(tmp_path, *entries):
     index = {"uad_sdk": str(tmp_path / "UAD2SDK.dll"), "module_store": str(tmp_path), "bundles": []}
-    for name, channels in entries:
-        file = name.replace(" ", "-") + "-runtime-bundle.json"
-        (tmp_path / file).write_text(json.dumps({"status": "pass", "name": name, "carrier_channels": channels}))
-        index["bundles"].append({"name": name, "file": file})
+    for name, layout in entries:
+        file = f"{name.replace(' ', '-')}-{layout}-runtime-bundle.json"
+        (tmp_path / file).write_text(json.dumps({"status": "pass", "name": name, "layout": layout,
+                                                 "carrier_channels": 2 if layout == "stereo" else 1}))
+        index["bundles"].append({"name": name, "layout": layout, "file": file})
     (tmp_path / "index.json").write_text(json.dumps(index))
 
 
-def test_registry_offers_known_good_on_every_input(tmp_path, monkeypatch):
+def test_registry_offers_each_verified_layout_from_its_own_bundle(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "ProfiledCarrierProvider", Stub)
     monkeypatch.setattr(registry, "StereoProfiledCarrierProvider", StereoStub)
     monkeypatch.delenv("OA_UAD_SDK", raising=False)
     monkeypatch.delenv("OA_MODULE_STORE", raising=False)
-    known = next(iter(registry.known_good()))
-    bundles(tmp_path, (known, 2), ("UAD Not Yet Live", 1))
+    monkeypatch.setattr(registry, "known_good", lambda: {
+        "UAD Both": {"layouts": ["mono", "stereo"]}, "UAD Mono Only": {"layouts": ["mono"]}})
+    bundles(tmp_path, ("UAD Both", "mono"), ("UAD Both", "stereo"), ("UAD Mono Only", "mono"),
+            ("UAD Mono Only", "stereo"), ("UAD Not Yet Live", "mono"))
     offered = registry.create_profiled_providers(tmp_path)
-    assert sorted((type(p).__name__, p.input_index) for p in offered) == [
-        ("StereoStub", 0), ("StereoStub", 2), ("Stub", 0), ("Stub", 1), ("Stub", 2), ("Stub", 3)]
-    assert {p.name for p in offered} == {known}
+    assert sorted((p.name, type(p).__name__, p.input_index) for p in offered) == [
+        ("UAD Both", "StereoStub", 0), ("UAD Both", "StereoStub", 2),
+        *[("UAD Both", "Stub", i) for i in range(4)], *[("UAD Mono Only", "Stub", i) for i in range(4)]]
     assert callable(offered.composer)
     everything = registry.create_profiled_providers(tmp_path, advertise_all=True)
-    assert {p.name for p in everything} == {known, "UAD Not Yet Live"}
+    assert {(p.name, type(p).__name__) for p in everything} >= {("UAD Mono Only", "StereoStub"), ("UAD Not Yet Live", "Stub")}
 
 
 def test_known_good_list_holds_no_dsp_data():
     for entry in registry.known_good().values():
-        assert set(entry) <= {"name", "stage", "family", "channels", "latency_samples", "dynamic_refs"}
+        assert set(entry) <= {"name", "stage", "family", "layouts", "latency_samples", "dynamic_refs"}
+        assert set(entry["layouts"]) <= {"mono", "stereo"}
         assert all(len(ref) == 2 for ref in entry.get("dynamic_refs", ()))

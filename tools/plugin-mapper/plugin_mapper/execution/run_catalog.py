@@ -168,8 +168,10 @@ def run_one(profile,cfg):
 STEREO_REQUEST=json.loads((BATCH/'carrier/stereo-channel-request.json').read_text())['plugins']
 
 def apply_overrides(profiles):
-    # Opt-in stereo channel request (carrier/stereo-channel-request.json); executed profile records it.
-    return [dict(p,stereo_channel_request=True)if p.get('name')in STEREO_REQUEST else p for p in profiles]
+    # Opt-in stereo channel request (carrier/stereo-channel-request.json) unless the profile already
+    # says which host layout it is executed for (plugin_mapper runs a mono and a stereo variant).
+    return [dict(p,stereo_channel_request=True)if p.get('name')in STEREO_REQUEST and 'stereo_channel_request' not in p
+            else p for p in profiles]
 
 def load_profiles(args):
     if args.profiles:

@@ -157,10 +157,10 @@ CPU) into `~/.local/share/open-apollo/plugin-bundles`, and restarts the mixer da
 `--native-plugin-bundles`. Rerun the script after a UAD update; `--remove` turns hosting off.
 
 What to expect:
-- The Console offers the plug-ins on `mixer-engine/device_maps/native_known_good.json`: the
-  ones that went live on an Apollo x4 at 48 kHz, in mono on every input and, for stereo
-  plug-ins, on linked pairs, up to four per input. `--all` maps every installed plug-in, and
-  the daemon's `--advertise-all-plugins` offers them too; those are untested.
+- The Console lists the plug-ins `mixer-engine/device_maps/native_known_good.json` marks as
+  live-tested on an Apollo x4 at 48 kHz in both layouts: mono on any input and stereo on a
+  linked pair, up to four per input. `--all` maps every installed plug-in, and the daemon's
+  `--advertise-all-plugins` offers them too; those are untested.
 - 48 kHz only. Your Windows install must stay mounted where you mapped it from: the daemon
   runs each plug-in's own code to plan control changes.
 - The plug-ins run with UA's own DSP code; a refused licence leaves the input as it was.

@@ -190,7 +190,10 @@ def main(argv=None):
                 continue
             profiles += [p for p in json.loads(output.read_text())['profiles'] if p['name'] == name]
 
-    # Execution: every control of every discovered plug-in, offline.
+    # Execution: every control of every discovered plug-in, offline, once per host layout. The
+    # plug-in's own code asks the host for its channel count (parent 0x518/0x520) and builds a
+    # different state for a stereo insert, so mono and stereo are separate bundles.
+    profiles = [dict(p, stereo_channel_request=stereo) for p in profiles for stereo in (False, True)]
     save(work / 'profiles-all.json', dict(profiles=profiles))
     if profiles:
         run([sys.executable, str(PKG / 'execution/run_catalog.py'), '--profiles', str(work / 'profiles-all.json'),
@@ -202,32 +205,42 @@ def main(argv=None):
 
     # Bundles.
     args.out.mkdir(parents=True, exist_ok=True)
-    built = []
+    built, mono_only = [], []
+    for old in args.out.glob('*-runtime-bundle.json'):  # a rerun replaces the whole set
+        old.unlink()
     for row in results:
         name = row['name']
-        if row['status'] != 'offline_pass':
-            failures[name] = f"execution {row['status']}: {(row.get('failure_bucket') or {}).get('subject', '')}"
-            continue
         job = Path(row['execution']).parent
-        execution = json.loads((job / 'execution.json').read_text())
         profile = json.loads((job / 'profile.json').read_text())
+        layout = 'stereo' if profile.get('stereo_channel_request') else 'mono'
+        key = f'{name} ({layout})'
+        if row['status'] != 'offline_pass':
+            failures[key] = f"execution {row['status']}: {(row.get('failure_bucket') or {}).get('subject', '')}"
+            continue
+        execution = json.loads((job / 'execution.json').read_text())
+        if layout == 'stereo' and tuple(execution['descriptor'].get('io', ())) != (2, 2):
+            mono_only.append(name)  # the original descriptor is not 2-in/2-out: no stereo insert
+            continue
         metadata = json.loads(Path(profile['captured_metadata']['path']).read_text())
         entry = known.get(name, {})
         try:
-            bundle = build(execution, profile, metadata, entry.get('latency_samples'))
+            bundle = build(execution, profile, metadata, entry.get('latency_samples'), layout)
         except ValueError as error:
-            failures[name] = str(error)
+            failures[key] = str(error)
             continue
         if entry.get('dynamic_refs'):
             bundle['dynamic_observation_refs'] = entry['dynamic_refs']
-        save(args.out / f'{slug(name)}-runtime-bundle.json', bundle)
-        built.append(dict(name=name, file=f'{slug(name)}-runtime-bundle.json', known_good=name in known,
+        file = f'{slug(name)}-{layout}-runtime-bundle.json'
+        save(args.out / file, bundle)
+        built.append(dict(name=name, layout=layout, file=file, known_good=layout in entry.get('layouts', ()),
                           latency_source=bundle['latency_source']))
     save(args.out / 'index.json', dict(schema='open-apollo-plugin-bundles/1', created=time.strftime('%Y-%m-%dT%H:%M:%S'),
                                        uad_sdk=str(sdk), uad_sdk_sha256=sha(sdk), plugin_dlls=str(dlls),
                                        module_store=str(args.module_store / 'modules'),
-                                       bundles=built, failures=dict(sorted(failures.items()))))
-    print(f'{len(built)} bundles written to {args.out}, {len(failures)} not built '
+                                       bundles=built, mono_only=sorted(mono_only),
+                                       failures=dict(sorted(failures.items()))))
+    layouts = {lay: sum(b['layout'] == lay for b in built) for lay in ('mono', 'stereo')}
+    print(f"{len(built)} bundles ({layouts['mono']} mono, {layouts['stereo']} stereo) written to {args.out}, {len(failures)} not built "
           f'({time.monotonic() - started:.0f} s); details in {args.out / "index.json"}', flush=True)
     return 0 if built else 1
 

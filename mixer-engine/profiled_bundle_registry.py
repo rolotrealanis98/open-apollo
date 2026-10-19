@@ -3,11 +3,11 @@
   python3 -m plugin_mapper --from <install> --out ~/.local/share/open-apollo/plugin-bundles
   ua_mixer_daemon.py --native-plugin-bundles ~/.local/share/open-apollo/plugin-bundles ...
 
-Each passing bundle is offered mono on every analog input, and on both input pairs as well when
-its original descriptor is 2-in/2-out.
-Only plug-ins on device_maps/native_known_good.json are advertised unless advertise_all is set:
-the others built offline but have not been through a live pass. The Apollo's licence answer
-still decides every load.
+A plug-in has a mono bundle (offered on every analog input) and, when its original descriptor
+is 2-in/2-out, a stereo bundle (offered on the linked pairs 1/2 and 3/4). Only the layouts
+device_maps/native_known_good.json lists for a plug-in are advertised unless advertise_all is
+set: the others built offline but have not been through a live pass. The Apollo's licence
+answer still decides every load.
 """
 import json
 import logging
@@ -40,29 +40,29 @@ def create_profiled_providers(directory=DEFAULT_DIR, *, advertise_all=False, inp
     os.environ.setdefault('OA_MODULE_STORE', index.get('module_store', str(MODULES)))
     store = Path(os.environ['OA_MODULE_STORE'])
     allowed = None if advertise_all else known_good()
-    providers, names = [], set()
+    providers, offered = [], set()
     for entry in index['bundles']:
         path = directory / entry['file']
         data = json.loads(path.read_text())
-        name = data.get('name')
-        if data.get('status') != 'pass' or not isinstance(name, str):
+        name, layout = data.get('name'), data.get('layout')
+        if data.get('status') != 'pass' or not isinstance(name, str) or layout not in ('mono', 'stereo'):
             continue
-        if allowed is not None and name not in allowed:
+        if allowed is not None and layout not in allowed.get(name, {}).get('layouts', ()):
             continue
-        if name in names:
-            raise ValueError(f'duplicate profiled bundle name: {name}')
-        names.add(name)
-        channels = data.get('carrier_channels', 1)
-        if channels not in (1, 2):
-            raise ValueError(f'profile bundle carrier_channels must be 1 or 2: {path}')
-        offers = [(ProfiledCarrierProvider, i) for i in inputs]
-        if channels == 2:  # an original 2/2 descriptor also runs as a stereo carrier on linked pairs
-            offers += [(StereoProfiledCarrierProvider, i) for i in (0, 2) if i in inputs and i + 1 in inputs]
+        if (name, layout) in offered:
+            raise ValueError(f'duplicate profiled bundle: {name} ({layout})')
+        if data.get('carrier_channels') != (2 if layout == 'stereo' else 1):
+            raise ValueError(f'profile bundle carrier_channels do not match its layout: {path}')
+        # Each layout runs from its own bundle: the plug-in built a mono or a stereo state.
+        offers = ([(StereoProfiledCarrierProvider, i) for i in (0, 2) if i in inputs and i + 1 in inputs]
+                  if layout == 'stereo' else [(ProfiledCarrierProvider, i) for i in inputs])
         try:
             providers += [kind(path, i, data=data, module_store=store) for kind, i in offers]
+            offered.add((name, layout))
         except (OSError, ValueError) as error:
             # One bad bundle must not take the others down; it is simply not offered.
             log.warning('native bundle %s not offered: %s', path.name, error)
-    log.info('native hosting: %d plug-ins from %s (%s)', len(names), directory,
-             'all built bundles' if advertise_all else 'known-good list')
+    both = {n for n, lay in offered if lay == 'mono'} & {n for n, lay in offered if lay == 'stereo'}
+    log.info('native hosting: %d plug-ins (%d in both layouts) from %s (%s)', len({n for n, _ in offered}),
+             len(both), directory, 'all built bundles' if advertise_all else 'known-good list')
     return ProfiledProviders(providers)

@@ -19,18 +19,23 @@ python3 mixer-engine/ua_mixer_daemon.py \
 parameter block, program loader and descriptor; execution constructs it with the user's own
 `UAD2SDK.dll`, loads its Console defaults, reads the DSP descriptor, and sweeps every control
 (0, middle, maximum) recording the DSP words each change writes. Parameter names, step labels
-and defaults come from the installed panel specs. One `<plug-in>-runtime-bundle.json` per
-passing plug-in, plus `index.json` (what was built, what failed and why).
+and defaults come from the installed panel specs. Every plug-in runs twice, once answering the
+plug-in's channel-count query (parent 0x518/0x520) as a mono host and once as a stereo host,
+because the plug-in builds a different state for each: `<plug-in>-mono-runtime-bundle.json`
+and, when its descriptor is 2-in/2-out, `<plug-in>-stereo-runtime-bundle.json`, plus
+`index.json` (what was built, which plug-ins are mono only, what failed and why).
 
-`profiled_bundle_registry.py` makes one `ProfiledCarrierProvider` per input (and a
-`StereoProfiledCarrierProvider` per input pair for 2-in/2-out descriptors) and the chain
-composer (`native_chain_composer.py`). `native_carrier.py` builds the CREATE recipe: chain head,
+`profiled_bundle_registry.py` offers each layout from its own bundle: a
+`ProfiledCarrierProvider` per input for mono, a `StereoProfiledCarrierProvider` per linked
+pair (1/2, 3/4) for stereo, and the chain composer (`native_chain_composer.py`). The daemon
+publishes them as `NativeMonoSlots` / `NativeStereoSlots` per `/plugins/N`; the Console lists
+a plug-in only when both are non-empty. `native_carrier.py` builds the CREATE recipe: chain head,
 Mic Input Strip (the words `driver/ua_strips.c` writes for a plain strip), then the plug-in's
 rows and startup words. Control changes are planned by running the plug-in's own setter in the
 emulator, so the daemon needs the mapper's Python packages and the DLL where it was mapped.
 
-Only plug-ins on `device_maps/native_known_good.json` are offered unless
-`--advertise-all-plugins` is given. That list holds names, the discovery family, Console latency
+Only the layouts `device_maps/native_known_good.json` lists for a plug-in are offered unless
+`--advertise-all-plugins` is given. That list holds names, the live-gated layouts, the discovery family, Console latency
 (samples at 48 kHz, for delay compensation) and the positions of DSP-owned words the daemon must
 not verify, nothing else; it is the plug-ins that went live on an Apollo x4. Bundles,
 receipts, captures and disassembly never enter the repository (`tools/check-clean-repo.py`,
