@@ -208,7 +208,10 @@ It talks to the mixer daemon on 127.0.0.1:4710. The menu entry controls your Apo
 (`uaconsole --writes`). Plain `uaconsole` only shows the mixer until you turn on
 Settings › WRITES. Plug-in windows, Settings and the movable panels open as separate windows
 on X11 and Wayland; on Wayland the compositor places them (Hyprland: enable
-`focus_on_activate` if a re-opened plug-in window should come to the front). See [console-rs/README.md](console-rs/README.md)
+`focus_on_activate` if a re-opened plug-in window should come to the front). View › Section ›
+Show Snapshots appears when `show_snapshots` is true in `~/.config/open-apollo/console-prefs.json`
+(UAD Console 1.3.1 hides this section). Window › Notifications lists writes the engine refused.
+Settings › Hardware › CHANNEL DSP PAIRING sets how many virtual channels are active. See [console-rs/README.md](console-rs/README.md)
 for options and troubleshooting, and [console-rs/WIRING.md](console-rs/WIRING.md) for which
 controls are wired.
 
