@@ -423,6 +423,28 @@ fn alt_trim_knobs_follow_the_alt_count() {
     assert!(find(&hits, "monitor", &Control::AltTrim(1)).is_some());
 }
 
+/// CTRL ROOM SOURCE: CUE 1 / CUE 2 with two cues; CUE 3 / CUE 4 appear with CUE BUS COUNT 4.
+#[test]
+fn control_room_source_follows_the_cue_bus_count() {
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    view.show_ctrl_room = true;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::CrSource(2)).is_some());
+    assert!(find(&hits, "monitor", &Control::CrSource(3)).is_none());
+    for k in [3, 4] {
+        model.cues.push(rack::CueOutput { name: format!("CUE {k}"), source_cue: false, mono: false, destination: "NONE".into() });
+    }
+    let (hits, _) = build(&assets, &model, &view);
+    let c3 = find(&hits, "monitor", &Control::CrSource(3)).expect("CUE 3").rect;
+    let c4 = find(&hits, "monitor", &Control::CrSource(4)).expect("CUE 4").rect;
+    let c1 = find(&hits, "monitor", &Control::CrSource(1)).unwrap().rect;
+    assert!(c3.y > c1.y && c3.x == c1.x && c4.y == c3.y, "a second row under CUE 1 / CUE 2");
+    press(&mut view, &mut model, &hits, "monitor", Control::CrSource(4));
+    assert_eq!(model.monitor_options.cr_source, 4);
+}
+
 #[test]
 fn plugin_scenes_panel_primes_and_recalls() {
     let assets = assets();

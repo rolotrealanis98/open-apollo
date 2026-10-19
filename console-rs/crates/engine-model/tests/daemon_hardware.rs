@@ -392,6 +392,11 @@ fn monitor_controls_reach_the_mixer() {
         m.headphone_outputs()[0].source == cue2 as usize && m.store().refusals().count() == 1
     });
     assert!(r.d.hw_since(mark).iter().all(|(n, a)| mixer_param(n, a).is_none_or(|(_, _, p, _)| p != 0x3f)));
+    // SOURCE CUE 3: no verified encoding; refused, the button snaps back to CUE 1.
+    let mark = r.d.mark();
+    r.m.apply(&Action::Tap(mon(Control::CrSource(3))));
+    pump_until(&mut r.m, "SOURCE back on CUE 1", |m| m.monitor_options().cr_source == 1 && m.store().refusals().count() == 2);
+    assert!(r.d.hw_since(mark).iter().all(|(n, a)| mixer_param(n, a).is_none_or(|(t, _, p, _)| (t, p) != (MONITOR, 0x04))));
     let o = r.m.monitor_options();
     assert_eq!((o.dim, o.cr_source, o.alt_selection), (Some(true), 1, 1));
     assert_eq!(r.m.headphone_outputs()[0].source, cue2 as usize);

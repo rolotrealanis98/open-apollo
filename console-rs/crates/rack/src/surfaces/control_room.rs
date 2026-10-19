@@ -56,8 +56,12 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
     let opts = model.monitor_options();
     let cues = model.cue_outputs();
     let b = r.h; // column-local foot
+    // SOURCE offers a CUE button per active cue (CUE BUS COUNT 2…4); CUE 3 / CUE 4 take a
+    // second row and the panel grows by it. [I] the 3/4-cue layout is not captured.
+    let n_cues = cues.len().clamp(2, 4);
+    let extra = if n_cues > 2 { 40.0 } else { 0.0 };
     ui.at(r.x, r.y, |ui| {
-        let panel = Rect::new(4.0, b - 4.0 - PANEL_H, r.w - 4.0, PANEL_H);
+        let panel = Rect::new(4.0, b - 4.0 - PANEL_H - extra, r.w - 4.0, PANEL_H + extra);
         ui.fill(panel, PANEL_EDGE);
         ui.fill(panel.inset(0.5, 0.5, 0.5, 0.5), PANEL);
         let top = panel.y;
@@ -75,12 +79,13 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
         ui.fill(Rect::new(panel.x, top + 130.0, panel.w, 1.0), RULE);
         ui.font_text("CR-Label", "SOURCE", Rect::new(panel.x, top + 137.0, panel.w, 14.0), Align::Center);
         ui.toggle("Switch-Large", Some("MONITOR"), opts.cr_source == 0, true, Rect::new(10.0, top + 152.0, 80.0, 40.0), Some(mid(Control::CrSource(0))), None);
-        for i in 0..2u8 {
+        for i in 0..n_cues as u8 {
             let label = format!("CUE\n{}", i + 1);
             let enabled = cues.len() > i as usize;
-            ui.toggle("Switch", Some(&label), opts.cr_source == i + 1, enabled, Rect::new(10.0 + 40.0 * i as f32, top + 192.0, 40.0, 40.0), Some(mid(Control::CrSource(i + 1))), None);
+            let at = Rect::new(10.0 + 40.0 * (i % 2) as f32, top + 192.0 + 40.0 * (i / 2) as f32, 40.0, 40.0);
+            ui.toggle("Switch", Some(&label), opts.cr_source == i + 1, enabled, at, Some(mid(Control::CrSource(i + 1))), None);
         }
-        ui.fill(Rect::new(panel.x, top + 236.0, panel.w, 1.0), RULE);
+        ui.fill(Rect::new(panel.x, top + 236.0 + extra, panel.w, 1.0), RULE);
         let mut name = ui.style("views", "Control-Room-Name");
         name.bold = true;
         ui.text("CONTROL\nROOM", name, Rect::new(4.0, b - 51.0, 92.0, 47.0), Align::Center);

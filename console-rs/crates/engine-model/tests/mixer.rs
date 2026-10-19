@@ -472,6 +472,18 @@ fn rename_of_a_stereo_pair_writes_stereo_name() {
     assert_eq!(m.main(&mono).name, "Bass");
 }
 
+/// CTRL ROOM SOURCE CUE 3 writes `MixInSource` "cue3" (in the engine's list) and reads back.
+#[test]
+fn control_room_source_cue_3() {
+    let mut m = offline();
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Tap(mon(Control::CrSource(3))));
+    assert_eq!(m.store().value("/devices/0/outputs/18/MixInSource").and_then(Value::as_str), Some("cue3"));
+    assert_eq!(m.monitor_options().cr_source, 3);
+    m.apply(&Action::Tap(mon(Control::CrSource(0))));
+    assert_eq!(m.monitor_options().cr_source, 0);
+}
+
 /// Settings › ALT COUNT 1 enables one pair (both legs): the monitor column shows one ALT
 /// button and one ALT TRIM knob; the knob writes `AltMonTrim` (±30 dB) on both legs.
 #[test]
