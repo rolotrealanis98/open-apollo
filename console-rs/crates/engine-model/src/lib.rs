@@ -654,6 +654,10 @@ impl MixerModel for EngineMixer {
         self.native_load_notice.as_deref().or_else(|| self.store.last_error())
     }
 
+    fn insert_refusal(&self, slot: &ControlId, name: &str) -> Option<String> {
+        self.native_assignment_refusal(&self.insert_slot(slot)?, name)
+    }
+
     fn plugin_scenes(&self) -> Vec<String> {
         self.surface_scenes()
     }

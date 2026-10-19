@@ -651,6 +651,11 @@ pub trait MixerModel {
     fn plugin_notice(&self) -> Option<&str> {
         None
     }
+    /// Why plug-in `name` cannot load on insert `slot` (a `Control::Insert` id), when the model
+    /// knows before asking the engine (native hosting's per-plug-in slot lists).
+    fn insert_refusal(&self, _slot: &ControlId, _name: &str) -> Option<String> {
+        None
+    }
     fn plugin_categories(&self) -> Vec<String> {
         PLUGIN_CATEGORIES.iter().map(|c| c.to_string()).collect()
     }

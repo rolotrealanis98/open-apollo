@@ -20,13 +20,16 @@ clock source reports the clock unlocked (UA_EVT_CLOCK_LOCK 0) unless
 --external-locks is given.  --stereo-sends is the daemon's option (send
 pans move a left/right pair).  --catalogue DIR overlays a ua-catalogue
 folder (console-rs/tools/drive/fixtures/catalogue is a synthetic one), so
-the plug-in browser has rows.
+the plug-in browser has rows.  --native-slots also publishes native hosting's
+capability properties for that catalogue (NATIVE-HOSTING.md): "UAD Test Comp"
+loads stereo only and "UAD Test EQ" mono only, on inputs 1-4; the rest none.
 """
 
 import argparse
 import asyncio
 import json
 import logging
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -146,6 +149,31 @@ class RecordingBackend:
         return record
 
 
+def publish_native_slots(state):
+    """Native hosting's capability properties, as the daemon publishes them
+    (_publish_native_capabilities), for the synthetic catalogue."""
+    def prop(path, value, kind):
+        state.add_runtime_property(path, {"type": kind, "value": value})
+    for key, value, kind in (("NativePluginHosting", True, "bool"),
+                             ("NativeMaxInstances", 4, "int"),
+                             ("NativeMaxInserts", 4, "int"),
+                             ("NativeChainSupported", True, "bool"),
+                             ("NativeReplacementSupported", True, "bool")):
+        prop("/" + key, value, kind)
+    slots = [f"/devices/0/inputs/{n}/effects/0" for n in range(4)]
+    layouts = {"UAD Test Comp": ([], slots[0::2]),   # (mono, stereo)
+               "UAD Test EQ": (slots, [])}
+    for path in state.all_paths():
+        if not re.fullmatch(r"/plugins/\d+/Name", path):
+            continue
+        base = path.rsplit("/", 1)[0]
+        mono, stereo = layouts.get(state.get_value(path), ([], []))
+        prop(base + "/NativeLoadSupported", bool(mono or stereo), "bool")
+        prop(base + "/NativeLoadSlots", ",".join(dict.fromkeys(mono + stereo)), "string")
+        prop(base + "/NativeMonoSlots", ",".join(mono), "string")
+        prop(base + "/NativeStereoSlots", ",".join(stereo), "string")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--port", type=int, default=0)
@@ -158,6 +186,9 @@ def main():
     parser.add_argument("--catalogue", type=Path,
                         help="overlay this ua-catalogue folder (a synthetic "
                              "one for browser tests; see ua_catalogue.py)")
+    parser.add_argument("--native-slots", action="store_true",
+                        help="publish native slot lists for the synthetic "
+                             "catalogue (stereo-only and mono-only bundles)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     if args.port in FORBIDDEN_PORTS:
@@ -179,6 +210,8 @@ def main():
     state.load_device_map(DEVICE_MAP)
     apply_runtime_properties(state)
     catalogue = ua_catalogue.apply(state, None, args.catalogue) if args.catalogue else None
+    if args.native_slots:
+        publish_native_slots(state)
     backend = RecordingBackend(log, args.refuse_rate, args.refuse_clock)
     router = HardwareRouter(backend, state, stereo_sends=args.stereo_sends,
                             input_buses=descriptor_input_buses(MODEL),

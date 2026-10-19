@@ -496,7 +496,8 @@ class NativeChainBackend(NativePluginBackend):
         template_slot = slot.rsplit('/', 1)[0] + '/0'
         template = self.providers.get((template_slot, name, channels))
         if template is None:
-            return PrepareOutcome(Outcome.FAILED, detail='No native chain recipe for this effect')
+            return PrepareOutcome(Outcome.FAILED, detail=self._layout_refusal(template_slot, name, channels)
+                                  or 'No native chain recipe for this effect')
         previous = self._chains.get(channels)
         old = previous.leases.get(slot) if previous else None
         if self._pending or self._compensating:

@@ -1,0 +1,14 @@
+# A bundle that lacks the input's layout (native hosting's NativeMonoSlots /
+# NativeStereoSlots) is refused before anything is sent, and says why: in the browser and
+# under the slot. Needs the synthetic catalogue with native slot lists: UAD Test Comp loads
+# stereo only, UAD Test EQ mono only; input 1 is unlinked.
+#: --native-slots
+settle
+dragto browser:BrowserItem(0) /devices/0/inputs/0:Insert(0)
+settle
+text UAD Test Comp: stereo only — link the input or use a mono bundle.
+#! no tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test Comp
+# The mono bundle loads there.
+dragto browser:BrowserItem(1) /devices/0/inputs/0:Insert(0)
+settle
+#! tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test EQ
