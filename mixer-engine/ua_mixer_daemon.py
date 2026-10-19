@@ -67,6 +67,7 @@ from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
                             latency_figures, load_descriptor)
 from commands import (CommandEngine, ERR_FAILED, parse_cmdparams,
                       refused_set)
+from enabled_meta import install as install_enabled_meta
 from session_dirty import SessionDirty
 from plugin_lifecycle import PluginLifecycle, is_plugin_slot_path
 from plugin_remote import PluginRemote
@@ -619,6 +620,9 @@ class MixerDaemon:
         self.state.register_change_observer(
             "openapollo.cue_bus_count", self._on_cue_bus_count)
         self._apply_cue_bus_count(self.state.get_value("/CueBusCount/value"))
+        # `enabled` on IOType, Stereo, 48V, Pad and SRConvert follows the
+        # Hi-Z jack, IOType and the clock source
+        install_enabled_meta(self.state)
         # Settings > PEAK HOLD / CLIP HOLD also set the host meters' holds
         self.state.register_change_observer(
             "openapollo.meter_holds", self._on_meter_holds)

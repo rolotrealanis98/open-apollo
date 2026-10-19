@@ -275,6 +275,35 @@ fn preamp_and_input_strip_controls_reach_the_mixer() {
     r.bus("M on", |m| m.apply(&Action::Toggle(id(IN0, Control::Mute))), |b, s, v| (b, s) == (0, 0) && v == 0.0);
 }
 
+/// The Hi-Z jack takes the preamp out of Mic mode: the daemon publishes `48V/enabled`,
+/// `Pad/enabled` (and `IOType/enabled`, `Stereo/enabled`) false, and the console shows them off.
+#[test]
+fn hi_z_input_disables_48v_and_pad() {
+    let Some(mut r) = Rig::start(&[]) else { return };
+    let s = strip(&r.m, IN0);
+    let pre = r.m.preamp(&s).unwrap();
+    assert_eq!(pre.source, "MIC");
+    assert!(pre.phantom_enabled && pre.pad_enabled);
+    r.m.store_mut().commit(&format!("{IN0}/preamps/0/HiZ"), true);
+    pump_until(&mut r.m, "Hi-Z input", |m| {
+        let s = strip(m, IN0);
+        let p = m.preamp(&s).unwrap();
+        p.source == "HI-Z" && !p.phantom_enabled && !p.pad_enabled
+    });
+    // A console connecting now reads them all from the tree (the open one re-reads only the
+    // preamp node on a Hi-Z change)
+    let fresh = r.d.console();
+    let enabled = |path: &str| fresh.store().meta(path).and_then(|m| m.enabled);
+    assert_eq!(enabled(&format!("{IN0}/preamps/0/48V")), Some(false));
+    assert_eq!(enabled(&format!("{IN0}/preamps/0/Pad")), Some(false));
+    assert_eq!(enabled(&format!("{IN0}/IOType")), Some(false));
+    assert_eq!(enabled(&format!("{IN0}/Stereo")), Some(false));
+    // CH2 has no jack in: still a Mic input with its own controls
+    let two = strip(&r.m, "/devices/0/inputs/1");
+    let p2 = r.m.preamp(&two).unwrap();
+    assert!(p2.phantom_enabled && p2.pad_enabled);
+}
+
 /// Link on ANALOG 1 (and from ANALOG 2): one stereo strip, the right preamp ganged, and bus 1
 /// carrying the leader's level hard right (UA's engine: SetProperty 0x45, UpdateHardwareState).
 #[test]
