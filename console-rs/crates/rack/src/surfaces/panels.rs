@@ -612,8 +612,8 @@ fn meter_window(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect) {
     let m: MeterFrame = model.monitor_meters();
     let left = Rect::new(r.x + 26.75, r.y + 74.0, 23.5, 491.0);
     let right = Rect::new(r.x + 68.75, r.y + 74.0, 23.5, 491.0);
-    ui.bar_meter("Monitor-Meter", m.left, 0.0, m.clip_left, left);
-    ui.bar_meter("Monitor-Meter", m.right, 0.0, m.clip_right, right);
+    ui.bar_meter("Monitor-Meter", m.left, m.peak_left, m.clip_left, left);
+    ui.bar_meter("Monitor-Meter", m.right, m.peak_right, m.clip_right, right);
     let skin = ui.skin("meters", "Monitor-Meter");
     let tick = skin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::rgb8(93, 101, 105));
     let mut numbers = ui.style("meters", "Monitor-Meter");

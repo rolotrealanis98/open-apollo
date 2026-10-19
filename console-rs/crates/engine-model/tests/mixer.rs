@@ -186,6 +186,21 @@ fn meters_use_the_console_scale() {
     assert_eq!(m.meters(&inputs[2]).left, 0.0);
 }
 
+#[test]
+fn aux_and_monitor_meters_carry_peaks() {
+    let m = offline();
+    let reading = |level_db, peak_db| MeterReading { level_db, peak_db, clip: false, updates: 1 };
+    let topology = m.store().topology();
+    let aux = topology.auxes[0].meters[0].base.clone();
+    let mon = topology.monitor.as_ref().expect("monitor").meters[0].base.clone();
+    m.store().meters().set(&aux, reading(-30.0, -9.0));
+    m.store().meters().set(&mon, reading(-30.0, -6.0));
+    let aux_frame = m.meters(&m.auxes()[0]);
+    assert!((aux_frame.peak_left - scales::meter_fraction(-9.0)).abs() < 1e-9);
+    assert!((m.monitor_meters().peak_left - scales::meter_fraction(-6.0)).abs() < 1e-9);
+    assert!(m.monitor_meters().peak_left > m.monitor_meters().left);
+}
+
 /// Offline (no connection, writer gate closed): actions move local values only.
 #[test]
 fn offline_actions_move_local_values() {

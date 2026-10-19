@@ -16,6 +16,8 @@ pub mod presets;
 pub mod scales;
 pub mod settings;
 pub mod surfaces;
+#[cfg(test)]
+mod test_support;
 pub mod ui;
 pub mod widgets;
 pub mod window;
