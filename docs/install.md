@@ -92,7 +92,7 @@ Below, `/path/to/windows` is the folder that holds Windows' `C:\` (or a Wine pre
 ```bash
 sudo $OA firmware --from /path/to/windows      # DSP modules, USB boot images -> /lib/firmware/universal-audio
 sudo $OA dsp --from /path/to/windows           # plug-ins' DSP modules -> /lib/firmware/universal-audio/plugins (optional)
-$OA import --from /path/to/windows             # UAD Console's art and the plug-in list -> ~/.local/share/open-apollo
+$OA import --from /path/to/windows             # UAD Console's art, plug-in icons and plug-in list -> ~/.local/share/open-apollo
 sudo bash scripts/install-panels.sh            # plug-in panel specs -> /usr/share/open-apollo/plugin-specs
 $OA plugins --from /path/to/windows            # plug-in panels' art -> ~/.local/share/open-apollo/generated
 sudo bash scripts/install.sh                   # driver, DKMS, audio settings, mixer daemon
@@ -128,7 +128,7 @@ What this release does with UAD plug-ins:
 
 | | |
 |---|---|
-| Plug-in browser | The Console's plug-in list and factory preset menus come from your UAD install (`~/.local/share/open-apollo/ua-catalogue/`, names only). Without that import the browser is empty: run `oa-assets catalogue --from /path/to/windows`, then Settings › Plug-Ins › RESCAN in the Console. |
+| Plug-in browser | The Console's plug-in list, icons and factory preset menus come from your UAD install (icons from its Plug-In Icons folder or, if UAD never saw an Apollo, from the `apollo-32bit.msi` in Windows' installer cache; `oa-assets icons` repeats just that step) (`~/.local/share/open-apollo/ua-catalogue/`, names only). Without that import the browser is empty: run `oa-assets catalogue --from /path/to/windows`, then Settings › Plug-Ins › RESCAN in the Console. |
 | Plug-in windows | The Console draws each plug-in's window from the panel specs and the art setup made from your Powered plug-ins: 206 of 224 with a UAD 12 install, the rest as a plain parameter list. |
 | Plug-in DSP modules | Setup stores them in `/lib/firmware/universal-audio/plugins/`. Nothing loads them yet. |
 | Running plug-ins on the Apollo's DSP | Not in this release. It is being developed and will only load plug-ins your Apollo itself reports as authorized. |
