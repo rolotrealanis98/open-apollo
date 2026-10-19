@@ -14,13 +14,16 @@ from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
 import json
+import re
 import xml.etree.ElementTree as ET
 
 import session_xml
 import ua_catalogue
+from commands import _CHANNEL_SKIP_CHILDREN, _CHANNEL_SKIP_NAMES
 
 EXTENSIONS = (".oapreset", ".uadchannel", ".fxp")
 CHANNEL_STRIP = "Channel Strip"
+CHANNEL = re.compile(r"/devices/\d+/(?:inputs|auxs)/\d+")
 
 
 def listed(tree, name):
@@ -156,10 +159,32 @@ class Presets:
                 self.state.replace_node(base, node)
                 self.history.append({"@node:" + base: (before, deepcopy(node))})
                 self.publish("/Dirty", True)
+            elif CHANNEL.fullmatch(base):
+                self.apply_channel(base, node)
             else:
                 raise ValueError("whole channel snapshots require the software backend")
         self.publish(base + "/Preset", name, "string")
         self.refresh()
+
+    def apply_channel(self, base, node):
+        """Recall a saved channel on a real device: its scalar values go
+        through the normal set path (so they reach the hardware), minus what a
+        recall must never touch (identity, preamps, meters, inserts)."""
+        before = self.history.snapshot()
+
+        def walk(prefix, current):
+            for name, meta in current.get("properties", {}).items():
+                path = f"{base}/{prefix}{name}/value"
+                if (not meta.get("readonly") and "value" in meta
+                        and name not in _CHANNEL_SKIP_NAMES
+                        and self.state.path_exists(path)):
+                    self.state.set(path, meta["value"])
+            for name, child in current.get("children", {}).items():
+                if name not in _CHANNEL_SKIP_CHILDREN:
+                    walk(f"{prefix}{name}/", child)
+        walk("", node)
+        self.history.record("preset", before)
+        self.publish("/Dirty", True)
 
     def load_channel(self, base, data):
         # DTD guard and bounded parse reused from the session mapper.
