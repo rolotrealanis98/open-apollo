@@ -187,6 +187,9 @@ _LEVEL_COMPANION = {"FaderLevelTapered": "FaderLevel",
                     "FaderLevel": "FaderLevelTapered",
                     "GainTapered": "Gain", "Gain": "GainTapered"}
 
+# Link (Console's SetStereo) on a pair's left input
+_RE_STEREO = re_mod.compile(r"^(/devices/\d+/inputs/)(\d+)/Stereo(?:/value)?$")
+
 
 # NOTE: Do NOT add "/BufferSize/values" or other "/Foo/values" paths here!
 # set_value("/Foo/values", x) resolves to the /Foo property and overwrites its
@@ -2727,6 +2730,31 @@ class MixerDaemon:
                 self.state.set(companion, value, source_client=client.id,
                                hardware=False)
                 self._send_response(client, companion, value)
+
+        # Link: UA's engine sets Stereo on both legs, parks the right leg
+        # (Active false: Console draws one "ANALOG 1/2" strip) and spreads the
+        # leader's pans hard left / right (the x4 engine dump of a linked
+        # pair: Stereo true on both, right Active false, Pan -1, Pan2 1).
+        # Tree only: the leader's param 0x02 write already links the hardware
+        m = _RE_STEREO.match(path)
+        if m and int(m.group(2)) % 2 == 0:
+            base, ch = m.group(1), int(m.group(2))
+            on = cmd.value is True or cmd.value in (1, "true", "True")
+            right = f"{base}{ch + 1}"
+            if self.state.path_exists(f"{right}/Stereo/value"):
+                companions = [(f"{right}/Stereo/value", on),
+                              (f"{right}/Active/value", not on)]
+                if on:
+                    companions += [(f"{base}{ch}/Pan/value", -1.0),
+                                   (f"{base}{ch}/Pan2/value", 1.0),
+                                   (f"{right}/Pan/value", -1.0),
+                                   (f"{right}/Pan2/value", 1.0)]
+                for cpath, cvalue in companions:
+                    if self.state.path_exists(cpath) and \
+                            self.state.get_value(cpath) != cvalue:
+                        self.state.set(cpath, cvalue, source_client=client.id,
+                                       hardware=False)
+                        self._send_response(client, cpath, cvalue)
 
         # Fader and send levels: Console writes the tapered value, but the
         # hardware router's later writes read the dB one (unmute, a solo,

@@ -418,3 +418,42 @@ class TestCopyMixToSend:
         d = MixerDaemon(tree, None)
         data, err = d.commands.execute("/CopyToSends", {})
         assert err is not None
+
+
+class TestLink:
+    """Console's Link (SetStereo) on a pair's left input: UA's engine sets
+    Stereo on both legs, parks the right leg (Active false, so Console draws
+    one "ANALOG 1/2" strip) and spreads the pans hard left / right; unlink
+    brings the right leg back."""
+
+    def setup(self, tree, backend):
+        router = HardwareRouter(backend, tree)
+        tree.on_set = router.on_set
+        return MixerDaemon(tree, router), MixerClient(None, Writer())
+
+    def set(self, d, client, path, value):
+        d._handle_set(client, Command("set", path, value,
+                                      raw_params={"func_id": "3"}))
+
+    def test_link_parks_the_right_leg(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{IN}/0/Stereo/value", True)
+        assert (1, 0, hardware.LINK_PARAM, 1) in backend.mixer_params
+        assert tree.get_value(f"{IN}/1/Stereo/value") is True
+        assert tree.get_value(f"{IN}/1/Active/value") is False
+        assert tree.get_value(f"{IN}/0/Pan/value") == -1.0
+        assert tree.get_value(f"{IN}/0/Pan2/value") == 1.0
+        echoes = [json.loads(f.rstrip(b"\0")) for f in client.writer.frames]
+        assert any(e["path"] == f"{IN}/1/Active/value" for e in echoes)
+
+    def test_unlink_restores_the_right_leg(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{IN}/0/Stereo/value", True)
+        self.set(d, client, f"{IN}/0/Stereo/value", False)
+        assert tree.get_value(f"{IN}/1/Stereo/value") is False
+        assert tree.get_value(f"{IN}/1/Active/value") is True
+
+    def test_right_leg_set_is_not_mirrored(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{IN}/1/Stereo/value", True)
+        assert tree.get_value(f"{IN}/0/Stereo/value") is not True
