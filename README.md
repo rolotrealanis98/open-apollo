@@ -201,8 +201,9 @@ encoding is verified; Unison and insert DSP need the plug-in host, which isn't i
 
 It talks to the mixer daemon on 127.0.0.1:4710. The menu entry controls your Apollo
 (`uaconsole --writes`). Plain `uaconsole` only shows the mixer until you turn on
-Settings › WRITES. On Wayland, plug-in windows and menus open inside the mixer window;
-`uaconsole --x11` gives them their own windows. See [console-rs/README.md](console-rs/README.md)
+Settings › WRITES. Plug-in windows, Settings and the movable panels open as separate windows
+on X11 and Wayland; on Wayland the compositor places them (Hyprland: enable
+`focus_on_activate` if a re-opened plug-in window should come to the front). See [console-rs/README.md](console-rs/README.md)
 for options and troubleshooting, and [console-rs/WIRING.md](console-rs/WIRING.md) for which
 controls are wired.
 
