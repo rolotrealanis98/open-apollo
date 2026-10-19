@@ -304,6 +304,44 @@ fn hi_z_input_disables_48v_and_pad() {
     assert!(p2.phantom_enabled && p2.pad_enabled);
 }
 
+/// The front Hi-Z jack as the unit reports it: readback word 0 bit 24 + input (bit 25 = ANALOG 2,
+/// read on Titan's x4 with a cable in, 2026-10-19). ANALOG 2 turns HI-Z with 48V and PAD off,
+/// ANALOG 1 stays a Mic input, and pulling the cable gives MIC back.
+#[test]
+fn hi_z_jack_follows_the_readback() {
+    let Some(mut r) = Rig::start(&[]) else { return };
+    let in1 = "/devices/0/inputs/1";
+    let mut rb = [0u32; 40];
+    r.d.set_readback(&rb);
+    settle(&mut r.m, 300);
+    rb[0] = 1 << 25;
+    r.d.set_readback(&rb);
+    pump_until(&mut r.m, "ANALOG 2 Hi-Z", |m| {
+        let p = m.preamp(&strip(m, in1)).unwrap();
+        p.source == "HI-Z" && !p.phantom_enabled && !p.pad_enabled
+    });
+    // The open console re-reads the input and its partner: no source choice on ANALOG 2, and
+    // neither leg can start a link
+    let enabled = |m: &EngineMixer, path: &str| m.store().meta(path).and_then(|m| m.enabled);
+    pump_until(&mut r.m, "IOType and Stereo metadata", |m| {
+        enabled(m, &format!("{in1}/IOType")) == Some(false)
+            && enabled(m, &format!("{in1}/Stereo")) == Some(false)
+            && enabled(m, &format!("{IN0}/Stereo")) == Some(false)
+    });
+    let p1 = r.m.preamp(&strip(&r.m, IN0)).unwrap();
+    assert_eq!(p1.source, "MIC");
+    assert!(p1.phantom_enabled && p1.pad_enabled);
+    rb[0] = 0;
+    r.d.set_readback(&rb);
+    pump_until(&mut r.m, "ANALOG 2 back to Mic", |m| {
+        let p = m.preamp(&strip(m, in1)).unwrap();
+        p.source == "MIC" && p.phantom_enabled && p.pad_enabled
+    });
+    pump_until(&mut r.m, "IOType and Stereo back", |m| {
+        enabled(m, &format!("{in1}/IOType")) == Some(true) && enabled(m, &format!("{IN0}/Stereo")) == Some(true)
+    });
+}
+
 /// Link on ANALOG 1 (and from ANALOG 2): one stereo strip, the right preamp ganged, and bus 1
 /// carrying the leader's level hard right (UA's engine: SetProperty 0x45, UpdateHardwareState).
 #[test]

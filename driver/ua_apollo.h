@@ -837,8 +837,9 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_RB_HIZ_ACTIVE(data0)          (((data0) >> 24) & 1)
 
 /*
- * HiZ detect: word 0 bit 24 is input 1 and bit 25 input 2 (bit 25 is not
- * hardware-confirmed yet); UA_RB_HIZ_ACTIVE() is input 1 only.
+ * HiZ detect: word 0 bit 24 is input 1 and bit 25 input 2 (x4, a cable in
+ * the input 2 jack reads bit 25 set, 2026-10-19); UA_RB_HIZ_ACTIVE() is
+ * input 1 only.
  */
 #define UA_RB_HIZ_DETECT(data0, ch)      (((data0) >> (24 + (ch))) & 1)
 

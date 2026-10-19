@@ -63,6 +63,8 @@ impl FakeDaemon {
             .arg(&script)
             .arg("--log")
             .arg(&log)
+            .arg("--readback")
+            .arg(dir.join("readback.json"))
             .args(extra)
             .env("HOME", dir.join("home"))
             .stdin(Stdio::null())
@@ -96,6 +98,14 @@ impl FakeDaemon {
         };
         assert!(!FORBIDDEN.contains(&port), "port {port} belongs to a real daemon");
         Some(FakeDaemon { child, port, dir, log })
+    }
+
+    /// What the hardware readback reports from now on (the 40 words, `UA_MIXER_RB_WORDS`); the
+    /// daemon polls it like the driver's.
+    pub fn set_readback(&self, words: &[u32]) {
+        let tmp = self.dir.join("readback.json.tmp");
+        std::fs::write(&tmp, serde_json::to_string(words).unwrap()).unwrap();
+        std::fs::rename(&tmp, self.dir.join("readback.json")).unwrap();
     }
 
     /// A console connected to it, with writes on, once the engine tree is loaded.

@@ -1531,6 +1531,9 @@ class MixerDaemon:
                     continue    # HiZ: inputs 1-2 only
                 val = rb[f"{prefix}_{key}"]
                 if val != last_rb.get(f"{prefix}_{key}"):
+                    if ctrl == "HiZ":
+                        log.info("HiZ jack input %d: %s", inp + 1,
+                                 "in" if val else "out")
                     self._push_to_clients(f"{path_base}/{ctrl}", val)
 
             # IOType and Link (Stereo) are at input level, not preamps/0
