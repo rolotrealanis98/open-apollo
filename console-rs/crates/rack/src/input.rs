@@ -333,6 +333,14 @@ impl ControlsMode {
     }
 }
 
+/// Modifier keys held at a press, in Console's terms: `alt` = Option (macOS) / Alt, `cmd` =
+/// Command (macOS) / Ctrl (Windows, Linux). Shift (fine) reaches `pointer_move` as `fine`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeyMods {
+    pub alt: bool,
+    pub cmd: bool,
+}
+
 /// A knob's travel: 270° from 7:30 to 4:30, 0 at 12 o'clock. [I] Console's exact sweep is not
 /// measured; the knob films draw about this arc.
 const KNOB_SWEEP_DEG: f64 = 270.0;
@@ -372,7 +380,7 @@ pub struct ScrollRegion {
 pub enum Action {
     GestureBegin(ControlId),
     Set(ControlId, f64),
-    /// Double click / double tap: back to the default. `.1` is the UI's default (what to show);
+    /// Option/Alt-click, or a double click / tap: back to the default. `.1` is the UI's default (what to show);
     /// an engine model sends Console's `set <prop>/value "default"` instead of a number.
     Reset(ControlId, f64),
     GestureEnd(ControlId),
@@ -406,14 +414,19 @@ pub const LATCH_HOLD: std::time::Duration = std::time::Duration::from_millis(500
 pub struct Interaction {
     /// CONTROLS MODE for [`HitKind::Knob`] drags (the host sets it from [`ControlsMode::of`]).
     pub controls_mode: ControlsMode,
+    /// The modifier keys held at the next press (the host sets them before `pointer_down`).
+    pub mods: KeyMods,
     active: Option<Active>,
     /// The [`HitKind::Latch`] control pressed, and when.
     latched: Option<(ControlId, std::time::Instant)>,
 }
 
 impl Interaction {
+    /// A press. Console's modifiers (manual "Controls Shortcuts"): Option/Alt-click returns a
+    /// knob or fader to its default (`Action::Reset`: the engine gets `"default"`).
     pub fn pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool) -> Vec<Action> {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
+        let mods = self.mods;
         match &hit.kind {
             HitKind::Toggle => vec![Action::Toggle(hit.id.clone())],
             HitKind::Latch => {
@@ -432,6 +445,19 @@ impl Interaction {
                 vec![Action::Tap(id)]
             }
             HitKind::Drag { value, span, reset } | HitKind::Knob { value, span, reset } => {
+                if mods.alt {
+                    // Back to the default (the engine resolves `"default"`; a control without a
+                    // known UI default shows its value until the engine's echo).
+                    let group = [hit];
+                    let mut out = vec![Action::GestureBegin(hit.id.clone())];
+                    for h in group {
+                        if let HitKind::Drag { value, reset, .. } | HitKind::Knob { value, reset, .. } = &h.kind {
+                            out.push(Action::Reset(h.id.clone(), reset.unwrap_or(*value)));
+                        }
+                    }
+                    out.push(Action::GestureEnd(hit.id.clone()));
+                    return out;
+                }
                 if double {
                     if let Some(r) = reset {
                         return vec![
@@ -462,7 +488,7 @@ impl Interaction {
         (a / KNOB_SWEEP_DEG + 0.5).clamp(0.0, 1.0)
     }
 
-    /// `fine` divides the motion by 10 (Console's modifier-drag).
+    /// `fine` (Shift) divides the motion by 10 (Console's fine adjust).
     pub fn pointer_move(&mut self, x: f32, y: f32, fine: bool) -> Vec<Action> {
         let mode = self.controls_mode;
         let Some(a) = &mut self.active else { return vec![] };
@@ -525,6 +551,37 @@ mod tests {
         assert_eq!(i.pointer_up(), vec![Action::GestureEnd(id())]);
         let reset = i.pointer_down(&hits, 10.0, 100.0, true);
         assert_eq!(reset[1], Action::Reset(id(), 0.78));
+    }
+
+    fn cid(strip: &str, control: Control) -> ControlId {
+        ControlId { strip: strip.into(), control }
+    }
+
+    /// Two input faders and an aux fader (in0 at 0.5, in1 at 0.9, aux0 at 0.3) and two input
+    /// mutes.
+    fn strip_hits() -> Vec<Hit> {
+        let drag = |value| HitKind::Drag { value, span: 100.0, reset: Some(0.78) };
+        vec![
+            Hit { rect: Rect::new(0.0, 0.0, 50.0, 300.0), id: cid("/d/inputs/0", Control::Fader), kind: drag(0.5) },
+            Hit { rect: Rect::new(100.0, 0.0, 50.0, 300.0), id: cid("/d/inputs/1", Control::Fader), kind: drag(0.9) },
+            Hit { rect: Rect::new(200.0, 0.0, 50.0, 300.0), id: cid("/d/auxs/0", Control::Fader), kind: drag(0.3) },
+            Hit { rect: Rect::new(0.0, 310.0, 50.0, 20.0), id: cid("/d/inputs/0", Control::Mute), kind: HitKind::Toggle },
+            Hit { rect: Rect::new(100.0, 310.0, 50.0, 20.0), id: cid("/d/inputs/1", Control::Mute), kind: HitKind::Toggle },
+        ]
+    }
+
+    fn with(alt: bool, cmd: bool) -> Interaction {
+        Interaction { mods: KeyMods { alt, cmd }, ..Interaction::default() }
+    }
+
+    /// Option-click: the control's default (`Reset`, sent as `"default"`), no drag.
+    #[test]
+    fn option_click_resets() {
+        let hits = strip_hits();
+        let mut i = with(true, false);
+        let in0 = cid("/d/inputs/0", Control::Fader);
+        assert_eq!(i.pointer_down(&hits, 10.0, 100.0, false), vec![Action::GestureBegin(in0.clone()), Action::Reset(in0.clone(), 0.78), Action::GestureEnd(in0)]);
+        assert!(!i.is_dragging());
     }
 
     /// TALK: a click latches (toggle on press, nothing on release); held for 0.5 s it is

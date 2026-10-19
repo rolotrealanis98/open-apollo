@@ -251,8 +251,15 @@ impl App {
         })
     }
 
+    /// Shift: fine adjust (knob / fader drags).
     fn fine(&self) -> bool {
-        self.mods.shift_key() || self.mods.alt_key()
+        self.mods.shift_key()
+    }
+
+    /// Console's control modifiers: Option (macOS) / Alt, and Command (macOS) / Ctrl.
+    fn key_mods(&self) -> rack::KeyMods {
+        let cmd = if cfg!(target_os = "macos") { self.mods.super_key() } else { self.mods.control_key() };
+        rack::KeyMods { alt: self.mods.alt_key(), cmd }
     }
 
     fn request_redraw(&self) {
@@ -521,6 +528,7 @@ impl App {
         // a double-click still activates the row now (as the FFI host does).
         let armed = self.mixer.drag_press(active_hits!(self), x, y, &*self.model);
         self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
+        self.interaction.mods = self.key_mods();
         let actions = self
             .interaction
             .pointer_down(active_hits!(self), x, y, double);
