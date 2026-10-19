@@ -28,7 +28,8 @@
 //! wait MS             pump the model for MS milliseconds
 //! settle              pump until nothing changes for 300 ms (≤ 5 s)
 //! shot PATH           render a PNG of the current frame
-//! hits [PREFIX]       print the names and rects of the hits on screen
+//! hits [PREFIX [N]]   print the names and rects of the hits on screen; with N, fail unless
+//!                     exactly N distinct names start with PREFIX
 //! echo TEXT
 //! ```
 //!
@@ -409,11 +410,16 @@ impl Driver {
             "shot" => self.shot(Path::new(arg(0)?))?,
             "hits" => {
                 let prefix = args.first().copied().unwrap_or("");
+                let mut names = std::collections::BTreeSet::new();
                 for h in &self.frame.hits {
                     let n = name(&h.id);
                     if n.starts_with(prefix) {
                         println!("hit {n} [{:.0},{:.0},{:.0},{:.0}]", h.rect.x, h.rect.y, h.rect.w, h.rect.h);
+                        names.insert(n);
                     }
+                }
+                if args.len() > 1 && names.len() != num(1)? as usize {
+                    return Err(format!("hits {prefix}: {} named {names:?}, expected {}", names.len(), args[1]));
                 }
             }
             "echo" => println!("{}", args.join(" ")),

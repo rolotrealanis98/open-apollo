@@ -1708,12 +1708,7 @@ impl ViewState {
                 self.text_edit = Some(TextEdit { target: TextTarget::Rename(id.strip.clone()), text: name });
                 self.popover = Some(PopoverState { kind: Popover::Rename { strip: id.strip.clone() }, anchor: ControlId { strip: id.strip.clone(), control: Control::Name } });
             }
-            MenuCmd::Assign(slot) => {
-                self.show_browser = true;
-                self.compact = false;
-                self.browser.tab = crate::surfaces::BrowserTab::Plugins;
-                self.browser.assign_to = Some(ControlId { strip: id.strip.clone(), control: Control::Insert(*slot) });
-            }
+            MenuCmd::Assign(slot) => self.begin_assign(id.strip.clone(), *slot),
             MenuCmd::Presets(scope) => self.begin_preset_assign(id.strip.clone(), *scope),
             MenuCmd::AssignCancel => {
                 self.browser.assign_to = None;

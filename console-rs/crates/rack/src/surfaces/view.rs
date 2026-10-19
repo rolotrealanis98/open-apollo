@@ -139,11 +139,13 @@ pub struct BrowserView {
     pub preset_target: Option<(Arc<str>, crate::presets::PresetScope)>,
     /// The selected PRESETS row `(top, child)` (`u16::MAX` child = top-level).
     pub preset_selected: Option<(u16, u16)>,
+    /// Why the last assignment was refused (shown while its target is still armed).
+    pub notice: Option<&'static str>,
 }
 
 impl Default for BrowserView {
     fn default() -> Self {
-        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None, presets_open: Vec::new(), presets_scroll: 0.0, preset_target: None, preset_selected: None }
+        Self { tab: BrowserTab::Plugins, search: String::new(), categories_open: true, category: None, favorites_only: false, large_rows: true, hint: true, group_open: true, inactive_open: true, scroll: 0.0, selected: None, assign_to: None, presets_open: Vec::new(), presets_scroll: 0.0, preset_target: None, preset_selected: None, notice: None }
     }
 }
 
@@ -544,8 +546,20 @@ impl ViewState {
     /// picked goes into that slot.
     pub fn begin_assign(&mut self, strip: Arc<str>, slot: u8) {
         self.show_browser = true;
+        self.compact = false;
         self.browser.tab = BrowserTab::Plugins;
+        self.browser.notice = None;
         self.browser.assign_to = Some(ControlId { strip, control: Control::Insert(slot) });
+    }
+
+    /// Catalog entry `i` into `slot`: its `EffectName` write, or None when the slot refuses it
+    /// (the Unison slot takes only Unison plug-ins), with the reason as the browser's notice.
+    fn assign_plugin(&mut self, slot: ControlId, i: u16, model: &dyn MixerModel) -> Option<Effect> {
+        let p = model.plugin_catalog().into_iter().nth(i as usize)?;
+        if let Control::Insert(k) = slot.control {
+            self.browser.notice = p.refusal(k);
+        }
+        self.browser.notice.is_none().then_some(Effect::SetText(slot, p.name))
     }
 
     /// Applies a view spec: comma-separated `key=value` items (renders, `--view`, tests).
@@ -747,10 +761,20 @@ impl ViewState {
             if insert_menu {
                 return vec![Effect::Model(action)]; // "Open" from the context menu
             }
-            if let Some(sel) = self.browser.selected.take() {
-                if let Some(p) = model.plugin_catalog().get(sel as usize) {
-                    return vec![Effect::SetText(id, p.name.clone())];
+            if let Some(sel) = self.browser.selected {
+                // A refused plug-in stays selected (the browser says why).
+                let e = self.assign_plugin(id, sel, model);
+                if e.is_some() {
+                    self.browser.selected = None;
                 }
+                return e.into_iter().collect();
+            }
+            // An empty slot opens the browser in assign mode for it (manual §7.3; the Unison
+            // slot's lists only Unison plug-ins). Modifiers keep their meaning (COPY pastes).
+            let empty = crate::dnd::slot_state(model, &id.strip, k) == crate::model::InsertState::Empty;
+            if self.modifier.is_none() && empty {
+                self.begin_assign(id.strip.clone(), k);
+                return Vec::new();
             }
             let to = |control| ControlId { strip: id.strip.clone(), control };
             if self.modifier.is_some() {
@@ -904,24 +928,27 @@ impl ViewState {
             }
             C::BrowserGroupReveal => self.browser.group_open ^= true,
             C::BrowserInactiveReveal => self.browser.inactive_open ^= true,
-            C::BrowserItem(i) => match self.browser.assign_to.take() {
+            C::BrowserItem(i) => match self.browser.assign_to.clone() {
+                // A refused plug-in keeps assign mode armed.
                 Some(slot) => {
-                    if let Some(p) = model.plugin_catalog().get(i as usize) {
-                        out.push(Effect::SetText(slot, p.name.clone()));
+                    if let Some(e) = self.assign_plugin(slot, i, model) {
+                        out.push(e);
+                        self.browser.assign_to = None;
+                        self.browser.selected = None;
                     }
-                    self.browser.selected = None;
                 }
                 None => self.browser.selected = if self.browser.selected == Some(i) { None } else { Some(i) },
             },
             C::BrowserActivate(i) => {
-                let target = self.browser.assign_to.take().or_else(|| {
+                let target = self.browser.assign_to.clone().or_else(|| {
                     let strip = self.selected_channel.as_ref()?;
                     let s = find_strip(model, strip)?;
                     let k = model.inserts(&s).iter().position(|slot| matches!(slot, crate::model::InsertState::Empty))?;
                     Some(ControlId { strip: strip.clone(), control: C::Insert(k as u8) })
                 });
-                if let (Some(target), Some(plugin)) = (target, model.plugin_catalog().get(i as usize)) {
-                    out.push(Effect::SetText(target, plugin.name.clone()));
+                if let Some(e) = target.and_then(|t| self.assign_plugin(t, i, model)) {
+                    out.push(e);
+                    self.browser.assign_to = None;
                     self.browser.selected = None;
                 }
             }

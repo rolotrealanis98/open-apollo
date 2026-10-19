@@ -136,6 +136,7 @@ impl EngineMixer {
                     native_supported: flag("NativeLoadSupported"),
                     native_hint: self.str_at(&format!("{base}/NativeLoadHint")).map(str::to_owned),
                     hidden,
+                    unison: flag("Unison"),
                 })
             })
             .collect()

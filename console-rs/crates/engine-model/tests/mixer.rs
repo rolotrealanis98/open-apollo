@@ -602,3 +602,29 @@ fn plugin_catalog_without_licence_state_is_enabled() {
     let cat = m.plugin_catalog();
     assert!(cat[0].enabled && cat[0].badge.is_none());
 }
+
+/// `/plugins/P/Unison` reaches the browser: assign mode for the Unison slot lists only the
+/// Unison entries, a strip insert's lists them all.
+#[test]
+fn plugin_catalog_unison_flag_filters_the_unison_assign_browser() {
+    let plugin = |name: &str, unison: &str| format!(r#"{{"properties":{{"Name":{{"type":"string","value":"{name}"}},"Categories":{{"type":"string","value":"Delay"}}{unison}}}}}"#);
+    let entries = [
+        plugin("UAD Comp", r#","Unison":{"type":"bool","value":false}"#),
+        plugin("UAD Pre", r#","Unison":{"type":"bool","value":true}"#),
+        plugin("UAD Unknown", ""),
+    ];
+    let children: Vec<String> = entries.iter().enumerate().map(|(i, e)| format!(r#""{i}":{e}"#)).collect();
+    let json = format!(r#"{{"format":"consolelab-engine-snapshot","info":{{}},"tree":{{"children":{{"plugins":{{"children":{{{}}}}}}}}},"version":1}}"#, children.join(","));
+    let path = std::env::temp_dir().join(format!("engine-model-catalog-unison-{}.json", std::process::id()));
+    std::fs::write(&path, json).unwrap();
+    let m = EngineMixer::from_snapshot(&path).expect("snapshot");
+    std::fs::remove_file(&path).ok();
+    let cat = m.plugin_catalog();
+    assert_eq!(cat.iter().map(|p| p.unison).collect::<Vec<_>>(), [Some(false), Some(true), None]);
+    assert_eq!(m.plugin_is_unison("UAD Comp"), Some(false));
+    let mut view = rack::ViewState::default();
+    view.begin_assign("/devices/0/inputs/0".into(), UNISON_SLOT);
+    assert_eq!(rack::surfaces::browser::filtered(&cat, &m.plugin_categories(), &view), [1, 2], "unknown stays allowed");
+    view.begin_assign("/devices/0/inputs/0".into(), 0);
+    assert_eq!(rack::surfaces::browser::filtered(&cat, &m.plugin_categories(), &view), [0, 1, 2]);
+}

@@ -1,0 +1,12 @@
+# Needs the synthetic catalogue: run.py --catalogue (fixtures/catalogue; "UAD Test Pre" is the
+# only Unison plug-in). A click on the empty Unison slot opens the Unison assign browser, which
+# lists only Unison plug-ins; a tap on the row loads it.
+settle
+click /devices/0/inputs/0:Insert(255)
+settle
+hits browser:BrowserItem 1
+hits browser:BrowserItem(2) 1
+click browser:BrowserItem(2)
+settle
+#! tree /devices/0/inputs/0/preamps/0/effects/0/EffectName/value UAD Test Pre
+#! no tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test Pre
