@@ -9,6 +9,8 @@ description = "Finds a UAD install on a Windows disk and imports its assets for 
 flate2 = "1.1.10"
 
 [dependencies]
+cab = "0.6.0"
+cfb = "0.14.0"
 flate2 = "1.1.10"
 png = "0.18.1"
 # Pinned: SVG recipe hashes depend on the rasterizer's exact output.
@@ -17,3 +19,6 @@ serde = { version = "1.0.228", features = ["derive"] }
 # float_roundtrip: recipe matrices must parse to the exact doubles they were written from
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
+
+[dev-dependencies]
+zip = { version = "9.0.5", default-features = false }
