@@ -306,13 +306,23 @@ pub struct MonitorState {
     pub mute: bool,
 }
 
-/// Meter levels as 0…1 scale fractions plus clip LEDs.
+/// Meter levels as 0…1 scale fractions, the engine-held peaks (`MeterPeakLevel`, same scale)
+/// and clip LEDs.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MeterFrame {
     pub left: f64,
     pub right: f64,
+    pub peak_left: f64,
+    pub peak_right: f64,
     pub clip_left: bool,
     pub clip_right: bool,
+}
+
+impl MeterFrame {
+    /// The louder leg, 0…1: what a single-valued indicator (knob ring, signal LED) shows.
+    pub fn level(&self) -> f64 {
+        self.left.max(self.right)
+    }
 }
 
 /// One entry of the plug-in browser (`/plugins/P/{Name, Categories, Authorized, …}`).

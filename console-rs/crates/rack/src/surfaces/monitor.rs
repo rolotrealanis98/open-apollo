@@ -258,8 +258,8 @@ fn monitor_meters(ui: &mut Ui, meters: MeterFrame, bottom: f32) {
             ui.image(&path, Rect::new(((g.logo.w - w) / 2.0).floor(), g.logo.y, w, h), None, None, 1.0);
         }
     }
-    ui.bar_meter("Monitor-Meter", meters.left, meters.clip_left, g.left);
-    ui.bar_meter("Monitor-Meter", meters.right, meters.clip_right, g.right);
+    ui.bar_meter("Monitor-Meter", meters.left, 0.0, meters.clip_left, g.left);
+    ui.bar_meter("Monitor-Meter", meters.right, 0.0, meters.clip_right, g.right);
 
     // Rack_MeterMarks: style 1 left of L (3-pt major / 1-pt minor ticks on its right edge),
     // style 3 between the bars (numbers, 2-pt centred minor ticks), style 2 right of R.

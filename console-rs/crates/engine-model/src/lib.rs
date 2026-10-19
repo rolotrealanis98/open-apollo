@@ -282,6 +282,8 @@ impl EngineMixer {
         MeterFrame {
             left: scales::meter_fraction(l.level_db as f64),
             right: scales::meter_fraction(rr.level_db as f64),
+            peak_left: scales::meter_fraction(l.peak_db as f64),
+            peak_right: scales::meter_fraction(rr.peak_db as f64),
             clip_left: l.clip,
             clip_right: rr.clip,
         }

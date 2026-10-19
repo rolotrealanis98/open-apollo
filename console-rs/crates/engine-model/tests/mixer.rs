@@ -166,6 +166,9 @@ fn meters_use_the_console_scale() {
     assert!((f.left - scales::meter_fraction(-6.0)).abs() < 1e-9);
     assert!((f.right - scales::meter_fraction(-18.0)).abs() < 1e-9);
     assert!(!f.clip_left && f.clip_right);
+    // The engine-held peaks ride along on the same scale.
+    assert!((f.peak_left - scales::meter_fraction(-3.0)).abs() < 1e-9);
+    assert!((f.peak_right - scales::meter_fraction(-12.0)).abs() < 1e-9);
     // Mono strips mirror the left meter.
     let mono = m.store().topology().inputs[0].meters[0].base.clone();
     m.store().meters().set(
