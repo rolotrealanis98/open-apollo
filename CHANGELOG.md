@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-19
+
+The first release that ships no Universal Audio files. `bash scripts/setup.sh` reads what your
+Apollo needs from a UAD install you already have (Windows on another partition or a boot disk, a
+Windows VM, Wine, or a copied folder), builds the driver, and installs the native mixer console
+with plug-in windows. The web console, the tray and the Nix packaging are gone. Running UAD
+plug-ins on the Apollo's DSP is not in this release. See `docs/install.md`.
+
 ### Removed
 - The Nix flake, the NixOS module and the `nix` CI job: one install path, `bash scripts/setup.sh`.
 - The web console (`console-web/`) and the system tray indicator (`tools/open-apollo-tray.py`, its icons and autostart entry, and the AppIndicator dependency): the native console (console-rs, `uaconsole`) replaces both. The `open-apollo-console` launcher and its fallback to UA's Windows Console under Wine are gone too; the menu entry runs `uaconsole`. The uninstallers still remove what older installs left behind.
