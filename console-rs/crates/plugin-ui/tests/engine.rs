@@ -103,3 +103,45 @@ fn meters_poll_the_engine_read_only() {
     assert!(gets.iter().all(|c| c.starts_with(&format!("get {slot}/VendorSpecific/value?floats=7"))), "{gets:?}");
     assert!(server.write_commands().is_empty(), "meter polling never writes");
 }
+
+/// A slot whose parameters the engine publishes after the insert (no push for them): the slot
+/// re-reads itself while empty and lists them once they are there (MockEngine, no hardware).
+#[test]
+fn late_parameters_are_reread() {
+    use std::time::{Duration, Instant};
+    use ua_engine::{MockEngine, MockOptions, Options, Status};
+
+    let slot = "/devices/0/inputs/0/effects/1";
+    let params = format!("{slot}/parameters");
+    let mut tree = store().tree().clone();
+    let published = tree.node_json(&params);
+    tree.remove_subtree(&params);
+    let server = MockEngine::start(tree, MockOptions::default()).expect("mock engine");
+    let mut store = Store::new();
+    store.connect(server.endpoint(), Options::default());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while *store.status() != Status::Live {
+        assert!(Instant::now() < deadline, "mock engine never went live");
+        store.drain();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut engine = EngineSlot::open(&mut store, InsertPaths::from_slot(slot));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        store.drain();
+        engine.sync(&mut store);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(engine.view(&store).count(), 0);
+    server.set_node(&params, &published);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while engine.view(&store).count() == 0 {
+        assert!(Instant::now() < deadline, "late parameters never listed");
+        store.drain();
+        engine.sync(&mut store);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(engine.view(&store).count(), 11);
+    assert!(server.write_commands().is_empty(), "re-reads never write");
+    engine.close(&mut store);
+}

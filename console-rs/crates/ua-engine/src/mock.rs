@@ -201,6 +201,12 @@ impl MockEngine {
         lock(&self.state).refused.push((path::property_path(property).to_owned(), value.into()));
     }
 
+    /// Replaces the subtree at `path` (no push: clients see it on their next `get`), e.g. an
+    /// insert's `parameters` published after its metadata.
+    pub fn set_node(&self, path: &str, node: &Json) {
+        lock(&self.state).tree.insert_node(node, path);
+    }
+
     /// Replaces a property's `values` list (no push: clients re-read lists with `get …/values`).
     pub fn set_values(&self, prop: &str, values: Json) {
         set_values(&mut lock(&self.state), path::property_path(prop), values);

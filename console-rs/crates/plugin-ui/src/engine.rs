@@ -21,14 +21,22 @@ pub struct EngineSlot {
     pub params: Vec<PluginParameter>,
     retained: Vec<String>,
     seen: Option<(u64, u64)>,
+    /// While the list is empty: when the slot was last re-read and how many times.
+    reread: (Instant, u32),
 }
+
+/// An empty slot is re-read this often (`get <slot>?recursive=1`) and at most [`REREADS`] times:
+/// the daemon can publish `parameters/N/*` after the metadata refresh, and the store drops pushes
+/// for paths its tree does not have yet.
+const REREAD: Duration = Duration::from_millis(500);
+const REREADS: u32 = 20;
 
 impl EngineSlot {
     /// Refreshes the slot (read-only `get <slot>?recursive=1` when live) and subscribes its
     /// parameters. Balance with [`close`](Self::close).
     pub fn open(store: &mut Store, slot: InsertPaths) -> Self {
         store.refresh(&slot.base);
-        let mut s = Self { slot, params: Vec::new(), retained: Vec::new(), seen: None };
+        let mut s = Self::new(slot, Vec::new());
         s.sync(store);
         s
     }
@@ -37,15 +45,23 @@ impl EngineSlot {
     /// headless render). Nothing to close.
     pub fn peek(store: &Store, slot: InsertPaths) -> Self {
         let params = PluginParameter::list(store.tree(), &slot);
-        Self { slot, params, retained: Vec::new(), seen: None }
+        Self::new(slot, params)
+    }
+
+    fn new(slot: InsertPaths, params: Vec<PluginParameter>) -> Self {
+        Self { slot, params, retained: Vec::new(), seen: None, reread: (Instant::now(), 0) }
     }
 
     /// Re-lists the parameters when the tree changed (refresh landed, plug-in swapped) and keeps
-    /// `NormalizedValue`, `StringValue` and `StepValue` of each subscribed. True when the list
-    /// changed.
+    /// `NormalizedValue`, `StringValue` and `StepValue` of each subscribed. An empty list is
+    /// re-read now and then (see [`REREAD`]). True when the list changed.
     pub fn sync(&mut self, store: &mut Store) -> bool {
         let rev = (store.tree_revision(), store.node_revision());
         if self.seen == Some(rev) {
+            if self.params.is_empty() && self.reread.1 < REREADS && self.reread.0.elapsed() >= REREAD {
+                store.refresh(&self.slot.base);
+                self.reread = (Instant::now(), self.reread.1 + 1);
+            }
             return false;
         }
         self.seen = Some(rev);
@@ -57,8 +73,16 @@ impl EngineSlot {
             self.retained = paths;
         }
         let changed = list != self.params;
+        if !list.is_empty() {
+            self.reread.1 = 0;
+        }
         self.params = list;
         changed
+    }
+
+    /// Whether [`sync`](Self::sync) still re-reads an empty slot (the window keeps ticking).
+    pub fn rereading(&self) -> bool {
+        self.params.is_empty() && self.reread.1 < REREADS
     }
 
     /// Releases the subscriptions taken by [`open`](Self::open)/[`sync`](Self::sync).
