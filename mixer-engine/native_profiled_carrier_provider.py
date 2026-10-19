@@ -137,6 +137,7 @@ class ProfiledCarrierProvider:
             raise ValueError('original profile required')
         self.cap = None
         self.state = None
+        self._texts = None  # (values, formatter texts), see _texts_now()
         # The daemon builds emulators on a worker thread (warm()); every change of cap/state holds this.
         self._lock = threading.RLock()
 
@@ -169,6 +170,7 @@ class ProfiledCarrierProvider:
             shadow = {int(key, 0) if isinstance(key, str) else key: value
                       for key, value in self.data['startup']['shadow'].items()}
             self.state = ProfiledState.make(self.cap.defaults_values, shadow)
+            self._texts_now()
 
     def __deepcopy__(self, memo):
         clone = self.__class__(self.bundle_path, self.input_index, data=self.data, module_store=self.module_store)
@@ -177,6 +179,8 @@ class ProfiledCarrierProvider:
             # The accepted state travels even when this copy has no emulator yet (a copy of a
             # copy); the clone rebuilds its emulator from it (_ensure / warm()).
             clone.state = self.state
+            clone._texts = self._texts
+            clone._control_ref_cache = getattr(self, '_control_ref_cache', None)
         return clone
 
     def composition_arguments(self):
@@ -268,14 +272,26 @@ class ProfiledCarrierProvider:
         self._ensure()
         return self._values(field, self.state.values, self.cap)
 
+    def _texts_now(self):
+        """The original formatter's text of every parameter at the accepted state, cached with
+        that state: a copy made for chain planning publishes it without rebuilding an emulator."""
+        with self._lock:
+            if self._texts is None or self._texts[0] != self.state.values:
+                self._ensure()
+                self._texts = (self.state.values,
+                               tuple(self.cap.format_parameter(i)['console_trimmed'] for i in range(len(self.maxima))))
+            return self._texts[1]
+
     def _parameters(self):
-        self._ensure()
+        if self.state is None:
+            self._ensure()
+        texts = self._texts_now()
         output = []
         values = self.state.values
         for index, value in enumerate(values):
             props = deepcopy(self.params[index])
             props['NormalizedValue']['value'] = value / self.maxima[index]
-            props['StringValue']['value'] = self.cap.format_parameter(index)['console_trimmed']
+            props['StringValue']['value'] = texts[index]
             if 'StepValue' in props:
                 props['StepValue']['value'] = self._step_label(index, value, props['StringValue']['value'])
             output.append({'id': index, 'properties': props})
