@@ -12,6 +12,7 @@ from capture_pultec import CapturePultec
 from prove_sdk_constructor import OriginalSdkConstructor,SDK,SDKBASE
 from probe_transactions import Replay
 import pefile
+import pe_cache
 from unicorn import UcError,UC_HOOK_BLOCK,UC_HOOK_CODE,UC_HOOK_MEM_READ
 from unicorn.x86_const import *
 
@@ -40,7 +41,7 @@ def parent_allocation_size(path,ctor_va,embedded_offset=None):
     if inline is not None:return inline
     import numpy as np
     from capstone import Cs,CS_ARCH_X86,CS_MODE_64
-    pe=pefile.PE(path,fast_load=True);base=pe.OPTIONAL_HEADER.ImageBase;sites=[]
+    pe=pe_cache.parsed(path);base=pe.OPTIONAL_HEADER.ImageBase;sites=[]
     for section in pe.sections:
         if not section.Characteristics&0x20000000:continue
         data=section.get_data();va=base+section.VirtualAddress
@@ -73,7 +74,7 @@ def crt_rand_returns(path):
     """Return-instruction VAs of MSVC CRT rand(): `imul ecx, [rax+0x28], 0x343fd;
     add ecx, 0x269ec3; mov [rax+0x28], ecx; shr ecx, 0x10; and ecx, 0x7fff;
     mov eax, ecx; ...; ret` (the per-thread LCG that srand seeds)."""
-    pe=pefile.PE(path,fast_load=True);base=pe.OPTIONAL_HEADER.ImageBase;found=[]
+    pe=pe_cache.parsed(path);base=pe.OPTIONAL_HEADER.ImageBase;found=[]
     signature=bytes.fromhex('6948 28 fd430300 81c1 c39e2600 894828 c1e910 81e1ff7f0000 8bc1'.replace(' ',''))
     for section in pe.sections:
         if not section.Characteristics&0x20000000:continue
@@ -91,7 +92,7 @@ def _inline_factory_size(path,ctor_va,embedded_offset):
     if not embedded_offset:return None
     from capstone import Cs,CS_ARCH_X86,CS_MODE_64
     from capstone.x86 import X86_OP_MEM,X86_OP_REG
-    pe=pefile.PE(path,fast_load=True);rva=ctor_va-pe.OPTIONAL_HEADER.ImageBase
+    pe=pe_cache.parsed(path);rva=ctor_va-pe.OPTIONAL_HEADER.ImageBase
     md=Cs(CS_ARCH_X86,CS_MODE_64);md.detail=True
     insns=[]
     for ins in md.disasm(pe.get_data(rva,0x400),ctor_va):
@@ -196,7 +197,7 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
         self.wq(HEAP+0x370058,self.tls_vector);self.wq(self.tls_vector,self.tls_slot0)
         # Loader TLS semantics: the module's TLS block starts as a copy of the PE TLS template
         # (e.g. MSVC _Init_thread_epoch = INT_MIN), the rest zero. Slot zero is the only TLS slot.
-        tls_pe=pefile.PE(source['path'],fast_load=True);tls_pe.parse_data_directories(directories=[9])
+        tls_pe=pe_cache.parsed(source['path'],[9])
         tls=getattr(tls_pe,'DIRECTORY_ENTRY_TLS',None)
         if tls is not None:
             template=bytes(tls_pe.get_memory_mapped_image()[tls.struct.StartAddressOfRawData-BASE:tls.struct.EndAddressOfRawData-BASE])
@@ -313,7 +314,7 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
                 raise ValueError('source parent slot must remain inside mapped original image')
             self.wq(self.parentvt+slot,va)
             self.parent_required_bindings.append(dict(slot=hex(slot),va=hex(va),function_end=hex(end)))
-        exports={s.name:SDKBASE+s.address for s in pefile.PE(str(SDK)).DIRECTORY_ENTRY_EXPORT.symbols if s.name}
+        exports={s.name:SDKBASE+s.address for s in pe_cache.parsed(str(SDK),fast_load=False).DIRECTORY_ENTRY_EXPORT.symbols if s.name}
         self.sdk_redirects={}
         for name,label,stub in self.imports:
             if label.lower().startswith('uad2sdk.dll!') and name in exports:

@@ -15,6 +15,7 @@ Applied only when the default program-state init (slot 0x538) reads a field the 
 Anything not matching the exact shape returns None and the original failure stands."""
 import struct
 import pefile
+import pe_cache
 from capstone import Cs,CS_ARCH_X86,CS_MODE_64
 from capstone.x86 import X86_OP_MEM,X86_OP_IMM,X86_OP_REG
 from unicorn import UC_HOOK_CODE,UcError
@@ -29,7 +30,7 @@ def _md():
 
 
 def _pe(path):
-    pe=pefile.PE(path,fast_load=True);pe.parse_data_directories(directories=[3]);return pe
+    return pe_cache.parsed(path,[3])
 
 
 def _function(pe,va):

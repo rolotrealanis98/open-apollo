@@ -4,9 +4,10 @@ It is the one function that references the string SleepConditionVariableCS and i
 as a pointer in a non-code section (the __xc table). Nothing is selected if that is not unique."""
 import re,struct
 import pefile
+import pe_cache
 
 def find_initializer(path):
-    pe=pefile.PE(path,fast_load=True);pe.parse_data_directories(directories=[3])
+    pe=pe_cache.parsed(path,[3])
     im=pe.get_memory_mapped_image();base=pe.OPTIONAL_HEADER.ImageBase
     needle=b'SleepConditionVariableCS\0'
     strings=[m.start() for m in re.finditer(re.escape(needle),im)]

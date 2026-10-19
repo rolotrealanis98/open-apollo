@@ -3,10 +3,11 @@ No plugin/address list, no pointer or coefficient value is synthesized.
 """
 import re,struct,hashlib
 import pefile
+import pe_cache
 PATTERN=re.compile(rb'\x40\x53\x48\x83\xec\x20\x48\x8b\x1d....(?:\x48\x8b\xcb\xe8....){5}\xb0\x01\x48\x83\xc4\x20\x5b\xc3',re.DOTALL)
 
 def discover(path):
-    pe=pefile.PE(path);base=pe.OPTIONAL_HEADER.ImageBase
+    pe=pe_cache.parsed(path,fast_load=False);base=pe.OPTIONAL_HEADER.ImageBase
     cookie=pe.DIRECTORY_ENTRY_LOAD_CONFIG.struct.SecurityCookie
     matches=[]
     for sec in pe.sections:

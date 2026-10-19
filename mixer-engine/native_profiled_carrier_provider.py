@@ -8,7 +8,7 @@ capstone and pefile, and the DLL where the bundle was built from.
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-import hashlib, json, math, os, re, sys, threading
+import hashlib, json, math, os, re, sys, threading, time
 
 EXECUTOR = Path(__file__).resolve().parents[1] / 'tools/plugin-mapper/plugin_mapper/executor'
 if str(EXECUTOR) not in sys.path:
@@ -199,12 +199,39 @@ class ProfiledCarrierProvider:
         self._lock = threading.RLock()
 
     def _ensure(self):
+        """The emulator at the accepted state. Built outside the provider's lock (seconds) so
+        a load or a get never waits for a background warm-up; only one build runs at a time."""
         with self._lock:
-            if self.cap is None:
-                if self.state is None:
-                    self.reset()
-                else:
-                    self.cap = self._capture(self.state.values)
+            if self.cap is not None:
+                return
+            if self.state is None:
+                self.learn_defaults()
+                return
+            building = getattr(self, '_building', None)
+            if building is None:
+                building = self._building = threading.Event()
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            building.wait()
+            with self._lock:
+                if self.cap is not None:
+                    return
+            return self._ensure()
+        try:
+            while True:
+                with self._lock:
+                    values = self.state.values
+                cap = self._capture(values)
+                with self._lock:
+                    if self.state.values == values:   # unchanged meanwhile (loads reset it)
+                        self.cap = cap
+                        return
+        finally:
+            with self._lock:
+                self._building = None
+            building.set()
 
     def _capture(self, values=None):
         cap = self.capture_type(self.profile, auto_start=False)
@@ -253,6 +280,13 @@ class ProfiledCarrierProvider:
         self._warming = True
 
         def run():
+            # Let the load that asked for it publish first, then build at a lower CPU priority
+            # (Linux: per-thread nice) so clients and the next transaction stay responsive.
+            time.sleep(0.3)
+            try:
+                os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 10)
+            except (AttributeError, OSError):
+                pass
             try:
                 self._ensure()
             except Exception:
@@ -323,6 +357,7 @@ class ProfiledCarrierProvider:
         source = self.recipe.startup_observations()
         plan = self._filtered_observations(source)
         # Host plans are capped at 32768 runs: repack at the driver ABI maximum (64 words) only for a plan over 32000.
+        # (64-word reads are refused with EPROTO on the x4 for ordinary plans: keep 16.)
         return self._filtered_observations(source, width=64) if len(plan) > 32000 else plan
 
     def _field(self, field):

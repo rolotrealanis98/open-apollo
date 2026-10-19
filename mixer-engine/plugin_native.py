@@ -4,6 +4,7 @@ The provider is trusted local code, explicitly loaded by the owner. It plans
 writes and formats verified values; this adapter owns every device operation.
 """
 
+import logging
 import copy
 from dataclasses import dataclass
 import importlib.util
@@ -21,6 +22,8 @@ from plugin_transactions import (
     PrepareOutcome, RestoreControlOutcome, RetireOutcome, RollbackOutcome,
 )
 
+
+log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ControlPlan:
@@ -102,6 +105,7 @@ class NativePluginBackend:
             self.providers[key] = item
         self._leases = {}
         self._pending = {}
+        self._dynamic = {}   # native handle -> {(row, word)} the running plug-in owns
 
     def _channels(self, slot):
         first = int(slot.split('/')[4])
@@ -168,18 +172,49 @@ class NativePluginBackend:
                            for word in expected)):
                 raise ValueError('invalid authoritative observation')
 
-    def _observe(self, native, observations):
+    def _observe(self, native, observations, learn=False):
+        """Read back `observations` and require them. Words the running plug-in owns (learned
+        for this instance, see prepare_control) are not compared.
+
+        learn: before a control writes anything, its prior words can only differ because the
+        DSP code changed them since they were verified (delay pointers, LFO phases, meters);
+        a few such words are learned for this instance instead of failing."""
         self._validate_observations(observations)
+        dynamic = self._dynamic.setdefault(native.handle, set())
         for row, offset, expected in observations:
             try:
                 actual = self.driver.service(native, read=(row, offset, len(expected)))
             except OSError:
                 self.invalidate()
                 raise
-            if actual != expected:
-                diffs = [(offset + i, e, a) for i, (e, a) in enumerate(zip(expected, actual)) if e != a]
-                raise ValueError('native coefficient observation differs: row %d %s' % (
-                    row, ', '.join(f'word {w} 0x{e:x}->0x{a:x}' for w, e, a in diffs[:4])))
+            if actual == expected:
+                continue
+            diffs = [(offset + i, e, a) for i, (e, a) in enumerate(zip(expected, actual))
+                     if e != a and (row, offset + i) not in dynamic]
+            if not diffs:
+                continue
+            # A word whose value moves between two reads is the running DSP code's (a ramp, a
+            # pointer): a write that failed would read back the same wrong value both times.
+            try:
+                again = self.driver.service(native, read=(row, offset, len(expected)))
+            except OSError:
+                self.invalidate()
+                raise
+            moving = {w for w, _, a in diffs if again[w - offset] != a}
+            if moving:
+                dynamic.update((row, w) for w in moving)
+                log.info('native instance %s: row %d words %s change while it runs; not verified',
+                         native.handle, row, ', '.join(str(w) for w in sorted(moving)))
+                diffs = [d for d in diffs if d[0] not in moving]
+                if not diffs:
+                    continue
+            if learn and len(diffs) <= max(2, len(expected) // 2):
+                dynamic.update((row, w) for w, _, _ in diffs)
+                log.info('native instance %s: row %d words %s are the running plug-in\'s; not verified',
+                         native.handle, row, ', '.join(str(w) for w, _, _ in diffs))
+                continue
+            raise ValueError('native coefficient observation differs: row %d %s' % (
+                row, ', '.join(f'word {w} 0x{e:x}->0x{a:x}' for w, e, a in diffs[:4])))
         self._session()
 
     def read(self, slot, handle, query):
@@ -374,7 +409,7 @@ class NativePluginBackend:
                 raise ValueError('typed control plan required')
             self._validate_observations(plan.observations)
             self.publisher.stage_control(slot, ControlReadback(handle, field, plan.values))
-        self._observe(lease.native, prior.observations)
+        self._observe(lease.native, prior.observations, learn=True)
         return PrepareControlOutcome(Outcome.CONFIRMED, PreparedControl(
             (lease, prior, proposal, restoration), handle, field, copy.deepcopy(prior.values)))
 

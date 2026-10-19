@@ -8,6 +8,7 @@ coordinator. No handles, DSP results, or parameters are generated.
 
 import copy
 import logging
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -374,7 +375,9 @@ class PluginTransactions:
             return TransactionResult("openapollo.invalid_plugin_slot")
         slot = "/" + "/".join(part for part in slot.split("/") if part)
         try:
+            started = time.monotonic()
             outcome = self.backend.prepare(slot, name)
+            prepared_at = time.monotonic()
         except Exception as exc:
             return self._quarantine(
                 f"Preparation raised {type(exc).__name__}; ownership unknown"
@@ -410,7 +413,9 @@ class PluginTransactions:
                 f"Publication validation failed: {type(exc).__name__}",
             )
         try:
+            activating_at = time.monotonic()
             activated = self.backend.activate(prepared)
+            activated_at = time.monotonic()
         except Exception as exc:
             return self._rollback(
                 prepared, f"Activation raised {type(exc).__name__}"
@@ -458,8 +463,13 @@ class PluginTransactions:
                 prepared,
                 committed=True,
             )
+        published_at = time.monotonic()
         try:
             finalized = self.backend.finalize(prepared)
+            log.info("native load %s on %s: %.0f ms (prepare %.0f, activate %.0f, publish %.0f, "
+                     "finalize %.0f)", name, slot, (time.monotonic() - started) * 1e3,
+                     (prepared_at - started) * 1e3, (activated_at - activating_at) * 1e3,
+                     (published_at - activated_at) * 1e3, (time.monotonic() - published_at) * 1e3)
         except Exception as exc:
             return self._quarantine(
                 f"Published; retirement raised {type(exc).__name__}",
@@ -795,7 +805,7 @@ class PluginTransactions:
                     )
             except Exception as exc:
                 return self._quarantine(
-                    f"{detail}; restore unconfirmed: {type(exc).__name__}",
+                    f"{detail}; restore unconfirmed: {type(exc).__name__}: {exc}",
                     prepared,
                 )
             return TransactionResult(
@@ -813,6 +823,7 @@ class PluginTransactions:
         try:
             applied = methods[1](prepared)
         except Exception as exc:
+            log.warning("Native control on %s %s: apply raised %s: %s", slot, field, type(exc).__name__, exc)
             return restore(f"Control apply raised {type(exc).__name__}")
         if (
             prepared.handle,

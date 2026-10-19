@@ -2,6 +2,7 @@
 import hashlib,os
 from pathlib import Path
 import pefile
+import pe_cache
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_RIP
 from offline_host import BASE
@@ -14,7 +15,7 @@ SDKBASE=0x190000000;TRAPS=0x73000000
 class OriginalSdkConstructor:
  def _map_image(self,image):
   super()._map_image(image);raw=SDK.read_bytes();self.sdk_sha256=hashlib.sha256(raw).hexdigest()
-  p=pefile.PE(data=raw);assert p.OPTIONAL_HEADER.ImageBase==BASE;p.relocate_image(SDKBASE);im=p.get_memory_mapped_image()
+  p,im=pe_cache.from_bytes(self.sdk_sha256,raw);assert p.OPTIONAL_HEADER.ImageBase==BASE;p,im=pe_cache.from_bytes(self.sdk_sha256,raw,SDKBASE)
   self.uc.mem_map(SDKBASE,(len(im)+4095)&~4095);self.uc.mem_write(SDKBASE,im)
   self.uc.mem_map(TRAPS,0x10000);self.uc.mem_write(TRAPS,b'\xc3'*0x10000);self.uc.hook_add(UC_HOOK_CODE,self.hook,begin=TRAPS,end=TRAPS+0xffff)
   for n,imp in enumerate(i for d in p.DIRECTORY_ENTRY_IMPORT for i in d.imports):

@@ -25,6 +25,7 @@ state, converts it and pushes the DSP words itself), so the host runs it per con
     written by original code or declared by the host; an uninitialised read rejects instead of reading zero;
   * the statically linked CRT's malloc/free (and sprintf_s, which needs per-thread CRT data) are answered by the host.
 """
+import pe_cache
 import math, re, struct
 from collections import deque
 from generic_capture import GenericCapture, OfflineHost, UC_HOOK_BLOCK, HEAP, STACK, STUBS, STOP, BASE, integer, _ARGUMENTS, UcError
@@ -148,8 +149,7 @@ class DspApCapture(GenericCapture):
         # Loader TLS semantics (as GenericCapture / VstMain): GS:[0x58] -> TLS vector, slot 0 = copy of the PE TLS template
         # (the JUCE AudioProcessor base constructor of the Auto-Tune DLLs reads its per-thread block through it).
         import pefile
-        tls_pe = pefile.PE(profile['dll']['path'], fast_load=True)
-        tls_pe.parse_data_directories(directories=[9])
+        tls_pe = pe_cache.parsed(profile['dll']['path'], [9])
         self.image_size = tls_pe.OPTIONAL_HEADER.SizeOfImage
         tls = getattr(tls_pe, 'DIRECTORY_ENTRY_TLS', None)
         if tls is not None:

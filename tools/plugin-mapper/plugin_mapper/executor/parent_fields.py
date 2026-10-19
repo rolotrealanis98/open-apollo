@@ -6,12 +6,13 @@ stores the spilled argument into `[this+off]`. Returns {off: X} or {} when the s
 differs anywhere (refuse rather than guess)."""
 import functools
 import pefile
+import pe_cache
 
 
 @functools.lru_cache(maxsize=None)
 def base_static_pointer_fields(path, parent_ctor_va, base_ctor_va):
     from capstone import Cs, CS_ARCH_X86, CS_MODE_64
-    pe = pefile.PE(path, fast_load=True); image = pe.OPTIONAL_HEADER.ImageBase
+    pe = pe_cache.parsed(path); image = pe.OPTIONAL_HEADER.ImageBase
     md = Cs(CS_ARCH_X86, CS_MODE_64)
     def decode(va, size, stop=None):
         out = []
@@ -64,7 +65,7 @@ def base_stack_int_fields(path, parent_ctor_va, base_ctor_va):
     shape differs (e.g. the framework input/output channel counts stored at +0x1d8/+0x1dc)."""
     from capstone import Cs, CS_ARCH_X86, CS_MODE_64
     from capstone.x86 import X86_OP_IMM
-    pe = pefile.PE(path, fast_load=True); image = pe.OPTIONAL_HEADER.ImageBase
+    pe = pe_cache.parsed(path); image = pe.OPTIONAL_HEADER.ImageBase
     md = Cs(CS_ARCH_X86, CS_MODE_64); md.detail = True
     def decode(va, size, stop=None):
         out = []

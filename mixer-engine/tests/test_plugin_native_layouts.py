@@ -111,3 +111,17 @@ def test_missing_layout_names_the_bundles_layout_and_the_fix():
     result=tx.load(mono_only.slot,mono_only.name)
     assert 'UAD Mono: mono only — unlink the input or use a stereo bundle' == result.detail
     assert not driver.calls
+
+
+def test_words_the_running_plugin_owns_are_learned_not_failed():
+    import plugin_native
+    p = provider(1)
+    state, driver, backend, tx = rig((p,), max_instances=4)
+    assert tx.load(p.slot, p.name).committed
+    native = backend._leases[p.slot].native
+    reads = iter([(1, 2, 3), (1, 9, 3)])   # word 1 moves between reads, word 2 stays wrong
+    backend.driver = type('D', (), {'service': lambda self, n, read: next(reads)})()
+    import pytest
+    with pytest.raises(ValueError, match='word 2'):
+        backend._observe(native, ((10, 0, (1, 0, 0)),))
+    assert (10, 1) in backend._dynamic[native.handle] and (10, 2) not in backend._dynamic[native.handle]

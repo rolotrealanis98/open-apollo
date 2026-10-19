@@ -136,7 +136,7 @@ def test_initial_readback_failure_destroys_before_publishing():
     driver.mismatch = True
     result = tx.load(SLOT, provider.name)
     assert result.error and not result.committed and not result.quarantined
-    assert driver.calls == ['create', 'read', 'destroy']
+    assert driver.calls == ['create', 'read', 'read', 'destroy']  # a mismatch is read twice
     assert state.get_value(SLOT + '/EffectInstance') == 0
 
 

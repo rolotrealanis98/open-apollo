@@ -8,6 +8,7 @@ from pathlib import Path
 import struct
 
 import pefile
+import pe_cache
 from unicorn import Uc, UcError, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE
 from unicorn.x86_const import (
     UC_X86_REG_RAX, UC_X86_REG_RCX, UC_X86_REG_RDX, UC_X86_REG_R8,
@@ -24,10 +25,10 @@ class OfflineHost:
         raw = Path(dll).read_bytes()
         if hashlib.sha256(raw).hexdigest() != expected_sha256:
             raise ValueError('Plugin identity mismatch')
-        pe = pefile.PE(data=raw)
+        pe, image = pe_cache.from_bytes(expected_sha256, raw)
         if pe.FILE_HEADER.Machine != 0x8664 or pe.OPTIONAL_HEADER.ImageBase != BASE:
             raise ValueError('Pinned Win64 image at the explicit base required')
-        self._map_image(pe.get_memory_mapped_image())
+        self._map_image(image)
         self.imports = []
         next_stub = STUBS + 0x3000
         for entry in getattr(pe, 'DIRECTORY_ENTRY_IMPORT', ()):

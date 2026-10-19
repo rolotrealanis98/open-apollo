@@ -9,6 +9,7 @@ are returned; nothing else in the table is selected.
 """
 import re,struct
 import pefile
+import pe_cache
 from capstone import Cs,CS_ARCH_X86,CS_MODE_64
 from capstone.x86 import X86_OP_MEM,X86_OP_REG,X86_OP_IMM
 
@@ -18,7 +19,7 @@ _LOOP=[('cmp','rcx, rdx'),('mov','rax, qword ptr [rbx]'),('test','rax, rax'),('a
 def _rip(i,o):return i.address+i.size+o.mem.disp
 
 def domain_initializers(path,table_va,count):
-    pe=pefile.PE(path,fast_load=True);pe.parse_data_directories(directories=[3])
+    pe=pe_cache.parsed(path,[3])
     im=pe.get_memory_mapped_image();base=pe.OPTIONAL_HEADER.ImageBase
     cs=Cs(CS_ARCH_X86,CS_MODE_64);cs.detail=True
     funcs=sorted((e.struct.BeginAddress,e.struct.EndAddress)for e in pe.DIRECTORY_ENTRY_EXCEPTION)
