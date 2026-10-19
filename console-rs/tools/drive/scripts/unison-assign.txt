@@ -1,6 +1,7 @@
 # Needs the synthetic catalogue: run.py --catalogue (fixtures/catalogue; "UAD Test Pre" is the
 # only Unison plug-in). A click on the empty Unison slot opens the Unison assign browser, which
 # lists only Unison plug-ins; a tap on the row loads it.
+#: --catalogue
 settle
 click /devices/0/inputs/0:Insert(255)
 settle

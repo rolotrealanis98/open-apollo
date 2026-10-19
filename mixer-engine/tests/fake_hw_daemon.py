@@ -162,7 +162,8 @@ def publish_native_slots(state):
         prop("/" + key, value, kind)
     slots = [f"/devices/0/inputs/{n}/effects/0" for n in range(4)]
     layouts = {"UAD Test Comp": ([], slots[0::2]),   # (mono, stereo)
-               "UAD Test EQ": (slots, [])}
+               "UAD Test EQ": (slots, []),
+               "UAD Test Pre": (slots, slots[0::2])}  # both: the only one the browser lists
     for path in state.all_paths():
         if not re.fullmatch(r"/plugins/\d+/Name", path):
             continue
