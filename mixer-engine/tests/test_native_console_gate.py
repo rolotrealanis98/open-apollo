@@ -20,7 +20,10 @@ def lab():
     daemon._send_error = Mock()
     daemon._send_response = Mock()
     daemon._send_post_reply = Mock()
-    client = SimpleNamespace(id='console', helper=False, ubjson=False, sleep=False)
+    # model() has no device map: an accepted set then ends as "unresolved path"
+    daemon._send_unresolved_set = Mock()
+    daemon._send_engine_error = Mock()
+    client = SimpleNamespace(id='console', helper=False, ubjson=False, sleep=False, send=Mock())
     return SimpleNamespace(daemon=daemon, client=client)
 
 

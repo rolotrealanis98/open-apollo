@@ -198,9 +198,9 @@ class TestDispatch:
 
     def test_set_with_func_id_echoes(self, daemon):
         c = FakeClient()
-        daemon._dispatch(c, "set /BufferSize/value?func_id=4 512")
+        daemon._dispatch(c, "set /devices/0/inputs/0/Pan/value?func_id=4 0.5")
         msgs = c.messages()
-        assert msgs and msgs[-1]["data"] == 512
+        assert msgs and msgs[-1]["data"] == 0.5
         assert msgs[-1]["parameters"] == {"func_id": 4}
 
     def test_gain_set_pushes_companion_tapered_value(self, daemon, tree):
