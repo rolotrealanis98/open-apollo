@@ -1126,9 +1126,11 @@ class MixerDaemon:
         import model_features as mf
         for hold in ("PeakHold", "ClipHold"):
             if path in (f"/{hold}/value", f"/devices/0/{hold}/value"):
-                if value in mf.HOLD_NAMES:
+                # Test meters and --no-hardware stand-ins may not hold
+                set_holds = getattr(self._metering, "set_holds", None)
+                if value in mf.HOLD_NAMES and set_holds is not None:
                     ms = mf.HOLD_MS[mf.HOLD_NAMES.index(value)]
-                    self._metering.set_holds(**{
+                    set_holds(**{
                         "peak_ms" if hold == "PeakHold" else "clip_ms": ms})
                 return
 
