@@ -170,7 +170,7 @@ fn dir_tree(dir: &Path, ext: &str) -> Value {
             if p.is_dir() {
                 Some((true, name, p))
             } else {
-                name.to_ascii_lowercase().ends_with(ext).then(|| (false, name, p))
+                name.to_ascii_lowercase().ends_with(ext).then_some((false, name, p))
             }
         })
         .collect();
@@ -231,10 +231,10 @@ fn channel_strip_names(msi: &Path) -> Option<Vec<Vec<String>>> {
         }
         if &magic == b"PK\x03\x04" {
             let mut zip = Vec::new();
-            if s.take(MAX_ZIP as u64).read_to_end(&mut zip).is_ok() {
-                if let Some(n) = zip_channel_strips(&zip) {
-                    return Some(n);
-                }
+            if s.take(MAX_ZIP as u64).read_to_end(&mut zip).is_ok()
+                && let Some(n) = zip_channel_strips(&zip)
+            {
+                return Some(n);
             }
         } else if &magic == b"MSCF" {
             let Ok(mut cab) = cab::Cabinet::new(s) else { continue };
@@ -248,10 +248,9 @@ fn channel_strip_names(msi: &Path) -> Option<Vec<Vec<String>>> {
                 let mut zip = Vec::new();
                 if cab.read_file(&name).and_then(|mut r| r.read_to_end(&mut zip)).is_ok()
                     && zip.starts_with(b"PK\x03\x04")
+                    && let Some(n) = zip_channel_strips(&zip)
                 {
-                    if let Some(n) = zip_channel_strips(&zip) {
-                        return Some(n);
-                    }
+                    return Some(n);
                 }
             }
         }
@@ -410,10 +409,10 @@ impl UaXml {
                 }
                 "names" if section == "shortnames" => parent = attr(tag, "title").unwrap_or_default(),
                 "name" if section == "shortnames" => {
-                    if let Some(short) = attr(tag, "title").filter(|s| !s.is_empty()) {
-                        if !parent.is_empty() {
-                            out.short_names.entry(parent.clone()).or_default().push(short);
-                        }
+                    if let Some(short) = attr(tag, "title").filter(|s| !s.is_empty())
+                        && !parent.is_empty()
+                    {
+                        out.short_names.entry(parent.clone()).or_default().push(short);
                     }
                 }
                 _ => {}
@@ -600,7 +599,7 @@ mod tests {
         assert_eq!((c["source"]["via"].as_str(), c["presets"][0]["value"].as_str()), (Some("installed"), Some("Own")));
 
         // Neither: empty, via null.
-        fs::remove_dir_all(&pp.join("Presets")).unwrap();
+        fs::remove_dir_all(pp.join("Presets")).unwrap();
         fs::remove_dir_all(&cache).unwrap();
         let data = t.join("data3");
         assert_eq!(write(&root, &data).unwrap().channel_presets, 0);
