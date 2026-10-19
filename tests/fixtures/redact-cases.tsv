@@ -1,0 +1,19 @@
+# scripts/oa_redact.py and oa-setup's runlog.rs must agree on every row: input<TAB>expected.
+# Identity: user alex, home /home/alex, host studio.lan, machine id 0123456789abcdef0123456789abcdef.
+plain line, nothing to hide	plain line, nothing to hide
+Reading /home/alex/win/drive_c (read-only)	Reading <home>/win/drive_c (read-only)
+runuser -u alex -- oa-assets import	runuser -u <user> -- oa-assets import
+alexander stays, alex_2 and alex go	alexander stays, <user>_2 and <user> go
+Mixer daemon running as alex (TCP:4710)	Mixer daemon running as <user> (TCP:4710)
+host studio.lan or studio, not studios	host <host> or <host>, not studios
+machine-id 0123456789abcdef0123456789abcdef	machine-id <machine-id>
+ua_apollo 0000:44:00.0: serial: 20000000000123	ua_apollo 0000:44:00.0: serial: <redacted>
+Serial Number = AB-12CD-34	Serial Number = <redacted>
+serial_number=XYZ12345, S/N#Q1W2E3R4	serial_number=<redacted>, S/N#<redacted>
+serial 12345 is too short	serial 12345 is too short
+Serial number: 1234	Serial <redacted>: 1234
+bluez_card.AA_BB_CC_DD_EE_FF and aa:bb:cc:dd:ee:ff	bluez_card.<mac> and <mac>
+pci 0000:44:00.0 and sha 3f1a9c0d2e4b5a6978 stay	pci 0000:44:00.0 and sha 3f1a9c0d2e4b5a6978 stay
+[0;32m[ OK ][0m  Opened /dev/nvme0n1p3 read-only (ntfs3)	[ OK ]  Opened /dev/nvme0n1p3 read-only (ntfs3)
+10%55%100% /home/alex	100% <home>
+── serial: ABCDEF12 … done	── serial: <redacted> … done

@@ -6,6 +6,8 @@
 # logging stubs (dkms, rmmod, systemctl, udevadm, runuser, ...), so nothing
 # real is unloaded, removed or restarted, and nothing needs root.
 
+# The stubs' bodies (single-quoted) are shell code, expanded when a stub runs.
+# shellcheck disable=SC2016
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
