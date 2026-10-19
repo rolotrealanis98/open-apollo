@@ -3,8 +3,61 @@
 
 use std::path::{Path, PathBuf};
 
+use rack::surfaces::{BrowserTab, InsertSize, Sections};
+use rack::ViewState;
+
 use crate::cli::EngineAddr;
 use crate::view::{ViewMode, ZOOM_MAX, ZOOM_MIN};
+
+/// The mixer's view state that Console 1.3.1 remembers between launches: the INPUTS / INSERTS /
+/// SENDS / FADER rows, insert size, FIXED SLOTS, SENDS OVERVIEW, the browser, SHOW AUX / CTRL ROOM
+/// and the window size (layout points).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MixerPrefs {
+    pub sections: Sections,
+    pub insert_size: InsertSize,
+    pub fixed_slots: bool,
+    pub sends_overview: bool,
+    pub show_browser: bool,
+    pub tab: BrowserTab,
+    pub show_aux: bool,
+    pub show_ctrl_room: bool,
+    pub window: Option<(f32, f32)>,
+}
+
+impl Default for MixerPrefs {
+    fn default() -> Self {
+        Self::capture(&ViewState::default())
+    }
+}
+
+impl MixerPrefs {
+    pub fn capture(v: &ViewState) -> Self {
+        Self {
+            sections: v.sections,
+            insert_size: v.insert_size,
+            fixed_slots: v.fixed_slots,
+            sends_overview: v.sends_overview,
+            show_browser: v.show_browser,
+            tab: v.browser.tab,
+            show_aux: v.show_aux,
+            show_ctrl_room: v.show_ctrl_room,
+            window: v.window,
+        }
+    }
+
+    pub fn apply(&self, v: &mut ViewState) {
+        v.sections = self.sections;
+        v.insert_size = self.insert_size;
+        v.fixed_slots = self.fixed_slots;
+        v.sends_overview = self.sends_overview;
+        v.show_browser = self.show_browser;
+        v.browser.tab = self.tab;
+        v.show_aux = self.show_aux;
+        v.show_ctrl_room = self.show_ctrl_room;
+        v.window = self.window;
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -14,6 +67,7 @@ pub struct Settings {
     pub zoom: f32,
     pub compact: bool,
     pub view: ViewMode,
+    pub mixer: MixerPrefs,
 }
 
 impl Default for Settings {
@@ -23,6 +77,7 @@ impl Default for Settings {
             zoom: 1.0,
             compact: false,
             view: ViewMode::Fit,
+            mixer: MixerPrefs::default(),
         }
     }
 }
@@ -82,6 +137,26 @@ impl Settings {
                 ("zoom", Some(Value::Num(v))) => s.zoom = (v as f32).clamp(ZOOM_MIN, ZOOM_MAX),
                 ("compact", Some(Value::Bool(v))) => s.compact = v,
                 ("view", Some(Value::Str(v))) => s.view = ViewMode::parse(&v).unwrap_or(s.view),
+                ("inputs", Some(Value::Bool(v))) => s.mixer.sections.inputs = v,
+                ("inserts", Some(Value::Bool(v))) => s.mixer.sections.inserts = v,
+                ("sends", Some(Value::Bool(v))) => s.mixer.sections.sends = v,
+                ("fader", Some(Value::Bool(v))) => s.mixer.sections.fader = v,
+                ("insert_size", Some(Value::Str(v))) => match v.as_str() {
+                    "small" => s.mixer.insert_size = InsertSize::Small,
+                    "large" => s.mixer.insert_size = InsertSize::Large,
+                    _ => {}
+                },
+                ("fixed_slots", Some(Value::Bool(v))) => s.mixer.fixed_slots = v,
+                ("sends_overview", Some(Value::Bool(v))) => s.mixer.sends_overview = v,
+                ("browser", Some(Value::Bool(v))) => s.mixer.show_browser = v,
+                ("browser_tab", Some(Value::Str(v))) => match v.as_str() {
+                    "plugins" => s.mixer.tab = BrowserTab::Plugins,
+                    "presets" => s.mixer.tab = BrowserTab::Presets,
+                    _ => {}
+                },
+                ("aux", Some(Value::Bool(v))) => s.mixer.show_aux = v,
+                ("ctrl_room", Some(Value::Bool(v))) => s.mixer.show_ctrl_room = v,
+                ("window", Some(Value::Str(v))) => s.mixer.window = parse_window(&v).or(s.mixer.window),
                 _ => {}
             }
         }
@@ -99,8 +174,34 @@ impl Settings {
             self.compact,
             quote(self.view.as_str())
         );
+        let m = &self.mixer;
+        out += &format!(
+            "inputs = {}\ninserts = {}\nsends = {}\nfader = {}\ninsert_size = {}\nfixed_slots = {}\n\
+             sends_overview = {}\nbrowser = {}\nbrowser_tab = {}\naux = {}\nctrl_room = {}\n",
+            m.sections.inputs,
+            m.sections.inserts,
+            m.sections.sends,
+            m.sections.fader,
+            quote(if m.insert_size == InsertSize::Small { "small" } else { "large" }),
+            m.fixed_slots,
+            m.sends_overview,
+            m.show_browser,
+            quote(if m.tab == BrowserTab::Presets { "presets" } else { "plugins" }),
+            m.show_aux,
+            m.show_ctrl_room,
+        );
+        if let Some((w, h)) = m.window {
+            out += &format!("window = \"{}x{}\"\n", w.round(), h.round());
+        }
         out
     }
+}
+
+/// `"WxH"` in layout points, within what a window can be.
+fn parse_window(v: &str) -> Option<(f32, f32)> {
+    let (w, h) = v.split_once('x')?;
+    let (w, h) = (w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?);
+    ((320.0..=16384.0).contains(&w) && (200.0..=16384.0).contains(&h)).then_some((w, h))
 }
 
 enum Value {
@@ -163,6 +264,17 @@ mod tests {
             zoom: 1.25,
             compact: true,
             view: ViewMode::OneToOne,
+            mixer: MixerPrefs {
+                sections: Sections { inputs: false, inserts: true, sends: true, fader: false },
+                insert_size: InsertSize::Small,
+                fixed_slots: false,
+                sends_overview: true,
+                show_browser: false,
+                tab: BrowserTab::Presets,
+                show_aux: false,
+                show_ctrl_room: true,
+                window: Some((1440.0, 900.0)),
+            },
         };
         assert_eq!(Settings::parse(&s.to_toml()), s);
         assert_eq!(
@@ -198,5 +310,20 @@ mod tests {
         assert!(s.compact);
         assert_eq!(s.engine.unwrap().port, 4710);
         assert_eq!(s.view, ViewMode::Fit);
+        // Out-of-range or malformed mixer values keep the defaults.
+        let s = Settings::parse("window = \"10x10\"\nbrowser_tab = \"x\"\ninsert_size = 3\nsends = \"yes\"\n");
+        assert_eq!(s.mixer, MixerPrefs::default());
+    }
+
+    #[test]
+    fn mixer_prefs_apply_to_view() {
+        let text = "sends = true\ninputs = false\ninsert_size = \"small\"\nwindow = \"1200x800\"\n";
+        let prefs = Settings::parse(text).mixer;
+        let mut v = ViewState::default();
+        prefs.apply(&mut v);
+        assert!(v.sections.sends && !v.sections.inputs && v.sections.fader);
+        assert_eq!(v.insert_size, InsertSize::Small);
+        assert_eq!(v.window, Some((1200.0, 800.0)));
+        assert_eq!(MixerPrefs::capture(&v), prefs);
     }
 }
