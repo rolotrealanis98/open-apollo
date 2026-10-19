@@ -45,6 +45,12 @@ impl EngineMixer {
         self.store.meta(path).map(|m| m.choices()).unwrap_or_default()
     }
 
+    /// `enabled` of each `/SampleRate` value (the engine greys out rates the device can't run).
+    fn rate_enabled(&self) -> Vec<bool> {
+        let Some(Json::Array(list)) = self.store.meta("/SampleRate").and_then(|m| m.values.as_ref()) else { return Vec::new() };
+        list.iter().map(|v| v.get("enabled").and_then(Json::as_bool).unwrap_or(true)).collect()
+    }
+
     /// The input's sends Console shows: AUX 1/2, and the cues within `CueBusCount` that are active.
     pub(crate) fn input_send_paths(&self, s: &InputStrip) -> Vec<SendPaths> {
         let topology = self.store.topology_for_device(s.device).unwrap_or(self.store.topology());
@@ -162,6 +168,7 @@ impl EngineMixer {
             connected: matches!(self.store.status(), Status::Live | Status::Loading),
             sample_rate: self.store.value("/SampleRate").and_then(Value::as_i64).map(|r| r as u32),
             sample_rates: ints("/SampleRate"),
+            sample_rate_enabled: self.rate_enabled(),
             clock_source: self.str_at("/ClockSource").map(str::to_owned),
             clock_sources: self.choices("/ClockSource").iter().filter_map(|v| v.as_str().map(str::to_owned)).collect(),
             buffer_size: self.store.value("/BufferSize").and_then(Value::as_i64).map(|b| b as u32),

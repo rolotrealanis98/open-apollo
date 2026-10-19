@@ -90,6 +90,12 @@ const LOG_CAP: usize = 16_384;
 const REFRESH_DELAY: Duration = Duration::from_millis(100);
 /// `/UndoRedo`: an int whose `values` are `[{type:"undo"…},{type:"current"…},{type:"redo"…}]`.
 pub const UNDO_REDO: &str = "/UndoRedo";
+/// The daemon pulses these (true) when a device's clock-source / sample-rate lists change; the
+/// lists are then re-read.
+const LIST_CHANGED: [(&str, &str); 2] = [
+    ("/ClockSourceListChanged", "/ClockSource"),
+    ("/SampleRateListChanged", "/SampleRate"),
+];
 const MIDI_INPUT_DEVICE: &str = "/MidiInputDevice";
 const MIDI_POLL: Duration = Duration::from_secs(1);
 /// How long after a gesture the undo list is re-read (Console: 30–90 ms).
@@ -115,6 +121,8 @@ struct Model {
     values_wanted: bool,
     /// `/UndoRedo` changed (another client, the hardware): re-read its list.
     undo_values_wanted: bool,
+    /// Properties whose `*ListChanged` flag pulsed: re-read their lists.
+    lists_wanted: Vec<&'static str>,
     live: bool,
 }
 
@@ -153,6 +161,12 @@ impl Model {
         }
         if self.live && pp == UNDO_REDO {
             self.undo_values_wanted = true;
+        }
+        if self.live
+            && let Some((_, list)) = LIST_CHANGED.iter().find(|(flag, _)| *flag == pp)
+            && self.tree.value(pp).is_some_and(|v| matches!(v, Value::Bool(true)))
+        {
+            self.lists_wanted.push(list);
         }
         true
     }
@@ -289,6 +303,7 @@ impl Store {
                 refresh_wanted: Vec::new(),
                 values_wanted: false,
                 undo_values_wanted: false,
+                lists_wanted: Vec::new(),
                 live: false,
             },
             writer: Writer::default(),
@@ -1153,6 +1168,9 @@ impl Store {
             }
         } else {
             self.midi_poll_due = None;
+        }
+        for list in std::mem::take(&mut self.model.lists_wanted) {
+            self.refresh_values(list);
         }
         let undo_due = self.undo_values_due.is_some_and(|t| Instant::now() >= t);
         if undo_due || std::mem::take(&mut self.model.undo_values_wanted) {
