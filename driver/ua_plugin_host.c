@@ -357,7 +357,8 @@ u64 ua_plugin_host_ops(struct ua_device *ua)
 		if (ua_plugin_dsp_admitted(ua, i))
 			return ops | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_SERVICE |
 			       UA_PLUGIN_OP_SWAP | UA_PLUGIN_OP_UNISON_PARAMS |
-                       UA_PLUGIN_OP_BEGIN_UNISON | UA_PLUGIN_OP_ACTIVATE_UNISON;
+                       UA_PLUGIN_OP_BEGIN_UNISON | UA_PLUGIN_OP_ACTIVATE_UNISON |
+			       UA_PLUGIN_OP_START;
 	return ops;
 }
 

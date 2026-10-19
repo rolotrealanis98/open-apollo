@@ -59,3 +59,14 @@ def test_unknown_defaults_start_the_emulator_as_before(tmp_path, monkeypatch):
     monkeypatch.setattr(p, '_texts_now', lambda: ('x', 'A'), raising=False)
     p._parameters()
     assert calls and not started
+
+
+def test_reset_at_load_uses_learned_defaults(tmp_path, monkeypatch):
+    npc._DEFAULTS.clear()
+    p, bundle, started = provider(tmp_path, monkeypatch)
+    npc.save_defaults(bundle, (3, 1), ('x', 'B'))
+    monkeypatch.setattr(p, '_capture', lambda values=None: (_ for _ in ()).throw(AssertionError('emulator started')),
+                        raising=False)
+    p.cap = object()
+    p.reset()
+    assert p.cap is None and p.state.values == (3, 1) and p._texts == ((3, 1), ('x', 'B')) and started == [True]

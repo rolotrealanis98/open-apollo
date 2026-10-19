@@ -210,3 +210,50 @@ int main(void)
     return 0;
 }
 ''')
+
+
+def test_start_routes_a_staged_instance_with_no_anchor():
+    run(r'''
+static long start_flags(struct ua_file *f, const struct ua_plugin_instance *in, u32 flags)
+{
+    struct ua_plugin_instance q = {0};
+    q.struct_size = sizeof(q);
+    q.op = UA_PLUGIN_INST_START;
+    q.handle = in->handle;
+    q.epoch = in->epoch;
+    q.flags = flags;
+    return ua_plugin_ioctl_instance(&dev, f, (unsigned long)&q);
+}
+static long start_staged(struct ua_file *f, const struct ua_plugin_instance *in)
+{ return start_flags(f, in, 0); }
+int main(void)
+{
+    struct ua_plugin_instance staged, other;
+    unsigned int c;
+    for(unsigned int stereo=0;stereo<2;stereo++) {
+        u32 pair=stereo?0x00010000:0x00200000;
+        setup_plain();
+        assert(stage(&file_a,pair,&staged)==0);
+        assert(!owned(&file_a,&staged)->started);
+        /* Another file's started instance on the same input: busy, nothing sent. */
+        assert(start(&file_b,pair,1,&other)==0);
+        c=dev.dsp[1].cmd.write_ptr;
+        assert(start_staged(&file_a,&staged)==-EBUSY && c==dev.dsp[1].cmd.write_ptr);
+        assert(destroy(&file_b,other.handle)==0);
+        /* Malformed, foreign and started instances are refused before anything is sent. */
+        c=dev.dsp[1].cmd.write_ptr;
+        assert(start_flags(&file_a,&staged,1)==-EINVAL);
+        assert(start_staged(&file_b,&staged)==-ENOENT);
+        assert(c==dev.dsp[1].cmd.write_ptr);
+        /* Routed exactly as START routes: the synch with the chain's lease, then the inputs. */
+        assert(start_staged(&file_a,&staged)==0);
+        assert(owned(&file_a,&staged)->started);
+        assert(slots[2][c][0]==0x001f0004);
+        assert(start_staged(&file_a,&staged)==-EPERM);
+        assert(destroy(&file_a,staged.handle)==0);
+        assert(!host.n_instances && !host.dsp[1].quarantined);
+        cleanup_plain();
+    }
+    return 0;
+}
+''')

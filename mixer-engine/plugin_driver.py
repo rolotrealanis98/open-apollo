@@ -56,6 +56,11 @@ def _words(values):
     return (ctypes.c_uint32 * len(values))(*map(_uint, values))
 
 
+SWAP_REFUSALS = (errno.EINVAL, errno.ENOENT)
+# driver/ua_plugin_instance.c ua_plugin_start_staged: all returned before anything is sent.
+START_REFUSALS = (errno.EINVAL, errno.ENOENT, errno.EPERM, errno.EBUSY)
+
+
 def _request(op):
     fields = [0] * 19
     fields[0:2] = [INSTANCE.size, op]
@@ -97,12 +102,18 @@ class PluginDriver:
         ):
             raise ValueError('current client-owned instance required')
 
-    def _call(self, fields):
+    def _call(self, fields, refusals=()):
+        """refusals: errnos this operation returns only before it changes anything (its argument
+        and state checks); the session stays valid after those."""
         buf = bytearray(INSTANCE.pack(*fields))
         try:
             self._ioctl(self._fd, PLUGIN_INSTANCE, buf, True)
+        except OSError as error:
+            if error.errno not in refusals:
+                # Interrupted or failed calls can have changed the device already.
+                self._valid = False
+            raise
         except BaseException:
-            # Interrupted or failed calls can have changed the device already.
             self._valid = False
             raise
         return INSTANCE.unpack(buf)
@@ -210,7 +221,17 @@ class PluginDriver:
                 raise ValueError('distinct instances on the same DSP and epoch required')
             fields = _request(4)
             fields[3], fields[10], fields[13] = current.handle, current.epoch, candidate.handle
-            self._call(fields)
+            # driver/ua_plugin_instance.c ua_plugin_swap: EINVAL (argument or instance state)
+            # and ENOENT (unknown handle) are returned before any route transaction.
+            self._call(fields, refusals=SWAP_REFUSALS)
+
+    def start(self, instance):
+        """Route an initialized staged instance on its inputs (UA_FEAT2_PLUGIN_START_STAGED)."""
+        with self._lock:
+            self._check(instance)
+            fields = _request(8)
+            fields[3], fields[10] = instance.handle, instance.epoch
+            self._call(fields, refusals=START_REFUSALS)
 
     def _unison_transition(self, instance, operation):
         fields = _request(operation)

@@ -1246,6 +1246,64 @@ unlock:
 	return ret;
 }
 
+/*
+ * UA_PLUGIN_INST_START: route an initialized STAGE instance on its inputs, as
+ * CREATE with START would have, when no instance owns them. A chain whose
+ * startup is over one command page is created STAGE and initialized with
+ * SERVICE writes; without an anchor to SWAP from it would never be routed.
+ */
+static int ua_plugin_start_staged(struct ua_device *ua, struct ua_file *uf,
+				  const struct ua_plugin_instance *req)
+{
+	struct ua_plugin_host *h = ua->host;
+	struct ua_plugin_inst *in, *other;
+	u32 generation;
+	int ret;
+
+	if (!req->handle || !req->epoch || req->flags || req->render_id || req->dsp ||
+	    req->n_resources || req->n_private || req->resources || req->privates ||
+	    memchr_inv(req->reserved, 0, sizeof(req->reserved)))
+		return -EINVAL;
+	if (mutex_lock_killable(&h->mutex))
+		return -EINTR;
+	mutex_lock(&ua->lock);
+	in = ua_inst_find(h, uf, req->handle);
+	ret = !in ? -ENOENT : 0;
+	if (!ret && (in->unison || !in->loaded || in->started || in->route_pending ||
+		     !in->strip_override))
+		ret = -EPERM;
+	if (!ret && (in->lost || !in->placed || in->epoch != req->epoch ||
+		     h->epoch != req->epoch || !ua_plugin_dsp_admitted(ua, in->dsp)))
+		ret = -ESTALE;
+	if (!ret) {
+		list_for_each_entry (other, &h->instances, node)
+			if (other != in && other->placed && !other->lost &&
+			    (other->started || other->route_pending) &&
+			    ua_inst_inputs_overlap(in->synch, other->synch)) {
+				ret = -EBUSY;
+				break;
+			}
+	}
+	if (!ret)
+		ret = ua_strips_override_target(ua, in->dsp, in->synch, req->epoch, &generation);
+	if (!ret && generation != in->strip_generation)
+		ret = -ESTALE;
+	if (ret)
+		goto out;
+	mutex_unlock(&ua->lock);
+	ret = ua_inst_start(ua, in, NULL, 0, in->synch, true);
+	mutex_lock(&ua->lock);
+	if (!ret && (in->lost || h->epoch != req->epoch))
+		ret = -ESTALE;
+	if (!ret)
+		dev_info(&ua->pdev->dev, "plug-in host: instance %u started on its DSP input\n",
+			 in->handle);
+out:
+	mutex_unlock(&ua->lock);
+	mutex_unlock(&h->mutex);
+	return ret;
+}
+
 static long ua_plugin_unison_lifecycle(struct ua_device *ua, struct ua_file *uf,
 				       struct ua_plugin_instance *req)
 {
@@ -1469,6 +1527,8 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 		return ua_plugin_ioctl_service(ua, uf, &req);
 	if (req.op == UA_PLUGIN_INST_SWAP)
 		return ua_plugin_swap(ua, uf, &req);
+	if (req.op == UA_PLUGIN_INST_START)
+		return ua_plugin_start_staged(ua, uf, &req);
 	if (req.op == UA_PLUGIN_INST_CREATE &&
 	    (req.flags & (UA_PLUGIN_CREATE_F_START | UA_PLUGIN_CREATE_F_STAGE))) {
 		nw = req.reserved[1];

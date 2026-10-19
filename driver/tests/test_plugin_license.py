@@ -750,7 +750,7 @@ int main(void)
 	dev.audio.connected = true;
 	mutex_lock(&dev.lock);
 	ops = ua_plugin_host_ops(&dev);
-	assert(ops == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_DESTROY | UA_PLUGIN_OP_SERVICE | UA_PLUGIN_OP_SWAP | UA_PLUGIN_OP_UNISON_PARAMS | UA_PLUGIN_OP_BEGIN_UNISON | UA_PLUGIN_OP_ACTIVATE_UNISON));
+	assert(ops == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_CREATE | UA_PLUGIN_OP_DESTROY | UA_PLUGIN_OP_SERVICE | UA_PLUGIN_OP_SWAP | UA_PLUGIN_OP_UNISON_PARAMS | UA_PLUGIN_OP_BEGIN_UNISON | UA_PLUGIN_OP_ACTIVATE_UNISON | UA_PLUGIN_OP_START));
 	for (int i = 0; i < 4; i++)
 		host.dsp[i].quarantined = true;
 	assert(ua_plugin_host_ops(&dev) == (UA_PLUGIN_OP_BOARD_QUERY | UA_PLUGIN_OP_DESTROY));

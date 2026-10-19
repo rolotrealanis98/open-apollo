@@ -256,6 +256,8 @@ UA_FEAT2_PLUGIN_CHAIN = 1 << 4
 UA_FEAT2_PLUGIN_DELAY_COMP = 1 << 5
 UA_FEAT2_PLUGIN_UNISON = 1 << 6
 UA_FEAT2_PLUGIN_ANALOG_LEASE = 1 << 7
+# UA_PLUGIN_INST_START: route an initialized staged instance (no anchor to swap from)
+UA_FEAT2_PLUGIN_START_STAGED = 1 << 8
 
 # UA_IOCTL_BOARD_QUERY (ABI 1.8, UA_FEAT2_PLUGIN_HOST): the device's own
 # per-plug-in authorization answer, read fresh by the driver every time.

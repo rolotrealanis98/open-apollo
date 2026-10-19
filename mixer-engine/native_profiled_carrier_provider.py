@@ -222,6 +222,20 @@ class ProfiledCarrierProvider:
                 for key, value in self.data['startup']['shadow'].items()}
 
     def reset(self):
+        """Back to the plug-in's load-time state. With learned defaults no emulator starts here
+        (it warms in the background for the first control change); else it starts now."""
+        learned = load_defaults(self.bundle_path) if self.bundle_path is not None else None
+        if learned is not None and len(learned[0]) == len(self.maxima):
+            with self._lock:
+                self.cap = None
+                self.state = ProfiledState.make(learned[0], self._startup_shadow())
+                self._texts = (self.state.values, learned[1])
+            self.warm()
+            return
+        self.learn_defaults()
+
+    def learn_defaults(self):
+        """Start the emulator at the load-time state and remember its values and texts."""
         with self._lock:
             self.cap = self._capture()
             self.state = ProfiledState.make(self.cap.defaults_values, self._startup_shadow())
@@ -549,7 +563,7 @@ def learn(paths):
             data = json.loads(Path(path).read_text())
             kind = StereoProfiledCarrierProvider if data.get('layout') == 'stereo' else ProfiledCarrierProvider
             provider = kind(path, 0, data=data, module_store=Path(os.environ.get('OA_MODULE_STORE') or MODULES))
-            provider.reset()
+            provider.learn_defaults()
             provider.cap = None
             done += 1
         except Exception as error:

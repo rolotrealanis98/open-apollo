@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import logging
 import re
 
+from plugin_driver import START_REFUSALS, SWAP_REFUSALS
 from plugin_native import NativePluginBackend, _Lease
 from plugin_delay import InputLatency, plan_compensation
 from plugin_publication import LoadedPlugin, OwnedHandle
@@ -71,8 +72,12 @@ class NativeChainBackend(NativePluginBackend):
 
     def __init__(self, publisher, driver, provider, *, composer, max_inserts=4,
                  record_delay_samples=200, compensation_supported=False,
-                 compensation_setting='Medium', **kwargs):
+                 compensation_setting='Medium', start_staged=False, **kwargs):
         super().__init__(publisher, driver, provider, **kwargs)
+        # The driver can route a staged chain with no anchor to swap from (UA_PLUGIN_INST_START).
+        # Without it a chain whose startup is over one command page cannot go live on an
+        # empty input, and such a load is refused instead of showing a silent plug-in.
+        self.start_staged = bool(start_staged)
         if not callable(composer) or type(max_inserts) is not int or not 1 <= max_inserts <= 4:
             raise ValueError('explicit composer and bounded insert count required')
         if type(record_delay_samples) is not int or not 0 <= record_delay_samples < 2048:
@@ -94,6 +99,46 @@ class NativeChainBackend(NativePluginBackend):
     def _compensation_io(operation, *args, **kwargs):
         try:
             return operation(*args, **kwargs)
+        except Exception as error:
+            raise _UnconfirmedDeviceOperation('device operation unconfirmed') from error
+
+    @staticmethod
+    def _live_observations(composed):
+        """What to read back once a chain runs. Its whole startup was verified while it was
+        inactive (just created or staged); once the DSP runs it, plug-ins own some of those words
+        (delay pointers, LFO phases), so only the chain's own header words are checked: row 0 and
+        each effect's count and tap words."""
+        effects = getattr(composed, 'effects', None)
+        if not effects:
+            return composed.observations
+        heads = {getattr(effect, 'base_row', None) for effect in effects}
+        live = tuple(o for o in composed.observations if o[0] == 0 or (o[0] in heads and o[1] in (1, 4)))
+        return live or composed.observations
+
+    def _start(self, candidate):
+        try:
+            return self.driver.start(candidate)
+        except OSError as error:
+            if error.errno in START_REFUSALS:
+                raise ValueError(f'driver refused to start the staged chain: {error.strerror}') from error
+            raise _UnconfirmedDeviceOperation('device operation unconfirmed') from error
+        except ValueError:
+            raise
+        except Exception as error:
+            raise _UnconfirmedDeviceOperation('device operation unconfirmed') from error
+
+    def _swap(self, current, candidate):
+        """Route `candidate` in place of `current`. A swap the driver refused before acting
+        (plugin_driver.SWAP_REFUSALS) changed nothing: a ValueError, so the change rolls back
+        normally instead of leaving every slot quarantined."""
+        try:
+            return self.driver.swap(current, candidate)
+        except OSError as error:
+            if error.errno in SWAP_REFUSALS:
+                raise ValueError(f'driver refused the swap: {error.strerror}') from error
+            raise _UnconfirmedDeviceOperation('device operation unconfirmed') from error
+        except ValueError:
+            raise
         except Exception as error:
             raise _UnconfirmedDeviceOperation('device operation unconfirmed') from error
 
@@ -170,11 +215,11 @@ class NativeChainBackend(NativePluginBackend):
                 raise ValueError('retained strip compensation readback differs')
             for previous, candidate in candidates:
                 self._current(previous)
-                self._compensation_io(self.driver.swap, previous.native, candidate.native)
+                self._swap(previous.native, candidate.native)
                 swapped.append((previous, candidate))
             # Observe after activation as well, before replacing any row adapters.
             for (_, _, composed, _, _, _), (_, candidate) in zip(prepared, candidates):
-                self._observe(candidate.native, composed.observations)
+                self._observe(candidate.native, self._live_observations(composed))
         except ValueError as error:
             # A confirmed readback/validation failure is reversible. Driver I/O
             # exceptions are handled separately because their effect is unknown.
@@ -244,6 +289,9 @@ class NativeChainBackend(NativePluginBackend):
                 continue
             providers = copy.deepcopy(prospective[key])
             composed, arguments, ordered = self._compose(providers, key, planned[key])
+            if composed.needs_staging and not previous[key] and not self.start_staged:
+                raise ValueError('this chain needs a driver that can start a staged chain '
+                                 '(UA_FEAT2_PLUGIN_START_STAGED): update the driver')
             retained = self._retained(composed, ordered, previous[key], slot if key == channels else None)
             if previous[key]:
                 arguments['stage'] = True
@@ -256,7 +304,10 @@ class NativeChainBackend(NativePluginBackend):
             change.strips_before = self._compensation_io(self.driver.strip_delays)
             for key, (sources, composed, arguments, ordered, retained) in change.recipes.items():
                 stage = composed.stage_bundle() if composed.needs_staging else None
-                create_arguments = stage['create_arguments'] if stage is not None else arguments
+                # The staged recipe is the same chain: keep its chain/Unison flags.
+                create_arguments = (dict(stage['create_arguments'], **{k: arguments[k] for k in ('chain', 'unison')
+                                                                         if k in arguments})
+                                    if stage is not None else arguments)
                 native = self._compensation_io(self.driver.create, **create_arguments)
                 if stage is not None:
                     for writes in stage['initialize_chunks']:
@@ -292,14 +343,19 @@ class NativeChainBackend(NativePluginBackend):
             for key, candidate in change.candidates.items():
                 previous = change.previous[key]
                 if previous:
-                    self._compensation_io(self.driver.swap, previous.native, candidate.native)
+                    self._swap(previous.native, candidate.native)
                     change.swapped.append(key)
+                elif change.recipes[key][1].needs_staging:
+                    # Nothing to swap from: route the staged chain itself.
+                    self._start(candidate.native)
             for key, candidate in change.candidates.items():
-                self._observe(candidate.native, change.recipes[key][1].observations)
+                self._observe(candidate.native, self._live_observations(change.recipes[key][1]))
             change.activated = True
-        except ValueError:
+        except ValueError as error:
+            log.warning('native chain: activation on %s refused: %s', change.slot, error)
             return ActivateOutcome(Outcome.FAILED, previous_retained=True)
         except Exception:
+            log.exception('native chain: activation on %s raised', change.slot)
             self.invalidate()
             return ActivateOutcome(Outcome.INDETERMINATE)
         return ActivateOutcome(Outcome.CONFIRMED, previous_retained=True)
@@ -307,8 +363,7 @@ class NativeChainBackend(NativePluginBackend):
     def _rollback_batch(self, change):
         try:
             for key in reversed(change.swapped):
-                self._compensation_io(self.driver.swap,
-                    change.candidates[key].native, change.previous[key].native)
+                self._swap(change.candidates[key].native, change.previous[key].native)
             if change.strips_after is not None:
                 before = change.strips_before
                 restored = self._compensation_io(self.driver.strip_delays, change.strips_after,
@@ -319,6 +374,7 @@ class NativeChainBackend(NativePluginBackend):
             for candidate in reversed(tuple(change.candidates.values())):
                 self._compensation_io(self.driver.destroy, candidate.native)
         except Exception:
+            log.exception('native chain: rollback on %s failed', change.slot)
             self.invalidate()
             return RollbackOutcome(Outcome.INDETERMINATE)
         del self._pending[change.channels]
@@ -333,6 +389,7 @@ class NativeChainBackend(NativePluginBackend):
                 if previous:
                     self._compensation_io(self.driver.destroy, previous.native)
         except Exception:
+            log.exception('native chain: commit on %s failed', change.slot)
             self.invalidate()
             return Outcome.INDETERMINATE
         del self._pending[change.channels]
@@ -341,9 +398,10 @@ class NativeChainBackend(NativePluginBackend):
     def _prepare_compensated(self, slot, channels, sources, old):
         try:
             change = self._plan_batch(slot, channels, sources)
-        except Exception:
+        except Exception as error:
             log.exception('native chain: compensation plan refused a load on %s', slot)
-            return PrepareOutcome(Outcome.FAILED, detail='Prospective compensation validation failed')
+            return PrepareOutcome(Outcome.FAILED, detail='Prospective compensation validation failed'
+                                  + (f': {error}' if isinstance(error, ValueError) else ''))
         self._serial += 1
         status = self._allocate_batch(change, self._serial)
         candidate = change.candidates.get(channels)
@@ -530,18 +588,32 @@ class NativeChainBackend(NativePluginBackend):
                 return self._prepare_compensated(slot, channels, sources, old)
             composed, arguments, ordered = self._compose(sources, channels)
             retained = self._retained(composed, ordered, previous, slot)
-            if previous:
+            chunks = ()
+            if composed.needs_staging:
+                if not previous and not self.start_staged:
+                    raise ValueError('this chain needs a driver that can start a staged chain '
+                                     '(UA_FEAT2_PLUGIN_START_STAGED): update the driver')
+                stage = composed.stage_bundle()
+                arguments = dict(stage['create_arguments'], **{k: arguments[k] for k in ('chain', 'unison')
+                                                                if k in arguments})
+                chunks = stage['initialize_chunks']
+            elif previous:
                 arguments['stage'] = True
             self._serial += 1
-        except Exception:
-            return PrepareOutcome(Outcome.FAILED, detail='Native chain validation failed')
+        except Exception as error:
+            log.warning('native chain: load on %s refused: %s', slot, error)
+            return PrepareOutcome(Outcome.FAILED, detail='Native chain validation failed'
+                                  + (f': {error}' if isinstance(error, ValueError) else ''))
         try:
             native = self.driver.create(**arguments)
+            for writes in chunks:
+                self.driver.service(native, writes=writes)
             candidate = self._candidate(native, composed, sources, ordered, previous, slot, self._serial, retained)
         except Exception:
             self.invalidate()
             return PrepareOutcome(Outcome.INDETERMINATE, detail='Native chain CREATE unconfirmed')
         change = _Change(slot, previous, candidate)
+        change.start_staged = bool(chunks or composed.needs_staging) and not previous
         self._pending[channels] = change
         prepared = PreparedPlugin(change, candidate.leases[slot].loaded,
                                   old.loaded.handle if old else None)
@@ -563,9 +635,15 @@ class NativeChainBackend(NativePluginBackend):
             self._session()
             if change.previous:
                 self._current(change.previous)
-                self.driver.swap(change.previous.native, change.candidate.native)
+                self._swap(change.previous.native, change.candidate.native)
+            elif getattr(change, 'start_staged', False):
+                self._start(change.candidate.native)
             change.activated = True
+        except ValueError as error:
+            log.warning('native chain: activation on %s refused: %s', change.slot, error)
+            return ActivateOutcome(Outcome.FAILED, previous_retained=True)
         except Exception:
+            log.exception('native chain: activation on %s raised', change.slot)
             self.invalidate()
             return ActivateOutcome(Outcome.INDETERMINATE)
         # Keep old adapters until the coordinator commits publication. Its busy

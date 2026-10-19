@@ -177,7 +177,9 @@ class NativePluginBackend:
                 self.invalidate()
                 raise
             if actual != expected:
-                raise ValueError('native coefficient observation differs')
+                diffs = [(offset + i, e, a) for i, (e, a) in enumerate(zip(expected, actual)) if e != a]
+                raise ValueError('native coefficient observation differs: row %d %s' % (
+                    row, ', '.join(f'word {w} 0x{e:x}->0x{a:x}' for w, e, a in diffs[:4])))
         self._session()
 
     def read(self, slot, handle, query):
@@ -441,7 +443,8 @@ def register_native(state, helper, hardware, provider):
     from hardware import (DRIVER_PARAM_SAMPLE_RATE, UA_FEAT2_PLUGIN_MULTI_INPUT,
                           UA_FEAT2_PLUGIN_STEREO, UA_FEAT2_PLUGIN_SWAP,
                           UA_FEAT2_PLUGIN_CHAIN, UA_FEAT2_PLUGIN_DELAY_COMP,
-                          UA_FEAT2_PLUGIN_UNISON, UA_FEAT2_PLUGIN_ANALOG_LEASE)
+                          UA_FEAT2_PLUGIN_UNISON, UA_FEAT2_PLUGIN_ANALOG_LEASE,
+                          UA_FEAT2_PLUGIN_START_STAGED)
 
     if helper is None or not hardware.connected or hardware.fd < 0:
         raise ValueError('native hosting needs live PCIe hardware and helper tree')
@@ -463,6 +466,7 @@ def register_native(state, helper, hardware, provider):
         backend_type = NativeChainBackend
         options['composer'] = composer
         options['compensation_supported'] = bool(features & UA_FEAT2_PLUGIN_DELAY_COMP)
+        options['start_staged'] = bool(features & UA_FEAT2_PLUGIN_START_STAGED)
         options['unison'] = bool(features & UA_FEAT2_PLUGIN_UNISON
                                  and features & UA_FEAT2_PLUGIN_ANALOG_LEASE
                                  and getattr(provider, 'unison_supported', False))

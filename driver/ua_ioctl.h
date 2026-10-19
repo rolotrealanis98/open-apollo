@@ -588,6 +588,8 @@ struct ua_dma_test {
 /* CHAIN may begin with a licensed integrated preamp instead of Mic0x846. */
 #define UA_FEAT2_PLUGIN_UNISON	(1u << 6)
 #define UA_FEAT2_PLUGIN_ANALOG_LEASE (1u << 7)
+/* UA_PLUGIN_INST_START: route an initialized STAGE instance with no anchor to swap from. */
+#define UA_FEAT2_PLUGIN_START_STAGED (1u << 8)
 
 struct ua_version {
 	__u32 abi_major;
@@ -777,6 +779,7 @@ struct ua_pause_info {
 #define UA_PLUGIN_OP_UNISON_PARAMS	(1ull << 5)
 #define UA_PLUGIN_OP_BEGIN_UNISON	(1ull << 6)
 #define UA_PLUGIN_OP_ACTIVATE_UNISON	(1ull << 7)
+#define UA_PLUGIN_OP_START		(1ull << 8)
 
 struct ua_plugin_caps {
 	__u32 struct_size;	/* sizeof(struct ua_plugin_caps) */
@@ -1086,6 +1089,16 @@ struct ua_board_query {
 #define UA_PLUGIN_INST_UNISON_PARAMS	5u
 #define UA_PLUGIN_INST_BEGIN_UNISON	6u
 #define UA_PLUGIN_INST_ACTIVATE_UNISON	7u
+/*
+ * UA_PLUGIN_INST_START (UA_FEAT2_PLUGIN_START_STAGED): handle and epoch from a
+ * CREATE with STAGE (not Unison), every other field zero. Routes the
+ * initialized instance on its inputs exactly as START would have, for a chain
+ * whose startup did not fit one command page and has no started instance to
+ * SWAP from. -EINVAL, -ENOENT, -EPERM (not an unstarted staged instance) and
+ * -EBUSY (another instance owns an input) are returned before anything is
+ * sent; then -ESTALE, -ETIMEDOUT/-EPROTO as for SWAP.
+ */
+#define UA_PLUGIN_INST_START		8u
 #define UA_PLUGIN_UNISON_WORDS_MAX	192u
 
 #define UA_PLUGIN_CREATE_F_CHECK	(1u << 0)

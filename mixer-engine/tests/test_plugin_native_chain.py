@@ -1,6 +1,7 @@
 """Generic composite hosting over synthetic physical instances and real transactions."""
 import copy
 import errno
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -116,8 +117,16 @@ class Driver:
         row, offset, count = read
         return tuple(self.memory[native.handle].get((row, offset+i), 0) + int(self.mismatch) for i in range(count))
 
+    def start(self, native):
+        self.check('start')
+        assert native.handle not in self.active
+        self.active.add(native.handle)
+        self.calls.append(('start', native.handle))
+
     def swap(self, current, candidate):
         self.check('swap')
+        if getattr(self, 'refuse_swap', None):
+            raise OSError(self.refuse_swap, os.strerror(self.refuse_swap))
         assert current.handle in self.active and candidate.handle not in self.active
         self.active.remove(current.handle)
         self.active.add(candidate.handle)
@@ -643,3 +652,48 @@ def test_plain_input_rejoins_its_configured_group_when_last_effect_removed():
     assert driver.strips.monitor == (31,0,0,0)
     assert tx.unload(slot(0)).committed
     assert driver.strips.monitor == (0,)*4
+
+
+
+class StagedComposition(Composition):
+    """A startup over one command page: created staged, nothing routes it on its own."""
+    needs_staging = True
+
+    def stage_bundle(self):
+        return dict(create_arguments=dict(self.create_arguments(), stage=True), initialize_chunks=())
+
+
+def staged_model(start_staged):
+    state, helper, driver, backend, tx = model()
+    backend.composer = lambda providers, **kw: (StagedComposition if any(p.name == 'second' for p in providers)
+                                                else Composition)(providers, kw['channels'], kw['slots'])
+    backend.start_staged = start_staged
+    return state, helper, driver, backend, tx
+
+
+def test_a_staged_chain_on_an_empty_input_is_started_by_the_driver():
+    state, helper, driver, backend, tx = staged_model(True)
+    assert tx.load(slot(0), 'second').committed
+    create = next(c for c in driver.calls if c[0] == 'create')
+    assert create[2] is True and create[3] is True            # staged, and still a chain
+    assert ('start', create[1]) in driver.calls and create[1] in driver.active
+
+
+def test_an_old_driver_refuses_a_staged_load_instead_of_a_silent_plugin():
+    state, helper, driver, backend, tx = staged_model(False)
+    result = tx.load(slot(0), 'second')
+    assert not result.committed and not result.quarantined and 'update the driver' in result.detail
+    assert not driver.active and not any(c[0] == 'create' for c in driver.calls)
+    assert tx.load(slot(0), 'first').committed                 # nothing else is affected
+
+
+def test_a_swap_the_driver_refuses_rolls_back_without_quarantine():
+    state, helper, driver, backend, tx = model()
+    assert tx.load(slot(0), 'first').committed
+    kept = backend._leases[slot(0)].native
+    driver.refuse_swap = errno.EINVAL
+    result = tx.load(slot(2), 'second')                         # rebuilds input 1's chain: a swap
+    assert not result.committed and not result.quarantined and not tx.quarantined
+    assert driver.valid and backend._leases[slot(0)].native == kept and kept.handle in driver.active
+    driver.refuse_swap = None
+    assert tx.load(slot(2), 'second').committed
