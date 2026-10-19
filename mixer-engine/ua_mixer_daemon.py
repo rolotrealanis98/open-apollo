@@ -478,6 +478,22 @@ DEFAULT_WS_PORT = 4721
 DEFAULT_HOST = "0.0.0.0"
 
 
+def native_unavailable_reason(error) -> str:
+    """What the user can do about native hosting being unavailable, from the error."""
+    text = str(error)
+    cause = error
+    while cause is not None and not isinstance(cause, OSError):
+        cause = cause.__cause__ or cause.__context__
+    if (isinstance(cause, OSError) and cause.errno == errno.ESTALE) or 'compensation could not be confirmed' in text:
+        return ("Power-cycle the Apollo to enable plug-ins: its DSPs have not cold-started "
+                "since the driver loaded")
+    if 'sample rate' in text:
+        return "Plug-ins run at 48 kHz: set the sample rate to 48 kHz to enable them"
+    if 'live PCIe hardware' in text:
+        return "Plug-ins need the Apollo connected over Thunderbolt"
+    return f"Plug-in hosting unavailable: {type(error).__name__}: {error}"
+
+
 class MixerClient:
     """State for a single connected TCP client."""
 
@@ -580,6 +596,10 @@ class MixerDaemon:
         self._native_executor = None
         self._native_busy = False
         self._native_waiting: list = []
+        # Hosting asked for but not available yet (no cold start since the driver loaded, a rate
+        # other than 48 kHz): _native_attach retries it, the reason is published meanwhile.
+        self._native_attach = None
+        self._native_unavailable_reason = ""
         self.plugin_remote = PluginRemote(state, backend=plugin_remote_backend,
                                           lease_provider=plugin_transactions)
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
@@ -749,7 +769,11 @@ class MixerDaemon:
         """
         native = self._native_plugin_backend
         if native is None:
+            if self._native_attach is not None or self._native_unavailable_reason:
+                self._publish_license('/NativePluginHosting', False, 'bool')
+                self._publish_license('/NativePluginHostingReason', self._native_unavailable_reason, 'string')
             return
+        self._publish_license('/NativePluginHostingReason', '', 'string')
         capabilities = native.capabilities()
         by_name = {}
         for cap in capabilities:
@@ -801,6 +825,45 @@ class MixerDaemon:
                     ('NativeSampleRate', rate, 'int'),
                     ('NativeLoadHint', hint, 'string')):
                 self._publish_license(base + '/' + key, value, kind)
+
+    def attach_native(self, backend, transactions):
+        """Turn native hosting on in a running daemon (it was unavailable at start)."""
+        self.plugins_enabled = self.plugin_remote_enabled = True
+        self.plugin_lifecycle = PluginLifecycle(self.state, None, helper_tree=self.helper_tree,
+                                                transactions=transactions)
+        self.plugin_remote = PluginRemote(self.state, backend=backend, lease_provider=transactions)
+        self._native_plugin_backend = (backend if getattr(backend, 'native_single_insert', False) is True
+                                       else None)
+        self._native_attach = None
+        self._native_unavailable_reason = ""
+        log.info("Native plug-in hosting on")
+        self._publish_native_capabilities()
+
+    def _native_hosting_try(self) -> bool:
+        """One attempt to turn hosting on; True once it is on (or nothing is left to try)."""
+        attach = self._native_attach
+        if attach is None:
+            return True
+        router = self.hw_router
+        if router is None or not getattr(router.backend, 'connected', False):
+            return False
+        try:
+            backend, transactions = attach()
+        except Exception as error:
+            reason = native_unavailable_reason(error)
+            if reason != self._native_unavailable_reason:
+                log.info("Native plug-in hosting still unavailable (%s: %s)", type(error).__name__, error)
+                self._native_unavailable_reason = reason
+                self._publish_native_capabilities()
+            return False
+        self.attach_native(backend, transactions)
+        return True
+
+    async def _native_hosting_retry(self, interval: float = 5.0):
+        """Keep trying until the driver's plug-in host is usable (a cold start after the driver
+        loaded, 48 kHz). Cheap: one strip-delay read-back per try."""
+        while not self._native_hosting_try():
+            await asyncio.sleep(interval)
 
     def _publish_native_delay_status(self):
         native = self._native_plugin_backend
@@ -4412,7 +4475,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     elif args.no_hardware:
         log.info("Software-only mode (--no-hardware)")
 
-    native_backend = native_transactions = None
+    native_backend = native_transactions = native_attach = None
+    native_reason = ""
     if native_enabled:
         from plugin_native import load_provider, register_native
         try:
@@ -4422,10 +4486,22 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                     args.native_plugin_bundles, advertise_all=args.advertise_all_plugins)
             else:
                 providers = load_provider(args.native_plugin_provider)
-            native_backend, native_transactions = register_native(
-                state, helper_tree, backend, providers)
         except Exception as error:
-            parser.error(f"native hosting unavailable: {type(error).__name__}: {error}")
+            # The mixer runs without plug-ins: a bad recipe file never takes it down.
+            providers = None
+            native_reason = f"Plug-in maps unreadable: {type(error).__name__}: {error}"
+            log.error("Native plug-in hosting off: %s", native_reason)
+        if providers is not None:
+            def native_attach():
+                return register_native(state, helper_tree, backend, providers)
+            try:
+                native_backend, native_transactions = native_attach()
+            except Exception as error:
+                # Never exit for this: the driver may not have cold-started the DSPs yet, or the
+                # rate is not 48 kHz. The daemon retries and turns hosting on when it can.
+                native_reason = native_unavailable_reason(error)
+                log.warning("Native plug-in hosting not available yet (%s: %s): %s",
+                            type(error).__name__, error, native_reason)
 
     # Initialize software metering (through PipeWire when it holds the
     # Apollo, else ALSA capture)
@@ -4455,7 +4531,11 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                          catalogue=catalogue,
                          plugin_transactions=native_transactions,
                          plugin_remote_backend=native_backend,
-                         plugin_hosting=bool(native_backend))
+                         plugin_hosting=native_enabled)
+    daemon._native_attach = native_attach if native_backend is None else None
+    daemon._native_unavailable_reason = native_reason
+    if native_backend is None and native_enabled:
+        daemon._publish_native_capabilities()   # NativePluginHosting false and why
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}
@@ -4512,6 +4592,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
             asyncio.create_task(daemon._device_watchdog()),
             asyncio.create_task(daemon.autogain.run()),
         ]
+        if daemon._native_attach is not None:
+            tasks.append(asyncio.create_task(daemon._native_hosting_retry()))
         if ws_server:
             tasks.append(asyncio.create_task(ws_server.start()))
         await asyncio.gather(*tasks)
@@ -4521,8 +4603,9 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     except KeyboardInterrupt:
         log.info("Shutting down...")
     finally:
-        if native_backend:
-            native_backend.invalidate()
+        native_live = daemon._native_plugin_backend or native_backend
+        if native_live:
+            native_live.invalidate()
             # The borrowed owner fd closes here; the driver retires its leases.
             backend.close()
         metering.stop()

@@ -976,6 +976,17 @@ impl App {
                 "The installer changed the kernel command line (iommu=pt). The Apollo works after a restart.",
             );
         }
+        let power_cycle = self.install.as_ref().is_some_and(|i| {
+            i.run.section(RootStep::Driver).progress.lines.iter().any(|l| l.text().contains("Power-cycle the Apollo"))
+        });
+        if power_cycle {
+            callout(
+                ui,
+                Status::Warning,
+                "Power-cycle the Apollo to turn plug-ins on",
+                "Switch the Apollo off and on again. The driver's plug-in host needs a cold start of the DSPs after it loads; plug-ins then appear in the Console by themselves.",
+            );
+        }
         section(ui, "Where things went");
         card(ui, false, |ui| {
             let mut rows: Vec<(&str, String)> = Vec::new();

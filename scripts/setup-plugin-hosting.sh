@@ -57,6 +57,50 @@ restart_daemon() {
     fi
 }
 
+# Whether the restarted daemon could turn plug-in hosting on. A driver loaded while the Apollo
+# was already on has not cold-started its DSPs: the daemon runs without plug-ins and says so
+# until the Apollo is power-cycled, then turns them on by itself.
+check_hosting() {
+    local answer="" i
+    for i in $(seq 20); do
+        answer=$(python3 - <<'PY' 2>/dev/null
+import json, socket
+try:
+    s = socket.create_connection(('127.0.0.1', 4710), 2); s.settimeout(3)
+    out = {}
+    for n, path in enumerate(('/NativePluginHosting', '/NativePluginHostingReason')):
+        s.sendall(f'get {path}/value?func_id=h{n}'.encode() + b'\0')
+        buf = b''
+        while True:
+            while b'\0' not in buf:
+                chunk = s.recv(65536)
+                if not chunk:
+                    raise OSError
+                buf += chunk
+            raw, buf = buf.split(b'\0', 1)
+            r = json.loads(raw) if raw else {}
+            if str((r.get('parameters') or {}).get('func_id')) == f'h{n}':
+                out[path] = r.get('data')
+                break
+    print('on' if out['/NativePluginHosting'] is True else
+          'off ' + (out['/NativePluginHostingReason'] or '') if out['/NativePluginHosting'] is False else '')
+except Exception:
+    pass
+PY
+)
+        [ -n "$answer" ] && break
+        sleep 1
+    done
+    case "$answer" in
+        on) echo "[ OK ]  Plug-in hosting is on." ;;
+        off*) echo "[WARN]  ${answer#off }"
+              echo "[WARN]  Power-cycle the Apollo (switch it off and on again): plug-ins turn on by themselves" \
+                   "once the driver sees the cold start; no restart of anything else is needed." ;;
+        *) echo "[INFO]  Power-cycle the Apollo once after setup if the Console's plug-in browser shows no" \
+                "Native DSP loads: the driver's plug-in host needs a cold start of the DSPs." ;;
+    esac
+}
+
 if [ "$REMOVE" = 1 ]; then
     rm -f "$DROPIN"
     rm -rf "$OUT"
@@ -94,5 +138,6 @@ ExecStart=
 ExecStart=$VENV/bin/python3 $PROJECT_DIR/mixer-engine/ua_mixer_daemon.py --native-plugin-bundles $OUT --preserve-hardware
 EOF
 restart_daemon
+check_hosting
 echo "Done. Plug-ins on the known-good list appear in the console's plug-in browser as"
 echo "Native DSP loads; the Apollo's licence check still decides each load."
