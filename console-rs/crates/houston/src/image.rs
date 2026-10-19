@@ -117,6 +117,35 @@ fn area_weights(n_in: usize, n_out: usize) -> Vec<Vec<(usize, f32)>> {
 mod resample_tests {
     use super::*;
 
+    /// 17 of UAD's shipped plug-in icons (`apollo-32bit.msi`, byte-equal to the installer's) carry
+    /// an `iCCP` chunk whose CRC is wrong; the pixels are fine. Strict decoders refuse the file;
+    /// ours skips the bad ancillary chunk, as Windows' decoders do.
+    #[test]
+    fn a_bad_ancillary_crc_still_decodes() {
+        let dir = std::env::temp_dir().join(format!("houston-iccp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("icon.png");
+        let mut png = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut png, 2, 1);
+            enc.set_color(png::ColorType::Rgb);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&[255, 0, 0, 0, 0, 255]).unwrap();
+        }
+        // An iCCP chunk after IHDR (8 + 25 bytes) with a wrong CRC.
+        let body = b"sRGB\0\0\x78\x9c\x03\x00\x00\x00\x00\x01";
+        let mut chunk = (body.len() as u32).to_be_bytes().to_vec();
+        chunk.extend_from_slice(b"iCCP");
+        chunk.extend_from_slice(body);
+        chunk.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        png.splice(33..33, chunk);
+        std::fs::write(&path, &png).unwrap();
+        let img = ImageData::decode_png(&path).expect("decodes past the bad iCCP CRC");
+        assert_eq!((img.width, img.height), (2, 1));
+        assert_eq!(&img.rgba[..4], &[255, 0, 0, 255]);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
     #[test]
     fn area_weights_cover_input() {
         let w = area_weights(400, 190);

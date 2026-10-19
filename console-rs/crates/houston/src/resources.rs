@@ -63,15 +63,21 @@ impl Resources {
         self.root.join("fonts")
     }
 
-    /// `Plug-In Icons/<EffectName>.png`: inside Resources on Windows, system-wide on macOS.
+    /// `Plug-In Icons/<EffectName>.png`. On macOS UA's own set comes first: 400×160 close-ups, the
+    /// art Console's browser rows are made for. Otherwise the folder inside Resources (`oa-assets
+    /// icons` imports the Windows installer's set there: smaller full-panel portraits).
     pub fn plugin_icons_dir(&self) -> PathBuf {
+        let mac = Path::new(MAC_PLUGIN_ICONS);
         let inside = self.root.join("Plug-In Icons");
-        if inside.is_dir() {
-            return inside;
+        if (cfg!(target_os = "macos") && mac.is_dir()) || !inside.is_dir() {
+            return mac.to_path_buf();
         }
-        PathBuf::from("/Library/Application Support/Universal Audio/Plug-In Icons")
+        inside
     }
 }
+
+/// UA's plug-in icons on macOS (installed with the UAD software).
+const MAC_PLUGIN_ICONS: &str = "/Library/Application Support/Universal Audio/Plug-In Icons";
 
 /// `console.version` from an `oa-assets` manifest (Windows Console has no Info.plist).
 fn imported_version(manifest: &Path) -> Option<String> {
