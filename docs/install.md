@@ -92,7 +92,7 @@ Below, `/path/to/windows` is the folder that holds Windows' `C:\` (or a Wine pre
 ```bash
 sudo $OA firmware --from /path/to/windows      # DSP modules, USB boot images -> /lib/firmware/universal-audio
 sudo $OA dsp --from /path/to/windows           # plug-ins' DSP modules -> /lib/firmware/universal-audio/plugins (optional)
-$OA import --from /path/to/windows             # UAD Console's art -> ~/.local/share/open-apollo
+$OA import --from /path/to/windows             # UAD Console's art and the plug-in list -> ~/.local/share/open-apollo
 sudo bash scripts/install-panels.sh            # plug-in panel specs -> /usr/share/open-apollo/plugin-specs
 $OA plugins --from /path/to/windows            # plug-in panels' art -> ~/.local/share/open-apollo/generated
 sudo bash scripts/install.sh                   # driver, DKMS, audio settings, mixer daemon
@@ -128,6 +128,7 @@ What this release does with UAD plug-ins:
 
 | | |
 |---|---|
+| Plug-in browser | The Console's plug-in list and factory preset menus come from your UAD install (`~/.local/share/open-apollo/ua-catalogue/`, names only). Without that import the browser is empty: run `oa-assets catalogue --from /path/to/windows`, then `systemctl --user restart ua-mixer-daemon`. |
 | Plug-in windows | The Console draws each plug-in's window from the panel specs and the art setup made from your Powered plug-ins: 206 of 224 with a UAD 12 install, the rest as a plain parameter list. |
 | Plug-in DSP modules | Setup stores them in `/lib/firmware/universal-audio/plugins/`. Nothing loads them yet. |
 | Running plug-ins on the Apollo's DSP | Not in this release. It is being developed and will only load plug-ins your Apollo itself reports as authorized. |
@@ -165,6 +166,7 @@ It ends with a check that lists anything still there. `--yes` asks nothing.
 | DSP modules, USB boot images (from your UAD install) | `/lib/firmware/universal-audio/` | `uninstall.sh --purge` |
 | Plug-ins' DSP modules (from your UAD install) | `/lib/firmware/universal-audio/plugins/` | `uninstall.sh --purge` |
 | UAD Console's art (from your UAD install) | `~/.local/share/open-apollo/console-resources/` | `uninstall.sh --purge` |
+| Plug-in list and factory preset menus (from your UAD install) | `~/.local/share/open-apollo/ua-catalogue/` | `uninstall.sh --purge` |
 | Plug-in panels' art (made from your UAD install) | `~/.local/share/open-apollo/generated/` | `uninstall.sh --purge` |
 | Plug-in panel specs | `/usr/share/open-apollo/plugin-specs/` | `uninstall.sh` |
 | Mixer daemon | systemd user unit `ua-mixer-daemon` | `uninstall.sh` |
@@ -185,5 +187,6 @@ host name, home path or serial numbers.
 | No sound after using a JACK app (Ardour) | `systemctl --user restart pipewire wireplumber pipewire-pulse`, then `apollo-setup-io`. |
 | The Console shows no art | `bash scripts/install-uaconsole.sh --check`; see [console-rs/README.md](../console-rs/README.md#troubleshooting). |
 | Plug-in windows show a plain parameter list | Run `oa-assets status`. The panel specs or their art are missing, or that panel isn't drawn yet. |
+| The plug-in browser is empty | `oa-assets catalogue --from /path/to/windows`, then `systemctl --user restart ua-mixer-daemon`. |
 
 More hardware notes are on the [wiki](https://github.com/rolotrealanis98/open-apollo/wiki/Troubleshooting).

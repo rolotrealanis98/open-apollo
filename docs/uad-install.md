@@ -19,6 +19,7 @@ don't share them. See [NOTICE.md](../NOTICE.md).
 | From | What it becomes | Where it goes |
 |---|---|---|
 | UAD Console | the Console's art and fonts | `~/.local/share/open-apollo/console-resources/` |
+| The Powered plug-ins | UA's plug-in list, its categories and the factory preset menus (names only: no preset files, plug-in code or licence state) | `~/.local/share/open-apollo/ua-catalogue/` |
 | The Powered plug-ins | the plug-in windows' art (about 2.7 GB, made from recipes) | `~/.local/share/open-apollo/generated/` |
 | The UAD driver and Powered plug-ins | the DSP programs the Apollo runs, and the USB Apollos' boot images | `/lib/firmware/universal-audio/` |
 | The Powered plug-ins | every plug-in's DSP modules, kept for plug-in processing in a later release | `/lib/firmware/universal-audio/plugins/` |
