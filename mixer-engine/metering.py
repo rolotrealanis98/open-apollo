@@ -32,9 +32,9 @@ import time
 log = logging.getLogger("ua-metering")
 
 SILENCE_DB = -77.0   # UA Mixer Engine silence floor
-PEAK_HOLD_SEC = 2.0  # seconds to hold peak before decay
+PEAK_HOLD_SEC = 2.0  # seconds to hold peak before decay (until Settings says)
 PEAK_DECAY_DB_SEC = 20.0  # dB/sec decay after hold expires
-CLIP_HOLD_SEC = 2.0  # seconds to hold clip indicator
+CLIP_HOLD_SEC = 2.0  # seconds to hold clip indicator (until Settings says)
 S32_MAX = 2147483647  # 2^31 - 1
 
 
@@ -90,6 +90,10 @@ class AlsaMeter:
         self._clips = [False] * capture_channels
         self._clip_times = [0.0] * capture_channels
 
+        # Settings > PEAK HOLD / CLIP HOLD (set_holds); inf = INFINITE
+        self.peak_hold_sec = PEAK_HOLD_SEC
+        self.clip_hold_sec = CLIP_HOLD_SEC
+
         self._lock = threading.Lock()
         self._running = False
         self._thread = None
@@ -118,6 +122,18 @@ class AlsaMeter:
             self._thread.join(timeout=2.0)
             self._thread = None
 
+    def set_holds(self, peak_ms=None, clip_ms=None):
+        """Peak / clip hold times in ms as the hardware takes them (0 =
+        NONE, -1 = INFINITE); None leaves one as it is."""
+        for attr, ms in (("peak_hold_sec", peak_ms), ("clip_hold_sec", clip_ms)):
+            if ms is not None:
+                setattr(self, attr, float("inf") if ms < 0 else ms / 1000.0)
+
+    def clear_clips(self):
+        """Drop every held clip (Console's ClearClips)."""
+        with self._lock:
+            self._clips = [False] * len(self._clips)
+
     def get_input_meter(self, channel):
         """Get meter values for an input (capture) channel.
 
@@ -137,7 +153,7 @@ class AlsaMeter:
 
             # Clip hold
             clip = self._clips[channel]
-            if clip and now - self._clip_times[channel] > CLIP_HOLD_SEC:
+            if clip and now - self._clip_times[channel] > self.clip_hold_sec:
                 clip = False
 
         return (level, peak, clip)
@@ -148,12 +164,12 @@ class AlsaMeter:
 
     def _held_peak(self, c, now):
         """Peak-hold reading of channel c (caller holds the lock): the peak,
-        held PEAK_HOLD_SEC after the level last reached it, then decaying,
+        held peak_hold_sec after the level last reached it, then decaying,
         never below the current level."""
         peak = self._peaks[c]
         elapsed = now - self._peak_times[c]
-        if elapsed > PEAK_HOLD_SEC:
-            peak -= PEAK_DECAY_DB_SEC * (elapsed - PEAK_HOLD_SEC)
+        if elapsed > self.peak_hold_sec:
+            peak -= PEAK_DECAY_DB_SEC * (elapsed - self.peak_hold_sec)
         return max(self._levels[c], peak, SILENCE_DB)
 
     def get_output_meter(self, channel):
@@ -252,7 +268,7 @@ class AlsaMeter:
         """Take a new level for channel c (caller holds the lock)."""
         # Peak hold: reaching the held peak again restarts the hold (a
         # steady signal keeps it), so it only decays once the level has
-        # dropped for PEAK_HOLD_SEC
+        # dropped for peak_hold_sec
         if db >= self._held_peak(c, now):
             self._peaks[c] = db
             self._peak_times[c] = now
@@ -680,6 +696,9 @@ class NullMeter:
         pass
 
     def stop(self):
+        pass
+
+    def set_holds(self, peak_ms=None, clip_ms=None):
         pass
 
     def get_input_meter(self, channel):
