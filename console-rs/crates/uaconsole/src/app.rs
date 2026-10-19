@@ -125,6 +125,8 @@ pub struct App {
     pending_menu: Option<String>,
     /// A press on a drag source (`rack::dnd`): its tap fires on release unless it became a drag.
     deferred_tap: Option<rack::Hit>,
+    /// The plug-in windows Window › Show/Hide Floating Windows hid (Some while hidden).
+    hidden_floating: Option<Vec<Box<dyn crate::overlay::Panel>>>,
 }
 
 /// Runs the window until it is closed. Returns an error message if it could not start.
@@ -196,6 +198,7 @@ impl App {
             interaction: Interaction::default(),
             clicks: ClickTracker::default(),
             deferred_tap: None,
+            hidden_floating: None,
             cursor: (0.0, 0.0),
             panning: false,
             mods: ModifiersState::empty(),
@@ -806,6 +809,12 @@ impl App {
             match c {
                 C::Quit => self.quit(event_loop),
                 C::ToggleFullScreen => self.run_command(Command::ToggleFullscreen, false, event_loop),
+                C::ShowHideFloatingWindows => self.toggle_floating(),
+                C::NextWindow | C::PreviousWindow => self.cycle_window(c == C::NextWindow),
+                C::ShowNotifications => {
+                    self.mixer.show_notifications(&*self.model);
+                    self.changed();
+                }
                 other => eprintln!("uaconsole: {} ({}): not available yet", other.label(), other.id()),
             }
         }
@@ -813,6 +822,52 @@ impl App {
         for url in self.mixer.take_open_urls() {
             open_target(&url);
         }
+    }
+
+    /// Window › Show/Hide Floating Windows (⇧⌘W): closes the plug-in windows and the free
+    /// window (Settings, MONITOR CONTROLLER, …) and remembers them; the next one reopens them.
+    /// Their OS windows (native Wayland toplevels too) follow their layers.
+    fn toggle_floating(&mut self) {
+        match self.hidden_floating.take() {
+            Some(panels) => {
+                self.overlays.restore_floating(panels);
+                self.mixer.show_floating();
+            }
+            None => {
+                let panels = self.overlays.take_floating();
+                if self.mixer.hide_floating() || !panels.is_empty() {
+                    self.hidden_floating = Some(panels);
+                }
+            }
+        }
+        self.changed();
+    }
+
+    /// Window › Next / Previous Window: focus moves round the mixer and the free windows
+    /// (Settings, panels, plug-in windows) in stacking order. Drawn inside the mixer window, the
+    /// plug-in window reached is raised.
+    fn cycle_window(&mut self, forward: bool) {
+        let ids: Vec<String> = self.frame.layers.iter().filter(|l| crate::popups::toplevel(l)).map(|l| l.id.clone()).collect();
+        let current = match self.popups.wins.iter().find(|w| w.focused) {
+            Some(w) => Some(w.id.clone()),
+            // In the mixer window: the topmost plug-in window counts as current when unfocused
+            // windows are drawn inside it.
+            None if self.popups.wins.is_empty() => ids.iter().rev().find(|i| i.starts_with("plugin:")).cloned(),
+            None => None,
+        };
+        match crate::popups::cycle(&ids, current.as_deref(), forward) {
+            Some(id) => {
+                self.overlays.raise(&id);
+                // Focused after the next frame's window sync (as a reopened plug-in window).
+                self.overlays.focus = Some(id);
+            }
+            None => {
+                if let Some(g) = &self.gpu {
+                    g.window.focus_window();
+                }
+            }
+        }
+        self.changed();
     }
 
     fn quit(&mut self, event_loop: &ActiveEventLoop) {

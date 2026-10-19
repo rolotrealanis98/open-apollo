@@ -702,6 +702,13 @@ impl MixerModel for EngineMixer {
         Some(self)
     }
 
+    /// The writes the engine refused (`Store::refusals`), newest first.
+    fn notifications(&self) -> Vec<String> {
+        let mut n: Vec<String> = self.store.refusals().map(|r| format!("{}: {}", r.path, r.message)).collect();
+        n.reverse();
+        n
+    }
+
     fn apply_setting_writes(&mut self, writes: Vec<rack::settings::Write>) {
         self.write_settings(writes);
     }

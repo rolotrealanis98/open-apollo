@@ -183,6 +183,9 @@ pub enum Popover {
     /// Typed-value entry for `target` (a fader or send level; `ViewState::text_edit` holds the
     /// dB text): OK sets it, −144…+12 dB. The anchor is the readout's hit (or `target`'s).
     Value { target: ControlId },
+    /// Window › Notifications: the engine's recent refusals, newest first
+    /// ([`MixerModel::notifications`]), with OK.
+    Notifications { lines: Vec<String> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -343,6 +346,8 @@ pub struct ViewState {
     pub blink: bool,
     /// When [`ViewState::tick_blink`] first ran (the blink phase counts from it).
     pub blink_epoch: Option<std::time::Instant>,
+    /// The free window Window › Show/Hide Floating Windows hid ([`ViewState::hide_floating`]).
+    pub hidden_sheet: Option<Sheet>,
 }
 
 impl ViewState {
@@ -396,6 +401,7 @@ impl Default for ViewState {
             windowing: None,
             blink: false,
             blink_epoch: None,
+            hidden_sheet: None,
         }
     }
 }
@@ -1126,6 +1132,36 @@ impl ViewState {
         true
     }
 
+    /// Window › Show/Hide Floating Windows: hides the open free window (Settings, or a panel
+    /// whose layer is a `LayerKind::Window`: MONITOR CONTROLLER, PLUG-IN SCENES, …). True when
+    /// there was one.
+    pub fn hide_floating(&mut self) -> bool {
+        let free = match self.sheet {
+            Some(Sheet::Settings) => true,
+            Some(Sheet::Panel(p)) => crate::layers::panel_kind(p) == crate::layers::LayerKind::Window,
+            None => false,
+        };
+        if free {
+            self.hidden_sheet = self.sheet.take();
+        }
+        free
+    }
+
+    /// Shows the free window [`Self::hide_floating`] hid, unless another opened meanwhile.
+    pub fn show_floating(&mut self) {
+        if let Some(s) = self.hidden_sheet.take() {
+            self.sheet.get_or_insert(s);
+        }
+    }
+
+    /// Window › Notifications: the recent engine refusals in a dialog (the daemon publishes no
+    /// notification list of its own).
+    pub fn show_notifications(&mut self, model: &dyn MixerModel) {
+        self.menu = None;
+        let anchor = ControlId { strip: "popover".into(), control: Control::PopoverDismiss };
+        self.popover = Some(PopoverState { kind: Popover::Notifications { lines: model.notifications() }, anchor });
+    }
+
     pub fn key_text(&mut self, s: &str) {
         if let Some(e) = &mut self.text_edit {
             if let TextTarget::Value { fresh, .. } = &mut e.target {
@@ -1296,6 +1332,25 @@ mod tests {
         v.key_enter(&mut model);
         assert!(v.popover.is_none());
         assert_eq!(model.props.prop("/devices/0/inputs/22/sends/2/Gain").and_then(|p| p.as_f64()), Some(-20.0));
+    }
+
+    /// Window › Show/Hide Floating Windows hides a free window and shows it again; a callout
+    /// (CUE OUTPUTS) is not a floating window. Notifications opens a dialog OK closes.
+    #[test]
+    fn floating_windows_and_notifications() {
+        let mut model = PreviewMixer::default();
+        let mut v = ViewState { sheet: Some(Sheet::Settings), ..ViewState::default() };
+        assert!(v.hide_floating());
+        assert_eq!((v.sheet.clone(), v.hidden_sheet.clone()), (None, Some(Sheet::Settings)));
+        v.show_floating();
+        assert_eq!((v.sheet.clone(), v.hidden_sheet.clone()), (Some(Sheet::Settings), None));
+        v.sheet = Some(Sheet::Panel(Panel::CueOutputs));
+        assert!(!v.hide_floating());
+        assert_eq!(v.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
+        v.show_notifications(&model);
+        assert_eq!(v.popover.as_ref().map(|p| &p.kind), Some(&Popover::Notifications { lines: Vec::new() }));
+        v.dispatch(Action::Tap(cid("popover", Control::PopoverDismiss)), &mut model);
+        assert!(v.popover.is_none());
     }
 
     #[test]
