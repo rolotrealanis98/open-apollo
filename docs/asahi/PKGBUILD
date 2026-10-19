@@ -1,0 +1,93 @@
+# linux-asahi-tbt: an Asahi Linux kernel with USB4/Thunderbolt PCIe tunneling, for open-apollo.
+# See docs/asahi-linux.md in open-apollo.
+# Builds a local worktree ($TBT_SRC, default ~/linux-tbt), branch `tbt-7.1`: Ophuscado/linux tbt/7.1
+# (head 9d460b403164) = tag asahi-7.1.13-3, the exact source of the installed
+# linux-asahi 7.1.13.asahi3, plus 10 commits (USB4 host driver from asahi-wip-7.2,
+# tunneled PCIe controllers, DART dma-offset, t602x USB4 device tree).
+# Installs beside linux-asahi as a second package; the stock kernel stays installed.
+#
+# Config = the stock /proc/config.gz with LOCALVERSION="-tbt", USB4=y,
+# USB4_APPLE_SOC=m and RESET_APPLE_CIO=m (see `config` vs `config.stock`). USB4 is =y,
+# not =m: PCIE_APPLE "depends on USB4 || !USB4", so USB4=m would demote the internal
+# PCIe driver (10GbE, Wi-Fi, SD, USB-A) to a module.
+#
+# The release string is 7.1.13-1-tbt, deliberately without "-ARCH": the stock bundle
+# and the U-Boot recovery bundle take their DTBs from the newest /lib/modules/*-ARCH,
+# and must never pick up this tree's DTB. This kernel boots only from its own m1n1
+# bundle with its own DTB (docs/asahi-linux.md, "Boot it").
+#
+# Build (no sudo):   makepkg -od   # prepare: config + version, no build
+#                    makepkg -ed   # build + package
+# Install (sudo):    sudo pacman -U linux-asahi-tbt-*.pkg.tar.*
+
+pkgbase=linux-asahi-tbt
+pkgname=("$pkgbase")
+_srcdir="${TBT_SRC:-$HOME/linux-tbt}"
+_branch=tbt-7.1
+_base=asahi-7.1.13-3
+_m1n1_version=1.6.1
+epoch=1
+pkgver=7.1.13.tbt1.r10.g9d460b403164
+pkgrel=1
+pkgdesc="AArch64 Apple Silicon (Asahi) kernel with USB4/Thunderbolt PCIe tunneling (Ophuscado tbt/7.1)"
+arch=('aarch64')
+url="https://github.com/Ophuscado/linux"
+license=('GPL2')
+makedepends=(bc dtc kmod libelf cpio perl tar xz python)
+options=('!strip' '!debug')
+source=(config)
+sha256sums=('SKIP')
+export KBUILD_BUILD_HOST="$(uname -n)"
+export KBUILD_BUILD_USER=$pkgbase
+export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
+# Rust: use the rustc the stock kernel was built with (CONFIG_RUSTC_VERSION in
+# /proc/config.gz; 109301 = 1.93.1 for linux-asahi 7.1.13.asahi3). Needs rustup.
+export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-1.93.1}"
+# Set (empty) so setlocalversion does not append "+" for an untagged HEAD.
+export LOCALVERSION=
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+
+pkgver() {
+  cd "$_srcdir"
+  printf '7.1.13.tbt1.r%s.g%s' "$(git rev-list --count $_base..HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+  cd "$_srcdir"
+  [[ "$(git rev-parse --abbrev-ref HEAD)" == "$_branch" ]] || { echo "worktree is not on branch $_branch"; return 1; }
+  echo "-$pkgrel" > localversion.10-pkgrel   # release: 7.1.13-1-tbt (CONFIG_LOCALVERSION="-tbt")
+  mkdir -p "$srcdir/build"
+  cp "$srcdir/config" "$srcdir/build/.config"
+  make O="$srcdir/build" olddefconfig prepare
+  diff -u "$srcdir/config" "$srcdir/build/.config" || :
+  make -s O="$srcdir/build" kernelrelease > "$srcdir/build/version"
+  echo "Prepared $pkgbase version $(<"$srcdir/build/version")"
+}
+
+build() {
+  cd "$_srcdir"
+  make O="$srcdir/build" all -j"$(nproc)"
+}
+
+package() {
+  pkgdesc="The $pkgdesc kernel and modules"
+  depends=(coreutils kmod initramfs "m1n1>=$_m1n1_version")
+  provides=(WIREGUARD-MODULE)
+  cd "$_srcdir"
+  local O="$srcdir/build"
+  local kernver="$(<"$O/version")"
+  local modulesdir="$pkgdir/usr/lib/modules/$kernver"
+
+  echo "Installing boot image..."
+  install -Dm644 "$O"/arch/arm64/boot/Image "$modulesdir/vmlinuz"
+  # Used by mkinitcpio to name the kernel (vmlinuz-linux-asahi-tbt, initramfs-linux-asahi-tbt.img)
+  echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
+
+  echo "Installing modules..."
+  make O="$O" INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
+
+  echo "Installing device trees..."
+  install -Dt "$modulesdir/dtbs" "$O"/arch/arm64/boot/dts/apple/*.dtb
+
+  rm -f "$modulesdir"/{source,build}
+}

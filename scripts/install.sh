@@ -322,7 +322,9 @@ check_install_deps() {
         case "$PKG_MGR" in
             dnf)    missing_pkgs+=("kernel-devel") ;;
             apt)    missing_pkgs+=("linux-headers-$(uname -r)") ;;
-            pacman) missing_pkgs+=("linux-headers") ;;
+            # Asahi Linux (Apple Silicon) ships its kernel as linux-asahi
+            pacman) if pacman -Qq linux-asahi &>/dev/null; then missing_pkgs+=("linux-asahi-headers")
+                    else missing_pkgs+=("linux-headers"); fi ;;
             zypper) missing_pkgs+=("kernel-devel") ;;
         esac
     else
@@ -634,6 +636,9 @@ setup_dkms() {
 check_iommu() {
     # Intel VT-d (DMAR) blocks BAR0 access unless iommu=pt is set.
     # Without it, all register reads return 0xFFFFFFFF and the Apollo is unusable.
+    # Apple Silicon's IOMMUs (DART) also log "iommu" but have no passthrough mode;
+    # the tunneled Apollo works translated there (docs/asahi-linux.md).
+    [ "$(uname -m)" = aarch64 ] && return 0
     if ! dmesg 2>/dev/null | grep -qi 'DMAR\|IOMMU'; then
         return 0  # No IOMMU, nothing to do
     fi

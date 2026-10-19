@@ -6,12 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `docs/asahi-linux.md`: open-apollo on Apple Silicon under Asahi Linux. The stock Asahi kernel
+  cannot tunnel PCIe over Thunderbolt; the guide builds Ophuscado's out-of-tree `tbt/7.1` kernel
+  (`docs/asahi/PKGBUILD`), boots it with its own device tree from m1n1, and installs open-apollo
+  on it. Verified on a Mac Studio M2 Ultra with an Apollo x4 (Thunderbolt 3).
+
 ### Fixed
 - Apollo Twin X (and every model without a verified input strip map): a warm move from another
   OS no longer skips the DSP ring connect, which kept no input strips there and left playback
   silent. Only models whose strips the driver builds (Apollo x4) keep the inherited DSP state (#91).
 - Plug-in hosting no longer asks for a power cycle when the driver has the input strips off for
   the model; the daemon now shows the driver's reason from `dsp_state` (#91).
+- `install.sh` on Asahi Linux: suggests `linux-asahi-headers` instead of `linux-headers`, and
+  skips the Intel `iommu=pt` step on aarch64, where Apple's IOMMUs have no passthrough mode.
 
 ## [2.1.0] - 2026-10-19
 

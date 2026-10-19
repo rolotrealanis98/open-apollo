@@ -5,6 +5,7 @@
 | Document | What it covers |
 |---|---|
 | [Install guide](install.md) | Requirements, the setup wizard page by page, the command-line install, USB Apollos, updating and uninstalling, where every file goes, troubleshooting |
+| [open-apollo on Asahi Linux](asahi-linux.md) | Apple Silicon Macs: building and booting a kernel with Thunderbolt PCIe tunneling, then installing open-apollo on it |
 | [Getting a UAD install](uad-install.md) | The UAD install setup reads from: Windows on another partition or a boot disk, a Windows VM, a Wine prefix, or a copied folder; what setup takes from it |
 | [Getting help](../SUPPORT.md) | What to check first, and what to attach to an issue |
 | [Mixer console](../console-rs/README.md) | `uaconsole`: installing, running, where its art comes from, options, troubleshooting |
