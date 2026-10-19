@@ -207,7 +207,7 @@ class FixturePipeWire:
         return None
 
 
-def plugin_loads(daemon, delay, refused):
+def plugin_loads(daemon, delay, refused, loading="Loading"):
     """Plug-in loads (set <slot>/EffectName) as the engine answers them: Power
     follows (true with a plug-in, false empty), as UA's engine has it. With
     `delay`, as the native host does: Status "Loading" at once, then after
@@ -234,7 +234,7 @@ def plugin_loads(daemon, delay, refused):
 
         if not cmd.value or not delay:
             return done()
-        daemon._push_to_clients(slot + "/Status", "Loading")
+        daemon._push_to_clients(slot + "/Status", loading)
         asyncio.get_running_loop().call_later(delay, done)
 
     daemon._handle_set = set_
@@ -264,6 +264,14 @@ def main():
                         help="a plug-in load (set <slot>/EffectName) commits "
                              "after this many seconds, with <slot>/Status "
                              "\"Loading\" meanwhile (a native load)")
+    parser.add_argument("--loading-status", default="Loading",
+                        help="the slot's Status while a delayed load runs "
+                             "(the daemon says \"Preparing plug-in…\" for a "
+                             "plug-in it must first learn)")
+    parser.add_argument("--root-prop", action="append", default=[],
+                        metavar="NAME=VALUE",
+                        help="publish a root property (true/false/int/text), "
+                             "e.g. NativePluginHosting=false")
     parser.add_argument("--refuse-load", action="append", default=[],
                         help="a plug-in whose name contains this is refused "
                              "(after --load-delay) with a reason")
@@ -317,7 +325,16 @@ def main():
         run=pw.run if pw else lambda cmd, env: None,
         locate=lambda card: ({}, "pipewire (4242)" if pw else ""))
     daemon._publish_pipewire(daemon.pipewire.poll())
-    plugin_loads(daemon, args.load_delay, args.refuse_load)
+    plugin_loads(daemon, args.load_delay, args.refuse_load, args.loading_status)
+    for item in args.root_prop:
+        name, _, raw = item.partition("=")
+        value = {"true": True, "false": False}.get(raw, int(raw) if raw.isdigit() else raw)
+        kind = {bool: "bool", int: "int"}.get(type(value), "string")
+        path = "/" + name
+        if state.get_value(path) is None:
+            state.add_runtime_property(path, {"type": kind, "value": value})
+        else:
+            daemon._push_to_clients(path, value)
 
     async def run():
         loop = asyncio.get_running_loop()

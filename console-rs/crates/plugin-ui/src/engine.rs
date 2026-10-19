@@ -101,6 +101,13 @@ impl EngineSlot {
         self.loading
     }
 
+    /// The daemon's own word for a load in flight (`Status`, e.g. "Preparing plug-in…"), when it
+    /// says more than "Loading".
+    pub fn loading_text(&self, store: &Store) -> Option<String> {
+        let s = store.value(&self.slot.status())?.as_str()?;
+        (self.loading && !s.is_empty() && s != "Loading").then(|| s.to_owned())
+    }
+
     /// Releases the subscriptions taken by [`open`](Self::open)/[`sync`](Self::sync).
     pub fn close(&mut self, store: &mut Store) {
         store.release_subscriptions(&self.retained);

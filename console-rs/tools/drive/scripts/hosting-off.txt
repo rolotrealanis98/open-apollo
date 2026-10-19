@@ -1,0 +1,9 @@
+# Plug-in hosting off (open-apollo: the DSPs have not cold-started): the browser says why, and a
+# drop is refused with that reason before anything is written.
+#: --catalogue --specs --daemon-arg=--root-prop --daemon-arg=NativePluginHosting=false --daemon-arg=--root-prop "--daemon-arg=NativePluginHostingReason=Power-cycle the Apollo to enable plug-ins: its DSPs have not cold-started since the driver loaded"
+settle
+text Power-cycle the Apollo to enable plug-ins
+dragto browser:BrowserItem(0) /devices/0/inputs/0:Insert(0)
+settle
+nolayer plugin:/devices/0/inputs/0:0
+notext Test Comp…
