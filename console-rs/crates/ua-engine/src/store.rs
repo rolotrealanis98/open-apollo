@@ -16,9 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
 use crate::command::Command;
-use crate::connection::{
-    CommandSink, ConnectionState, Endpoint, Engine, EngineHandle, Options, PendingReply, Update,
-};
+use crate::connection::{CommandSink, ConnectionState, Endpoint, Engine, EngineHandle, Options, PendingReply, Update};
 use crate::error::Result;
 use crate::meters::{MeterReading, MeterStore};
 use crate::path;
@@ -92,10 +90,8 @@ const REFRESH_DELAY: Duration = Duration::from_millis(100);
 pub const UNDO_REDO: &str = "/UndoRedo";
 /// The daemon pulses these (true) when a device's clock-source / sample-rate lists change; the
 /// lists are then re-read.
-const LIST_CHANGED: [(&str, &str); 2] = [
-    ("/ClockSourceListChanged", "/ClockSource"),
-    ("/SampleRateListChanged", "/SampleRate"),
-];
+const LIST_CHANGED: [(&str, &str); 2] =
+    [("/ClockSourceListChanged", "/ClockSource"), ("/SampleRateListChanged", "/SampleRate")];
 const MIDI_INPUT_DEVICE: &str = "/MidiInputDevice";
 const MIDI_POLL: Duration = Duration::from_secs(1);
 /// How long after a gesture the undo list is re-read (Console: 30–90 ms).
@@ -103,7 +99,12 @@ const UNDO_VALUES_DELAY: Duration = Duration::from_millis(40);
 
 struct Hold {
     until: Instant,
+    /// The newest engine push seen while held that is not the engine's echo of `local`: applied
+    /// at release. None once the engine has echoed `local` (everything held before was older
+    /// than our write).
     latest: Option<Value>,
+    /// What we wrote.
+    local: Value,
 }
 
 /// Tree plus change tracking and echo holds (what the writer writes into).
@@ -175,15 +176,9 @@ impl Model {
 impl LocalModel for Model {
     fn apply_local(&mut self, path: &str, value: Value) {
         let pp = path::property_path(path).to_owned();
-        self.set_value(&pp, value);
+        self.set_value(&pp, value.clone());
         let latest = self.holds.remove(&pp).and_then(|h| h.latest);
-        self.holds.insert(
-            pp,
-            Hold {
-                until: Instant::now() + self.echo_hold,
-                latest,
-            },
-        );
+        self.holds.insert(pp, Hold { until: Instant::now() + self.echo_hold, latest, local: value });
     }
 
     fn is_integral(&self, path: &str) -> bool {
@@ -399,11 +394,7 @@ impl Store {
     /// The revision at which `path` last changed (0 if it has not changed since the tree was
     /// installed).
     pub fn path_revision(&self, path: &str) -> u64 {
-        self.model
-            .path_revs
-            .get(path::property_path(path))
-            .copied()
-            .unwrap_or(0)
+        self.model.path_revs.get(path::property_path(path)).copied().unwrap_or(0)
     }
 
     /// Paths changed after revision `rev`.
@@ -470,8 +461,7 @@ impl Store {
     pub fn next_deadline(&self) -> Option<Instant> {
         let holds = self.model.holds.values().map(|h| h.until);
         let refresh = self.refresh_due.values().copied();
-        let inflight =
-            (!self.refresh_inflight.is_empty()).then(|| Instant::now() + Duration::from_millis(50));
+        let inflight = (!self.refresh_inflight.is_empty()).then(|| Instant::now() + Duration::from_millis(50));
         holds
             .chain(refresh)
             .chain(self.undo_values_due)
@@ -486,11 +476,7 @@ impl Store {
     /// Shows a snapshot offline (disconnects first).
     pub fn load(&mut self, snapshot: Snapshot) {
         self.disconnect();
-        let source = snapshot
-            .info
-            .source
-            .clone()
-            .unwrap_or_else(|| "snapshot".into());
+        let source = snapshot.info.source.clone().unwrap_or_else(|| "snapshot".into());
         self.install(snapshot.tree, snapshot.info);
         self.status = Status::Offline(source);
     }
@@ -504,20 +490,11 @@ impl Store {
     pub fn snapshot(&self, trimmed: bool) -> Snapshot {
         let mut info = self.info.clone();
         info.captured = Some(crate::iso8601_now());
-        let tree = if trimmed {
-            self.model.tree.trimmed(false)
-        } else {
-            self.model.tree.clone()
-        };
+        let tree = if trimmed { self.model.tree.trimmed(false) } else { self.model.tree.clone() };
         Snapshot::new(tree, info)
     }
 
-    pub fn save_snapshot(
-        &self,
-        path: impl AsRef<std::path::Path>,
-        trimmed: bool,
-        pretty: bool,
-    ) -> Result<()> {
+    pub fn save_snapshot(&self, path: impl AsRef<std::path::Path>, trimmed: bool, pretty: bool) -> Result<()> {
         self.snapshot(trimmed).save(path, pretty)
     }
 
@@ -544,10 +521,7 @@ impl Store {
         self.refresh_inflight.clear();
         self.model.live = false;
         if self.status == Status::Live
-            || matches!(
-                self.status,
-                Status::Connecting(_) | Status::Loading | Status::Reconnecting(_)
-            )
+            || matches!(self.status, Status::Connecting(_) | Status::Loading | Status::Reconnecting(_))
         {
             self.status = Status::Offline("disconnected".into());
         }
@@ -584,8 +558,7 @@ impl Store {
         }
         let now = Instant::now();
         self.release_holds(now);
-        self.writer
-            .poll(now, &self.model, sink_of(&self.sink, &self.handle));
+        self.writer.poll(now, &self.model, sink_of(&self.sink, &self.handle));
         self.poll_refresh(now);
         self.poll_values();
         self.poll_rereads();
@@ -599,11 +572,7 @@ impl Store {
         match update {
             Update::State(s) => match s {
                 ConnectionState::Connecting => {
-                    let ep = self
-                        .handle
-                        .as_ref()
-                        .map(|h| h.endpoint().to_string())
-                        .unwrap_or_default();
+                    let ep = self.handle.as_ref().map(|h| h.endpoint().to_string()).unwrap_or_default();
                     self.status = Status::Connecting(ep);
                 }
                 ConnectionState::Loading => self.status = Status::Loading,
@@ -611,10 +580,7 @@ impl Store {
                 ConnectionState::BackingOff { delay, reason, .. } => {
                     self.subscribed.clear();
                     self.model.live = false;
-                    self.status = Status::Reconnecting(format!(
-                        "{reason} — retry in {:.1} s",
-                        delay.as_secs_f64()
-                    ));
+                    self.status = Status::Reconnecting(format!("{reason} — retry in {:.1} s", delay.as_secs_f64()));
                 }
                 ConnectionState::Failed(r) => {
                     self.subscribed.clear();
@@ -742,25 +708,19 @@ impl Store {
         if let Some(h) = self.model.holds.get_mut(pp)
             && h.until > now
         {
-            h.latest = Some(value);
+            // The engine's echo of our own write: the engine has caught up, so a push held
+            // before it was older than the write and must not come back at release.
+            h.latest = (value != h.local).then_some(value);
             return;
         }
         self.model.set_value(pp, value);
     }
 
     fn release_holds(&mut self, now: Instant) {
-        let expired: Vec<String> = self
-            .model
-            .holds
-            .iter()
-            .filter(|(_, h)| h.until <= now)
-            .map(|(k, _)| k.clone())
-            .collect();
+        let expired: Vec<String> =
+            self.model.holds.iter().filter(|(_, h)| h.until <= now).map(|(k, _)| k.clone()).collect();
         for p in expired {
-            if let Some(Hold {
-                latest: Some(v), ..
-            }) = self.model.holds.remove(&p)
-            {
+            if let Some(Hold { latest: Some(v), .. }) = self.model.holds.remove(&p) {
                 self.model.set_value(&p, v);
             }
         }
@@ -791,7 +751,9 @@ impl Store {
         self.model.topology_dirty = false;
         let tree = &self.model.tree;
         let mut devices = tree.indices("/devices");
-        devices.sort_by_key(|d| (tree.value(&format!("/devices/{d}/MultiUnitOrder")).and_then(Value::as_i64).unwrap_or(*d as i64), *d));
+        devices.sort_by_key(|d| {
+            (tree.value(&format!("/devices/{d}/MultiUnitOrder")).and_then(Value::as_i64).unwrap_or(*d as i64), *d)
+        });
         let all: Vec<Topology> = devices.iter().map(|d| Topology::new(tree, *d)).collect();
         // Keep one primary control-room/bus model; do not guess how a cascade
         // shares aux/monitor ownership. Inputs are grouped by cascade order.
@@ -821,12 +783,7 @@ impl Store {
         let mut desired: HashSet<&str> = HashSet::new();
         for batch in &plan.batches {
             desired.extend(batch.paths.iter().map(String::as_str));
-            let new: Vec<String> = batch
-                .paths
-                .iter()
-                .filter(|p| !self.subscribed.contains(*p))
-                .cloned()
-                .collect();
+            let new: Vec<String> = batch.paths.iter().filter(|p| !self.subscribed.contains(*p)).cloned().collect();
             if new.is_empty() {
                 continue;
             }
@@ -834,32 +791,15 @@ impl Store {
                 self.subscribed.extend(new);
             }
         }
-        let mut extra: Vec<String> = self
-            .retained
-            .keys()
-            .filter(|p| self.model.tree.has_property(p))
-            .cloned()
-            .collect();
+        let mut extra: Vec<String> =
+            self.retained.keys().filter(|p| self.model.tree.has_property(p)).cloned().collect();
         extra.sort();
         desired.extend(extra.iter().map(String::as_str));
-        let new_extra: Vec<String> = extra
-            .iter()
-            .filter(|p| !self.subscribed.contains(*p))
-            .cloned()
-            .collect();
-        if !new_extra.is_empty()
-            && handle
-                .send(Command::SubscribeBatch(new_extra.clone()))
-                .is_ok()
-        {
+        let new_extra: Vec<String> = extra.iter().filter(|p| !self.subscribed.contains(*p)).cloned().collect();
+        if !new_extra.is_empty() && handle.send(Command::SubscribeBatch(new_extra.clone())).is_ok() {
             self.subscribed.extend(new_extra);
         }
-        let stale: Vec<String> = self
-            .subscribed
-            .iter()
-            .filter(|p| !desired.contains(p.as_str()))
-            .cloned()
-            .collect();
+        let stale: Vec<String> = self.subscribed.iter().filter(|p| !desired.contains(p.as_str())).cloned().collect();
         for p in stale {
             let _ = handle.send(Command::Unsubscribe(p.clone()));
             self.subscribed.remove(&p);
@@ -873,10 +813,7 @@ impl Store {
     /// reconnects; paths the tree does not contain are subscribed once they appear.
     pub fn retain_subscriptions<S: AsRef<str>>(&mut self, paths: &[S]) {
         for p in paths {
-            *self
-                .retained
-                .entry(path::value_path(p.as_ref()))
-                .or_insert(0) += 1;
+            *self.retained.entry(path::value_path(p.as_ref())).or_insert(0) += 1;
         }
         self.sync_subscriptions();
     }
@@ -924,32 +861,26 @@ impl Store {
         if self.status != Status::Live {
             return;
         }
-        let due: Vec<String> = self
-            .refresh_due
-            .iter()
-            .filter(|(_, t)| **t <= now)
-            .map(|(k, _)| k.clone())
-            .collect();
+        let due: Vec<String> = self.refresh_due.iter().filter(|(_, t)| **t <= now).map(|(k, _)| k.clone()).collect();
         for node in due {
             self.refresh_due.remove(&node);
             let reply = handle.request(&node, true);
             self.refresh_inflight.push((node, reply));
         }
         let mut done = Vec::new();
-        self.refresh_inflight
-            .retain(|(node, reply)| match reply.try_take() {
-                None => true,
-                Some(Ok(msg)) => {
-                    if let Some(data) = msg.data {
-                        done.push((node.clone(), data));
-                    }
-                    false
+        self.refresh_inflight.retain(|(node, reply)| match reply.try_take() {
+            None => true,
+            Some(Ok(msg)) => {
+                if let Some(data) = msg.data {
+                    done.push((node.clone(), data));
                 }
-                Some(Err(e)) => {
-                    log::debug!("metadata refresh of {node} failed: {e}");
-                    false
-                }
-            });
+                false
+            }
+            Some(Err(e)) => {
+                log::debug!("metadata refresh of {node} failed: {e}");
+                false
+            }
+        });
         for (node, data) in done {
             self.apply_subtree(&node, &data);
         }
@@ -972,12 +903,7 @@ impl Store {
             .filter(|(p, v)| p.starts_with(&prefix) && before.get(*p) != Some(*v))
             .map(|(p, _)| p.to_owned())
             .collect();
-        changed.extend(
-            before
-                .keys()
-                .filter(|p| !self.model.tree.has_property(p))
-                .cloned(),
-        );
+        changed.extend(before.keys().filter(|p| !self.model.tree.has_property(p)).cloned());
         for p in changed {
             self.model.record(&p);
         }
@@ -1062,14 +988,12 @@ impl Store {
     /// Opens an undo step (`set /UndoRecording/value true`). Nested calls are counted; only the
     /// outermost pair is sent.
     pub fn begin_gesture(&mut self) {
-        self.writer
-            .begin_gesture(&self.model, sink_of(&self.sink, &self.handle));
+        self.writer.begin_gesture(&self.model, sink_of(&self.sink, &self.handle));
     }
 
     pub fn end_gesture(&mut self) {
         let closing = self.writer.gesture_depth() == 1;
-        self.writer
-            .end_gesture(&self.model, sink_of(&self.sink, &self.handle));
+        self.writer.end_gesture(&self.model, sink_of(&self.sink, &self.handle));
         // Console re-reads the undo list after every gesture (`get /UndoRedo/values?cmdID=15`,
         // 30–90 ms later in the 1.3.1 pcap) so Edit › Undo / Redo enable correctly.
         if closing && self.writer.writes_enabled {
@@ -1081,8 +1005,7 @@ impl Store {
     /// off), after any pending values.
     pub fn post(&mut self, path: &str, payload: Option<&Json>) {
         let command = Command::post(path, payload.map(Json::to_string));
-        self.writer
-            .send_now(&self.model, sink_of(&self.sink, &self.handle), command);
+        self.writer.send_now(&self.model, sink_of(&self.sink, &self.handle), command);
     }
 
     /// Runs a session command (load, save, new, …) through the writer gate. Loads move the
@@ -1094,14 +1017,8 @@ impl Store {
         }
         match command {
             SessionCommand::Load(name) => self.commit(session::SESSION, name.as_str()),
-            SessionCommand::RestoreModified(v) => {
-                self.commit(session::MODIFIED_SESSIONS, v.as_str())
-            }
-            other => self.writer.send_now(
-                &self.model,
-                sink_of(&self.sink, &self.handle),
-                other.command(),
-            ),
+            SessionCommand::RestoreModified(v) => self.commit(session::MODIFIED_SESSIONS, v.as_str()),
+            other => self.writer.send_now(&self.model, sink_of(&self.sink, &self.handle), other.command()),
         }
     }
 
@@ -1114,11 +1031,7 @@ impl Store {
             S::Recall(n) => self.commit(session::SNAPSHOT, n.as_str()),
             S::Prime(n) => self.commit(session::PRIMED_SNAPSHOT, n.as_str()),
             other => {
-                self.writer.send_now(
-                    &self.model,
-                    sink_of(&self.sink, &self.handle),
-                    other.command(),
-                );
+                self.writer.send_now(&self.model, sink_of(&self.sink, &self.handle), other.command());
                 self.model.values_wanted = self.model.live;
             }
         }
@@ -1183,18 +1096,17 @@ impl Store {
             self.refresh_values_query(UNDO_REDO, Some("cmdID=15"));
         }
         let mut done = Vec::new();
-        self.values_inflight
-            .retain(|(prop, reply)| match reply.try_take() {
-                None => true,
-                Some(Ok(msg)) => {
-                    done.push((prop.clone(), msg.data.unwrap_or(Json::Null)));
-                    false
-                }
-                Some(Err(e)) => {
-                    log::debug!("values refresh of {prop} failed: {e}");
-                    false
-                }
-            });
+        self.values_inflight.retain(|(prop, reply)| match reply.try_take() {
+            None => true,
+            Some(Ok(msg)) => {
+                done.push((prop.clone(), msg.data.unwrap_or(Json::Null)));
+                false
+            }
+            Some(Err(e)) => {
+                log::debug!("values refresh of {prop} failed: {e}");
+                false
+            }
+        });
         for (prop, data) in done {
             let Some(mut p) = self.model.tree.property(&prop).cloned() else {
                 continue;
@@ -1210,8 +1122,7 @@ impl Store {
 
     /// Sends (or counts as suppressed) every pending value now.
     pub fn flush(&mut self) {
-        self.writer
-            .flush(&self.model, sink_of(&self.sink, &self.handle));
+        self.writer.flush(&self.model, sink_of(&self.sink, &self.handle));
     }
 
     // MARK: Simulated meters (offline UI work)

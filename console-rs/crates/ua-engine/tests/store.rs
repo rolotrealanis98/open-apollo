@@ -13,10 +13,7 @@ fn push(path: &str, v: impl Into<Value>) -> (String, Value) {
 #[test]
 fn store_loads_snapshot_offline() {
     let store = x4_store();
-    assert_eq!(
-        store.status(),
-        &Status::Offline("live 127.0.0.1:4710 via lab-engine dump".into())
-    );
+    assert_eq!(store.status(), &Status::Offline("live 127.0.0.1:4710 via lab-engine dump".into()));
     assert_eq!(store.device_name(), Some("Apollo x4"));
     assert_eq!(store.engine_version(), Some("12.0.0"));
     assert_eq!(store.topology().inputs.len(), 6);
@@ -45,17 +42,8 @@ fn change_tracking() {
         push(&strips[2].fader(), 0.2),
     ]);
     assert_eq!(store.revision(), rev + 4);
-    let Changes::Paths(p) = store.changed_since(rev) else {
-        panic!("expected paths")
-    };
-    assert_eq!(
-        p,
-        [
-            strips[2].fader().as_str(),
-            "/TalkbackOn",
-            strips[1].solo().as_str()
-        ]
-    ); // newest first, no repeats
+    let Changes::Paths(p) = store.changed_since(rev) else { panic!("expected paths") };
+    assert_eq!(p, [strips[2].fader().as_str(), "/TalkbackOn", strips[1].solo().as_str()]); // newest first, no repeats
     assert!(store.changed_since(rev + 3).contains(&strips[2].fader()));
     assert!(!store.changed_since(rev + 3).contains("/TalkbackOn"));
     assert_eq!(store.path_revision(&strips[2].fader()), rev + 4);
@@ -70,15 +58,9 @@ fn change_tracking() {
 fn topology_changes_only_on_structure() {
     let mut store = x4_store();
     let r = store.topology_revision();
-    store.apply([
-        push("/devices/0/inputs/0/FaderLevelTapered", 0.2),
-        push("/devices/0/inputs/0/Mute", false),
-    ]);
+    store.apply([push("/devices/0/inputs/0/FaderLevelTapered", 0.2), push("/devices/0/inputs/0/Mute", false)]);
     assert_eq!(store.topology_revision(), r);
-    store.apply([
-        push("/devices/0/inputs/0/Stereo", true),
-        push("/devices/0/inputs/1/Stereo", true),
-    ]);
+    store.apply([push("/devices/0/inputs/0/Stereo", true), push("/devices/0/inputs/1/Stereo", true)]);
     assert_eq!(store.topology_revision(), r + 1);
     assert_eq!(store.topology().inputs[0].right_index, Some(1));
     // A structural property set to the same layout does not bump it.
@@ -94,58 +76,28 @@ fn topology_changes_only_on_structure() {
 fn meter_routing() {
     let meters = MeterStore::new();
     for (p, v) in [
-        (
-            "/devices/0/inputs/0/meters/0/MeterLevel/value",
-            Value::Number(-12.5),
-        ),
-        (
-            "/devices/0/inputs/0/meters/0/MeterPeakLevel/value",
-            Value::Number(-3.0),
-        ),
-        (
-            "/devices/0/inputs/0/meters/0/MeterClip/value",
-            Value::Bool(true),
-        ),
-        (
-            "/devices/0/inputs/0/CustomIntegratedPreampInputMeter/value",
-            Value::Number(-40.0),
-        ),
+        ("/devices/0/inputs/0/meters/0/MeterLevel/value", Value::Number(-12.5)),
+        ("/devices/0/inputs/0/meters/0/MeterPeakLevel/value", Value::Number(-3.0)),
+        ("/devices/0/inputs/0/meters/0/MeterClip/value", Value::Bool(true)),
+        ("/devices/0/inputs/0/CustomIntegratedPreampInputMeter/value", Value::Number(-40.0)),
         ("/MeterPulse/value", Value::Number(1381672.0)),
     ] {
         assert!(meters.ingest(p, &v), "{p}");
     }
     assert!(!meters.ingest("/devices/0/inputs/0/Mute/value", &Value::Bool(true)));
     let r = meters.reading("/devices/0/inputs/0/meters/0");
-    assert_eq!(
-        (r.level_db, r.peak_db, r.clip, r.updates),
-        (-12.5, -3.0, true, 3)
-    );
-    assert_eq!(
-        meters
-            .reading("/devices/0/inputs/0/CustomIntegratedPreampInputMeter")
-            .level_db,
-        -40.0
-    );
+    assert_eq!((r.level_db, r.peak_db, r.clip, r.updates), (-12.5, -3.0, true, 3));
+    assert_eq!(meters.reading("/devices/0/inputs/0/CustomIntegratedPreampInputMeter").level_db, -40.0);
     assert_eq!(meters.pulse(), 1381672);
-    assert_eq!(
-        meters.reading("/devices/0/inputs/5/meters/0"),
-        MeterReading::SILENT
-    );
-    assert!(MeterStore::is_meter_path(
-        "/devices/0/inputs/0/sends/3/meters/1/MeterClip/value"
-    ));
+    assert_eq!(meters.reading("/devices/0/inputs/5/meters/0"), MeterReading::SILENT);
+    assert!(MeterStore::is_meter_path("/devices/0/inputs/0/sends/3/meters/1/MeterClip/value"));
     assert!(!MeterStore::is_meter_path("/MeterLevel/value")); // Console's root path bug: not a meter node
-    assert!(!MeterStore::is_meter_path(
-        "/devices/0/inputs/0/FaderLevel/value"
-    ));
+    assert!(!MeterStore::is_meter_path("/devices/0/inputs/0/FaderLevel/value"));
     let stats = meters.stats();
     assert_eq!((stats.pushes, stats.pulses, stats.active_meters), (4, 1, 2));
     // A handle reads the same slot lock-free and sees later pushes.
     let h = meters.handle("/devices/0/inputs/0/meters/0");
-    meters.ingest(
-        "/devices/0/inputs/0/meters/0/MeterLevel/value",
-        &Value::Number(-6.0),
-    );
+    meters.ingest("/devices/0/inputs/0/meters/0/MeterLevel/value", &Value::Number(-6.0));
     assert_eq!(h.reading().level_db, -6.0);
 }
 
@@ -210,19 +162,9 @@ fn reads_before_load_fill_in() {
     let mut store = Store::new();
     assert_eq!(store.status(), &Status::Empty);
     assert!(store.value("/devices/0/inputs/0/Mute").is_none());
-    store.load(
-        Snapshot::load(common::manifest(
-            "tests/fixtures/apollo-x4-12.0.0.snapshot.json",
-        ))
-        .unwrap(),
-    );
+    store.load(Snapshot::load(common::manifest("tests/fixtures/apollo-x4-12.0.0.snapshot.json")).unwrap());
     assert!(store.value("/devices/0/inputs/0/Mute").is_some());
-    assert_eq!(
-        store
-            .meta("/devices/0/inputs/0/Mute")
-            .and_then(|m| m.ty.as_deref()),
-        Some("bool")
-    );
+    assert_eq!(store.meta("/devices/0/inputs/0/Mute").and_then(|m| m.ty.as_deref()), Some("bool"));
 }
 
 #[test]
@@ -230,8 +172,32 @@ fn simulated_meters_move() {
     let mut store = x4_store();
     store.simulate_meters(true);
     let key = store.topology().inputs[0].meters[0].base.clone();
-    common::wait_until("simulated meters", Duration::from_secs(3), || {
-        store.meters().reading(&key).updates > 2
-    });
+    common::wait_until("simulated meters", Duration::from_secs(3), || store.meters().reading(&key).updates > 2);
     store.simulate_meters(false);
+}
+
+/// A drag's echo hold: a stale push is held, the engine's echo of our own write drops it (a
+/// release never pulls the control back to a value older than the write), and a push that comes
+/// after that echo is the engine's newer state and wins at release.
+#[test]
+fn echo_hold_drops_pushes_older_than_our_write() {
+    let mut store = x4_store();
+    store.set_writes_enabled(true);
+    let fader = store.topology().inputs[0].fader();
+    store.set_echo_hold(Duration::from_millis(20));
+    store.set(&fader, 0.6);
+    store.apply([push(&fader, 0.3)]); // stale, from before our write
+    assert_eq!(store.value(&fader), Some(&Value::Number(0.6)));
+    store.apply([push(&fader, 0.6)]); // the engine's echo of our write
+    std::thread::sleep(Duration::from_millis(30));
+    store.drain(); // releases the hold
+    assert_eq!(store.value(&fader), Some(&Value::Number(0.6)), "the stale 0.3 must not come back");
+
+    store.set(&fader, 0.5);
+    store.apply([push(&fader, 0.5)]); // echo
+    store.apply([push(&fader, 0.2)]); // someone else moved it after our write
+    assert_eq!(store.value(&fader), Some(&Value::Number(0.5)), "held while dragging");
+    std::thread::sleep(Duration::from_millis(30));
+    store.drain();
+    assert_eq!(store.value(&fader), Some(&Value::Number(0.2)), "the newer engine value wins at release");
 }
