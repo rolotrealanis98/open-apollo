@@ -311,7 +311,8 @@ class TestReadbackMeter:
         m.feed(hi)
         m.feed(make_readback())
         level, peak, _ = m.get_channel_meter(0)
-        assert level == SILENCE_DB
+        # The level is released at the engine's rate (a few ms: still -6)
+        assert -6.5 < level <= -6.0
         assert peak == pytest.approx(-6.0, abs=0.05)
 
     def test_table_channel_ids_unique(self):

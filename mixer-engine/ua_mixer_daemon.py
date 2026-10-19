@@ -38,7 +38,8 @@ import time
 from pathlib import Path
 
 from protocol import (Command, parse_command, encode_response_bytes,
-                      encode_error_bytes, _parse_path_with_params)
+                      encode_error_bytes, encode_multi_bytes,
+                      _parse_path_with_params)
 from state_tree import StateTree
 from console_commands import ConsoleCommands
 from helper_tree import HelperTree
@@ -63,7 +64,7 @@ from hardware import (CLOCK_CONTROL_PATHS, CUE_34_OFF_RATE, effective_cue_count,
                       pcie_link_text, preamp_db_to_tapered)
 import pipewire_state
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, find_apollo_card,
-                      make_meter,
+                      METER_TICK_SEC, make_meter,
                       meter_channel)
 from bonjour import BonjourAnnouncer, _default_name
 from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
@@ -468,6 +469,11 @@ DEFAULT_HELPER_PINS = SCRIPT_DIR / "device_maps" / "helper_tree.pins.json"
 DEVICES_DIR = SCRIPT_DIR.parent / "devices"
 DEFAULT_PORT = 4710
 DEFAULT_HELPER_PORT = 4720
+METER_PULSE_PATH = "/MeterPulse/value"
+# A meter goes out again once it moves this much (the release moves it
+# ~0.5 dB per tick near 0 dBFS, ~0.01 dB near silence)
+METER_DELTA_DB = 0.01
+_METER_PROP_INDEX = {'level': 0, 'peak': 1, 'clip': 2}
 DEFAULT_WS_PORT = 4721
 DEFAULT_HOST = "0.0.0.0"
 
@@ -497,6 +503,8 @@ class MixerClient:
         self.ubjson = False
         self.json_framed = False
         self.sleep = False   # Per-socket meter-consumer hint, never mixer state.
+        # `subscribe mode=multi`: meter ticks arrive as one envelope
+        self.multi = False
         self._send_count = 0
 
     def send(self, data: bytes):
@@ -582,6 +590,7 @@ class MixerDaemon:
         self._metering = metering or NullMeter()
         self._meter_map: dict = {}   # (kind, ch, meter) → record ch
         self._meter_map_ids: tuple | None = None
+        self._meter_cfg: dict = {}   # (kind, ch, send, meter) → (cap, gain)
         self._last_meter: dict[str, float | bool] = {}  # delta detection
 
         # Generate unique IDs matching real mixer engine format (hex UUIDs)
@@ -591,8 +600,11 @@ class MixerDaemon:
 
         self._init_fired = False  # Track if we've sent the init sequence
 
-        # MeterPulse heartbeat counter (real UA Mixer Engine runs at ~32 Hz)
+        # MeterPulse counter and the subscribed meters (_meter_tick)
         self._meter_pulse_counter = 0
+        self._meter_cache: list[dict] | None = None
+        self._meter_cache_gen = 0
+        self._meter_ticks = 0
 
         # Readback suppression: when a client SETs a value that's also
         # read from hardware readback, suppress readback pushes for a
@@ -696,6 +708,9 @@ class MixerDaemon:
         # `enabled` on IOType, Stereo, 48V, Pad and SRConvert follows the
         # Hi-Z jack, IOType and the clock source
         install_enabled_meta(self.state)
+        # Meter channels and gains follow the tree (_meter_config)
+        self.state.register_change_observer(
+            "openapollo.meter_config", self._on_tree_change_for_meters)
         # Settings > PEAK HOLD / CLIP HOLD also set the host meters' holds
         self.state.register_change_observer(
             "openapollo.meter_holds", self._on_meter_holds)
@@ -1052,9 +1067,10 @@ class MixerDaemon:
 
         DSP load, rate, transport, buffer size and latency are polled at
         ~1 Hz (every 50 ticks) even with no client connected.
+
+        The meters themselves go out on the meter tick
+        (_meter_pulse_heartbeat), as the Mixer Engine sends them.
         """
-        meter_cache: list[dict] | None = None
-        cache_gen = 0
         last_rb: dict = {}
         dsp_tick = 0
 
@@ -1070,18 +1086,7 @@ class MixerDaemon:
                 self._poll_device_status()
 
             if not self.state._callbacks:
-                meter_cache = None
                 continue
-
-            # Rebuild cache when subscriptions change
-            sub_gen = len(self.state._subs)
-            if meter_cache is None or sub_gen != cache_gen:
-                meter_cache = []
-                for path in self.state._subs:
-                    entry = self._parse_meter_path(path)
-                    if entry:
-                        meter_cache.append(entry)
-                cache_gen = sub_gen
 
             # Retry hardware init if device wasn't available at startup.
             # Apollo may connect after daemon starts (TB hot-plug).
@@ -1112,87 +1117,99 @@ class MixerDaemon:
                     if isinstance(self._metering, ReadbackMeter):
                         self._metering.feed(rb["words"])
 
-            if not meter_cache:
-                continue
-
-            for entry in meter_cache:
-                value = self._read_meter(entry)
-
-                # Delta check: skip if value hasn't changed significantly
-                last = self._last_meter.get(entry['path'])
-                if last is not None:
-                    if entry['prop'] == 'clip':
-                        if value == last:
-                            continue
-                    else:
-                        if abs(value - last) < 0.5:
-                            continue
-
-                self._last_meter[entry['path']] = value
-
-                # Update the state tree's stored value so GET requests
-                # return current meter readings
-                prop = self.state.get_prop_dict(entry['path'].rsplit('/value', 1)[0])
-                if prop is not None:
-                    prop["value"] = value
-
-                # Push to all subscribers on both state tree and helper tree
-                subs = set()
-                if entry['path'] in self.state._subs:
-                    subs.update(self.state._subs[entry['path']])
-                # Also check base path without /value suffix
-                base_path = entry['path'].rsplit('/value', 1)[0]
-                if base_path in self.state._subs:
-                    subs.update(self.state._subs[base_path])
-
-                for client_id in list(subs):
-                    cb = self.state._callbacks.get(client_id)
-                    if cb:
-                        try:
-                            cb(entry['path'], value)
-                        except Exception:
-                            pass
-
-                # Also notify helper tree subscribers (cross-protocol)
-                if self.helper_tree:
-                    self.helper_tree._notify(entry['path'], value)
-
     async def _meter_pulse_heartbeat(self):
-        """Send MeterPulse counter to subscribed 4710 clients at ~10 Hz.
-
-        The real UA Mixer Engine sends /MeterPulse/value at ~32 Hz as an
-        incrementing int64 counter. Clients use this as a heartbeat to
-        know the daemon is alive and metering is active.
-
-        We run at 10 Hz (configurable) which is sufficient for
-        ConsoleLink/iPad to stay happy.
+        """The Mixer Engine's meter tick, every 30.71 ms (about 32.6 Hz, the
+        Console 1.3.1 capture's median): /MeterPulse goes up by one and the
+        meters that moved go out with it, in one `multi` envelope for a
+        client that asked for `subscribe mode=multi` (Console) and as
+        separate pushes otherwise. The schedule is absolute, so the rate
+        does not drift with the work done per tick.
         """
-        pulse_path = "/MeterPulse/value"
-
+        loop = asyncio.get_running_loop()
+        due = loop.time()
         while True:
-            await asyncio.sleep(0.1)  # 10 Hz
+            due += METER_TICK_SEC
+            delay = due - loop.time()
+            if delay < -METER_TICK_SEC:
+                # Stalled (a long transaction on the loop): start afresh
+                # rather than bursting the missed ticks
+                due = loop.time()
+                delay = 0.0
+            await asyncio.sleep(max(0.0, delay))
+            try:
+                self._meter_tick()
+            except Exception:
+                log.exception("meter tick failed")
 
-            # Check if anyone is subscribed to MeterPulse
-            subs = self.state._subs.get(pulse_path)
-            if not subs:
-                # Also check without /value suffix
-                subs = self.state._subs.get("/MeterPulse")
-            if not subs:
-                continue
+    def _meter_tick(self):
+        """One meter tick: MeterPulse and the subscribed meters that changed,
+        sent to each subscriber (see _meter_pulse_heartbeat)."""
+        subs = self.state._subs
+        if not self.state._callbacks:
+            self._meter_cache = None
+            return
+        # Channels and gains are re-read once a second too, for a tree
+        # change that notified nobody (a session load replacing nodes)
+        self._meter_ticks += 1
+        if self._meter_ticks % 33 == 0:
+            self._meter_cfg.clear()
+        # Rebuild the meter list when subscriptions change
+        if self._meter_cache is None or len(subs) != self._meter_cache_gen:
+            self._meter_cache = [e for e in map(self._parse_meter_path, subs)
+                                 if e]
+            self._meter_cache_gen = len(subs)
 
+        out: dict[str, list] = {}   # client id -> [(path, value)]
+        pulse_subs = subs.get(METER_PULSE_PATH) or subs.get("/MeterPulse")
+        if pulse_subs:
             self._meter_pulse_counter += 1
-
-            # Update the state tree value (no notifications -- we push manually)
             prop = self.state.get_prop_dict("/MeterPulse")
             if prop is not None:
                 prop["value"] = self._meter_pulse_counter
+            for cid in pulse_subs:
+                out.setdefault(cid, []).append(
+                    (METER_PULSE_PATH, self._meter_pulse_counter))
 
-            # Push to all subscribed clients
-            for client_id in list(subs):
-                cb = self.state._callbacks.get(client_id)
-                if cb:
+        readings: dict[tuple, tuple] = {}
+        for entry in self._meter_cache:
+            key = (entry['kind'], entry['channel'], entry['send'],
+                   entry['meter_idx'])
+            r = readings.get(key)
+            if r is None:
+                r = readings[key] = self._read_meter_values(entry)
+            value = r[_METER_PROP_INDEX[entry['prop']]]
+            if entry['prop'] != 'clip' and value < SILENCE_DB + 0.01:
+                value = SILENCE_DB      # the release has reached silence
+            path = entry['path']
+            # Only values that changed, as the engine sends them
+            last = self._last_meter.get(path)
+            if last is not None and (
+                    value == last if entry['prop'] == 'clip'
+                    else abs(value - last) < METER_DELTA_DB):
+                continue
+            self._last_meter[path] = value
+            # GETs return the current reading
+            base = path.rsplit('/value', 1)[0]
+            prop = self.state.get_prop_dict(base)
+            if prop is not None:
+                prop["value"] = value
+            for cid in subs.get(path, set()) | subs.get(base, set()):
+                out.setdefault(cid, []).append((path, value))
+            # Helper tree subscribers (cross-protocol)
+            if self.helper_tree:
+                self.helper_tree._notify(path, value)
+
+        for cid, items in out.items():
+            client = self.clients.get(cid)
+            if client is not None and client.multi and not client.ubjson:
+                if not client.sleep:
+                    client.send(encode_multi_bytes(items))
+                continue
+            cb = self.state._callbacks.get(cid)
+            if cb:
+                for path, value in items:
                     try:
-                        cb(pulse_path, self._meter_pulse_counter)
+                        cb(path, value)
                     except Exception:
                         pass
 
@@ -1225,40 +1242,62 @@ class MixerDaemon:
         }
 
     def _read_meter(self, entry: dict):
-        """Read a single meter value from the software meter.
+        """One meter property (entry['prop']) from _read_meter_values."""
+        return self._read_meter_values(entry)[_METER_PROP_INDEX[entry['prop']]]
+
+    def _read_meter_values(self, entry: dict):
+        """(level, peak, clip) of a meter from the software meter.
 
         Maps the device-map channel (by its Name) to the ALSA record
         channel that carries it; channels the Apollo doesn't record read
         as silence.
         """
+        cap, gain = self._meter_config(entry)
+        if cap is None or gain is None:
+            return SILENCE_DB, SILENCE_DB, False
+        level, peak, clip = self._metering.get_channel_meter(cap)
+        if gain:
+            level, peak, clip = self._shift_meter(gain, level, peak, clip)
+        return level, peak, clip
+
+    def _meter_config(self, entry: dict):
+        """(record channel or None, gain dB or None) of a meter: what
+        _read_meter_values needs from the tree, kept until the tree changes
+        (_on_tree_change_for_meters) so a meter tick does not walk it for
+        every meter."""
         ids = tuple(self._metering.channel_ids)
+        if ids != self._meter_map_ids:
+            self._meter_map = {}
+            self._meter_cfg = {}
+            self._meter_map_ids = ids
+        ckey = (entry['kind'], entry['channel'], entry['send'],
+                entry['meter_idx'])
+        cfg = self._meter_cfg.get(ckey)
+        if cfg is None:
+            cfg = self._meter_cfg[ckey] = (
+                self._meter_capture(entry),
+                self._meter_gain_db(entry) if entry['kind'] == 'inputs'
+                else 0.0)
+        return cfg
+
+    def _on_tree_change_for_meters(self, path: str, value):
+        """Any change but a meter's own reading may move a meter's channel
+        or gain (Stereo, Name, fader, mute, sends, PostFaderMetering)."""
+        if "/meters/" not in path:
+            self._meter_cfg.clear()
+
+    def _meter_capture(self, entry: dict):
+        """The record channel carrying a meter, or None."""
+        ids = self._meter_map_ids
         base = f"/devices/0/{entry['kind']}/{entry['channel']}"
         # a runtime Link moves meters/1 to the pair's right channel
         stereo = bool(self.state.get_value(f"{base}/Stereo/value"))
         key = (entry['kind'], entry['channel'], entry['meter_idx'], stereo)
-        if ids != self._meter_map_ids:
-            self._meter_map = {}
-            self._meter_map_ids = ids
         if key not in self._meter_map:
             self._meter_map[key] = meter_channel(
                 entry['kind'], entry['channel'], entry['meter_idx'],
                 self.state.get_value(f"{base}/Name/value"), stereo, ids)
-        cap = self._meter_map[key]
-        if cap is None:
-            level, peak, clip = SILENCE_DB, SILENCE_DB, False
-        else:
-            level, peak, clip = self._metering.get_channel_meter(cap)
-            if entry['kind'] == 'inputs':
-                level, peak, clip = self._apply_meter_gain(
-                    entry, level, peak, clip)
-
-        if entry['prop'] == 'level':
-            return level
-        elif entry['prop'] == 'peak':
-            return peak
-        elif entry['prop'] == 'clip':
-            return clip
-        return SILENCE_DB
+        return self._meter_map[key]
 
     def _meter_gain_db(self, entry: dict) -> float | None:
         """The gain the host adds to an input's meter, or None (silent).
@@ -1312,15 +1351,10 @@ class MixerDaemon:
             gain += fader
         return gain
 
-    def _apply_meter_gain(self, entry: dict, level: float, peak: float,
-                          clip: bool):
-        """Input meter -> post-fader or send meter (see _meter_gain_db)."""
-        gain = self._meter_gain_db(entry)
-        if gain is None:
-            return SILENCE_DB, SILENCE_DB, False
-        if not gain:
-            return level, peak, clip
-
+    @staticmethod
+    def _shift_meter(gain: float, level: float, peak: float, clip: bool):
+        """Input meter -> post-fader or send meter, `gain` dB from
+        _meter_gain_db (not None)."""
         def shift(v):
             # Silence stays silence; the meter tops out at 0 dBFS
             return v if v <= SILENCE_DB else max(SILENCE_DB, min(0.0, v + gain))
@@ -3521,8 +3555,9 @@ class MixerDaemon:
         path = cmd.path
 
         # Handle "subscribe mode=multi" — just acknowledge, enable batch mode
-        if path == "mode=multi":
-            log.debug("%s: subscribe mode=multi acknowledged", client.id)
+        if path in ("mode=multi", "mode=single"):
+            log.debug("%s: subscribe %s acknowledged", client.id, path)
+            client.multi = path == "mode=multi"
             return
 
         # Handle batch subscribe: subscribe {"paths":["/path1","/path2",...]}

@@ -33,9 +33,26 @@ log = logging.getLogger("ua-metering")
 
 SILENCE_DB = -77.0   # UA Mixer Engine silence floor
 PEAK_HOLD_SEC = 2.0  # seconds to hold peak before decay (until Settings says)
-PEAK_DECAY_DB_SEC = 20.0  # dB/sec decay after hold expires
 CLIP_HOLD_SEC = 2.0  # seconds to hold clip indicator (until Settings says)
+# The Mixer Engine's meter release (UADMeterValue::Update, engine 12.0.0 arm64
+# 0x100068130): after its hold a meter falls as (dB + 77) * c - 77 per step,
+# c = MeterDecayCoefficient 0.993 (GlobalSettings ctor 0x1000b6720). The step
+# is 16 ms but the remainder is dropped each meter tick, so it is one step per
+# 30.71 ms tick; Console 1.3.1's capture shows x0.99300 per push, 30.7 ms apart.
+METER_DECAY_COEFFICIENT = 0.993
+METER_TICK_SEC = 0.03071
 S32_MAX = 2147483647  # 2^31 - 1
+
+
+def meter_decay(db, seconds):
+    """`db` after `seconds` of the Mixer Engine's meter release, never below
+    silence: (dB + 77) * 0.993 per 30.71 ms, so about 17.6 dB/s from 0 dBFS
+    and 1.3 s from 0 to -20 dB."""
+    if seconds <= 0.0 or db <= SILENCE_DB:
+        return max(db, SILENCE_DB)
+    return ((db - SILENCE_DB)
+            * METER_DECAY_COEFFICIENT ** (seconds / METER_TICK_SEC)
+            + SILENCE_DB)
 
 
 def find_alsa_device():
@@ -85,6 +102,9 @@ class AlsaMeter:
 
         # Per-channel state (capture inputs)
         self._levels = [SILENCE_DB] * capture_channels
+        # Released level (meter_decay from the last rise) and its time
+        self._shown = [SILENCE_DB] * capture_channels
+        self._shown_times = [0.0] * capture_channels
         self._peaks = [SILENCE_DB] * capture_channels
         self._peak_times = [0.0] * capture_channels
         self._clips = [False] * capture_channels
@@ -141,13 +161,14 @@ class AlsaMeter:
             channel: 0-based channel index (0..capture_channels-1)
 
         Returns:
-            (level_db, peak_hold_db, clip) — dBFS floats + clip bool
+            (level_db, peak_hold_db, clip) — dBFS floats + clip bool; the
+            level rises at once and falls at the Mixer Engine's rate
         """
         now = time.monotonic()
         with self._lock:
             if channel < 0 or channel >= len(self._levels):
                 return (SILENCE_DB, SILENCE_DB, False)
-            level = self._levels[channel]
+            level = self._released_level(channel, now)
 
             peak = self._held_peak(channel, now)
 
@@ -162,14 +183,21 @@ class AlsaMeter:
         """(level_db, peak_hold_db, clip) of ALSA record channel `channel`."""
         return self.get_input_meter(channel)
 
+    def _released_level(self, c, now):
+        """Level of channel c as the Mixer Engine shows it (caller holds the
+        lock): the last rise, falling at meter_decay's rate, never below the
+        current level."""
+        return max(self._levels[c],
+                   meter_decay(self._shown[c], now - self._shown_times[c]))
+
     def _held_peak(self, c, now):
         """Peak-hold reading of channel c (caller holds the lock): the peak,
-        held peak_hold_sec after the level last reached it, then decaying,
-        never below the current level."""
+        held peak_hold_sec after the level last reached it, then falling at
+        meter_decay's rate, never below the current level."""
         peak = self._peaks[c]
         elapsed = now - self._peak_times[c]
         if elapsed > self.peak_hold_sec:
-            peak -= PEAK_DECAY_DB_SEC * (elapsed - self.peak_hold_sec)
+            peak = meter_decay(peak, elapsed - self.peak_hold_sec)
         return max(self._levels[c], peak, SILENCE_DB)
 
     def get_output_meter(self, channel):
@@ -272,6 +300,9 @@ class AlsaMeter:
         if db >= self._held_peak(c, now):
             self._peaks[c] = db
             self._peak_times[c] = now
+        if db >= self._released_level(c, now):
+            self._shown[c] = db
+            self._shown_times[c] = now
         self._levels[c] = db
         if clip:
             self._clips[c] = True
@@ -438,6 +469,8 @@ class PipeWireMeter(AlsaMeter):
         self.channel_ids = ids
         self._capture_ch = n
         self._levels = [SILENCE_DB] * n
+        self._shown = [SILENCE_DB] * n
+        self._shown_times = [0.0] * n
         self._peaks = [SILENCE_DB] * n
         self._peak_times = [0.0] * n
         self._clips = [False] * n

@@ -52,6 +52,15 @@ def encode_response_bytes(path: str, data: Any, params: dict | None = None) -> b
     return (json.dumps(msg, separators=(",", ":")) + "\0").encode("utf-8")
 
 
+def encode_multi_bytes(items) -> bytes:
+    """A `multi` envelope, as the Mixer Engine sends a meter tick to a client
+    in `subscribe mode=multi`: {"path":"multi","data":[{"path":…,"data":…},
+    …]}, null-terminated. `items` are (path, value) pairs."""
+    msg = {"path": "multi",
+           "data": [{"path": p, "data": v} for p, v in items]}
+    return (json.dumps(msg, separators=(",", ":")) + "\0").encode("utf-8")
+
+
 def encode_error_bytes(path: str, verb: str) -> bytes:
     """Encode an error response matching the real mixer engine format."""
     msg = {"path": path, "error": f"Unable to resolve path for {verb}."}

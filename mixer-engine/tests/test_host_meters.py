@@ -108,8 +108,10 @@ def test_bypassed_or_off_send_is_silent(daemon, tree, path, value):
     assert read(daemon, send_level(1)) == SILENCE_DB
 
 
-def test_silent_input_stays_silent(daemon, tree, meter):
-    meter.feed([0] * 40)
+def test_silent_input_stays_silent(daemon, tree):
+    # A meter that never saw signal (a fed level falls at the engine's rate)
+    daemon._metering = ReadbackMeter()
+    daemon._metering.feed([0] * 40)
     tree.set_value(IN0 + "/sends/0/Gain/value", 12.0)
     assert read(daemon, send_level(0)) == SILENCE_DB
 
