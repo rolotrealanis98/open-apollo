@@ -146,7 +146,7 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
     let Some(dev) = devices.first() else { return };
     let cues = settings::fields(src, SettingsGroup::CueRoutes(dev.index));
     let n = cues.iter().map(|f| f.row as usize + 1).max().unwrap_or(0).max(1);
-    let hp: Vec<String> = src.indices(&format!("{}/outputs", dev.path)).into_iter().map(|o| format!("{}/outputs/{o}", dev.path)).filter(|o| str_at(src, &format!("{o}/IOType")).as_deref() == Some("Headphone")).collect();
+    let hp = model.headphone_outputs();
     let rows = hp.len().max(2) as f32;
     let col_w = 90.0;
     let size = (164.0 + n as f32 * col_w + 4.0, 149.0 + rows * 44.0 + 1.0);
@@ -218,14 +218,19 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
                 _ => {}
             }
         }
-        // The headphone tile: which HP output plays this cue.
+        // The headphone tile: which HP output plays this cue. The lit tile opens the HP's
+        // source menu (`MixInSource`: MON, CUE 1…4, NONE); an empty cell assigns this cue.
+        let cue = format!("CUE {}", k + 1);
         for (h, o) in hp.iter().enumerate() {
-            if str_at(src, &format!("{o}/MixInSource")).unwrap_or_default() == format!("cue{}", k + 1) {
+            let tile = Rect::new(cx + 1.0, row.y + 1.0 + h as f32 * 43.0, 89.0, 41.0);
+            if o.options.get(o.source) == Some(&cue) {
                 let mix = fields.iter().find(|f| f.label == "SOURCE").map(|f| f.value_text()).unwrap_or_default();
                 let what = if mix == "MIX" { "MONITOR MIX".to_string() } else { format!("CUE {} MIX", k + 1) };
-                let tile = Rect::new(cx + 1.0, row.y + 1.0 + h as f32 * 43.0, 89.0, 41.0);
                 // The tile art fills the 89 × 41 tile (`Switch-NoDedicatedCue-A`, stretched).
                 ui.toggle("Switch-NoDedicatedCue-A", Some(&format!("{what}\nto\n{} HP {}", dev.letter(), h + 1)), true, true, tile, None, None);
+                ui.hit(tile, ControlId { strip: "monitor".into(), control: Control::HeadphoneMenu(h as u8) }, HitKind::Tap);
+            } else if let Some(i) = o.options.iter().position(|l| *l == cue) {
+                ui.hit(tile, ControlId { strip: "monitor".into(), control: Control::HeadphoneSource { output: h as u8, option: i as u8 } }, HitKind::Tap);
             }
         }
     }
@@ -607,8 +612,8 @@ fn meter_window(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect) {
     let m: MeterFrame = model.monitor_meters();
     let left = Rect::new(r.x + 26.75, r.y + 74.0, 23.5, 491.0);
     let right = Rect::new(r.x + 68.75, r.y + 74.0, 23.5, 491.0);
-    ui.bar_meter("Monitor-Meter", m.left, m.clip_left, left);
-    ui.bar_meter("Monitor-Meter", m.right, m.clip_right, right);
+    ui.bar_meter("Monitor-Meter", m.left, m.peak_left, m.clip_left, left);
+    ui.bar_meter("Monitor-Meter", m.right, m.peak_right, m.clip_right, right);
     let skin = ui.skin("meters", "Monitor-Meter");
     let tick = skin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::rgb8(93, 101, 105));
     let mut numbers = ui.style("meters", "Monitor-Meter");
@@ -713,7 +718,7 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
             mute: Some(sid(Control::SettingPress(format!("toggle:{node}/Bypass").into()))),
             level: Some(sid(Control::SettingSet(format!("fader:{node}/GainTapered").into()))),
         };
-        let send = crate::model::SendState { name: name.clone(), level, muted, pan: pan_knob };
+        let send = crate::model::SendState { name: name.clone(), level, muted, pan: pan_knob, meter: model.send_meter(node) };
         ui.at(x, r.y + 31.0, |ui| crate::surfaces::cells::full_send_strip(ui, "Sends-Input-Fader", &send, &db_readout(db), 0.0, r.h - 36.0, ids));
     }
     // ‹ › step through the auxes, or through the input strips: `Popover-Left` / `-Right`
@@ -982,16 +987,48 @@ fn tempo(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bounds: Rect) {
     // The tempo field (80 × 24 at (12, 39)): the value selected when the window opens.
     // (Opened without the status bar, `--open tempo`, it shows the session tempo the same way.)
     let text = view.text_edit.as_ref().filter(|e| matches!(e.target, TextTarget::Tempo)).map(|e| e.text.clone()).unwrap_or_else(|| format!("{:.2}", model.status().tempo));
-    let fr = Rect::new(r.x + 12.0, r.y + 39.0, 80.0, 24.0);
-    ui.fill(fr, Rgba::rgb8(78, 83, 88));
-    let ts = Ui::plain_style("Helvetica", 11.0, false, Rgba::rgb8(191, 202, 214));
-    if !text.is_empty() {
-        let w = crate::window::helvetica_width(&text, ts.size).ceil();
-        ui.fill(Rect::new(fr.x + 8.0, fr.y + 6.5, w + 2.0, 11.0), Rgba::rgb8(43, 79, 119));
-    }
-    ui.text(&text, ts, Rect::new(fr.x + 8.5, fr.y + 2.0, fr.w - 10.0, fr.h), Align::Left);
+    value_field(ui, &text, true, Rect::new(r.x + 12.0, r.y + 39.0, 80.0, 24.0));
     // TAP (Switch-Large, 70 × 30 at (109.5, 36.5)): Console's tap tempo (`TapTempo`).
     ui.toggle("Switch-Large", Some("TAP"), false, true, Rect::new(r.x + 108.5, r.y + 35.5, 71.0, 31.0), Some(pid(Control::TempoTap)), None);
+    popover_button(ui, "CANCEL", false, Rect::new(r.x + 12.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCancel)));
+    popover_button(ui, "OK", true, Rect::new(r.x + 104.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCommit)));
+}
+
+/// The TEMPO window's value field: the text, highlighted while `selected`.
+fn value_field(ui: &mut Ui, text: &str, selected: bool, fr: Rect) {
+    ui.fill(fr, Rgba::rgb8(78, 83, 88));
+    let ts = Ui::plain_style("Helvetica", 11.0, false, Rgba::rgb8(191, 202, 214));
+    if selected && !text.is_empty() {
+        let w = crate::window::helvetica_width(text, ts.size).ceil();
+        ui.fill(Rect::new(fr.x + 8.0, fr.y + 6.5, w + 2.0, 11.0), Rgba::rgb8(43, 79, 119));
+    }
+    ui.text(text, ts, Rect::new(fr.x + 8.5, fr.y + 2.0, fr.w - 10.0, fr.h), Align::Left);
+}
+
+// ---- Typed value (`Rack_DoublePopover` / `Rack_KnobPopover` / `Rack_PanKnobPopover`) ----
+
+/// The typed-dB popover over `anchor` (a fader readout or a send knob), centred on it, above
+/// it when there is room, else below. [I] No capture of Console's value popover exists: it
+/// takes the TEMPO window's look (Rack_Popover chrome, the field, CANCEL / OK at the same
+/// places; the close X cancels), without TAP and with "dB" after the field.
+pub(crate) fn value_popover(ui: &mut Ui, view: &ViewState, anchor: Rect, bounds: Rect) {
+    let size = (196.0, 111.0);
+    let x = (anchor.center().0 - size.0 / 2.0).clamp(bounds.x, (bounds.max_x() - size.0).max(bounds.x));
+    let y = if anchor.y - size.1 - 0.5 >= bounds.y { anchor.y - size.1 - 0.5 } else { (anchor.max_y() + 0.5).min(bounds.max_y() - size.1) };
+    let r = Rect::new(x, y, size.0, size.1);
+    popover_frame_with(ui, r, "VOLUME", false);
+    if let Some(img) = ui.skin("views", "Popover-Close-Old").and_then(|s| s.image("image")) {
+        let img = img.to_string();
+        ui.image(&img, Rect::new(r.x + 12.0, r.y + 8.5, 12.0, 12.0), None, None, 1.0);
+    }
+    ui.hit(Rect::new(r.x + 8.0, r.y + 1.0, 20.0, 27.0), pid(Control::TextCancel), HitKind::Tap);
+    let (text, fresh) = match view.text_edit.as_ref().map(|e| (&e.target, e)) {
+        Some((TextTarget::Value { fresh, .. }, e)) => (e.text.clone(), *fresh),
+        _ => (String::new(), false),
+    };
+    value_field(ui, &text, fresh, Rect::new(r.x + 12.0, r.y + 39.0, 80.0, 24.0));
+    let ls = Ui::plain_style("Helvetica", 11.0, false, Rgba::rgb8(191, 202, 214));
+    ui.text("dB", ls, Rect::new(r.x + 100.0, r.y + 41.0, 30.0, 24.0), Align::Left);
     popover_button(ui, "CANCEL", false, Rect::new(r.x + 12.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCancel)));
     popover_button(ui, "OK", true, Rect::new(r.x + 104.0, r.y + 75.0, 80.0, 24.0), Some(pid(Control::TextCommit)));
 }

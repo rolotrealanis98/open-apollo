@@ -134,6 +134,40 @@ class TestCueBusCount:
                 for n in (14, 15, 16, 17)] == [True, True, False, False]
         assert d.state is tree
 
+    def test_lowering_the_count_disables_the_cue_buses(self, router, backend):
+        router.on_set("/CueBusCount/value", 4)
+        backend.mixer_params.clear()
+        router.on_set("/CueBusCount/value", 3)
+        assert backend.mixer_params == [(0, 5, 0x01, 1), (0, 6, 0x01, 0)]
+        backend.mixer_params.clear()
+        router.on_set("/CueBusCount/value", 2)
+        assert backend.mixer_params == [(0, 5, 0x01, 0)]
+        backend.mixer_params.clear()
+        router.on_set("/CueBusCount/value", 2)
+        assert backend.mixer_params == []
+
+    def test_cue_3_4_are_off_at_176k_and_return_when_it_drops(
+            self, tree, backend):
+        router = HardwareRouter(backend, tree)
+        d = MixerDaemon(tree, router)
+
+        def active():
+            return [tree.get_value(f"/devices/0/outputs/{n}/Active/value")
+                    for n in (14, 15, 16, 17)]
+        tree.set("/CueBusCount/value", 4)
+        router.on_set("/CueBusCount/value", 4)
+        assert active() == [True] * 4
+        backend.mixer_params.clear()
+        tree.set("/SampleRate/value", 192000)
+        assert active() == [True, True, False, False]
+        assert backend.mixer_params == [(0, 5, 0x01, 0), (0, 6, 0x01, 0)]
+        assert tree.get_value("/CueBusCount/value") == 4
+        backend.mixer_params.clear()
+        tree.set("/SampleRate/value", 96000)
+        assert active() == [True] * 4
+        assert backend.mixer_params == [(0, 5, 0x01, 1), (0, 6, 0x01, 1)]
+        assert d.state is tree
+
 
 class TestTalkback:
     def daemon(self, tree, backend):
@@ -418,3 +452,41 @@ class TestCopyMixToSend:
         d = MixerDaemon(tree, None)
         data, err = d.commands.execute("/CopyToSends", {})
         assert err is not None
+
+
+class TestLink:
+    """Console's Link (SetStereo) on a pair's left input: UA's engine sets
+    Stereo on both legs, parks the right leg (Active false, so Console draws
+    one "ANALOG 1/2" strip) and spreads the pans hard left / right; unlink
+    brings the right leg back."""
+
+    def setup(self, tree, backend):
+        router = HardwareRouter(backend, tree)
+        tree.on_set = router.on_set
+        return MixerDaemon(tree, router), MixerClient(None, Writer())
+
+    def set(self, d, client, path, value):
+        d._handle_set(client, Command("set", path, value,
+                                      raw_params={"func_id": "3"}))
+
+    def test_link_parks_the_right_leg(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{IN}/0/Stereo/value", True)
+        assert (1, 0, hardware.LINK_PARAM, 1) in backend.mixer_params
+        assert tree.get_value(f"{IN}/1/Stereo/value") is True
+        assert tree.get_value(f"{IN}/1/Active/value") is False
+        assert tree.get_value(f"{IN}/0/Pan/value") == -1.0
+        assert tree.get_value(f"{IN}/0/Pan2/value") == 1.0
+
+    def test_unlink_restores_the_right_leg(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{IN}/0/Stereo/value", True)
+        self.set(d, client, f"{IN}/0/Stereo/value", False)
+        assert tree.get_value(f"{IN}/1/Stereo/value") is False
+        assert tree.get_value(f"{IN}/1/Active/value") is True
+
+    def test_right_leg_set_links_from_the_leader(self, tree, backend):
+        d, client = self.setup(tree, backend)
+        self.set(d, client, f"{IN}/1/Stereo/value", True)
+        assert tree.get_value(f"{IN}/0/Stereo/value") is True
+        assert tree.get_value(f"{IN}/1/Active/value") is False

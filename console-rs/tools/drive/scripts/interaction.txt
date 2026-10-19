@@ -1,0 +1,70 @@
+# Control interaction rules (UAD Console 1.3.1 manual, "Adjusting Controls" / "Controls
+# Shortcuts"): Option-click = default, Cmd+Option-click = every strip's default, Option-click
+# Mute / Solo = every strip, Cmd-drag = every strip, Shift = fine, Option+wheel = adjust,
+# double-click a fader readout / send = typed dB.
+settle
+
+# Option-click a moved fader: `"default"`, which the fake daemon resolves to
+# 0.7818181818181819 (it boots the faders at 0.7819444444444444, so only a reset publishes it).
+drag /devices/0/inputs/0:Fader 0 -60
+settle
+click /devices/0/inputs/0:Fader alt
+settle
+#! tree /devices/0/inputs/0/FaderLevelTapered/value 0.7818181818181819
+
+# Cmd+Option-click: every input fader to its default, the aux faders untouched.
+drag /devices/0/inputs/12:Fader 0 -30
+settle
+click /devices/0/inputs/14:Fader cmd+alt
+settle
+#! tree /devices/0/inputs/12/FaderLevelTapered/value 0.7818181818181819
+#! tree /devices/0/inputs/17/FaderLevelTapered/value 0.7818181818181819
+#! no tree /devices/0/auxs/0/FaderLevelTapered/value
+
+# Option-click a Mute: every input takes the clicked one's opposite state. The fake daemon boots
+# every input muted, so the first unmutes them all; the second mutes them all again.
+click /devices/0/inputs/1:Mute alt
+settle
+#! tree /devices/0/inputs/0/Mute/value False
+#! tree /devices/0/inputs/17/Mute/value False
+click /devices/0/inputs/1:Mute alt
+settle
+# Option-click a Solo: every input solos.
+click /devices/0/inputs/2:Solo alt
+settle
+#! tree /devices/0/inputs/0/Solo/value True
+#! tree /devices/0/inputs/17/Solo/value True
+click /devices/0/inputs/2:Solo alt
+settle
+
+# A plain wheel scrolls; Option+wheel adjusts the fader (3 lines = +0.03).
+wheel /devices/0/inputs/15:Fader 3
+wheel /devices/0/inputs/16:Fader 3 alt
+settle
+#! no tree /devices/0/inputs/15/FaderLevelTapered/value 0.8118181818181819
+#! tree /devices/0/inputs/16/FaderLevelTapered/value 0.8118181818181819
+
+# Shift-drag: a tenth of the motion (40 pt up: +0.0179 instead of +0.179).
+drag /devices/0/inputs/17:Fader 0 -40 shift
+settle
+#! tree /devices/0/inputs/17/FaderLevelTapered/value 0.7997554015491236
+
+# Cmd-drag: every input moves by the same amount (40 pt down: -0.1794), offsets kept.
+drag /devices/0/inputs/2:Fader 0 40 cmd
+settle
+#! tree /devices/0/inputs/2/FaderLevelTapered/value 0.6024459845087649
+#! tree /devices/0/inputs/17/FaderLevelTapered/value 0.6203832042397066
+
+# Double-click the fader readout: the typed-dB popover; -12 OK writes FaderLevel.
+click /devices/0/inputs/3:ValueEntry(Fader) double
+key -12
+key enter
+settle
+#! tree /devices/0/inputs/3/FaderLevel/value -12.0
+
+# Double-click a send knob: the same popover (no reset); -20 OK writes the send's Gain.
+click /devices/0/auxs/0:SendLevel(0) double
+key -20
+key enter
+settle
+#! tree /devices/0/auxs/0/sends/0/Gain/value -20.0

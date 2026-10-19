@@ -287,8 +287,10 @@ class TestInputSends:
         (2, 1), (3, 2),              # CUE 1, CUE 2
         (4, 5), (5, 6)])             # CUE 3, CUE 4
     def test_send_sub_param(self, router, backend, send, sub):
+        # S/PDIF L leads the linked pair: its sends drive both buses
         router.on_set(f"{IN}/12/sends/{send}/Gain/value", 0.0)
-        assert backend.bus_params == [(0x08, sub, pytest.approx(0.7071067))]
+        assert backend.bus_params == [(0x08, sub, pytest.approx(0.7071067)),
+                                      (0x09, sub, pytest.approx(0.7071067))]
 
     def test_send_does_not_touch_the_mix(self, router, backend):
         router.on_set(f"{IN}/4/sends/0/Gain/value", -20.0)

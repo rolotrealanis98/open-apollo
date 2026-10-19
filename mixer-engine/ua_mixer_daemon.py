@@ -51,7 +51,7 @@ from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK,
                     UA_EVT_PAUSED, UA_EVT_RESUMED, UA_PAUSE_DEVICE)
 from model_info import ModelInfo, monitor_param_allowed
-from hardware import (CLOCK_CONTROL_PATHS, CLOCK_SOURCE_MAP,
+from hardware import (CLOCK_CONTROL_PATHS, effective_cue_count, CLOCK_SOURCE_MAP,
                       DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
                       HardwareBackend, HardwareRouter, clock_source_names,
@@ -67,6 +67,7 @@ from model_features import (LINES34_HP_CLASSES, MAX_DELAY_COMP_SAMPLES,
                             latency_figures, load_descriptor)
 from commands import (CommandEngine, ERR_FAILED, parse_cmdparams,
                       refused_set)
+from enabled_meta import install as install_enabled_meta
 from session_dirty import SessionDirty
 from plugin_lifecycle import PluginLifecycle, is_plugin_slot_path
 from plugin_remote import PluginRemote
@@ -619,6 +620,15 @@ class MixerDaemon:
         self.state.register_change_observer(
             "openapollo.cue_bus_count", self._on_cue_bus_count)
         self._apply_cue_bus_count(self.state.get_value("/CueBusCount/value"))
+        # `enabled` on IOType, Stereo, 48V, Pad and SRConvert follows the
+        # Hi-Z jack, IOType and the clock source
+        install_enabled_meta(self.state)
+        # Settings > PEAK HOLD / CLIP HOLD also set the host meters' holds
+        self.state.register_change_observer(
+            "openapollo.meter_holds", self._on_meter_holds)
+        for hold in ("PeakHold", "ClipHold"):
+            self._on_meter_holds(f"/{hold}/value",
+                                 self.state.get_value(f"/{hold}/value"))
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -1009,16 +1019,17 @@ class MixerDaemon:
         as silence.
         """
         ids = tuple(self._metering.channel_ids)
-        key = (entry['kind'], entry['channel'], entry['meter_idx'])
+        base = f"/devices/0/{entry['kind']}/{entry['channel']}"
+        # a runtime Link moves meters/1 to the pair's right channel
+        stereo = bool(self.state.get_value(f"{base}/Stereo/value"))
+        key = (entry['kind'], entry['channel'], entry['meter_idx'], stereo)
         if ids != self._meter_map_ids:
             self._meter_map = {}
             self._meter_map_ids = ids
         if key not in self._meter_map:
-            base = f"/devices/0/{entry['kind']}/{entry['channel']}"
             self._meter_map[key] = meter_channel(
                 entry['kind'], entry['channel'], entry['meter_idx'],
-                self.state.get_value(f"{base}/Name/value"),
-                bool(self.state.get_value(f"{base}/Stereo/value")), ids)
+                self.state.get_value(f"{base}/Name/value"), stereo, ids)
         cap = self._meter_map[key]
         if cap is None:
             level, peak, clip = SILENCE_DB, SILENCE_DB, False
@@ -1113,9 +1124,32 @@ class MixerDaemon:
             del self._readback_suppress[path]
         return False
 
+    def _on_meter_holds(self, path: str, value):
+        """/PeakHold, /ClipHold (NONE, 1/3/5/10 SEC, INFINITE) -> the host
+        meters' hold times, live."""
+        import model_features as mf
+        for hold in ("PeakHold", "ClipHold"):
+            if path in (f"/{hold}/value", f"/devices/0/{hold}/value"):
+                # Test meters and --no-hardware stand-ins may not hold
+                set_holds = getattr(self._metering, "set_holds", None)
+                if value in mf.HOLD_NAMES and set_holds is not None:
+                    ms = mf.HOLD_MS[mf.HOLD_NAMES.index(value)]
+                    set_holds(**{
+                        "peak_ms" if hold == "PeakHold" else "clip_ms": ms})
+                return
+
     def _on_cue_bus_count(self, path: str, value):
         if path == "/CueBusCount/value":
             self._apply_cue_bus_count(value)
+        elif path == "/SampleRate/value":
+            # CUE 3/4 are off at >= 176.4 kHz and come back when it drops
+            count = self.state.get_value("/CueBusCount/value")
+            self._apply_cue_bus_count(count)
+            if self.hw_router and count is not None:
+                try:
+                    self.hw_router.apply_cue_buses(int(count))
+                except (TypeError, ValueError):
+                    pass
 
     def _apply_cue_bus_count(self, value):
         """The state a CUE BUS COUNT implies: the device's read-only
@@ -1128,6 +1162,10 @@ class MixerDaemon:
         except (TypeError, ValueError):
             return
         self._push_if_present("/devices/0/CueBusCount", count)
+        # ponytail: the device's CueBusCount keeps the chosen count; whether
+        # the real engine publishes the reduced one at >= 176.4 kHz is
+        # unconfirmed (MAP.md only lists values 0-4 with `enabled`)
+        count = effective_cue_count(count, self.state.get_value("/SampleRate/value"))
         k = 0
         for n in range(64):
             base = f"/devices/0/outputs/{n}"
@@ -1250,9 +1288,23 @@ class MixerDaemon:
             if micline != last_rb.get(f"{prefix}_micline"):
                 iotype = "Line" if micline else "Mic"
                 self._push_to_clients(f"{in_base}/IOType", iotype)
+            # Link: the driver reports the bit on both preamps of a pair;
+            # the leader's goes through the router's Link (the right leg
+            # parks, the pans spread, the buses are rewritten), as a
+            # front-panel link would in UA's engine.  Not right after a
+            # client SET on either leg.
             link = rb.get(f"{prefix}_link", False)
-            if link != last_rb.get(f"{prefix}_link"):
-                self._push_if_present(f"{in_base}/Stereo", link, force=True)
+            pair = router._pair_of(inp)
+            if link != last_rb.get(f"{prefix}_link") and pair and \
+                    pair[0] == inp and \
+                    self.state.get_value(f"{in_base}/Stereo/value") \
+                    not in (None, link) and \
+                    not any(self._readback_suppressed(p)
+                            for leg in pair
+                            for p in (f"/devices/0/inputs/{leg}/Stereo",
+                                      f"/devices/0/inputs/{leg}/Stereo/value")):
+                self._push_to_clients(f"{in_base}/Stereo", link)
+                router.link_readback(inp, link)
 
         self._sync_front_panel(rb, last_rb, preamps)
 
@@ -2636,6 +2688,13 @@ class MixerDaemon:
                     self._send_response(client, path, cmd.value, resp_params)
             return
 
+        # The engine refuses a client SET of a read-only value (the daemon's
+        # own writers call state.set and are not subject to this)
+        if self.state.is_readonly(path):
+            self._send_engine_error(client, path, "uasrv.read_only",
+                                    resp_params)
+            return
+
         old_value = self.commands.value_of(path)
 
         # Console host properties (console_commands): insert EffectName,
@@ -2679,7 +2738,9 @@ class MixerDaemon:
                     client.send(ubjson_encode_response(resp))
                 return
             if result == "not_found":
-                self.state.set(path, cmd.value)
+                if not self.state.set(path, cmd.value):
+                    self._send_unresolved_set(client, path, resp_params)
+                    return
             else:
                 # Helper tree updated — also route to hardware.
                 # Helper SET paths may omit /value suffix; normalize for
@@ -2696,7 +2757,9 @@ class MixerDaemon:
                 # Suppress readback echo for this path (300ms window)
                 self._readback_suppress[path] = time.monotonic()
         else:
-            self.state.set(path, cmd.value)
+            if not self.state.set(path, cmd.value):
+                self._send_unresolved_set(client, path, resp_params)
+                return
             # Suppress readback echo for 4710 clients too (prevents
             # gain LED blinking from readback pushing old values back)
             self._readback_suppress[path] = time.monotonic()
@@ -2913,6 +2976,14 @@ class MixerDaemon:
         if "func_id" in params:
             self._send_response(client, path, result.value, params)
         return True
+
+    def _send_unresolved_set(self, client: MixerClient, path: str,
+                             params: dict | None = None):
+        """A SET of a path the tree does not have: refused, nothing changed
+        (the engine's "Unable to resolve path for set.")."""
+        log.info("%s: SET %s refused (unknown path)", client.id, path)
+        self._send_engine_error(client, path,
+                                "Unable to resolve path for set.", params)
 
     def _send_engine_error(self, client: MixerClient, path: str, error: str,
                            params: dict | None = None):
@@ -3728,6 +3799,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}
     daemon.commands.set_store(state_file.parent, store_stem)
+    # Settings > Plug-Ins RESCAN reads this folder again (default: the import's)
+    daemon.console.catalogue_dir = args.ua_catalogue or daemon.console.catalogue_dir
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None

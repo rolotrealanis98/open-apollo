@@ -50,7 +50,7 @@ pub const LETTERBOX: Rgba = Rgba::rgb8(18, 19, 21);
 /// Pan distance per wheel line, in pixels.
 const PAN_PER_LINE: f32 = 60.0;
 /// Scroll distance per wheel line in the browser list and cells column, in points.
-const SCROLL_PER_LINE: f32 = 40.0;
+pub(crate) const SCROLL_PER_LINE: f32 = 40.0;
 
 pub struct Options {
     pub source: ModelSource,
@@ -114,6 +114,8 @@ pub struct App {
     popups: Popups,
     /// The frame split per window (part 0 the mixer, part k+1 layer k) while `separate`.
     parts: Vec<rack::LayerPart>,
+    /// The part each layer is drawn in (`Popups::assign`): its own, or the window it opened from.
+    parts_of: Vec<u16>,
     /// The window the current pointer event came from (index into `popups.wins`; None: mixer).
     active: Option<usize>,
     /// Windows the user moved, by layer id (screen position, physical px).
@@ -209,6 +211,7 @@ impl App {
             separate: false,
             popups: Popups::default(),
             parts: Vec::new(),
+            parts_of: Vec::new(),
             active: None,
             moved: HashMap::new(),
             main_focused: true,
@@ -251,8 +254,15 @@ impl App {
         })
     }
 
+    /// Shift: fine adjust (knob / fader drags, Option+wheel).
     fn fine(&self) -> bool {
-        self.mods.shift_key() || self.mods.alt_key()
+        self.mods.shift_key()
+    }
+
+    /// Console's control modifiers: Option (macOS) / Alt, and Command (macOS) / Ctrl.
+    fn key_mods(&self) -> rack::KeyMods {
+        let cmd = if cfg!(target_os = "macos") { self.mods.super_key() } else { self.mods.control_key() };
+        rack::KeyMods { alt: self.mods.alt_key(), cmd }
     }
 
     fn request_redraw(&self) {
@@ -295,7 +305,10 @@ impl App {
         let logical = layout_for(&*self.model, &self.mixer).size();
         let tf = self.view.transform(logical, surface, self.scale_factor);
         self.mixer.windowing = match (&self.gpu, self.separate) {
-            (Some(g), true) => self.windowing(g, tf),
+            (Some(g), true) if self.popups.placed => self.windowing(g, tf),
+            // Native Wayland: nothing is placed on a screen, menus and callouts keep to the
+            // mixer window; free windows go where the compositor puts them.
+            (Some(_), true) => Some(rack::Windowing::new(houston::Rect::new(0.0, 0.0, logical.0, logical.1))),
             _ => None,
         };
         let area = tf.visible(logical, surface);
@@ -314,7 +327,9 @@ impl App {
             hud,
         );
         self.parts = if self.mixer.windowing.is_some() {
-            rack::layers::split(&self.frame.list, &self.frame.hits, &self.frame.scrolls, self.frame.layers.len(), &self.frame.marks)
+            let from = self.active.and_then(|i| self.popups.wins.get(i)).map(|w| w.id.clone());
+            self.parts_of = self.popups.assign(&self.frame.layers, from.as_deref());
+            rack::layers::split_into(&self.frame.list, &self.frame.hits, &self.frame.scrolls, &self.parts_of, &self.frame.marks)
         } else {
             Vec::new()
         };
@@ -391,11 +406,21 @@ impl App {
         // Separate windows follow the frame's layers (opened, moved, closed).
         match (&self.gpu, self.mixer.windowing.is_some()) {
             (Some(g), true) => {
-                if let Ok(inner) = g.window.inner_position() {
-                    self.popups.sync(event_loop, &g.surface, inner, tf, &self.frame.layers);
+                // Unplaced (Wayland) there is no position; placed, follow the mixer's.
+                let inner = g.window.inner_position();
+                if inner.is_ok() || !self.popups.placed {
+                    let overlays = &self.overlays;
+                    let title = |l: &rack::Layer| overlays.title(&l.id).unwrap_or_else(|| crate::popups::title(l));
+                    self.popups.sync(event_loop, &g.surface, inner.unwrap_or_default(), tf, &self.frame.layers, &self.parts_of, &title);
                 }
             }
             _ => self.popups.wins.clear(),
+        }
+        // A plug-in window opened again: bring it forward.
+        if let Some(id) = self.overlays.focus.take() {
+            if let Some(w) = self.popups.wins.iter().find(|w| w.id == id) {
+                w.window.focus_window();
+            }
         }
         if self.active.is_some_and(|i| i >= self.popups.wins.len()) {
             self.active = None;
@@ -491,6 +516,14 @@ impl App {
     }
 
     fn route(&mut self, ev: PointerEvent) -> bool {
+        if let Some(w) = self.active.and_then(|i| self.popups.wins.get(i)) {
+            // Input in a plug-in window is that window's panel's (the stack serves the top one).
+            let id = w.id.clone();
+            self.overlays.raise(&id);
+        } else if self.separate && !self.popups.placed && self.active_part() == Some(0) {
+            // Unplaced, plug-in windows are elsewhere: nothing in the mixer window is theirs.
+            return false;
+        }
         let routed = self.overlays.pointer(ev, &mut *self.model);
         let forwarded = self.overlays.take_mixer_actions();
         if !forwarded.is_empty() {
@@ -517,14 +550,20 @@ impl App {
         if self.dirty {
             self.rebuild(); // hit values must match what the model holds now
         }
-        // A loaded insert or a browser row: the tap waits for the release (it may be a drag).
-        if self.mixer.drag_press(active_hits!(self), x, y, &*self.model) {
-            self.deferred_tap = active_hits!(self).iter().rev().find(|h| h.rect.contains(x, y)).cloned();
-            return;
-        }
+        // A loaded insert or a browser row: the tap waits for the release (it may be a drag);
+        // a double-click still activates the row now (as the FFI host does).
+        let armed = self.mixer.drag_press(active_hits!(self), x, y, &*self.model);
+        self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
+        self.interaction.mods = self.key_mods();
         let actions = self
             .interaction
             .pointer_down(active_hits!(self), x, y, double);
+        if armed {
+            if let [Action::Tap(_)] = actions.as_slice() {
+                self.deferred_tap = active_hits!(self).iter().rev().find(|h| h.rect.contains(x, y)).cloned();
+                return;
+            }
+        }
         self.apply(actions);
     }
 
@@ -626,9 +665,12 @@ impl App {
             if self.dirty {
                 self.rebuild();
             }
-            if let Some(actions) = wheel_actions(active_hits!(self), x, y, lines.1, fine) {
-                self.apply(actions);
-                return;
+            // Option / Alt + wheel adjusts the control under the pointer; a plain wheel scrolls.
+            if self.mods.alt_key() {
+                if let Some(actions) = wheel_actions(active_hits!(self), x, y, lines.1, fine) {
+                    self.apply(actions);
+                    return;
+                }
             }
             if self.mixer.wheel(
                 active_scrolls!(self),
@@ -774,6 +816,7 @@ impl App {
 
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         self.save_settings();
+        self.model.quit();
         event_loop.exit();
     }
 
@@ -843,12 +886,10 @@ impl App {
             surface,
             renderer,
         });
-        // Console's menus and panels are windows of their own where clients can place windows
-        // (not native Wayland: run with --x11 there).
-        self.separate = self.windows == WindowsMode::Separate && can_place_windows(event_loop);
-        if self.windows == WindowsMode::Separate && !self.separate {
-            eprintln!("uaconsole: Wayland cannot place windows: menus and panels stay inside the mixer (--x11 for separate windows)");
-        }
+        // Console's menus and panels are windows of their own. Native Wayland cannot place
+        // them: there only the free windows are (`popups::toplevel`; --x11 places them all).
+        self.separate = self.windows == WindowsMode::Separate;
+        self.popups.placed = can_place_windows(event_loop);
         self.title.clear();
         self.changed();
         Ok(())
@@ -893,8 +934,25 @@ impl App {
                     self.changed();
                 }
             }
+            // Its window closed: close what it shows.
             WindowEvent::CloseRequested => {
-                self.mixer.key_escape();
+                let Some(w) = self.popups.wins.get(i) else { return };
+                let (id, kind) = (w.id.clone(), w.kind);
+                if self.overlays.close(&id) {
+                } else if id == "channels" {
+                    self.mixer.show_channels = false;
+                } else if kind == rack::LayerKind::Window {
+                    // Settings or a panel: everything opened over it goes with it.
+                    for _ in 0..16 {
+                        if self.mixer.sheet.is_none() {
+                            break;
+                        }
+                        self.mixer.key_escape();
+                    }
+                } else {
+                    self.mixer.key_escape();
+                }
+                self.active = None;
                 self.changed();
             }
             WindowEvent::Resized(size) => {
@@ -920,10 +978,14 @@ impl App {
     /// controls) moves the window, as Console's do.
     fn title_bar_drag(&mut self, i: usize) -> bool {
         let Some(w) = self.popups.wins.get(i) else { return false };
+        let (x, y) = self.cursor_pt();
+        // An unplaced plug-in window (a toplevel the compositor moves) by its own title bar.
+        if !self.popups.placed && self.overlays.title_bar_at(&w.id, x, y) {
+            return w.window.drag_window().is_ok();
+        }
         if !matches!(w.kind, rack::LayerKind::Window | rack::LayerKind::Dialog) || w.title_h <= 0.0 {
             return false;
         }
-        let (x, y) = self.cursor_pt();
         if y - w.rect.y > w.title_h {
             return false;
         }

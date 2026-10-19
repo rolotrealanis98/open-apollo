@@ -23,13 +23,45 @@ fn mid(control: Control) -> ControlId {
     ControlId { strip: MONITOR_ID.into(), control }
 }
 
+/// ALT TRIM section (`Rack_ControlRoom_AltTrimSection`, `alt_1_trim` / `alt_2_trim`): one
+/// knob per ALT set (ALT COUNT), ±30 dB, 0 dB centre, with its dB readout. [I] Geometry is not
+/// measured (no capture with ALT COUNT > 0): a panel in the column's style above the main one.
+fn alt_trims(ui: &mut Ui, opts: &crate::model::MonitorOptions, panel: Rect) {
+    let n = opts.alt_count.min(2) as usize;
+    if n == 0 {
+        return;
+    }
+    let h = 96.0;
+    let sec = Rect::new(panel.x, panel.y - 4.0 - h, panel.w, h);
+    ui.fill(sec, PANEL_EDGE);
+    ui.fill(sec.inset(0.5, 0.5, 0.5, 0.5), PANEL);
+    ui.font_text("CR-Label", "ALT TRIM", Rect::new(sec.x, sec.y + 6.0, sec.w, 14.0), Align::Center);
+    let col = sec.w / n as f32;
+    for k in 0..n {
+        let x = sec.x + col * k as f32;
+        let v = opts.alt_trim[k];
+        ui.font_text("CR-Label", &format!("ALT {}", k + 1), Rect::new(x, sec.y + 22.0, col, 12.0), Align::Center);
+        let knob = Rect::new(x + (col - 36.0) / 2.0, sec.y + 34.0, 36.0, 40.0);
+        let id = mid(Control::AltTrim(k as u8));
+        ui.knob("Main-Level-Small", v, knob, Some(id.clone()), None);
+        let mut readout = ui.style("views", "Main-Readout");
+        readout.color = Rgba::WHITE.with_alpha(0.75);
+        ui.text(&format!("{:+.1} dB", v * 60.0 - 30.0), readout, Rect::new(x, sec.y + 76.0, col, 16.0), Align::Center);
+        ui.hit(knob, id, HitKind::Knob { value: v, span: 120.0, reset: Some(0.5) });
+    }
+}
+
 /// Draws the column into `r` (the full column, from the strip columns' top to the status bar).
 pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
     let opts = model.monitor_options();
     let cues = model.cue_outputs();
     let b = r.h; // column-local foot
+    // SOURCE offers a CUE button per active cue (CUE BUS COUNT 2…4); CUE 3 / CUE 4 take a
+    // second row and the panel grows by it. [I] the 3/4-cue layout is not captured.
+    let n_cues = cues.len().clamp(2, 4);
+    let extra = if n_cues > 2 { 40.0 } else { 0.0 };
     ui.at(r.x, r.y, |ui| {
-        let panel = Rect::new(4.0, b - 4.0 - PANEL_H, r.w - 4.0, PANEL_H);
+        let panel = Rect::new(4.0, b - 4.0 - PANEL_H - extra, r.w - 4.0, PANEL_H + extra);
         ui.fill(panel, PANEL_EDGE);
         ui.fill(panel.inset(0.5, 0.5, 0.5, 0.5), PANEL);
         let top = panel.y;
@@ -47,15 +79,17 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
         ui.fill(Rect::new(panel.x, top + 130.0, panel.w, 1.0), RULE);
         ui.font_text("CR-Label", "SOURCE", Rect::new(panel.x, top + 137.0, panel.w, 14.0), Align::Center);
         ui.toggle("Switch-Large", Some("MONITOR"), opts.cr_source == 0, true, Rect::new(10.0, top + 152.0, 80.0, 40.0), Some(mid(Control::CrSource(0))), None);
-        for i in 0..2u8 {
+        for i in 0..n_cues as u8 {
             let label = format!("CUE\n{}", i + 1);
             let enabled = cues.len() > i as usize;
-            ui.toggle("Switch", Some(&label), opts.cr_source == i + 1, enabled, Rect::new(10.0 + 40.0 * i as f32, top + 192.0, 40.0, 40.0), Some(mid(Control::CrSource(i + 1))), None);
+            let at = Rect::new(10.0 + 40.0 * (i % 2) as f32, top + 192.0 + 40.0 * (i / 2) as f32, 40.0, 40.0);
+            ui.toggle("Switch", Some(&label), opts.cr_source == i + 1, enabled, at, Some(mid(Control::CrSource(i + 1))), None);
         }
-        ui.fill(Rect::new(panel.x, top + 236.0, panel.w, 1.0), RULE);
+        ui.fill(Rect::new(panel.x, top + 236.0 + extra, panel.w, 1.0), RULE);
         let mut name = ui.style("views", "Control-Room-Name");
         name.bold = true;
         ui.text("CONTROL\nROOM", name, Rect::new(4.0, b - 51.0, 92.0, 47.0), Align::Center);
-        ui.hit(knob, mid(Control::DimLevel), HitKind::Drag { value: opts.dim_level, span: 120.0, reset: None });
+        ui.hit(knob, mid(Control::DimLevel), HitKind::Knob { value: opts.dim_level, span: 120.0, reset: None });
+        alt_trims(ui, &opts, panel);
     });
 }

@@ -1,0 +1,49 @@
+settle
+size 1920 1300
+click nav:SectionsOpenAll
+settle
+# input 1: AUX 1 send level, mute, pre/post; CUE 1 send
+drag /devices/0/inputs/0:SendLevel(0) 0 -30
+settle
+click /devices/0/inputs/0:SendMute(0)
+settle
+click /devices/0/inputs/0:SendMute(0)
+settle
+rclick /devices/0/inputs/0:SendLevel(0)
+settle
+key escape
+settle
+# aux 1 return: fader, mute, mono, pre/post, CUE 1 send + mute
+drag /devices/0/auxs/0:Fader 0 -40
+settle
+click /devices/0/auxs/0:Mute
+settle
+click /devices/0/auxs/0:Mono
+settle
+click /devices/0/auxs/0:PrePost
+settle
+drag /devices/0/auxs/0:SendLevel(0) 0 -30
+settle
+click /devices/0/auxs/0:SendMute(0)
+settle
+# monitor
+drag monitor:MonitorLevel 0 -30
+settle
+click monitor:MonitorMute
+settle
+click monitor:MonitorMono
+settle
+click monitor:MonitorPage(ControlRoom)
+settle
+#! tree /devices/0/inputs/0/sends/0/GainTapered/value
+#! hw set_mixer_bus_param 0 3 * *
+#! tree /devices/0/inputs/0/sends/0/Bypass/value True
+#! hw set_mixer_bus_param 16 0 * *
+#! tree /devices/0/auxs/0/Mute/value True
+#! tree /devices/0/auxs/0/MixToMono/value True
+#! tree /devices/0/auxs/0/SendPostFader/value
+#! hw set_mixer_bus_param 16 1 * *
+#! tree /devices/0/auxs/0/sends/0/Bypass/value True
+#! hw set_mixer_param 2 1 1 *
+#! tree /devices/0/outputs/18/Mute/value True
+#! tree /devices/0/outputs/18/MixToMono/value True

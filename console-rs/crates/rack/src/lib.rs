@@ -16,6 +16,8 @@ pub mod presets;
 pub mod scales;
 pub mod settings;
 pub mod surfaces;
+#[cfg(test)]
+mod test_support;
 pub mod ui;
 pub mod widgets;
 pub mod window;
@@ -23,7 +25,7 @@ pub mod window;
 pub use draw::{Align, Draw, DrawList, Frame, TextStyle};
 pub use houston::{Insets, Rect, Rgba};
 pub use layers::{Layer, LayerKind, LayerMark, LayerPart, Windowing};
-pub use input::{Action, Control, ControlId, Hit, HitKind, Interaction, PluginWindowButton, ScrollRegion, ScrollTarget};
+pub use input::{Action, Control, ControlId, ControlsMode, Hit, HitKind, Interaction, KeyMods, PluginWindowButton, ScrollRegion, ScrollTarget};
 pub use model::{ConsoleModel, CueOutput, EngineSettings, HeadphoneOutput, InsertLabel, MixerModel, MonitorOptions, PluginBadge, PluginEntry, PresetNode, PreviewMixer, StatusInfo};
 pub use menu::{Command, MenuCmd, PopupMenu};
 pub use surfaces::{Effect, SessionInfo, SessionOp, ViewState};

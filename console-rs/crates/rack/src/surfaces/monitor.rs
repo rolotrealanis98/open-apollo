@@ -258,8 +258,8 @@ fn monitor_meters(ui: &mut Ui, meters: MeterFrame, bottom: f32) {
             ui.image(&path, Rect::new(((g.logo.w - w) / 2.0).floor(), g.logo.y, w, h), None, None, 1.0);
         }
     }
-    ui.bar_meter("Monitor-Meter", meters.left, meters.clip_left, g.left);
-    ui.bar_meter("Monitor-Meter", meters.right, meters.clip_right, g.right);
+    ui.bar_meter("Monitor-Meter", meters.left, meters.peak_left, meters.clip_left, g.left);
+    ui.bar_meter("Monitor-Meter", meters.right, meters.peak_right, meters.clip_right, g.right);
 
     // Rack_MeterMarks: style 1 left of L (3-pt major / 1-pt minor ticks on its right edge),
     // style 3 between the bars (numbers, 2-pt centred minor ticks), style 2 right of R.
@@ -377,7 +377,25 @@ pub fn combo_box(ui: &mut Ui, text: &str, r: Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::{MonitorMetersGeometry, MonitorStack};
+    use super::{MonitorMetersGeometry, MonitorStack, monitor_meters};
+    use crate::draw::Draw;
+    use crate::model::MeterFrame;
+    use crate::ui::Ui;
+
+    #[test]
+    fn monitor_meters_draw_their_peak_hold() {
+        let a = crate::test_support::assets(
+            r#"{"file_format":"appearance","meters":{"Monitor-Meter":{"width":17,"height":195,"peak-height":1,
+            "bounds-content":"2,14,30,372","bounds-clip":"2,2,30,12","image-content":"meters/on.png"}}}"#,
+        );
+        let lines = |m: MeterFrame| {
+            let mut ui = Ui::new(&a);
+            monitor_meters(&mut ui, m, 521.0);
+            ui.list.items.iter().filter(|d| matches!(d, Draw::Clip(Some(r)) if r.h == 1.0)).count()
+        };
+        assert_eq!(lines(MeterFrame { left: 0.1, right: 0.1, ..Default::default() }), 0);
+        assert_eq!(lines(MeterFrame { left: 0.1, right: 0.1, peak_left: 0.5, peak_right: 0.7, ..Default::default() }), 2);
+    }
 
     #[test]
     fn stack_matches_console_geometry() {

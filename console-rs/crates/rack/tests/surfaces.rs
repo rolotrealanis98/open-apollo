@@ -351,6 +351,152 @@ fn monitor_buttons_open_their_panels() {
     assert_eq!(view.sheet, Some(Sheet::Panel(Panel::HeadphoneCorrection)));
 }
 
+/// CUE OUTPUTS: an empty cell in a cue's column puts that HP on the cue; the lit tile opens the
+/// HP's source menu (MON, CUE 1…4, NONE), which closes on a pick and keeps the panel.
+#[test]
+fn cue_outputs_headphone_tiles_pick_the_source() {
+    use rack::settings::Panel;
+    use rack::surfaces::Sheet;
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::CueOutputs);
+    let (hits, _) = build(&assets, &model, &view);
+    // HP 1 plays CUE 1 (lit tile → menu); its CUE 2 cell assigns CUE 2 (option 2).
+    assert!(find(&hits, "monitor", &Control::HeadphoneMenu(0)).is_some());
+    assert!(find(&hits, "monitor", &Control::HeadphoneSource { output: 1, option: 2 }).is_none(), "HP 2's lit cell is a menu");
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneSource { output: 0, option: 2 });
+    assert_eq!(model.headphones[0].source, 2);
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::HeadphoneSource { output: 0, option: 1 }).is_some());
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneMenu(0));
+    assert!(matches!(view.popover, Some(PopoverState { kind: Popover::Headphone { output: 0 }, .. })));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneSource { output: 0, option: 5 });
+    assert_eq!(model.headphones[0].source, 5, "NONE");
+    assert!(view.popover.is_none());
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
+    // A tap outside an open HP menu closes the menu only.
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneSource { output: 0, option: 1 });
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneMenu(0));
+    let (hits, _) = build(&assets, &model, &view);
+    let outside = hits.iter().rev().find(|h| h.rect.contains(2.0, 1040.0)).unwrap().clone();
+    tap(&hits, &outside, &mut view, &mut model);
+    assert!(view.popover.is_none());
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
+}
+
+/// ALT COUNT 1: one ALT button and one ALT TRIM knob in the control room; 2: two of each.
+#[test]
+fn alt_trim_knobs_follow_the_alt_count() {
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    view.show_ctrl_room = true;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::AltTrim(0)).is_none(), "ALT COUNT 0");
+    model.monitor_options.alt_count = 1;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::MonitorAlt(1)).is_some());
+    assert!(find(&hits, "monitor", &Control::MonitorAlt(2)).is_none());
+    assert!(find(&hits, "monitor", &Control::AltTrim(1)).is_none());
+    let h = find(&hits, "monitor", &Control::AltTrim(0)).expect("ALT 1 TRIM").clone();
+    assert!(matches!(h.kind, rack::input::HitKind::Knob { reset: Some(r), .. } if r == 0.5), "0 dB default");
+    // Drag up 30 pt over a 120-pt span: +0.25 → +15 dB.
+    let (cx, cy) = h.rect.center();
+    let mut i = Interaction::default();
+    for a in i.pointer_down(&hits, cx, cy, false) {
+        view.dispatch(a, &mut model);
+    }
+    for a in i.pointer_move(cx, cy - 30.0, false) {
+        view.dispatch(a, &mut model);
+    }
+    for a in i.pointer_up() {
+        view.dispatch(a, &mut model);
+    }
+    assert!((model.monitor_options.alt_trim[0] - 0.75).abs() < 1e-9);
+    model.monitor_options.alt_count = 2;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::AltTrim(1)).is_some());
+}
+
+/// CTRL ROOM SOURCE: CUE 1 / CUE 2 with two cues; CUE 3 / CUE 4 appear with CUE BUS COUNT 4.
+#[test]
+fn control_room_source_follows_the_cue_bus_count() {
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    view.show_ctrl_room = true;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::CrSource(2)).is_some());
+    assert!(find(&hits, "monitor", &Control::CrSource(3)).is_none());
+    for k in [3, 4] {
+        model.cues.push(rack::CueOutput { name: format!("CUE {k}"), source_cue: false, mono: false, destination: "NONE".into() });
+    }
+    let (hits, _) = build(&assets, &model, &view);
+    let c3 = find(&hits, "monitor", &Control::CrSource(3)).expect("CUE 3").rect;
+    let c4 = find(&hits, "monitor", &Control::CrSource(4)).expect("CUE 4").rect;
+    let c1 = find(&hits, "monitor", &Control::CrSource(1)).unwrap().rect;
+    assert!(c3.y > c1.y && c3.x == c1.x && c4.y == c3.y, "a second row under CUE 1 / CUE 2");
+    press(&mut view, &mut model, &hits, "monitor", Control::CrSource(4));
+    assert_eq!(model.monitor_options.cr_source, 4);
+}
+
+/// Settings › CONTROLS MODE: Linear drags knobs vertically; Circular jumps a knob to the
+/// pointer's angle; Relative Circular turns it by the angle swept. Faders stay linear.
+#[test]
+fn controls_mode_drives_knob_drags() {
+    use rack::ControlsMode;
+    use rack::settings::{PropValue, Write};
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let view = ViewState::default();
+    assert_eq!(ControlsMode::of(&model), ControlsMode::Linear);
+    let (hits, _) = build(&assets, &model, &view);
+    let pan = find(&hits, "in0", &Control::PanL).expect("pan knob").clone();
+    let fader = find(&hits, "in0", &Control::Fader).expect("fader").clone();
+    let rack::input::HitKind::Knob { value: v0, span, .. } = pan.kind else { panic!("{:?}", pan.kind) };
+    let (cx, cy) = pan.rect.center();
+    let r = pan.rect.w.min(pan.rect.h) / 2.0 - 1.0;
+    let set = |acts: Vec<Action>| acts.into_iter().filter_map(|a| if let Action::Set(_, v) = a { Some(v) } else { None }).last();
+    // Linear: up by span/4 → +0.25.
+    let mut i = Interaction::default();
+    i.pointer_down(&hits, cx, cy, false);
+    assert!((set(i.pointer_move(cx, cy - span / 4.0, false)).unwrap() - (v0 + 0.25).min(1.0)).abs() < 1e-6);
+    i.pointer_up();
+    // Circular: pressing at 3 o'clock jumps to 90° of the 270° sweep.
+    model.apply_setting_writes(vec![Write::Set("/ControlsMode".into(), PropValue::Str("Circular".into()))]);
+    let mut i = Interaction::default();
+    i.controls_mode = ControlsMode::of(&model);
+    assert_eq!(i.controls_mode, ControlsMode::Circular);
+    let v = set(i.pointer_down(&hits, cx + r, cy, false)).expect("jump on press");
+    assert!((v - (90.0 / 270.0 + 0.5)).abs() < 1e-6, "{v}");
+    // … and 9 o'clock.
+    assert!((set(i.pointer_move(cx - r, cy, false)).unwrap() - (0.5 - 90.0 / 270.0)).abs() < 1e-6);
+    i.pointer_up();
+    // A fader in Circular mode is still a linear drag.
+    let (fx, fy) = fader.rect.center();
+    let rack::input::HitKind::Drag { value: f0, span: fspan, .. } = fader.kind else { panic!() };
+    assert!(set(i.pointer_down(&hits, fx, fy, false)).is_none());
+    assert!((set(i.pointer_move(fx, fy - fspan / 10.0, false)).unwrap() - (f0 + 0.1).min(1.0)).abs() < 1e-6);
+    i.pointer_up();
+    // Relative Circular: no jump; a quarter turn (12 → 3 o'clock, crossing nothing) adds 90/270.
+    model.apply_setting_writes(vec![Write::Set("/ControlsMode".into(), PropValue::Str("Relative Circular".into()))]);
+    let mut i = Interaction::default();
+    i.controls_mode = ControlsMode::of(&model);
+    assert!(set(i.pointer_down(&hits, cx, cy - r, false)).is_none());
+    i.pointer_move(cx + r * 0.7071, cy - r * 0.7071, false);
+    let v = set(i.pointer_move(cx + r, cy, false)).unwrap();
+    assert!((v - (v0 + 90.0 / 270.0).min(1.0)).abs() < 1e-4, "{v}");
+    // Turning back past the start goes below it.
+    i.pointer_move(cx, cy - r, false);
+    let v = set(i.pointer_move(cx - r, cy, false)).unwrap();
+    assert!((v - (v0 - 90.0 / 270.0).max(0.0)).abs() < 1e-4, "{v}");
+}
+
 #[test]
 fn plugin_scenes_panel_primes_and_recalls() {
     let assets = assets();

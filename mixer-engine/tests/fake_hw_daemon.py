@@ -18,7 +18,9 @@ Driver behaviour can be scripted: --refuse-rate HZ makes the driver refuse
 that sample rate, --refuse-clock NAME that clock source, and a non-internal
 clock source reports the clock unlocked (UA_EVT_CLOCK_LOCK 0) unless
 --external-locks is given.  --stereo-sends is the daemon's option (send
-pans move a left/right pair).
+pans move a left/right pair).  --catalogue DIR overlays a ua-catalogue
+folder (console-rs/tools/drive/fixtures/catalogue is a synthetic one), so
+the plug-in browser has rows.
 """
 
 import argparse
@@ -33,6 +35,7 @@ ENGINE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ENGINE_DIR))
 
 import hardware  # noqa: E402
+import ua_catalogue  # noqa: E402
 import ua_mixer_daemon  # noqa: E402
 from events import UA_EVT_CLOCK_LOCK, UA_EVT_RATE_CHANGED  # noqa: E402
 from hardware import (CLOCK_SOURCE_MAP, DRIVER_PARAM_CLOCK_SOURCE,  # noqa: E402
@@ -152,6 +155,9 @@ def main():
     parser.add_argument("--refuse-clock", action="append", default=[])
     parser.add_argument("--external-locks", action="store_true")
     parser.add_argument("--stereo-sends", action="store_true")
+    parser.add_argument("--catalogue", type=Path,
+                        help="overlay this ua-catalogue folder (a synthetic "
+                             "one for browser tests; see ua_catalogue.py)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     if args.port in FORBIDDEN_PORTS:
@@ -172,6 +178,7 @@ def main():
     state = StateTree()
     state.load_device_map(DEVICE_MAP)
     apply_runtime_properties(state)
+    catalogue = ua_catalogue.apply(state, None, args.catalogue) if args.catalogue else None
     backend = RecordingBackend(log, args.refuse_rate, args.refuse_clock)
     router = HardwareRouter(backend, state, stereo_sends=args.stereo_sends,
                             input_buses=descriptor_input_buses(MODEL),
@@ -185,8 +192,10 @@ def main():
     scratch = tempfile.TemporaryDirectory(prefix="fake-hw-daemon-")
     daemon = MixerDaemon(state, router, "127.0.0.1", args.port, helper_port=0,
                          sessions_dir=Path(scratch.name) / "sessions",
-                         presets_dir=Path(scratch.name) / "presets")
+                         presets_dir=Path(scratch.name) / "presets",
+                         catalogue=catalogue)
     daemon.model_data = router.model_data
+    daemon.console.catalogue_dir = args.catalogue or daemon.console.catalogue_dir
     daemon.mute_on_rate_change = 0.0
 
     async def run():

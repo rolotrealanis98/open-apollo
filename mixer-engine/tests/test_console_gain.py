@@ -124,7 +124,9 @@ def test_func_id_ack_keeps_binary_framing():
 def test_no_companion_for_other_gain_paths(path):
     daemon, state, client, writer, writes = connection(True, subscribe=())
     daemon._handle_set(client, Command("set", path, -6.0))
-    assert writer.frames == []
+    # a path the tree lacks is refused, with no companion pushed
+    assert decode(writer.frames, True) == [
+        {"path": path, "error": "Unable to resolve path for set."}]
     assert not any("GainTapered" in p or p.endswith("preamps/0/Gain/value")
                    for p, _ in writes)
 

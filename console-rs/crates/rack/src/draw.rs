@@ -53,4 +53,11 @@ impl DrawList {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+    /// The topmost text drawn inside `r`, for scripted drivers.
+    pub fn text_in(&self, r: Rect) -> Option<String> {
+        self.items.iter().rev().find_map(|d| match d {
+            Draw::Text { text, rect, .. } if r.contains(rect.x + rect.w / 2.0, rect.y + rect.h / 2.0) => Some(text.clone()),
+            _ => None,
+        })
+    }
 }

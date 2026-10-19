@@ -1,0 +1,7 @@
+settle
+click /devices/0/inputs/12:Menu(SrConvert(true))
+settle
+click /devices/0/inputs/12:Menu(SrConvert(false))
+settle
+#! hw set_mixer_param 2 1 31 1
+#! hw set_mixer_param 2 1 31 0

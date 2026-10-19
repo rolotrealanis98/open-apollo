@@ -145,6 +145,8 @@ pub enum Control {
     MonitorAlt(u8),
     /// [model] Dim attenuation knob (drag 0…1).
     DimLevel,
+    /// [model] ALT 1 / ALT 2 TRIM knob (k = 0, 1; drag 0…1 = −30…+30 dB, `AltMonTrim`).
+    AltTrim(u8),
     /// [model] Cue output `MixInSource` (cue mix ↔ monitor mix) and `MixToMono`.
     CueSource(u8),
     CueMono(u8),
@@ -232,6 +234,14 @@ pub enum Control {
     /// A popup-menu row or menu-bar title (`menu`): view commands (`MenuCmd::is_view`) are
     /// consumed by `ViewState`, the rest reach `MixerModel::apply` as `Action::Tap`.
     Menu(crate::menu::MenuCmd),
+    // Control interaction rules (manual "Controls Shortcuts"). Append-only below.
+    /// [view → model] Option/Alt-click on a Mute or Solo (`.0`): every strip of the clicked
+    /// one's kind (inputs or auxes) takes the clicked one's opposite state (`ViewState::route`).
+    ToggleAll(Box<Control>),
+    /// [view] Typed-value entry for control `.0` of this strip (`Rack_DoublePopover`): the
+    /// fader readout's hit (a double-click opens it), and what [`Interaction`] sends for a
+    /// double-click on a send: `Action::Set(id, v)` opens the popover showing `v` (0…1).
+    ValueEntry(Box<Control>),
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the
@@ -302,6 +312,50 @@ pub enum HitKind {
     /// Vertical drag over `span` points covers 0…1; `value` is the current value; double-click
     /// resets to `reset`.
     Drag { value: f64, span: f32, reset: Option<f64> },
+    /// A rotary knob: a [`HitKind::Drag`] that follows Settings › CONTROLS MODE
+    /// ([`Interaction::controls_mode`]); the hit rect is centred on the knob.
+    Knob { value: f64, span: f32, reset: Option<f64> },
+}
+
+/// Settings › OPTIONS › CONTROLS MODE (`/ControlsMode`): how a knob follows a drag. Faders
+/// and other drags stay linear.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlsMode {
+    /// Vertical (and a quarter of horizontal) motion, as for faders.
+    #[default]
+    Linear,
+    /// The knob jumps to the pointer's angle around its centre.
+    Circular,
+    /// The angle turned around the centre moves the knob from where it was.
+    RelativeCircular,
+}
+
+impl ControlsMode {
+    /// The engine's `/ControlsMode` ("Circular", "Relative Circular", "Linear").
+    pub fn of(model: &dyn crate::MixerModel) -> ControlsMode {
+        match model.properties().and_then(|p| p.prop("/ControlsMode")).as_ref().and_then(|v| v.as_str()) {
+            Some("Circular") => ControlsMode::Circular,
+            Some("Relative Circular") => ControlsMode::RelativeCircular,
+            _ => ControlsMode::Linear,
+        }
+    }
+}
+
+/// Modifier keys held at a press, in Console's terms: `alt` = Option (macOS) / Alt, `cmd` =
+/// Command (macOS) / Ctrl (Windows, Linux). Shift (fine) reaches `pointer_move` as `fine`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeyMods {
+    pub alt: bool,
+    pub cmd: bool,
+}
+
+/// A knob's travel: 270° from 7:30 to 4:30, 0 at 12 o'clock. [I] Console's exact sweep is not
+/// measured; the knob films draw about this arc.
+const KNOB_SWEEP_DEG: f64 = 270.0;
+
+/// The pointer's angle (degrees, clockwise from 12 o'clock, −180…180) around `c`.
+fn angle(c: (f32, f32), x: f32, y: f32) -> f64 {
+    ((x - c.0) as f64).atan2((c.1 - y) as f64).to_degrees()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -334,7 +388,7 @@ pub struct ScrollRegion {
 pub enum Action {
     GestureBegin(ControlId),
     Set(ControlId, f64),
-    /// Double click / double tap: back to the default. `.1` is the UI's default (what to show);
+    /// Option/Alt-click, or a double click / tap: back to the default. `.1` is the UI's default (what to show);
     /// an engine model sends Console's `set <prop>/value "default"` instead of a number.
     Reset(ControlId, f64),
     GestureEnd(ControlId),
@@ -356,6 +410,46 @@ struct Active {
     start_x: f32,
     start_value: f64,
     span: f32,
+    /// A knob under a circular CONTROLS MODE: its centre and the last pointer angle.
+    circular: Option<((f32, f32), f64)>,
+    /// The pressed control's value at the press, and every control the drag moves with their
+    /// values at the press (Cmd: the same control on each strip of its kind; else just it).
+    origin: f64,
+    group: Vec<(ControlId, f64)>,
+}
+
+impl Active {
+    /// The pressed control at `v`: the group moves by the same amount, stopping when one of
+    /// them reaches 0 or 1 (Console: relative offsets kept until one hits min/max).
+    fn sets(&self, v: f64) -> Vec<Action> {
+        let lo = self.group.iter().map(|g| g.1).fold(1.0, f64::min);
+        let hi = self.group.iter().map(|g| g.1).fold(0.0, f64::max);
+        let d = (v - self.origin).clamp(-lo, 1.0 - hi);
+        self.group.iter().map(|(id, s)| Action::Set(id.clone(), (s + d).clamp(0.0, 1.0))).collect()
+    }
+}
+
+/// The same control as `hit` on every strip of its kind (inputs, auxes; the talkback strip is
+/// its own kind), topmost hit per strip, `hit` first. ponytail: strips with no hit on screen
+/// (cells scrolled out of view) are not included; use the model's strip list if that matters.
+fn peers<'a>(hits: &'a [Hit], hit: &'a Hit) -> Vec<&'a Hit> {
+    use crate::settings::{Panel, SendsOf};
+    let talkback = |s: &str| hits.iter().any(|h| &*h.id.strip == s && h.id.control == Control::ShowPanel(Panel::Sends(SendsOf::Talkback)));
+    let kind = |s: &str| if talkback(s) { s.to_owned() } else { s.trim_end_matches(|c: char| c.is_ascii_digit()).to_owned() };
+    let want = kind(&hit.id.strip);
+    let mut out = vec![hit];
+    for h in hits.iter().rev() {
+        if h.id.control == hit.id.control && !out.iter().any(|o| o.id.strip == h.id.strip) && kind(&h.id.strip) == want {
+            out.push(h);
+        }
+    }
+    out
+}
+
+/// Controls whose double-click opens the typed-value popover instead of resetting (manual: a
+/// send knob, an Aux / Cue value in SENDS OVERVIEW; the fader readout has its own hit).
+fn types_value(c: &Control) -> bool {
+    matches!(c, Control::SendLevel(_))
 }
 
 /// How long a [`HitKind::Latch`] press is held before its release turns it off.
@@ -364,15 +458,28 @@ pub const LATCH_HOLD: std::time::Duration = std::time::Duration::from_millis(500
 /// Pointer state machine. Hits are searched topmost-first (last registered wins).
 #[derive(Default)]
 pub struct Interaction {
+    /// CONTROLS MODE for [`HitKind::Knob`] drags (the host sets it from [`ControlsMode::of`]).
+    pub controls_mode: ControlsMode,
+    /// The modifier keys held at the next press (the host sets them before `pointer_down`).
+    pub mods: KeyMods,
     active: Option<Active>,
     /// The [`HitKind::Latch`] control pressed, and when.
     latched: Option<(ControlId, std::time::Instant)>,
 }
 
 impl Interaction {
+    /// A press. Console's modifiers (manual "Controls Shortcuts"): Option/Alt-click returns a
+    /// knob or fader to its default (`Action::Reset`: the engine gets `"default"`), with Cmd
+    /// (Ctrl) every strip's; Option/Alt-click on a Mute or Solo sets every strip
+    /// ([`Control::ToggleAll`]); Cmd (Ctrl)-drag moves the same control on every strip; a
+    /// double-click on a send opens its typed-value popover, on other knobs and faders resets.
     pub fn pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool) -> Vec<Action> {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
+        let mods = self.mods;
         match &hit.kind {
+            HitKind::Toggle if mods.alt && matches!(hit.id.control, Control::Mute | Control::Solo) => {
+                vec![Action::Toggle(ControlId { strip: hit.id.strip.clone(), control: Control::ToggleAll(Box::new(hit.id.control.clone())) })]
+            }
             HitKind::Toggle => vec![Action::Toggle(hit.id.clone())],
             HitKind::Latch => {
                 self.latched = Some((hit.id.clone(), std::time::Instant::now()));
@@ -380,6 +487,17 @@ impl Interaction {
             }
             HitKind::Tap => {
                 let mut id = hit.id.clone();
+                if let Control::ValueEntry(target) = &id.control {
+                    // The readout opens the entry on a double-click, showing its control's value.
+                    let value = hits.iter().rev().find(|h| h.id.strip == id.strip && h.id.control == **target).and_then(|h| match h.kind {
+                        HitKind::Drag { value, .. } | HitKind::Knob { value, .. } => Some(value),
+                        _ => None,
+                    });
+                    return match value {
+                        Some(v) if double => vec![Action::Set(id, v)],
+                        _ => vec![],
+                    };
+                }
                 if double {
                     id.control = match id.control {
                         Control::BrowserItem(i) => Control::BrowserActivate(i),
@@ -389,7 +507,23 @@ impl Interaction {
                 }
                 vec![Action::Tap(id)]
             }
-            HitKind::Drag { value, span, reset } => {
+            HitKind::Drag { value, span, reset } | HitKind::Knob { value, span, reset } => {
+                if mods.alt {
+                    // Back to the default (the engine resolves `"default"`; a control without a
+                    // known UI default shows its value until the engine's echo).
+                    let group = if mods.cmd { peers(hits, hit) } else { vec![hit] };
+                    let mut out = vec![Action::GestureBegin(hit.id.clone())];
+                    for h in group {
+                        if let HitKind::Drag { value, reset, .. } | HitKind::Knob { value, reset, .. } = &h.kind {
+                            out.push(Action::Reset(h.id.clone(), reset.unwrap_or(*value)));
+                        }
+                    }
+                    out.push(Action::GestureEnd(hit.id.clone()));
+                    return out;
+                }
+                if double && types_value(&hit.id.control) {
+                    return vec![Action::Set(ControlId { strip: hit.id.strip.clone(), control: Control::ValueEntry(Box::new(hit.id.control.clone())) }, *value)];
+                }
                 if double {
                     if let Some(r) = reset {
                         return vec![
@@ -399,18 +533,56 @@ impl Interaction {
                         ];
                     }
                 }
-                self.active = Some(Active { id: hit.id.clone(), start_y: y, start_x: x, start_value: *value, span: *span });
-                vec![Action::GestureBegin(hit.id.clone())]
+                let knob = matches!(hit.kind, HitKind::Knob { .. });
+                let circular = (knob && self.controls_mode != ControlsMode::Linear).then(|| {
+                    let c = hit.rect.center();
+                    (c, angle(c, x, y))
+                });
+                let group = if mods.cmd { peers(hits, hit) } else { vec![hit] };
+                let group = group
+                    .into_iter()
+                    .filter_map(|h| match h.kind {
+                        HitKind::Drag { value, .. } | HitKind::Knob { value, .. } => Some((h.id.clone(), value)),
+                        _ => None,
+                    })
+                    .collect();
+                let a = Active { id: hit.id.clone(), start_y: y, start_x: x, start_value: *value, span: *span, circular, origin: *value, group };
+                let mut out = vec![Action::GestureBegin(hit.id.clone())];
+                // Circular: the press itself moves the knob to the pointer.
+                if let (Some((_, angle)), ControlsMode::Circular) = (circular, self.controls_mode) {
+                    out.extend(a.sets(Self::circular_value(angle)));
+                }
+                self.active = Some(a);
+                out
             }
         }
     }
 
-    /// `fine` divides the motion by 10 (Console's modifier-drag).
+    /// The knob value at pointer angle `a` (the dead zone at 6 o'clock snaps to the nearer end).
+    fn circular_value(a: f64) -> f64 {
+        (a / KNOB_SWEEP_DEG + 0.5).clamp(0.0, 1.0)
+    }
+
+    /// `fine` (Shift) divides the motion by 10 (Console's fine adjust).
     pub fn pointer_move(&mut self, x: f32, y: f32, fine: bool) -> Vec<Action> {
-        let Some(a) = &self.active else { return vec![] };
+        let mode = self.controls_mode;
+        let Some(a) = &mut self.active else { return vec![] };
         let scale = if fine { 10.0 } else { 1.0 };
+        if let Some((c, last)) = &mut a.circular {
+            let now = angle(*c, x, y);
+            let v = if mode == ControlsMode::Circular {
+                Self::circular_value(now)
+            } else {
+                // Relative: the turn since the last move (unwrapped across 6 o'clock) accumulates.
+                let turn = (now - *last + 540.0).rem_euclid(360.0) - 180.0;
+                *last = now;
+                a.start_value = (a.start_value + turn / (KNOB_SWEEP_DEG * scale)).clamp(0.0, 1.0);
+                a.start_value
+            };
+            return a.sets(v);
+        }
         let delta = ((a.start_y - y) as f64 + (x - a.start_x) as f64 * 0.25) / (a.span.max(1.0) as f64 * scale);
-        vec![Action::Set(a.id.clone(), (a.start_value + delta).clamp(0.0, 1.0))]
+        a.sets((a.start_value + delta).clamp(0.0, 1.0))
     }
 
     pub fn pointer_up(&mut self) -> Vec<Action> {
@@ -454,6 +626,81 @@ mod tests {
         assert_eq!(i.pointer_up(), vec![Action::GestureEnd(id())]);
         let reset = i.pointer_down(&hits, 10.0, 100.0, true);
         assert_eq!(reset[1], Action::Reset(id(), 0.78));
+    }
+
+    fn cid(strip: &str, control: Control) -> ControlId {
+        ControlId { strip: strip.into(), control }
+    }
+
+    /// Two input faders and an aux fader (in0 at 0.5, in1 at 0.9, aux0 at 0.3), two input
+    /// mutes, a send knob and in0's readout.
+    fn strip_hits() -> Vec<Hit> {
+        let drag = |value| HitKind::Drag { value, span: 100.0, reset: Some(0.78) };
+        vec![
+            Hit { rect: Rect::new(0.0, 0.0, 50.0, 300.0), id: cid("/d/inputs/0", Control::Fader), kind: drag(0.5) },
+            Hit { rect: Rect::new(100.0, 0.0, 50.0, 300.0), id: cid("/d/inputs/1", Control::Fader), kind: drag(0.9) },
+            Hit { rect: Rect::new(200.0, 0.0, 50.0, 300.0), id: cid("/d/auxs/0", Control::Fader), kind: drag(0.3) },
+            Hit { rect: Rect::new(0.0, 310.0, 50.0, 20.0), id: cid("/d/inputs/0", Control::Mute), kind: HitKind::Toggle },
+            Hit { rect: Rect::new(100.0, 310.0, 50.0, 20.0), id: cid("/d/inputs/1", Control::Mute), kind: HitKind::Toggle },
+            Hit { rect: Rect::new(0.0, 340.0, 40.0, 40.0), id: cid("/d/inputs/0", Control::SendLevel(0)), kind: HitKind::Knob { value: 0.6, span: 250.0, reset: Some(0.78) } },
+            Hit { rect: Rect::new(0.0, 390.0, 50.0, 16.0), id: cid("/d/inputs/0", Control::ValueEntry(Box::new(Control::Fader))), kind: HitKind::Tap },
+        ]
+    }
+
+    fn with(alt: bool, cmd: bool) -> Interaction {
+        Interaction { mods: KeyMods { alt, cmd }, ..Interaction::default() }
+    }
+
+    /// Option-click: the control's default (`Reset`, sent as `"default"`), no drag.
+    #[test]
+    fn option_click_resets() {
+        let hits = strip_hits();
+        let mut i = with(true, false);
+        let in0 = cid("/d/inputs/0", Control::Fader);
+        assert_eq!(i.pointer_down(&hits, 10.0, 100.0, false), vec![Action::GestureBegin(in0.clone()), Action::Reset(in0.clone(), 0.78), Action::GestureEnd(in0)]);
+        assert!(!i.is_dragging());
+    }
+
+    /// Cmd+Option-click: every input's fader resets (not the aux's).
+    #[test]
+    fn cmd_option_click_resets_every_strip_of_the_kind() {
+        let hits = strip_hits();
+        let out = with(true, true).pointer_down(&hits, 110.0, 100.0, false);
+        let resets: Vec<_> = out.iter().filter_map(|a| if let Action::Reset(id, v) = a { Some((&*id.strip, *v)) } else { None }).collect();
+        assert_eq!(resets, vec![("/d/inputs/1", 0.78), ("/d/inputs/0", 0.78)]);
+    }
+
+    /// Option-click on a Mute: `ToggleAll(Mute)` (the view sets every strip).
+    #[test]
+    fn option_click_mute_toggles_all() {
+        let hits = strip_hits();
+        assert_eq!(with(true, false).pointer_down(&hits, 10.0, 315.0, false), vec![Action::Toggle(cid("/d/inputs/0", Control::ToggleAll(Box::new(Control::Mute))))]);
+        assert_eq!(with(false, true).pointer_down(&hits, 10.0, 315.0, false), vec![Action::Toggle(cid("/d/inputs/0", Control::Mute))]);
+    }
+
+    /// Cmd-drag: both input faders move by the same amount and stop when one reaches the top.
+    #[test]
+    fn cmd_drag_moves_every_strip_keeping_offsets() {
+        let hits = strip_hits();
+        let mut i = with(false, true);
+        i.pointer_down(&hits, 10.0, 100.0, false);
+        let (in0, in1) = (cid("/d/inputs/0", Control::Fader), cid("/d/inputs/1", Control::Fader));
+        let set = |a: Vec<Action>| a.into_iter().map(|a| if let Action::Set(id, v) = a { (id, (v * 1000.0).round() / 1000.0) } else { panic!("{a:?}") }).collect::<Vec<_>>();
+        assert_eq!(set(i.pointer_move(10.0, 95.0, false)), vec![(in0.clone(), 0.55), (in1.clone(), 0.95)]);
+        assert_eq!(set(i.pointer_move(10.0, 50.0, false)), vec![(in0.clone(), 0.6), (in1.clone(), 1.0)], "stops at in1's max");
+        assert_eq!(set(i.pointer_move(10.0, 150.0, true)), vec![(in0, 0.45), (in1, 0.85)], "Shift: a tenth");
+    }
+
+    /// Double-click a send knob or the fader readout: the typed-value popover (`Set` on
+    /// `ValueEntry`) instead of a reset; a single click on the readout does nothing.
+    #[test]
+    fn double_click_send_or_readout_opens_value_entry() {
+        let hits = strip_hits();
+        let mut i = Interaction::default();
+        let entry = |c| cid("/d/inputs/0", Control::ValueEntry(Box::new(c)));
+        assert_eq!(i.pointer_down(&hits, 10.0, 350.0, true), vec![Action::Set(entry(Control::SendLevel(0)), 0.6)]);
+        assert_eq!(i.pointer_down(&hits, 10.0, 395.0, false), vec![]);
+        assert_eq!(i.pointer_down(&hits, 10.0, 395.0, true), vec![Action::Set(entry(Control::Fader), 0.5)]);
     }
 
     /// TALK: a click latches (toggle on press, nothing on release); held for 0.5 s it is

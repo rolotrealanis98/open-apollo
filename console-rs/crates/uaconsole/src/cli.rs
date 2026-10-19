@@ -17,6 +17,8 @@ usage:
                                                          headless render (preview data);
                                                          --size is the window in points
   uaconsole --bench N [--compact] [--scale N]            render N frames headless, print timings
+  uaconsole --drive FILE [--engine host[:port] --writes | --mock snapshot.json]
+                                                         run a script headless (see crates/uaconsole/src/drive.rs)
 
   --open settings[:hardware|io-matrix|options|midi|network], cue-outputs,
   monitor-controller[:1], headphone-correction, plugin-scenes, meters, talkback,
@@ -99,6 +101,8 @@ impl fmt::Display for EngineAddr {
 pub struct Args {
     pub render: Option<PathBuf>,
     pub bench: Option<usize>,
+    /// `--drive FILE`: run a script headless (`crate::drive`).
+    pub drive: Option<PathBuf>,
     pub scale: Option<f32>,
     /// Window size in points for `--render` (Console lays out to its window).
     pub size: Option<(f32, f32)>,
@@ -152,6 +156,7 @@ impl Args {
             let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
             match a.as_str() {
                 "--render" => out.render = Some(value("--render")?.into()),
+                "--drive" => out.drive = Some(PathBuf::from(value("--drive")?)),
                 "--bench" => {
                     out.bench = Some(
                         value("--bench")?

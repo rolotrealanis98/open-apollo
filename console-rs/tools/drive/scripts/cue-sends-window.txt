@@ -1,0 +1,25 @@
+settle
+size 1920 1300
+click nav:SectionsOpenAll
+settle
+rclick /devices/0/inputs/0:SendLevel(0)
+settle
+drag settings:SettingSet("fader:/devices/0/inputs/0/sends/2/GainTapered") 0 -40
+settle
+click settings:SettingPress("toggle:/devices/0/inputs/0/sends/2/Bypass")
+settle
+drag settings:SettingSet("fader:/devices/0/inputs/0/sends/3/GainTapered") 0 -40
+settle
+drag settings:SettingSet("pan:/devices/0/inputs/0/sends/2/Pan") 0 -20
+settle
+click settings:PanelClose
+settle
+# COPY MIX TO from the fader menu
+rclick /devices/0/inputs/0:Fader
+settle
+key escape
+#! tree /devices/0/inputs/0/sends/2/GainTapered/value
+#! hw set_mixer_bus_param 0 1 * *
+#! tree /devices/0/inputs/0/sends/2/Bypass/value True
+#! hw set_mixer_bus_param 0 2 * *
+#! tree /devices/0/inputs/0/sends/2/Pan/value

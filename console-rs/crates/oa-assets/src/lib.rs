@@ -11,6 +11,7 @@
 //! Powered plug-in DLLs ([`plugins`]).
 //! Everything is read-only toward the source.
 
+pub mod catalogue;
 pub mod detect;
 pub mod discover;
 pub mod dsp;

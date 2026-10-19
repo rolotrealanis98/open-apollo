@@ -7,7 +7,7 @@ use rack::{Action, Hit, HitKind};
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
-/// Value change per wheel line on a knob/fader, and with Shift/Alt.
+/// Value change per wheel line on a knob/fader (Option/Alt + wheel), and with Shift too.
 pub const WHEEL_STEP: f64 = 0.01;
 pub const WHEEL_STEP_FINE: f64 = 0.001;
 /// Touchpad pixels per wheel line.
@@ -32,11 +32,11 @@ impl ClickTracker {
     }
 }
 
-/// Wheel over a `Drag` hit at (`x`, `y`) (points): a one-step gesture. None when no drag control
-/// is under the pointer (the wheel then pans).
+/// Option/Alt + wheel over a `Drag` hit at (`x`, `y`) (points): a one-step gesture. None when
+/// no drag control is under the pointer (the wheel then scrolls or pans).
 pub fn wheel_actions(hits: &[Hit], x: f32, y: f32, lines: f64, fine: bool) -> Option<Vec<Action>> {
     let hit = hits.iter().rev().find(|h| h.rect.contains(x, y))?;
-    let HitKind::Drag { value, .. } = &hit.kind else {
+    let (HitKind::Drag { value, .. } | HitKind::Knob { value, .. }) = &hit.kind else {
         return None;
     };
     let step = if fine { WHEEL_STEP_FINE } else { WHEEL_STEP };

@@ -22,12 +22,32 @@ and "Gain/value" as its current value. We replicate this.
 
 import json
 import logging
+import re
 import threading
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
 log = logging.getLogger(__name__)
+
+# Property patterns the engine publishes as `readonly` (N = any index); names
+# only (device_maps/readonly_properties.json)
+READONLY_PATTERNS = Path(__file__).resolve().parent / "device_maps" / \
+    "readonly_properties.json"
+
+
+def _readonly_regex(path: Path = READONLY_PATTERNS):
+    try:
+        patterns = json.loads(Path(path).read_text())["readonly"]
+    except (OSError, ValueError, KeyError):
+        log.warning("No readonly property list at %s", path)
+        return None
+    return re.compile("^(?:%s)$" % "|".join(
+        "/".join(r"\d+" if part == "N" else re.escape(part)
+                 for part in pattern.split("/")) for pattern in patterns))
+
+
+_READONLY_RE = _readonly_regex()
 
 
 class StateTree:
@@ -86,6 +106,7 @@ class StateTree:
         for ctrl in controls:
             ctrl_path = ctrl["path"]
             self._insert_control(ctrl_path, ctrl)
+        self._publish_defaults()
 
         log.info("Loaded %d controls for %s", self.control_count, self.device_name)
 
@@ -97,6 +118,7 @@ class StateTree:
         """
         self._insert_control(ctrl_path, ctrl)
         self._props[ctrl_path] = self.get_prop_dict(ctrl_path)
+        self._publish_defaults((ctrl_path,))
 
     def update_property(self, ctrl_path: str, overrides: dict):
         """Update an existing property with override values.
@@ -110,6 +132,12 @@ class StateTree:
         for key in ("type", "value", "min", "max", "values", "readonly"):
             if overrides.get(key) is not None:
                 prop[key] = overrides[key]
+
+    def is_readonly(self, path: str) -> bool:
+        """Whether a client SET of `path` is refused (`uasrv.read_only`).
+        Daemon-internal writers call set() and are not subject to it."""
+        prop = self.get_prop_dict(path)
+        return bool(prop and prop.get("readonly"))
 
     def get_prop_dict(self, path: str) -> dict | None:
         """Get the raw property dict for a path (for direct mutation)."""
@@ -225,7 +253,8 @@ class StateTree:
             prop_data["default"] = ctrl["default"]
         if "value" in ctrl:
             prop_data["value"] = ctrl["value"]
-        if ctrl.get("readonly"):
+        if ctrl.get("readonly") or (
+                _READONLY_RE and _READONLY_RE.match(ctrl_path)):
             prop_data["readonly"] = True
 
         props = node.setdefault("properties", {})
@@ -233,6 +262,75 @@ class StateTree:
 
         # Index for fast lookup
         self._props[ctrl_path] = prop_data
+
+    # ── Defaults ─────────────────────────────────────────────────────
+
+    def _publish_defaults(self, paths=None):
+        """Publish `default` on the properties the engine gives one (x4
+        engine dump): a map's own stays, else _builtin_default.  `paths`
+        limits it to those."""
+        for path in (paths if paths is not None else tuple(self._props)):
+            prop = self._props.get(path)
+            if prop is not None and "default" not in prop:
+                default = self._builtin_default(path)
+                if default is not None:
+                    prop["default"] = default
+
+    def _builtin_default(self, path: str):
+        """The Mixer Engine's default of a property, by name (x4 engine
+        dump): 0 dB faders and trims, a send at 0 dB (its Gain at -144),
+        centre pans, a preamp at 10 dB, the talkback strip and its sends
+        at -6 dB.  None where the engine has none."""
+        name = path.rpartition("/")[2]
+        if name in self._FIXED_DEFAULTS:
+            return self._FIXED_DEFAULTS[name]
+        in_preamp, in_send = "/preamps/" in path, "/sends/" in path
+        tapered = name.endswith("Tapered")
+        if in_preamp and name in ("Gain", "GainTapered"):
+            from hardware import preamp_db_to_tapered
+            return preamp_db_to_tapered(10.0) if tapered else 10.0
+        if name == "Gain" and in_send:
+            # (the engine's talkback sends 0 and 1, the AUX ones, stay off)
+            send = int(path.rsplit("/sends/", 1)[1].split("/")[0])
+            return -6.0 if self._is_talkback(path) and send > 1 else -144.0
+        if not (name.removesuffix("Tapered") in ("FaderLevel", "LLMDiskTrimLevel")
+                or name == "GainTapered" and in_send):
+            return None
+        if name.startswith("LLM"):
+            return 43.0 / 55.0 if tapered else 0.0
+        if self._is_talkback(path):
+            # the engine's own values: float32 of 37/55 and 43/55 (the
+            # fader LUT lands a 360th off them)
+            return 37.0 / 55.0 if tapered else -6.0
+        return 43.0 / 55.0 if tapered else 0.0
+
+    _FIXED_DEFAULTS = {
+        "Pan": 0.0, "Pan2": 0.0, "PostFaderOverride": -1, "DimAttenuation": 17,
+        "AltMonTrim": 0.0, "AltMonSelection": 0, "CRMonitorLevel": -96.0,
+        "CRMonitorLevelTapered": 0.0,
+        "BassMgrXOverFreq": 80,
+    }
+
+    def _is_talkback(self, path: str) -> bool:
+        """Whether `path` is under the TALKBACK input (the map's name)."""
+        parts = path.split("/")
+        if len(parts) < 5 or parts[3] != "inputs":
+            return False
+        name_path = "/".join(parts[:5]) + "/Name"
+        name = self._base.get(name_path + "/value",
+                              self.get_value(name_path + "/value"))
+        return isinstance(name, str) and name.strip().upper() == "TALKBACK"
+
+    def _stereo_pan_default(self, path: str, name: str):
+        """Pan / Pan2 of a linked input rest hard left / right (-1 / 1, as
+        the link writes them); None for any other property."""
+        parts = path.split("/")
+        if name not in ("Pan", "Pan2") or len(parts) != 6 or \
+                parts[3] != "inputs":
+            return None
+        if self.get_value("/".join(parts[:5]) + "/Stereo/value") is True:
+            return -1.0 if name == "Pan" else 1.0
+        return None
 
     # ── Path Traversal ───────────────────────────────────────────────
 
@@ -399,15 +497,13 @@ class StateTree:
         # Convert value to match the property type
         prop_type = resolved.get("type")
         if value == "default":
-            # Captured current values are not factory defaults. Only reset
-            # controls whose neutral value is known, or explicit metadata.
-            defaults = {"Pan": 0.0, "FaderLevel": 0.0,
-                        "FaderLevelTapered": 43.0 / 55.0}
-            if "default" in resolved:
-                value = resolved["default"]
-            elif prop_name in defaults and prop_type == "float":
-                value = defaults[prop_name]
-            else:
+            # Captured current values are not factory defaults: the map's
+            # own default, else the per-property table (_builtin_default)
+            ppath = path.rstrip("/").removesuffix("/value")
+            value = self._stereo_pan_default(ppath, prop_name)
+            if value is None:
+                value = resolved.get("default")
+            if value is None:
                 log.warning("SET: default unavailable: %s", path)
                 return False
         value = self._coerce_value(value, prop_type, resolved)

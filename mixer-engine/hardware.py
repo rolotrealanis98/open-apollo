@@ -567,6 +567,17 @@ ALTMON_ENABLE_PARAMS = (0x3B, 0x3C)
 OUT_PAD_PARAMS = (0x19, 0x1A, 0x1B, 0x1C)
 # DSP bus-enable ids of CUE 1..4 (SetBusEnable; CueBusCount decides)
 CUE_BUS_ENABLE_BUSES = (1, 2, 5, 6)
+# Console: "cue 3/4 are off at sample rates >= 176.4 kHz"
+CUE_34_OFF_RATE = 176400
+
+
+def effective_cue_count(count: int, rate) -> int:
+    """CUE BUS COUNT as the engine runs it: CUE 3/4 drop out at >= 176.4 kHz."""
+    try:
+        high = int(rate) >= CUE_34_OFF_RATE
+    except (TypeError, ValueError):
+        high = False
+    return min(count, 2) if high else count
 AUX_MONO_PARAMS = {0: 0x0A, 1: 0x0F}     # CMxAuxBus MixToMono, aux 1 / 2
 
 
@@ -2437,6 +2448,13 @@ _RE_PREAMP = re.compile(
     r'PreampInputKnobSteps|PreampSelectedParam|'
     r'PreampGainCustomDisplayText)/value$')
 
+# Preamp controls a linked pair's leader repeats on the right channel
+# (CMxInput::UpdateHardwareState: params 0 mic/line, 1 Pad, 3 48V, 4 LowCut,
+# 5 Phase, 6 Gain, 7 Impedance to synch-in and synch-in + 1)
+_GANGED_PREAMP = ("Gain", "GainTapered", "48V", "Pad", "LowCut", "Phase",
+                  "HiZImpedance")
+_GANGED_INPUT = ("IOType", "HiZImpedance")
+
 # Bus send controls: /devices/0/inputs/<ch>/sends/<send>/<control>/value
 _RE_SEND = re.compile(
     r'^/devices/0/inputs/(\d+)/sends/(\d+)/'
@@ -2506,6 +2524,8 @@ class HardwareRouter:
         self.backend = backend
         self.stereo_sends = stereo_sends
         self.state_tree = state_tree
+        # DSP buses 5/6 (CUE 3/4) this router turned on
+        self._cue_buses_on: set[int] = set()
         # The device's clock-source menu, {name: value} (device_clock_menu):
         # the daemon sets it from UA_IOCTL_GET_CLOCK_SOURCES; it names an
         # AES/EBU or MADI source as the device does.  CLOCK_SOURCE_MAP
@@ -2881,15 +2901,16 @@ class HardwareRouter:
         sub 0/3/4 triplet the macOS capture shows.
         """
         base = f"/devices/0/inputs/{ch}"
+        buses = [bus] + self._second_bus(ch)
         for send_idx in range(len(_SEND_IDX_TO_SUB)):
             sub = self._send_sub(base, send_idx, _SEND_IDX_TO_SUB)
             if sub is None or not self._send_is_post_fader(base, send_idx):
                 continue
-            self._write_send(
-                bus, sub,
-                self._input_send_linear(
-                    ch, send_idx, fader_db=fader_db, muted=muted),
-                self._send_pan(f"{base}/sends/{send_idx}"))
+            linear = self._input_send_linear(
+                ch, send_idx, fader_db=fader_db, muted=muted)
+            for b in buses:
+                self._write_send(b, sub, linear,
+                                 self._send_pan(f"{base}/sends/{send_idx}"))
 
     def _solo_muted(self, ch: int) -> bool:
         """The input is silenced by another channel's solo (the rule of
@@ -2904,17 +2925,19 @@ class HardwareRouter:
         """Write input send `send_idx` of input `ch` from the tree: its
         gain, bypass, pre/post-fader rule, the fader, the mute and a solo
         that silences the channel.  False when the send has no bus or
-        sub-param."""
+        sub-param, and for a linked pair's right half (the leader's sends
+        drive its bus)."""
         base = f"{IN_BASE}/{ch}"
         sub = self._send_sub(base, send_idx, _SEND_IDX_TO_SUB)
         bus = self._input_bus(ch)
-        if sub is None or bus is None:
+        if sub is None or bus is None or self._pair_follower(ch):
             return False
         muted = self._truthy(self._tree_value(f"{base}/Mute/value")) or \
             self._solo_muted(ch)
-        self._write_send(bus, sub,
-                         self._input_send_linear(ch, send_idx, muted=muted),
-                         self._send_pan(f"{base}/sends/{send_idx}"))
+        linear = self._input_send_linear(ch, send_idx, muted=muted)
+        for b in [bus] + self._second_bus(ch):
+            self._write_send(b, sub, linear,
+                             self._send_pan(f"{base}/sends/{send_idx}"))
         return True
 
     def _rewrite_sends_following(self, send_id: str) -> int:
@@ -2994,6 +3017,11 @@ class HardwareRouter:
 
     def on_set(self, path: str, value: Any):
         """Called by state_tree when a value changes. Route to hardware."""
+        m = _RE_INPUT.match(path)
+        if m and m.group(2) == "Stereo":
+            # The tree half of a Link runs while paused too (the layout)
+            self._apply_link(path, int(m.group(1)), value)
+            return
         if self.paused:
             log.debug("SET %s = %r (device paused, tree only)", path, value)
             return
@@ -3002,12 +3030,16 @@ class HardwareRouter:
         if m:
             ch, control = int(m.group(1)), m.group(2)
             self._handle_preamp(path, ch, control, value)
+            if control in _GANGED_PREAMP:
+                self._gang(path, ch, control, value, self._handle_preamp)
             return
 
         m = _RE_INPUT.match(path)
         if m:
             ch, control = int(m.group(1)), m.group(2)
             self._handle_input(path, ch, control, value)
+            if control in _GANGED_INPUT:
+                self._gang(path, ch, control, value, self._handle_input)
             return
 
         if _RE_REMOTE_SOLO.match(path):
@@ -3170,10 +3202,8 @@ class HardwareRouter:
         solo_flag = any_solo and self._has_feature(UA_FEAT_BUS_SOLO_FLAG)
         for i, bus, soloed, fader_db, muted in channels:
             if self._pair_follower(i):
-                # A linked pair's right half: its main-mix bus is written
-                # with the leader (Pan2), only its own sends here
-                self._write_post_fader_sends(
-                    i, bus, fader_db, muted or (any_solo and not soloed))
+                # A linked pair's right half: the leader writes its bus
+                # (main mix with Pan2, and the leader's sends)
                 continue
             if bus == self.talkback_bus():
                 # Talkback has its own encoding (sub 0 only, unity 3.976)
@@ -3382,7 +3412,6 @@ class HardwareRouter:
                 # The pair's leader carries this bus (its Pan2 position)
                 log.debug("SET %s = %r (right half of a linked pair: the "
                           "leader drives bus 0x%04x)", path, value, bus)
-                self._write_post_fader_sends(ch, bus, db, muted)
                 return
             linear = encode_input_fader(db)
             # Read current pan to compute combined sub=0 coefficient
@@ -3412,14 +3441,11 @@ class HardwareRouter:
             return
 
         if control == "Mute":
+            if self._pair_follower(ch):
+                log.debug("SET %s = %r (right half of a linked pair: the "
+                          "leader's mute drives bus 0x%04x)", path, value, bus)
+                return
             if value and value != "0" and value != "false":
-                if self._pair_follower(ch):
-                    log.debug("SET %s = %r (right half of a linked pair: "
-                              "the leader's mute silences bus 0x%04x)",
-                              path, value, bus)
-                    self._write_post_fader_sends(
-                        ch, bus, self._get_input_fader_db(ch), True)
-                    return
                 log.info("HW BUS: input[%d].Mute ON (fader→0.0, bus=0x%04x)",
                          ch, bus)
                 self.backend.set_bus_fader(bus, 0.0, 0.0, 0.0)
@@ -3501,13 +3527,6 @@ class HardwareRouter:
         if control == "HiZImpedance":
             if ch in self.preamp_inputs():
                 self._write_hiz_impedance(path, ch, value)
-            return
-
-        if control == "Stereo":
-            self._write_link(path, ch, value)
-            # Linking hands the second bus to the leader (and unlinking
-            # gives it back): rewrite every bus's coefficients
-            self._handle_solo_recalc()
             return
 
         if control == "PGADisabledInLineMode":
@@ -3714,27 +3733,150 @@ class HardwareRouter:
     def _linked(self, ch: int) -> bool:
         return self._truthy(self._tree_value(f"{IN_BASE}/{ch}/Stereo/value"))
 
+    def _pair_of(self, ch: int) -> tuple[int, int] | None:
+        """(leader, right) tree indexes of the stereo pair `ch` belongs to,
+        whatever Stereo says (CMxInput::GetStereoPartner: the input whose
+        synch-in is mine ^ 1; the even one leads).  None without one."""
+        bus = self._input_bus(ch)
+        if bus is None:
+            return None
+        for cand in (ch + 1, ch - 1):
+            if self._input_bus(cand) == bus ^ 1:
+                return (ch, cand) if bus % 2 == 0 else (cand, ch)
+        return None
+
     def _pair_partner(self, ch: int) -> int | None:
         """Tree index of the right half when `ch` leads a linked stereo pair
         (Stereo set and an even synch-in); None otherwise.  As
         CMxInput::UpdateHardwareState, the leader drives both buses: its
         own with the Pan pair, synch-in + 1 with the Pan2 pair."""
-        bus = self._input_bus(ch)
-        if bus is None or bus % 2 or not self._linked(ch):
+        pair = self._pair_of(ch)
+        if pair is None or pair[0] != ch or not self._linked(ch):
             return None
-        for cand in (ch + 1, ch - 1):
-            if self._input_bus(cand) == bus + 1:
-                return cand
-        return None
+        return pair[1]
 
     def _pair_follower(self, ch: int) -> bool:
-        """True for the right half (odd synch-in) of a linked pair: the
-        engine sends no main-mix coefficients for it."""
-        bus = self._input_bus(ch)
-        if bus is None or bus % 2 == 0 or not self._linked(ch):
-            return False
-        return any(self._input_bus(c) == bus - 1 and self._linked(c)
-                   for c in (ch - 1, ch + 1))
+        """True for the right half (odd synch-in) of a pair whose leader is
+        linked: the leader's fader, mute, solo, pans and sends drive its
+        bus, whatever the right input's own controls say."""
+        pair = self._pair_of(ch)
+        return pair is not None and pair[1] == ch and self._linked(pair[0])
+
+    def _second_bus(self, ch: int) -> list:
+        """[bus of synch-in + 1] when `ch` leads a linked pair, else []."""
+        partner = self._pair_partner(ch)
+        return [] if partner is None else [self._input_bus(partner)]
+
+    def _mirror(self, path: str, value: Any):
+        """Tree only (no hardware write), to every subscriber."""
+        if self.state_tree and self.state_tree.get_value(path) is not None:
+            self.state_tree.set(path, value, hardware=False)
+
+    def _apply_link(self, path: str, ch: int, value: Any):
+        """kPropStereo (CMxInput::SetProperty case 0x45).  A set on the
+        right leg is forwarded to the leader, which links the pair.  The
+        leader: the right leg follows in the tree (link_tree), then the
+        hardware: link bit, the right preamp ganged to the leader's, both
+        buses' main mix and sends rewritten."""
+        on = self._truthy(value)
+        pair = self._pair_of(ch)
+        if pair is None:
+            if not self.paused:
+                self._write_link(path, ch, value)
+                self._handle_solo_recalc()
+            return
+        leader, right = pair
+        if ch == right:
+            if self._linked(leader) != on:
+                lpath = f"{IN_BASE}/{leader}/Stereo/value"
+                self._mirror(lpath, on)
+                self._apply_link(lpath, leader, on)
+            return
+        self.link_tree(leader, on)
+        if not self.paused:
+            self._write_link(path, leader, value)
+            self._link_hardware(leader, right, on)
+
+    def _link_hardware(self, leader: int, right: int, on: bool):
+        """The mixer half of a Link: on link the leader's preamp is
+        re-pushed on the right channel (UA re-sets Pad, 48V, Phase and Gain
+        with flag 8); then every bus's main mix (linking hands the second
+        bus to the leader, unlinking gives it back) and the pair's sends
+        (the leader's on both buses, or the right input's own)."""
+        if on and right in self.preamp_inputs():
+            lbase, rbase = f"{IN_BASE}/{leader}/", f"{IN_BASE}/{right}/"
+            for control in _GANGED_PREAMP:
+                p = f"{lbase}preamps/0/{control}/value"
+                v = self._tree_value(p)
+                if v is not None and control != "GainTapered":
+                    self._handle_preamp(p.replace(lbase, rbase), right,
+                                        control, v)
+            for control in _GANGED_INPUT:
+                p = f"{lbase}{control}/value"
+                v = self._tree_value(p)
+                if v is not None:
+                    self._handle_input(p.replace(lbase, rbase), right,
+                                       control, v)
+        self._handle_solo_recalc()
+        self.write_input_sends(leader if on else right)
+
+    def link_tree(self, leader: int, on: bool):
+        """The tree half of a Link on `leader` (UA's SetProperty 0x45 and
+        UpdateActiveState; the x4 engine dump of a linked pair): the right
+        leg's Stereo follows, its Active is cleared (Console draws one
+        "ANALOG 1/2" strip), both legs' pans go hard left / right (Pan -1,
+        Pan2 +1; 0 / 0 on unlink); on link its Solo clears and its preamp
+        takes the leader's values, so an unlink shows the ganged state.
+        No hardware write: the caller rewrites the buses."""
+        pair = self._pair_of(leader)
+        if pair is None or pair[0] != leader:
+            return
+        right = pair[1]
+        rbase, lbase = f"{IN_BASE}/{right}", f"{IN_BASE}/{leader}"
+        pan, pan2 = (-1.0, 1.0) if on else (0.0, 0.0)
+        values = [(f"{rbase}/Stereo/value", on),
+                  (f"{rbase}/Active/value", not on)]
+        for base in (lbase, rbase):
+            values += [(f"{base}/Pan/value", pan), (f"{base}/Pan2/value", pan2)]
+        if on:
+            values.append((f"{rbase}/Solo/value", False))
+            values += [(f"{rbase}/preamps/0/{c}/value",
+                        self._tree_value(f"{lbase}/preamps/0/{c}/value"))
+                       for c in _GANGED_PREAMP]
+            values += [(f"{rbase}/{c}/value",
+                        self._tree_value(f"{lbase}/{c}/value"))
+                       for c in _GANGED_INPUT]
+        for p, v in values:
+            if v is not None:
+                self._mirror(p, v)
+
+    def link_readback(self, leader: int, on: bool):
+        """The hardware reported a link change (the front panel): a Link
+        without the link-bit write (the device already has it)."""
+        pair = self._pair_of(leader)
+        if pair is None or pair[0] != leader:
+            return
+        self.link_tree(leader, on)
+        if not self.paused:
+            self._link_hardware(leader, pair[1], on)
+
+    def _gang(self, path: str, ch: int, control: str, value: Any, handler):
+        """A preamp write on a linked leader is repeated on the right
+        channel (hardware, then the tree only)."""
+        right = self._pair_partner(ch)
+        if right is None or right not in self.preamp_inputs():
+            return
+        rpath = path.replace(f"/inputs/{ch}/", f"/inputs/{right}/", 1)
+        handler(rpath, right, control, value)
+        self._mirror(rpath, value)
+        if control in ("Gain", "GainTapered"):
+            base = rpath.rsplit("/", 2)[0]
+            if control == "Gain":
+                self._mirror(f"{base}/GainTapered/value",
+                             preamp_db_to_tapered(int(round(float(value)))))
+            else:
+                self._mirror(f"{base}/Gain/value",
+                             preamp_tapered_to_db(float(value)))
 
     def _write_partner_bus(self, ch: int, fader_db: float, silent: bool,
                            solo_mute: bool = False):
@@ -3779,7 +3921,17 @@ class HardwareRouter:
             log.debug("SET %s = %r (input %d has no mixer bus)",
                       path, value, ch)
             return
+        if self._pair_follower(ch):
+            # UA writes the leader's sends to both buses of a linked pair
+            log.debug("SET %s = %r (right half of a linked pair: the "
+                      "leader's sends drive bus 0x%04x)", path, value, bus)
+            return
         base = f"/devices/0/inputs/{ch}/sends/{send_idx}"
+        buses = [bus] + self._second_bus(ch)
+
+        def write(linear, pan):
+            for b in buses:
+                self._write_send(b, sub, linear, pan)
 
         if control in ("Gain", "GainTapered"):
             if self._send_bypassed(base):
@@ -3794,7 +3946,7 @@ class HardwareRouter:
             log.info("HW BUS: input[%d].send[%d].Gain = %.1f dB → "
                      "linear=%.6f (bus=0x%04x sub=%d)",
                      ch, send_idx, db, linear, bus, sub)
-            self._write_send(bus, sub, linear, self._send_pan(base))
+            write(linear, self._send_pan(base))
             return
 
         if control == "Pan":
@@ -3808,8 +3960,7 @@ class HardwareRouter:
                     pan = max(-1.0, min(1.0, float(value)))
                 except (TypeError, ValueError):
                     return
-                self._write_send(bus, sub,
-                                 self._input_send_linear(ch, send_idx), pan)
+                write(self._input_send_linear(ch, send_idx), pan)
             return
 
         if control == "Bypass":
@@ -3820,7 +3971,7 @@ class HardwareRouter:
             log.info("HW BUS: input[%d].send[%d].Bypass = %r → %.6f "
                      "(bus=0x%04x sub=%d)", ch, send_idx, value, linear,
                      bus, sub)
-            self._write_send(bus, sub, linear, self._send_pan(base))
+            write(linear, self._send_pan(base))
             return
 
         if control == "PostFaderOverride":
@@ -4545,12 +4696,25 @@ class HardwareRouter:
                 count = int(value)
             except (TypeError, ValueError):
                 return
-            for idx, bus in enumerate(CUE_BUS_ENABLE_BUSES):
-                if idx >= 2 and count > idx:
-                    log.info("HW MONITOR: CueBusCount = %d → enable bus %d "
-                             "(CUE %d)", count, bus, idx + 1)
-                    self.backend.set_mixer_param(0, bus, 0x01, 1)
+            self.apply_cue_buses(count)
             return
+
+    def apply_cue_buses(self, count: int):
+        """Enable the DSP buses of the CUEs the effective count keeps and
+        disable the ones that dropped out (lowered count or a rate >=
+        176.4 kHz).  Bus 5/6 are only disabled after we enabled them."""
+        eff = effective_cue_count(count, self._tree_value("/SampleRate/value"))
+        for idx, bus in enumerate(CUE_BUS_ENABLE_BUSES):
+            if idx < 2:
+                continue
+            on = eff > idx
+            if not on and bus not in self._cue_buses_on:
+                continue
+            log.info("HW MONITOR: CueBusCount = %d (effective %d) → %s bus "
+                     "%d (CUE %d)", count, eff, "enable" if on else "disable",
+                     bus, idx + 1)
+            self.backend.set_mixer_param(0, bus, 0x01, int(on))
+            (self._cue_buses_on.add if on else self._cue_buses_on.discard)(bus)
 
     @staticmethod
     def _enum_index(value, names) -> int | None:

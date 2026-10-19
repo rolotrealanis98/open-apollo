@@ -180,6 +180,9 @@ pub enum Popover {
     /// CANCEL and a primed OK). OK taps `ok`.
     /// A question with CANCEL and `ok_label` (OK, or YES for SWITCH NETWORK INTERFACE?).
     Confirm { title: String, message: String, ok: ControlId, ok_label: String },
+    /// Typed-value entry for `target` (a fader or send level; `ViewState::text_edit` holds the
+    /// dB text): OK sets it, −144…+12 dB. The anchor is the readout's hit (or `target`'s).
+    Value { target: ControlId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -210,6 +213,8 @@ pub enum TextTarget {
     SceneName(u16),
     /// A preset name for SAVE AS / RENAME / NEW FOLDER on the PRESETS target's strip.
     Preset(Arc<str>, crate::presets::PresetScope, crate::presets::PresetCmd),
+    /// A [`Popover::Value`] field; `fresh` until the first key, which replaces the shown value.
+    Value { target: ControlId, fresh: bool },
 }
 
 /// A text field with keyboard focus.
@@ -469,8 +474,35 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SessionPanelRow(_)
             | C::SessionPanelDots
             | C::SessionSaveChoice(_)
+            | C::ValueEntry(_)
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
         || matches!(c, C::Menu(m) if m.is_view())
+}
+
+/// [`Control::ToggleAll`]: every input (or every aux) whose Mute / Solo differs from the
+/// clicked strip's opposite state toggles, in one undo step.
+fn toggle_all(model: &dyn MixerModel, strip: &Arc<str>, control: &Control) -> Vec<Effect> {
+    let inputs = model.inputs();
+    let group = if inputs.iter().any(|s| s.id == *strip) { inputs } else { model.auxes() };
+    let on = |s: &StripInfo| {
+        let m = model.main(s);
+        if *control == Control::Solo { m.solo } else { m.mute }
+    };
+    let Some(target) = group.iter().find(|s| s.id == *strip).map(|s| !on(s)) else { return Vec::new() };
+    let id = |s: &StripInfo| ControlId { strip: s.id.clone(), control: control.clone() };
+    let mut out = vec![Effect::Model(Action::GestureBegin(ControlId { strip: strip.clone(), control: control.clone() }))];
+    out.extend(group.iter().filter(|s| on(s) != target).map(|s| Effect::Model(Action::Toggle(id(s)))));
+    out.push(Effect::Model(Action::GestureEnd(ControlId { strip: strip.clone(), control: control.clone() })));
+    out
+}
+
+/// A typed level: dB text (`-12`, `+3.5`, `-inf`/`-∞` = −144) clamped to −144…+12 dB, as the
+/// level's `set_text` (an engine model writes the dB property, `FaderLevel` / `sends/k/Gain`).
+/// Not a number: nothing.
+fn value_effects(target: ControlId, text: &str) -> Vec<Effect> {
+    let t = text.trim().trim_end_matches("dB").trim();
+    let db = if t.contains('∞') || t.eq_ignore_ascii_case("-inf") { Some(-144.0) } else { t.parse::<f64>().ok().filter(|d| d.is_finite()) };
+    db.map(|db| Effect::SetText(target, format!("{}", db.clamp(-144.0, 12.0)))).into_iter().collect()
 }
 
 fn find_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
@@ -596,7 +628,18 @@ impl ViewState {
         if (press || matches!(action, Action::GestureBegin(_))) && find_strip(model, &id.strip).is_some() {
             self.selected_channel = Some(id.strip.clone());
         }
+        if let C::ToggleAll(c) = &id.control {
+            return toggle_all(model, &id.strip, c);
+        }
         if is_view_control(&id.control) {
+            if let (C::ValueEntry(c), Action::Set(_, v)) = (&id.control, &action) {
+                let target = ControlId { strip: id.strip.clone(), control: (**c).clone() };
+                let text = crate::scales::format_db(crate::scales::fader_db(*v));
+                self.menu = None;
+                self.text_edit = Some(TextEdit { target: TextTarget::Value { target: target.clone(), fresh: true }, text });
+                self.open(Popover::Value { target }, id);
+                return Vec::new();
+            }
             if let Action::Set(_, v) = action {
                 let frac = (1.0 - v as f32).clamp(0.0, 1.0);
                 match id.control {
@@ -872,10 +915,11 @@ impl ViewState {
             C::CueOutputs => self.toggle_panel(Panel::CueOutputs, model),
             C::HeadphoneMenu(o) => self.open(Popover::Headphone { output: o }, id),
             C::PopoverDismiss => {
-                self.popover = None;
+                let had_popover = self.popover.take().is_some();
                 self.text_edit = self.text_edit.take().filter(|t| t.target == TextTarget::Search);
-                // A tap outside closes an open settings dropdown first, then an anchored panel.
-                if self.settings.menu.take().is_none() && self.sheet == Some(Sheet::Panel(Panel::CueOutputs)) {
+                // A tap outside closes an open popover or settings dropdown first, then an
+                // anchored panel (the HP source menu over CUE OUTPUTS keeps the panel).
+                if !had_popover && self.settings.menu.take().is_none() && self.sheet == Some(Sheet::Panel(Panel::CueOutputs)) {
                     self.sheet = None;
                 }
             }
@@ -918,6 +962,7 @@ impl ViewState {
             TextTarget::Rename(strip) => vec![Effect::SetText(ControlId { strip, control: Control::Name }, edit.text)],
             TextTarget::Tempo => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::Tempo }, edit.text)],
             TextTarget::Search => Vec::new(),
+            TextTarget::Value { target, .. } => value_effects(target, &edit.text),
             TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
             TextTarget::Preset(strip, scope, cmd) => self.commit_preset_text(strip, scope, cmd, edit.text),
             t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder | TextTarget::SessionFolderRename(_) | TextTarget::SessionNewFolderIn(_)) => self.commit_session_text(&t, edit.text, model),
@@ -1072,6 +1117,11 @@ impl ViewState {
 
     pub fn key_text(&mut self, s: &str) {
         if let Some(e) = &mut self.text_edit {
+            if let TextTarget::Value { fresh, .. } = &mut e.target {
+                if std::mem::take(fresh) {
+                    e.text.clear();
+                }
+            }
             e.text.push_str(s);
             self.sync_search();
         }
@@ -1079,6 +1129,11 @@ impl ViewState {
 
     pub fn key_backspace(&mut self) {
         if let Some(e) = &mut self.text_edit {
+            if let TextTarget::Value { fresh, .. } = &mut e.target {
+                if std::mem::take(fresh) {
+                    e.text.clear();
+                }
+            }
             e.text.pop();
             self.sync_search();
         }
@@ -1171,6 +1226,50 @@ mod tests {
         assert!(v.sections.inputs && v.sections.inserts && v.sections.sends);
         let fwd = v.route(Action::Toggle(cid("in0", Control::Mute)), &model);
         assert_eq!(fwd, vec![Effect::Model(Action::Toggle(cid("in0", Control::Mute)))]);
+    }
+
+    /// Option-click on a Mute / Solo: every input takes the clicked one's opposite state
+    /// (auxes untouched).
+    #[test]
+    fn toggle_all_sets_every_strip_of_the_kind() {
+        let mut model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        let all = |strip: &str, c: Control| Action::Toggle(cid(strip, Control::ToggleAll(Box::new(c))));
+        v.dispatch(Action::Toggle(cid("in0", Control::Mute)), &mut model); // in0 on, the rest muted
+        v.dispatch(all("in1", Control::Mute), &mut model);
+        let inputs = model.inputs();
+        assert!(inputs.iter().all(|s| !model.main(s).mute), "in1 was muted: all unmute");
+        v.dispatch(all("in0", Control::Mute), &mut model);
+        assert!(inputs.iter().all(|s| model.main(s).mute));
+        v.dispatch(all("in2", Control::Solo), &mut model);
+        assert!(inputs.iter().all(|s| model.main(s).solo));
+        assert!(model.auxes().iter().all(|s| !model.main(s).solo && !model.main(s).mute));
+    }
+
+    /// The typed-value popover: opened showing the value in dB, the first key replaces it, OK
+    /// sets the fader through the taper (−144…+12 dB); text that is not a number sets nothing.
+    #[test]
+    fn value_popover_commits_typed_db() {
+        let mut model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        let entry = cid("in0", Control::ValueEntry(Box::new(Control::Fader)));
+        v.dispatch(Action::Set(entry.clone(), crate::scales::fader_tapered(-6.0)), &mut model);
+        assert_eq!(v.popover.as_ref().map(|p| &p.kind), Some(&Popover::Value { target: cid("in0", Control::Fader) }));
+        assert_eq!(v.text_edit.as_ref().map(|e| e.text.as_str()), Some("-6.0"));
+        v.key_text("-");
+        v.key_text("12");
+        v.key_enter(&mut model);
+        assert!(v.popover.is_none() && v.text_edit.is_none());
+        let s = model.inputs().into_iter().next().unwrap();
+        assert!((model.main(&s).fader - crate::scales::fader_tapered(-12.0)).abs() < 1e-9);
+        v.dispatch(Action::Set(entry.clone(), 0.5), &mut model);
+        v.key_text("40");
+        v.dispatch(Action::Tap(cid("popover", Control::TextCommit)), &mut model);
+        assert_eq!(model.main(&s).fader, 1.0, "clamped to +12 dB");
+        v.dispatch(Action::Set(entry, 0.5), &mut model);
+        v.key_text("loud");
+        v.key_enter(&mut model);
+        assert_eq!(model.main(&s).fader, 1.0);
     }
 
     #[test]

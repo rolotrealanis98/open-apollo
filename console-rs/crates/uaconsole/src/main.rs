@@ -3,6 +3,7 @@
 mod app;
 mod bench;
 mod cli;
+mod drive;
 mod frame;
 mod input;
 mod overlay;
@@ -38,7 +39,7 @@ fn main() -> ExitCode {
     let Some(assets) = load_assets() else {
         return ExitCode::from(2);
     };
-    let headless = args.render.is_some() || args.bench.is_some();
+    let headless = args.render.is_some() || args.bench.is_some() || args.drive.is_some();
     let settings = Settings::load();
 
     // The window connects to the local engine unless told otherwise; headless modes use
@@ -81,6 +82,7 @@ fn main() -> ExitCode {
         }
         let scale = args.scale.unwrap_or(2.0);
         let result = match (&args.render, args.bench) {
+            _ if args.drive.is_some() => drive::run(assets, opened.model, scale, args.drive.as_ref().expect("checked")),
             (Some(out), _) => bench::render_png(
                 &assets,
                 &*opened.model,
@@ -99,7 +101,7 @@ fn main() -> ExitCode {
             (None, Some(n)) => {
                 bench::bench(&assets, &mut *opened.model, args.compact, scale, n.max(1))
             }
-            (None, None) => unreachable!("headless without --render/--bench"),
+            (None, None) => unreachable!("headless without --render/--bench/--drive"),
         };
         return match result {
             Ok(()) => ExitCode::SUCCESS,

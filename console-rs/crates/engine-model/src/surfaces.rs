@@ -45,6 +45,12 @@ impl EngineMixer {
         self.store.meta(path).map(|m| m.choices()).unwrap_or_default()
     }
 
+    /// `enabled` of each `/SampleRate` value (the engine greys out rates the device can't run).
+    fn rate_enabled(&self) -> Vec<bool> {
+        let Some(Json::Array(list)) = self.store.meta("/SampleRate").and_then(|m| m.values.as_ref()) else { return Vec::new() };
+        list.iter().map(|v| v.get("enabled").and_then(Json::as_bool).unwrap_or(true)).collect()
+    }
+
     /// The input's sends Console shows: AUX 1/2, and the cues within `CueBusCount` that are active.
     pub(crate) fn input_send_paths(&self, s: &InputStrip) -> Vec<SendPaths> {
         let topology = self.store.topology_for_device(s.device).unwrap_or(self.store.topology());
@@ -61,6 +67,7 @@ impl EngineMixer {
                 level: self.f64_at(&p.gain()).unwrap_or(0.0),
                 muted: self.bool_at(&p.bypass()).unwrap_or(false),
                 pan: ua_engine::tapers::pan::knob_from_pan(self.f64_at(&p.pan()).unwrap_or(0.0)),
+                meter: self.send_frame(&p.base),
             })
             .collect()
     }
@@ -102,7 +109,9 @@ impl EngineMixer {
                 let flag = |k: &str| self.bool_at(&format!("{base}/{k}"));
                 let name = self.str_at(&format!("{base}/Name"))?.to_owned();
                 let categories = self.store.value(&format!("{base}/Categories")).map(categories).unwrap_or_default();
-                let enabled = flag("Authorized").unwrap_or(false) || flag("Demoing").unwrap_or(false);
+                // No `Authorized` at all (open-apollo's catalogue never invents licence
+                // state): the entry is usable, as the plug-in footer assumes too.
+                let enabled = flag("Authorized").unwrap_or(true) || flag("Demoing").unwrap_or(false);
                 let badge = (!enabled).then(|| {
                     if flag("AuthUpdateRequired").unwrap_or(false) {
                         PluginBadge::Activate
@@ -160,6 +169,7 @@ impl EngineMixer {
             connected: matches!(self.store.status(), Status::Live | Status::Loading),
             sample_rate: self.store.value("/SampleRate").and_then(Value::as_i64).map(|r| r as u32),
             sample_rates: ints("/SampleRate"),
+            sample_rate_enabled: self.rate_enabled(),
             clock_source: self.str_at("/ClockSource").map(str::to_owned),
             clock_sources: self.choices("/ClockSource").iter().filter_map(|v| v.as_str().map(str::to_owned)).collect(),
             buffer_size: self.store.value("/BufferSize").and_then(Value::as_i64).map(|b| b as u32),
@@ -168,11 +178,20 @@ impl EngineMixer {
         }
     }
 
+    /// The monitor unit's outputs that carry `AltMonEnabled` (line outs 1–4 on the x4): pair k
+    /// of them is ALT k+1 (as Settings › ALT COUNT writes it).
+    fn alt_outputs(&self) -> Vec<String> {
+        let Some(m) = &self.store.topology().monitor else { return Vec::new() };
+        let dev = format!("/devices/{}", m.device);
+        self.store.tree().indices(&format!("{dev}/outputs")).into_iter().map(|n| format!("{dev}/outputs/{n}")).filter(|o| self.store.tree().has_property(&format!("{o}/AltMonEnabled"))).collect()
+    }
+
     pub(crate) fn surface_monitor_options(&self) -> MonitorOptions {
         let Some(m) = &self.store.topology().monitor else { return MonitorOptions::default() };
         let atten = self.f64_at(&m.dim_attenuation()).unwrap_or(17.0);
         let dev = format!("/devices/{}", m.device);
-        let alt_count = self.store.tree().indices(&format!("{dev}/outputs")).into_iter().filter(|n| self.bool_at(&format!("{dev}/outputs/{n}/AltMonEnabled")) == Some(true)).count().min(2) as u8;
+        // ALT COUNT counts output pairs (Settings writes `AltMonEnabled` on both legs).
+        let alt_count = self.alt_outputs().chunks(2).filter(|pair| pair.iter().any(|o| self.bool_at(&format!("{o}/AltMonEnabled")) == Some(true))).count().min(2) as u8;
         MonitorOptions {
             dim: self.bool_at(&m.dim()),
             dim_level: (atten / 60.0).clamp(0.0, 1.0),
@@ -180,6 +199,10 @@ impl EngineMixer {
             talkback: self.bool_at(&self.store.topology().talkback.on()),
             talkback_to_monitor: self.bool_at(&self.store.topology().talkback.in_physical_cr()),
             alt_count,
+            alt_trim: [0, 1].map(|k| {
+                let db = self.alt_outputs().get(2 * k).and_then(|o| self.f64_at(&format!("{o}/AltMonTrim"))).unwrap_or(0.0);
+                ((db + 30.0) / 60.0).clamp(0.0, 1.0)
+            }),
             alt_selection: self.store.value(&m.alt_mon_selection()).and_then(Value::as_i64).unwrap_or(0).clamp(0, 2) as u8,
             // Rack's controller predicate is unresolved; Console 1.3.1 shows the button for an
             // Apollo x4 with `RemoteMonitorController` false.
@@ -240,7 +263,8 @@ impl EngineMixer {
         match id.control {
             Control::Name => {
                 let path = match (self.input(&id.strip), self.aux(&id.strip)) {
-                    (Some(s), _) => Some(s.name_path()),
+                    // A pair renames its `StereoName` (the label), as Console does.
+                    (Some(s), _) => Some(s.display_name_path()),
                     (None, Some(a)) => Some(a.name_path()),
                     _ => None,
                 };
@@ -265,6 +289,20 @@ impl EngineMixer {
                     self.store.commit("/Tempo", t.clamp(1.0, 999.0));
                 }
             }
+            // The typed-value popover (`Rack_DoublePopover`): dB on the level's dB property
+            // (`FaderLevel`, `sends/k/Gain`; −144…+12), which the engine tapers itself.
+            Control::Fader | Control::SendLevel(_) => {
+                let path = match (&id.control, self.input(&id.strip), self.aux(&id.strip)) {
+                    (Control::Fader, Some(s), _) => Some(s.fader_db()),
+                    (Control::Fader, None, Some(a)) => Some(a.fader_db()),
+                    (Control::SendLevel(k), Some(s), _) => self.input_send_paths(s).into_iter().nth(*k as usize).map(|p| p.gain_db()),
+                    (Control::SendLevel(k), None, Some(a)) => self.aux_sends(a).into_iter().nth(*k as usize).map(|p| p.gain_db()),
+                    _ => None,
+                };
+                if let (Some(p), Ok(db)) = (path, text.trim().parse::<f64>()) {
+                    self.store.commit(&p, db.clamp(-144.0, 12.0));
+                }
+            }
             _ => {}
         }
     }
@@ -281,6 +319,15 @@ impl EngineMixer {
                     }
                     None => false,
                 },
+                // ALT k TRIM: −30…+30 dB in Console's 0.5 dB steps on both outputs of the pair
+                // (the daemon routes either leg to 0x38 / 0x39).
+                Control::AltTrim(k) => {
+                    let db = ((v * 60.0 - 30.0) * 2.0).round() / 2.0;
+                    for o in self.alt_outputs().into_iter().skip(2 * *k as usize).take(2) {
+                        self.store.set(&format!("{o}/AltMonTrim"), db);
+                    }
+                    true
+                }
                 Control::DimLevel => {
                     if let Some(m) = self.store.topology().monitor.as_ref().map(|m| m.dim_attenuation()) {
                         self.store.set(&m, (v * 60.0).round() as i64);

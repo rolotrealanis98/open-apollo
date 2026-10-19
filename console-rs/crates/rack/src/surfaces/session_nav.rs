@@ -41,10 +41,10 @@ pub fn draw_session_navigator(ui: &mut Ui, model: &dyn MixerModel, show_offline:
         let x = (b.x + (slot - 12.0) / 2.0).floor();
         let mr = Rect::new(x, inner.y + 2.0, 12.0, 21.0);
         if s.stereo {
-            ui.bar_meter("Left-Main-Meter-Bridge", m.left, m.clip_left, Rect::new(mr.x, mr.y, 6.0, mr.h));
-            ui.bar_meter("Right-Main-Meter-Bridge", m.right, m.clip_right, Rect::new(mr.x + 6.0, mr.y, 6.0, mr.h));
+            ui.bar_meter("Left-Main-Meter-Bridge", m.left, m.peak_left, m.clip_left, Rect::new(mr.x, mr.y, 6.0, mr.h));
+            ui.bar_meter("Right-Main-Meter-Bridge", m.right, m.peak_right, m.clip_right, Rect::new(mr.x + 6.0, mr.y, 6.0, mr.h));
         } else {
-            ui.bar_meter("Main-Meter-Bridge", m.left, m.clip_left, mr);
+            ui.bar_meter("Main-Meter-Bridge", m.left, m.peak_left, m.clip_left, mr);
         }
         let target = i.saturating_sub(visible / 2).min(n.saturating_sub(visible));
         ui.hit(b, ControlId { strip: SESSION_ID.into(), control: Control::SessionNavigate(target as u16) }, HitKind::Tap);
