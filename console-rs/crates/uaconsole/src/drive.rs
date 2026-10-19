@@ -35,6 +35,7 @@
 //!                     with a word, fail unless its size compares so with the last `layer PREFIX`
 //! nolayer PREFIX      fail if a layer's id starts with PREFIX (a window that should have closed)
 //! text TEXT           fail unless TEXT is drawn (texts joined by spaces: wrapped lines match)
+//! notext TEXT         fail if TEXT is drawn
 //! echo TEXT
 //! ```
 //!
@@ -177,7 +178,9 @@ impl Driver {
                         self.overlays.on_open_plugin(&strip, slot, &*self.model);
                     }
                     Effect::Model(a) => self.model.apply(&a),
-                    Effect::SetText(id, text) => self.model.set_text(&id, &text),
+                    Effect::SetText(id, text) => {
+                        self.overlays.set_text(&mut *self.model, &id, &text);
+                    }
                 }
             }
         }
@@ -243,7 +246,9 @@ impl Driver {
             for e in effects {
                 match e {
                     Effect::Model(a) => self.model.apply(&a),
-                    Effect::SetText(id, text) => self.model.set_text(&id, &text),
+                    Effect::SetText(id, text) => {
+                        self.overlays.set_text(&mut *self.model, &id, &text);
+                    }
                 }
             }
             self.rebuild();
@@ -469,7 +474,7 @@ impl Driver {
                     }
                 }
             }
-            "text" => {
+            "text" | "notext" => {
                 let want = args.join(" ");
                 let drawn: Vec<&str> = self
                     .frame
@@ -478,8 +483,8 @@ impl Driver {
                     .iter()
                     .filter_map(|d| if let rack::Draw::Text { text, .. } = d { Some(text.as_str()) } else { None })
                     .collect();
-                if !drawn.join(" ").contains(&want) {
-                    return Err(format!("{want:?} is not drawn"));
+                if drawn.join(" ").contains(&want) != (cmd == "text") {
+                    return Err(format!("{want:?} is {}drawn", if cmd == "text" { "not " } else { "" }));
                 }
             }
             "echo" => println!("{}", args.join(" ")),

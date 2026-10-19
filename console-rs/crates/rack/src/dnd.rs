@@ -311,9 +311,10 @@ pub fn draw_drag(ui: &mut Ui, view: &ViewState, model: &dyn MixerModel) {
 /// A refusal under slot `slot`: amber text (the browser notice's) on a dark box, wrapped.
 /// The newest refused write ([`MixerModel::last_refusal`]) for [`NOTICE_FOR`], centred over the
 /// status bar at `status_y`, so a refusal that answers a menu (a link) is not silent.
-pub fn draw_refusal(ui: &mut Ui, model: &dyn MixerModel, width: f32, status_y: f32) {
+pub fn draw_refusal(ui: &mut Ui, view: &ViewState, model: &dyn MixerModel, width: f32, status_y: f32) {
     let Some((text, at)) = model.last_refusal() else { return };
-    if at.elapsed() < NOTICE_FOR {
+    let under_slot = view.drop_notice.as_ref().is_some_and(|n| Instant::now() < n.until);
+    if at.elapsed() < NOTICE_FOR && !under_slot {
         let lines = crate::surfaces::browser::wrap(&text, (240.0 / 5.5) as usize).len().min(4) as f32;
         draw_notice(ui, Rect::new(width / 2.0 - 120.0, status_y - lines * 14.0 - 14.0, 240.0, 0.0), &text);
     }

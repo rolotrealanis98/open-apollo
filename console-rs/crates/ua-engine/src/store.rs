@@ -22,7 +22,7 @@ use crate::meters::{MeterReading, MeterStore};
 use crate::path;
 use crate::session::{self, SessionCommand, SessionState};
 use crate::subscription::SubscriptionPlan;
-use crate::topology::Topology;
+use crate::topology::{InsertPaths, Topology};
 use crate::tree::{Meta, Property, Snapshot, SnapshotInfo, Tree};
 use crate::value::{Json, Value};
 use crate::writer::{LocalModel, Writer};
@@ -405,6 +405,18 @@ impl Store {
     /// Bumped on every value change (local or pushed) and every tree install.
     pub fn revision(&self) -> u64 {
         self.model.revision
+    }
+
+    /// Whether a plug-in load into `slot` is still in flight: the daemon publishes `Status`
+    /// "Loading" while it loads, or (a daemon without it) `Power` is still the empty slot's false
+    /// and older than the plug-in name: UA's engine and the daemon turn `Power` true when the
+    /// plug-in runs (seconds for a native load). A name that is empty is no load.
+    pub fn insert_loading(&self, slot: &InsertPaths) -> bool {
+        let named = self.value(&slot.effect_name()).and_then(Value::as_str).is_some_and(|n| !n.is_empty());
+        let powered = self.value(&slot.power()).and_then(Value::as_bool) != Some(false);
+        named
+            && (self.value(&slot.status()).and_then(Value::as_str) == Some("Loading")
+                || (!powered && self.path_revision(&slot.effect_name()) > self.path_revision(&slot.power())))
     }
 
     /// The revision at which `path` last changed (0 if it has not changed since the tree was
@@ -938,6 +950,16 @@ impl Store {
             .map(|(p, v)| (p.to_owned(), v.clone()))
             .collect();
         self.model.tree.insert_node(data, node);
+        // A slot the daemon reports as still loading (`Status` "Loading") keeps the plug-in name
+        // this client set: the daemon's name there is the previous state until the load commits.
+        for (p, prop) in &before {
+            let Some(slot) = p.strip_suffix("/EffectName") else { continue };
+            let loading = self.model.tree.value(&format!("{slot}/Status")).and_then(Value::as_str) == Some("Loading");
+            let ours = prop.value.as_ref().and_then(Value::as_str).is_some_and(|n| !n.is_empty());
+            if loading && ours {
+                self.model.tree.set_property(p, prop.clone());
+            }
+        }
         let mut changed: Vec<String> = self
             .model
             .tree

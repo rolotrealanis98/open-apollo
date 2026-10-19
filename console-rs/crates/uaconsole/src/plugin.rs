@@ -246,6 +246,7 @@ impl WindowPanel {
             }
             if let Some(slot) = &mut self.engine {
                 slot.sync(store);
+                self.window.loading = slot.loading();
                 self.snapshot = ParamSnapshot::capture(&slot.view(store));
                 if let Some(p) = slot.power(store) {
                     self.window.chrome.power = p;
@@ -453,6 +454,20 @@ impl Panel for WindowPanel {
 
     fn pointer(&mut self, ev: PointerEvent, model: &mut dyn MixerModel) -> PanelResponse {
         let (dx, dy) = self.origin;
+        // A load in flight: the panel is locked; only Close answers.
+        if self.window.loading {
+            if let PointerEvent::Down { x, y, .. } = ev {
+                let on_close = self
+                    .hits
+                    .iter()
+                    .any(|h| h.id.control == Control::PluginWindow(B::Close) && h.rect.contains(x + dx, y + dy));
+                if on_close {
+                    self.close(model);
+                    return PanelResponse::Close;
+                }
+            }
+            return PanelResponse::Handled;
+        }
         // Spec panels recognise their own gestures (long presses, repeats, held looks, swipes,
         // graph handles, menus); chrome and popovers stay with rack's interaction.
         match ev {
