@@ -1036,6 +1036,16 @@ impl MixerModel for PreviewMixer {
                 }
             }
             Control::SettingEdit(ref k) => self.apply_setting(k, &crate::settings::SettingOp::Text(text.to_string())),
+            // The typed-value popover: dB through the fader taper (sends share it).
+            Control::Fader | Control::SendLevel(_) => {
+                let Ok(db) = text.trim().parse::<f64>() else { return };
+                let v = scales::fader_tapered(db);
+                match id.control {
+                    Control::Fader => self.mains.get_mut(&id.strip).into_iter().for_each(|m| m.fader = v),
+                    Control::SendLevel(k) => self.sends.get_mut(&id.strip).and_then(|s| s.get_mut(k as usize)).into_iter().for_each(|s| s.0.level = v),
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }

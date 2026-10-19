@@ -281,6 +281,20 @@ impl EngineMixer {
                     self.store.commit("/Tempo", t.clamp(1.0, 999.0));
                 }
             }
+            // The typed-value popover (`Rack_DoublePopover`): dB on the level's dB property
+            // (`FaderLevel`, `sends/k/Gain`; −144…+12), which the engine tapers itself.
+            Control::Fader | Control::SendLevel(_) => {
+                let path = match (&id.control, self.input(&id.strip), self.aux(&id.strip)) {
+                    (Control::Fader, Some(s), _) => Some(s.fader_db()),
+                    (Control::Fader, None, Some(a)) => Some(a.fader_db()),
+                    (Control::SendLevel(k), Some(s), _) => self.input_send_paths(s).into_iter().nth(*k as usize).map(|p| p.gain_db()),
+                    (Control::SendLevel(k), None, Some(a)) => self.aux_sends(a).into_iter().nth(*k as usize).map(|p| p.gain_db()),
+                    _ => None,
+                };
+                if let (Some(p), Ok(db)) = (path, text.trim().parse::<f64>()) {
+                    self.store.commit(&p, db.clamp(-144.0, 12.0));
+                }
+            }
             _ => {}
         }
     }

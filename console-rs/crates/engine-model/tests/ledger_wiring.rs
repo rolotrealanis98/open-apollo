@@ -198,7 +198,9 @@ impl Audit {
         let mut view = base.clone();
         let (cx, cy) = hit.rect.center();
         let mut i = Interaction::default();
-        let mut actions = i.pointer_down(hits, cx, cy, false);
+        // A fader readout acts on a double-click only (the typed-value popover).
+        let double = matches!(hit.id.control, Control::ValueEntry(_));
+        let mut actions = i.pointer_down(hits, cx, cy, double);
         if matches!(hit.kind, HitKind::Drag { .. } | HitKind::Knob { .. }) {
             actions.extend(i.pointer_move(cx, cy + dy, false));
         }

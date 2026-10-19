@@ -4,7 +4,7 @@ use houston::{Insets, Rect, Rgba};
 
 use crate::draw::{Align, Frame};
 use crate::geometry::{FaderAndMetersGeometry, FaderMetrics};
-use crate::input::{ControlId, HitKind};
+use crate::input::{Control, ControlId, HitKind};
 use crate::model::{INSERT_LABEL_W, InsertLabel, InsertState, MeterFrame};
 use crate::scales;
 use crate::ui::{ART_SCALE, Ui};
@@ -215,6 +215,10 @@ impl Ui<'_> {
                 ui.bar_meter("Right-Input-Meter", meters.right, meters.clip_right, right);
             }
             ui.font_text("Small-Label-Font", readout, g.value_label, Align::Center);
+            // Double-click the readout: the typed-value popover (`Rack_FaderAndMeters::buttonClicked`).
+            if let Some(id) = id.as_ref().filter(|id| matches!(id.control, Control::Fader | Control::SendLevel(_))) {
+                ui.hit(g.value_label, ControlId { strip: id.strip.clone(), control: Control::ValueEntry(Box::new(id.control.clone())) }, HitKind::Tap);
+            }
             // Meter scale (`Rack_MeterMarks`, labels 0x1809d1470): a 3×1 tick at the scale's left
             // edge per label, a 1×1 dot halfway, the number 7 pt right of the tick (measured).
             let mskin = ui.skin("meters", "Mono-Input-Meter");

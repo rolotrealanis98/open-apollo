@@ -238,6 +238,10 @@ pub enum Control {
     /// [view → model] Option/Alt-click on a Mute or Solo (`.0`): every strip of the clicked
     /// one's kind (inputs or auxes) takes the clicked one's opposite state (`ViewState::route`).
     ToggleAll(Box<Control>),
+    /// [view] Typed-value entry for control `.0` of this strip (`Rack_DoublePopover`): the
+    /// fader readout's hit (a double-click opens it), and what [`Interaction`] sends for a
+    /// double-click on a send: `Action::Set(id, v)` opens the popover showing `v` (0…1).
+    ValueEntry(Box<Control>),
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the
@@ -442,6 +446,12 @@ fn peers<'a>(hits: &'a [Hit], hit: &'a Hit) -> Vec<&'a Hit> {
     out
 }
 
+/// Controls whose double-click opens the typed-value popover instead of resetting (manual: a
+/// send knob, an Aux / Cue value in SENDS OVERVIEW; the fader readout has its own hit).
+fn types_value(c: &Control) -> bool {
+    matches!(c, Control::SendLevel(_))
+}
+
 /// How long a [`HitKind::Latch`] press is held before its release turns it off.
 pub const LATCH_HOLD: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -461,7 +471,8 @@ impl Interaction {
     /// A press. Console's modifiers (manual "Controls Shortcuts"): Option/Alt-click returns a
     /// knob or fader to its default (`Action::Reset`: the engine gets `"default"`), with Cmd
     /// (Ctrl) every strip's; Option/Alt-click on a Mute or Solo sets every strip
-    /// ([`Control::ToggleAll`]); Cmd (Ctrl)-drag moves the same control on every strip.
+    /// ([`Control::ToggleAll`]); Cmd (Ctrl)-drag moves the same control on every strip; a
+    /// double-click on a send opens its typed-value popover, on other knobs and faders resets.
     pub fn pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool) -> Vec<Action> {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
         let mods = self.mods;
@@ -476,6 +487,17 @@ impl Interaction {
             }
             HitKind::Tap => {
                 let mut id = hit.id.clone();
+                if let Control::ValueEntry(target) = &id.control {
+                    // The readout opens the entry on a double-click, showing its control's value.
+                    let value = hits.iter().rev().find(|h| h.id.strip == id.strip && h.id.control == **target).and_then(|h| match h.kind {
+                        HitKind::Drag { value, .. } | HitKind::Knob { value, .. } => Some(value),
+                        _ => None,
+                    });
+                    return match value {
+                        Some(v) if double => vec![Action::Set(id, v)],
+                        _ => vec![],
+                    };
+                }
                 if double {
                     id.control = match id.control {
                         Control::BrowserItem(i) => Control::BrowserActivate(i),
@@ -498,6 +520,9 @@ impl Interaction {
                     }
                     out.push(Action::GestureEnd(hit.id.clone()));
                     return out;
+                }
+                if double && types_value(&hit.id.control) {
+                    return vec![Action::Set(ControlId { strip: hit.id.strip.clone(), control: Control::ValueEntry(Box::new(hit.id.control.clone())) }, *value)];
                 }
                 if double {
                     if let Some(r) = reset {
@@ -608,7 +633,7 @@ mod tests {
     }
 
     /// Two input faders and an aux fader (in0 at 0.5, in1 at 0.9, aux0 at 0.3), two input
-    /// mutes.
+    /// mutes, a send knob and in0's readout.
     fn strip_hits() -> Vec<Hit> {
         let drag = |value| HitKind::Drag { value, span: 100.0, reset: Some(0.78) };
         vec![
@@ -617,6 +642,8 @@ mod tests {
             Hit { rect: Rect::new(200.0, 0.0, 50.0, 300.0), id: cid("/d/auxs/0", Control::Fader), kind: drag(0.3) },
             Hit { rect: Rect::new(0.0, 310.0, 50.0, 20.0), id: cid("/d/inputs/0", Control::Mute), kind: HitKind::Toggle },
             Hit { rect: Rect::new(100.0, 310.0, 50.0, 20.0), id: cid("/d/inputs/1", Control::Mute), kind: HitKind::Toggle },
+            Hit { rect: Rect::new(0.0, 340.0, 40.0, 40.0), id: cid("/d/inputs/0", Control::SendLevel(0)), kind: HitKind::Knob { value: 0.6, span: 250.0, reset: Some(0.78) } },
+            Hit { rect: Rect::new(0.0, 390.0, 50.0, 16.0), id: cid("/d/inputs/0", Control::ValueEntry(Box::new(Control::Fader))), kind: HitKind::Tap },
         ]
     }
 
@@ -662,6 +689,18 @@ mod tests {
         assert_eq!(set(i.pointer_move(10.0, 95.0, false)), vec![(in0.clone(), 0.55), (in1.clone(), 0.95)]);
         assert_eq!(set(i.pointer_move(10.0, 50.0, false)), vec![(in0.clone(), 0.6), (in1.clone(), 1.0)], "stops at in1's max");
         assert_eq!(set(i.pointer_move(10.0, 150.0, true)), vec![(in0, 0.45), (in1, 0.85)], "Shift: a tenth");
+    }
+
+    /// Double-click a send knob or the fader readout: the typed-value popover (`Set` on
+    /// `ValueEntry`) instead of a reset; a single click on the readout does nothing.
+    #[test]
+    fn double_click_send_or_readout_opens_value_entry() {
+        let hits = strip_hits();
+        let mut i = Interaction::default();
+        let entry = |c| cid("/d/inputs/0", Control::ValueEntry(Box::new(c)));
+        assert_eq!(i.pointer_down(&hits, 10.0, 350.0, true), vec![Action::Set(entry(Control::SendLevel(0)), 0.6)]);
+        assert_eq!(i.pointer_down(&hits, 10.0, 395.0, false), vec![]);
+        assert_eq!(i.pointer_down(&hits, 10.0, 395.0, true), vec![Action::Set(entry(Control::Fader), 0.5)]);
     }
 
     /// TALK: a click latches (toggle on press, nothing on release); held for 0.5 s it is

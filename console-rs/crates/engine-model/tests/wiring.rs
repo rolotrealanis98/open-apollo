@@ -231,6 +231,20 @@ fn toggle_all_writes_every_input_in_one_step() {
     assert_eq!(w.iter().filter(|c| c.ends_with(&format!("/Mute/value {target}"))).count(), changed, "{w:?}");
 }
 
+/// The typed-value popover's OK writes the fader's dB property (`FaderLevel`).
+#[test]
+fn typed_value_writes_the_db_property() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let mut v = ViewState::default();
+    let strip = m.inputs()[0].id.clone();
+    v.dispatch(Action::Set(ControlId { strip, control: Control::ValueEntry(Box::new(Control::Fader)) }, 0.5), &mut m);
+    v.key_text("-12");
+    v.key_enter(&mut m);
+    let w = writes_after(&server, 3);
+    assert!(w.iter().any(|c| c == "set /devices/0/inputs/0/FaderLevel/value -12"), "{w:?}");
+}
+
 /// Against a private open-apollo daemon (`ua_mixer_daemon.py --no-hardware --port 28710 …`):
 /// `UA_SANDBOX_ENGINE=127.0.0.1:28710 cargo test -p engine-model --test wiring -- --ignored`.
 /// Console's wire forms (query params, scene / meter / undo posts, the sleep hint) keep the
