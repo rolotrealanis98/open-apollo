@@ -30,8 +30,8 @@ prefix), by the setup wizard and `oa-assets`:
 These copies are for your own use on your own machine; don't share them.
 Universal Audio's license terms may restrict copying or extracting from its
 software, and you are responsible for complying with the licenses you accepted.
-None of these files are in this repository, in packages built from it (such as
-the Nix package) or in CI artifacts. `tools/check-clean-repo.py` refuses commits
+None of these files are in this repository, in packages built from it or in CI
+artifacts. `tools/check-clean-repo.py` refuses commits
 that would add them.
 
 The plug-in panel specs (where each control of a plug-in's editor sits) are

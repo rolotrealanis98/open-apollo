@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="492" viewBox="0 0 1280 492" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="692" viewBox="0 0 1280 692" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
 <title>open-apollo status map (2026-10-11)</title>
 <style>.lbl{font-size:11px;fill:#1f2328;paint-order:stroke;stroke:#ffffff;stroke-width:3px;stroke-linejoin:round}.h{font-size:14px;fill:#1f2328}.m{font-size:11px;fill:#59636e}.verified{fill:#1a7f37}.done{fill:#7ccf8e}.partial{fill:#d4a72c}.re{fill:#8250df}.todo{fill:#c8d1da}.plugin{fill:#54aeff}.blocked{fill:#cf222e}</style>
-<rect width="1280" height="492" rx="6" fill="#ffffff"/>
+<rect width="1280" height="692" rx="6" fill="#ffffff"/>
 <text class="h" x="12" y="36">UA driver behaviour: 72.8% done (739/1015)</text>
 <rect class="done" x="11" y="47" width="14.9" height="15.7"><title>Kext classes: com_uaudio_driv… 1 lifecycle (done in code)</title></rect>
 <rect class="done" x="26.9" y="47" width="14.9" height="15.7"><title>Kext classes: CPcieDevice 1 lifecycle (done in code)</title></rect>
@@ -1247,19 +1247,231 @@
 <rect class="done" x="1227" y="387" width="41" height="30"><title>USB: apollo-solo-usb Apollo Solo USB (done in code)</title></rect>
 <rect class="done" x="1227" y="418" width="41" height="30"><title>USB: apollo-twin-x-usb Apollo Twin X USB (done in code)</title></rect>
 <text class="lbl" x="1230" y="399">USB</text>
-<rect class="verified" x="12" y="469" width="12" height="12"/>
-<text class="m" x="29" y="479">verified on hardware</text>
-<rect class="done" x="179" y="469" width="12" height="12"/>
-<text class="m" x="196" y="479">done in code</text>
-<rect class="partial" x="293" y="469" width="12" height="12"/>
-<text class="m" x="310" y="479">partial / in progress</text>
-<rect class="re" x="466" y="469" width="12" height="12"/>
-<text class="m" x="483" y="479">still to figure out (RE)</text>
-<rect class="todo" x="659" y="469" width="12" height="12"/>
-<text class="m" x="676" y="479">understood, not done</text>
-<rect class="plugin" x="826" y="469" width="12" height="12"/>
-<text class="m" x="843" y="479">plugin hosting (in progress)</text>
-<rect class="blocked" x="1045" y="469" width="12" height="12"/>
-<text class="m" x="1062" y="479">needs hardware</text>
+<text class="h" x="12" y="486">Plug-in mapping: 124 of 206 UAD plug-ins live on the Apollo, 62 more mapped (as of 2026-10-18)</text>
+<rect class="verified" x="11" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: ADA Flanger ADA Flanger (verified on hardware)</title></rect>
+<rect class="verified" x="41.3" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: AKG BX 20 AKG BX 20 (verified on hardware)</title></rect>
+<rect class="verified" x="71.5" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: AMS DMX 15-80 S AMS DMX 15-80 S (verified on hardware)</title></rect>
+<rect class="verified" x="101.8" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: AMS RMX16 AMS RMX16 (verified on hardware)</title></rect>
+<rect class="verified" x="132" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: AMS RMX16 Expanded AMS RMX16 Expanded (verified on hardware)</title></rect>
+<rect class="verified" x="162.3" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: API 2500 API 2500 (verified on hardware)</title></rect>
+<rect class="verified" x="192.5" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: API 550A API 550A (verified on hardware)</title></rect>
+<rect class="verified" x="222.8" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: API 560 API 560 (verified on hardware)</title></rect>
+<rect class="verified" x="253.1" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: API Preamp API Preamp (verified on hardware)</title></rect>
+<rect class="verified" x="283.3" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: API Vision Channel Strip Legacy API Vision Channel Strip Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="313.6" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Ampeg B15N Ampeg B15N (verified on hardware)</title></rect>
+<rect class="verified" x="343.8" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Ampeg SVT3Pro Ampeg SVT3Pro (verified on hardware)</title></rect>
+<rect class="verified" x="374.1" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Ampeg SVTVR Ampeg SVTVR (verified on hardware)</title></rect>
+<rect class="verified" x="404.4" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Ampeg SVTVR Classic Ampeg SVTVR Classic (verified on hardware)</title></rect>
+<rect class="verified" x="434.6" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Ampex ATR-102 Ampex ATR-102 (verified on hardware)</title></rect>
+<rect class="verified" x="464.9" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Auto-Tune Realtime Access Auto-Tune Realtime Access (verified on hardware)</title></rect>
+<rect class="verified" x="495.1" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Auto-Tune Realtime Advanced Auto-Tune Realtime Advanced (verified on hardware)</title></rect>
+<rect class="verified" x="525.4" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Auto-Tune Realtime X Auto-Tune Realtime X (verified on hardware)</title></rect>
+<rect class="verified" x="555.6" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Avalon VT-737sp Avalon VT-737sp (verified on hardware)</title></rect>
+<rect class="verified" x="585.9" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Bermuda Triangle Bermuda Triangle (verified on hardware)</title></rect>
+<rect class="verified" x="616.2" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Brigade Chorus Brigade Chorus (verified on hardware)</title></rect>
+<rect class="verified" x="646.4" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: C-Suite C-Vox C-Suite C-Vox (verified on hardware)</title></rect>
+<rect class="verified" x="676.7" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Cambridge Cambridge (verified on hardware)</title></rect>
+<rect class="verified" x="706.9" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Capitol Chambers Capitol Chambers (verified on hardware)</title></rect>
+<rect class="verified" x="737.2" y="497" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Century Tube Channel Strip Century Tube Channel Strip (verified on hardware)</title></rect>
+<rect class="verified" x="11" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Cooper Time Cube Cooper Time Cube (verified on hardware)</title></rect>
+<rect class="verified" x="41.3" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: DreamVerb DreamVerb (verified on hardware)</title></rect>
+<rect class="verified" x="71.5" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: EMT 140 EMT 140 (verified on hardware)</title></rect>
+<rect class="verified" x="101.8" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: ENGL E765 RT ENGL E765 RT (verified on hardware)</title></rect>
+<rect class="verified" x="132" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: EP-34 Tape Echo EP-34 Tape Echo (verified on hardware)</title></rect>
+<rect class="verified" x="162.3" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Empirical Labs Distressor Empirical Labs Distressor (verified on hardware)</title></rect>
+<rect class="verified" x="192.5" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Empirical Labs FATSO Jr Empirical Labs FATSO Jr (verified on hardware)</title></rect>
+<rect class="verified" x="222.8" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Empirical Labs FATSO Sr Empirical Labs FATSO Sr (verified on hardware)</title></rect>
+<rect class="verified" x="253.1" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Fairchild 660 Fairchild 660 (verified on hardware)</title></rect>
+<rect class="verified" x="283.3" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Fairchild 670 Fairchild 670 (verified on hardware)</title></rect>
+<rect class="verified" x="313.6" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Fairchild 670 Legacy Fairchild 670 Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="343.8" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Fender 55 Tweed Deluxe Fender 55 Tweed Deluxe (verified on hardware)</title></rect>
+<rect class="verified" x="374.1" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Galaxy Tape Echo Galaxy Tape Echo (verified on hardware)</title></rect>
+<rect class="verified" x="404.4" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Harrison 32C Harrison 32C (verified on hardware)</title></rect>
+<rect class="verified" x="434.6" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Harrison 32C SE Harrison 32C SE (verified on hardware)</title></rect>
+<rect class="verified" x="464.9" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Helios Type 69 Helios Type 69 (verified on hardware)</title></rect>
+<rect class="verified" x="495.1" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Helios Type 69 Legacy Helios Type 69 Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="525.4" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Hitsville EQ Hitsville EQ (verified on hardware)</title></rect>
+<rect class="verified" x="555.6" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Hitsville EQ Mastering Hitsville EQ Mastering (verified on hardware)</title></rect>
+<rect class="verified" x="585.9" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Hitsville Reverb Chambers Hitsville Reverb Chambers (verified on hardware)</title></rect>
+<rect class="verified" x="616.2" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Korg SDD-3000 Korg SDD-3000 (verified on hardware)</title></rect>
+<rect class="verified" x="646.4" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: LA-6176 Channel Strip LA-6176 Channel Strip (verified on hardware)</title></rect>
+<rect class="verified" x="676.7" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Lexicon 480L Lexicon 480L (verified on hardware)</title></rect>
+<rect class="verified" x="706.9" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Little Labs IBP Little Labs IBP (verified on hardware)</title></rect>
+<rect class="verified" x="737.2" y="526.6" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Little Labs VOG Little Labs VOG (verified on hardware)</title></rect>
+<rect class="verified" x="11" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: MXR Flanger-Doubler MXR Flanger-Doubler (verified on hardware)</title></rect>
+<rect class="verified" x="41.3" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Manley Massive Passive Manley Massive Passive (verified on hardware)</title></rect>
+<rect class="verified" x="71.5" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Manley Massive Passive MST Manley Massive Passive MST (verified on hardware)</title></rect>
+<rect class="verified" x="101.8" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Manley Reference Mic Preamp Manley Reference Mic Preamp (verified on hardware)</title></rect>
+<rect class="verified" x="132" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Manley VOXBOX Manley VOXBOX (verified on hardware)</title></rect>
+<rect class="verified" x="162.3" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Manley Variable Mu Manley Variable Mu (verified on hardware)</title></rect>
+<rect class="verified" x="192.5" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Moog Multimode Filter Moog Multimode Filter (verified on hardware)</title></rect>
+<rect class="verified" x="222.8" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Moog Multimode Filter SE Moog Multimode Filter SE (verified on hardware)</title></rect>
+<rect class="verified" x="253.1" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 1073 Neve 1073 (verified on hardware)</title></rect>
+<rect class="verified" x="283.3" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 1073 Legacy Neve 1073 Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="313.6" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 1073SE Legacy Neve 1073SE Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="343.8" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 1084 Neve 1084 (verified on hardware)</title></rect>
+<rect class="verified" x="374.1" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 2254 E Neve 2254 E (verified on hardware)</title></rect>
+<rect class="verified" x="404.4" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 2254 E Dual Neve 2254 E Dual (verified on hardware)</title></rect>
+<rect class="verified" x="434.6" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 33609 C Neve 33609 C (verified on hardware)</title></rect>
+<rect class="verified" x="464.9" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 33609SE Neve 33609SE (verified on hardware)</title></rect>
+<rect class="verified" x="495.1" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 88RS Neve 88RS (verified on hardware)</title></rect>
+<rect class="verified" x="525.4" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve 88RS Legacy Neve 88RS Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="555.6" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Neve Preamp Neve Preamp (verified on hardware)</title></rect>
+<rect class="verified" x="585.9" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Oxford Dynamic EQ Oxford Dynamic EQ (verified on hardware)</title></rect>
+<rect class="verified" x="616.2" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Oxford Inflator Oxford Inflator (verified on hardware)</title></rect>
+<rect class="verified" x="646.4" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Oxford Limiter Oxford Limiter (verified on hardware)</title></rect>
+<rect class="verified" x="676.7" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Oxford SuprEsser DS Oxford SuprEsser DS (verified on hardware)</title></rect>
+<rect class="verified" x="706.9" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Oxide Tape Oxide Tape (verified on hardware)</title></rect>
+<rect class="verified" x="737.2" y="556.2" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Buss Compressor Precision Buss Compressor (verified on hardware)</title></rect>
+<rect class="verified" x="11" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Channel Strip Precision Channel Strip (verified on hardware)</title></rect>
+<rect class="verified" x="41.3" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision De-Esser Precision De-Esser (verified on hardware)</title></rect>
+<rect class="verified" x="71.5" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Delay Mod Precision Delay Mod (verified on hardware)</title></rect>
+<rect class="verified" x="101.8" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Delay Mod L Precision Delay Mod L (verified on hardware)</title></rect>
+<rect class="verified" x="132" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Enhancer Hz Precision Enhancer Hz (verified on hardware)</title></rect>
+<rect class="verified" x="162.3" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Enhancer kHz Precision Enhancer kHz (verified on hardware)</title></rect>
+<rect class="verified" x="192.5" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Equalizer Precision Equalizer (verified on hardware)</title></rect>
+<rect class="verified" x="222.8" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision K-Stereo Precision K-Stereo (verified on hardware)</title></rect>
+<rect class="verified" x="253.1" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Limiter Precision Limiter (verified on hardware)</title></rect>
+<rect class="verified" x="283.3" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Maximizer Precision Maximizer (verified on hardware)</title></rect>
+<rect class="verified" x="313.6" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Multiband Precision Multiband (verified on hardware)</title></rect>
+<rect class="verified" x="343.8" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Precision Reflection Engine Precision Reflection Engine (verified on hardware)</title></rect>
+<rect class="verified" x="374.1" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Pultec EQP-1A Pultec EQP-1A (verified on hardware)</title></rect>
+<rect class="verified" x="404.4" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Pultec EQP-1A Legacy Pultec EQP-1A Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="434.6" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Pultec HLF-3C Pultec HLF-3C (verified on hardware)</title></rect>
+<rect class="verified" x="464.9" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Pultec MEQ-5 Pultec MEQ-5 (verified on hardware)</title></rect>
+<rect class="verified" x="495.1" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Pultec-Pro Legacy Pultec-Pro Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="525.4" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Pure Plate Pure Plate (verified on hardware)</title></rect>
+<rect class="verified" x="555.6" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Raw Raw (verified on hardware)</title></rect>
+<rect class="verified" x="585.9" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: RealVerb-Pro RealVerb-Pro (verified on hardware)</title></rect>
+<rect class="verified" x="616.2" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: SSL E Channel Strip SSL E Channel Strip (verified on hardware)</title></rect>
+<rect class="verified" x="646.4" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: SSL E Channel Strip Legacy SSL E Channel Strip Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="676.7" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: SSL G Bus Compressor SSL G Bus Compressor (verified on hardware)</title></rect>
+<rect class="verified" x="706.9" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: SSL G Bus Compressor Legacy SSL G Bus Compressor Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="737.2" y="585.8" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Sound Machine Wood Works Sound Machine Wood Works (verified on hardware)</title></rect>
+<rect class="verified" x="11" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Sphere Mic Collection Sphere Mic Collection (verified on hardware)</title></rect>
+<rect class="verified" x="41.3" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Sphere Mic Collection 180 Sphere Mic Collection 180 (verified on hardware)</title></rect>
+<rect class="verified" x="71.5" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Studer A800 Studer A800 (verified on hardware)</title></rect>
+<rect class="verified" x="101.8" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Studio D Chorus Studio D Chorus (verified on hardware)</title></rect>
+<rect class="verified" x="132" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: TS Overdrive TS Overdrive (verified on hardware)</title></rect>
+<rect class="verified" x="162.3" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Teletronix LA-2 Teletronix LA-2 (verified on hardware)</title></rect>
+<rect class="verified" x="192.5" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Teletronix LA-2A Gray Teletronix LA-2A Gray (verified on hardware)</title></rect>
+<rect class="verified" x="222.8" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Teletronix LA-2A Legacy Teletronix LA-2A Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="253.1" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Teletronix LA-2A Silver Teletronix LA-2A Silver (verified on hardware)</title></rect>
+<rect class="verified" x="283.3" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Teletronix LA-3A Teletronix LA-3A (verified on hardware)</title></rect>
+<rect class="verified" x="313.6" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Thermionic Culture Vulture Thermionic Culture Vulture (verified on hardware)</title></rect>
+<rect class="verified" x="343.8" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: Trident A-Range Trident A-Range (verified on hardware)</title></rect>
+<rect class="verified" x="374.1" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 1176 Rev A UA 1176 Rev A (verified on hardware)</title></rect>
+<rect class="verified" x="404.4" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 1176AE UA 1176AE (verified on hardware)</title></rect>
+<rect class="verified" x="434.6" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 1176LN Legacy UA 1176LN Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="464.9" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 1176LN Rev E UA 1176LN Rev E (verified on hardware)</title></rect>
+<rect class="verified" x="495.1" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 1176SE Legacy UA 1176SE Legacy (verified on hardware)</title></rect>
+<rect class="verified" x="525.4" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 175-B UA 175-B (verified on hardware)</title></rect>
+<rect class="verified" x="555.6" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 176 UA 176 (verified on hardware)</title></rect>
+<rect class="verified" x="585.9" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 610-A UA 610-A (verified on hardware)</title></rect>
+<rect class="verified" x="616.2" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: UA 610-B UA 610-B (verified on hardware)</title></rect>
+<rect class="verified" x="646.4" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: V76 Preamp V76 Preamp (verified on hardware)</title></rect>
+<rect class="verified" x="676.7" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: bx_tuner bx_tuner (verified on hardware)</title></rect>
+<rect class="verified" x="706.9" y="615.4" width="29.3" height="28.6"><title>Live on the Apollo: every control mapped, loaded and read back: dbx 160 dbx 160 (verified on hardware)</title></rect>
+<text class="lbl" x="14" y="509">Live on the Apollo: every control mapped, loaded and read back</text>
+<rect class="done" x="769.4" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: 4K Buss Compressor 4K Buss Compressor (done in code)</title></rect>
+<rect class="done" x="799.2" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: 4K Channel Strip 4K Channel Strip (done in code)</title></rect>
+<rect class="done" x="829" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: ADA STD-1 Stereo Tapped Delay ADA STD-1 Stereo Tapped Delay (done in code)</title></rect>
+<rect class="done" x="858.8" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Chandler GAV19T Chandler GAV19T (done in code)</title></rect>
+<rect class="done" x="888.5" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Dangerous BAX EQ Master Dangerous BAX EQ Master (done in code)</title></rect>
+<rect class="done" x="918.3" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Dangerous BAX EQ Mix Dangerous BAX EQ Mix (done in code)</title></rect>
+<rect class="done" x="948.1" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Diezel Herbert Diezel Herbert (done in code)</title></rect>
+<rect class="done" x="977.8" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Diezel VH4 Diezel VH4 (done in code)</title></rect>
+<rect class="done" x="1007.6" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: ENGL E646 VS ENGL E646 VS (done in code)</title></rect>
+<rect class="done" x="1037.4" y="497" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: ENGL Savage 120 ENGL Savage 120 (done in code)</title></rect>
+<rect class="done" x="769.4" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Friedman BE100 Friedman BE100 (done in code)</title></rect>
+<rect class="done" x="799.2" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Friedman Buxom Betty Friedman Buxom Betty (done in code)</title></rect>
+<rect class="done" x="829" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Friedman DS40 Friedman DS40 (done in code)</title></rect>
+<rect class="done" x="858.8" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Fuchs Overdrive Supreme 50 Fuchs Overdrive Supreme 50 (done in code)</title></rect>
+<rect class="done" x="888.5" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Gallien Krueger 800RB Gallien Krueger 800RB (done in code)</title></rect>
+<rect class="done" x="918.3" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Ibanez Tube Screamer TS808 Ibanez Tube Screamer TS808 (done in code)</title></rect>
+<rect class="done" x="948.1" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Maag EQ4 Maag EQ4 (done in code)</title></rect>
+<rect class="done" x="977.8" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Maag EQ4 MS Maag EQ4 MS (done in code)</title></rect>
+<rect class="done" x="1007.6" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Millennia NSEQ-2 Millennia NSEQ-2 (done in code)</title></rect>
+<rect class="done" x="1037.4" y="526.6" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Neve 1081 Neve 1081 (done in code)</title></rect>
+<rect class="done" x="769.4" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Neve 1081SE Neve 1081SE (done in code)</title></rect>
+<rect class="done" x="799.2" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Neve 31102 Neve 31102 (done in code)</title></rect>
+<rect class="done" x="829" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Neve 31102SE Neve 31102SE (done in code)</title></rect>
+<rect class="done" x="858.8" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Roland CE-1 Roland CE-1 (done in code)</title></rect>
+<rect class="done" x="888.5" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Roland Dimension D Roland Dimension D (done in code)</title></rect>
+<rect class="done" x="918.3" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Roland RE-201 Roland RE-201 (done in code)</title></rect>
+<rect class="done" x="948.1" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: SPL Transient Designer SPL Transient Designer (done in code)</title></rect>
+<rect class="done" x="977.8" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: SPL TwinTube SPL TwinTube (done in code)</title></rect>
+<rect class="done" x="1007.6" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: SPL Vitalizer MK2-T SPL Vitalizer MK2-T (done in code)</title></rect>
+<rect class="done" x="1037.4" y="556.2" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: SPL Vitalizer MK3-T SPL Vitalizer MK3-T (done in code)</title></rect>
+<rect class="done" x="769.4" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Shadow Hills Class A Mastering Comp Shadow Hills Class A Mastering Comp (done in code)</title></rect>
+<rect class="done" x="799.2" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Shadow Hills Mastering Compressor Shadow Hills Mastering Compressor (done in code)</title></rect>
+<rect class="done" x="829" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Suhr PT100 Suhr PT100 (done in code)</title></rect>
+<rect class="done" x="858.8" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Suhr SE100 Suhr SE100 (done in code)</title></rect>
+<rect class="done" x="888.5" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Vertigo VSC-2 Vertigo VSC-2 (done in code)</title></rect>
+<rect class="done" x="918.3" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: Vertigo VSM-3 Vertigo VSM-3 (done in code)</title></rect>
+<rect class="done" x="948.1" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_digital V2 bx_digital V2 (done in code)</title></rect>
+<rect class="done" x="977.8" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_digital V2 Mono bx_digital V2 Mono (done in code)</title></rect>
+<rect class="done" x="1007.6" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_digital V3 bx_digital V3 (done in code)</title></rect>
+<rect class="done" x="1037.4" y="585.8" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_digital V3 mix bx_digital V3 mix (done in code)</title></rect>
+<rect class="done" x="769.4" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_masterdesk bx_masterdesk (done in code)</title></rect>
+<rect class="done" x="799.2" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_masterdesk Classic bx_masterdesk Classic (done in code)</title></rect>
+<rect class="done" x="829" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_refinement bx_refinement (done in code)</title></rect>
+<rect class="done" x="858.8" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_saturator V2 bx_saturator V2 (done in code)</title></rect>
+<rect class="done" x="888.5" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: bx_subsynth bx_subsynth (done in code)</title></rect>
+<rect class="done" x="918.3" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: elysia alpha compressor V2 elysia alpha compressor V2 (done in code)</title></rect>
+<rect class="done" x="948.1" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: elysia alpha master elysia alpha master (done in code)</title></rect>
+<rect class="done" x="977.8" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: elysia alpha mix elysia alpha mix (done in code)</title></rect>
+<rect class="done" x="1007.6" y="615.4" width="28.8" height="28.6"><title>Mapped offline, needs a licence to test live: elysia mpressor elysia mpressor (done in code)</title></rect>
+<text class="lbl" x="772.4" y="509">Mapped offline, needs a licence to test live</text>
+<rect class="blocked" x="1069.2" y="497" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (1) not authorized on the test Apollo (1) (needs hardware)</title></rect>
+<rect class="blocked" x="1096.2" y="497" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (2) not authorized on the test Apollo (2) (needs hardware)</title></rect>
+<rect class="blocked" x="1123.2" y="497" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (3) not authorized on the test Apollo (3) (needs hardware)</title></rect>
+<rect class="blocked" x="1150.2" y="497" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (4) not authorized on the test Apollo (4) (needs hardware)</title></rect>
+<rect class="blocked" x="1069.2" y="526.6" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (5) not authorized on the test Apollo (5) (needs hardware)</title></rect>
+<rect class="blocked" x="1096.2" y="526.6" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (6) not authorized on the test Apollo (6) (needs hardware)</title></rect>
+<rect class="blocked" x="1123.2" y="526.6" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (7) not authorized on the test Apollo (7) (needs hardware)</title></rect>
+<rect class="blocked" x="1150.2" y="526.6" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (8) not authorized on the test Apollo (8) (needs hardware)</title></rect>
+<rect class="blocked" x="1069.2" y="556.2" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (9) not authorized on the test Apollo (9) (needs hardware)</title></rect>
+<rect class="blocked" x="1096.2" y="556.2" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (10) not authorized on the test Apollo (10) (needs hardware)</title></rect>
+<rect class="blocked" x="1123.2" y="556.2" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (11) not authorized on the test Apollo (11) (needs hardware)</title></rect>
+<rect class="blocked" x="1150.2" y="556.2" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (12) not authorized on the test Apollo (12) (needs hardware)</title></rect>
+<rect class="blocked" x="1069.2" y="585.8" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (13) not authorized on the test Apollo (13) (needs hardware)</title></rect>
+<rect class="blocked" x="1096.2" y="585.8" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (14) not authorized on the test Apollo (14) (needs hardware)</title></rect>
+<rect class="blocked" x="1123.2" y="585.8" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (15) not authorized on the test Apollo (15) (needs hardware)</title></rect>
+<rect class="blocked" x="1150.2" y="585.8" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (16) not authorized on the test Apollo (16) (needs hardware)</title></rect>
+<rect class="blocked" x="1069.2" y="615.4" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (17) not authorized on the test Apollo (17) (needs hardware)</title></rect>
+<rect class="blocked" x="1096.2" y="615.4" width="26" height="28.6"><title>Not authorized on the test Apollo: not authorized on the test Apollo (18) not authorized on the test Apollo (18) (needs hardware)</title></rect>
+<text class="lbl" x="1072.2" y="509">Not authorized </text>
+<rect class="partial" x="1179.3" y="497" width="28.9" height="24.6"><title>Mapped, live load on hold: A-Type Multiband Enhancer A-Type Multiband Enhancer (partial / in progress)</title></rect>
+<rect class="partial" x="1209.2" y="497" width="28.9" height="24.6"><title>Mapped, live load on hold: CS-1 CS-1 (partial / in progress)</title></rect>
+<rect class="partial" x="1239.1" y="497" width="28.9" height="24.6"><title>Mapped, live load on hold: Dytronics Cyclosonic Panner Dytronics Cyclosonic Panner (partial / in progress)</title></rect>
+<rect class="partial" x="1179.3" y="522.6" width="28.9" height="24.6"><title>Mapped, live load on hold: Dytronics Tri-Stereo Chorus Dytronics Tri-Stereo Chorus (partial / in progress)</title></rect>
+<rect class="partial" x="1209.2" y="522.6" width="28.9" height="24.6"><title>Mapped, live load on hold: EMT 250 EMT 250 (partial / in progress)</title></rect>
+<rect class="partial" x="1239.1" y="522.6" width="28.9" height="24.6"><title>Mapped, live load on hold: Eden WT800 Eden WT800 (partial / in progress)</title></rect>
+<rect class="partial" x="1179.3" y="548.2" width="28.9" height="24.6"><title>Mapped, live load on hold: Lexicon 224 Lexicon 224 (partial / in progress)</title></rect>
+<rect class="partial" x="1209.2" y="548.2" width="28.9" height="24.6"><title>Mapped, live load on hold: Marshall Plexi Classic Marshall Plexi Classic (partial / in progress)</title></rect>
+<rect class="partial" x="1239.1" y="548.2" width="28.9" height="24.6"><title>Mapped, live load on hold: Marshall Plexi Super Lead 1959 Marshall Plexi Super Lead 1959 (partial / in progress)</title></rect>
+<rect class="partial" x="1179.3" y="573.8" width="28.9" height="24.6"><title>Mapped, live load on hold: Ocean Way Studios Ocean Way Studios (partial / in progress)</title></rect>
+<rect class="partial" x="1209.2" y="573.8" width="28.9" height="24.6"><title>Mapped, live load on hold: Softube Bass Amp Room 8x10 Softube Bass Amp Room 8x10 (partial / in progress)</title></rect>
+<rect class="partial" x="1239.1" y="573.8" width="28.9" height="24.6"><title>Mapped, live load on hold: Tube-Tech CL 1B Tube-Tech CL 1B (partial / in progress)</title></rect>
+<rect class="partial" x="1179.3" y="599.4" width="28.9" height="24.6"><title>Mapped, live load on hold: Tube-Tech CL 1B mk II Tube-Tech CL 1B mk II (partial / in progress)</title></rect>
+<text class="lbl" x="1182.3" y="509">Mapped, live</text>
+<rect class="re" x="1179.3" y="627" width="43.9" height="17"><title>Blocked: API Vision Channel Strip API Vision Channel Strip (still to figure out (RE))</title></rect>
+<rect class="re" x="1224.1" y="627" width="43.9" height="17"><title>Blocked: Moog Multimode Filter XL Moog Multimode Filter XL (still to figure out (RE))</title></rect>
+<text class="lbl" x="1182.3" y="639">Blocked</text>
+<rect class="verified" x="12" y="669" width="12" height="12"/>
+<text class="m" x="29" y="679">verified on hardware</text>
+<rect class="done" x="179" y="669" width="12" height="12"/>
+<text class="m" x="196" y="679">done in code</text>
+<rect class="partial" x="293" y="669" width="12" height="12"/>
+<text class="m" x="310" y="679">partial / in progress</text>
+<rect class="re" x="466" y="669" width="12" height="12"/>
+<text class="m" x="483" y="679">still to figure out (RE)</text>
+<rect class="todo" x="659" y="669" width="12" height="12"/>
+<text class="m" x="676" y="679">understood, not done</text>
+<rect class="plugin" x="826" y="669" width="12" height="12"/>
+<text class="m" x="843" y="679">plugin hosting (in progress)</text>
+<rect class="blocked" x="1045" y="669" width="12" height="12"/>
+<text class="m" x="1062" y="679">needs hardware</text>
 <text class="m" x="1268" y="18" text-anchor="end">as of 2026-10-11</text>
 </svg>

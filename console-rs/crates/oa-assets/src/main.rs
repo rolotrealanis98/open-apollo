@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use oa_assets::catalogue;
 use oa_assets::detect::{self, Install};
 use oa_assets::discover::{self, Root, Source};
 use oa_assets::dsp;
 use oa_assets::firmware::{self, Event, Pins};
 use oa_assets::import;
-use oa_assets::catalogue;
 
 const USAGE: &str = "\
 oa-assets: use your own UAD install with open-apollo

@@ -95,7 +95,8 @@ def main():
                  if r.getAttribute("class") in gen.ORDER and
                  r.getElementsByTagName("title")]
         n_models = sum(len(g["items"]) for g in gen.load_models())
-        assert len(cells) == 10 + 8 + n_models, len(cells)
+        n_library = sum(len(g["items"]) for g in gen.load_library())
+        assert len(cells) == 10 + 8 + n_models + n_library, len(cells)
         assert gen.render(data, "dark") == svg       # deterministic
         for name, text in gen.outputs(data).items():
             if name.endswith(".svg"):

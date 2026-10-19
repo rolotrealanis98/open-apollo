@@ -35,8 +35,6 @@ jobs:
       webview: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.webview == 'true' }}
       installer: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.installer == 'true' }}
       install_matrix: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.install_matrix == 'true' }}
-      # nix also runs after any console-rs change lands on main
-      nix: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.nix == 'true' || (github.event_name == 'push' && steps.filter.outputs.console_rs == 'true') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -82,17 +80,6 @@ jobs:
               - 'configs/**'
               - 'tests/docker/**'
               - '.dockerignore'
-            nix:
-              # On PRs: the packaging and the Rust manifests. After a merge to
-              # main any console-rs change runs it too (see `nix` output above).
-              - *workflow
-              - 'flake.nix'
-              - 'flake.lock'
-              - 'nix/**'
-              - 'console-rs/Cargo.toml'
-              - 'console-rs/Cargo.lock'
-              - 'console-rs/crates/*/Cargo.toml'
-              - 'console-rs/packaging/**'
 
   clean-repo:
     # No UA bytes (DSP modules, pinned firmware, art) and no personal data in
@@ -340,21 +327,3 @@ jobs:
             { echo 'FAIL: No UCM2 config'; exit 1; };
             echo 'All checks passed'
           "
-
-  nix:
-    # Builds packages.uaconsole (through checks.uaconsole) and runs the
-    # workspace tests in the Nix sandbox. No binary cache for our crates, so
-    # it is the slowest job: on PRs it runs for packaging and manifest
-    # changes, on main for every console-rs change.
-    name: nix
-    needs: changes
-    if: needs.changes.outputs.nix == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@v31
-      - name: nix flake check
-        run: nix flake check -L

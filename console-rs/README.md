@@ -56,21 +56,6 @@ uaconsole).
 bash scripts/setup.sh          # from the repository root; --demo: simulated install, nothing changes
 ```
 
-### Nix
-
-```bash
-nix run github:rolotrealanis98/open-apollo#uaconsole
-nix profile install github:rolotrealanis98/open-apollo#uaconsole
-```
-
-On NixOS, add `inputs.open-apollo.packages.${pkgs.system}.uaconsole` to
-`environment.systemPackages`. The package bundles the fonts it needs (Nimbus Sans, Liberation
-Sans) and the Vulkan, GL, Wayland and X11 libraries it loads at run time.
-
-On another distribution with Nix installed, programs built by Nix cannot see the system's
-GPU drivers. Run uaconsole through [nixGL](https://github.com/nix-community/nixGL), or install it
-with `scripts/install-uaconsole.sh` instead.
-
 ## Run
 
 1. Start the mixer daemon. The open-apollo installer does this; by hand:
@@ -170,7 +155,6 @@ pins. Like the Console art, these files are for your own machine only.
 | `no GPU adapter`, or a black window | Check that `vulkaninfo --summary` lists your GPU, and install your distribution's Vulkan driver (`mesa-vulkan-drivers`, `vulkan-radeon`, `vulkan-intel`). Try another backend with `WGPU_BACKEND=gl` or `WGPU_BACKEND=vulkan`. `--render` reads this variable; the window may not yet. |
 | Labels look too wide or narrow, or use the wrong typeface | Install Nimbus Sans and Liberation Sans (table above). Check with `fc-list "Nimbus Sans"`. |
 | Nothing moves, or no connection | Check that the daemon is listening: `ss -tln \| grep 4710`. Start it (`systemctl --user start ua-mixer-daemon`, or by hand as under [Run](#run)). |
-| Nix build on a non-NixOS system finds no GPU | Use nixGL (see [Nix](#nix)). |
 | Wayland issues | Force X11 for one run: `env -u WAYLAND_DISPLAY uaconsole`. |
 
 ## Development
@@ -183,10 +167,6 @@ cargo build --release
 cargo run --release -p uaconsole -- --render /tmp/console.png
 cargo test --workspace
 ```
-
-With Nix, `nix develop` (from the repo root) provides the Rust toolchain, clippy, rustfmt,
-rust-analyzer and Python. It also sets `LD_LIBRARY_PATH` and `FONTCONFIG_FILE` so that
-`cargo run` finds the GPU, windowing libraries and fonts.
 
 ### Command-line flags
 
@@ -225,11 +205,8 @@ under `console-rs/` or `mixer-engine/device_maps/`:
   rustfmt- or clippy-clean yet; format a crate with `cargo fmt -p <crate>` before adding it.
 - `cargo check` with the `webview` feature (`plugin-ui`, `uaconsole`; installs the
   `libwebkit2gtk-4.1-dev` and `libgtk-3-dev` headers) when those crates or `Cargo.lock` change.
-- `nix flake check` (the `nix` job), which builds `packages.uaconsole` and runs the same tests in
-  the Nix sandbox: on PRs that touch `flake.nix`, `nix/` or a Cargo manifest, and after every
-  console-rs change on `main`.
 
-The CI runners have **no GPU and no UA resources**, and neither does the Nix build sandbox. A
+The CI runners have **no GPU and no UA resources**. A
 test that needs either must detect that and skip itself at run time, not fail:
 
 ```rust
