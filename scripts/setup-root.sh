@@ -32,6 +32,8 @@
 #                     the pinned release (see install-panels.sh)
 #   --panels-sha256 HEX  the SHA-256 --panels must have, when not the pinned one
 #   --send-report     upload install.sh's anonymous report (opt-in)
+#   --plugin-hosting  experimental: load the driver with its plug-in host on and
+#                     map the user's plug-ins for it (install.sh --plugin-hosting)
 #   -h, --help        show this help
 #
 # Exit status: 0 done (perhaps with warnings), 1 a step failed, 2 a bad option.
@@ -50,6 +52,7 @@ OA_ASSETS=""
 DATA_DIR=""
 KEEP_CURRENT=0
 SEND_REPORT=0
+PLUGIN_HOSTING=0
 PANELS_FROM=""
 PANELS_SHA=""
 
@@ -85,6 +88,7 @@ parse_args() {
                 shift 2 ;;
             --keep-current) KEEP_CURRENT=1; shift ;;
             --send-report) SEND_REPORT=1; shift ;;
+            --plugin-hosting) PLUGIN_HOSTING=1; shift ;;
             -h|--help) usage; exit 0 ;;
             *) bad_usage "unknown option $1" ;;
         esac
@@ -306,6 +310,8 @@ step_driver() {
     header "Installing the driver"
     local -a args=(--yes)
     [ "$SEND_REPORT" = 1 ] && args+=(--send-report)
+    # The install is still open here (it closes on exit), so the plug-ins can be mapped from it.
+    [ "$PLUGIN_HOSTING" = 1 ] && args+=("--plugin-hosting=$FROM")
     DRIVER_LOG=$(mktemp "${TMPDIR:-/tmp}/open-apollo-install.XXXXXX") || DRIVER_LOG=/dev/null
     bash "$SCRIPT_DIR/install.sh" "${args[@]}" 2>&1 | tee "$DRIVER_LOG"
     local rc=${PIPESTATUS[0]}

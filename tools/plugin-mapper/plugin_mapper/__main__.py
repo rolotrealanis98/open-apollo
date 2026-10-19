@@ -23,8 +23,11 @@ from build_bundle import build  # noqa: E402
 REPO = PKG.parents[2]
 DEFAULT_OUT = Path.home() / '.local/share/open-apollo/plugin-bundles'
 DEFAULT_WORK = Path.home() / '.cache/open-apollo/plugin-mapper'
-DEFAULT_SPECS = Path('/usr/share/open-apollo/plugin-specs')
+DEFAULT_SPECS = next((p for p in (Path('/usr/share/open-apollo/plugin-specs'),
+                                  Path.home() / '.local/share/open-apollo/plugin-specs') if p.is_dir()),
+                     Path('/usr/share/open-apollo/plugin-specs'))  # where scripts/install-panels.sh puts them
 DEFAULT_STORE = Path('/lib/firmware/universal-audio/plugins')
+DEFAULT_TEXTS = Path(os.environ.get('OA_PLUGIN_ART') or Path.home() / '.local/share/open-apollo/generated') / 'Text'
 KNOWN_GOOD = REPO / 'mixer-engine/device_maps/native_known_good.json'
 GENERATORS = ('dspaudioprocessor', 'vst2', 'vst2_bx', 'vst2_relab', 'vstmain', 'paramobj', 'sonnox')
 WHOLE_SET = ('paramobj', 'vst2_relab')  # these generators take no --plugin and build their pinned set
@@ -61,19 +64,25 @@ def save(path, value):
     tmp.replace(path)
 
 
-def metadata_from_spec(spec):
+def metadata_from_spec(spec, texts):
     """The parameter metadata the pipeline reads, from an installed panel spec: names, step
-    labels and Console defaults per parameter (the same schema a Console capture has)."""
+    labels and Console defaults per parameter (the same schema a Console capture has).
+    Step labels a spec only references (`stepsRef`, e.g. preset names) come from the texts
+    `oa-assets plugins` extracted from the user's install into `texts`."""
     controls = []
     for p in spec['parameters']:
-        if p.get('stepsRef') and not p.get('steps'):
-            raise ValueError(f"parameter {p['index']} step labels are a reference the spec does not resolve")
+        steps = p.get('steps')
+        if p.get('stepsRef') and not steps:
+            ref = Path(texts) / f"{p['stepsRef']}.json"
+            if not ref.is_file():
+                raise ValueError(f"parameter {p['index']} step labels {p['stepsRef']} not imported (run oa-assets plugins)")
+            steps = json.loads(ref.read_text())
         base = f"{SLOT}/parameters/{p['index']}/"
         controls += [dict(path=base + 'Type', type='string', value='parameter'),
                      dict(path=base + 'Name', type='string', value=p['name']),
                      dict(path=base + 'NormalizedValue', type='float', min=0.0, max=1.0, value=p['default'])]
-        if p.get('steps'):
-            controls.append(dict(path=base + 'StepValue', type='string', values=p['steps'], value=None))
+        if steps:
+            controls.append(dict(path=base + 'StepValue', type='string', values=steps, value=None))
     return dict(schema='openapollo-synthetic-metadata/1', source='panel-spec', path=SLOT, controls=controls)
 
 
@@ -91,6 +100,7 @@ def main(argv=None):
     ap.add_argument('--work', type=Path, default=DEFAULT_WORK, help='discovery/execution cache (safe to delete)')
     ap.add_argument('--specs', type=Path, default=DEFAULT_SPECS, help='installed panel specs')
     ap.add_argument('--module-store', type=Path, default=DEFAULT_STORE, help='oa-assets dsp output')
+    ap.add_argument('--texts', type=Path, default=DEFAULT_TEXTS, help='texts oa-assets plugins imported (step lists)')
     ap.add_argument('--known-good', type=Path, default=KNOWN_GOOD)
     pick = ap.add_mutually_exclusive_group()
     pick.add_argument('--all', action='store_true', help='every installed plug-in with a panel spec, not only the known-good list')
@@ -138,7 +148,7 @@ def main(argv=None):
             continue
         stem, spec = specs[name]
         try:
-            metadata = metadata_from_spec(spec)
+            metadata = metadata_from_spec(spec, args.texts)
         except ValueError as error:
             failures[name] = str(error)
             continue

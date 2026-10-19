@@ -1,0 +1,4 @@
+numpy==2.5.4
+unicorn==2.1.4
+capstone==5.0.9
+pefile==2024.8.26

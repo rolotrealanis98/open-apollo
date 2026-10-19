@@ -348,6 +348,9 @@ pub struct Plan {
     pub data: Option<PathBuf>,
     pub keep_current: bool,
     pub send_report: bool,
+    /// `--plugin-hosting`: load the driver with its plug-in host on and map the
+    /// user's plug-ins (scripts/setup-plugin-hosting.sh). Experimental, opt-in.
+    pub plugin_hosting: bool,
     /// `--panels`: a plug-in panel specs tarball instead of the pinned download
     /// (`$OA_PANELS_TARBALL`, for testing a panels build), with its `--panels-sha256`.
     pub panels: Option<PathBuf>,
@@ -373,6 +376,9 @@ impl Plan {
         }
         if self.send_report {
             a.push("--send-report".into());
+        }
+        if self.plugin_hosting {
+            a.push("--plugin-hosting".into());
         }
         if let Some(p) = &self.panels {
             a.extend(["--panels".into(), p.into()]);
@@ -755,6 +761,7 @@ mod tests {
             data: None,
             keep_current: false,
             send_report: true,
+            plugin_hosting: false,
             panels: None,
             panels_sha256: None,
         };
@@ -776,6 +783,9 @@ mod tests {
         let plan = Plan { panels: Some("/tmp/p.tar.gz".into()), panels_sha256: Some("ab12".into()), ..plan };
         let args: Vec<String> = plan.args().iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args[args.len() - 4..], ["--panels", "/tmp/p.tar.gz", "--panels-sha256", "ab12"]);
+        let plan = Plan { plugin_hosting: true, panels: None, panels_sha256: None, ..plan };
+        let args: Vec<String> = plan.args().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args.last().map(String::as_str), Some("--plugin-hosting"));
     }
 
     #[test]

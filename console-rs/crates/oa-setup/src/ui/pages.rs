@@ -505,6 +505,20 @@ impl App {
             .small()
             .color(WEAK),
         );
+        let mut hosting = self.plugin_hosting;
+        if ui.add_enabled(idle, egui::Checkbox::new(&mut hosting, "Plug-ins on the Apollo (experimental)")).changed() {
+            act.push(Action::PluginHosting(hosting));
+        }
+        ui.add(
+            egui::Label::new(
+                RichText::new(
+                    "Runs your Powered plug-ins on the Apollo's DSP. Setup builds their control mappings by running your own plug-ins offline (about 10 to 40 minutes after the driver; nothing leaves this computer) and loads the driver with its plug-in host on. The Apollo's licence check still decides each load.",
+                )
+                .small()
+                .color(WEAK),
+            )
+            .wrap(),
+        );
         let mut send = self.send_report;
         if ui
             .add_enabled(idle, egui::Checkbox::new(&mut send, "Send an anonymous install report to help open-apollo"))

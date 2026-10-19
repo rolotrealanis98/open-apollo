@@ -1,21 +1,46 @@
 # Experimental native plug-in hosting
 
-Experimental and off by default (driver `plugin_host=1`, daemon `--native-plugin-provider`). It
-connects the daemon's insert transactions to the kernel INSTANCE API. The bundles a provider
-loads are built on your own machine from your own UAD install; open-apollo ships none. Select a trusted local provider explicitly and preserve the
-running hardware configuration:
+Experimental and off by default (driver `plugin_host=1 input_strips=1`, daemon
+`--native-plugin-bundles`). It connects the daemon's insert transactions to the kernel INSTANCE
+API. open-apollo ships no vendor recipes, coefficient pages, plug-in binaries or art: the runtime
+bundles are built on the user's machine from their own UAD install. Users turn it on in setup
+(docs/install.md, "Running plug-ins on the Apollo"); by hand:
 
 ```sh
+python3 -m plugin_mapper --from /path/to/windows      # in tools/plugin-mapper; see its README
 python3 mixer-engine/ua_mixer_daemon.py \
-  --native-plugin-provider /absolute/path/to/provider.py \
+  --native-plugin-bundles ~/.local/share/open-apollo/plugin-bundles \
   --preserve-hardware --require-hardware
 ```
 
-The product ships no vendor recipes, coefficient pages, plug-in binaries or art.
-A provider exposes `create_provider()` or `create_providers()`; the latter may
-return a tuple subclass with an explicit `composer` callable. Device licensing
-remains authoritative. Catalog visibility and a configured loader do not prove
-successful device admission or hardware qualification.
+## Bundles
+
+`tools/plugin-mapper` runs each Powered plug-in DLL under Unicorn: static discovery finds its
+parameter block, program loader and descriptor; execution constructs it with the user's own
+`UAD2SDK.dll`, loads its Console defaults, reads the DSP descriptor, and sweeps every control
+(0, middle, maximum) recording the DSP words each change writes. Parameter names, step labels
+and defaults come from the installed panel specs. One `<plug-in>-runtime-bundle.json` per
+passing plug-in, plus `index.json` (what was built, what failed and why).
+
+`profiled_bundle_registry.py` makes one `ProfiledCarrierProvider` per input (and a
+`StereoProfiledCarrierProvider` per input pair for 2-in/2-out descriptors) and the chain
+composer (`native_chain_composer.py`). `native_carrier.py` builds the CREATE recipe: chain head,
+Mic Input Strip (the words `driver/ua_strips.c` writes for a plain strip), then the plug-in's
+rows and startup words. Control changes are planned by running the plug-in's own setter in the
+emulator, so the daemon needs the mapper's Python packages and the DLL where it was mapped.
+
+Only plug-ins on `device_maps/native_known_good.json` are offered unless
+`--advertise-all-plugins` is given. That list holds names, the discovery family, Console latency
+(samples at 48 kHz, for delay compensation) and the positions of DSP-owned words the daemon must
+not verify, nothing else; it is the plug-ins that went live on an Apollo x4. Bundles,
+receipts, captures and disassembly never enter the repository (`tools/check-clean-repo.py`,
+rule `plugin-bundle`).
+
+A lower-level `--native-plugin-provider FILE` loads an explicitly trusted Python provider
+instead (development). It exposes `create_provider()` or `create_providers()`; the latter may
+return a tuple subclass with an explicit `composer` callable. Device licensing remains
+authoritative. Catalog visibility and a configured loader do not prove successful device
+admission or hardware qualification.
 
 ## Hosting contract
 
