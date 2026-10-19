@@ -81,3 +81,76 @@ class TestChannelPresetRoundTrip:
     def test_factory_name_without_file_refused(self, stack):
         r = send(stack, "set", CH + "/Preset/value", "nothing")
         assert r["error"] == "Unable to resolve path for set."
+
+
+class TestConsoleKeys:
+    """Console 1.3.1's argument keys (MAP.md "Commands"), through the
+    daemon's post path; the daemon's older keys keep working."""
+
+    def test_iomap_preset_save_rename_delete(self, stack):
+        d = stack
+        assert post(d, "/SaveIOMapPreset", {"ioPresetName": "a"})["data"]
+        names = lambda: [v["value"] for v in
+                         d.state.get_prop_dict("/IOMapPreset")["values"]]
+        assert "a" in names()
+        assert post(d, "/RenameIOMapPreset",
+                    {"origPreset": "a", "newPreset": "b"})["data"]
+        assert "b" in names() and "a" not in names()
+        assert post(d, "/DeleteIOMapPreset", {"ioPresetName": "b"})["data"]
+        assert "b" not in names()
+        # a missing preset still fails
+        assert post(d, "/DeleteIOMapPreset",
+                    {"ioPresetName": "b"})["error"] == ERR_FAILED
+
+    def test_iomap_old_keys(self, stack):
+        d = stack
+        assert post(d, "/SaveIOMapPreset", {"name": "a"})["data"]
+        assert post(d, "/RenameIOMapPreset",
+                    {"name": "a", "new_name": "b"})["data"]
+        assert post(d, "/DeleteIOMapPreset", {"name": "b"})["data"]
+
+    def test_snapshots(self, stack):
+        d = stack
+        for n in ("one", "Live/two"):
+            r = post(d, "/SaveAsSnapshot", {"snapshotName": n, "isNew": "true"})
+            assert r["data"]["name"] == n
+        r = post(d, "/MoveSnapshot", {"origName": "one", "newName": "Live/uno",
+                                      "shuffle": "false"})
+        assert r["data"]["snapshots"] == ["Live/uno", "Live/two"]
+        assert post(d, "/MoveSnapshot", {"origName": "nope",
+                                         "newName": "x"})["error"] == ERR_FAILED
+        assert post(d, "/MoveSnapshot", {"origName": "Live/uno",
+                                         "newName": "Live/two"})["error"] == ERR_FAILED
+        r = post(d, "/DeleteSnapshot", {"snapshotName": "Live/uno"})
+        assert r["data"]["snapshots"] == ["Live/two"]
+        assert post(d, "/DeleteSnapshot",
+                    {"snapshotName": "Live/uno"})["error"] == ERR_FAILED
+        assert post(d, "/SaveAsSnapshot", {"snapshotName": "../x"})[
+            "error"] == ERR_FAILED
+
+    def test_snapshot_old_keys(self, stack):
+        d = stack
+        assert post(d, "/SaveAsSnapshot", {"name": "a"})["data"]
+        assert post(d, "/DeleteSnapshot", {"name": "a"})["data"]
+
+    def test_session_commands_take_console_keys(self, stack):
+        d = stack
+        post(d, "/NewFolder", {"folder": "Live", "type": "session"})
+        assert post(d, "/DeleteFolder",
+                    {"folder": "Live", "type": "session"})["data"] is True
+        # the engine-side session commands (object posts) too
+        data, err = d.commands.execute("/SaveSessionAs", {"name": "s1"})
+        assert err is None
+        data, err = d.commands.execute(
+            "/RenameSession", {"origName": "s1", "newName": "s2"})
+        assert err is None and data["sessions"] == ["s2"]
+        data, err = d.commands.execute("/DeleteSession", {"name": "s2"})
+        assert err is None and data["sessions"] == []
+
+    def test_preset_folder_new_and_delete(self, stack):
+        d = stack
+        args = {"folder": "Vox", "path": CH + "/Preset"}
+        assert post(d, "/NewFolder", args)["data"] is True
+        assert (stack.console.presets.directory / "Channel%20Strip" / "Vox").is_dir()
+        assert post(d, "/DeleteFolder", args)["data"] is True
+        assert post(d, "/DeleteFolder", args)["error"] == ERR_FAILED

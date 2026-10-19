@@ -213,12 +213,13 @@ class Presets:
         self.history.record("preset", before)
 
     def post(self, command, args):
-        if command == "NewFolder" and "path" in args:
+        if command in ("NewFolder", "DeleteFolder") and "path" in args:
             target = args["path"]
             if not isinstance(target, str) or not target.endswith("/Preset"):
                 raise ValueError("preset folder requires an object/Preset path")
             plugin = self.plugin(target.removesuffix("/Preset"))
-            self.path(plugin, args.get("folder", ""), extension=None).mkdir(parents=True)
+            folder = self.path(plugin, args.get("folder", ""), extension=None)
+            folder.mkdir(parents=True) if command == "NewFolder" else folder.rmdir()
         elif command == "SaveAsPreset":
             base = args.get("path", "")
             plugin = self.plugin(base)
