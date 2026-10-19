@@ -86,8 +86,8 @@ restart_daemon() {
 # was already on has not cold-started its DSPs: the daemon runs without plug-ins and says so
 # until the Apollo is power-cycled, then turns them on by itself.
 check_hosting() {
-    local answer="" i
-    for i in $(seq 20); do
+    local answer=""
+    for _ in $(seq 20); do
         answer=$(python3 - <<'PY' 2>/dev/null
 import json, socket
 try:
