@@ -352,6 +352,7 @@ static inline bool ua_public_output_mute(u32 pt)
 #define UA_REG_REC_DMA_BASE     0xA000  /* Record DMA descriptor base */
 #define UA_DMA_SG_ENTRIES       1024    /* 4 MiB / 4K pages = 1024 entries per direction */
 #define UA_DMA_BUF_SIZE         0x400000  /* 4 MiB DMA buffer per direction */
+#define UA_DMA_RING_PAGES       (UA_DMA_BUF_SIZE / PAGE_SIZE) /* kernel pages per ring */
 
 /*
  * Notification / SRAM Registers
@@ -1189,9 +1190,14 @@ struct ua_pirq_trace {
 	struct ua_pirq_trace_ev ev[UA_PIRQ_TRACE_N];
 };
 
-/* Page-granular backing store for one audio DMA ring (ua_audio.c) */
+/*
+ * Backing store for one audio DMA ring (ua_audio.c).  One entry per
+ * kernel page (UA_DMA_RING_PAGES: 1024 at 4K, 256 at 16K); the device's
+ * 4 KiB SG entries (UA_DMA_SG_ENTRIES) are derived from it when the
+ * table is programmed.
+ */
 struct ua_dma_ring {
-	struct page **pages;        /* UA_DMA_SG_ENTRIES entries, kvcalloc()ed */
+	struct page **pages;        /* UA_DMA_RING_PAGES entries, kvcalloc()ed */
 	dma_addr_t *dmas;           /* device address of pages[i] */
 	unsigned int nr_pages;      /* pages successfully allocated */
 };

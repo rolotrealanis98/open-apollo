@@ -467,15 +467,17 @@ static void ua_get_model_channels(struct ua_device *ua)
 /* ----------------------------------------------------------------
  * Audio DMA rings
  *
- * Each 4 MiB ring is UA_DMA_SG_ENTRIES separate pages from
- * dma_alloc_pages() rather than one contiguous dma_alloc_coherent()
+ * Each 4 MiB ring is UA_DMA_RING_PAGES separate kernel pages (1024 at
+ * 4K, 256 at 16K on Asahi) from dma_alloc_pages() rather than one contiguous dma_alloc_coherent()
  * block.  A single 4 MiB coherent allocation needs a physically
  * contiguous order-10 buddy block below 4 GiB (DMA_BIT_MASK(32)); on
  * a dma-direct (no IOMMU) host with CmaTotal=0, low memory fragments
  * within hours of uptime and probe fails with -ENOMEM on every replug
  * (2026-08-29: three consecutive -12 failures after the first
- * boot-time connect).  The FPGA walks a 1024-entry SG table, so the
- * device never needed contiguity.
+ * boot-time connect).  The FPGA walks a 1024-entry SG table of 4 KiB
+ * pages, so the device never needed contiguity; with kernel pages
+ * larger than 4 KiB each page fills PAGE_SIZE / UA_PCIE_PAGE_SIZE
+ * consecutive SG entries (ua_audio_program_sg()).
  *
  * dma_alloc_pages() rather than per-page dma_alloc_coherent(): it
  * returns the struct page, which is what vmap() needs to build the
@@ -518,18 +520,20 @@ static int ua_dma_ring_alloc(struct device *dev, struct ua_dma_ring *ring,
 	unsigned int i;
 	void *va;
 
-	/* The flat view is one kernel page per SG entry */
-	BUILD_BUG_ON(PAGE_SIZE != UA_PCIE_PAGE_SIZE);
+	/* A kernel page is a whole number of 4 KiB device pages */
+	BUILD_BUG_ON(PAGE_SIZE < UA_PCIE_PAGE_SIZE);
+	BUILD_BUG_ON(PAGE_SIZE % UA_PCIE_PAGE_SIZE);
+	BUILD_BUG_ON(UA_DMA_BUF_SIZE % PAGE_SIZE);
 	BUILD_BUG_ON(UA_DMA_SG_ENTRIES * UA_PCIE_PAGE_SIZE != UA_DMA_BUF_SIZE);
 
-	ring->pages = kvcalloc(UA_DMA_SG_ENTRIES, sizeof(*ring->pages),
+	ring->pages = kvcalloc(UA_DMA_RING_PAGES, sizeof(*ring->pages),
 			       GFP_KERNEL);
-	ring->dmas = kvcalloc(UA_DMA_SG_ENTRIES, sizeof(*ring->dmas),
+	ring->dmas = kvcalloc(UA_DMA_RING_PAGES, sizeof(*ring->dmas),
 			      GFP_KERNEL);
 	if (!ring->pages || !ring->dmas)
 		goto err;
 
-	for (i = 0; i < UA_DMA_SG_ENTRIES; i++) {
+	for (i = 0; i < UA_DMA_RING_PAGES; i++) {
 		ring->pages[i] = dma_alloc_pages(dev, PAGE_SIZE, &ring->dmas[i],
 						 UA_DMA_RING_DIR, GFP_KERNEL);
 		if (!ring->pages[i])
@@ -538,7 +542,7 @@ static int ua_dma_ring_alloc(struct device *dev, struct ua_dma_ring *ring,
 	}
 
 	/* dma_alloc_pages() zero-fills, so no memset through the vmap */
-	va = vmap(ring->pages, UA_DMA_SG_ENTRIES, VM_MAP, PAGE_KERNEL);
+	va = vmap(ring->pages, UA_DMA_RING_PAGES, VM_MAP, PAGE_KERNEL);
 	if (!va)
 		goto err;
 
@@ -707,7 +711,7 @@ static int ua_audio_alloc_dma(struct ua_device *ua)
 	}
 
 	dev_info(dev, "DMA buffers: %u pages per direction, vmapped flat (4 MiB each)\n",
-		 UA_DMA_SG_ENTRIES);
+		 (unsigned int)UA_DMA_RING_PAGES);
 	return 0;
 }
 
@@ -717,6 +721,8 @@ static int ua_audio_alloc_dma(struct ua_device *ua)
  * The SG SRAM at 0x8000 appears to be 8 KiB (0x8000-0x9FFF) for playback
  * and 0xA000-0xBFFF for record, supporting up to 1024 entries at 8 bytes
  * each.  1024 entries × 4K stride = 4 MiB, covering the full DMA buffer.
+ * Entry i maps device page i, i.e. byte i * 4 KiB of the ring, which is
+ * sub-page (i % (PAGE_SIZE / 4K)) of kernel page i / (PAGE_SIZE / 4K).
  *
  * The region is write-only (reads return 0x00000000).
  *
@@ -726,8 +732,10 @@ static int ua_audio_alloc_dma(struct ua_device *ua)
 static void ua_audio_program_sg(struct ua_device *ua)
 {
 	struct ua_audio *audio = &ua->audio;
-	const dma_addr_t *play = audio->play_ring.dmas;
-	const dma_addr_t *rec = audio->rec_ring.dmas;
+	const dma_addr_t *play_pg = audio->play_ring.dmas;
+	const dma_addr_t *rec_pg = audio->rec_ring.dmas;
+	const unsigned int sub = PAGE_SIZE / UA_PCIE_PAGE_SIZE;
+	dma_addr_t p, r;
 	unsigned int i;
 	u32 ax;
 
@@ -751,15 +759,17 @@ static void ua_audio_program_sg(struct ua_device *ua)
 	audio->transport_running = false;
 
 	for (i = 0; i < UA_DMA_SG_ENTRIES; i++) {
+		p = play_pg[i / sub] + (i % sub) * UA_PCIE_PAGE_SIZE;
+		r = rec_pg[i / sub] + (i % sub) * UA_PCIE_PAGE_SIZE;
 		ua_write(ua, UA_REG_PLAY_DMA_BASE + i * 8,
-			 lower_32_bits(play[i]));
+			 lower_32_bits(p));
 		ua_write(ua, UA_REG_PLAY_DMA_BASE + i * 8 + 4,
-			 upper_32_bits(play[i]));
+			 upper_32_bits(p));
 
 		ua_write(ua, UA_REG_REC_DMA_BASE + i * 8,
-			 lower_32_bits(rec[i]));
+			 lower_32_bits(r));
 		ua_write(ua, UA_REG_REC_DMA_BASE + i * 8 + 4,
-			 upper_32_bits(rec[i]));
+			 upper_32_bits(r));
 	}
 
 	/* No doorbell — kext ProgramRegisters writes SG directly without one */
@@ -792,11 +802,9 @@ static void ua_audio_program_sg(struct ua_device *ua)
 	ua_enable_vector(ua, UA_IRQ_VEC_NOTIFICATION, true);
 
 	dev_dbg(&ua->pdev->dev, "  SG[0]: play=0x%08x rec=0x%08x\n",
-		lower_32_bits(play[0]), lower_32_bits(rec[0]));
+		lower_32_bits(play_pg[0]), lower_32_bits(rec_pg[0]));
 	dev_dbg(&ua->pdev->dev, "  SG[%u]: play=0x%08x rec=0x%08x\n",
-		UA_DMA_SG_ENTRIES - 1,
-		lower_32_bits(play[UA_DMA_SG_ENTRIES - 1]),
-		lower_32_bits(rec[UA_DMA_SG_ENTRIES - 1]));
+		UA_DMA_SG_ENTRIES - 1, lower_32_bits(p), lower_32_bits(r));
 }
 
 /*
