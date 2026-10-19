@@ -50,7 +50,7 @@ pub const LETTERBOX: Rgba = Rgba::rgb8(18, 19, 21);
 /// Pan distance per wheel line, in pixels.
 const PAN_PER_LINE: f32 = 60.0;
 /// Scroll distance per wheel line in the browser list and cells column, in points.
-const SCROLL_PER_LINE: f32 = 40.0;
+pub(crate) const SCROLL_PER_LINE: f32 = 40.0;
 
 pub struct Options {
     pub source: ModelSource,
@@ -254,8 +254,15 @@ impl App {
         })
     }
 
+    /// Shift: fine adjust (knob / fader drags, Option+wheel).
     fn fine(&self) -> bool {
-        self.mods.shift_key() || self.mods.alt_key()
+        self.mods.shift_key()
+    }
+
+    /// Console's control modifiers: Option (macOS) / Alt, and Command (macOS) / Ctrl.
+    fn key_mods(&self) -> rack::KeyMods {
+        let cmd = if cfg!(target_os = "macos") { self.mods.super_key() } else { self.mods.control_key() };
+        rack::KeyMods { alt: self.mods.alt_key(), cmd }
     }
 
     fn request_redraw(&self) {
@@ -547,6 +554,7 @@ impl App {
         // a double-click still activates the row now (as the FFI host does).
         let armed = self.mixer.drag_press(active_hits!(self), x, y, &*self.model);
         self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
+        self.interaction.mods = self.key_mods();
         let actions = self
             .interaction
             .pointer_down(active_hits!(self), x, y, double);
@@ -657,9 +665,12 @@ impl App {
             if self.dirty {
                 self.rebuild();
             }
-            if let Some(actions) = wheel_actions(active_hits!(self), x, y, lines.1, fine) {
-                self.apply(actions);
-                return;
+            // Option / Alt + wheel adjusts the control under the pointer; a plain wheel scrolls.
+            if self.mods.alt_key() {
+                if let Some(actions) = wheel_actions(active_hits!(self), x, y, lines.1, fine) {
+                    self.apply(actions);
+                    return;
+                }
             }
             if self.mixer.wheel(
                 active_scrolls!(self),

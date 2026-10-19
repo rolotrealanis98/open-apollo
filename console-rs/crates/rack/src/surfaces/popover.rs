@@ -227,6 +227,10 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
         Popover::SessionRename => text_popover(ui, a, bounds, "RENAME SESSION", view.text_edit.as_ref()),
         Popover::SessionNewFolder => text_popover(ui, a, bounds, "NEW FOLDER", view.text_edit.as_ref()),
         Popover::Tempo => text_popover(ui, a, bounds, "TEMPO", view.text_edit.as_ref()),
+        Popover::Value { target } => {
+            let a = ui.hit_rect(anchor).or_else(|| ui.hit_rect(target)).unwrap_or(a);
+            crate::surfaces::panels::value_popover(ui, view, a, bounds);
+        }
         Popover::Confirm { title, message, ok, ok_label } => confirm_dialog(ui, title, message, ok, ok_label, bounds),
         Popover::CueOutputs => cue_outputs_popover(ui, model, a, bounds),
         Popover::Headphone { output } => {
