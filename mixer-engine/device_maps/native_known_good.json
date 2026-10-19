@@ -1,6 +1,6 @@
 {
  "schema": "open-apollo-native-known-good/1",
- "note": "Plug-ins whose user-built runtime bundles passed a live gate on an Apollo x4 at 48 kHz, per layout (mono: one input; stereo: a linked pair). Names, stage, discovery family, Console latency in samples and the positions (row, word) of DSP-owned words the daemon must not verify. No DSP data, no UA text.",
+ "note": "Plug-ins whose user-built runtime bundles passed a live gate on an Apollo x4 at 48 kHz (load, every parameter listed, three controls with readback, unload), per layout: mono on one input, stereo on a linked pair. Names, stage, discovery family, Console latency in samples and the positions (row, word) of DSP-owned words the daemon must not verify. No DSP data, no UA text.",
  "sample_rate": 48000,
  "device": "Apollo x4",
  "plugins": [
@@ -10,6 +10,7 @@
    "family": "vst2_bx",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -19,6 +20,7 @@
    "family": "dspaudioprocessor",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -28,6 +30,7 @@
    "family": "vst2",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -37,6 +40,7 @@
    "family": "vst2",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -128,6 +132,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -137,6 +142,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -146,6 +152,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -155,6 +162,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -164,7 +172,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -173,6 +182,7 @@
    "family": "vst2_bx",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -182,6 +192,7 @@
    "family": "vst2_bx",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -191,6 +202,7 @@
    "family": "vst2_bx",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -200,6 +212,7 @@
    "family": "vst2_bx",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -219,6 +232,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -246,6 +260,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -269,6 +284,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -296,6 +312,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -305,6 +322,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -314,6 +332,7 @@
    "family": "generic",
    "latency_samples": 88,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -329,6 +348,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -338,6 +358,7 @@
    "family": "dspaudioprocessor",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -347,6 +368,7 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -356,6 +378,7 @@
    "family": "generic",
    "latency_samples": 320,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -365,7 +388,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -380,6 +404,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -389,6 +414,7 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -398,6 +424,7 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -407,6 +434,7 @@
    "family": "vst2_bx",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -416,6 +444,7 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -443,6 +472,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -466,6 +496,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -489,6 +520,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -504,7 +536,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -519,7 +552,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -534,6 +568,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -543,6 +578,7 @@
    "family": "generic",
    "latency_samples": 87,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -552,6 +588,7 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -571,7 +608,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -590,7 +628,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -599,6 +638,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -618,7 +658,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -627,6 +668,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -635,9 +677,7 @@
    "stage": "live",
    "family": "generic",
    "latency_samples": 55,
-   "layouts": [
-    "stereo"
-   ]
+   "layouts": []
   },
   {
    "name": "UAD Hitsville Reverb Chambers",
@@ -645,6 +685,7 @@
    "family": "generic",
    "latency_samples": 320,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -654,6 +695,7 @@
    "family": "generic",
    "latency_samples": 87,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -663,6 +705,7 @@
    "family": "generic",
    "latency_samples": 110,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -672,6 +715,7 @@
    "family": "vst2_relab",
    "latency_samples": 64,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -681,7 +725,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -690,7 +735,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -699,6 +745,7 @@
    "family": "generic",
    "latency_samples": 31,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -708,6 +755,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -717,6 +765,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -726,6 +775,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -735,6 +785,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -774,7 +825,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -797,6 +849,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -820,6 +873,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -829,7 +883,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -848,7 +903,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -857,7 +913,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -866,7 +923,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -875,6 +933,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -884,7 +943,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -907,7 +967,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -930,7 +991,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -939,6 +1001,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -962,6 +1025,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -971,6 +1035,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -986,6 +1051,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1001,6 +1067,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1020,6 +1087,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1029,6 +1097,7 @@
    "family": "vstmain",
    "latency_samples": 178,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1044,6 +1113,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1053,7 +1123,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1068,6 +1139,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1077,7 +1149,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1092,6 +1165,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1107,6 +1181,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1130,7 +1205,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1139,7 +1215,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1154,6 +1231,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1256,9 +1334,7 @@
      3
     ]
    ],
-   "layouts": [
-    "stereo"
-   ]
+   "layouts": []
   },
   {
    "name": "UAD Precision Limiter",
@@ -1308,6 +1384,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1317,7 +1394,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1332,6 +1410,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1347,6 +1426,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1374,7 +1454,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1393,7 +1474,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1402,7 +1484,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1429,7 +1512,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1438,6 +1522,7 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1447,6 +1532,7 @@
    "family": "generic",
    "latency_samples": 44,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1456,6 +1542,7 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1465,6 +1552,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1488,6 +1576,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1515,7 +1604,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1530,6 +1620,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1548,6 +1639,7 @@
    "family": "vstmain",
    "latency_samples": 24,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1557,6 +1649,7 @@
    "family": "vstmain",
    "latency_samples": 24,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1572,6 +1665,7 @@
     ]
    ],
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1586,9 +1680,7 @@
      9
     ]
    ],
-   "layouts": [
-    "stereo"
-   ]
+   "layouts": []
   },
   {
    "name": "UAD TS Overdrive",
@@ -1596,6 +1688,7 @@
    "family": "generic",
    "latency_samples": 88,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1627,7 +1720,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1658,7 +1752,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1689,7 +1784,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1697,9 +1793,7 @@
    "stage": "live",
    "family": "generic",
    "latency_samples": 0,
-   "layouts": [
-    "mono"
-   ]
+   "layouts": []
   },
   {
    "name": "UAD Thermionic Culture Vulture",
@@ -1707,6 +1801,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1726,7 +1821,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1745,7 +1841,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1764,7 +1861,8 @@
     ]
    ],
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1772,27 +1870,21 @@
    "stage": "live",
    "family": "generic",
    "latency_samples": 55,
-   "layouts": [
-    "mono"
-   ]
+   "layouts": []
   },
   {
    "name": "UAD UA 175-B",
    "stage": "live",
    "family": "generic",
    "latency_samples": 55,
-   "layouts": [
-    "stereo"
-   ]
+   "layouts": []
   },
   {
    "name": "UAD UA 176",
    "stage": "live",
    "family": "generic",
    "latency_samples": 55,
-   "layouts": [
-    "stereo"
-   ]
+   "layouts": []
   },
   {
    "name": "UAD UA 610-A",
@@ -1800,7 +1892,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1809,7 +1902,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   },
   {
@@ -1818,6 +1912,7 @@
    "family": "generic",
    "latency_samples": 55,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1827,6 +1922,7 @@
    "family": "vst2_bx",
    "latency_samples": 0,
    "layouts": [
+    "mono",
     "stereo"
    ]
   },
@@ -1836,7 +1932,8 @@
    "family": "generic",
    "latency_samples": 0,
    "layouts": [
-    "mono"
+    "mono",
+    "stereo"
    ]
   }
  ],
@@ -1846,5 +1943,15 @@
   "UAD Teletronix LA-2A Legacy": "hand-built legacy provider (UA-derived tables), not user-buildable",
   "UAD UA 1176LN Legacy": "hand-built legacy provider (UA-derived tables), not user-buildable",
   "UAD UA 1176SE Legacy": "hand-built legacy provider (UA-derived tables), not user-buildable"
+ },
+ "not_yet_supported": {
+  "UAD Hitsville EQ Mastering": "skipped: stereo indeterminate on its first control",
+  "UAD Precision K-Stereo": "skipped: load refused by the chain allocation readback in both layouts",
+  "UAD Sound Machine Wood Works (mono)": "mono bundle not built: the offline restore check fails (stereo passed the gate)",
+  "UAD Studio D Chorus": "skipped: mono load hung DSP 1 (-110, quarantined until a cold start)",
+  "UAD Teletronix LA-3A": "skipped: load refused in both layouts: native coefficient observation differs",
+  "UAD UA 1176LN Rev E": "skipped: load refused in both layouts: native coefficient observation differs",
+  "UAD UA 175-B": "skipped: load refused in both layouts: native coefficient observation differs",
+  "UAD UA 176": "skipped: load refused in both layouts: native coefficient observation differs"
  }
 }
