@@ -304,6 +304,42 @@ pub enum HitKind {
     /// Vertical drag over `span` points covers 0…1; `value` is the current value; double-click
     /// resets to `reset`.
     Drag { value: f64, span: f32, reset: Option<f64> },
+    /// A rotary knob: a [`HitKind::Drag`] that follows Settings › CONTROLS MODE
+    /// ([`Interaction::controls_mode`]); the hit rect is centred on the knob.
+    Knob { value: f64, span: f32, reset: Option<f64> },
+}
+
+/// Settings › OPTIONS › CONTROLS MODE (`/ControlsMode`): how a knob follows a drag. Faders
+/// and other drags stay linear.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlsMode {
+    /// Vertical (and a quarter of horizontal) motion, as for faders.
+    #[default]
+    Linear,
+    /// The knob jumps to the pointer's angle around its centre.
+    Circular,
+    /// The angle turned around the centre moves the knob from where it was.
+    RelativeCircular,
+}
+
+impl ControlsMode {
+    /// The engine's `/ControlsMode` ("Circular", "Relative Circular", "Linear").
+    pub fn of(model: &dyn crate::MixerModel) -> ControlsMode {
+        match model.properties().and_then(|p| p.prop("/ControlsMode")).as_ref().and_then(|v| v.as_str()) {
+            Some("Circular") => ControlsMode::Circular,
+            Some("Relative Circular") => ControlsMode::RelativeCircular,
+            _ => ControlsMode::Linear,
+        }
+    }
+}
+
+/// A knob's travel: 270° from 7:30 to 4:30, 0 at 12 o'clock. [I] Console's exact sweep is not
+/// measured; the knob films draw about this arc.
+const KNOB_SWEEP_DEG: f64 = 270.0;
+
+/// The pointer's angle (degrees, clockwise from 12 o'clock, −180…180) around `c`.
+fn angle(c: (f32, f32), x: f32, y: f32) -> f64 {
+    ((x - c.0) as f64).atan2((c.1 - y) as f64).to_degrees()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -358,6 +394,8 @@ struct Active {
     start_x: f32,
     start_value: f64,
     span: f32,
+    /// A knob under a circular CONTROLS MODE: its centre and the last pointer angle.
+    circular: Option<((f32, f32), f64)>,
 }
 
 /// How long a [`HitKind::Latch`] press is held before its release turns it off.
@@ -366,6 +404,8 @@ pub const LATCH_HOLD: std::time::Duration = std::time::Duration::from_millis(500
 /// Pointer state machine. Hits are searched topmost-first (last registered wins).
 #[derive(Default)]
 pub struct Interaction {
+    /// CONTROLS MODE for [`HitKind::Knob`] drags (the host sets it from [`ControlsMode::of`]).
+    pub controls_mode: ControlsMode,
     active: Option<Active>,
     /// The [`HitKind::Latch`] control pressed, and when.
     latched: Option<(ControlId, std::time::Instant)>,
@@ -391,7 +431,7 @@ impl Interaction {
                 }
                 vec![Action::Tap(id)]
             }
-            HitKind::Drag { value, span, reset } => {
+            HitKind::Drag { value, span, reset } | HitKind::Knob { value, span, reset } => {
                 if double {
                     if let Some(r) = reset {
                         return vec![
@@ -401,16 +441,45 @@ impl Interaction {
                         ];
                     }
                 }
-                self.active = Some(Active { id: hit.id.clone(), start_y: y, start_x: x, start_value: *value, span: *span });
-                vec![Action::GestureBegin(hit.id.clone())]
+                let knob = matches!(hit.kind, HitKind::Knob { .. });
+                let circular = (knob && self.controls_mode != ControlsMode::Linear).then(|| {
+                    let c = hit.rect.center();
+                    (c, angle(c, x, y))
+                });
+                self.active = Some(Active { id: hit.id.clone(), start_y: y, start_x: x, start_value: *value, span: *span, circular });
+                let mut out = vec![Action::GestureBegin(hit.id.clone())];
+                // Circular: the press itself moves the knob to the pointer.
+                if let (Some((_, a)), ControlsMode::Circular) = (circular, self.controls_mode) {
+                    out.push(Action::Set(hit.id.clone(), Self::circular_value(a)));
+                }
+                out
             }
         }
     }
 
+    /// The knob value at pointer angle `a` (the dead zone at 6 o'clock snaps to the nearer end).
+    fn circular_value(a: f64) -> f64 {
+        (a / KNOB_SWEEP_DEG + 0.5).clamp(0.0, 1.0)
+    }
+
     /// `fine` divides the motion by 10 (Console's modifier-drag).
     pub fn pointer_move(&mut self, x: f32, y: f32, fine: bool) -> Vec<Action> {
-        let Some(a) = &self.active else { return vec![] };
+        let mode = self.controls_mode;
+        let Some(a) = &mut self.active else { return vec![] };
         let scale = if fine { 10.0 } else { 1.0 };
+        if let Some((c, last)) = &mut a.circular {
+            let now = angle(*c, x, y);
+            let v = if mode == ControlsMode::Circular {
+                Self::circular_value(now)
+            } else {
+                // Relative: the turn since the last move (unwrapped across 6 o'clock) accumulates.
+                let turn = (now - *last + 540.0).rem_euclid(360.0) - 180.0;
+                *last = now;
+                a.start_value = (a.start_value + turn / (KNOB_SWEEP_DEG * scale)).clamp(0.0, 1.0);
+                a.start_value
+            };
+            return vec![Action::Set(a.id.clone(), v)];
+        }
         let delta = ((a.start_y - y) as f64 + (x - a.start_x) as f64 * 0.25) / (a.span.max(1.0) as f64 * scale);
         vec![Action::Set(a.id.clone(), (a.start_value + delta).clamp(0.0, 1.0))]
     }

@@ -47,7 +47,7 @@ fn alt_trims(ui: &mut Ui, opts: &crate::model::MonitorOptions, panel: Rect) {
         let mut readout = ui.style("views", "Main-Readout");
         readout.color = Rgba::WHITE.with_alpha(0.75);
         ui.text(&format!("{:+.1} dB", v * 60.0 - 30.0), readout, Rect::new(x, sec.y + 76.0, col, 16.0), Align::Center);
-        ui.hit(knob, id, HitKind::Drag { value: v, span: 120.0, reset: Some(0.5) });
+        ui.hit(knob, id, HitKind::Knob { value: v, span: 120.0, reset: Some(0.5) });
     }
 }
 
@@ -89,7 +89,7 @@ pub fn draw_control_room(ui: &mut Ui, model: &dyn MixerModel, r: Rect) {
         let mut name = ui.style("views", "Control-Room-Name");
         name.bold = true;
         ui.text("CONTROL\nROOM", name, Rect::new(4.0, b - 51.0, 92.0, 47.0), Align::Center);
-        ui.hit(knob, mid(Control::DimLevel), HitKind::Drag { value: opts.dim_level, span: 120.0, reset: None });
+        ui.hit(knob, mid(Control::DimLevel), HitKind::Knob { value: opts.dim_level, span: 120.0, reset: None });
         alt_trims(ui, &opts, panel);
     });
 }

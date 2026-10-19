@@ -404,7 +404,7 @@ fn alt_trim_knobs_follow_the_alt_count() {
     assert!(find(&hits, "monitor", &Control::MonitorAlt(2)).is_none());
     assert!(find(&hits, "monitor", &Control::AltTrim(1)).is_none());
     let h = find(&hits, "monitor", &Control::AltTrim(0)).expect("ALT 1 TRIM").clone();
-    assert!(matches!(h.kind, rack::input::HitKind::Drag { reset: Some(r), .. } if r == 0.5), "0 dB default");
+    assert!(matches!(h.kind, rack::input::HitKind::Knob { reset: Some(r), .. } if r == 0.5), "0 dB default");
     // Drag up 30 pt over a 120-pt span: +0.25 → +15 dB.
     let (cx, cy) = h.rect.center();
     let mut i = Interaction::default();
@@ -443,6 +443,58 @@ fn control_room_source_follows_the_cue_bus_count() {
     assert!(c3.y > c1.y && c3.x == c1.x && c4.y == c3.y, "a second row under CUE 1 / CUE 2");
     press(&mut view, &mut model, &hits, "monitor", Control::CrSource(4));
     assert_eq!(model.monitor_options.cr_source, 4);
+}
+
+/// Settings › CONTROLS MODE: Linear drags knobs vertically; Circular jumps a knob to the
+/// pointer's angle; Relative Circular turns it by the angle swept. Faders stay linear.
+#[test]
+fn controls_mode_drives_knob_drags() {
+    use rack::ControlsMode;
+    use rack::settings::{PropValue, Write};
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let view = ViewState::default();
+    assert_eq!(ControlsMode::of(&model), ControlsMode::Linear);
+    let (hits, _) = build(&assets, &model, &view);
+    let pan = find(&hits, "in0", &Control::PanL).expect("pan knob").clone();
+    let fader = find(&hits, "in0", &Control::Fader).expect("fader").clone();
+    let rack::input::HitKind::Knob { value: v0, span, .. } = pan.kind else { panic!("{:?}", pan.kind) };
+    let (cx, cy) = pan.rect.center();
+    let r = pan.rect.w.min(pan.rect.h) / 2.0 - 1.0;
+    let set = |acts: Vec<Action>| acts.into_iter().filter_map(|a| if let Action::Set(_, v) = a { Some(v) } else { None }).last();
+    // Linear: up by span/4 → +0.25.
+    let mut i = Interaction::default();
+    i.pointer_down(&hits, cx, cy, false);
+    assert!((set(i.pointer_move(cx, cy - span / 4.0, false)).unwrap() - (v0 + 0.25).min(1.0)).abs() < 1e-6);
+    i.pointer_up();
+    // Circular: pressing at 3 o'clock jumps to 90° of the 270° sweep.
+    model.apply_setting_writes(vec![Write::Set("/ControlsMode".into(), PropValue::Str("Circular".into()))]);
+    let mut i = Interaction::default();
+    i.controls_mode = ControlsMode::of(&model);
+    assert_eq!(i.controls_mode, ControlsMode::Circular);
+    let v = set(i.pointer_down(&hits, cx + r, cy, false)).expect("jump on press");
+    assert!((v - (90.0 / 270.0 + 0.5)).abs() < 1e-6, "{v}");
+    // … and 9 o'clock.
+    assert!((set(i.pointer_move(cx - r, cy, false)).unwrap() - (0.5 - 90.0 / 270.0)).abs() < 1e-6);
+    i.pointer_up();
+    // A fader in Circular mode is still a linear drag.
+    let (fx, fy) = fader.rect.center();
+    let rack::input::HitKind::Drag { value: f0, span: fspan, .. } = fader.kind else { panic!() };
+    assert!(set(i.pointer_down(&hits, fx, fy, false)).is_none());
+    assert!((set(i.pointer_move(fx, fy - fspan / 10.0, false)).unwrap() - (f0 + 0.1).min(1.0)).abs() < 1e-6);
+    i.pointer_up();
+    // Relative Circular: no jump; a quarter turn (12 → 3 o'clock, crossing nothing) adds 90/270.
+    model.apply_setting_writes(vec![Write::Set("/ControlsMode".into(), PropValue::Str("Relative Circular".into()))]);
+    let mut i = Interaction::default();
+    i.controls_mode = ControlsMode::of(&model);
+    assert!(set(i.pointer_down(&hits, cx, cy - r, false)).is_none());
+    i.pointer_move(cx + r * 0.7071, cy - r * 0.7071, false);
+    let v = set(i.pointer_move(cx + r, cy, false)).unwrap();
+    assert!((v - (v0 + 90.0 / 270.0).min(1.0)).abs() < 1e-4, "{v}");
+    // Turning back past the start goes below it.
+    i.pointer_move(cx, cy - r, false);
+    let v = set(i.pointer_move(cx - r, cy, false)).unwrap();
+    assert!((v - (v0 - 90.0 / 270.0).max(0.0)).abs() < 1e-4, "{v}");
 }
 
 #[test]
