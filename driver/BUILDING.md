@@ -35,6 +35,34 @@ Notes:
   macro at the top of `ua_apollo.h` provides it and expands to nothing under
   clang. Do not use `__attribute__((optimize))` directly.
 
+## aarch64 / Asahi
+
+**Builds; untested on hardware until Asahi has Thunderbolt PCIe tunneling.**
+
+Cross-built for arm64 with 16 KiB pages (`CONFIG_ARM64_16K_PAGES`) against
+the `linux-asahi` `asahi-7.1.13-3` source and the asahi-alarm config
+(`asahi-alarm/PKGBUILDs`, `linux-asahi/config`), clang/lld from an x86_64
+host. Rust was turned off in that config (`scripts/config -d RUST`); it does
+not affect a C module.
+
+```bash
+git clone --depth 1 --branch asahi-7.1.13-3 https://github.com/AsahiLinux/linux
+cd linux
+curl -L https://raw.githubusercontent.com/asahi-alarm/PKGBUILDs/main/linux-asahi/config -o .config
+scripts/config -d RUST
+make LLVM=1 ARCH=arm64 olddefconfig
+make LLVM=1 ARCH=arm64 -j"$(nproc)" vmlinux modules   # Module.symvers for modpost
+make -C /path/to/open-apollo/driver LLVM=1 ARCH=arm64 KDIR=$PWD W=1
+```
+
+On an Asahi box build natively against `linux-asahi-headers` as usual.
+
+Page-size handling: the device's SG table and DSP rings use 4 KiB pages
+(`UA_PCIE_PAGE_SIZE`, a device constant). The audio DMA rings are allocated
+in kernel pages (`UA_DMA_RING_PAGES`) and each kernel page fills
+`PAGE_SIZE / UA_PCIE_PAGE_SIZE` consecutive SG entries, so 4 KiB kernels
+behave exactly as before.
+
 ## Commands
 
 GCC with warnings:
