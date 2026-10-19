@@ -73,7 +73,7 @@ from commands import (CommandEngine, ERR_FAILED, parse_cmdparams,
                       refused_set)
 from enabled_meta import install as install_enabled_meta
 from session_dirty import SessionDirty
-from plugin_lifecycle import PluginLifecycle, is_plugin_slot_path
+from plugin_lifecycle import PluginLifecycle, PluginResult, is_plugin_slot_path
 from plugin_remote import PluginRemote
 import plugin_license
 from ubjson_codec import encode_response as ubjson_encode_response
@@ -576,6 +576,10 @@ class MixerDaemon:
         self._native_plugin_backend = (candidate if getattr(
             candidate, 'native_single_insert', False) is True else None)
         self._plugin_publication_active = False
+        # Native plug-in transactions run on one worker thread (_native_run); sets wait meanwhile.
+        self._native_executor = None
+        self._native_busy = False
+        self._native_waiting: list = []
         self.plugin_remote = PluginRemote(state, backend=plugin_remote_backend,
                                           lease_provider=plugin_transactions)
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
@@ -3098,6 +3102,76 @@ class MixerDaemon:
         else:
             client.send(encode_error_bytes(path, "get"))
 
+    def _native_run(self, client, path, cmd, resp_params) -> bool:
+        """Run a native plug-in transaction on the worker thread; True when it finishes later.
+
+        A load runs the plug-in's original code in the emulator and reads back up to tens of
+        thousands of DSP words (minutes for the largest), so inline it would stop the daemon
+        answering anyone. The publication commit needs the state tree unchanged since it was
+        staged, so it is staged and committed on the loop (publish_on); while the transaction
+        runs every SET waits in a queue (in order) and gets are served as usual; a load's slot
+        reads Status "Loading" meanwhile."""
+        transactions = self.plugin_lifecycle.transactions
+        if not hasattr(transactions, "owned_by_current_thread"):
+            return False
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False  # no event loop (tests): run inline
+        if self._native_executor is None:
+            import concurrent.futures
+            self._native_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="native-plugin")
+        from plugin_lifecycle import plugin_slot_from_path
+        slot = plugin_slot_from_path(path)
+        loading = (path.removesuffix("/value").endswith("/EffectName")
+                   and isinstance(cmd.value, str) and cmd.value != "")
+        if loading:
+            self._publish_license(slot + "/Status", "Loading", "string")
+        self._native_busy = True
+
+        def on_loop(publish):
+            # The loop owns the state tree: stage and commit there, between its own updates.
+            return asyncio.run_coroutine_threadsafe(_call(publish), loop).result()
+
+        async def _call(publish):
+            return publish()
+
+        def run():
+            inline = transactions.publish_on
+            transactions.publish_on = on_loop
+            try:
+                with transactions.owned_by_current_thread():
+                    return self.plugin_lifecycle.handle(path, cmd.value)
+            finally:
+                transactions.publish_on = inline
+
+        def finish(done):
+            try:
+                result = done.result()
+            except Exception as error:
+                log.exception("Native plug-in transaction on %s raised", path)
+                result = PluginResult("openapollo.plugin_transaction_indeterminate", repr(error))
+            self._native_busy = False
+            if loading and self.state.get_value(slot + "/Status") == "Loading":
+                self._publish_license(slot + "/Status", "", "string")
+            self._finish_plugin_set(client, path, cmd, resp_params, result)
+            while self._native_waiting and not self._native_busy:
+                waiting_client, waiting = self._native_waiting.pop(0)
+                self._handle_set(waiting_client, waiting)
+        loop.run_in_executor(self._native_executor, run).add_done_callback(finish)
+        return True
+
+    def _finish_plugin_set(self, client, path, cmd, resp_params, plugin_result):
+        if plugin_result.committed:
+            self._publish_plugin_commit(plugin_result.events)
+        if plugin_result.error:
+            # Local Open Apollo error namespace; not a claimed native UA code.
+            self._send_local_plugin_error(client, path, plugin_result.error,
+                                          resp_params, plugin_result.detail)
+        elif "func_id" in resp_params:
+            self._send_response(client, path, cmd.value, resp_params)
+
     def _handle_set(self, client: MixerClient, cmd: Command):
         """Handle SET command — update state and write to hardware.
 
@@ -3124,6 +3198,11 @@ class MixerDaemon:
                 client.sleep = cmd.value
                 if resp_params:
                     self._send_response(client, path, cmd.value, resp_params)
+            return
+        if self._native_busy:
+            # A native plug-in transaction is running on the worker thread (_native_run):
+            # nothing may change the state tree until it commits. Applied afterwards, in order.
+            self._native_waiting.append((client, cmd))
             return
 
         native = self._native_plugin_backend
@@ -3155,17 +3234,14 @@ class MixerDaemon:
                 resp_params)
             return
 
+        if native and self.plugins_enabled and is_plugin_slot_path(path) and \
+                self._native_run(client, path, cmd, resp_params):
+            return
+
         plugin_result = (self.plugin_lifecycle.handle(path, cmd.value)
                          if self.plugins_enabled else None)
         if plugin_result is not None:
-            if plugin_result.committed:
-                self._publish_plugin_commit(plugin_result.events)
-            if plugin_result.error:
-                # Local Open Apollo error namespace; not a claimed native UA code.
-                self._send_local_plugin_error(client, path, plugin_result.error,
-                                              resp_params, plugin_result.detail)
-            elif "func_id" in resp_params:
-                self._send_response(client, path, cmd.value, resp_params)
+            self._finish_plugin_set(client, path, cmd, resp_params, plugin_result)
             return
 
         # The engine refuses a client SET of a read-only value (the daemon's
@@ -4123,9 +4199,19 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                                help="Exit (status 1) when the device node "
                                     "cannot be opened at start, instead of "
                                     "waiting for it")
-    parser.add_argument("--native-plugin-provider", type=Path, metavar="FILE",
-                        help="Experimental single-insert hosting through an explicitly "
-                             "trusted local Python provider; requires --preserve-hardware")
+    native_source = parser.add_mutually_exclusive_group()
+    native_source.add_argument("--native-plugin-provider", type=Path, metavar="FILE",
+                               help="Experimental single-insert hosting through an explicitly "
+                                    "trusted local Python provider; requires --preserve-hardware")
+    native_source.add_argument("--native-plugin-bundles", type=Path, metavar="DIR", nargs="?",
+                               const=Path.home() / ".local/share/open-apollo/plugin-bundles",
+                               help="Host UA plug-ins on the Apollo's DSP from the runtime bundles "
+                                    "tools/plugin-mapper built on this machine (default DIR "
+                                    "~/.local/share/open-apollo/plugin-bundles); requires "
+                                    "--preserve-hardware. See NATIVE-HOSTING.md")
+    parser.add_argument("--advertise-all-plugins", action="store_true",
+                        help="With --native-plugin-bundles: offer every built bundle, not "
+                             "only the plug-ins on device_maps/native_known_good.json")
     parser.add_argument("--preserve-hardware", action="store_true",
                         help="Attach to a running Apollo without the init "
                              "sequence: publish what the hardware reports "
@@ -4188,7 +4274,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     parser.add_argument("--factory-presets-dir", type=Path,
                         help="Read-only factory .fxp/.uadchannel directory")
     args = parser.parse_args()
-    if args.native_plugin_provider and (
+    native_enabled = bool(args.native_plugin_provider or args.native_plugin_bundles)
+    if args.advertise_all_plugins and not args.native_plugin_bundles:
+        parser.error("--advertise-all-plugins needs --native-plugin-bundles")
+    if native_enabled and (
             not args.preserve_hardware or args.no_hardware or args.usb or args.no_helper):
         parser.error("native hosting requires --preserve-hardware, PCIe hardware and helper")
 
@@ -4269,7 +4358,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     # Persisted intent never establishes a native DSP lease.
     state.enable_persistence(state_file, restore_filter=(
         (lambda key: not is_plugin_slot_path(key))
-        if args.native_plugin_provider else None))
+        if native_enabled else None))
     store_stem = state_file.name.removesuffix(".state.json")
     network_id = load_network_id(state_file.with_name(
         state_file.name.removesuffix(".state.json") + ".network.json"))
@@ -4324,11 +4413,17 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
         log.info("Software-only mode (--no-hardware)")
 
     native_backend = native_transactions = None
-    if args.native_plugin_provider:
+    if native_enabled:
         from plugin_native import load_provider, register_native
         try:
+            if args.native_plugin_bundles:
+                from profiled_bundle_registry import create_profiled_providers
+                providers = create_profiled_providers(
+                    args.native_plugin_bundles, advertise_all=args.advertise_all_plugins)
+            else:
+                providers = load_provider(args.native_plugin_provider)
             native_backend, native_transactions = register_native(
-                state, helper_tree, backend, load_provider(args.native_plugin_provider))
+                state, helper_tree, backend, providers)
         except Exception as error:
             parser.error(f"native hosting unavailable: {type(error).__name__}: {error}")
 

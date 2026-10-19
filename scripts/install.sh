@@ -24,6 +24,8 @@ SKIP_INIT=0
 NO_DKMS=0
 ASSUME_YES=0
 SEND_REPORT=0
+PLUGIN_HOSTING_FROM=""
+PLUGIN_HOSTING_CONF=/etc/modprobe.d/open-apollo-plugin-hosting.conf
 # Only main() parses arguments, so sourcing this file (tests do) is
 # side-effect free.
 parse_args() {
@@ -34,6 +36,7 @@ parse_args() {
             --no-dkms)   NO_DKMS=1 ;;
             -y|--yes)    ASSUME_YES=1 ;;
             --send-report) SEND_REPORT=1 ;;
+            --plugin-hosting=*) PLUGIN_HOSTING_FROM="${arg#*=}" ;;
             -h|--help)
                 cat <<EOF
 Usage: sudo bash scripts/install.sh [OPTIONS]
@@ -49,6 +52,12 @@ Options:
                 Without it the report is uploaded only if you answer yes
                 when asked at a terminal; otherwise it stays in
                 /tmp/open-apollo-install-report.json
+  --plugin-hosting=ROOT
+                Experimental: host your UA plug-ins on the Apollo's DSP.
+                Loads the driver with plugin_host=1 input_strips=1 and runs
+                scripts/setup-plugin-hosting.sh --from ROOT as you (ROOT is
+                your Windows UAD install, as given to setup; mapping takes
+                10-40 minutes). See mixer-engine/NATIVE-HOSTING.md
   -h, --help    Show this help
 
 Steps performed:
@@ -729,8 +738,8 @@ deploy_configs() {
 
 # Driver v2 defaults (io_map=-1 auto, mixer_mailbox=1) follow the macOS driver
 # on every model (hardware-verified on the x4 and x8p only); an old override in
-# /etc/modprobe.d can silently pin the legacy layout.  The installer never
-# writes modprobe options, so only warn.
+# /etc/modprobe.d can silently pin the legacy layout.  The installer writes
+# no modprobe options (except the opt-in --plugin-hosting file), so only warn.
 check_modprobe_options() {
     local f hits=""
     for f in /etc/modprobe.d/*.conf; do
@@ -742,6 +751,30 @@ check_modprobe_options() {
     if [ -n "$hits" ]; then
         warn "Old ua_apollo io_map/mixer_mailbox options found in:$hits"
         info "Driver v2 defaults (io_map=-1 auto, mixer_mailbox=1) are recommended — remove those options unless you set them on purpose"
+    fi
+}
+
+# ================================================================
+# Opt-in native plug-in hosting (--plugin-hosting=ROOT)
+# ================================================================
+# Before the driver loads: its plug-in host and input strips are off by default.
+plugin_hosting_options() {
+    [ -n "$PLUGIN_HOSTING_FROM" ] || return 0
+    printf '%s\n' "# Written by scripts/install.sh --plugin-hosting (experimental native plug-in hosting)." \
+        "options ua_apollo plugin_host=1 input_strips=1" | run_sudo tee "$PLUGIN_HOSTING_CONF" >/dev/null
+    ok "Driver options for plug-in hosting: $PLUGIN_HOSTING_CONF"
+}
+
+# After the daemon: map the user's plug-ins (as them) and point the daemon at the bundles.
+setup_plugin_hosting() {
+    [ -n "$PLUGIN_HOSTING_FROM" ] || return 0
+    header "Plug-ins on the Apollo (experimental)"
+    info "Mapping your Powered plug-ins offline from $PLUGIN_HOSTING_FROM (10-40 minutes; nothing leaves this computer)"
+    if as_desktop_user bash "$PROJECT_DIR/scripts/setup-plugin-hosting.sh" --from "$PLUGIN_HOSTING_FROM"; then
+        STEP_STATUS[plugins]="ok"
+    else
+        warn "Plug-in mapping failed — rerun: bash scripts/setup-plugin-hosting.sh --from $PLUGIN_HOSTING_FROM"
+        STEP_STATUS[plugins]="fail"
     fi
 }
 
@@ -1326,6 +1359,7 @@ main() {
     check_iommu        || true
     install_firmware   || true
     deploy_configs     || true
+    plugin_hosting_options
     check_modprobe_options
 
     # Check if build succeeded before proceeding
@@ -1414,6 +1448,7 @@ main() {
     # ── Mixer daemon (systemd user unit) ──
     if [ "${STEP_STATUS[init]:-}" = "ok" ] || [ "${STEP_STATUS[init]:-}" = "skipped" ]; then
         setup_mixer_daemon || true
+        setup_plugin_hosting || true
     fi
 
     # ── Audio test ──

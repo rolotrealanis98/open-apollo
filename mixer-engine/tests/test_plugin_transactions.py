@@ -191,10 +191,14 @@ class Transactions(unittest.TestCase):
                 )
             )
             result = c.load(f.slot, "fixture")
-            self.assertFalse(result.committed)
-            self.assertEqual(b.calls[-1], "rollback")
-            self.assertEqual(s.get_value(f.slot + "/EffectInstance/value"), 42)
-            if not disconnect:
+            if disconnect:
+                self.assertFalse(result.committed)
+                self.assertEqual(b.calls[-1], "rollback")
+                self.assertEqual(s.get_value(f.slot + "/EffectInstance/value"), 42)
+            else:
+                # Publication is staged again after activation: the edit is kept.
+                self.assertTrue(result.committed)
+                self.assertEqual(s.get_value(f.slot + "/EffectInstance/value"), 43)
                 self.assertEqual(s.get_value("/mixer/Level/value"), 0.4)
 
     def test_session_revoked_after_publication_never_reports_success(self):

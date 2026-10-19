@@ -120,7 +120,8 @@ paths_of() {
             PATHS=("$ROOT"/usr/src/ua_apollo-* "$ROOT"/var/lib/dkms/ua_apollo
                    "$ROOT"/lib/modules/*/updates/dkms/ua_apollo.ko*) ;;
         driver)
-            PATHS=("$ROOT"/lib/modules/*/extra/ua_apollo.ko* "$ROOT"/etc/modules-load.d/ua_apollo.conf) ;;
+            PATHS=("$ROOT"/lib/modules/*/extra/ua_apollo.ko* "$ROOT"/etc/modules-load.d/ua_apollo.conf
+                   "$ROOT"/etc/modprobe.d/open-apollo-plugin-hosting.conf) ;;
         daemon)
             PATHS=("$ROOT"/etc/systemd/user/ua-mixer-daemon.service
                    "$ROOT"/etc/systemd/user/ua-mixer-daemon@.service

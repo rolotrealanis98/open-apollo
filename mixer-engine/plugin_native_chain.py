@@ -147,6 +147,7 @@ class NativeChainBackend(NativePluginBackend):
                 arguments['stage'] = True
                 prepared.append((previous, sources, composed, arguments, ordered, retained))
         except Exception:
+            log.exception('native chain: compensation policy %r refused', setting)
             return CompensationOutcome(Outcome.FAILED, setting, detail='Compensation policy validation failed')
         self._compensating = True
         candidates, swapped, strips_before, strips_after = [], [], None, None
@@ -174,9 +175,10 @@ class NativeChainBackend(NativePluginBackend):
             # Observe after activation as well, before replacing any row adapters.
             for (_, _, composed, _, _, _), (_, candidate) in zip(prepared, candidates):
                 self._observe(candidate.native, composed.observations)
-        except ValueError:
+        except ValueError as error:
             # A confirmed readback/validation failure is reversible. Driver I/O
             # exceptions are handled separately because their effect is unknown.
+            log.warning('native chain: compensation %r refused: %s', setting, error)
             try:
                 for previous, candidate in reversed(swapped):
                     self._compensation_io(self.driver.swap, candidate.native, previous.native)
@@ -196,6 +198,7 @@ class NativeChainBackend(NativePluginBackend):
             self._compensation_transition = None
             return CompensationOutcome(Outcome.FAILED, setting, inputs, 'Previous compensation restored')
         except Exception:
+            log.exception('native chain: compensation %r device operation raised', setting)
             self.invalidate()
             return CompensationOutcome(Outcome.INDETERMINATE, setting, inputs,
                 'Compensation device operation unconfirmed')
@@ -262,9 +265,11 @@ class NativeChainBackend(NativePluginBackend):
                     change.previous[key], change.slot if key == change.channels else None, serial, retained)
                 change.candidates[key] = candidate
                 self._observe(native, composed.observations)
-        except ValueError:
+        except ValueError as error:
+            log.warning('native chain: allocation refused on %s: %s', change.slot, error)
             return Outcome.FAILED
         except Exception:
+            log.exception('native chain: allocation on %s raised', change.slot)
             self.invalidate()
             return Outcome.INDETERMINATE
         return Outcome.CONFIRMED

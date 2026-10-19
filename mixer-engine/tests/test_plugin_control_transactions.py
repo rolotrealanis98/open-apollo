@@ -153,7 +153,7 @@ class Controls(unittest.TestCase):
 
         def prepare(*args):
             result = original(*args)
-            s.add_runtime_property("/mixer/late", {"type": "int", "value": 1})
+            s.add_runtime_property(f.slot + "/late", {"type": "int", "value": 1})
             return result
 
         b.prepare_control = prepare
@@ -161,12 +161,22 @@ class Controls(unittest.TestCase):
         self.assertEqual(b.calls, ["prepare_control"])
         f, s, h, p, b, c = self.model()
         b.hook = lambda: s.add_runtime_property(
-            "/mixer/late", {"type": "int", "value": 1}
+            f.slot + "/late", {"type": "int", "value": 1}
         )
         result = c.control(f.slot, "Power", False)
         self.assertTrue(result.quarantined)
         self.assertIn("restore_control", b.calls)
         self.assertTrue(s.get_value(f.slot + "/Power"))
+
+    def test_mutation_outside_the_slot_is_kept(self):
+        # The daemon's loop keeps the rest of the tree current while a control runs.
+        f, s, h, p, b, c = self.model()
+        b.hook = lambda: s.add_runtime_property(
+            "/mixer/late", {"type": "int", "value": 1}
+        )
+        self.assertTrue(c.control(f.slot, "Power", False).committed)
+        self.assertFalse(s.get_value(f.slot + "/Power"))
+        self.assertEqual(s.get_value("/mixer/late/value"), 1)
 
     def test_readonly_control_rejected_before_backend(self):
         f, s, h, p, b, c = self.model()

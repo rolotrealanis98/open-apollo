@@ -138,6 +138,7 @@ pub(super) enum Action {
     CheckEarlier,
     KeepCurrent(bool),
     SendReport(bool),
+    PluginHosting(bool),
     StartInstall,
     SkipInstall,
     StartConsole,
@@ -176,6 +177,8 @@ pub struct App {
     pub(super) keep_current: bool,
     /// --send-report: upload install.sh's report (opt-in, off by default).
     pub(super) send_report: bool,
+    /// --plugin-hosting: host UA plug-ins on the Apollo's DSP (experimental, off by default).
+    pub(super) plugin_hosting: bool,
     pub(super) extractor: Option<Extractor>,
     pub(super) extractor_ok: Option<bool>,
     pub(super) install: Option<Install>,
@@ -223,6 +226,7 @@ impl App {
             earlier_checking: false,
             keep_current: false,
             send_report: false,
+            plugin_hosting: false,
             extractor: Extractor::locate(),
             extractor_ok: None,
             install: None,
@@ -327,6 +331,7 @@ impl App {
             data: (!self.opts.data_is_default).then(|| self.opts.data.clone()),
             keep_current: self.keep_current,
             send_report: self.send_report,
+            plugin_hosting: self.plugin_hosting,
             panels: std::env::var_os("OA_PANELS_TARBALL").filter(|v| !v.is_empty()).map(|p| absolute(Path::new(&p))),
             panels_sha256: std::env::var("OA_PANELS_SHA256").ok().filter(|v| !v.is_empty()),
         })
@@ -643,6 +648,11 @@ impl App {
             Action::SendReport(on) => {
                 if !self.install_running() {
                     self.send_report = on;
+                }
+            }
+            Action::PluginHosting(on) => {
+                if !self.install_running() {
+                    self.plugin_hosting = on;
                 }
             }
             Action::StartInstall => self.start_install(),

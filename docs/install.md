@@ -130,12 +130,41 @@ What this release does with UAD plug-ins:
 |---|---|
 | Plug-in browser | The Console's plug-in list, icons and factory preset menus come from your UAD install (icons from its Plug-In Icons folder or, if UAD never saw an Apollo, from the `apollo-32bit.msi` in Windows' installer cache; `oa-assets icons` repeats just that step) (`~/.local/share/open-apollo/ua-catalogue/`, names only). Without that import the browser is empty: run `oa-assets catalogue --from /path/to/windows`, then Settings › Plug-Ins › RESCAN in the Console. |
 | Plug-in windows | The Console draws each plug-in's window from the panel specs and the art setup made from your Powered plug-ins: 206 of 224 with a UAD 12 install, the rest as a plain parameter list. |
-| Plug-in DSP modules | Setup stores them in `/lib/firmware/universal-audio/plugins/`. Nothing loads them yet. |
-| Running plug-ins on the Apollo's DSP | Not in this release. It is being developed and will only load plug-ins your Apollo itself reports as authorized. |
+| Plug-in DSP modules | Setup stores them in `/lib/firmware/universal-audio/plugins/`. Only plug-in hosting (below) loads them. |
+| Running plug-ins on the Apollo's DSP | Experimental and off by default; see below. Only plug-ins your Apollo itself reports as authorized load. |
 
-You don't need plug-in licences for any of this. To rebuild the panels' art alone, for
-example after a UAD update, run `oa-assets plugins --from /path/to/windows`; `oa-assets status`
-says what is there.
+You don't need plug-in licences for the browser and the windows. To rebuild the panels' art
+alone, for example after a UAD update, run `oa-assets plugins --from /path/to/windows`;
+`oa-assets status` says what is there.
+
+### Running plug-ins on the Apollo (experimental)
+
+open-apollo can insert UAD plug-ins on the Apollo's analog inputs, running on its DSP like UA
+Console does. open-apollo ships no plug-in data for this: your computer builds each plug-in's
+control mapping by running your own Powered plug-in DLLs offline (an x86 emulator; no Wine, no
+device, no network). Turn it on with the **Plug-ins on the Apollo (experimental)** box on the
+wizard's Review page, or from a terminal:
+
+```bash
+sudo bash scripts/install.sh --plugin-hosting=/path/to/windows
+```
+
+Either way the driver loads with `plugin_host=1 input_strips=1` (written to
+`/etc/modprobe.d/open-apollo-plugin-hosting.conf`), then `scripts/setup-plugin-hosting.sh`
+runs as you: it installs numpy, unicorn, capstone and pefile into
+`~/.local/share/open-apollo/plugin-venv`, maps the plug-ins (5 to 40 minutes depending on the
+CPU) into `~/.local/share/open-apollo/plugin-bundles`, and restarts the mixer daemon with
+`--native-plugin-bundles`. Rerun the script after a UAD update; `--remove` turns hosting off.
+
+What to expect:
+- The Console lists the plug-ins `mixer-engine/device_maps/native_known_good.json` marks as
+  live-tested on an Apollo x4 at 48 kHz in both layouts: mono on any input and stereo on a
+  linked pair, up to four per input. `--all` maps every installed plug-in, and the daemon's
+  `--advertise-all-plugins` offers them too; those are untested.
+- 48 kHz only. Your Windows install must stay mounted where you mapped it from: the daemon
+  runs each plug-in's own code to plan control changes.
+- The plug-ins run with UA's own DSP code; a refused licence leaves the input as it was.
+- The bundles are made from UA's code on your computer. Don't share or publish them.
 
 ## Updating, reinstalling and uninstalling
 
@@ -169,6 +198,8 @@ It ends with a check that lists anything still there. `--yes` asks nothing.
 | Plug-in list and factory preset menus (from your UAD install) | `~/.local/share/open-apollo/ua-catalogue/` | `uninstall.sh --purge` |
 | Plug-in panels' art (made from your UAD install) | `~/.local/share/open-apollo/generated/` | `uninstall.sh --purge` |
 | Plug-in panel specs | `/usr/share/open-apollo/plugin-specs/` | `uninstall.sh` |
+| Plug-in hosting: driver options | `/etc/modprobe.d/open-apollo-plugin-hosting.conf` | `uninstall.sh` |
+| Plug-in hosting: bundles and their Python (made from your UAD install) | `~/.local/share/open-apollo/plugin-bundles/`, `plugin-venv/`, `~/.cache/open-apollo/plugin-mapper/` | `uninstall.sh --purge` |
 | Mixer daemon | systemd user unit `ua-mixer-daemon` | `uninstall.sh` |
 | Console | `~/.local/bin/uaconsole`, menu entry **Open Apollo Console** | `uninstall.sh` |
 | Audio settings | `/etc/pipewire`, `/etc/wireplumber`, `/usr/share/alsa/ucm2`, `/etc/udev/rules.d` | `uninstall.sh` |

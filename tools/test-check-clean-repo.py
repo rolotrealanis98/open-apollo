@@ -233,6 +233,16 @@ class PersonalData(unittest.TestCase):
         self.assertEqual(rules("specs/PluginSpec_ua_1176.json", b'{"schema": 2}\n'), ["panel-spec"])
         self.assertEqual(rules("console-rs/tests/spec.json", b'{"schema": 2}\n'), [])
 
+    def test_plugin_bundles_stay_out(self):
+        bundle = b'{"schema": "openapollo-' + b'profiled-runtime-bundle/1"}\n'
+        self.assertEqual(rules("x/api-560-runtime-bundle.json", b"{}\n"), ["plugin-bundle"])
+        self.assertEqual(rules("x/a.json", bundle), ["plugin-bundle"])
+        self.assertEqual(rules("x/a.json", b'{"' + b'control_sweep": []}\n'), ["plugin-bundle"])
+        self.assertEqual(rules("x/UAD_X-constructor.asm", b"0x1: ret\n"), ["plugin-bundle"])
+        # The code that writes them names the schema; that is fine.
+        self.assertEqual(rules("tools/build_bundle.py", bundle), [])
+        self.assertEqual(rules("device_maps/native_known_good.json", b'{"plugins": []}\n'), [])
+
     def test_binary_files_are_not_read_as_text(self):
         self.assertEqual(rules("x.bin", b"\0" + LAN.encode()), [])
 
