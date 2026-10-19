@@ -128,7 +128,7 @@ What this release does with UAD plug-ins:
 
 | | |
 |---|---|
-| Plug-in browser | The Console's plug-in list and factory preset menus come from your UAD install (`~/.local/share/open-apollo/ua-catalogue/`, names only). Without that import the browser is empty: run `oa-assets catalogue --from /path/to/windows`, then `systemctl --user restart ua-mixer-daemon`. |
+| Plug-in browser | The Console's plug-in list and factory preset menus come from your UAD install (`~/.local/share/open-apollo/ua-catalogue/`, names only). Without that import the browser is empty: run `oa-assets catalogue --from /path/to/windows`, then `systemctl --user restart ua-mixer-daemon`. Factory channel-strip presets are imported when your Windows install has had an Apollo connected (`Presets\Channel Strip`); otherwise the channel preset menu is empty. |
 | Plug-in windows | The Console draws each plug-in's window from the panel specs and the art setup made from your Powered plug-ins: 206 of 224 with a UAD 12 install, the rest as a plain parameter list. |
 | Plug-in DSP modules | Setup stores them in `/lib/firmware/universal-audio/plugins/`. Nothing loads them yet. |
 | Running plug-ins on the Apollo's DSP | Not in this release. It is being developed and will only load plug-ins your Apollo itself reports as authorized. |
