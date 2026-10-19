@@ -77,12 +77,14 @@ class TestLink:
     def test_leader_carries_the_link(self, router, backend, ch):
         router.on_set(f"{IN}/{ch}/Stereo/value", True)
         router.on_set(f"{IN}/{ch}/Stereo/value", False)
-        assert backend.mixer_params == [(PRE, ch, 0x02, 1), (PRE, ch, 0x02, 0)]
+        assert sets(backend, PRE, 0x02) == [(PRE, ch, 0x02, 1),
+                                            (PRE, ch, 0x02, 0)]
 
     @pytest.mark.parametrize("ch", [1, 3])
-    def test_odd_channel_is_a_no_op(self, router, backend, ch):
+    def test_odd_channel_forwards_to_the_leader(self, router, backend, ch):
+        # UA's SetProperty 0x45 on the right leg links the pair from the left
         router.on_set(f"{IN}/{ch}/Stereo/value", True)
-        assert backend.mixer_params == []
+        assert sets(backend, PRE, 0x02) == [(PRE, ch - 1, 0x02, 1)]
 
     @pytest.mark.parametrize("ch", [4, 12, 20])
     def test_inputs_without_a_preamp_write_nothing(self, router, backend, ch):

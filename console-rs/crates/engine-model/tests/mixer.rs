@@ -453,6 +453,64 @@ fn surface_actions_move_local_values() {
     assert!(m.engine_settings().writes_enabled);
 }
 
+/// Rename on a linked pair writes `StereoName` (the label) and leaves `Name`; a mono strip
+/// writes `Name`. The pair's title is its `StereoName/default`.
+#[test]
+fn rename_of_a_stereo_pair_writes_stereo_name() {
+    let mut m = offline();
+    let pair = m.inputs().into_iter().find(|s| s.stereo).expect("a linked pair");
+    assert_eq!(pair.id.as_ref(), "/devices/0/inputs/2");
+    assert_eq!(pair.title, "ANALOG 3/4");
+    m.set_text(&id(&pair, Control::Name), "Synth");
+    assert_eq!(m.main(&pair).name, "Synth");
+    let v = |p: &str| m.store().value(p).and_then(Value::as_str).map(str::to_owned);
+    assert_eq!(v("/devices/0/inputs/2/StereoName").as_deref(), Some("Synth"));
+    assert_eq!(v("/devices/0/inputs/2/Name").as_deref(), Some("ANALOG 3"));
+    let mono = m.inputs()[1].clone();
+    m.set_text(&id(&mono, Control::Name), "Bass");
+    assert_eq!(m.store().value("/devices/0/inputs/1/Name").and_then(Value::as_str), Some("Bass"));
+    assert_eq!(m.main(&mono).name, "Bass");
+}
+
+/// CTRL ROOM SOURCE CUE 3 writes `MixInSource` "cue3" (in the engine's list) and reads back.
+#[test]
+fn control_room_source_cue_3() {
+    let mut m = offline();
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Tap(mon(Control::CrSource(3))));
+    assert_eq!(m.store().value("/devices/0/outputs/18/MixInSource").and_then(Value::as_str), Some("cue3"));
+    assert_eq!(m.monitor_options().cr_source, 3);
+    m.apply(&Action::Tap(mon(Control::CrSource(0))));
+    assert_eq!(m.monitor_options().cr_source, 0);
+}
+
+/// Settings › ALT COUNT 1 enables one pair (both legs): the monitor column shows one ALT
+/// button and one ALT TRIM knob; the knob writes `AltMonTrim` (±30 dB) on both legs.
+#[test]
+fn alt_count_counts_pairs_and_trims_write_alt_mon_trim() {
+    let mut m = offline();
+    let s = |c: Control| ControlId { strip: "settings".into(), control: c };
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Tap(s(Control::SettingChoose("alt:/devices/0".into(), 1))));
+    for o in [0, 1] {
+        assert_eq!(m.store().value(&format!("/devices/0/outputs/{o}/AltMonEnabled")).and_then(Value::as_bool), Some(true));
+    }
+    let opts = m.monitor_options();
+    assert_eq!(opts.alt_count, 1);
+    assert_eq!(opts.alt_trim, [0.5, 0.5], "0 dB");
+    m.apply(&Action::Set(mon(Control::AltTrim(0)), 0.75));
+    for o in [0, 1] {
+        assert_eq!(m.store().value(&format!("/devices/0/outputs/{o}/AltMonTrim")).and_then(Value::as_f64), Some(15.0));
+    }
+    assert_eq!(m.store().value("/devices/0/outputs/2/AltMonTrim").and_then(Value::as_f64), Some(0.0));
+    assert_eq!(m.monitor_options().alt_trim[0], 0.75);
+    m.apply(&Action::Tap(s(Control::SettingChoose("alt:/devices/0".into(), 2))));
+    assert_eq!(m.monitor_options().alt_count, 2);
+    m.apply(&Action::Set(mon(Control::AltTrim(1)), 0.0));
+    assert_eq!(m.store().value("/devices/0/outputs/3/AltMonTrim").and_then(Value::as_f64), Some(-30.0));
+    assert_eq!(m.monitor_options().alt_trim, [0.75, 0.0]);
+}
+
 /// `/plugins/P`: engine (numeric) order, every category, active vs. inactive and the badge of
 /// inactive entries.
 #[test]
@@ -490,4 +548,17 @@ fn plugin_catalog_maps_licence_states() {
     assert_eq!((cat[1].enabled, cat[1].badge), (false, Some(PluginBadge::Demo)));
     assert_eq!((cat[2].enabled, cat[2].badge), (false, Some(PluginBadge::Buy)));
     assert_eq!((cat[3].enabled, cat[3].badge), (false, Some(PluginBadge::Activate)));
+}
+
+/// open-apollo's catalogue publishes no licence state (`Authorized` absent): every entry is
+/// usable and draggable, with no badge.
+#[test]
+fn plugin_catalog_without_licence_state_is_enabled() {
+    let json = r#"{"format":"consolelab-engine-snapshot","info":{},"tree":{"children":{"plugins":{"children":{"0":{"properties":{"Name":{"type":"string","value":"UAD A"},"Categories":{"type":"string","value":"Delay"}}}}}}},"version":1}"#;
+    let path = std::env::temp_dir().join(format!("engine-model-catalog-nolic-{}.json", std::process::id()));
+    std::fs::write(&path, json).unwrap();
+    let m = EngineMixer::from_snapshot(&path).expect("snapshot");
+    std::fs::remove_file(&path).ok();
+    let cat = m.plugin_catalog();
+    assert!(cat[0].enabled && cat[0].badge.is_none());
 }

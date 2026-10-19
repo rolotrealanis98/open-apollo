@@ -664,6 +664,12 @@ class MixerDaemon:
         self.state.register_change_observer(
             "openapollo.cue_bus_count", self._on_cue_bus_count)
         self._apply_cue_bus_count(self.state.get_value("/CueBusCount/value"))
+        # Settings > PEAK HOLD / CLIP HOLD also set the host meters' holds
+        self.state.register_change_observer(
+            "openapollo.meter_holds", self._on_meter_holds)
+        for hold in ("PeakHold", "ClipHold"):
+            self._on_meter_holds(f"/{hold}/value",
+                                 self.state.get_value(f"/{hold}/value"))
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -1191,16 +1197,17 @@ class MixerDaemon:
         as silence.
         """
         ids = tuple(self._metering.channel_ids)
-        key = (entry['kind'], entry['channel'], entry['meter_idx'])
+        base = f"/devices/0/{entry['kind']}/{entry['channel']}"
+        # a runtime Link moves meters/1 to the pair's right channel
+        stereo = bool(self.state.get_value(f"{base}/Stereo/value"))
+        key = (entry['kind'], entry['channel'], entry['meter_idx'], stereo)
         if ids != self._meter_map_ids:
             self._meter_map = {}
             self._meter_map_ids = ids
         if key not in self._meter_map:
-            base = f"/devices/0/{entry['kind']}/{entry['channel']}"
             self._meter_map[key] = meter_channel(
                 entry['kind'], entry['channel'], entry['meter_idx'],
-                self.state.get_value(f"{base}/Name/value"),
-                bool(self.state.get_value(f"{base}/Stereo/value")), ids)
+                self.state.get_value(f"{base}/Name/value"), stereo, ids)
         cap = self._meter_map[key]
         if cap is None:
             level, peak, clip = SILENCE_DB, SILENCE_DB, False
@@ -1294,6 +1301,20 @@ class MixerDaemon:
                 return True
             del self._readback_suppress[path]
         return False
+
+    def _on_meter_holds(self, path: str, value):
+        """/PeakHold, /ClipHold (NONE, 1/3/5/10 SEC, INFINITE) -> the host
+        meters' hold times, live."""
+        import model_features as mf
+        for hold in ("PeakHold", "ClipHold"):
+            if path in (f"/{hold}/value", f"/devices/0/{hold}/value"):
+                # Test meters and --no-hardware stand-ins may not hold
+                set_holds = getattr(self._metering, "set_holds", None)
+                if value in mf.HOLD_NAMES and set_holds is not None:
+                    ms = mf.HOLD_MS[mf.HOLD_NAMES.index(value)]
+                    set_holds(**{
+                        "peak_ms" if hold == "PeakHold" else "clip_ms": ms})
+                return
 
     def _on_cue_bus_count(self, path: str, value):
         if path == "/CueBusCount/value":
@@ -1432,9 +1453,23 @@ class MixerDaemon:
             if micline != last_rb.get(f"{prefix}_micline"):
                 iotype = "Line" if micline else "Mic"
                 self._push_to_clients(f"{in_base}/IOType", iotype)
+            # Link: the driver reports the bit on both preamps of a pair;
+            # the leader's goes through the router's Link (the right leg
+            # parks, the pans spread, the buses are rewritten), as a
+            # front-panel link would in UA's engine.  Not right after a
+            # client SET on either leg.
             link = rb.get(f"{prefix}_link", False)
-            if link != last_rb.get(f"{prefix}_link"):
-                self._push_if_present(f"{in_base}/Stereo", link, force=True)
+            pair = router._pair_of(inp)
+            if link != last_rb.get(f"{prefix}_link") and pair and \
+                    pair[0] == inp and \
+                    self.state.get_value(f"{in_base}/Stereo/value") \
+                    not in (None, link) and \
+                    not any(self._readback_suppressed(p)
+                            for leg in pair
+                            for p in (f"/devices/0/inputs/{leg}/Stereo",
+                                      f"/devices/0/inputs/{leg}/Stereo/value")):
+                self._push_to_clients(f"{in_base}/Stereo", link)
+                router.link_readback(inp, link)
 
         self._sync_front_panel(rb, last_rb, preamps)
 

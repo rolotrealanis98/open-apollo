@@ -1,0 +1,1 @@
+{"format": "open-apollo-ua-catalogue/channel-presets", "version": 1, "source": {"uad": "0.0.0.scratch"}, "presets": [{"value": "Strips", "type": "folder", "locked": true, "children": [{"value": "Strip 1", "type": "file", "locked": true}]}, {"value": "Top File", "type": "file", "locked": true}]}

@@ -803,7 +803,8 @@ fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, size: InsertSi
             draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0 - dy, STRIP_W, 129.0));
         }
     } else if s.shows_sr_convert {
-        sr_convert(ui, Rect::new(0.0, 167.0 - dy, STRIP_W, 65.0));
+        let on = model.strip_menu_state(s).sr_convert.unwrap_or(false);
+        sr_convert(ui, s, on, Rect::new(0.0, 167.0 - dy, STRIP_W, 65.0));
     }
 }
 
@@ -811,14 +812,20 @@ fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, size: InsertSi
 /// type 3; skins from 0x1815224c0), bottom-aligned in the input cell like the preamp:
 /// secondary background, label plate `(4, 0, w−8, 24)` with the Silk-Screen title `(0, 5, w, 16)`,
 /// lower plate `(6, 24, w−12, 19 + 2·10)`, radio background and OFF / ON at `(10+6, 34)` / `(48, 34)`.
-fn sr_convert(ui: &mut Ui, r: Rect) {
+fn sr_convert(ui: &mut Ui, s: &StripInfo, on: bool, r: Rect) {
     ui.background("Secondary-Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, r.h));
     ui.background("Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, 24.0));
     ui.font_text("Silk-Screen", "SR CONVERT", Rect::new(r.x, r.y + 5.0, r.w, 16.0), Align::Center);
     ui.background("Send-Lower-State-Plate", Rect::new(r.x + 6.0, r.y + 24.0, r.w - 12.0, 39.0));
     ui.background("Preamp-Radio-Background", Rect::new(r.x + 16.0, r.y + 34.0, 64.0, 19.0));
-    ui.toggle("SR-Convert-Off", Some("OFF"), false, true, Rect::new(r.x + 16.0, r.y + 34.0, 32.0, 19.0), None, None);
-    ui.toggle("SR-Convert-On", Some("ON"), true, true, Rect::new(r.x + 48.0, r.y + 34.0, 32.0, 19.0), None, None);
+    // The OFF / ON radio writes `SRConvert` like the preamp menu's entries.
+    let off = Rect::new(r.x + 16.0, r.y + 34.0, 32.0, 19.0);
+    let on_r = Rect::new(r.x + 48.0, r.y + 34.0, 32.0, 19.0);
+    ui.toggle("SR-Convert-Off", Some("OFF"), !on, true, off, None, None);
+    ui.toggle("SR-Convert-On", Some("ON"), on, true, on_r, None, None);
+    for (r, on) in [(off, false), (on_r, true)] {
+        ui.hit(r, ControlId { strip: s.id.clone(), control: Control::Menu(crate::menu::MenuCmd::SrConvert(on)) }, HitKind::Tap);
+    }
 }
 
 /// `Rack_Inserts_Unison`: a one-slot `Rack_Inserts` with its header row. Background

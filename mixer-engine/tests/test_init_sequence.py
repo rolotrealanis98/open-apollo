@@ -11,7 +11,10 @@ And the talkback mic (input 22, bus 10) is no longer muted like the other
 inputs: it keeps the device map's -6 dB and its CUE 1/2 sends are written
 at the end (TALK gates it; a muted talkback bus left TALK silent).  And a
 muted input's fader is no longer written (it was, at 0 dB, just before
-its mute: a blip of every input at start): the mute holds.
+its mute: a blip of every input at start): the mute holds.  And the
+linked pair's sends are S/PDIF L's on both buses (UA's
+_UpdateDSPBusParameters isSecond): bus 9's send writes moved from S/PDIF
+R's turn to S/PDIF L's, same values.
 """
 
 import json

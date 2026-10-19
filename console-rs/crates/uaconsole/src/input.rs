@@ -36,7 +36,7 @@ impl ClickTracker {
 /// is under the pointer (the wheel then pans).
 pub fn wheel_actions(hits: &[Hit], x: f32, y: f32, lines: f64, fine: bool) -> Option<Vec<Action>> {
     let hit = hits.iter().rev().find(|h| h.rect.contains(x, y))?;
-    let HitKind::Drag { value, .. } = &hit.kind else {
+    let (HitKind::Drag { value, .. } | HitKind::Knob { value, .. }) = &hit.kind else {
         return None;
     };
     let step = if fine { WHEEL_STEP_FINE } else { WHEEL_STEP };

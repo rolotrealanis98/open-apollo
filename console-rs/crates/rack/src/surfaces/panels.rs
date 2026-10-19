@@ -146,7 +146,7 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
     let Some(dev) = devices.first() else { return };
     let cues = settings::fields(src, SettingsGroup::CueRoutes(dev.index));
     let n = cues.iter().map(|f| f.row as usize + 1).max().unwrap_or(0).max(1);
-    let hp: Vec<String> = src.indices(&format!("{}/outputs", dev.path)).into_iter().map(|o| format!("{}/outputs/{o}", dev.path)).filter(|o| str_at(src, &format!("{o}/IOType")).as_deref() == Some("Headphone")).collect();
+    let hp = model.headphone_outputs();
     let rows = hp.len().max(2) as f32;
     let col_w = 90.0;
     let size = (164.0 + n as f32 * col_w + 4.0, 149.0 + rows * 44.0 + 1.0);
@@ -218,14 +218,19 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
                 _ => {}
             }
         }
-        // The headphone tile: which HP output plays this cue.
+        // The headphone tile: which HP output plays this cue. The lit tile opens the HP's
+        // source menu (`MixInSource`: MON, CUE 1…4, NONE); an empty cell assigns this cue.
+        let cue = format!("CUE {}", k + 1);
         for (h, o) in hp.iter().enumerate() {
-            if str_at(src, &format!("{o}/MixInSource")).unwrap_or_default() == format!("cue{}", k + 1) {
+            let tile = Rect::new(cx + 1.0, row.y + 1.0 + h as f32 * 43.0, 89.0, 41.0);
+            if o.options.get(o.source) == Some(&cue) {
                 let mix = fields.iter().find(|f| f.label == "SOURCE").map(|f| f.value_text()).unwrap_or_default();
                 let what = if mix == "MIX" { "MONITOR MIX".to_string() } else { format!("CUE {} MIX", k + 1) };
-                let tile = Rect::new(cx + 1.0, row.y + 1.0 + h as f32 * 43.0, 89.0, 41.0);
                 // The tile art fills the 89 × 41 tile (`Switch-NoDedicatedCue-A`, stretched).
                 ui.toggle("Switch-NoDedicatedCue-A", Some(&format!("{what}\nto\n{} HP {}", dev.letter(), h + 1)), true, true, tile, None, None);
+                ui.hit(tile, ControlId { strip: "monitor".into(), control: Control::HeadphoneMenu(h as u8) }, HitKind::Tap);
+            } else if let Some(i) = o.options.iter().position(|l| *l == cue) {
+                ui.hit(tile, ControlId { strip: "monitor".into(), control: Control::HeadphoneSource { output: h as u8, option: i as u8 } }, HitKind::Tap);
             }
         }
     }

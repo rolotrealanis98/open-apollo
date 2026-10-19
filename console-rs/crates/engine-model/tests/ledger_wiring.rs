@@ -199,7 +199,7 @@ impl Audit {
         let (cx, cy) = hit.rect.center();
         let mut i = Interaction::default();
         let mut actions = i.pointer_down(hits, cx, cy, false);
-        if matches!(hit.kind, HitKind::Drag { .. }) {
+        if matches!(hit.kind, HitKind::Drag { .. } | HitKind::Knob { .. }) {
             actions.extend(i.pointer_move(cx, cy + dy, false));
         }
         actions.extend(i.pointer_up());
@@ -221,7 +221,7 @@ impl Audit {
     /// knob at its top) and records the outcome.
     fn press(&mut self, scenario: &str, base: &ViewState, hits: &[Hit], hit: &Hit, via_menu: Option<(String, String)>) -> ViewState {
         let (mut cmds, mut shell, mut view, mut model_only) = self.one_press(base, hits, hit, -20.0);
-        if matches!(hit.kind, HitKind::Drag { .. }) && cmds.is_empty() && !shell && !model_only && view == *base {
+        if matches!(hit.kind, HitKind::Drag { .. } | HitKind::Knob { .. }) && cmds.is_empty() && !shell && !model_only && view == *base {
             (cmds, shell, view, model_only) = self.one_press(base, hits, hit, 20.0);
         }
         let changed = view != *base;

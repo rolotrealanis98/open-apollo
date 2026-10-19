@@ -6,6 +6,7 @@ use oa_assets::discover::{self, Root, Source};
 use oa_assets::dsp;
 use oa_assets::firmware::{self, Event, Pins};
 use oa_assets::import;
+use oa_assets::catalogue;
 
 const USAGE: &str = "\
 oa-assets: use your own UAD install with open-apollo
@@ -15,7 +16,10 @@ USAGE:
   oa-assets mount  DEVICE                      mount a Windows partition read-only, then scan it
   oa-assets attach IMAGE                       attach a (shut down) VM's raw disk image read-only, then scan it
   oa-assets detach IMAGE|LOOPDEVICE            unmount an attached image and release it
-  oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs
+  oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs and
+                                               write the plug-in catalogue (as `catalogue`)
+  oa-assets catalogue [--from PATH]            write UA's plug-in list and factory preset menus
+                                               (names only) to ~/.local/share/open-apollo/ua-catalogue
   oa-assets status [--out DIR]                 show what has been imported and built
   oa-assets firmware [--from PATH] [--out DIR] [--accept-unknown] [--verify-golden] [--json]
                                                extract the DSP modules and USB boot images the Apollo
@@ -115,6 +119,7 @@ fn main() -> ExitCode {
         "attach" => attach(&args),
         "detach" => detach(&args),
         "import" => run_import(&args),
+        "catalogue" => run_catalogue(&args),
         "status" => status(&args),
         "firmware" => return run_firmware(&args),
         "dsp" => return run_dsp(&args),
@@ -289,6 +294,31 @@ fn run_import(args: &Args) -> Result<(), String> {
         done.bytes as f64 / 1e6,
         done.dest.display()
     );
+    // The plug-in browser is empty without the catalogue; a failure here only warns.
+    match catalogue::write(&chosen.root.path, &args.data) {
+        Ok(w) => print_catalogue(&w),
+        Err(e) => eprintln!("oa-assets: plug-in catalogue not written ({e}); the plug-in browser stays empty"),
+    }
+    Ok(())
+}
+
+fn print_catalogue(w: &catalogue::Written) {
+    println!(
+        "Wrote the UAD {} plug-in catalogue: {} plug-ins, {} channel-strip presets, {} I/O presets -> {}",
+        w.uad_version.as_deref().unwrap_or("?"),
+        w.plugins,
+        w.channel_presets,
+        w.io_presets,
+        w.dir.display()
+    );
+}
+
+fn run_catalogue(args: &Args) -> Result<(), String> {
+    let roots = roots(args);
+    let Some(root) = roots.iter().find(|r| catalogue::tools_dir(&r.path).is_some()) else {
+        return Err("no UAD install found (no UA.xml); run `oa-assets scan`, or pass --from".into());
+    };
+    print_catalogue(&catalogue::write(&root.path, &args.data)?);
     Ok(())
 }
 

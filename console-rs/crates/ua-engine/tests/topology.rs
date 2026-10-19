@@ -341,6 +341,34 @@ fn stereo_link_folds_pairs() {
     assert!(!t.inputs.iter().any(|s| s.index == 1));
 }
 
+/// The leader's `Stereo` alone folds the pair (no one-frame duplicate of the right leg while
+/// the daemon has not pushed its flag yet); the title is the pair's `StereoName/default`.
+#[test]
+fn leader_stereo_alone_folds_the_pair() {
+    let mut tree = device_map("x4");
+    tree.set_value("/devices/0/inputs/0/Stereo", Value::Bool(true));
+    let t = Topology::from_tree(&tree);
+    assert_eq!((t.inputs[0].index, t.inputs[0].right_index), (0, Some(1)));
+    assert!(!t.inputs.iter().any(|s| s.index == 1));
+    // Only the right leg linked: nothing folds.
+    let mut tree = device_map("x4");
+    tree.set_value("/devices/0/inputs/1/Stereo", Value::Bool(true));
+    let t = Topology::from_tree(&tree);
+    assert_eq!(t.inputs[0].right_index, None);
+    assert!(t.inputs.iter().any(|s| s.index == 1));
+    // A pair is titled by StereoName/default; a mono strip by Name/default.
+    let mut tree = device_map("x4");
+    tree.set_value("/devices/0/inputs/0/Stereo", Value::Bool(true));
+    let json = |v: &str, d: &str| serde_json::json!({"type": "string", "value": v, "default": d});
+    tree.set_property("/devices/0/inputs/0/Name", ua_engine::Property::from_json(&json("ANALOG 1", "ANALOG 1")));
+    tree.set_property("/devices/0/inputs/0/StereoName", ua_engine::Property::from_json(&json("Keys", "ANALOG 1/2")));
+    let t = Topology::from_tree(&tree);
+    assert_eq!(t.inputs[0].default_name.as_deref(), Some("ANALOG 1/2"));
+    assert_eq!(t.inputs[0].name, "Keys");
+    tree.set_value("/devices/0/inputs/0/Stereo", Value::Bool(false));
+    assert_eq!(Topology::from_tree(&tree).inputs[0].default_name.as_deref(), Some("ANALOG 1"));
+}
+
 #[test]
 fn subscription_plan_follows_console() {
     let tree = live_x4();
