@@ -199,6 +199,31 @@ _LEVEL_COMPANION = {"FaderLevelTapered": "FaderLevel",
 # open fd every DEVICE_WATCH_INTERVAL; after a loss it retries the open
 # with a doubling delay (MIN..MAX) and, once the node is back, waits
 # DEVICE_SETTLE for the plugin chain/DSP before re-running the init path.
+# Native plug-in hosting owns the inserts and is bound to the start-up sample
+# rate (plugin_native.register_native).  While it runs, the daemon refuses only
+# what it has no transactional adapter for: the rate and clock, links (unless
+# the backend allows an idle one), and host state that reloads inserts
+# (channel presets, undo/redo, sessions).  Ordinary mixer controls still work.
+_NATIVE_REFUSED_PROPS = frozenset({
+    'SampleRate', 'ClockSource', 'BufferSize', 'MaxDelayComp', 'DelayCompGroup',
+    'Stereo', 'StereoLink', 'Link', 'Preset'})
+_NATIVE_REFUSED_PATHS = frozenset({'/UndoRedo', '/Session', '/ModifiedSessions'})
+# Posts that change only the mixer, never an insert.
+_NATIVE_MIXER_POSTS = frozenset({
+    'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
+
+
+def native_refuses_set(canonical: str) -> bool:
+    """Whether native hosting refuses a non-slot SET (path without /value)."""
+    return (canonical in _NATIVE_REFUSED_PATHS
+            or canonical.rsplit('/', 1)[-1] in _NATIVE_REFUSED_PROPS)
+
+
+def native_allows_post(path: str) -> bool:
+    """Whether a POST runs while native hosting owns the inserts."""
+    return path.rstrip('/').rsplit('/', 1)[-1] in _NATIVE_MIXER_POSTS
+
+
 DEVICE_WATCH_INTERVAL = 0.25
 DEVICE_REOPEN_MIN = 0.5
 DEVICE_REOPEN_MAX = 5.0
@@ -2950,11 +2975,8 @@ class MixerDaemon:
             return
         native_allows_idle_link = (native and hasattr(native, 'allows_idle_mixer_link_change')
                                    and native.allows_idle_mixer_link_change(canonical))
-        if native and not native_allows_idle_link and not is_plugin_slot_path(path) and (
-                self._console_owns_set(path, cmd.value)
-                or path.removesuffix('/value').split('/')[-1] in (
-                    'SampleRate', 'ClockSource', 'BufferSize', 'MaxDelayComp',
-                    'Stereo', 'StereoLink', 'Link', 'DelayCompGroup')):
+        if native and not native_allows_idle_link and not is_plugin_slot_path(path) \
+                and native_refuses_set(canonical):
             self._send_local_plugin_error(
                 client, path, 'openapollo.native_operation_unsupported', resp_params)
             return
@@ -3427,8 +3449,9 @@ class MixerDaemon:
                     1.0, self._fire_init_complete)
             return
 
-        # This first native mode has no transactional bulk/undo/preset adapter.
-        if self._native_plugin_backend:
+        # This first native mode has no transactional bulk/undo/preset adapter:
+        # only mixer-only commands run while it owns the inserts.
+        if self._native_plugin_backend and not native_allows_post(cmd.path):
             self._send_post_reply(client, cmd.path, None,
                                   'openapollo.native_operation_unsupported', resp_params)
             return
