@@ -619,6 +619,12 @@ class MixerDaemon:
         self.state.register_change_observer(
             "openapollo.cue_bus_count", self._on_cue_bus_count)
         self._apply_cue_bus_count(self.state.get_value("/CueBusCount/value"))
+        # Settings > PEAK HOLD / CLIP HOLD also set the host meters' holds
+        self.state.register_change_observer(
+            "openapollo.meter_holds", self._on_meter_holds)
+        for hold in ("PeakHold", "ClipHold"):
+            self._on_meter_holds(f"/{hold}/value",
+                                 self.state.get_value(f"/{hold}/value"))
         if hw_router and not self._hw_online:
             self._hw_init_done = True
             self._set_device_online(False)
@@ -1113,6 +1119,18 @@ class MixerDaemon:
                 return True
             del self._readback_suppress[path]
         return False
+
+    def _on_meter_holds(self, path: str, value):
+        """/PeakHold, /ClipHold (NONE, 1/3/5/10 SEC, INFINITE) -> the host
+        meters' hold times, live."""
+        import model_features as mf
+        for hold in ("PeakHold", "ClipHold"):
+            if path in (f"/{hold}/value", f"/devices/0/{hold}/value"):
+                if value in mf.HOLD_NAMES:
+                    ms = mf.HOLD_MS[mf.HOLD_NAMES.index(value)]
+                    self._metering.set_holds(**{
+                        "peak_ms" if hold == "PeakHold" else "clip_ms": ms})
+                return
 
     def _on_cue_bus_count(self, path: str, value):
         if path == "/CueBusCount/value":
