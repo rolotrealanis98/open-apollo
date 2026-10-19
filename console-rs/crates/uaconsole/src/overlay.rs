@@ -101,7 +101,7 @@ pub trait Panel {
     fn modal(&self) -> bool {
         true
     }
-    /// Wants 30 Hz redraws while open (meters, animations).
+    /// Wants meter-rate redraws while open (meters, animations).
     fn live(&self) -> bool {
         false
     }

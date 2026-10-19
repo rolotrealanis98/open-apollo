@@ -211,9 +211,12 @@ fn send_meters_reach_the_send_states() {
     let strip = topology.inputs.iter().position(|s| !s.sends.is_empty() && !s.sends[0].meters.is_empty()).expect("an input with send meters");
     let key = topology.inputs[strip].sends[0].meters[0].base.clone();
     let cue = topology.auxes[0].sends.iter().find(|s| s.is_cue() && !s.meters.is_empty()).expect("aux cue send meter").meters[0].base.clone();
+    m.set_meter_time(0.0);
     assert_eq!(m.input_sends(&inputs[strip])[0].meter, rack::model::MeterFrame::default());
     m.store().meters().set(&key, reading(-12.0, -6.0));
     m.store().meters().set(&cue, reading(-24.0, -18.0));
+    // Console eases the bar up over a few 16.7 ms steps; a second later it is there.
+    m.set_meter_time(1.0);
     let send = &m.input_sends(&inputs[strip])[0];
     assert!((send.meter.left - scales::meter_fraction(-12.0)).abs() < 1e-9);
     assert!((send.meter.peak_left - scales::meter_fraction(-6.0)).abs() < 1e-9);
@@ -627,4 +630,59 @@ fn plugin_catalog_unison_flag_filters_the_unison_assign_browser() {
     assert_eq!(rack::surfaces::browser::filtered(&cat, &m.plugin_categories(), &view), [1, 2], "unknown stays allowed");
     view.begin_assign("/devices/0/inputs/0".into(), 0);
     assert_eq!(rack::surfaces::browser::filtered(&cat, &m.plugin_categories(), &view), [0, 1, 2]);
+}
+
+/// Meters are drawn with the engine's release and peak hold and Console's easing, against the
+/// frame clock: a step and a burst read the same whether the engine pushes at 50 Hz or 20 Hz and
+/// whether we draw at 30, 60 or 120 Hz.
+#[test]
+fn meters_have_the_engine_ballistics_at_any_rate() {
+    use rack::ballistics::decay;
+    // `scales::meter_fraction` inverted by bisection (−60…0 dB).
+    let db_of = |f: f64| {
+        let (mut lo, mut hi) = (-60.0, 0.0);
+        for _ in 0..60 {
+            let mid = (lo + hi) / 2.0;
+            if scales::meter_fraction(mid) < f { lo = mid } else { hi = mid }
+        }
+        (lo + hi) / 2.0
+    };
+    // 0 dBFS for 1 s, then a −6 dB burst at 1.0…1.1 s over silence. Peak hold: 3 SEC (default).
+    let signal = |t: f64| if t < 1.0 { 0.0 } else if t < 1.1 { -6.0 } else { -77.0 };
+    let run = |push_hz: f64, fps: f64| {
+        let m = offline();
+        let monitor = m.store().topology().monitor.as_ref().expect("monitor").meters[0].base.clone();
+        let (mut t, mut next) = (0.0f64, 0.0f64);
+        let mut seen = Vec::new();
+        for at in [0.9, 1.6, 2.6, 4.0, 4.6] {
+            while t < at {
+                if t >= next {
+                    let db = signal(t) as f32;
+                    m.store().meters().set(&monitor, MeterReading { level_db: db, peak_db: db, clip: false, updates: 1 });
+                    next += 1.0 / push_hz;
+                }
+                m.set_meter_time(t);
+                let _ = m.monitor_meters();
+                t += 1.0 / fps;
+            }
+            m.set_meter_time(at);
+            let f = m.monitor_meters();
+            seen.push((db_of(f.left), db_of(f.peak_left)));
+        }
+        seen
+    };
+    let base = run(1000.0, 1000.0);
+    // Full scale, then the engine's fall (about 1.3 s from 0 to −20 dB), not a drop to silence.
+    assert!(base[0].0 > -0.01, "{base:?}");
+    assert!((base[1].0 - decay(0.0, 0.6)).abs() < 1.0, "bar 0.6 s after the step: {base:?}");
+    // The 0 dBFS peak is held 3 s after the level last reached it (1.0 s), then decays.
+    assert!(base[1].1 > -0.01 && base[2].1 > -0.01, "held: {base:?}");
+    assert!(base[3].1 > -0.5, "hold ends at 4.0 s: {base:?}");
+    assert!((base[4].1 - decay(0.0, 0.6)).abs() < 0.5, "then falls at the engine rate: {base:?}");
+    for (push_hz, fps) in [(50.0, 60.0), (20.0, 30.0), (32.6, 120.0)] {
+        let s = run(push_hz, fps);
+        for ((bl, bp), (l, p)) in base.iter().zip(&s) {
+            assert!((bl - l).abs() < 1.0 && (bp - p).abs() < 1.0, "{push_hz} Hz / {fps} fps {s:?} vs {base:?}");
+        }
+    }
 }

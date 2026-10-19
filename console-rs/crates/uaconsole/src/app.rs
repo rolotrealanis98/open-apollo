@@ -1,7 +1,8 @@
 //! The window: winit event loop, wgpu surface, input routing and the redraw policy.
 //!
 //! Redraws happen on input and model changes only; while live meters (or a live panel) are on,
-//! a 30 Hz `WaitUntil` timer drives them. Otherwise the loop sleeps in `ControlFlow::Wait`.
+//! a `WaitUntil` timer at the display rate (60…120 Hz, [`meter_period`]) drives them. Otherwise
+//! the loop sleeps in `ControlFlow::Wait`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,7 +46,18 @@ macro_rules! active_scrolls {
     };
 }
 
-pub const METER_PERIOD: Duration = Duration::from_nanos(33_333_333);
+/// Live meters redraw at the display's rate, 60…120 Hz: Console steps its meters every
+/// 16 666 µs (`Rack_Meter`, Rack.dll 0x1809c9780), and the ballistics are time-based
+/// (`rack::ballistics`), so faster displays only get smoother.
+pub const METER_PERIOD: Duration = Duration::from_nanos(16_666_667);
+
+/// The live-meter redraw period for a display refreshing at `millihertz` (0: unknown).
+pub fn meter_period(millihertz: Option<u32>) -> Duration {
+    match millihertz {
+        Some(mhz) if mhz > 0 => Duration::from_secs_f64(1000.0 / mhz.clamp(60_000, 120_000) as f64),
+        _ => METER_PERIOD,
+    }
+}
 pub const LETTERBOX: Rgba = Rgba::rgb8(18, 19, 21);
 /// Pan distance per wheel line, in pixels.
 const PAN_PER_LINE: f32 = 60.0;
@@ -56,7 +68,7 @@ pub struct Options {
     pub source: ModelSource,
     pub view: View,
     pub compact: bool,
-    /// Force the 30 Hz meter timer even when the model is not live (testing).
+    /// Force the meter timer even when the model is not live (testing).
     pub live_meters: bool,
     /// Start with the stats overlay.
     pub stats: bool,
@@ -103,6 +115,8 @@ pub struct App {
     show_stats: bool,
     times: FrameTimes,
     next_tick: Option<Instant>,
+    /// [`meter_period`] of the window's display.
+    meter_period: Duration,
     occluded: bool,
     scale_factor: f64,
     title: String,
@@ -227,6 +241,7 @@ impl App {
             show_stats: opts.stats,
             times: FrameTimes::default(),
             next_tick: None,
+            meter_period: METER_PERIOD,
             occluded: false,
             scale_factor: 1.0,
             title: String::new(),
@@ -992,6 +1007,7 @@ impl App {
             surface.format(),
             self.assets.images.clone(),
         );
+        self.meter_period = meter_period(window.current_monitor().and_then(|m| m.refresh_rate_millihertz()));
         self.gpu = Some(Gpu {
             window,
             surface,
@@ -1124,7 +1140,7 @@ impl ApplicationHandler for App {
             requested_resume, ..
         } = cause
         {
-            self.next_tick = Some(requested_resume + METER_PERIOD);
+            self.next_tick = Some(requested_resume + self.meter_period);
             self.changed();
         }
     }
@@ -1186,7 +1202,7 @@ impl ApplicationHandler for App {
         let now = Instant::now();
         let next = match self.next_tick {
             Some(t) if t > now => t,
-            _ => now + METER_PERIOD,
+            _ => now + self.meter_period,
         };
         self.next_tick = Some(next);
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
@@ -1363,6 +1379,16 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meters_redraw_at_the_display_rate() {
+        assert_eq!(meter_period(None), METER_PERIOD);
+        assert_eq!(meter_period(Some(0)), METER_PERIOD);
+        assert!((meter_period(Some(120_000)).as_secs_f64() - 1.0 / 120.0).abs() < 1e-6);
+        // Below 60 Hz still steps like Console; above 120 Hz no faster.
+        assert!((meter_period(Some(30_000)).as_secs_f64() - 1.0 / 60.0).abs() < 1e-6);
+        assert!((meter_period(Some(240_000)).as_secs_f64() - 1.0 / 120.0).abs() < 1e-6);
+    }
 
     #[test]
     fn saved_view_state_applies_and_view_spec_overrides() {

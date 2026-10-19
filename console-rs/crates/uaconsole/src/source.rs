@@ -19,7 +19,7 @@ pub enum ModelSource {
 
 pub struct OpenedModel {
     pub model: Box<dyn MixerModel>,
-    /// The model's meters move on their own: redraw at 30 Hz.
+    /// The model's meters move on their own: redraw at the meter rate.
     pub live_meters: bool,
     /// Device or session description for the title bar.
     pub label: String,

@@ -50,7 +50,7 @@ the bus extension views (`Rack_ExtensionView_*`).
 Frame pipeline: engine pushes → `ua-engine::Store` (main-thread owned) and `MeterStore`
 (atomics, written by the network task) → `rack` builds the whole window's `DrawList`
 (≈2–3k quads, microseconds) → `gfx` draws it in a few draw calls. Redraw happens on engine
-change, on input, and at 30 Hz while meters are active.
+change, on input, and at the display rate (60…120 Hz) while meters are active.
 
 ## Reference material (outside the repo)
 
