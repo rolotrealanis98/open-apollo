@@ -39,8 +39,9 @@ What is implemented needs no UA file format:
                                    volatile paths, the preamps and the
                                    monitor level are never undone
 
-Every other command of the engine's list is known and answers "Unable to
-execute command."; the licensing commands (PluginStartDemo,
+Import (an I/O preset file picked in a dialog on the engine's host) is
+refused with the reason logged.  Every other command of the engine's list
+is known and answers "Unable to execute command."; the licensing commands (PluginStartDemo,
 SIDRLicenseStateUpdated, GetPluginAuth, anything about authorization or
 licenses) and anything not in the list answer "Unable to resolve the command
 for the post.".
@@ -104,7 +105,7 @@ KNOWN_UNSUPPORTED = frozenset(n.lower() for n in """
     MoveChannel ToXML FromXML LEDTest AddDevice RemoveDevice
     CloseModalDialog DeleteFolder NewFolder UpdatePlugInStatus
     PluginBarCopySettings PluginBarPasteSettings SetTouch
-    Import Export DumpChains
+    Export DumpChains
     GetMidiBuffers SetSpeakerCorrectionSpec GetSpeakerCorrectionSpec
     SetSpeakerTrims GetSpeakerTrims SetHeadphoneCorrectionSpec
     GetHeadphoneCorrectionSpec SetHeadphone2CorrectionSpec
@@ -322,6 +323,7 @@ class CommandEngine:
             "saveiomappreset": self._iomap_save,
             "deleteiomappreset": self._iomap_delete,
             "renameiomappreset": self._iomap_rename,
+            "import": self._import,
             "undo": self._undo,
             "redo": self._redo,
         }
@@ -344,6 +346,18 @@ class CommandEngine:
         self.store_dir = Path(directory)
         self.stem = stem
         self._publish_iomap_list()
+
+    def _import(self, obj: str, params: dict):
+        """Console's I/O preset LOAD (Import {"type": "IOMapPreset"}): the
+        engine opens a file dialog on its own host and loads the preset file
+        picked there.  This daemon has no dialog and no such file, so it
+        refuses (and says why); its saved presets are recalled by setting
+        /IOMapPreset, which Console does for them."""
+        log.warning("Import %r refused: the Mixer Engine loads an I/O preset "
+                    "file picked in a host-side file dialog, and this daemon "
+                    "has none; set /IOMapPreset to recall a saved preset",
+                    params.get("type"))
+        raise CommandError("no host file dialog")
 
     # ── Dispatch ───────────────────────────────────────────────────
 

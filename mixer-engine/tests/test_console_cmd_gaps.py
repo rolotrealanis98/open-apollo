@@ -154,3 +154,59 @@ class TestConsoleKeys:
         assert (stack.console.presets.directory / "Channel%20Strip" / "Vox").is_dir()
         assert post(d, "/DeleteFolder", args)["data"] is True
         assert post(d, "/DeleteFolder", args)["error"] == ERR_FAILED
+
+
+class TestRescanAndImport:
+    def catalogue(self, tmp_path, names):
+        from test_ua_catalogue import PLUGINS, write_catalogue
+        extra = [dict(PLUGINS[0], name=n, plugin_id=n, vst_id=n[:4])
+                 for n in names]
+        return write_catalogue(tmp_path / "cat", plugins=PLUGINS + extra)
+
+    def daemon(self, tmp_path, catalogue_dir=None):
+        import ua_catalogue
+        tree = StateTree()
+        tree.load_device_map(DEVICE_MAP_X4)
+        cat = ua_catalogue.apply(tree, None, catalogue_dir)
+        d = MixerDaemon(tree, HardwareRouter(FakeBackend(), tree),
+                        sessions_dir=tmp_path / "s", presets_dir=tmp_path / "p",
+                        catalogue=cat)
+        d.console.catalogue_dir = catalogue_dir
+        return d
+
+    def test_rescan_without_import_is_ok(self, tmp_path):
+        d = self.daemon(tmp_path, tmp_path / "none")
+        assert post(d, "/UpdatePlugInStatus", {})["data"] is True
+        assert not d.state.path_exists("/plugins/0/Name/value")
+
+    def test_rescan_picks_up_a_newer_import(self, tmp_path):
+        d = self.daemon(tmp_path, self.catalogue(tmp_path, []))
+        assert d.state.get_value("/plugins/1/Name") == "Test Pre"
+        assert not d.state.path_exists("/plugins/2/Name/value")
+        pushed = []
+        d.state.register_change_observer(
+            "t", lambda path, value: pushed.append(path))
+        self.catalogue(tmp_path, ["Brand New"])    # `oa-assets import` again
+        assert post(d, "/UpdatePlugInStatus", {})["data"] is True
+        assert d.state.get_value("/plugins/2/Name") == "Brand New"
+        assert d.state.get_value("/plugins/2/DemoAvailable") is False
+        assert "/plugins/2/Name/value" in pushed
+        # old entries keep their index, a second rescan changes nothing
+        assert d.state.get_value("/plugins/0/Name") == "Test Comp"
+        pushed.clear()
+        assert post(d, "/UpdatePlugInStatus", {})["data"] is True
+        assert not [p for p in pushed if p.endswith("/Name/value")]
+
+    def test_rescan_fills_in_a_late_first_import(self, tmp_path):
+        d = self.daemon(tmp_path, tmp_path / "cat")
+        assert not d.state.path_exists("/plugins/0/Name/value")
+        self.catalogue(tmp_path, [])
+        assert post(d, "/UpdatePlugInStatus", {})["data"] is True
+        assert d.state.get_value("/plugins/0/Name") == "Test Comp"
+        # and the channel strip's factory names reach the preset menus
+        assert d.console.presets.catalogue
+
+    def test_import_is_refused_and_says_why(self, stack, caplog):
+        r = post(stack, "/Import", {"type": "IOMapPreset"})
+        assert r["error"] == ERR_FAILED
+        assert "file dialog" in caplog.text

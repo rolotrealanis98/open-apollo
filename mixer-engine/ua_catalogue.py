@@ -179,12 +179,13 @@ def is_unison(plugin: dict, unison_ids=frozenset()) -> bool:
 
 # ── Device map (4710) ───────────────────────────────────────────────
 
-def plugin_controls(plugins: list, unison_ids=frozenset()) -> list[tuple[str, dict]]:
-    """The engine's /plugins/N controls for a catalogue, in the engine's
-    field order.  Licence state is never invented: Status stays empty and
-    no Authorized/Demo property is created."""
+def plugin_controls(plugins: list, unison_ids=frozenset(),
+                    start: int = 0) -> list[tuple[str, dict]]:
+    """The engine's /plugins/N controls for a catalogue (N from `start`),
+    in the engine's field order.  Licence state is never invented: Status
+    stays empty and no Authorized/Demo property is created."""
     out = []
-    for i, p in enumerate(plugins):
+    for i, p in enumerate(plugins, start):
         base = f"/plugins/{i}"
         shorts = [{"value": s} for s in p.get("short_names") or []
                   if isinstance(s, str)]
@@ -207,19 +208,29 @@ def plugin_controls(plugins: list, unison_ids=frozenset()) -> list[tuple[str, di
     return out
 
 
-def apply_to_state(state, cat: Catalogue, unison_ids=None) -> dict:
+def apply_to_state(state, cat: Catalogue, unison_ids=None,
+                   rescan: bool = False) -> dict:
     """Overlay the catalogue on a loaded StateTree.  Only fills what the
     shipped map leaves empty, so a map that still carries its own lists
     (an old capture) is not changed.  `unison_ids` defaults to the shipped
-    Unison list."""
+    Unison list.  `rescan` (Settings > Plug-Ins RESCAN, on the live tree)
+    also appends the plug-ins a newer import lists after the ones already
+    there, provided those are the catalogue's own leading entries."""
     done = {"plugins": 0, "channel_presets": 0, "io_presets": 0}
     paths = state.all_paths()
-    if cat.plugins and not any(_RE_PLUGIN_ENTRY.match(p) for p in paths):
+    fresh = not any(_RE_PLUGIN_ENTRY.match(p) for p in paths)
+    listed = 0
+    while not fresh and state.path_exists(f"/plugins/{listed}/Name/value"):
+        listed += 1
+    append = rescan and not fresh and listed <= len(cat.plugins) and all(
+        state.get_value(f"/plugins/{i}/Name") == cat.plugins[i]["name"]
+        for i in range(listed))
+    if cat.plugins and (fresh or append) and listed < len(cat.plugins):
         if unison_ids is None:
             unison_ids = load_unison()
-        for path, ctrl in plugin_controls(cat.plugins, unison_ids):
+        for path, ctrl in plugin_controls(cat.plugins[listed:], unison_ids, listed):
             state.add_runtime_property(path, ctrl)
-        done["plugins"] = len(cat.plugins)
+        done["plugins"] = len(cat.plugins) - listed
     if cat.channel_presets:
         for path in paths:
             if _RE_CHANNEL_PRESET.match(path):
