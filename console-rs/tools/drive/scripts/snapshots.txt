@@ -1,0 +1,20 @@
+# The Snapshots section (View > Show Snapshots; --open snapshots) end to end: SAVE AS... "A",
+# move input 1's fader, prime A in the SNAPSHOTS list and RECALL it: the daemon puts the fader
+# back (and the recall is not an edit).
+settle
+open snapshots
+settle
+click snapshots:Snapshots(SaveAs)
+key A
+key enter
+settle
+drag /devices/0/inputs/0:Fader 0 -60
+settle
+click snapshots:Snapshots(Snapshot(0))
+settle
+click snapshots:Snapshots(Recall)
+settle
+#! tree /Snapshot/value 000 - Untitled/A
+#! tree /devices/0/inputs/0/FaderLevel/value 12.0
+#! tree /devices/0/inputs/0/FaderLevel/value 0.0
+#! tree /Dirty/value False
