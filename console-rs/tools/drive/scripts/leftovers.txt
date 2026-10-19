@@ -15,3 +15,23 @@ settle
 click settings:PanelClose
 settle
 #! tree /devices/0/inputs/0/sends/2/Gain/value -18.0
+
+# The INS switch beside UAD REC/MON (Rack_UADRecord's press target): flips the input's
+# RecordPreEffects, as the LEDs do. Twice: one value each way.
+click /devices/0/inputs/1:RecMon
+settle
+click /devices/0/inputs/1:RecMon
+settle
+#! tree /devices/0/inputs/1/RecordPreEffects/value True
+#! tree /devices/0/inputs/1/RecordPreEffects/value False
+
+# MODIFIERS > SET DEFAULT: a plain click on a moved fader returns it to its default (manual
+# §4.7); the fake daemon resolves "default" to 0.7818181818181819.
+drag /devices/0/inputs/2:Fader 0 -60
+settle
+click nav:Modifier(SetDefault)
+click /devices/0/inputs/2:Fader
+settle
+click nav:Modifier(SetDefault)
+settle
+#! tree /devices/0/inputs/2/FaderLevelTapered/value 0.7818181818181819

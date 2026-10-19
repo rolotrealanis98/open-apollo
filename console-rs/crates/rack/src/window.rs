@@ -847,7 +847,10 @@ fn unison(ui: &mut Ui, state: &crate::model::InsertState, label: Option<&crate::
 fn rec_mon(ui: &mut Ui, monitor_only: bool, s: &StripInfo, y: f32) {
     let h = 42.0;
     ui.toggle("UAD-Record-LEDs", None, !monitor_only, true, Rect::new(6.0, y - 2.0, 43.0, h), cid(s, Control::RecMon), None);
-    ui.toggle("Switch", Some("INS"), false, true, Rect::new(STRIP_W / 2.0, y - 2.0, 40.0, h), None, None);
+    // INS (`Rack_UADRecord` 0x14ff288, button "toggle"): not a state of its own. A press anywhere
+    // on the component flips this input's `RecordPreEffects` (mouseDown 0x14fff98), the LEDs
+    // show it; INS only takes the pressed look while held (mouseUp 0x15004c0 clears it).
+    ui.toggle("Switch", Some("INS"), false, true, Rect::new(STRIP_W / 2.0, y - 2.0, 40.0, h), cid(s, Control::RecMon), None);
 }
 
 fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos) {

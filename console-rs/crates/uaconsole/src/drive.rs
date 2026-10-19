@@ -196,6 +196,7 @@ impl Driver {
         }
         let armed = self.mixer.drag_press(&self.frame.hits, x, y, &*self.model);
         self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
+        self.interaction.set_default = self.mixer.modifier == Some(rack::surfaces::Modifier::SetDefault);
         self.interaction.mods = self.keys;
         let actions = self.interaction.pointer_down(&self.frame.hits, x, y, double);
         if armed {

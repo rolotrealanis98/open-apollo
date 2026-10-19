@@ -738,7 +738,9 @@ impl ViewState {
                 Some(Modifier::Power) => Action::Tap(to(C::InsertPower(k))),
                 Some(Modifier::Remove) => Action::Tap(to(C::InsertRemove(k))),
                 Some(Modifier::Copy) => Action::Tap(to(C::InsertCopy(k))),
-                Some(Modifier::SetDefault) => Action::Tap(to(C::InsertSetDefault(k))),
+                // SET DEFAULT leaves plug-in inserts alone (manual §4.7); Rack_Inserts consumes
+                // the click under any modifier (`buttonClicked` 0x145c510 acts in mode 0 only).
+                Some(Modifier::SetDefault) => return Vec::new(),
                 _ => action,
             })];
         }
@@ -1311,6 +1313,9 @@ mod tests {
         assert_eq!(v.modifier, None);
         let e = v.route(Action::Tap(cid("in0", Control::Insert(1))), &model);
         assert_eq!(e, vec![Effect::Model(Action::Tap(cid("in0", Control::Insert(1))))]);
+        // SET DEFAULT does not apply to inserts: the tap is consumed (no open, no write).
+        v.dispatch(Action::Toggle(cid("nav", Control::Modifier(Modifier::SetDefault))), &mut model);
+        assert!(v.route(Action::Tap(cid("in0", Control::Insert(1))), &model).is_empty());
     }
 
     #[test]

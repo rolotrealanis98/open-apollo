@@ -66,7 +66,6 @@ pub enum Control {
     InsertPower(u8),
     InsertRemove(u8),
     InsertCopy(u8),
-    InsertSetDefault(u8),
     /// [model] Drag and drop (`crate::dnd`): the loaded insert `from_slot` of strip `from`
     /// dropped on slot `slot` of this strip (`post /MoveInsert`); `copy` with the copy modifier.
     InsertMove { slot: u8, from: Arc<str>, from_slot: u8, copy: bool },
@@ -503,6 +502,10 @@ pub struct Interaction {
     pub controls_mode: ControlsMode,
     /// The modifier keys held at the next press (the host sets them before `pointer_down`).
     pub mods: KeyMods,
+    /// MODIFIERS › SET DEFAULT is latched (the host sets it from the view): a press on a knob
+    /// or fader returns it to its default, as Option-click (manual §4.7; Rack's
+    /// `RFT_SetDefaultButton`: faders, pans, sends, preamp gain), not monitor levels.
+    pub set_default: bool,
     active: Option<Active>,
     /// The [`HitKind::Latch`] control pressed, and when.
     latched: Option<(ControlId, std::time::Instant)>,
@@ -549,7 +552,7 @@ impl Interaction {
                 vec![Action::Tap(id)]
             }
             HitKind::Drag { value, span, reset } | HitKind::Knob { value, span, reset } => {
-                if mods.alt {
+                if mods.alt || (self.set_default && hit.id.control != Control::MonitorLevel) {
                     // Back to the default (the engine resolves `"default"`; a control without a
                     // known UI default shows its value until the engine's echo).
                     let group = if mods.cmd { peers(hits, hit) } else { vec![hit] };
@@ -678,6 +681,16 @@ mod tests {
     fn option_click_resets() {
         let hits = strip_hits();
         let mut i = with(true, false);
+        let in0 = cid("/d/inputs/0", Control::Fader);
+        assert_eq!(i.pointer_down(&hits, 10.0, 100.0, false), vec![Action::GestureBegin(in0.clone()), Action::Reset(in0.clone(), 0.78), Action::GestureEnd(in0)]);
+        assert!(!i.is_dragging());
+    }
+
+    /// SET DEFAULT latched: a plain click resets a fader, as Option-click.
+    #[test]
+    fn set_default_modifier_click_resets() {
+        let hits = strip_hits();
+        let mut i = Interaction { set_default: true, ..Interaction::default() };
         let in0 = cid("/d/inputs/0", Control::Fader);
         assert_eq!(i.pointer_down(&hits, 10.0, 100.0, false), vec![Action::GestureBegin(in0.clone()), Action::Reset(in0.clone(), 0.78), Action::GestureEnd(in0)]);
         assert!(!i.is_dragging());

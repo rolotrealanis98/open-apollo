@@ -554,6 +554,7 @@ impl App {
         // a double-click still activates the row now (as the FFI host does).
         let armed = self.mixer.drag_press(active_hits!(self), x, y, &*self.model);
         self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
+        self.interaction.set_default = self.mixer.modifier == Some(rack::surfaces::Modifier::SetDefault);
         self.interaction.mods = self.key_mods();
         let actions = self
             .interaction
