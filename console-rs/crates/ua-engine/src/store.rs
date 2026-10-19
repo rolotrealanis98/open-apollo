@@ -84,6 +84,16 @@ const STRUCTURAL: [&str; 12] = [
 /// A change of these re-reads the node's metadata (`48V/enabled` and the like): the Hi-Z jack
 /// too, which takes the preamp out of Mic.
 const METADATA_TRIGGERS: [&str; 4] = ["Stereo", "IOType", "EffectName", "HiZ"];
+/// `<device>/inputs/N/preamps/K` + `HiZ` → `<device>/inputs/N` and its pair partner `inputs/N^1`.
+fn hi_z_inputs(node: &str, name: &str) -> Option<[String; 2]> {
+    if name != "HiZ" {
+        return None;
+    }
+    let (input, _) = node.rsplit_once("/preamps/")?;
+    let (device, n) = input.rsplit_once("/inputs/")?;
+    let n: u32 = n.parse().ok()?;
+    Some([input.to_owned(), format!("{device}/inputs/{}", n ^ 1)])
+}
 const LOG_CAP: usize = 16_384;
 const REFRESH_DELAY: Duration = Duration::from_millis(100);
 /// `/UndoRedo`: an int whose `values` are `[{type:"undo"…},{type:"current"…},{type:"redo"…}]`.
@@ -155,7 +165,13 @@ impl Model {
             self.topology_dirty = true;
         }
         if self.live && METADATA_TRIGGERS.contains(&name) {
-            self.refresh_wanted.push(node.to_owned());
+            match hi_z_inputs(node, name) {
+                // `IOType/enabled` and `Stereo/enabled` live on the input, and a Hi-Z jack also
+                // stops the pair partner from starting a link (the input's re-read covers the
+                // preamp node)
+                Some(inputs) => self.refresh_wanted.extend(inputs),
+                None => self.refresh_wanted.push(node.to_owned()),
+            }
         }
         if self.live && session::IDENTITY_PATHS.contains(&pp) {
             self.values_wanted = true;
@@ -1259,5 +1275,19 @@ mod error_notice_tests {
         assert!(store.model.revision > previous);
         store.clear_error();
         assert!(store.last_error().is_none());
+    }
+}
+
+#[cfg(test)]
+mod hi_z_tests {
+    use super::hi_z_inputs;
+
+    #[test]
+    fn hi_z_refreshes_the_input_and_its_partner() {
+        let got = hi_z_inputs("/devices/0/inputs/1/preamps/0", "HiZ").unwrap();
+        assert_eq!(got, ["/devices/0/inputs/1".to_owned(), "/devices/0/inputs/0".to_owned()]);
+        assert_eq!(hi_z_inputs("/devices/1/inputs/2/preamps/0", "HiZ").unwrap()[1], "/devices/1/inputs/3");
+        assert!(hi_z_inputs("/devices/0/inputs/1/preamps/0", "IOType").is_none());
+        assert!(hi_z_inputs("/devices/0/outputs/1", "HiZ").is_none());
     }
 }

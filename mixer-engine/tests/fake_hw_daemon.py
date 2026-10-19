@@ -76,8 +76,9 @@ class RecordingBackend:
     def set_bus_pan(self):
         return HardwareBackend.set_bus_pan.__get__(self)
 
-    def __init__(self, log, refuse_rates=(), refuse_clocks=()):
+    def __init__(self, log, refuse_rates=(), refuse_clocks=(), readback=None):
         self.log = log
+        self.readback = readback
         self.connected = True
         self.paused = False
         self.device_path = None
@@ -118,9 +119,14 @@ class RecordingBackend:
     def get_driver_param(self, param_id):
         return self.driver_values.get(param_id)
 
-    # Reads the daemon polls: nothing to report
+    # Reads the daemon polls: nothing to report, except the readback words
+    # a test puts in the --readback file (a JSON list, front panel / jacks)
     def get_hw_readback(self):
-        return None
+        try:
+            words = json.loads(self.readback.read_text())
+        except (AttributeError, OSError, ValueError):
+            return None
+        return 1, [int(w) & 0xFFFFFFFF for w in words]
 
     def get_dsp_loads(self):
         return None
@@ -218,6 +224,9 @@ def main():
                              "catalogue (stereo-only and mono-only bundles)")
     parser.add_argument("--pipewire-fixture", type=Path,
                         help="serve this pw-dump JSON as PipeWire")
+    parser.add_argument("--readback", type=Path,
+                        help="the hardware readback: a JSON list of the "
+                             "words, re-read on every poll (absent: none)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     if args.port in FORBIDDEN_PORTS:
@@ -241,7 +250,8 @@ def main():
     catalogue = ua_catalogue.apply(state, None, args.catalogue) if args.catalogue else None
     if args.native_slots:
         publish_native_slots(state)
-    backend = RecordingBackend(log, args.refuse_rate, args.refuse_clock)
+    backend = RecordingBackend(log, args.refuse_rate, args.refuse_clock,
+                               args.readback)
     router = HardwareRouter(backend, state, stereo_sends=args.stereo_sends,
                             input_buses=descriptor_input_buses(MODEL),
                             model=descriptor_model(MODEL))
