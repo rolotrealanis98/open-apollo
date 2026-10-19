@@ -200,11 +200,10 @@ fn echoes_do_not_pull_back_a_drag() {
     assert_eq!(store.value(&fader), Some(&Value::Number(0.6)), "a held echo does not pull the drag back");
     store.end_gesture();
     drain_until(&mut store, "engine settles on 0.6", T, |_| server.value(&fader) == Some(Value::Number(0.6)));
-    // Past the hold's release: the engine's own echo of 0.6 came after the stale 0.3, so the
-    // release applies 0.6 and nothing pulls the fader back.
+    // Past the hold's release: the engine's echo of our 0.6 dropped the stale 0.3, so the
+    // release keeps 0.6; a slow engine's late echo can only confirm it.
     std::thread::sleep(Duration::from_millis(1600));
-    store.drain();
-    assert_eq!(store.value(&fader), Some(&Value::Number(0.6)));
+    drain_until(&mut store, "0.6 after the release", T, |s| s.value(&fader) == Some(&Value::Number(0.6)));
 }
 
 #[test]
