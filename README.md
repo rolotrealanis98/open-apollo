@@ -193,11 +193,18 @@ and troubleshooting.
 
 Open **Open Apollo Console** from your app menu. `uaconsole` is a native Linux rebuild of UA's
 UAD Console: the mixer, its windows and menus, meters, and plug-in windows drawn from the
-open-apollo-panels specs. It talks to the mixer daemon on 127.0.0.1:4710. The menu entry
-controls your Apollo (`uaconsole --writes`). Plain `uaconsole` only shows the mixer until you
-turn on Settings › WRITES. See [console-rs/README.md](console-rs/README.md) for options
-and troubleshooting, and [console-rs/WIRING.md](console-rs/WIRING.md) for which controls are
-wired.
+open-apollo-panels specs. It drives the Apollo end to end: preamps, stereo link, sends, aux
+returns, cue sends (Sends window), monitor and control room (DIM, ALT, ALT TRIM, source,
+headphones), talkback, sample rate and clock, and Settings. Option/Alt-click resets a control
+to its default. CUE 3/4 and the headphone MON/NONE sources are refused until their hardware
+encoding is verified; Unison and insert DSP need the plug-in host, which isn't in this release.
+
+It talks to the mixer daemon on 127.0.0.1:4710. The menu entry controls your Apollo
+(`uaconsole --writes`). Plain `uaconsole` only shows the mixer until you turn on
+Settings › WRITES. On Wayland, plug-in windows and menus open inside the mixer window;
+`uaconsole --x11` gives them their own windows. See [console-rs/README.md](console-rs/README.md)
+for options and troubleshooting, and [console-rs/WIRING.md](console-rs/WIRING.md) for which
+controls are wired.
 
 ### Virtual I/O devices (Apollo x4)
 

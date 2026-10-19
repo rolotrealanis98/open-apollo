@@ -186,6 +186,7 @@ host name, home path or serial numbers.
 | The Apollo isn't detected (`lspci -d 1a00:` is empty) | Power-cycle the Apollo, check the Thunderbolt cable and port, and authorize the device (`boltctl list`). |
 | No sound after using a JACK app (Ardour) | `systemctl --user restart pipewire wireplumber pipewire-pulse`, then `apollo-setup-io`. |
 | The Console shows no art | `bash scripts/install-uaconsole.sh --check`; see [console-rs/README.md](../console-rs/README.md#troubleshooting). |
+| Plug-in windows open inside the mixer window | That is how it works on Wayland. Run `uaconsole --x11` for separate windows. |
 | Plug-in windows show a plain parameter list | Run `oa-assets status`. The panel specs or their art are missing, or that panel isn't drawn yet. |
 | The plug-in browser is empty | `oa-assets catalogue --from /path/to/windows`, then `systemctl --user restart ua-mixer-daemon`. |
 
