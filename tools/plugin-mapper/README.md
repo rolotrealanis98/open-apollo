@@ -16,8 +16,22 @@ cd tools/plugin-mapper
 (`scripts/install-panels.sh`) and, for a few plug-ins whose step lists are preset names, the
 texts `oa-assets plugins` imports. Options: `--all` (every installed plug-in with a panel spec,
 not only `mixer-engine/device_maps/native_known_good.json`), `--only NAME` (repeatable),
-`--workers N`, `--out DIR` (default `~/.local/share/open-apollo/plugin-bundles`), `--work DIR`
-(the cache, default `~/.cache/open-apollo/plugin-mapper`; delete it freely).
+`--workers N` (default: CPU cores - 1, or `OA_PLUGIN_MAP_WORKERS`), `--out DIR` (default
+`~/.local/share/open-apollo-plugin-maps`), `--work DIR` (scratch, default
+`~/.cache/open-apollo/plugin-mapper`; delete it freely), `--authorized auto|all|FILE` (default
+`auto`: only what the Apollo authorizes, asked of the running daemon or else the device; with no
+answer every selected plug-in), `--markers` (`::progress` lines for the setup wizard), `--force`
+and `--retry-failures`.
+
+`python3 -m plugin_mapper stage --from ROOT --to DIR` copies what mapping reads (the known-good
+plug-in DLLs, `UAD2SDK.dll`, the few data files plug-ins open) into DIR, laid out like the
+install; setup maps from that copy so mapping can go on after the Windows partition is closed.
+
+Plug-ins are mapped one per worker, each line on stdout as it starts and ends (`Mapping 12/37:
+UAD Pultec EQP-1A (mono, stereo)…`, then `done 41.0 s · ~6 min left`), with `progress.json` and
+`index.json` rewritten after each one. A plug-in's maps are reused until its DLL, `UAD2SDK.dll`,
+the mapper (`MAPPER_VERSION`) or its known-good entry changes; a plug-in that failed with the
+same inputs is not tried again unless `--retry-failures`.
 
 Nothing here loads a DLL into a process or talks to a device or the network: every plug-in
 runs inside Unicorn, against the user's own `UAD2SDK.dll`. The output is made from UA's code and

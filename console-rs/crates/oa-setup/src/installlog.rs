@@ -136,6 +136,11 @@ pub const INSTALL_SH: &[Phase] = &[
     phase(&["Install Report", "Telemetry"], "Install report", None),
 ];
 
+/// Phases install.sh runs only when asked (`--plugin-hosting`): not expected, so not listed
+/// as skipped when absent, but labelled and summarised like the others when they run.
+pub const OPTIONAL: &[Phase] =
+    &[phase(&["Plug-ins on the Apollo (experimental)"], "Plug-ins on the Apollo (mapping)", Some("plugins"))];
+
 /// scripts/uninstall.sh, in order. "USB install" (with uninstall-usb.sh's own
 /// headers) only runs when a USB install is there.
 pub const UNINSTALL_SH: &[Phase] = &[
@@ -205,6 +210,47 @@ pub struct Progress {
     /// install.sh's closing verdict line, if seen.
     pub verdict: Option<String>,
     pub outcome: Option<Outcome>,
+    /// The latest `::progress` marker (the plug-in mapper's count and ETA), shown as a bar.
+    pub counter: Option<Counter>,
+}
+
+/// `::progress <what> <done> <total> <eta seconds, -1 unknown> <text>`: a long phase's count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Counter {
+    pub what: String,
+    pub done: u32,
+    pub total: u32,
+    pub eta_seconds: Option<u32>,
+    pub text: String,
+}
+
+impl Counter {
+    pub fn parse(line: &str) -> Option<Counter> {
+        let clean = strip_ansi(line);
+        let rest = clean.trim_end().strip_prefix("::progress ")?;
+        let mut parts = rest.splitn(5, ' ');
+        let what = parts.next()?.to_string();
+        let done = parts.next()?.parse().ok()?;
+        let total = parts.next()?.parse().ok()?;
+        let eta: i64 = parts.next()?.parse().ok()?;
+        let text = parts.next().unwrap_or("").trim().to_string();
+        Some(Counter { what, done, total, eta_seconds: u32::try_from(eta).ok(), text })
+    }
+
+    pub fn fraction(&self) -> f32 {
+        if self.total == 0 { 0.0 } else { (self.done as f32 / self.total as f32).min(1.0) }
+    }
+
+    /// "12/37 · ~4 min left".
+    pub fn summary(&self) -> String {
+        let left = match self.eta_seconds {
+            None if self.done < self.total => " · estimating time left".to_string(),
+            Some(s) if self.done < self.total && s < 90 => format!(" · ~{} s left", s.max(1)),
+            Some(s) if self.done < self.total => format!(" · ~{} min left", (s + 30) / 60),
+            _ => String::new(),
+        };
+        format!("{}/{}{left}", self.done, self.total)
+    }
 }
 
 /// Keep the log view bounded; a kernel build can print a lot.
@@ -223,6 +269,7 @@ impl Progress {
             reboot_needed: false,
             verdict: None,
             outcome: None,
+            counter: None,
         }
     }
 
@@ -236,6 +283,10 @@ impl Progress {
     }
 
     pub fn feed(&mut self, raw: &str) {
+        if let Some(c) = Counter::parse(raw) {
+            self.counter = Some(c);
+            return;
+        }
         let line = classify(raw);
         let text = line.text().to_string();
         if text.contains("REBOOT REQUIRED") {
@@ -275,9 +326,16 @@ impl Progress {
         let idx = match found {
             Some(i) => i,
             None => {
-                self.plan.push(phase(&[], "", None));
-                self.substeps.push(SubStep { label: header.to_string(), status: Status::Pending, note: None });
-                self.substeps.len() - 1
+                // An optional or unknown phase: shown where it ran, after the current one.
+                let at = self.current.map_or(self.substeps.len(), |i| i + 1);
+                let known = OPTIONAL.iter().find(|p| p.headers.iter().any(|h| h.eq_ignore_ascii_case(header)));
+                let (p, label) = match known {
+                    Some(p) => (*p, p.label.to_string()),
+                    None => (phase(&[], "", None), header.to_string()),
+                };
+                self.plan.insert(at, p);
+                self.substeps.insert(at, SubStep { label, status: Status::Pending, note: None });
+                at
             }
         };
         if self.current == Some(idx) {
@@ -453,6 +511,37 @@ mod tests {
             "\x1b[0;36m[INFO]\x1b[0m  No data sent. Report saved locally at /tmp/open-apollo-install-report.json"
                 .into(),
         ]
+    }
+
+    #[test]
+    fn progress_markers_feed_a_counter_not_the_log() {
+        let mut p = Progress::new(INSTALL_SH);
+        p.feed(&header("Mixer Daemon"));
+        p.feed(&header("Plug-ins on the Apollo (experimental)"));
+        let labels: Vec<_> = p.substeps.iter().map(|s| s.label.as_str()).collect();
+        let at = labels.iter().position(|l| *l == "Plug-ins on the Apollo (mapping)").unwrap();
+        assert_eq!(labels[at - 1], "Mixer daemon", "shown right after the phase it followed");
+        assert_eq!(p.current().unwrap().label, "Plug-ins on the Apollo (mapping)");
+        let lines = p.lines.len();
+        p.feed("::progress plugins 12 37 240 UAD Pultec EQP-1A");
+        assert_eq!(p.lines.len(), lines);
+        let c = p.counter.clone().unwrap();
+        assert_eq!((c.what.as_str(), c.done, c.total, c.eta_seconds), ("plugins", 12, 37, Some(240)));
+        assert_eq!(c.text, "UAD Pultec EQP-1A");
+        assert_eq!(c.summary(), "12/37 · ~4 min left");
+        p.feed("::progress plugins 13 37 -1 x");
+        assert_eq!(p.counter.as_ref().unwrap().summary(), "13/37 · estimating time left");
+        p.feed("::progress plugins 37 37 0 done");
+        assert_eq!(p.counter.as_ref().unwrap().summary(), "37/37");
+        assert!(Counter::parse("::progress plugins x 37 0").is_none());
+        p.feed("  [OK]    plugins");
+        assert_eq!(p.substeps[at].status, Status::Done);
+    }
+
+    #[test]
+    fn without_plugin_hosting_no_plugin_phase_is_listed() {
+        let p = Progress::new(INSTALL_SH);
+        assert!(p.substeps.iter().all(|s| !s.label.starts_with("Plug-ins")));
     }
 
     fn status_of(p: &Progress, label_start: &str) -> Status {

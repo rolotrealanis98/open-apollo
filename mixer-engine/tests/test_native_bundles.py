@@ -135,3 +135,85 @@ def test_known_good_list_holds_no_dsp_data():
         assert set(entry) <= {"name", "stage", "family", "layouts", "latency_samples", "dynamic_refs"}
         assert set(entry["layouts"]) <= {"mono", "stereo"}
         assert all(len(ref) == 2 for ref in entry.get("dynamic_refs", ()))
+
+
+def test_maps_landing_while_the_daemon_runs_are_offered_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "ProfiledCarrierProvider", Stub)
+    monkeypatch.setattr(registry, "StereoProfiledCarrierProvider", StereoStub)
+    monkeypatch.setattr(registry, "known_good", lambda: {
+        "UAD A": {"layouts": ["mono", "stereo"]}, "UAD B": {"layouts": ["mono", "stereo"]}})
+    watcher = registry.BundleWatcher(tmp_path)
+    first = registry.create_profiled_providers(watcher=watcher)
+    assert list(first) == [] and first.growable          # no maps yet: hosting starts empty
+    bundles(tmp_path, ("UAD A", "mono"), ("UAD A", "stereo"))
+    assert {(p.name, type(p).__name__) for p in watcher.poll()} == {("UAD A", "Stub"), ("UAD A", "StereoStub")}
+    assert watcher.poll() == []                          # unchanged index: nothing new
+    bundles(tmp_path, ("UAD A", "mono"), ("UAD A", "stereo"), ("UAD B", "mono"))
+    import os
+    os.utime(tmp_path / "index.json", ns=(1, 10**18))    # a new index even within one clock tick
+    assert {(p.name, type(p).__name__) for p in watcher.poll()} == {("UAD B", "Stub")}
+    assert "2 plug-ins (1 in both layouts)" in watcher.summary()
+    (tmp_path / "progress.json").write_text(json.dumps({"state": "running", "done": 3, "total": 9, "eta_seconds": 300}))
+    assert watcher.progress()["done"] == 3
+
+
+def test_daemon_offers_landed_maps_and_publishes_progress(tmp_path, monkeypatch):
+    from ua_mixer_daemon import MixerDaemon
+    from test_plugin_native_layouts import provider, rig
+    p = provider(1)
+    state, driver, backend, tx = rig((p,), max_instances=4)
+    daemon = MixerDaemon(state, None, helper_tree=backend.publisher.helper,
+                         plugin_transactions=tx, plugin_hosting=True)
+
+    class Watcher:
+        def __init__(self):
+            self.landed = []
+
+        def progress(self):
+            return {"state": "running", "done": 2, "total": 5, "eta_seconds": 240}
+
+        def poll(self):
+            landed, self.landed = self.landed, []
+            return landed
+
+        def summary(self):
+            return "test"
+    daemon.plugin_maps = Watcher()
+    published = []
+    monkeypatch.setattr(daemon, "_publish_native_capabilities", lambda: published.append(True))
+    daemon._plugin_maps_poll()
+    assert state.get_value("/NativePluginMapsStatus") == "Mapping plug-ins 2/5 · ~4 min left"
+    assert state.get_value("/NativePluginMapsTotal") == 5 and not published
+    newcomer = provider(2)
+    newcomer.name = "UAD Newcomer"
+    daemon.plugin_maps.landed = [newcomer]
+    daemon._native_busy = True                           # a load is running: wait for it
+    daemon._plugin_maps_poll()
+    assert not published
+    daemon._native_busy = False
+    daemon._plugin_maps_poll()
+    assert published and (newcomer.slot, "UAD Newcomer", (2,)) in backend.providers
+
+
+def test_licence_answer_and_rescan_start_the_mapper_once_per_change(tmp_path, monkeypatch):
+    from ua_mixer_daemon import MixerDaemon
+    from state_tree import StateTree
+    import subprocess
+    daemon = MixerDaemon(StateTree(), None)
+    daemon.plugin_maps = object()
+    unit = tmp_path / "systemd/user/open-apollo-plugin-maps.service"
+    unit.parent.mkdir(parents=True)
+    unit.write_text("[Service]\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    started = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: started.append(argv))
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+    for i, (name, auth) in enumerate((("UAD A", True), ("UAD B", False))):
+        daemon.state.add_runtime_property(f"/plugins/{i}/Name", {"type": "string", "value": name})
+        daemon.state.add_runtime_property(f"/plugins/{i}/Authorized", {"type": "bool", "value": auth})
+    daemon._plugin_maps_on_licence()
+    daemon._plugin_maps_on_licence()                     # same answer: no second build
+    assert started == [["systemctl", "--user", "start", "--no-block", "open-apollo-plugin-maps.service"]]
+    daemon.state.set_value("/plugins/1/Authorized", True)   # a licence appeared
+    daemon._plugin_maps_on_licence()
+    assert len(started) == 2

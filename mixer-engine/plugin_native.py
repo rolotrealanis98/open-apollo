@@ -84,13 +84,23 @@ class NativePluginBackend:
             raise ValueError('Unison requires input-header composition')
         self.unison = unison
         providers = provider if isinstance(provider, (tuple, list)) else (provider,)
-        if not providers:
+        # A growable set (maps still being built on this machine) may start empty.
+        if not providers and not getattr(provider, 'growable', False):
             raise ValueError('at least one explicit native provider required')
         self.providers = {}
+        self._leases = {}
+        self._pending = {}
+        self._dynamic = {}   # native handle -> {(row, word)} the running plug-in owns
+        self.add_providers(providers)
+
+    def add_providers(self, providers):
+        """Offer more recipes (a plug-in whose maps just landed). All are checked before any is
+        added; existing recipes and live leases are untouched. Call between transactions."""
+        added = {}
         for item in providers:
             match = re.fullmatch(r'/devices/0/inputs/([0-3])/(preamps/0/)?effects/0', item.slot)
             if (not match or not isinstance(item.name, str) or not item.name
-                    or (match[2] and not unison)
+                    or (match[2] and not self.unison)
                     or type(item.sample_rate) is not int or item.sample_rate <= 0):
                 raise ValueError('named supported input effect-zero provider required')
             first = int(match[1])
@@ -100,12 +110,11 @@ class NativePluginBackend:
                     or (len(channels) == 2 and first not in (0, 2))):
                 raise ValueError('explicit mono input or adjacent stereo pair required')
             key = (item.slot, item.name, channels)
-            if key in self.providers:
+            if key in self.providers or key in added:
                 raise ValueError('duplicate native provider for slot and effect')
-            self.providers[key] = item
-        self._leases = {}
-        self._pending = {}
-        self._dynamic = {}   # native handle -> {(row, word)} the running plug-in owns
+            added[key] = item
+        self.providers.update(added)
+        return list(added)
 
     def _channels(self, slot):
         first = int(slot.split('/')[4])
@@ -486,8 +495,8 @@ def register_native(state, helper, hardware, provider):
     fd = hardware.fd
     rate = hardware.get_driver_param(DRIVER_PARAM_SAMPLE_RATE)
     providers = provider if isinstance(provider, (tuple, list)) else (provider,)
-    if not providers or any(type(p.sample_rate) is not int or p.sample_rate != rate
-                            for p in providers):
+    if (not providers and not getattr(provider, 'growable', False)) or any(
+            type(p.sample_rate) is not int or p.sample_rate != rate for p in providers):
         raise ValueError('native provider sample rate does not match hardware')
     features = hardware.features2()
     if type(features) is not int:

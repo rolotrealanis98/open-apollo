@@ -20,6 +20,10 @@
 #                 /lib/firmware/ua_apollo) and the desktop user's imported Console
 #                 art and caches (~/.local/share/open-apollo, ~/.cache/open-apollo).
 #                 Without it they stay, so a reinstall can use them again.
+#                 Plug-in maps (~/.local/share/open-apollo-plugin-maps) stay even then.
+#   --purge-plugin-maps
+#                 Also delete the plug-in maps tools/plugin-mapper built (they
+#                 take a long time to build again; a reinstall reuses them).
 #   --keep-dkms   Keep the DKMS registration and the modules it built.
 #   --list        Print what is installed, one "KIND<TAB>ITEM" line each, and exit.
 #   -h, --help    Show this help.
@@ -38,6 +42,7 @@ USB_UNINSTALL_SH="$SCRIPT_DIR/uninstall-usb.sh"
 # --- Flags (only main() parses them, so sourcing this file has no side effects) ---
 ASSUME_YES=0
 PURGE=0
+PURGE_MAPS=0
 KEEP_DKMS=0
 LIST_ONLY=0
 
@@ -60,6 +65,7 @@ parse_args() {
         case "$arg" in
             -y|--yes)    ASSUME_YES=1 ;;
             --purge)     PURGE=1 ;;
+            --purge-plugin-maps) PURGE_MAPS=1 ;;
             --keep-dkms) KEEP_DKMS=1 ;;
             --list)      LIST_ONLY=1 ;;
             -h|--help)   usage; exit 0 ;;
@@ -134,7 +140,8 @@ paths_of() {
                                    "$h"/.config/systemd/user/ua-mixer-daemon@*.service.d
                                    "$h"/.config/systemd/user/*.wants/ua-mixer-daemon*.service
                                    "$h"/.config/systemd/user/apollo-setup-io.service
-                                   "$h"/.config/systemd/user/*.wants/apollo-setup-io.service) ;;
+                                   "$h"/.config/systemd/user/*.wants/apollo-setup-io.service
+                                   "$h"/.config/systemd/user/open-apollo-plugin-maps.service) ;;
         config)
             PATHS=("$ROOT"/etc/wireplumber/main.lua.d/51-ua-apollo.lua
                    "$ROOT"/etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf
@@ -186,11 +193,14 @@ paths_of() {
         data)
             # Imported Console and plug-in art, caches (kept unless --purge)
             [ -n "$h" ] && PATHS=("$h"/.local/share/open-apollo "$h"/.cache/open-apollo) ;;
+        maps)
+            # Plug-in maps built from the user's install (kept unless --purge-plugin-maps)
+            [ -n "$h" ] && PATHS=("$h"/.local/share/open-apollo-plugin-maps) ;;
     esac
     return 0
 }
 
-FILE_KINDS="dkms driver daemon config udev console panels legacy usb firmware data"
+FILE_KINDS="dkms driver daemon config udev console panels legacy usb firmware data maps"
 
 # Every ua_apollo version DKMS knows, one per line (both status formats:
 # "ua_apollo/1.0, 6.9, x86_64: installed" and "ua_apollo, 1.0, 6.9, ...").
@@ -242,6 +252,7 @@ something_to_remove() {
     for k in "${INV_KIND[@]}"; do
         case "$k" in
             firmware|data) [ "$PURGE" = 1 ] && return 0 ;;
+            maps) [ "$PURGE_MAPS" = 1 ] && return 0 ;;
             dkms) [ "$KEEP_DKMS" = 1 ] || return 0 ;;
             *) return 0 ;;
         esac
@@ -277,6 +288,7 @@ stop_daemon() {
         user_systemctl disable --now ua-mixer-daemon.service
         user_systemctl stop 'ua-mixer-daemon@*.service'
         user_systemctl disable --now apollo-setup-io.service
+        user_systemctl stop open-apollo-plugin-maps.service
     fi
     # A daemon started by hand (older installers)
     if pgrep -f ua_mixer_daemon >/dev/null 2>&1; then
@@ -456,6 +468,15 @@ remove_driver() {
 
 remove_firmware_and_data() {
     header "Firmware and imported art"
+    if [ "$PURGE_MAPS" = 1 ]; then
+        remove_paths maps || info "No plug-in maps"
+    else
+        paths_of maps
+        local m
+        for m in "${PATHS[@]}"; do
+            [ -e "$m" ] && info "Kept ${m#"$ROOT"} (plug-in maps; --purge-plugin-maps removes them)"
+        done
+    fi
     if [ "$PURGE" = 1 ]; then
         remove_paths firmware || info "No extracted firmware"
         remove_paths data || info "No imported art or caches"
@@ -486,6 +507,13 @@ verify() {
         kind="${INV_KIND[$i]}"
         item="${INV_ITEM[$i]}"
         case "$kind" in
+            maps)
+                if [ "$PURGE_MAPS" = 1 ]; then
+                    fail "Still here: $item"
+                    left=$((left + 1))
+                else
+                    info "Kept: $item"
+                fi ;;
             firmware|data)
                 if [ "$PURGE" = 1 ]; then
                     fail "Still here: $item"

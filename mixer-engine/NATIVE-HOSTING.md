@@ -9,7 +9,7 @@ bundles are built on the user's machine from their own UAD install. Users turn i
 ```sh
 python3 -m plugin_mapper --from /path/to/windows      # in tools/plugin-mapper; see its README
 python3 mixer-engine/ua_mixer_daemon.py \
-  --native-plugin-bundles ~/.local/share/open-apollo/plugin-bundles \
+  --native-plugin-bundles ~/.local/share/open-apollo-plugin-maps \
   --preserve-hardware --require-hardware
 ```
 
@@ -32,7 +32,17 @@ publishes them as `NativeMonoSlots` / `NativeStereoSlots` per `/plugins/N`; the 
 a plug-in only when both are non-empty. `native_carrier.py` builds the CREATE recipe: chain head,
 Mic Input Strip (the words `driver/ua_strips.c` writes for a plain strip), then the plug-in's
 rows and startup words. Control changes are planned by running the plug-in's own setter in the
-emulator, so the daemon needs the mapper's Python packages and the DLL where it was mapped.
+emulator, so the daemon needs the mapper's Python packages and the DLL it was mapped from
+(setup copies the DLLs next to the maps, `source/`).
+
+The daemon may start before any map exists: `BundleWatcher` rereads `index.json` (the mapper
+rewrites it after each plug-in) every few seconds between transactions, hands the backend the
+new providers (`add_providers`) and republishes the advertisement, so a plug-in shows up in the
+browser as soon as its maps land. The mapper's `progress.json` is published as
+`/NativePluginMapsState`, `/NativePluginMapsDone`, `/NativePluginMapsTotal` and
+`/NativePluginMapsStatus` ("Mapping plug-ins 12/37 · ~4 min left"). Each licence answer that
+authorizes a plug-in without maps, and Settings > Plug-Ins > RESCAN, start the
+`open-apollo-plugin-maps` user service; the mapper maps only what is authorized and not current.
 
 Only the layouts `device_maps/native_known_good.json` lists for a plug-in are offered unless
 `--advertise-all-plugins` is given. That list holds names, the live-gated layouts, the discovery family, Console latency

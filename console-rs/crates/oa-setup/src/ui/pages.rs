@@ -1207,6 +1207,26 @@ pub(super) fn tilde(p: &std::path::Path) -> String {
 
 /// Sub-steps on the left, the section's log on the right.
 fn two_columns(ui: &mut Ui, s: &Section, id: &str) {
+    if let Some(c) = &s.progress.counter {
+        // The plug-in mapper's live count: it goes on in the background after setup.
+        card(ui, false, |ui| {
+            let title = if c.what == "plugins" { "Mapping your plug-ins" } else { c.what.as_str() };
+            ui.label(RichText::new(format!("{title}: {}", c.summary())).color(TEXT));
+            ui.add(egui::ProgressBar::new(c.fraction()).desired_height(6.0));
+            if !c.text.is_empty() {
+                ui.label(RichText::new(&c.text).small().color(WEAK));
+            }
+            if c.what == "plugins" && c.done < c.total {
+                ui.label(
+                    RichText::new(
+                        "This goes on in the background after setup: each plug-in appears in the Console as soon as it is mapped.",
+                    )
+                    .small()
+                    .color(WEAK),
+                );
+            }
+        });
+    }
     ui.columns(2, |cols| {
         card(&mut cols[0], false, |ui| substeps(ui, &s.progress.substeps));
         log_view(&mut cols[1], id, &s.progress.lines, 300.0);

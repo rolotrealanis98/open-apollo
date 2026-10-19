@@ -629,6 +629,10 @@ class MixerDaemon:
         # other than 48 kHz): _native_attach retries it, the reason is published meanwhile.
         self._native_attach = None
         self._native_unavailable_reason = ""
+        # Maps the mapper builds on this machine (profiled_bundle_registry.BundleWatcher), offered
+        # as they land; None without --native-plugin-bundles.
+        self.plugin_maps = None
+        self._plugin_maps_requested: frozenset | None = None
         self.plugin_remote = PluginRemote(state, backend=plugin_remote_backend,
                                           lease_provider=plugin_transactions)
         self.helper_tree = helper_tree  # Separate tree for 4720 Mixer Helper
@@ -892,6 +896,88 @@ class MixerDaemon:
         """Keep trying until the driver's plug-in host is usable (a cold start after the driver
         loaded, 48 kHz). Cheap: one strip-delay read-back per try."""
         while not self._native_hosting_try():
+            await asyncio.sleep(interval)
+
+    # ── Plug-in maps built on this machine ──────────────────────────────
+
+    PLUGIN_MAPS_UNIT = "open-apollo-plugin-maps.service"
+
+    def _plugin_maps_authorized(self) -> frozenset:
+        """The plug-ins the Apollo's answer on /plugins authorizes or demos."""
+        names = set()
+        for path in list(self.state._props):
+            if re_mod.fullmatch(r'/plugins/\d+/Name', path):
+                base = path.rsplit('/', 1)[0]
+                if (self.state.get_value(base + '/Authorized') is True
+                        or self.state.get_value(base + '/Demoing') is True):
+                    names.add(self.state.get_value(path))
+        return frozenset(names)
+
+    def _plugin_maps_on_licence(self):
+        """A fresh licence answer: map what it authorizes that has no map yet (the first answer
+        after start, and any answer that authorizes something new)."""
+        if self.plugin_maps is None:
+            return
+        names = self._plugin_maps_authorized()
+        if names and names != self._plugin_maps_requested:
+            self._plugin_maps_requested = names
+            self._plugin_maps_build("licence")
+
+    def _plugin_maps_build(self, why: str):
+        """Start the background mapper (setup-plugin-hosting.sh installs its user unit). It maps only
+        what changed or is newly authorized and returns at once when everything is current."""
+        if self.plugin_maps is None:
+            return
+        unit = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd/user" / self.PLUGIN_MAPS_UNIT
+        if not unit.is_file() or shutil.which("systemctl") is None:
+            log.info("Plug-in maps: no %s to start (%s); run scripts/setup-plugin-hosting.sh", self.PLUGIN_MAPS_UNIT, why)
+            return
+        import subprocess
+        try:
+            subprocess.Popen(["systemctl", "--user", "start", "--no-block", self.PLUGIN_MAPS_UNIT],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log.info("Plug-in maps: background mapping started (%s)", why)
+        except OSError as error:
+            log.warning("Plug-in maps: could not start %s: %s", self.PLUGIN_MAPS_UNIT, error)
+
+    def _plugin_maps_poll(self):
+        """Publish the mapper's progress and offer the plug-ins whose maps landed. Between native
+        transactions only: the worker thread reads the provider table."""
+        watcher = self.plugin_maps
+        native = self._native_plugin_backend
+        if watcher is None or native is None:
+            return
+        p = watcher.progress()
+        state = p.get("state") if isinstance(p.get("state"), str) else ""
+        done, total = int(p.get("done") or 0), int(p.get("total") or 0)
+        eta = p.get("eta_seconds")
+        if state == "running" and total:
+            left = ("" if not isinstance(eta, int) else
+                    f" · ~{max(eta, 1)} s left" if eta < 90 else f" · ~{round(eta / 60)} min left")
+            status = f"Mapping plug-ins {done}/{total}{left}"
+        else:
+            status = ""
+        self._publish_license("/NativePluginMapsState", state, "string")
+        self._publish_license("/NativePluginMapsDone", done, "int")
+        self._publish_license("/NativePluginMapsTotal", total, "int")
+        self._publish_license("/NativePluginMapsStatus", status, "string")
+        if self._native_busy or self._plugin_publication_active:
+            return
+        try:
+            providers = watcher.poll()
+            if providers:
+                native.add_providers(providers)
+        except Exception:
+            log.exception("Plug-in maps: new maps not offered")
+            return
+        if providers:
+            log.info("Plug-in maps: now offering %s", watcher.summary())
+            self._publish_native_capabilities()
+            learn_native_defaults(providers)   # so their first load does not wait for an emulator
+
+    async def _plugin_maps_watch(self, interval: float = 3.0):
+        while self.plugin_maps is not None:
+            self._plugin_maps_poll()
             await asyncio.sleep(interval)
 
     def _publish_native_delay_status(self):
@@ -2302,6 +2388,7 @@ class MixerDaemon:
                 err = self.licenses.last_error
                 if err is None:
                     self._license_retries = 0
+                    self._plugin_maps_on_licence()
                 elif (err in self._LICENSE_RETRY_ERRNOS and
                       self._license_retries < self._LICENSE_RETRIES):
                     self._license_retries += 1
@@ -3925,6 +4012,10 @@ class MixerDaemon:
         save also writes the daemon's state file now (Console sends it on its
         way out)."""
         name = path.rstrip("/").rsplit("/", 1)[-1]
+        if name == "UpdatePlugInStatus":
+            # Settings > Plug-Ins RESCAN: ask the Apollo again and map what it now authorizes.
+            self._license_request()
+            self._plugin_maps_build("rescan")
         if name in ("NewSession", "OpenSession"):
             self.commands.clear_history()
         elif name == "SaveLastUsedSession":
@@ -4304,11 +4395,12 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                                help="Experimental single-insert hosting through an explicitly "
                                     "trusted local Python provider; requires --preserve-hardware")
     native_source.add_argument("--native-plugin-bundles", type=Path, metavar="DIR", nargs="?",
-                               const=Path.home() / ".local/share/open-apollo/plugin-bundles",
-                               help="Host UA plug-ins on the Apollo's DSP from the runtime bundles "
-                                    "tools/plugin-mapper built on this machine (default DIR "
-                                    "~/.local/share/open-apollo/plugin-bundles); requires "
-                                    "--preserve-hardware. See NATIVE-HOSTING.md")
+                               const=Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+                               / "open-apollo-plugin-maps",
+                               help="Host UA plug-ins on the Apollo's DSP from the maps (runtime "
+                                    "bundles) tools/plugin-mapper builds on this machine (default DIR "
+                                    "~/.local/share/open-apollo-plugin-maps), offering each plug-in as "
+                                    "its maps land; requires --preserve-hardware. See NATIVE-HOSTING.md")
     parser.add_argument("--advertise-all-plugins", action="store_true",
                         help="With --native-plugin-bundles: offer every built bundle, not "
                              "only the plug-ins on device_maps/native_known_good.json")
@@ -4512,15 +4604,16 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     elif args.no_hardware:
         log.info("Software-only mode (--no-hardware)")
 
-    native_backend = native_transactions = native_attach = None
+    native_backend = native_transactions = native_attach = plugin_maps = None
     native_reason = ""
     if native_enabled:
         from plugin_native import load_provider, register_native
         try:
             if args.native_plugin_bundles:
-                from profiled_bundle_registry import create_profiled_providers
-                providers = create_profiled_providers(
-                    args.native_plugin_bundles, advertise_all=args.advertise_all_plugins)
+                from profiled_bundle_registry import BundleWatcher, create_profiled_providers
+                plugin_maps = BundleWatcher(args.native_plugin_bundles,
+                                            advertise_all=args.advertise_all_plugins)
+                providers = create_profiled_providers(watcher=plugin_maps)
             else:
                 providers = load_provider(args.native_plugin_provider)
         except Exception as error:
@@ -4575,6 +4668,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     daemon._native_unavailable_reason = native_reason
     if native_backend is None and native_enabled:
         daemon._publish_native_capabilities()   # NativePluginHosting false and why
+    daemon.plugin_maps = plugin_maps if native_enabled else None
     daemon.autogain.any_model = args.autogain_any_model
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}
@@ -4633,6 +4727,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
         ]
         if daemon._native_attach is not None:
             tasks.append(asyncio.create_task(daemon._native_hosting_retry()))
+        if daemon.plugin_maps is not None:
+            tasks.append(asyncio.create_task(daemon._plugin_maps_watch()))
         if ws_server:
             tasks.append(asyncio.create_task(ws_server.start()))
         await asyncio.gather(*tasks)

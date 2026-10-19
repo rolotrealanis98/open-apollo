@@ -156,17 +156,28 @@ sudo bash scripts/install.sh --plugin-hosting=/path/to/windows
 Either way the driver loads with `plugin_host=1 input_strips=1` (written to
 `/etc/modprobe.d/open-apollo-plugin-hosting.conf`), then `scripts/setup-plugin-hosting.sh`
 runs as you: it installs numpy, unicorn, capstone and pefile into
-`~/.local/share/open-apollo/plugin-venv`, maps the plug-ins (5 to 40 minutes depending on the
-CPU) into `~/.local/share/open-apollo/plugin-bundles`, and restarts the mixer daemon with
-`--native-plugin-bundles`. Rerun the script after a UAD update; `--remove` turns hosting off.
+`~/.local/share/open-apollo/plugin-venv`, copies the plug-in DLLs it reads into
+`~/.local/share/open-apollo-plugin-maps/source`, restarts the mixer daemon with
+`--native-plugin-bundles`, and starts mapping in the background (the user service
+`open-apollo-plugin-maps`, one worker per CPU core but one).
+
+- Only the plug-ins your Apollo authorizes are mapped (the device's own licence answer). When a
+  licence appears later the daemon maps it by itself; Settings > Plug-Ins > **RESCAN** asks at once.
+- Setup shows each plug-in as it is mapped (`Mapping 12/37: UAD Pultec EQP-1A…`, a count and the
+  time left) for a couple of minutes and then lets you finish; mapping goes on, and each plug-in
+  appears in the Console's plug-in browser as soon as its maps are built. Progress:
+  `tail -f ~/.local/share/open-apollo-plugin-maps/build.log`.
+- Maps are kept: `uninstall.sh --purge` leaves them (`--purge-plugin-maps` deletes them), so a
+  reinstall reuses them, and after a UAD update only the plug-ins whose DLL changed are mapped
+  again (rerun the script to copy the new DLLs). `--remove` turns hosting off.
 
 What to expect:
 - The Console lists the plug-ins `mixer-engine/device_maps/native_known_good.json` marks as
   live-tested on an Apollo x4 at 48 kHz in both layouts: mono on any input and stereo on a
   linked pair, up to four per input. `--all` maps every installed plug-in, and the daemon's
   `--advertise-all-plugins` offers them too; those are untested.
-- 48 kHz only. Your Windows install must stay mounted where you mapped it from: the daemon
-  runs each plug-in's own code to plan control changes.
+- 48 kHz only. The daemon runs each plug-in's own code to plan control changes, from the copy in
+  `~/.local/share/open-apollo-plugin-maps/source`: the Windows partition need not stay mounted.
 - The plug-ins run with UA's own DSP code; a refused licence leaves the input as it was.
 - The bundles are made from UA's code on your computer. Don't share or publish them.
 
@@ -203,7 +214,9 @@ It ends with a check that lists anything still there. `--yes` asks nothing.
 | Plug-in panels' art (made from your UAD install) | `~/.local/share/open-apollo/generated/` | `uninstall.sh --purge` |
 | Plug-in panel specs | `/usr/share/open-apollo/plugin-specs/` | `uninstall.sh` |
 | Plug-in hosting: driver options | `/etc/modprobe.d/open-apollo-plugin-hosting.conf` | `uninstall.sh` |
-| Plug-in hosting: bundles and their Python (made from your UAD install) | `~/.local/share/open-apollo/plugin-bundles/`, `plugin-venv/`, `~/.cache/open-apollo/plugin-mapper/` | `uninstall.sh --purge` |
+| Plug-in hosting: maps and the DLLs they are made from (from your UAD install) | `~/.local/share/open-apollo-plugin-maps/` | `uninstall.sh --purge-plugin-maps` |
+| Plug-in hosting: its Python and scratch | `~/.local/share/open-apollo/plugin-venv/`, `~/.cache/open-apollo/plugin-mapper/` | `uninstall.sh --purge` |
+| Plug-in hosting: mapping service | systemd user unit `open-apollo-plugin-maps` | `uninstall.sh` |
 | Mixer daemon | systemd user unit `ua-mixer-daemon` | `uninstall.sh` |
 | Console | `~/.local/bin/uaconsole`, menu entry **Open Apollo Console** | `uninstall.sh` |
 | Audio settings | `/etc/pipewire`, `/etc/wireplumber`, `/usr/share/alsa/ucm2`, `/etc/udev/rules.d` | `uninstall.sh` |

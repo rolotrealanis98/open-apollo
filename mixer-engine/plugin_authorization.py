@@ -113,16 +113,39 @@ def _answer(states):
     return states if any(v in (AUTHORIZED, DEMO) for v in states.values()) else None
 
 
-def authorized_plugins(*, host='127.0.0.1', port=4710, device='/dev/ua_apollo0', manifest=None, timeout=10.0):
-    """{'source': 'daemon'|'device'|None, 'plugins': {name: state}} (plugins empty when unknown)."""
-    for source, read in (('daemon', lambda: from_daemon(host, port, timeout)),
-                         ('device', lambda: from_device(device, manifest))):
-        plugins = read()
+def daemon_listening(host='127.0.0.1', port=4710):
+    try:
+        with socket.create_connection((host, port), 1):
+            return True
+    except OSError:
+        return False
+
+
+def authorized_plugins(*, host='127.0.0.1', port=4710, device='/dev/ua_apollo0', manifest=None, timeout=10.0,
+                       wait=0.0):
+    """{'source': 'daemon'|'device'|None, 'plugins': {name: state}} (plugins empty when unknown).
+
+    `wait`: seconds to keep asking a daemon that is up but has no answer yet (it asks the device
+    a few seconds after it starts); the device itself is only read when no daemon is up."""
+    import time
+    deadline = time.monotonic() + wait
+    while True:
+        plugins = from_daemon(host, port, timeout)
         if plugins:
-            counts = {s: sum(v == s for v in plugins.values()) for s in (AUTHORIZED, DEMO, UNAUTHORIZED, UNKNOWN)}
-            log.info('plug-in authorization from the %s: %s', source, counts)
-            return dict(source=source, plugins=plugins)
-    return dict(source=None, plugins={})
+            return _found('daemon', plugins)
+        if not daemon_listening(host, port):
+            break
+        if time.monotonic() >= deadline:
+            return dict(source=None, plugins={})  # a daemon holds the device: don't open it
+        time.sleep(3)
+    plugins = from_device(device, manifest)
+    return _found('device', plugins) if plugins else dict(source=None, plugins={})
+
+
+def _found(source, plugins):
+    counts = {s: sum(v == s for v in plugins.values()) for s in (AUTHORIZED, DEMO, UNAUTHORIZED, UNKNOWN)}
+    log.info('plug-in authorization from the %s: %s', source, counts)
+    return dict(source=source, plugins=plugins)
 
 
 def authorized_names(answer):

@@ -299,6 +299,22 @@ run -- --yes --purge
 check "a second --purge run exits 0" test $? = 0
 check "a second --purge run finds nothing" has "$tmp_dir/out" "Nothing from open-apollo is installed"
 
+# ---- plug-in maps: kept by --purge, removed by --purge-plugin-maps ----
+
+populate
+mkdir -p "$H/.local/share/open-apollo-plugin-maps" "$H/.config/systemd/user"
+echo '{}' > "$H/.local/share/open-apollo-plugin-maps/index.json"
+echo '[Service]' > "$H/.config/systemd/user/open-apollo-plugin-maps.service"
+run -- --yes --purge
+check "--purge with maps exits 0" test $? = 0
+check "--purge keeps the plug-in maps" test -e "$H/.local/share/open-apollo-plugin-maps/index.json"
+check "--purge says the maps were kept" has "$tmp_dir/out" "--purge-plugin-maps removes them"
+check "--purge removes the mapping service" missing "$H/.config/systemd/user/open-apollo-plugin-maps.service"
+check "the mapping service is stopped" has "$log" "stop open-apollo-plugin-maps.service"
+run -- --yes --purge-plugin-maps
+check "--purge-plugin-maps exits 0" test $? = 0
+check "--purge-plugin-maps removes the maps" missing "$H/.local/share/open-apollo-plugin-maps"
+
 # ---- PKEXEC_UID (the wizard runs it through pkexec, which sets no SUDO_USER) ----
 
 populate

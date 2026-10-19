@@ -62,8 +62,9 @@ Options:
                 Experimental: host your UA plug-ins on the Apollo's DSP.
                 Loads the driver with plugin_host=1 input_strips=1 and runs
                 scripts/setup-plugin-hosting.sh --from ROOT as you (ROOT is
-                your Windows UAD install, as given to setup; mapping takes
-                10-40 minutes). See mixer-engine/NATIVE-HOSTING.md
+                your Windows UAD install, as given to setup). Only plug-ins
+                the Apollo authorizes are mapped, in the background, each one
+                offered as soon as it is mapped. See mixer-engine/NATIVE-HOSTING.md
   -h, --help    Show this help
 
 Steps performed:
@@ -781,9 +782,11 @@ plugin_hosting_options() {
 setup_plugin_hosting() {
     [ -n "$PLUGIN_HOSTING_FROM" ] || return 0
     header "Plug-ins on the Apollo (experimental)"
-    info "Mapping your Powered plug-ins offline from $PLUGIN_HOSTING_FROM (10-40 minutes; nothing leaves this computer)"
+    info "Mapping the Powered plug-ins your Apollo authorizes, offline from $PLUGIN_HOSTING_FROM (nothing leaves this computer)"
+    info "It goes on in the background after setup; each plug-in appears in the Console as soon as it is mapped"
     if as_desktop_user OA_LOG_CAPTURED="${OA_LOG_CAPTURED:-0}" \
         bash "$PROJECT_DIR/scripts/setup-plugin-hosting.sh" --from "$PLUGIN_HOSTING_FROM"; then
+        ok "Plug-in mapping started (progress: ~/.local/share/open-apollo-plugin-maps/build.log)"
         STEP_STATUS[plugins]="ok"
     else
         warn "Plug-in mapping failed — rerun: bash scripts/setup-plugin-hosting.sh --from $PLUGIN_HOSTING_FROM"
