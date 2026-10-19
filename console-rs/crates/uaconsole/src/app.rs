@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use houston::Rgba;
 use rack::{Action, Assets, Control, ControlId, Effect, Interaction, MixerModel, ViewState};
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -1110,9 +1110,25 @@ impl App {
                 self.active = None;
                 self.changed();
             }
+            // A new window learns its display's scale only after it was made at a pixel size
+            // (Wayland): keep the pixels the layer wants and pin min = max again at the new
+            // scale. Otherwise it keeps the size it got first, with the panel drawn short of
+            // its right edge until the next Resize Plug-In (Hyprland at 1.6, 2026-10-19).
+            WindowEvent::ScaleFactorChanged { mut inner_size_writer, .. } => {
+                if let Some(w) = self.popups.wins.get(i) {
+                    let _ = inner_size_writer.request_inner_size(PhysicalSize::new(w.size.0, w.size.1));
+                    crate::popups::Shell::fix_size(&*w.window, w.size);
+                }
+                self.request_redraw();
+            }
             WindowEvent::Resized(size) => {
                 if let (Some(g), Some(w)) = (&self.gpu, self.popups.wins.get_mut(i)) {
                     w.surface.resize(&g.surface, size.width, size.height);
+                    // Not the size the layer asked for: ask again (twice at most).
+                    if (size.width, size.height) != w.size && w.repins < 2 {
+                        w.repins += 1;
+                        crate::popups::Shell::fix_size(&*w.window, w.size);
+                    }
                 }
                 self.request_redraw();
             }
