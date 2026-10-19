@@ -213,6 +213,24 @@ fn double_click_reset_sends_default() {
     assert!(server.raw_write_commands()[1].starts_with(r#"set /devices/0/inputs/0/Pan/value "default""#));
 }
 
+/// Option-click on a Mute (`Control::ToggleAll`): every input whose mute differs from the
+/// clicked one's new state is set, in one undo step.
+#[test]
+fn toggle_all_writes_every_input_in_one_step() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let mut v = ViewState::default();
+    let inputs = m.inputs();
+    let target = !m.main(&inputs[0]).mute;
+    let changed = inputs.iter().filter(|s| m.main(s).mute != target).count();
+    assert!(changed > 1, "fixture: inputs share the first one's mute");
+    v.dispatch(Action::Toggle(ControlId { strip: inputs[0].id.clone(), control: Control::ToggleAll(Box::new(Control::Mute)) }), &mut m);
+    let w = writes_after(&server, changed + 2);
+    assert_eq!(w.first().map(String::as_str), Some("set /UndoRecording/value true"));
+    assert_eq!(w.last().map(String::as_str), Some("set /UndoRecording/value false"));
+    assert_eq!(w.iter().filter(|c| c.ends_with(&format!("/Mute/value {target}"))).count(), changed, "{w:?}");
+}
+
 /// Against a private open-apollo daemon (`ua_mixer_daemon.py --no-hardware --port 28710 …`):
 /// `UA_SANDBOX_ENGINE=127.0.0.1:28710 cargo test -p engine-model --test wiring -- --ignored`.
 /// Console's wire forms (query params, scene / meter / undo posts, the sleep hint) keep the

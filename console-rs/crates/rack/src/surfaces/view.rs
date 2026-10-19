@@ -473,6 +473,23 @@ pub fn is_view_control(c: &Control) -> bool {
         || matches!(c, C::Menu(m) if m.is_view())
 }
 
+/// [`Control::ToggleAll`]: every input (or every aux) whose Mute / Solo differs from the
+/// clicked strip's opposite state toggles, in one undo step.
+fn toggle_all(model: &dyn MixerModel, strip: &Arc<str>, control: &Control) -> Vec<Effect> {
+    let inputs = model.inputs();
+    let group = if inputs.iter().any(|s| s.id == *strip) { inputs } else { model.auxes() };
+    let on = |s: &StripInfo| {
+        let m = model.main(s);
+        if *control == Control::Solo { m.solo } else { m.mute }
+    };
+    let Some(target) = group.iter().find(|s| s.id == *strip).map(|s| !on(s)) else { return Vec::new() };
+    let id = |s: &StripInfo| ControlId { strip: s.id.clone(), control: control.clone() };
+    let mut out = vec![Effect::Model(Action::GestureBegin(ControlId { strip: strip.clone(), control: control.clone() }))];
+    out.extend(group.iter().filter(|s| on(s) != target).map(|s| Effect::Model(Action::Toggle(id(s)))));
+    out.push(Effect::Model(Action::GestureEnd(ControlId { strip: strip.clone(), control: control.clone() })));
+    out
+}
+
 fn find_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
     model.inputs().into_iter().chain(model.auxes()).find(|s| &*s.id == id)
 }
@@ -595,6 +612,9 @@ impl ViewState {
         let press = matches!(action, Action::Tap(_) | Action::Toggle(_));
         if (press || matches!(action, Action::GestureBegin(_))) && find_strip(model, &id.strip).is_some() {
             self.selected_channel = Some(id.strip.clone());
+        }
+        if let C::ToggleAll(c) = &id.control {
+            return toggle_all(model, &id.strip, c);
         }
         if is_view_control(&id.control) {
             if let Action::Set(_, v) = action {
@@ -1172,6 +1192,24 @@ mod tests {
         assert!(v.sections.inputs && v.sections.inserts && v.sections.sends);
         let fwd = v.route(Action::Toggle(cid("in0", Control::Mute)), &model);
         assert_eq!(fwd, vec![Effect::Model(Action::Toggle(cid("in0", Control::Mute)))]);
+    }
+
+    /// Option-click on a Mute / Solo: every input takes the clicked one's opposite state
+    /// (auxes untouched).
+    #[test]
+    fn toggle_all_sets_every_strip_of_the_kind() {
+        let mut model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        let all = |strip: &str, c: Control| Action::Toggle(cid(strip, Control::ToggleAll(Box::new(c))));
+        v.dispatch(Action::Toggle(cid("in0", Control::Mute)), &mut model); // in0 on, the rest muted
+        v.dispatch(all("in1", Control::Mute), &mut model);
+        let inputs = model.inputs();
+        assert!(inputs.iter().all(|s| !model.main(s).mute), "in1 was muted: all unmute");
+        v.dispatch(all("in0", Control::Mute), &mut model);
+        assert!(inputs.iter().all(|s| model.main(s).mute));
+        v.dispatch(all("in2", Control::Solo), &mut model);
+        assert!(inputs.iter().all(|s| model.main(s).solo));
+        assert!(model.auxes().iter().all(|s| !model.main(s).solo && !model.main(s).mute));
     }
 
     #[test]

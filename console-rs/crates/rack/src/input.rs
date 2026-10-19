@@ -234,6 +234,10 @@ pub enum Control {
     /// A popup-menu row or menu-bar title (`menu`): view commands (`MenuCmd::is_view`) are
     /// consumed by `ViewState`, the rest reach `MixerModel::apply` as `Action::Tap`.
     Menu(crate::menu::MenuCmd),
+    // Control interaction rules (manual "Controls Shortcuts"). Append-only below.
+    /// [view → model] Option/Alt-click on a Mute or Solo (`.0`): every strip of the clicked
+    /// one's kind (inputs or auxes) takes the clicked one's opposite state (`ViewState::route`).
+    ToggleAll(Box<Control>),
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the
@@ -441,11 +445,15 @@ pub struct Interaction {
 impl Interaction {
     /// A press. Console's modifiers (manual "Controls Shortcuts"): Option/Alt-click returns a
     /// knob or fader to its default (`Action::Reset`: the engine gets `"default"`), with Cmd
-    /// (Ctrl) every strip's.
+    /// (Ctrl) every strip's; Option/Alt-click on a Mute or Solo sets every strip
+    /// ([`Control::ToggleAll`]).
     pub fn pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool) -> Vec<Action> {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
         let mods = self.mods;
         match &hit.kind {
+            HitKind::Toggle if mods.alt && matches!(hit.id.control, Control::Mute | Control::Solo) => {
+                vec![Action::Toggle(ControlId { strip: hit.id.strip.clone(), control: Control::ToggleAll(Box::new(hit.id.control.clone())) })]
+            }
             HitKind::Toggle => vec![Action::Toggle(hit.id.clone())],
             HitKind::Latch => {
                 self.latched = Some((hit.id.clone(), std::time::Instant::now()));
@@ -609,6 +617,14 @@ mod tests {
         let out = with(true, true).pointer_down(&hits, 110.0, 100.0, false);
         let resets: Vec<_> = out.iter().filter_map(|a| if let Action::Reset(id, v) = a { Some((&*id.strip, *v)) } else { None }).collect();
         assert_eq!(resets, vec![("/d/inputs/1", 0.78), ("/d/inputs/0", 0.78)]);
+    }
+
+    /// Option-click on a Mute: `ToggleAll(Mute)` (the view sets every strip).
+    #[test]
+    fn option_click_mute_toggles_all() {
+        let hits = strip_hits();
+        assert_eq!(with(true, false).pointer_down(&hits, 10.0, 315.0, false), vec![Action::Toggle(cid("/d/inputs/0", Control::ToggleAll(Box::new(Control::Mute))))]);
+        assert_eq!(with(false, true).pointer_down(&hits, 10.0, 315.0, false), vec![Action::Toggle(cid("/d/inputs/0", Control::Mute))]);
     }
 
     /// TALK: a click latches (toggle on press, nothing on release); held for 0.5 s it is
