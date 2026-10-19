@@ -586,4 +586,12 @@ fn a_loading_insert_is_not_drawn_bypassed() {
     // A bypass after the load is drawn as one.
     m.store_mut().apply([(format!("{slot}/Power"), Value::Bool(false))]);
     assert!(matches!(m.inserts(&strip)[0], InsertState::Loaded { power: false, .. }));
+    assert!(!m.insert_labels(&strip)[0].clone().unwrap().text.ends_with('…'));
+    // A daemon that publishes Status "Loading" (and Power false) while a load runs: active,
+    // with the loading look, until Status clears.
+    m.store_mut().apply([(format!("{slot}/Status"), Value::String("Loading".into()))]);
+    assert!(matches!(m.inserts(&strip)[0], InsertState::Loaded { power: true, .. }));
+    assert!(m.insert_labels(&strip)[0].clone().unwrap().text.ends_with('…'));
+    m.store_mut().apply([(format!("{slot}/Status"), Value::String(String::new()))]);
+    assert!(matches!(m.inserts(&strip)[0], InsertState::Loaded { power: false, .. }));
 }
