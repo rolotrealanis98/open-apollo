@@ -61,6 +61,7 @@ from hardware import (CLOCK_CONTROL_PATHS, CUE_34_OFF_RATE, effective_cue_count,
                       fader_db_to_tapered, normalize_global,
                       pcie_link_below_minimum,
                       pcie_link_text, preamp_db_to_tapered)
+import pipewire_state
 from metering import (NullMeter, ReadbackMeter, SILENCE_DB, find_apollo_card,
                       make_meter,
                       meter_channel)
@@ -155,6 +156,10 @@ RUNTIME_PROPERTIES = {
     "/openapollo/latency/output_delay_comp": {"type": "string", "value": "",
                                               "readonly": True},
 }
+
+
+# Settings › PIPEWIRE (pipewire_state.py)
+RUNTIME_PROPERTIES.update(pipewire_state.PROPERTIES)
 
 
 def apply_runtime_properties(state: StateTree):
@@ -660,6 +665,10 @@ class MixerDaemon:
         self._latency_key = None
         self._latency_fig: dict | None = None
         self._adc_comp_sent: tuple | None = None
+        # /openapollo/pipewire/* (pipewire_state.py): the last poll, the
+        # next poll time and whether one is running
+        self.pipewire = pipewire_state.PipeWireState()
+        self._pw_next, self._pw_busy = 0.0, False
         # Root /CueBusCount (Settings > CUE BUS COUNT) drives the device's
         # read-only CueBusCount and which CUE outputs are Active
         self.state.register_change_observer(
@@ -1907,13 +1916,16 @@ class MixerDaemon:
         self._poll_transport()
         self._poll_buffer_size()
         self._refresh_latency()
+        self._poll_pipewire()
 
     def _poll_buffer_size(self):
         """/BufferSize follows the period size of the Apollo's running
         stream (on Linux PipeWire picks it, the quantum; the Mixer Engine
-        reports CoreAudio's buffer size).  Read-only: a client SET does not
-        change the stream.  Nothing changes while no stream runs."""
-        if not self.hw_router or not self.hw_router.backend.connected:
+        reports CoreAudio's buffer size).  While PipeWire answers, its
+        quantum instead (_publish_pipewire; a SET forces it).  Nothing
+        changes while no stream runs."""
+        if self.pipewire.available or not self.hw_router \
+                or not self.hw_router.backend.connected:
             return
         card = find_apollo_card(self.hw_router.backend.device_path)
         frames = stream_period_frames(card)
@@ -3082,6 +3094,8 @@ class MixerDaemon:
             return
         if self._handle_clock_set(client, path, cmd.value, resp_params):
             return
+        if self._handle_pipewire_set(client, path, cmd.value, resp_params):
+            return
         if self.plugins_enabled and self._plugin_publication_active and \
                 is_plugin_slot_path(path):
             self._send_local_plugin_error(
@@ -3391,6 +3405,66 @@ class MixerDaemon:
         if "func_id" in params:
             self._send_response(client, path, result.value, params)
         return True
+
+    def _handle_pipewire_set(self, client: MixerClient, path: str, value,
+                             params: dict) -> bool:
+        """/openapollo/pipewire/ForceQuantum and ForceRate, and /BufferSize
+        while PipeWire answers (its ForceQuantum): `pw-metadata` first,
+        published when it took the value; refused as _handle_clock_set
+        refuses.  False for other paths."""
+        canonical = path.removesuffix("/value")
+        name = canonical.removeprefix(pipewire_state.PREFIX + "/")
+        if canonical == "/BufferSize" and self.pipewire.available:
+            name = "ForceQuantum"
+        if name not in pipewire_state.WRITABLE:
+            return False
+        done = self.pipewire.force(name, value)
+        if done is None:
+            log.info("%s: SET %s = %r refused (PipeWire)", client.id, path,
+                     value)
+            current = self.state.get_value(canonical + "/value")
+            if current is not None:
+                self._send_response(client, canonical + "/value", current)
+            self._send_engine_error(client, path, "Unable to set value.",
+                                    params)
+            return True
+        self._publish_pipewire(done)
+        if "func_id" in params:
+            self._send_response(client, path,
+                                self.state.get_value(canonical + "/value"),
+                                params)
+        return True
+
+    def _poll_pipewire(self):
+        """/openapollo/pipewire/*: pw-dump every 2 s while a client is
+        subscribed to them, in a thread (pw-top takes a second)."""
+        now = time.monotonic()
+        if self._pw_busy or now < self._pw_next or not any(
+                p.startswith(pipewire_state.PREFIX) for p in self.state._subs):
+            return
+        self._pw_busy, self._pw_next = True, now + 2.0
+        card = (find_apollo_card(self.hw_router.backend.device_path)
+                if self.hw_router else None)
+
+        async def refresh():
+            try:
+                self._publish_pipewire(
+                    await asyncio.to_thread(self.pipewire.poll, card))
+            finally:
+                self._pw_busy = False
+        asyncio.get_running_loop().create_task(refresh())
+
+    def _publish_pipewire(self, values: dict):
+        """Publish panel values (status: not saved) and, while PipeWire
+        answers, /BufferSize as its quantum."""
+        paths = {f"{pipewire_state.PREFIX}/{k}": v for k, v in values.items()}
+        if values.get("Quantum") and self.pipewire.available \
+                and self.state.path_exists("/BufferSize/value"):
+            paths["/BufferSize"] = values["Quantum"]
+        for path, value in paths.items():
+            if self.state.get_value(path + "/value") != value:
+                self._push_to_clients(path, value)
+                self.state._dirty.pop(path + "/value", None)
 
     def _send_unresolved_set(self, client: MixerClient, path: str,
                              params: dict | None = None):
