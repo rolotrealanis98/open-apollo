@@ -8,7 +8,7 @@ capstone and pefile, and the DLL where the bundle was built from.
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-import hashlib, json, math, re, sys
+import hashlib, json, math, re, sys, threading
 
 EXECUTOR = Path(__file__).resolve().parents[1] / 'tools/plugin-mapper/plugin_mapper/executor'
 if str(EXECUTOR) not in sys.path:
@@ -137,13 +137,20 @@ class ProfiledCarrierProvider:
             raise ValueError('original profile required')
         self.cap = None
         self.state = None
+        # The daemon builds emulators on a worker thread (warm()); every change of cap/state holds this.
+        self._lock = threading.RLock()
 
     def _ensure(self):
-        if self.cap is None:
-            if self.state is None:
-                self.reset()
-            else:
-                self.cap = self._capture(self.state.values)
+        with self._lock:
+            if self.cap is None:
+                if self.state is None:
+                    self.reset()
+                else:
+                    self.cap = self._capture(self.state.values)
+
+    def warm(self):
+        """Build the emulator now (seconds of original code), off the daemon's event loop."""
+        self._ensure()
 
     def _capture(self, values=None):
         cap = self.capture_type(self.profile, auto_start=False)
@@ -157,16 +164,19 @@ class ProfiledCarrierProvider:
         return cap
 
     def reset(self):
-        self.cap = self._capture()
-        shadow = {int(key, 0) if isinstance(key, str) else key: value
-                  for key, value in self.data['startup']['shadow'].items()}
-        self.state = ProfiledState.make(self.cap.defaults_values, shadow)
+        with self._lock:
+            self.cap = self._capture()
+            shadow = {int(key, 0) if isinstance(key, str) else key: value
+                      for key, value in self.data['startup']['shadow'].items()}
+            self.state = ProfiledState.make(self.cap.defaults_values, shadow)
 
     def __deepcopy__(self, memo):
         clone = self.__class__(self.bundle_path, self.input_index, data=self.data, module_store=self.module_store)
         memo[id(self)] = clone
-        if self.cap is not None:
-            clone.state = self.state  # emulator rebuilt lazily by _ensure()
+        with self._lock:
+            # The accepted state travels even when this copy has no emulator yet (a copy of a
+            # copy); the clone rebuilds its emulator from it (_ensure / warm()).
+            clone.state = self.state
         return clone
 
     def composition_arguments(self):
@@ -213,7 +223,8 @@ class ProfiledCarrierProvider:
         return tuple(output)
 
     def observations(self):
-        self._ensure()
+        # Static (the recipe's startup words): no emulator needed, so a chain rebuild that
+        # re-reads every member's observations doesn't re-run each plug-in's original code.
         # The chain carrier owns its root header words. They are not plug-in
         # coefficients and must not be replayed or observed as profile state.
         source = self.recipe.startup_observations()
@@ -371,8 +382,9 @@ class ProfiledCarrierProvider:
             return {(row, offset + i): v for row, offset, values in observations for i, v in enumerate(values)}
         if words(plan.observations) != words(expected):
             raise ValueError('accepted observation/state mismatch')
-        self.cap = self._advanced(plan.state)
-        self.state = plan.state
+        with self._lock:
+            self.cap = self._advanced(plan.state)
+            self.state = plan.state
 
     def _advanced(self, state):
         """The emulator at `state`: the live one moved by its originating control when that is

@@ -90,6 +90,14 @@ class NativeChainBackend(NativePluginBackend):
         self._compensating = False
         self._compensation_transition = None
 
+    def _template_key(self, slot, name):
+        # Every insert of an input is built from the provider registered for its effect 0.
+        return (slot.rsplit('/', 1)[0] + '/0', name, self._channels(slot))
+
+    def cold_sources(self):
+        return [source for chain in self._chains.values() for source in chain.sources.values()
+                if hasattr(source, 'warm') and getattr(source, 'cap', None) is None]
+
     @staticmethod
     def _compensation_io(operation, *args, **kwargs):
         try:
@@ -517,8 +525,10 @@ class NativeChainBackend(NativePluginBackend):
                 raise ValueError('slot ownership is unknown')
             if self._serial >= 0x1fffff:
                 raise ValueError('exact logical identity range exhausted')
-            source = copy.deepcopy(template)
-            source.reset()
+            source = self._take_warm((template_slot, name, channels))
+            if source is None:  # not built ahead on the daemon's worker thread
+                source = copy.deepcopy(template)
+                source.reset()
             sources = copy.deepcopy(previous.sources) if previous else {}
             sources[slot] = source
             if self.compensation_supported:
