@@ -165,3 +165,21 @@ def test_daemon_buffer_size_without_pipewire_is_only_stored():
     d._handle_set(client, Command("set", "/openapollo/pipewire/ForceQuantum/value", 256,
                                   raw_params={"func_id": "5"}))
     assert d.state.get_value("/openapollo/pipewire/ForceQuantum/value") == 0
+
+
+def test_daemon_polls_only_while_subscribed():
+    import asyncio
+    d, _, _ = daemon()
+    d.pipewire.poll = Mock(return_value={"Xruns": 9})
+
+    async def tick():
+        d._poll_pipewire()
+        if d._pw_task:
+            await d._pw_task
+    asyncio.run(tick())
+    assert not d.pipewire.poll.called
+    d.state.subscribe("c1", "/openapollo/pipewire/Xruns/value")
+    asyncio.run(tick())
+    assert d.state.get_value("/openapollo/pipewire/Xruns/value") == 9
+    asyncio.run(tick())                 # not again within 2 s
+    assert d.pipewire.poll.call_count == 1

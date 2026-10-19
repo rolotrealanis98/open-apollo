@@ -666,9 +666,9 @@ class MixerDaemon:
         self._latency_fig: dict | None = None
         self._adc_comp_sent: tuple | None = None
         # /openapollo/pipewire/* (pipewire_state.py): the last poll, the
-        # next poll time and whether one is running
+        # next poll time and the running one
         self.pipewire = pipewire_state.PipeWireState()
-        self._pw_next, self._pw_busy = 0.0, False
+        self._pw_next, self._pw_task = 0.0, None
         # Root /CueBusCount (Settings > CUE BUS COUNT) drives the device's
         # read-only CueBusCount and which CUE outputs are Active
         self.state.register_change_observer(
@@ -3439,20 +3439,18 @@ class MixerDaemon:
         """/openapollo/pipewire/*: pw-dump every 2 s while a client is
         subscribed to them, in a thread (pw-top takes a second)."""
         now = time.monotonic()
-        if self._pw_busy or now < self._pw_next or not any(
-                p.startswith(pipewire_state.PREFIX) for p in self.state._subs):
+        if (self._pw_task and not self._pw_task.done()) or now < self._pw_next \
+                or not any(p.startswith(pipewire_state.PREFIX)
+                           for p in self.state._subs):
             return
-        self._pw_busy, self._pw_next = True, now + 2.0
+        self._pw_next = now + 2.0
         card = (find_apollo_card(self.hw_router.backend.device_path)
                 if self.hw_router else None)
 
         async def refresh():
-            try:
-                self._publish_pipewire(
-                    await asyncio.to_thread(self.pipewire.poll, card))
-            finally:
-                self._pw_busy = False
-        asyncio.get_running_loop().create_task(refresh())
+            self._publish_pipewire(
+                await asyncio.to_thread(self.pipewire.poll, card))
+        self._pw_task = asyncio.get_running_loop().create_task(refresh())
 
     def _publish_pipewire(self, values: dict):
         """Publish panel values (status: not saved) and, while PipeWire
