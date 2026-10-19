@@ -123,11 +123,10 @@ fn decode_stream_name(name: &str) -> String {
     s
 }
 
-/// File key -> `FileName` column, from the MSI's File table (empty if it can't be read). The tables
-/// are column-major with 2-byte (3 when the string pool says so) string indices:
-/// File, Component_, FileName, Version, Language, then FileSize (4), Attributes (2), Sequence (2).
-// ponytail: pool strings over 64 KiB (a zero-length entry with a non-zero count) aren't handled; a
-// File table that follows one reads wrong names, and the keys are used for whatever doesn't match.
+/// File key -> `FileName` column, from the MSI's File table (empty if it can't be read). Tables
+/// are column-major; string cells are 2-byte (3 when the string pool's flag says so) pool
+/// indices, integer cells 2 or 4 bytes. The File table's column order and widths come from the
+/// `_Columns` table (UA's installer has `Sequence` 4 bytes wide and `FileSize` before `Version`).
 fn file_table(cfb: &mut cfb::CompoundFile<std::fs::File>) -> HashMap<String, String> {
     let entries: Vec<(String, PathBuf)> =
         cfb.walk().filter(|e| e.is_stream()).map(|e| (decode_stream_name(e.name()), e.path().to_path_buf())).collect();
@@ -137,24 +136,69 @@ fn file_table(cfb: &mut cfb::CompoundFile<std::fs::File>) -> HashMap<String, Str
         cfb.open_stream(p).ok()?.read_to_end(&mut v).ok()?;
         Some(v)
     };
-    let (Some(pool), Some(data), Some(file)) = (read("_StringPool"), read("_StringData"), read("File")) else {
+    let (Some(pool), Some(data), Some(columns), Some(file)) =
+        (read("_StringPool"), read("_StringData"), read("_Columns"), read("File"))
+    else {
         return HashMap::new();
     };
     let w = if pool.get(3).is_some_and(|b| b & 0x80 != 0) { 3 } else { 2 };
+    // Pool entries are (length u16, refcount u16); a string over 64 KiB (UA's licence text) has
+    // length 0 with a non-zero refcount and its u32 length in the next entry.
     let mut strings = vec![String::new()];
-    let mut at = 0;
-    for entry in pool.get(4..).unwrap_or_default().chunks_exact(4) {
-        let end = (at + u16::from_le_bytes([entry[0], entry[1]]) as usize).min(data.len());
+    let (mut at, mut i) = (0, 4);
+    while i + 4 <= pool.len() {
+        let (mut len, refs) =
+            (u16::from_le_bytes([pool[i], pool[i + 1]]) as usize, u16::from_le_bytes([pool[i + 2], pool[i + 3]]));
+        i += 4;
+        if len == 0 && refs != 0 && i + 4 <= pool.len() {
+            len = u32::from_le_bytes([pool[i], pool[i + 1], pool[i + 2], pool[i + 3]]) as usize;
+            i += 4;
+        }
+        let end = (at + len).min(data.len());
         strings.push(String::from_utf8_lossy(&data[at..end]).into_owned());
         at = end;
     }
-    let rows = file.len() / (5 * w + 8);
-    let string = |col: usize, row: usize| {
-        let o = (col * rows + row) * w;
-        let i = file[o..o + w].iter().rev().fold(0, |a, &b| a << 8 | b as usize);
-        strings.get(i).cloned().unwrap_or_default()
+    let cell = |table: &[u8], offset: usize, width: usize| -> usize {
+        table.get(offset..offset + width).map_or(0, |b| b.iter().rev().fold(0, |a, &b| a << 8 | b as usize))
     };
-    (0..rows).map(|r| (string(0, r), string(2, r))).collect()
+    // `_Columns`: Table (string), Number (i2), Name (string), Type (i2). Type: 0x0800 = string,
+    // else the low byte is the integer's width; the stored value carries 0x8000.
+    let n = columns.len() / (2 * w + 4);
+    let mut file_columns: Vec<(usize, String, usize)> = (0..n)
+        .filter(|&r| strings.get(cell(&columns, r * w, w)).is_some_and(|t| t == "File"))
+        .map(|r| {
+            let number = cell(&columns, n * w + r * 2, 2).wrapping_sub(0x8000);
+            let name = strings.get(cell(&columns, n * w + n * 2 + r * w, w)).cloned().unwrap_or_default();
+            let ty = cell(&columns, n * w + n * 2 + n * w + r * 2, 2);
+            let width = if ty & 0x0800 != 0 { w } else { (ty & 0xff).clamp(2, 4) };
+            (number, name, width)
+        })
+        .collect();
+    file_columns.sort_by_key(|c| c.0);
+    let row = file_columns.iter().map(|c| c.2).sum::<usize>();
+    if row == 0 || !file.len().is_multiple_of(row) {
+        return HashMap::new();
+    }
+    let rows = file.len() / row;
+    let offset_of = |want: &str| -> Option<(usize, usize)> {
+        let mut off = 0;
+        for (_, name, width) in &file_columns {
+            if name == want {
+                return Some((off, *width));
+            }
+            off += width * rows;
+        }
+        None
+    };
+    let (Some(key), Some(name)) = (offset_of("File"), offset_of("FileName")) else { return HashMap::new() };
+    (0..rows)
+        .map(|r| {
+            let s = |(off, width): (usize, usize)| {
+                strings.get(cell(&file, off + r * width, width)).cloned().unwrap_or_default()
+            };
+            (s(key), s(name))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -199,7 +243,24 @@ mod tests {
         c.create_stream("/Data1.cab").unwrap().write_all(&cabinet).unwrap();
         if let Some(rows) = table {
             // String pool: header (codepage), then (length, refcount) per string; index 0 is null.
-            let strs: Vec<&str> = rows.iter().flat_map(|(k, n)| [*k, *n]).chain(["comp", "1"]).collect();
+            // The File table's columns (as UA's installer lays them out: FileSize before Version,
+            // Sequence 4 bytes wide), named in the pool after the rows' strings.
+            let columns: [(&str, u16); 8] = [
+                ("File", 0xad48),
+                ("Component_", 0x8d48),
+                ("FileName", 0x8fff),
+                ("FileSize", 0x8104),
+                ("Version", 0x9d48),
+                ("Language", 0x9d14),
+                ("Attributes", 0x9502),
+                ("Sequence", 0x8104),
+            ];
+            let strs: Vec<&str> = rows
+                .iter()
+                .flat_map(|(k, n)| [*k, *n])
+                .chain(["comp", "1", "File"])
+                .chain(columns.iter().map(|c| c.0))
+                .collect();
             let mut pool = vec![0u8; 4];
             let mut data = Vec::new();
             for s in &strs {
@@ -207,23 +268,39 @@ mod tests {
                 pool.extend(1u16.to_le_bytes());
                 data.extend(s.as_bytes());
             }
-            let comp = strs.len() as u16 - 1;
+            let comp = 2 * rows.len() as u16 + 1;
+            let table_name = comp + 2;
             let blank = 0u16;
             let n = rows.len();
             let mut file = Vec::new();
-            for col in 0..5 {
+            // Column-major in the order above: File, Component_, FileName (strings), FileSize
+            // (4), Version, Language (strings), Attributes (2), Sequence (4).
+            for (col, (_, ty)) in columns.iter().enumerate() {
                 for r in 0..n {
-                    let v = match col {
-                        0 => 1 + 2 * r as u16,
-                        1 => comp,
-                        2 => 2 + 2 * r as u16,
-                        _ => blank,
-                    };
-                    file.extend(v.to_le_bytes());
+                    match col {
+                        0 => file.extend((1 + 2 * r as u16).to_le_bytes()),
+                        1 => file.extend(comp.to_le_bytes()),
+                        2 => file.extend((2 + 2 * r as u16).to_le_bytes()),
+                        _ if ty & 0x0800 != 0 => file.extend(blank.to_le_bytes()),
+                        _ => file.extend(vec![0u8; (ty & 0xff) as usize]),
+                    }
                 }
             }
-            file.extend(vec![0u8; n * 8]);
-            for (name, bytes) in [("_StringPool", pool), ("_StringData", data), ("File", file)] {
+            // `_Columns`: Table, Number, Name, Type, column-major, integers stored with 0x8000.
+            let mut cols = Vec::new();
+            for _ in &columns {
+                cols.extend(table_name.to_le_bytes());
+            }
+            for (i, _) in columns.iter().enumerate() {
+                cols.extend((0x8000 + 1 + i as u16).to_le_bytes());
+            }
+            for (i, _) in columns.iter().enumerate() {
+                cols.extend((table_name + 1 + i as u16).to_le_bytes());
+            }
+            for (_, ty) in &columns {
+                cols.extend(ty.to_le_bytes());
+            }
+            for (name, bytes) in [("_StringPool", pool), ("_StringData", data), ("_Columns", cols), ("File", file)] {
                 c.create_stream(format!("/{}", encode_table(name))).unwrap().write_all(&bytes).unwrap();
             }
         }
@@ -300,5 +377,29 @@ mod tests {
         assert!(import(&PluginIcons::Folder(src), &data).is_err());
         assert!(got.dest.join("UAD 1176LN.png").is_file());
         fs::remove_dir_all(&t).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod real_msi {
+    //! `OA_REAL_MSI=/path/to/apollo-32bit.msi cargo test -p oa-assets real_msi -- --nocapture`:
+    //! what the File-table reader sees in a real installer (never committed, never shipped).
+    use super::*;
+
+    #[test]
+    fn report() {
+        let Ok(path) = std::env::var("OA_REAL_MSI") else { return };
+        let mut cfb = cfb::open(&path).expect("open msi");
+        let names: Vec<String> = cfb.walk().filter(|e| e.is_stream()).map(|e| decode_stream_name(e.name())).collect();
+        eprintln!("streams: {:?}", names.iter().map(|n| n.replace('\u{4840}', "#")).collect::<Vec<_>>());
+        let table = file_table(&mut cfb);
+        eprintln!("file table rows: {}", table.len());
+        for (k, v) in table.iter().take(3) {
+            eprintln!("  {k} -> {v}");
+        }
+        let out = std::env::temp_dir().join("oa-real-msi-icons");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).unwrap();
+        eprintln!("extracted: {:?}", extract_msi(Path::new(&path), &out));
     }
 }
