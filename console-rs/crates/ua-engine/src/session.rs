@@ -42,11 +42,11 @@ pub const SYNC_SESSION_VALUE: &str = "extAppSyncSession";
 pub const NEW_SESSION_LABEL: &str = "- New Session -";
 pub const SYNC_SESSION_LABEL: &str = "- Sync Session -";
 
-/// Root properties that describe the session; the store re-reads the `values` lists of
-/// [`SESSION`] and [`MODIFIED_SESSIONS`] when one of these changes.
-pub const IDENTITY_PATHS: [&str; 4] = [SESSION, MODIFIED_SESSIONS, DIRTY, PROGRESS];
-/// Properties whose `values` list is the session menu's content.
-pub const LIST_PATHS: [&str; 2] = [SESSION, MODIFIED_SESSIONS];
+/// Root properties that describe the session; the store re-reads the [`LIST_PATHS`] `values`
+/// lists when one of these changes.
+pub const IDENTITY_PATHS: [&str; 5] = [SESSION, MODIFIED_SESSIONS, DIRTY, PROGRESS, SNAPSHOT];
+/// Properties whose `values` list is the session menu's (and the Snapshots section's) content.
+pub const LIST_PATHS: [&str; 3] = [SESSION, MODIFIED_SESSIONS, SNAPSHOT];
 
 /// One request that changes the engine's session. Every variant is a write: send it through
 /// [`Store::session`](crate::Store::session), which honours both write gates.
@@ -155,14 +155,17 @@ impl SessionCommand {
 /// Console snapshots (`MxClnt_Snapshots`, the `Rack_SnapshotsSection` panel: FILE SAVE /
 /// SAVE AS... / NEW / RENAME / DELETE / MOVE / IMPORT ALL / EXPORT ALL, FOLDERS, SNAPSHOTS,
 /// CURRENT, PRIMED, RECALL). Argument keys from Rack.dll 0x181972140…0x181970c00; recall and
-/// prime are assumed to be `set`s of `/Snapshot` and `/PrimedSnapshot` (not observed).
+/// prime are `set`s of `/Snapshot` and `/PrimedSnapshot` (Mac Rack 1.3.1 RECALL 0xbf65ec, row
+/// selection 0xbf7dbc). Folders have no commands of their own: Move and Delete take the
+/// folder's name (`deleteFolder` 0x1c1e614, folder RENAME / MOVE through `moveSnapshot`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SnapshotCommand {
-    /// `set /Snapshot/value "<[folder/]name>"` (assumed).
+    /// `set /Snapshot/value "<[folder/]name>"` (RECALL).
     Recall(String),
-    /// `set /PrimedSnapshot/value "<[folder/]name>"` (assumed).
+    /// `set /PrimedSnapshot/value "<[folder/]name>"` (a SNAPSHOTS row selected; `""` for none).
     Prime(String),
-    /// `post /SaveAsSnapshot {"snapshotName":…,"isNew":…}`.
+    /// `post /SaveAsSnapshot {"snapshotName":…}` (SAVE, SAVE AS...); NEW adds `"isNew":true`
+    /// (`newSnapshot` 0x1c1aef4 is the only sender of `isNew`).
     SaveAs { name: String, is_new: bool },
     /// `post /DeleteSnapshot {"snapshotName":…}`.
     Delete { name: String },
@@ -180,8 +183,11 @@ impl SnapshotCommand {
         match self {
             SnapshotCommand::Recall(n) => Command::set(SNAPSHOT, &Value::String(n.clone()), false),
             SnapshotCommand::Prime(n) => Command::set(PRIMED_SNAPSHOT, &Value::String(n.clone()), false),
-            SnapshotCommand::SaveAs { name, is_new } => {
-                post("SaveAsSnapshot", serde_json::json!({ "snapshotName": name, "isNew": is_new }))
+            SnapshotCommand::SaveAs { name, is_new: true } => {
+                post("SaveAsSnapshot", serde_json::json!({ "snapshotName": name, "isNew": true }))
+            }
+            SnapshotCommand::SaveAs { name, is_new: false } => {
+                post("SaveAsSnapshot", serde_json::json!({ "snapshotName": name }))
             }
             SnapshotCommand::Delete { name } => post("DeleteSnapshot", serde_json::json!({ "snapshotName": name })),
             SnapshotCommand::Move { from, to, shuffle } => post(
@@ -320,6 +326,10 @@ pub struct SessionState {
     /// `/Snapshot` and `/PrimedSnapshot` values (Console snapshots).
     pub snapshot: String,
     pub primed_snapshot: String,
+    /// `/Snapshot/values`: the snapshot folder tree (the [`SESSION`] shape).
+    pub snapshots: Vec<SessionEntry>,
+    /// `/Snapshot`'s `volumes` (`[{volume,user,removable,locked}]`): IMPORT / EXPORT targets.
+    pub snapshot_volumes: Vec<String>,
 }
 
 impl SessionState {
@@ -334,6 +344,13 @@ impl SessionState {
             modified: parse_modified(&list(MODIFIED_SESSIONS)),
             snapshot: s(SNAPSHOT),
             primed_snapshot: s(PRIMED_SNAPSHOT),
+            snapshots: parse_entries(&list(SNAPSHOT)),
+            snapshot_volumes: tree
+                .property(SNAPSHOT)
+                .and_then(|p| p.extra.get("volumes"))
+                .and_then(Json::as_array)
+                .map(|v| v.iter().filter_map(|e| Some(e.get("volume")?.as_str()?.to_owned())).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -376,7 +393,15 @@ mod tests {
         assert!(SessionCommand::Save.command().is_write());
         let snap = |c: SnapshotCommand| c.command().text();
         assert_eq!(snap(SnapshotCommand::Recall("A".into())), r#"set /Snapshot/value "A""#);
-        assert!(snap(SnapshotCommand::SaveAs { name: "A".into(), is_new: true }).starts_with("post /SaveAsSnapshot {"));
+        assert_eq!(snap(SnapshotCommand::Prime("F/A".into())), r#"set /PrimedSnapshot/value "F/A""#);
+        assert_eq!(
+            snap(SnapshotCommand::SaveAs { name: "F/A".into(), is_new: false }),
+            r#"post /SaveAsSnapshot {"snapshotName":"F/A"}"#
+        );
+        assert_eq!(
+            snap(SnapshotCommand::SaveAs { name: "F/001 - Untitled".into(), is_new: true }),
+            r#"post /SaveAsSnapshot {"isNew":true,"snapshotName":"F/001 - Untitled"}"#
+        );
         assert!(snap(SnapshotCommand::Import { volume: "V".into(), folder: "F".into(), append: false }).contains(r#""append":false"#));
         assert!(SessionCommand::Load("x".into()).replaces_session());
         assert!(!SessionCommand::Save.replaces_session());
