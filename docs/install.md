@@ -7,7 +7,7 @@ have**, because it includes no Universal Audio files. The setup wizard does ever
 - [Setup wizard](#setup-wizard) (Thunderbolt Apollos; recommended)
 - [Command-line install](#command-line-install) (step by step, or without a desktop)
 - [USB Apollos](#usb-apollos)
-- [NixOS](#nixos)
+- [Plug-ins](#plug-ins)
 - [Updating, reinstalling and uninstalling](#updating-reinstalling-and-uninstalling)
 - [Where things go](#where-things-go)
 - [Troubleshooting](#troubleshooting)
@@ -60,7 +60,8 @@ The wizard's pages:
    - **Import assets**: copies UAD Console's art, installs the plug-in panel specs and makes
      the panels' art. The panel specs and art are optional: without them, plug-in windows show
      a plain parameter list.
-   - **DSP programs & firmware**: extracts them to `/lib/firmware/universal-audio`.
+   - **DSP programs & firmware**: extracts them to `/lib/firmware/universal-audio`, and
+     stores every plug-in's DSP modules in its `plugins/` folder for a later release.
    - **Driver**: builds the driver with DKMS and installs the audio settings and the mixer
      daemon (`install.sh --yes`).
 
@@ -90,7 +91,8 @@ Below, `/path/to/windows` is the folder that holds Windows' `C:\` (or a Wine pre
 
 ```bash
 sudo $OA firmware --from /path/to/windows      # DSP modules, USB boot images -> /lib/firmware/universal-audio
-$OA import --from /path/to/windows             # UAD Console's art -> ~/.local/share/open-apollo
+sudo $OA dsp --from /path/to/windows           # plug-ins' DSP modules -> /lib/firmware/universal-audio/plugins (optional)
+$OA import --from /path/to/windows             # UAD Console's art and the plug-in list -> ~/.local/share/open-apollo
 sudo bash scripts/install-panels.sh            # plug-in panel specs -> /usr/share/open-apollo/plugin-specs
 $OA plugins --from /path/to/windows            # plug-in panels' art -> ~/.local/share/open-apollo/generated
 sudo bash scripts/install.sh                   # driver, DKMS, audio settings, mixer daemon
@@ -120,25 +122,20 @@ boot image or the DSP modules are missing. For the Console, also run the `import
 
 Twin USB and Twin X USB are untested.
 
-## NixOS
+## Plug-ins
 
-Add to your `flake.nix` inputs:
+What this release does with UAD plug-ins:
 
-```nix
-inputs.open-apollo.url = "github:rolotrealanis98/open-apollo";
-```
+| | |
+|---|---|
+| Plug-in browser | The Console's plug-in list and factory preset menus come from your UAD install (`~/.local/share/open-apollo/ua-catalogue/`, names only). Without that import the browser is empty: run `oa-assets catalogue --from /path/to/windows`, then Settings › Plug-Ins › RESCAN in the Console. |
+| Plug-in windows | The Console draws each plug-in's window from the panel specs and the art setup made from your Powered plug-ins: 206 of 224 with a UAD 12 install, the rest as a plain parameter list. |
+| Plug-in DSP modules | Setup stores them in `/lib/firmware/universal-audio/plugins/`. Nothing loads them yet. |
+| Running plug-ins on the Apollo's DSP | Not in this release. It is being developed and will only load plug-ins your Apollo itself reports as authorized. |
 
-Then in your `configuration.nix`:
-
-```nix
-imports = [ inputs.open-apollo.nixosModules.default ];
-hardware.ua-apollo.enable = true;
-```
-
-`nixos-rebuild switch` builds the kernel module and sets up `iommu=pt`, Thunderbolt (bolt),
-PipeWire and the packages it needs. The console is `nix run github:rolotrealanis98/open-apollo#uaconsole`
-(see [console-rs/README.md](../console-rs/README.md#nix)). Run the `oa-assets` steps above by
-hand for the Console art and the plug-in panels.
+You don't need plug-in licences for any of this. To rebuild the panels' art alone, for
+example after a UAD update, run `oa-assets plugins --from /path/to/windows`; `oa-assets status`
+says what is there.
 
 ## Updating, reinstalling and uninstalling
 
@@ -167,7 +164,9 @@ It ends with a check that lists anything still there. `--yes` asks nothing.
 |---|---|---|
 | Driver (DKMS) | `/usr/src/ua_apollo-*`, `/lib/modules/*/updates/dkms/` | `uninstall.sh` |
 | DSP modules, USB boot images (from your UAD install) | `/lib/firmware/universal-audio/` | `uninstall.sh --purge` |
+| Plug-ins' DSP modules (from your UAD install) | `/lib/firmware/universal-audio/plugins/` | `uninstall.sh --purge` |
 | UAD Console's art (from your UAD install) | `~/.local/share/open-apollo/console-resources/` | `uninstall.sh --purge` |
+| Plug-in list and factory preset menus (from your UAD install) | `~/.local/share/open-apollo/ua-catalogue/` | `uninstall.sh --purge` |
 | Plug-in panels' art (made from your UAD install) | `~/.local/share/open-apollo/generated/` | `uninstall.sh --purge` |
 | Plug-in panel specs | `/usr/share/open-apollo/plugin-specs/` | `uninstall.sh` |
 | Mixer daemon | systemd user unit `ua-mixer-daemon` | `uninstall.sh` |
@@ -187,6 +186,8 @@ host name, home path or serial numbers.
 | The Apollo isn't detected (`lspci -d 1a00:` is empty) | Power-cycle the Apollo, check the Thunderbolt cable and port, and authorize the device (`boltctl list`). |
 | No sound after using a JACK app (Ardour) | `systemctl --user restart pipewire wireplumber pipewire-pulse`, then `apollo-setup-io`. |
 | The Console shows no art | `bash scripts/install-uaconsole.sh --check`; see [console-rs/README.md](../console-rs/README.md#troubleshooting). |
+| A re-opened plug-in window stays behind the mixer (Wayland) | The compositor places windows. On Hyprland enable `focus_on_activate`. |
 | Plug-in windows show a plain parameter list | Run `oa-assets status`. The panel specs or their art are missing, or that panel isn't drawn yet. |
+| The plug-in browser is empty | `oa-assets catalogue --from /path/to/windows`, then Settings › Plug-Ins › RESCAN in the Console. |
 
 More hardware notes are on the [wiki](https://github.com/rolotrealanis98/open-apollo/wiki/Troubleshooting).

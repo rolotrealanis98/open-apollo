@@ -20,6 +20,10 @@ Inputs:
                            status) and the work plan, exported from the
                            project's reverse-engineering notes with --notes
   devices/*.json           the models and whether each is hardware-verified
+  docs/status/plugin-library.json
+                           every UA-built UAD-2 plug-in in scope and the stage
+                           its control->DSP mapping has reached, exported from
+                           the library ledger with --library
 
 Outputs (docs/status/): progress-dark.svg, progress-light.svg, the three
 badge-*.svg and README.md (the numbers per area and the open tasks).
@@ -30,6 +34,9 @@ Usage:
                                             notes (parity/ and
                                             master-implementation-plan.md),
                                             then redraw
+  tools/gen-status-graph.py --library LEDGER.json
+                                            export plugin-library.json from the
+                                            library ledger, then redraw
   tools/gen-status-graph.py --check         exit 1 if docs/status/ is stale
 
 Standard library only.  Output is deterministic.
@@ -47,6 +54,22 @@ from xml.sax.saxutils import escape, quoteattr
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "docs", "status")
 STATUS_JSON = os.path.join(OUT, "status.json")
+LIBRARY_JSON = os.path.join(OUT, "plugin-library.json")
+
+# Ledger tier -> (library stage, square colour)
+LIBRARY_TIERS = {
+    "live_controls": ("live", "verified"), "live_smoke": ("live", "verified"),
+    "ready_unlicensed": ("ready", "done"), "bundled": ("hold", "partial"),
+    "live_hold": ("hold", "partial"), "offline_blocked": ("blocked", "re"),
+    "unison_track": ("blocked", "re"), "license_refused": ("unlicensed", "blocked"),
+}
+LIBRARY_STAGES = (
+    ("live", "verified", "Live on the Apollo: every control mapped, loaded and read back"),
+    ("ready", "done", "Mapped offline, needs a licence to test live"),
+    ("hold", "partial", "Mapped, live load on hold"),
+    ("blocked", "re", "Blocked"),
+    ("unlicensed", "blocked", "Not authorized on the test Apollo"),
+)
 
 ORDER = ("verified", "done", "partial", "re", "todo", "plugin", "blocked")
 LEGEND = {
@@ -240,9 +263,48 @@ def export(notes):
     }
 
 
+def export_library(ledger_path):
+    """plugin-library.json from the private library ledger: name and stage
+    only (no receipts, paths or evidence).  Plug-ins the test Apollo does not
+    authorize are counted, not named."""
+    with open(ledger_path, encoding="utf-8") as f:
+        d = json.load(f)
+    items, n = [], 0
+    for p in sorted(d["plugins"], key=lambda p: p["name"]):
+        stage, _ = LIBRARY_TIERS[p["tier"]]
+        name = re.sub(r"^UAD ", "", p["name"])
+        if stage == "unlicensed":
+            n += 1
+            name = "not authorized on the test Apollo (%d)" % n
+        items.append([name, stage])
+    return {"exported": d["generated"][:10],
+            "source": "the plug-in library ledger (every UA-built UAD-2 "
+                      "plug-in in scope, by pipeline stage)",
+            "scope": d["in_scope"], "items": items}
+
+
 # --------------------------------------------------------------------------
 # Drawing
 # --------------------------------------------------------------------------
+
+def library_date():
+    with open(LIBRARY_JSON, encoding="utf-8") as f:
+        return json.load(f)["exported"]
+
+
+def load_library():
+    """Groups for the plug-in mapping panel, one per stage; [] without the file."""
+    if not os.path.exists(LIBRARY_JSON):
+        return []
+    with open(LIBRARY_JSON, encoding="utf-8") as f:
+        d = json.load(f)
+    groups = []
+    for stage, st, label in LIBRARY_STAGES:
+        items = [[name, name, st] for name, s in d["items"] if s == stage]
+        if items:
+            groups.append({"name": label, "items": items})
+    return groups
+
 
 def load_models():
     groups = {"Thunderbolt": [], "USB": []}
@@ -343,12 +405,17 @@ def draw_treemap(groups, x, y, w, h, out):
 def render(data, theme):
     t = THEMES[theme]
     models = load_models()
+    library = load_library()
     panels = [
         ("UA driver behaviour", data["parity"], (10, 46, 690, 404)),
         ("Work plan", data["plan"], (720, 46, 550, 300)),
         ("Apollo models", models, (720, 386, 550, 64)),
     ]
-    W, H = 1280, 492
+    legend_y = 469
+    if library:
+        panels.append(("Plug-in mapping", library, (10, 496, 1260, 150)))
+        legend_y = 669
+    W, H = 1280, legend_y + 23
     out = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
            'viewBox="0 0 %d %d" font-family="ui-monospace,SFMono-Regular,'
            'Menlo,Consolas,monospace">' % (W, H, W, H),
@@ -369,15 +436,20 @@ def render(data, theme):
         if title == "Apollo models":
             head = "%s: %d of %d verified on hardware" % (
                 title, c["verified"], total)
+        elif title == "Plug-in mapping":
+            head = ("%s: %d of %d UAD plug-ins live on the Apollo, "
+                    "%d more mapped (as of %s)" % (
+                        title, c["verified"], total,
+                        c["done"] + c["partial"], library_date()))
         out.append('<text class="h" x="%d" y="%d">%s</text>'
                    % (x + 2, y - 10, escape(head)))
         draw_treemap(groups, x, y, w, h, out)
     lx = 12
     for st in ORDER:
-        out.append('<rect class="%s" x="%d" y="469" width="12" height="12"/>'
-                   % (st, lx))
-        out.append('<text class="m" x="%d" y="479">%s</text>'
-                   % (lx + 17, escape(LEGEND[st])))
+        out.append('<rect class="%s" x="%d" y="%d" width="12" height="12"/>'
+                   % (st, lx, legend_y))
+        out.append('<text class="m" x="%d" y="%d">%s</text>'
+                   % (lx + 17, legend_y + 10, escape(LEGEND[st])))
         lx += 17 + int(len(LEGEND[st]) * 6.6) + 18
     out.append('<text class="m" x="%d" y="18" text-anchor="end">as of %s</text>'
                % (W - 12, escape(data["exported"])))
@@ -450,6 +522,15 @@ def readme(data):
         "plan. The plugin-hosting tasks are tracked separately and not shown.",
         "- **Apollo models**: one square per model in `devices/`; green ones "
         "have per-model support in the code but no owner has tested them yet.",
+        "- **Plug-in mapping**: one square per UA-built UAD-2 plug-in in "
+        "scope (`plugin-library.json`). Its control-to-DSP mapping is "
+        "produced by running UA's own code offline, never written by hand; "
+        "**live** = loaded on the Apollo with every control set and read "
+        "back; **mapped** = the mapping passed offline and waits for a "
+        "licence or a live load; **not authorized** = the test Apollo "
+        "refuses that plug-in, so it cannot be checked here. Running "
+        "plug-ins on the Apollo is still being built and is not in a "
+        "release yet.",
         "",
         "Colours: **verified** = done and seen working on real hardware (the "
         "note cites a hardware run); **done** = done in code; **partial** = "
@@ -482,6 +563,16 @@ def readme(data):
         lines += ["", "### %s (%d)" % (title, len(open_items)), ""]
         lines += ["- **%s** %s (%s)" % (it[0], it[1], name)
                   for name, it in open_items]
+    library = load_library()
+    if library:
+        c = counts(library)
+        lines += ["", "## Plug-in mapping", "",
+                  "%d of %d UA-built UAD-2 plug-ins are live on the Apollo; %d "
+                  "more are mapped (as of %s)." % (
+                      c["verified"], sum(c.values()), c["done"] + c["partial"],
+                      library_date()),
+                  "", "| Stage | Plug-ins |", "|---|---|"]
+        lines += ["| %s | %d |" % (g["name"], len(g["items"])) for g in library]
     lines += ["", "## Apollo models", "", "| Model | Status |", "|---|---|"]
     for g in models:
         for slug, name, st in g["items"]:
@@ -494,6 +585,7 @@ def readme(data):
         "",
         "```",
         "tools/gen-status-graph.py --notes <RE notes dir>   # re-export status.json, redraw",
+        "tools/gen-status-graph.py --library LEDGER.json   # re-export plugin-library.json, redraw",
         "tools/gen-status-graph.py                          # redraw only",
         "tools/gen-status-graph.py --check                  # CI: exit 1 if stale",
         "```",
@@ -505,8 +597,9 @@ def readme(data):
 def outputs(data):
     c_par, c_plan = counts(data["parity"]), counts(data["plan"])
     c_mod = counts(load_models())
+    c_lib = counts(load_library())
     p_par, p_plan = pct(c_par), pct(c_plan)
-    return {
+    out = {
         "progress-dark.svg": render(data, "dark"),
         "progress-light.svg": render(data, "light"),
         "badge-parity.svg": badge("UA driver parity", "%s%%" % f1(p_par),
@@ -518,14 +611,26 @@ def outputs(data):
             "#0969da"),
         "README.md": readme(data),
     }
+    if sum(c_lib.values()):
+        out["badge-plugins.svg"] = badge(
+            "plug-ins live on the Apollo",
+            "%d/%d" % (c_lib["verified"], sum(c_lib.values())),
+            badge_color(pct(c_lib, ("verified",))))
+    return out
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--notes", help="RE notes directory to export status.json from")
+    ap.add_argument("--library", help="library ledger JSON to export plugin-library.json from")
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if docs/status/ is out of date")
     args = ap.parse_args(argv)
+    if args.library:
+        os.makedirs(OUT, exist_ok=True)
+        with open(LIBRARY_JSON, "w", encoding="utf-8") as f:
+            json.dump(export_library(args.library), f, indent=1, ensure_ascii=False)
+            f.write("\n")
     if args.notes:
         data = export(args.notes)
         os.makedirs(OUT, exist_ok=True)

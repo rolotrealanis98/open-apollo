@@ -42,6 +42,30 @@ body:
       placeholder: "Thunderbolt 3, Thunderbolt 4, USB-C"
     validations:
       required: true
+  - type: dropdown
+    id: uad-source
+    attributes:
+      label: Where setup read your UAD install from
+      options:
+        - Windows on another partition or drive (dual boot)
+        - Windows on an external boot disk
+        - A Windows VM disk image
+        - A Wine prefix
+        - A copied folder
+        - Not sure / setup didn't get that far
+    validations:
+      required: true
+  - type: input
+    id: uad-versions
+    attributes:
+      label: UAD and UAD Console versions
+      placeholder: "e.g., UAD 12.0, UAD Console 1.3.1"
+  - type: textarea
+    id: oa-status
+    attributes:
+      label: oa-assets status
+      description: "Run: `console-rs/target/release/oa-assets status`. Never attach files from your UAD install."
+      render: shell
   - type: textarea
     id: dmesg
     attributes:
