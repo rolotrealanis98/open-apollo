@@ -406,6 +406,23 @@ struct Active {
     circular: Option<((f32, f32), f64)>,
 }
 
+/// The same control as `hit` on every strip of its kind (inputs, auxes; the talkback strip is
+/// its own kind), topmost hit per strip, `hit` first. ponytail: strips with no hit on screen
+/// (cells scrolled out of view) are not included; use the model's strip list if that matters.
+fn peers<'a>(hits: &'a [Hit], hit: &'a Hit) -> Vec<&'a Hit> {
+    use crate::settings::{Panel, SendsOf};
+    let talkback = |s: &str| hits.iter().any(|h| &*h.id.strip == s && h.id.control == Control::ShowPanel(Panel::Sends(SendsOf::Talkback)));
+    let kind = |s: &str| if talkback(s) { s.to_owned() } else { s.trim_end_matches(|c: char| c.is_ascii_digit()).to_owned() };
+    let want = kind(&hit.id.strip);
+    let mut out = vec![hit];
+    for h in hits.iter().rev() {
+        if h.id.control == hit.id.control && !out.iter().any(|o| o.id.strip == h.id.strip) && kind(&h.id.strip) == want {
+            out.push(h);
+        }
+    }
+    out
+}
+
 /// How long a [`HitKind::Latch`] press is held before its release turns it off.
 pub const LATCH_HOLD: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -423,7 +440,8 @@ pub struct Interaction {
 
 impl Interaction {
     /// A press. Console's modifiers (manual "Controls Shortcuts"): Option/Alt-click returns a
-    /// knob or fader to its default (`Action::Reset`: the engine gets `"default"`).
+    /// knob or fader to its default (`Action::Reset`: the engine gets `"default"`), with Cmd
+    /// (Ctrl) every strip's.
     pub fn pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool) -> Vec<Action> {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
         let mods = self.mods;
@@ -448,7 +466,7 @@ impl Interaction {
                 if mods.alt {
                     // Back to the default (the engine resolves `"default"`; a control without a
                     // known UI default shows its value until the engine's echo).
-                    let group = [hit];
+                    let group = if mods.cmd { peers(hits, hit) } else { vec![hit] };
                     let mut out = vec![Action::GestureBegin(hit.id.clone())];
                     for h in group {
                         if let HitKind::Drag { value, reset, .. } | HitKind::Knob { value, reset, .. } = &h.kind {
@@ -557,7 +575,7 @@ mod tests {
         ControlId { strip: strip.into(), control }
     }
 
-    /// Two input faders and an aux fader (in0 at 0.5, in1 at 0.9, aux0 at 0.3) and two input
+    /// Two input faders and an aux fader (in0 at 0.5, in1 at 0.9, aux0 at 0.3), two input
     /// mutes.
     fn strip_hits() -> Vec<Hit> {
         let drag = |value| HitKind::Drag { value, span: 100.0, reset: Some(0.78) };
@@ -582,6 +600,15 @@ mod tests {
         let in0 = cid("/d/inputs/0", Control::Fader);
         assert_eq!(i.pointer_down(&hits, 10.0, 100.0, false), vec![Action::GestureBegin(in0.clone()), Action::Reset(in0.clone(), 0.78), Action::GestureEnd(in0)]);
         assert!(!i.is_dragging());
+    }
+
+    /// Cmd+Option-click: every input's fader resets (not the aux's).
+    #[test]
+    fn cmd_option_click_resets_every_strip_of_the_kind() {
+        let hits = strip_hits();
+        let out = with(true, true).pointer_down(&hits, 110.0, 100.0, false);
+        let resets: Vec<_> = out.iter().filter_map(|a| if let Action::Reset(id, v) = a { Some((&*id.strip, *v)) } else { None }).collect();
+        assert_eq!(resets, vec![("/d/inputs/1", 0.78), ("/d/inputs/0", 0.78)]);
     }
 
     /// TALK: a click latches (toggle on press, nothing on release); held for 0.5 s it is
