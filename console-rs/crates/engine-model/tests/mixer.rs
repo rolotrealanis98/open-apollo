@@ -460,8 +460,12 @@ fn surface_actions_move_local_values() {
     // Loading writes EffectName only (as Console does); Power keeps the slot's value.
     let InsertState::Loaded { name, power } = m.inserts(&a1)[0].clone() else { panic!("not loaded") };
     assert_eq!(name, "UAD Pultec EQP-1A");
+    // Offline nothing commits the load (the slot shows a load in flight, active); the engine's
+    // commit pushes Power true, then the slot's power control bypasses it.
+    assert!(power, "a load in flight is not drawn bypassed");
+    m.store_mut().apply([("/devices/0/inputs/0/effects/0/Power".to_string(), ua_engine::Value::Bool(true))]);
     m.apply(&tap(Control::InsertPower(0)));
-    assert!(matches!(m.inserts(&a1)[0], InsertState::Loaded { power: p, .. } if p != power));
+    assert!(matches!(m.inserts(&a1)[0], InsertState::Loaded { power: false, .. }));
     let empty = 1 + m.inserts(&a1)[1..].iter().position(|s| *s == InsertState::Empty).expect("an empty slot");
     m.apply(&tap(Control::InsertCopy(0)));
     m.apply(&tap(Control::InsertCopy(empty as u8)));

@@ -122,7 +122,7 @@ impl EngineMixer {
             .filter(|slot| self.str_at(&slot.effect_name()).is_some_and(|n| !n.is_empty()))
             .filter_map(|slot| match op {
                 PluginOp::Remove => Some((slot.effect_name(), String::new().into())),
-                _ => (self.bool_at(&slot.power()) != Some(on)).then(|| (slot.power(), on.into())),
+                _ => (self.slot_power(slot) != on).then(|| (slot.power(), on.into())),
             })
             .collect();
         if writes.is_empty() {

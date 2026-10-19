@@ -565,3 +565,25 @@ fn browser_lists_everything_without_native_hosting() {
     let m = live(&server);
     assert_eq!(visible(&m), ["A", "B", "C", "D"]);
 }
+
+/// A load in flight draws as an active plug-in, not a bypassed one: the slot keeps the empty
+/// slot's `Power` false until the daemon commits the load (seconds for a native plug-in). A
+/// `Power` false that arrives with or after the plug-in is a real bypass.
+#[test]
+fn a_loading_insert_is_not_drawn_bypassed() {
+    use ua_engine::{Store, Value};
+    let mut m = EngineMixer::new(Store::from_snapshot(Snapshot::new(tree(), Default::default())));
+    let strip = m.inputs()[0].clone();
+    let slot = "/devices/0/inputs/0/effects/0";
+    m.store_mut().apply([(format!("{slot}/Power"), Value::Bool(false))]);
+    assert_eq!(m.inserts(&strip)[0], InsertState::Empty);
+    // The console's optimistic name (writes gated: local only), no answer yet.
+    m.store_mut().set(&format!("{slot}/EffectName"), "UAD 1176LN Rev E");
+    assert_eq!(m.inserts(&strip)[0], InsertState::Loaded { name: "UAD 1176LN Rev E".into(), power: true });
+    // The daemon commits: name, then Power true.
+    m.store_mut().apply([(format!("{slot}/EffectName"), Value::String("UAD 1176LN Rev E".into())), (format!("{slot}/Power"), Value::Bool(true))]);
+    assert!(matches!(m.inserts(&strip)[0], InsertState::Loaded { power: true, .. }));
+    // A bypass after the load is drawn as one.
+    m.store_mut().apply([(format!("{slot}/Power"), Value::Bool(false))]);
+    assert!(matches!(m.inserts(&strip)[0], InsertState::Loaded { power: false, .. }));
+}

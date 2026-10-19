@@ -253,7 +253,7 @@ impl EngineMixer {
         Some(SlotInfo {
             state: InsertState::Loaded {
                 name: name.to_owned(),
-                power: self.bool_at(&slot.power()) != Some(false),
+                power: self.slot_power(slot),
             },
             source: SlotSource::Uad2,
             label,

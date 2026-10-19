@@ -301,10 +301,19 @@ impl EngineMixer {
         match self.str_at(&slot.effect_name()) {
             Some(name) if !name.is_empty() => InsertState::Loaded {
                 name: name.to_owned(),
-                power: self.bool_at(&slot.power()) != Some(false),
+                power: self.slot_power(slot),
             },
             _ => InsertState::Empty,
         }
+    }
+
+    /// A loaded slot draws bypassed only when its `Power` is false and was set no earlier than
+    /// its plug-in name. A name newer than `Power` is a load still in flight: the empty slot's
+    /// `Power` false is the previous state, not this plug-in's (the open-apollo daemon answers a
+    /// load, and pushes `Power` true, only once the plug-in runs: seconds for a native one).
+    pub(crate) fn slot_power(&self, slot: &InsertPaths) -> bool {
+        self.bool_at(&slot.power()) != Some(false)
+            || self.store.path_revision(&slot.effect_name()) > self.store.path_revision(&slot.power())
     }
 
     /// Commits the negation of a bool property (`default` when it has no value).

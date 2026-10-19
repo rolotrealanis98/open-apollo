@@ -380,7 +380,11 @@ impl EngineMixer {
                 let Some(slot) = self.insert_slot(&ControlId { strip: id.strip.clone(), control: Control::Insert(k) }) else { return true };
                 let loaded = self.str_at(&slot.effect_name()).filter(|n| !n.is_empty()).map(str::to_owned);
                 match (&id.control, loaded) {
-                    (Control::InsertPower(_), Some(_)) => self.toggle(&slot.power(), true),
+                    (Control::InsertPower(_), Some(_)) => {
+                        // Flips what the slot shows (a load in flight shows active).
+                        let on = !self.slot_power(&slot);
+                        self.store.commit(&slot.power(), on);
+                    }
                     (Control::InsertRemove(_), Some(_)) => {
                         self.native_load_notice = None;
                         self.store.clear_error();
