@@ -107,6 +107,14 @@ pub trait Panel {
     }
     /// Called before each build with the model (read state, keep subscriptions).
     fn sync(&mut self, _model: &mut dyn MixerModel) {}
+    /// The insert a plug-in window shows (strip id, slot): the stack closes it when that slot
+    /// empties (Remove, an engine push, a preset recall, Undo) and reopens it in place when
+    /// another plug-in is loaded there, as Console does.
+    fn plugin_slot(&self) -> Option<(String, u8)> {
+        None
+    }
+    /// Leaving the stack (its slot emptied, its window closed): release what it holds.
+    fn closed(&mut self, _model: &mut dyn MixerModel) {}
     /// Mixer actions the panel's menus produced (a plug-in window's ⋮ menu rows are mixer
     /// controls); the shell routes them through the mixer.
     fn take_mixer_actions(&mut self) -> Vec<rack::Action> {
@@ -359,9 +367,9 @@ impl OverlayStack {
     }
 
     /// Closes the panel of layer `layer_id` (its window was closed). False when there is none.
-    pub fn close(&mut self, layer_id: &str) -> bool {
+    pub fn close(&mut self, layer_id: &str, model: &mut dyn MixerModel) -> bool {
         let Some(i) = self.index_of(layer_id) else { return false };
-        self.panels.remove(i);
+        self.panels.remove(i).closed(model);
         self.captured = false;
         true
     }
@@ -391,10 +399,27 @@ impl OverlayStack {
         self.panels.iter_mut().flat_map(|p| p.take_mixer_actions()).collect()
     }
 
-    /// Lets every panel read the model before the next build.
+    /// Lets every panel read the model before the next build. A plug-in window whose slot no
+    /// longer holds its plug-in closes, or reopens in place (same layer, same OS window) on the
+    /// plug-in loaded there instead.
     pub fn sync(&mut self, model: &mut dyn MixerModel) {
-        for p in &mut self.panels {
-            p.sync(model);
+        let mut i = 0;
+        while i < self.panels.len() {
+            if let Some((strip, slot)) = self.panels[i].plugin_slot()
+                && !self.panels[i].matches_plugin(&strip, slot, &*model)
+            {
+                self.panels[i].closed(model);
+                self.captured = false;
+                match self.hook.on_open_plugin(&strip, slot, &*model) {
+                    Some(p) => self.panels[i] = p,
+                    None => {
+                        self.panels.remove(i);
+                        continue;
+                    }
+                }
+            }
+            self.panels[i].sync(model);
+            i += 1;
         }
     }
 

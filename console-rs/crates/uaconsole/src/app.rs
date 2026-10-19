@@ -1049,7 +1049,7 @@ impl App {
             WindowEvent::CloseRequested => {
                 let Some(w) = self.popups.wins.get(i) else { return };
                 let (id, kind) = (w.id.clone(), w.kind);
-                if self.overlays.close(&id) {
+                if self.overlays.close(&id, &mut *self.model) {
                 } else if id == "channels" {
                     self.mixer.show_channels = false;
                 } else if kind == rack::LayerKind::Window {

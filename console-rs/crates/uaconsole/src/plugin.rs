@@ -400,6 +400,14 @@ impl Panel for WindowPanel {
         matches!(state, Some(InsertState::Loaded { name, .. }) if name == self.window.effect_name)
     }
 
+    fn plugin_slot(&self) -> Option<(String, u8)> {
+        Some((self.strip.to_string(), self.slot))
+    }
+
+    fn closed(&mut self, model: &mut dyn MixerModel) {
+        self.close(model);
+    }
+
     fn size(&self) -> (f32, f32) {
         self.window.size(&self.snapshot)
     }

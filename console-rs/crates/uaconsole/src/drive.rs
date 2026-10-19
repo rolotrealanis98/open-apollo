@@ -33,6 +33,7 @@
 //! layers              print each layer (separate window) id, kind and rect
 //! layer PREFIX [larger|smaller|same]   print the first layer whose id starts with PREFIX;
 //!                     with a word, fail unless its size compares so with the last `layer PREFIX`
+//! nolayer PREFIX      fail if a layer's id starts with PREFIX (a window that should have closed)
 //! text TEXT           fail unless TEXT is drawn (texts joined by spaces: wrapped lines match)
 //! echo TEXT
 //! ```
@@ -435,6 +436,12 @@ impl Driver {
                 for l in &self.frame.layers {
                     let r = l.rect;
                     println!("layer {} {:?} [{:.0},{:.0},{:.0},{:.0}]", l.id, l.kind, r.x, r.y, r.w, r.h);
+                }
+            }
+            "nolayer" => {
+                let prefix = arg(0)?;
+                if let Some(l) = self.frame.layers.iter().find(|l| l.id.starts_with(prefix)) {
+                    return Err(format!("layer {} is still open", l.id));
                 }
             }
             "layer" => {
