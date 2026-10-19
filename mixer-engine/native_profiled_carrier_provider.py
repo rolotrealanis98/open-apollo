@@ -8,7 +8,7 @@ capstone and pefile, and the DLL where the bundle was built from.
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-import hashlib, json, math, re, sys, threading
+import hashlib, json, math, os, re, sys, threading
 
 EXECUTOR = Path(__file__).resolve().parents[1] / 'tools/plugin-mapper/plugin_mapper/executor'
 if str(EXECUTOR) not in sys.path:
@@ -25,6 +25,63 @@ def _emulator():
     return GenericCapture, Replay
 
 _FIELD = re.compile(r'parameters/(\d+)/(NormalizedValue|StepValue)$')
+
+# A plug-in's parameter values and formatter texts at load, per bundle. Starting the emulator
+# takes seconds (the plug-in's own constructor runs), so a load publishes these instead and the
+# emulator starts in the background for the first control change. Learned the first time a
+# bundle's emulator starts and kept next to it (<bundle>.defaults.json); keyed by the bundle's
+# bytes, so a rebuilt bundle is learned again.
+_DEFAULTS: dict = {}
+_DEFAULTS_LOCK = threading.Lock()
+
+
+def _bundle_key(path):
+    st = os.stat(path)
+    return (str(path), st.st_mtime_ns, st.st_size)
+
+
+def _bundle_sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def defaults_path(bundle_path):
+    return Path(str(bundle_path) + '.defaults.json')
+
+
+def load_defaults(bundle_path):
+    """(values, texts) for a bundle at load, or None when not learned yet."""
+    try:
+        key = _bundle_key(bundle_path)
+    except OSError:
+        return None
+    with _DEFAULTS_LOCK:
+        if key in _DEFAULTS:
+            return _DEFAULTS[key]
+    found = None
+    try:
+        saved = json.loads(defaults_path(bundle_path).read_text())
+        if saved.get('bundle_sha256') == _bundle_sha256(bundle_path):
+            found = (tuple(saved['values']), tuple(saved['texts']))
+    except (OSError, ValueError, KeyError, TypeError):
+        found = None
+    with _DEFAULTS_LOCK:
+        if found is not None:
+            _DEFAULTS[key] = found
+    return found
+
+
+def save_defaults(bundle_path, values, texts):
+    try:
+        key = _bundle_key(bundle_path)
+        with _DEFAULTS_LOCK:
+            _DEFAULTS[key] = (tuple(values), tuple(texts))
+        target = defaults_path(bundle_path)
+        tmp = target.with_name(f'{target.name}.{os.getpid()}.tmp')
+        tmp.write_text(json.dumps(dict(bundle_sha256=_bundle_sha256(bundle_path), values=list(values),
+                                       texts=list(texts))))
+        tmp.replace(target)
+    except OSError:
+        pass  # read-only maps: learned again next start
 
 @dataclass(frozen=True)
 class ProfiledState:
@@ -160,13 +217,35 @@ class ProfiledCarrierProvider:
                     cap.set_control(index, target)
         return cap
 
+    def _startup_shadow(self):
+        return {int(key, 0) if isinstance(key, str) else key: value
+                for key, value in self.data['startup']['shadow'].items()}
+
     def reset(self):
         with self._lock:
             self.cap = self._capture()
-            shadow = {int(key, 0) if isinstance(key, str) else key: value
-                      for key, value in self.data['startup']['shadow'].items()}
-            self.state = ProfiledState.make(self.cap.defaults_values, shadow)
-            self._texts_now()
+            self.state = ProfiledState.make(self.cap.defaults_values, self._startup_shadow())
+            texts = self._texts_now()
+            if self.bundle_path is not None:
+                save_defaults(self.bundle_path, self.state.values, texts)
+
+    def warm(self, background=True):
+        """Start the emulator now (in a thread when `background`): a control change needs it."""
+        if self.cap is not None or getattr(self, '_warming', False):
+            return
+        if not background:
+            self._ensure()
+            return
+        self._warming = True
+
+        def run():
+            try:
+                self._ensure()
+            except Exception:
+                pass  # the next control change starts it again and reports the error
+            finally:
+                self._warming = False
+        threading.Thread(target=run, name='native-warm', daemon=True).start()
 
     def __deepcopy__(self, memo):
         clone = self.__class__(self.bundle_path, self.input_index, data=self.data, module_store=self.module_store)
@@ -279,8 +358,18 @@ class ProfiledCarrierProvider:
             return self._texts[1]
 
     def _parameters(self):
+        warm = False
         if self.state is None:
-            self._ensure()
+            learned = load_defaults(self.bundle_path) if self.bundle_path is not None else None
+            if learned is not None and len(learned[0]) == len(self.maxima):
+                # Load without the emulator; it starts in the background for the first control.
+                with self._lock:
+                    if self.state is None:
+                        self.state = ProfiledState.make(learned[0], self._startup_shadow())
+                        self._texts = (self.state.values, learned[1])
+                warm = True
+            else:
+                self._ensure()
         texts = self._texts_now()
         output = []
         values = self.state.values
@@ -291,6 +380,8 @@ class ProfiledCarrierProvider:
             if 'StepValue' in props:
                 props['StepValue']['value'] = self._step_label(index, value, props['StringValue']['value'])
             output.append({'id': index, 'properties': props})
+        if warm:
+            self.warm()
         return tuple(output)
 
     def _observe_refs(self, shadow, refs):
@@ -445,3 +536,26 @@ class StereoProfiledCarrierProvider(ProfiledCarrierProvider):
 
     def observations(self):
         return super().observations()+tuple((row,1,(2,2)) for row in (0,1,10))
+
+
+def learn(paths):
+    """Learn the load-time defaults of these bundles (one emulator start each), for the daemon
+    to load them without starting the emulator: python3 native_profiled_carrier_provider.py BUNDLE..."""
+    done = 0
+    for path in paths:
+        if load_defaults(path) is not None:
+            continue
+        try:
+            data = json.loads(Path(path).read_text())
+            kind = StereoProfiledCarrierProvider if data.get('layout') == 'stereo' else ProfiledCarrierProvider
+            provider = kind(path, 0, data=data, module_store=Path(os.environ.get('OA_MODULE_STORE') or MODULES))
+            provider.reset()
+            provider.cap = None
+            done += 1
+        except Exception as error:
+            print(f'{Path(path).name}: defaults not learned: {type(error).__name__}: {error}', flush=True)
+    return done
+
+
+if __name__ == '__main__':
+    print(f'learned the load-time defaults of {learn(sys.argv[1:])} bundles', flush=True)

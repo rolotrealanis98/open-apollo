@@ -478,6 +478,35 @@ DEFAULT_WS_PORT = 4721
 DEFAULT_HOST = "0.0.0.0"
 
 
+def learn_native_defaults(providers):
+    """Learn, in the background (other processes, low priority), each bundle's load-time values
+    and texts that are not known yet, so loading a plug-in never waits for its emulator to
+    start (native_profiled_carrier_provider.load_defaults). Once per bundle."""
+    import subprocess
+    try:
+        from native_profiled_carrier_provider import load_defaults
+    except Exception:
+        return
+    paths = sorted({str(p.bundle_path) for p in providers if getattr(p, 'bundle_path', None)})
+    missing = [p for p in paths if load_defaults(p) is None]
+    if not missing:
+        return
+    workers = max(1, min(4, (os.cpu_count() or 2) - 1))
+    script = str(Path(__file__).resolve().parent / "native_profiled_carrier_provider.py")
+    log.info("Native plug-ins: learning the load-time state of %d bundles in the background "
+             "(%d processes)", len(missing), workers)
+    for i in range(workers):
+        chunk = missing[i::workers]
+        if chunk:
+            try:
+                subprocess.Popen(["nice", "-n", "15", sys.executable, script, *chunk],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except OSError as error:
+                log.warning("Native plug-ins: load-time state not learned: %s", error)
+                return
+
+
 def native_unavailable_reason(error) -> str:
     """What the user can do about native hosting being unavailable, from the error."""
     text = str(error)
@@ -4499,6 +4528,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
             providers = None
             native_reason = f"Plug-in maps unreadable: {type(error).__name__}: {error}"
             log.error("Native plug-in hosting off: %s", native_reason)
+        if providers is not None and args.native_plugin_bundles:
+            learn_native_defaults(providers)
         if providers is not None:
             def native_attach():
                 return register_native(state, helper_tree, backend, providers)
