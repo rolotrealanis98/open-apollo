@@ -612,8 +612,8 @@ fn meter_window(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect) {
     let m: MeterFrame = model.monitor_meters();
     let left = Rect::new(r.x + 26.75, r.y + 74.0, 23.5, 491.0);
     let right = Rect::new(r.x + 68.75, r.y + 74.0, 23.5, 491.0);
-    ui.bar_meter("Monitor-Meter", m.left, m.clip_left, left);
-    ui.bar_meter("Monitor-Meter", m.right, m.clip_right, right);
+    ui.bar_meter("Monitor-Meter", m.left, m.peak_left, m.clip_left, left);
+    ui.bar_meter("Monitor-Meter", m.right, m.peak_right, m.clip_right, right);
     let skin = ui.skin("meters", "Monitor-Meter");
     let tick = skin.and_then(|s| s.color("color-text")).unwrap_or(Rgba::rgb8(93, 101, 105));
     let mut numbers = ui.style("meters", "Monitor-Meter");
@@ -718,7 +718,7 @@ fn sends(ui: &mut Ui, model: &dyn MixerModel, of: SendsOf, bounds: Rect) {
             mute: Some(sid(Control::SettingPress(format!("toggle:{node}/Bypass").into()))),
             level: Some(sid(Control::SettingSet(format!("fader:{node}/GainTapered").into()))),
         };
-        let send = crate::model::SendState { name: name.clone(), level, muted, pan: pan_knob };
+        let send = crate::model::SendState { name: name.clone(), level, muted, pan: pan_knob, meter: model.send_meter(node) };
         ui.at(x, r.y + 31.0, |ui| crate::surfaces::cells::full_send_strip(ui, "Sends-Input-Fader", &send, &db_readout(db), 0.0, r.h - 36.0, ids));
     }
     // ‹ › step through the auxes, or through the input strips: `Popover-Left` / `-Right`

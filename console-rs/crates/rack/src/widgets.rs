@@ -156,8 +156,10 @@ impl Ui<'_> {
         }
     }
 
-    /// Bar meter: 9-sliced background, lit content revealed from the bottom, clip LED.
-    pub fn bar_meter(&mut self, key: &str, level: f64, clip: bool, r: Rect) {
+    /// Bar meter: 9-sliced background, lit content revealed from the bottom, the peak-hold line
+    /// (`peak-height` pt of the lit art at `peak`, 0…1; skins without `peak-height` have none),
+    /// clip LED.
+    pub fn bar_meter(&mut self, key: &str, level: f64, peak: f64, clip: bool, r: Rect) {
         let Some(skin) = self.skin("meters", key) else { return };
         let bg = skin.image("image-background");
         let bg_h = bg.and_then(|p| self.assets.images.get(p)).map(|i| i.height as f32).unwrap_or(392.0);
@@ -181,6 +183,16 @@ impl Ui<'_> {
                 self.image(lit, well, slice, None, 1.0);
                 self.clip(None);
             }
+        }
+        let peak_h = skin.number("peak-height").unwrap_or(0.0) as f32;
+        if let (Some(lit), true) = (skin.image("image-content"), peak_h > 0.0 && peak > 0.0) {
+            // The line rides the well's travel: its foot at the peak, kept inside the well.
+            let y = (r.y + top + well_h * (1.0 - peak.clamp(0.0, 1.0) as f32) - peak_h).clamp(r.y + top, r.y + top + (well_h - peak_h).max(0.0));
+            let well = Rect::new(r.x + content.x / ART_SCALE, r.y + top, content.w / ART_SCALE, well_h);
+            let slice = skin.insets("inset-9-slice-content");
+            self.clip(Some(Rect::new(well.x, y, well.w, peak_h)));
+            self.image(lit, well, slice, None, 1.0);
+            self.clip(None);
         }
         if clip {
             if let Some(c) = skin.image("image-clip") {
@@ -210,9 +222,9 @@ impl Ui<'_> {
             // secondary_meter_well then meter_well, same rect (0x18141ea20).
             ui.background("Secondary-Display-Background", g.meter_well);
             ui.background("Display-Background", g.meter_well);
-            ui.bar_meter(left_key, meters.left, meters.clip_left, g.left_meter);
+            ui.bar_meter(left_key, meters.left, meters.peak_left, meters.clip_left, g.left_meter);
             if let Some(right) = g.right_meter {
-                ui.bar_meter("Right-Input-Meter", meters.right, meters.clip_right, right);
+                ui.bar_meter("Right-Input-Meter", meters.right, meters.peak_right, meters.clip_right, right);
             }
             ui.font_text("Small-Label-Font", readout, g.value_label, Align::Center);
             // Meter scale (`Rack_MeterMarks`, labels 0x1809d1470): a 3×1 tick at the scale's left

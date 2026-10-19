@@ -67,6 +67,7 @@ impl EngineMixer {
                 level: self.f64_at(&p.gain()).unwrap_or(0.0),
                 muted: self.bool_at(&p.bypass()).unwrap_or(false),
                 pan: ua_engine::tapers::pan::knob_from_pan(self.f64_at(&p.pan()).unwrap_or(0.0)),
+                meter: self.send_frame(&p.base),
             })
             .collect()
     }
