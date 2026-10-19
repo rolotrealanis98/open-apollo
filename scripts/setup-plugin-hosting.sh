@@ -158,10 +158,15 @@ echo "== Copying what mapping reads from your install ($OUT/source)"
 mapper stage --from "$FROM" --to "$OUT/source" $ALL || die "could not copy the plug-in DLLs from $FROM"
 
 LOG="$OUT/build.log"
+REDACT="$PROJECT_DIR/scripts/oa_redact.py"
 mkdir -p "$OUT"
-touch "$LOG"
+# The mapper's output goes through the log redactor (user, home, host, serials taken out,
+# lines time-stamped, mode 600): users attach build.log to bug reports.
+: | python3 "$REDACT" --append "$LOG"
+chmod 600 "$LOG" 2>/dev/null || true
 MAP_ARGS=(-m plugin_mapper --from "$OUT/source" --out "$OUT" --markers)
 [ -n "$ALL" ] && MAP_ARGS+=(--all)
+MAP_CMD="cd '$PROJECT_DIR/tools/plugin-mapper' && '$VENV/bin/python3' -u ${MAP_ARGS[*]} 2>&1 | python3 -u '$REDACT' --append '$LOG'"
 CORES=$(nproc 2>/dev/null || echo 2)
 N=${WORKERS:-$(( CORES > 1 ? CORES - 1 : 1 ))}
 
@@ -193,9 +198,7 @@ Description=Open Apollo: map UA plug-ins for the Apollo's DSP
 Type=oneshot
 WorkingDirectory=$PROJECT_DIR/tools/plugin-mapper
 Environment=OA_PLUGIN_MAP_WORKERS=$N
-ExecStart=$VENV/bin/python3 ${MAP_ARGS[*]}
-StandardOutput=append:$LOG
-StandardError=append:$LOG
+ExecStart=/bin/sh -c "$MAP_CMD"
 Nice=10
 IOSchedulingClass=idle
 EOF
@@ -205,7 +208,7 @@ fi
 if [ -z "$BACKGROUND" ]; then
     # No user systemd (or --no-daemon): run it detached, logging to the same file.
     (cd "$PROJECT_DIR/tools/plugin-mapper" &&
-        OA_PLUGIN_MAP_WORKERS=$N nohup setsid "$VENV/bin/python3" "${MAP_ARGS[@]}" >> "$LOG" 2>&1 < /dev/null &)
+        OA_PLUGIN_MAP_WORKERS=$N nohup setsid /bin/sh -c "$MAP_CMD" > /dev/null 2>&1 < /dev/null &)
     BACKGROUND="detached"
 fi
 
@@ -224,7 +227,8 @@ sleep 1
 while :; do
     size=$(stat -c %s "$LOG" 2>/dev/null || wc -c < "$LOG")
     if [ "$size" -gt "$OFFSET" ]; then
-        tail -c +"$((OFFSET + 1))" "$LOG" | head -c "$((size - OFFSET))"
+        # Without the redactor's time stamps: the wizard reads ::progress markers at line start.
+        tail -c +"$((OFFSET + 1))" "$LOG" | head -c "$((size - OFFSET))" | sed -E 's/^[0-9]{2}:[0-9]{2}:[0-9]{2} //'
         OFFSET=$size
     fi
     running || break
@@ -235,6 +239,6 @@ while :; do
     fi
     sleep 2
 done
-grep -q "^Plug-in maps: " "$LOG" || die "mapping stopped early (see $LOG)"
+grep -Eq "^([0-9]{2}:[0-9]{2}:[0-9]{2} )?Plug-in maps: " "$LOG" || die "mapping stopped early (see $LOG)"
 echo "Done. Plug-ins your Apollo authorizes appear in the Console's plug-in browser as Native DSP"
 echo "loads; the Apollo's licence check still decides each load."

@@ -237,6 +237,7 @@ host name, home path or serial numbers.
 | `sudo bash scripts/install.sh` | `~/.local/state/open-apollo/install-<date>-<time>.log` (the user who ran sudo) |
 | `bash scripts/install-uaconsole.sh` | `~/.local/state/open-apollo/uaconsole-<date>-<time>.log` |
 | `bash scripts/setup-plugin-hosting.sh` | `~/.local/state/open-apollo/plugin-hosting-<date>-<time>.log` |
+| Plug-in mapping in the background (after setup, and when a licence appears) | `~/.local/share/open-apollo-plugin-maps/build.log` (appended to, same redaction) |
 | `sudo bash scripts/uninstall.sh` | `~/.local/state/open-apollo/uninstall-<date>-<time>.log` |
 
 Dates and times are UTC. A script run from another one writes into its parent's log, so the
