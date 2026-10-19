@@ -3228,6 +3228,14 @@ class MixerDaemon:
     def _finish_plugin_set(self, client, path, cmd, resp_params, plugin_result):
         if plugin_result.committed:
             self._publish_plugin_commit(plugin_result.events)
+        transactions = getattr(self.plugin_lifecycle, 'transactions', None)
+        if getattr(transactions, 'quarantined', False) and self._native_plugin_backend is not None:
+            # Tell clients why every load now fails, instead of failing silently.
+            self._publish_license('/NativePluginHosting', False, 'bool')
+            self._publish_license('/NativePluginHostingReason',
+                                  'Plug-ins stopped after a device operation could not be confirmed: '
+                                  'restart the mixer daemon (systemctl --user restart ua-mixer-daemon) '
+                                  'to turn them on again', 'string')
         if plugin_result.error:
             # Local Open Apollo error namespace; not a claimed native UA code.
             self._send_local_plugin_error(client, path, plugin_result.error,

@@ -60,3 +60,19 @@ def test_no_retry_while_the_device_is_away():
     daemon = MixerDaemon(StateTree(), None, plugin_hosting=True)
     daemon._native_attach = lambda: (_ for _ in ()).throw(AssertionError('must not be called'))
     assert daemon._native_hosting_try() is False
+
+
+def test_a_quarantine_is_logged_and_published(caplog):
+    p = provider(1)
+    _, driver, backend, tx = rig((p,), max_instances=4)
+    state = backend.publisher.state
+    daemon = MixerDaemon(state, None, helper_tree=backend.publisher.helper,
+                         plugin_transactions=tx, plugin_hosting=True)
+    with caplog.at_level('ERROR'):
+        result = tx._quarantine('Activation unconfirmed')
+    assert 'quarantined' in caplog.text and 'Activation unconfirmed' in caplog.text
+    from protocol import Command
+    daemon._finish_plugin_set(None, p.slot + '/EffectName/value', Command('set', p.slot + '/EffectName/value', p.name),
+                              {}, type('R', (), {'committed': False, 'error': None})())
+    assert state.get_value('/NativePluginHosting') is False
+    assert 'restart the mixer daemon' in state.get_value('/NativePluginHostingReason')

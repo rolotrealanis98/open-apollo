@@ -7,6 +7,7 @@ coordinator. No handles, DSP results, or parameters are generated.
 """
 
 import copy
+import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -19,6 +20,9 @@ from plugin_publication import (
     PublicationError,
 )
 
+
+
+log = logging.getLogger(__name__)
 
 class Outcome(Enum):
     CONFIRMED = "confirmed"
@@ -237,6 +241,11 @@ class PluginTransactions:
     def _quarantine(
         self, detail, prepared=None, *, committed=False, events=()
     ):
+        if not self.quarantined:
+            # Every later transaction answers with this until the daemon restarts (it closes the
+            # device, which frees whatever the unconfirmed operation left): say so once, loudly.
+            log.error("Native plug-in transactions stopped (quarantined): %s. Plug-ins stay "
+                      "unavailable until the mixer daemon restarts.", detail)
         self.quarantined = True
         self.quarantine_reason = detail
         if prepared is not None:
