@@ -697,6 +697,12 @@ pub trait MixerModel {
     fn notifications(&self) -> Vec<String> {
         Vec::new()
     }
+    /// The newest refused write that has no notice of its own (a link the engine refused), with
+    /// when it came: shown over the status bar for a few seconds (plug-in loads show theirs
+    /// under the slot).
+    fn last_refusal(&self) -> Option<(String, std::time::Instant)> {
+        None
+    }
     /// Properties behind the Settings window and secondary panels (engine paths and `pref:`
     /// client preferences). None leaves those pages empty.
     fn properties(&self) -> Option<&dyn crate::settings::PropertySource> {

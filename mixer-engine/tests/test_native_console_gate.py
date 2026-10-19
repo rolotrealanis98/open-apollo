@@ -6,7 +6,7 @@ import pytest
 
 from protocol import Command
 from test_plugin_native import model
-from ua_mixer_daemon import MixerDaemon, native_allows_post, native_refuses_set
+from ua_mixer_daemon import MixerDaemon, native_allows_post, native_refusal_detail, native_refuses_set
 
 UNSUPPORTED = 'openapollo.native_operation_unsupported'
 
@@ -76,3 +76,16 @@ def test_posts(lab, path, allowed):
     lab.daemon._handle_post(lab.client, Command('post', path, {}, raw_params=None))
     errors = [c.args[3] for c in lab.daemon._send_post_reply.call_args_list]
     assert (UNSUPPORTED not in errors) == allowed
+
+
+def test_link_refusals_say_why():
+    assert 'Remove the plug-ins first' in native_refusal_detail('/devices/0/inputs/0/Stereo')
+    assert 'Analog 1-2 and Analog 3-4' in native_refusal_detail('/devices/0/inputs/4/Stereo')
+    assert native_refusal_detail('/SampleRate') is None
+
+
+def test_a_refused_link_carries_its_reason(lab):
+    lab.daemon._handle_set(lab.client, Command('set', '/devices/0/inputs/4/Stereo/value', True,
+                                               raw_params={'func_id': 1}))
+    assert refused(lab)
+    assert 'Analog 1-2' in lab.daemon._send_local_plugin_error.call_args.kwargs['detail']

@@ -225,6 +225,20 @@ def native_refuses_set(canonical: str) -> bool:
             or canonical.rsplit('/', 1)[-1] in _NATIVE_REFUSED_PROPS)
 
 
+_LINK_PROPS = frozenset({'Stereo', 'StereoLink', 'Link'})
+
+
+def native_refusal_detail(canonical: str) -> str | None:
+    """The reason shown with a refused link / unlink (the console shows `detail`)."""
+    if canonical.rsplit('/', 1)[-1] not in _LINK_PROPS:
+        return None
+    if re_mod.fullmatch(r"/devices/0/inputs/[02]/Stereo", canonical):
+        return ('Remove the plug-ins first: inputs cannot be linked or unlinked '
+                'while native plug-ins are loaded')
+    return ('Only Analog 1-2 and Analog 3-4 can be linked or unlinked '
+            'while native plug-in hosting is on')
+
+
 def native_allows_post(path: str) -> bool:
     """Whether a POST runs while native hosting owns the inserts."""
     return path.rstrip('/').rsplit('/', 1)[-1] in _NATIVE_MIXER_POSTS
@@ -3090,7 +3104,8 @@ class MixerDaemon:
         if native and not native_allows_idle_link and not is_plugin_slot_path(path) \
                 and native_refuses_set(canonical):
             self._send_local_plugin_error(
-                client, path, 'openapollo.native_operation_unsupported', resp_params)
+                client, path, 'openapollo.native_operation_unsupported', resp_params,
+                detail=native_refusal_detail(canonical))
             return
         if self._handle_clock_set(client, path, cmd.value, resp_params):
             return

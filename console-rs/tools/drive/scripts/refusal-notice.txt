@@ -1,0 +1,11 @@
+# A refused write that answers a menu (here a clock source the fake hardware refuses; a link
+# native hosting refuses is the same path) shows its reason over the status bar.
+#: --daemon-arg=--refuse-clock --daemon-arg=S/PDIF
+settle
+# Browser hidden: its own error line would match too.
+click nav:ShowBrowser
+settle
+click status:StatusClock
+menu S/PDIF
+settle
+text Unable to set value.

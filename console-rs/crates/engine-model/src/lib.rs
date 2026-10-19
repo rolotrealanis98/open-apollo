@@ -725,6 +725,11 @@ impl MixerModel for EngineMixer {
         Some(self)
     }
 
+    fn last_refusal(&self) -> Option<(String, std::time::Instant)> {
+        let r = self.store.refusals().last()?;
+        (!r.path.ends_with("/EffectName")).then(|| (r.message.clone(), r.at))
+    }
+
     /// The writes the engine refused (`Store::refusals`), newest first.
     fn notifications(&self) -> Vec<String> {
         let mut n: Vec<String> = self.store.refusals().map(|r| format!("{}: {}", r.path, r.message)).collect();
