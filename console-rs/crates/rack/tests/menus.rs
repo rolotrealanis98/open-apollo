@@ -152,6 +152,30 @@ fn context_menus_open_on_their_controls() {
     assert!(!v.open_context_menu(&hits, aux.center().0, aux.center().1));
 }
 
+/// A right click on the preamp plate (not on its controls) opens the preamp menu at the
+/// pointer (`Rack_Overview_Preamp`'s plate button), Unison rows included.
+#[test]
+fn preamp_plate_opens_the_preamp_menu() {
+    let assets = assets();
+    let model = PreviewMixer::default();
+    let hits = hits(&assets, &model, &ViewState::default());
+    let plate = hits.iter().find(|h| h.id.control == Control::PreampPlate).expect("a preamp plate").clone();
+    let (x, y) = (plate.rect.x + 3.0, plate.rect.y + 3.0);
+    let mut v = ViewState::default();
+    assert!(v.context_click(&hits, x, y));
+    let m = v.menu.as_ref().unwrap();
+    assert_eq!(m.target, MenuTarget::Preamp { strip: plate.id.strip.clone() });
+    assert_eq!(m.anchor, MenuAnchor::Point(x + menu::POINTER_DX, y + menu::POINTER_DY));
+    // A left click on the plate does nothing.
+    let mut i = Interaction::default();
+    let mut model = PreviewMixer::default();
+    let mut v = ViewState::default();
+    for a in i.pointer_down(&hits, x, y, false) {
+        v.dispatch(a, &mut model);
+    }
+    assert!(v.menu.is_none() && v.popover.is_none());
+}
+
 #[test]
 fn insert_menu_items_and_routing() {
     let assets = assets();

@@ -80,6 +80,11 @@ pub enum Control {
     Isolate,
     /// [model] Input source: index into `MixerModel::input_sources` (`IOType`).
     InputSource(u8),
+    /// [view] The preamp block's plate (`Rack_Overview_Preamp`: a transparent full-size button
+    /// under its controls, init 0x15d3018). A secondary click (right or Ctrl-click) opens the
+    /// preamp menu at the pointer (`SetupButtonPopup` 0x15d85ec → `HandleButtonPopup`
+    /// 0x15d8748); the controls on it keep their own clicks.
+    PreampPlate,
     /// [view] Plug-in browser.
     BrowserTab(BrowserTab),
     BrowserSearch,

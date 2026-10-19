@@ -475,6 +475,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SessionPanelDots
             | C::SessionSaveChoice(_)
             | C::ValueEntry(_)
+            | C::PreampPlate
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
         || matches!(c, C::Menu(m) if m.is_view())
 }
