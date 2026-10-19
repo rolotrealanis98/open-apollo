@@ -83,32 +83,12 @@ def test_registry_offers_each_verified_layout_from_its_own_bundle(tmp_path, monk
     assert {(p.name, type(p).__name__) for p in everything} >= {("UAD Mono Only", "StereoStub"), ("UAD Not Yet Live", "Stub")}
 
 
-def test_a_load_built_ahead_is_not_built_again(monkeypatch):
-    from test_plugin_native_layouts import provider, rig
-    p = provider(1)
-    builds = []
-    original_reset = type(p).reset
-
-    def reset(self):
-        builds.append(self)
-        original_reset(self)
-    monkeypatch.setattr(type(p), "reset", reset, raising=False)
-    monkeypatch.setattr(type(p), "warm", lambda self: None, raising=False)
-    state, driver, backend, tx = rig((p,), max_instances=4)
-    key, job = backend.warm_job(p.slot, p.name)
-    built = job()  # what the daemon runs on its worker thread
-    backend.adopt_warm(key, built)
-    assert builds == [built] and built is not p
-    assert tx.load(p.slot, p.name).committed
-    assert builds == [built], "prepare used the provider built ahead"
-    assert backend.warm_job("/devices/0/inputs/1/effects/0", "not offered") is None
-
-
-def test_a_native_load_builds_off_the_event_loop(monkeypatch):
-    """The emulator build runs on the daemon's worker thread; the loop keeps serving and the
-    slot reads Loading until the load commits."""
+def test_a_native_transaction_runs_off_the_event_loop(monkeypatch):
+    """The load runs on the daemon's worker thread: gets are served meanwhile, the slot reads
+    Loading, and a set waits (in order) until the load has committed."""
     import asyncio, threading
     from test_plugin_native_layouts import provider, rig
+    from test_plugin_native import FIELD
     from protocol import Command
     from plugin_test_support import MemoryWriter
     from ua_mixer_daemon import MixerClient, MixerDaemon
@@ -121,29 +101,30 @@ def test_a_native_load_builds_off_the_event_loop(monkeypatch):
         assert gate.wait(5)
         original_reset(self)
     monkeypatch.setattr(type(p), "reset", reset, raising=False)
-    monkeypatch.setattr(type(p), "warm", lambda self: None, raising=False)
     state, driver, backend, tx = rig((p,), max_instances=4)
     daemon = MixerDaemon(state, None, helper_tree=backend.publisher.helper,
                          plugin_transactions=tx, plugin_hosting=True)
     writer = MemoryWriter()
     client = MixerClient(None, writer)
-    path = p.slot + "/EffectName/value"
 
     async def run():
-        daemon._handle_set(client, Command("set", path, p.name, raw_params={"func_id": "7"}))
+        daemon._handle_set(client, Command("set", p.slot + "/EffectName/value", p.name, raw_params={"func_id": "7"}))
         assert state.get_value(p.slot + "/Status") == "Loading" and not writer.frames
-        daemon._handle_set(client, Command("set", path, p.name, raw_params={"func_id": "8"}))
-        assert b"reentrant" in writer.frames[-1]  # a second load into that slot waits its turn
+        daemon._handle_get(client, Command("get", p.slot + "/Status/value", raw_params={"func_id": "8"}))
+        assert json.loads(writer.frames[-1].rstrip(b"\0"))["data"] == "Loading"  # served while loading
+        daemon._handle_set(client, Command("set", f"{p.slot}/{FIELD}/value", .75, raw_params={"func_id": "9"}))
+        assert len(writer.frames) == 1  # waits for the load
         gate.set()
         for _ in range(500):
-            if len(writer.frames) == 2:
+            if len(writer.frames) == 3:
                 break
             await asyncio.sleep(0.01)
     asyncio.run(run())
-    assert threads and all(name.startswith("native-plan") for name in threads)
+    assert threads and all(name.startswith("native-plugin") for name in threads)
+    replies = [json.loads(frame.rstrip(b"\0")) for frame in writer.frames[1:]]
+    assert [r["parameters"]["func_id"] for r in replies] == [7, 9] and not any("error" in r for r in replies)
     assert state.get_value(p.slot + "/EffectName") == p.name and state.get_value(p.slot + "/Status") == ""
-    reply = json.loads(writer.frames[-1].rstrip(b"\0"))
-    assert reply["parameters"]["func_id"] == 7 and "error" not in reply
+    assert list(driver.instances.values()) == [75]
 
 
 def test_known_good_list_holds_no_dsp_data():

@@ -102,7 +102,6 @@ class NativePluginBackend:
             self.providers[key] = item
         self._leases = {}
         self._pending = {}
-        self._warm = {}
 
     def _channels(self, slot):
         first = int(slot.split('/')[4])
@@ -126,39 +125,6 @@ class NativePluginBackend:
         if (slot, name, other) not in self.providers:
             return None
         return f'{name}: {kind} only — {verb} the input or use a {want} bundle'
-
-    def _template_key(self, slot, name):
-        return (slot, name, self._channels(slot))
-
-    def warm_job(self, slot, name):
-        """(key, job) that builds a fresh provider for loading `name` into `slot`, or None.
-
-        Building it runs the plug-in's original code in the emulator (seconds), so the daemon
-        runs `job` on a worker thread and hands the result to adopt_warm(); prepare() then
-        uses it instead of building one on the event loop."""
-        if not re.fullmatch(r'/devices/0/inputs/[0-3]/effects/[0-3]', slot or ''):
-            return None
-        key = self._template_key(slot, name)
-        template = self.providers.get(key)
-        if template is None or not hasattr(template, 'warm'):
-            return None
-
-        def job():
-            source = copy.deepcopy(template)
-            source.reset()
-            return source
-        return key, job
-
-    def adopt_warm(self, key, source):
-        self._warm[key] = source
-
-    def _take_warm(self, key):
-        return self._warm.pop(key, None)
-
-    def cold_sources(self):
-        """Live providers whose emulator must be rebuilt (copies made by a chain change)."""
-        return [lease.provider for lease in self._leases.values()
-                if hasattr(lease.provider, 'warm') and getattr(lease.provider, 'cap', None) is None]
 
     @staticmethod
     def _provider_channels(provider):
@@ -286,13 +252,9 @@ class NativePluginBackend:
             return PrepareOutcome(Outcome.FAILED, detail='Current lease differs from slot state')
         try:
             self._session()
-            warmed = self._take_warm((slot, name, channels))
-            if warmed is not None:
-                provider = warmed
-            else:
-                if previous is not None:
-                    provider = copy.deepcopy(provider)
-                provider.reset()
+            if previous is not None:
+                provider = copy.deepcopy(provider)
+            provider.reset()
             initial = provider.initial(OwnedHandle(
                 1, self.publisher.owner, self.publisher.generation))
             self.publisher.validate(initial)

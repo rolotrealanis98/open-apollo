@@ -138,7 +138,7 @@ class ProfiledCarrierProvider:
         self.cap = None
         self.state = None
         self._texts = None  # (values, formatter texts), see _texts_now()
-        # The daemon builds emulators on a worker thread (warm()); every change of cap/state holds this.
+        # The daemon runs transactions on its worker thread; every change of cap/state holds this.
         self._lock = threading.RLock()
 
     def _ensure(self):
@@ -148,10 +148,6 @@ class ProfiledCarrierProvider:
                     self.reset()
                 else:
                     self.cap = self._capture(self.state.values)
-
-    def warm(self):
-        """Build the emulator now (seconds of original code), off the daemon's event loop."""
-        self._ensure()
 
     def _capture(self, values=None):
         cap = self.capture_type(self.profile, auto_start=False)

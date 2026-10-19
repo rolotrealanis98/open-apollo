@@ -7,6 +7,7 @@ coordinator. No handles, DSP results, or parameters are generated.
 """
 
 import copy
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from threading import RLock, get_ident
@@ -166,6 +167,19 @@ class PluginTransactions:
         self._owner_thread = get_ident()
         self._busy = False
         self._current_leases = {}  # Only successful coordinator publication establishes authority.
+
+    @contextmanager
+    def owned_by_current_thread(self):
+        """Run one operation on another thread (the daemon's native worker: a load runs the
+        plug-in's code and reads back thousands of DSP words). Meanwhile the creator thread
+        gets owner-mismatch refusals and no current lease, as during any busy transaction."""
+        with self._lock:
+            previous, self._owner_thread = self._owner_thread, get_ident()
+        try:
+            yield self
+        finally:
+            with self._lock:
+                self._owner_thread = previous
 
     @property
     def remote_revision(self):
