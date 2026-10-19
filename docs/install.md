@@ -7,7 +7,6 @@ have**, because it includes no Universal Audio files. The setup wizard does ever
 - [Setup wizard](#setup-wizard) (Thunderbolt Apollos; recommended)
 - [Command-line install](#command-line-install) (step by step, or without a desktop)
 - [USB Apollos](#usb-apollos)
-- [NixOS](#nixos)
 - [Plug-ins](#plug-ins)
 - [Updating, reinstalling and uninstalling](#updating-reinstalling-and-uninstalling)
 - [Where things go](#where-things-go)
@@ -122,26 +121,6 @@ boot image or the DSP modules are missing. For the Console, also run the `import
 `plugins` and `install-uaconsole.sh` lines from the command-line install above.
 
 Twin USB and Twin X USB are untested.
-
-## NixOS
-
-Add to your `flake.nix` inputs:
-
-```nix
-inputs.open-apollo.url = "github:rolotrealanis98/open-apollo";
-```
-
-Then in your `configuration.nix`:
-
-```nix
-imports = [ inputs.open-apollo.nixosModules.default ];
-hardware.ua-apollo.enable = true;
-```
-
-`nixos-rebuild switch` builds the kernel module and sets up `iommu=pt`, Thunderbolt (bolt),
-PipeWire and the packages it needs. The console is `nix run github:rolotrealanis98/open-apollo#uaconsole`
-(see [console-rs/README.md](../console-rs/README.md#nix)). Run the `oa-assets` steps above by
-hand for the Console art and the plug-in panels.
 
 ## Plug-ins
 

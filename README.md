@@ -181,7 +181,7 @@ install, and then:
 
 The [install guide](docs/install.md) has the details: requirements, each wizard page, the
 command-line install (no desktop, or step by step), **USB Apollos**
-(`sudo bash scripts/install-usb.sh`), NixOS, updating, uninstalling, where every file goes,
+(`sudo bash scripts/install-usb.sh`), updating, uninstalling, where every file goes,
 and troubleshooting.
 
 ## Using open-apollo
@@ -192,7 +192,7 @@ Open **Open Apollo Console** from your app menu. `uaconsole` is a native Linux r
 UAD Console: the mixer, its windows and menus, meters, and plug-in windows drawn from the
 open-apollo-panels specs. It talks to the mixer daemon on 127.0.0.1:4710. The menu entry
 controls your Apollo (`uaconsole --writes`). Plain `uaconsole` only shows the mixer until you
-turn on Settings › WRITES. See [console-rs/README.md](console-rs/README.md) for options, the Nix package
+turn on Settings › WRITES. See [console-rs/README.md](console-rs/README.md) for options
 and troubleshooting, and [console-rs/WIRING.md](console-rs/WIRING.md) for which controls are
 wired.
 
@@ -325,7 +325,7 @@ Plug-in panel specs live in their own repository,
 
 In this repository ([docs/README.md](docs/README.md) lists everything):
 
-- [Install guide](docs/install.md): requirements, the setup wizard, command-line and USB installs, NixOS, uninstalling, troubleshooting
+- [Install guide](docs/install.md): requirements, the setup wizard, command-line and USB installs, uninstalling, troubleshooting
 - [Getting a UAD install](docs/uad-install.md): dual boot, a Windows boot disk, a Windows VM, Wine, or a copied folder
 - [Getting help](SUPPORT.md): what to check first, and what to attach to an issue
 - [Mixer console](console-rs/README.md) and [what it controls](console-rs/WIRING.md)

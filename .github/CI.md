@@ -17,7 +17,6 @@ job that had nothing to check. Any change to `ci.yml` itself runs every job.
 | `console-rs` | `console-rs/`, `mixer-engine/device_maps/` | `cargo build`/`cargo test --workspace --locked` (cached with Swatinem/rust-cache, saved from `main` only); `cargo fmt --check` for the crates that follow `console-rs/rustfmt.toml` (`oa-assets`); `clippy -D warnings` for `oa-assets` and `oa-setup`; `cargo check` with the `webview` feature when `plugin-ui`, `uaconsole` or `Cargo.lock` change |
 | `installer` | `scripts/`, `tests/`, `configs/`, `tools/**/*.sh` | `shellcheck --severity=error` over every shell script in `scripts/ tools/ configs/ tests/`; every `tests/test-install-*.sh` (except the docker matrix), `tests/test-host-checks.sh`, `tests/test-uninstall.sh` and `tests/test-setup-root.sh` |
 | `install (ubuntu, fedora, debian, arch, opensuse)` | `driver/`, `scripts/`, `configs/`, `tests/docker/` | `scripts/install.sh` end to end in each distro's container |
-| `nix` | PRs: `flake.nix`, `nix/`, the Cargo manifests and lock file; `main`: also any `console-rs/` change | `nix flake check` (builds `uaconsole` and runs its tests in the sandbox) |
 
 ## Branch protection for `main`
 
@@ -39,8 +38,6 @@ Leave these advisory (visible on every PR, not required):
 - `install (…)`: the containers install from live distro mirrors, and Arch and openSUSE
   Tumbleweed are rolling releases, so they can break without any change of ours. Make
   `install (ubuntu)` and `install (debian)` required if installer regressions slip through.
-- `nix`: it follows `nixos-unstable` (there is no `flake.lock`) and is not run for every
-  console-rs PR.
 
 The last file `clean-repo` flagged, `tools/usb-re/init-bulk-sequence.bin` (a Windows USB
 capture that held UA DSP modules), is gone from the tree: the USB init now builds that stream
@@ -85,6 +82,5 @@ Rough figures for a 2-core `ubuntu-24.04` runner:
 | `ci.yml` itself, or `workflow_dispatch` | everything | about 60 to 70 |
 
 The push to `main` after a merge runs the same jobs again (it keeps the Rust cache warm for
-the next PRs), plus `nix` (about 25 minutes) when console-rs changed. A typical PR therefore
-costs its row above twice. The `install` matrix and `nix` are the expensive jobs; trim the
-matrix to `ubuntu` and `arch` on PRs if the allowance runs short.
+the next PRs). A typical PR therefore costs its row above twice. The `install` matrix is the
+expensive job; trim the matrix to `ubuntu` and `arch` on PRs if the allowance runs short.
