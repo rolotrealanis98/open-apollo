@@ -79,11 +79,21 @@ pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: boo
         let tempo = format!("{:.2}", st.tempo);
         let rate = sample_rate_label(st.sample_rate);
         let clock = st.clock_source.clone().unwrap_or_else(|| "OFFLINE".into()).to_uppercase();
-        let fields = [
+        let mut fields = vec![
             (Field { label: "TEMPO", label_x: 15.0, value_x: 80.5, arrow_x: 137.0, sep_x: 150.0, control: Control::StatusTempo }, tempo),
             (Field { label: "RATE", label_x: 161.0, value_x: 226.0, arrow_x: 283.0, sep_x: 296.0, control: Control::StatusRate }, rate),
             (Field { label: "CLOCK", label_x: 307.5, value_x: 362.0, arrow_x: 429.0, sep_x: 442.0, control: Control::StatusClock }, clock),
         ];
+        // BUFFER (Windows Console's `Rack_BufferSizeInfo`) when the engine has `/BufferSize`
+        // (open-apollo: PipeWire's quantum), one field pitch after CLOCK; the rest moves right.
+        // [I] its offsets repeat CLOCK's.
+        let buffer = model.engine_settings().buffer_size;
+        let shift = if buffer.is_some() { 146.5 } else { 0.0 };
+        if let Some(b) = buffer {
+            let f = Field { label: "BUFFER", label_x: 454.0, value_x: 508.5, arrow_x: 575.5, sep_x: 588.5,
+                            control: Control::SettingsBuffer };
+            fields.push((f, b.to_string()));
+        }
         for (f, v) in fields {
             let mut k = key.clone();
             if offline && f.label != "TEMPO" {
@@ -110,7 +120,7 @@ pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: boo
         // bar, value after it, 7 pt pitch. The fill is `min(v · 81 / 100, 81)`, the text
         // `(int)(v + 0.5)` and "%" (v in percent, as the engine sends it).
         for (i, (label, load)) in [("DSP", st.dsp_load), ("PGM", st.pgm_load), ("MEM", st.mem_load)].into_iter().enumerate() {
-            let bar = Rect::new(470.0, 10.0 + i as f32 * 7.0, 81.0, 6.0);
+            let bar = Rect::new(470.0 + shift, 10.0 + i as f32 * 7.0, 81.0, 6.0);
             ui.text(label, gas.clone(), Rect::new(bar.x - 30.0, bar.y + 1.0, 30.0, bar.h), Align::Right);
             ui.fill(bar, LOAD_WELL);
             let fill = (load.max(0.0) * bar.w / 100.0).min(bar.w);
@@ -122,22 +132,23 @@ pub fn draw_status_bar_with(ui: &mut Ui, model: &dyn MixerModel, scene_info: boo
         // 696). Positions measured on p1, the block's width from its name.
         let scene = st.scene.clone().unwrap_or_else(|| "(NONE)".into());
         let scene_w = helvetica_width(&scene, val.size).round() + 72.0;
+        let scene_x = SCENE_X + shift;
         let warning = model.properties().and_then(|src| src.prop("/InputDelayCompWarning"))
             .and_then(|value| value.as_str().map(str::to_owned)).filter(|s| !s.is_empty());
         if let Some(warning) = warning {
-            let area = Rect::new(SCENE_X, 4.0, (r.w - SCENE_X - 8.0).max(0.0), r.h - 8.0);
+            let area = Rect::new(scene_x, 4.0, (r.w - scene_x - 8.0).max(0.0), r.h - 8.0);
             let mut style = val.clone();
             style.color = Rgba::rgb8(255, 190, 45);
             ui.text(&warning, style, area, Align::Left);
             ui.hit(area, ControlId { strip: "delay-comp".into(), control: Control::ShowSettings }, HitKind::Tap);
-        } else if scene_info && st.plugin_scenes && SCENE_X + scene_w <= r.w {
-            let end = SCENE_X + scene_w;
-            sep(ui, 576.0);
-            ui.text("SCENE", key.clone(), Rect::new(587.5, ty, 44.0, th), Align::Left);
-            ui.text(&scene, val.clone(), Rect::new(631.5, ty, end - 13.0 - 631.5, th), Align::Left);
+        } else if scene_info && st.plugin_scenes && scene_x + scene_w <= r.w {
+            let end = scene_x + scene_w;
+            sep(ui, 576.0 + shift);
+            ui.text("SCENE", key.clone(), Rect::new(587.5 + shift, ty, 44.0, th), Align::Left);
+            ui.text(&scene, val.clone(), Rect::new(631.5 + shift, ty, end - 13.0 - 631.5 - shift, th), Align::Left);
             arrow(ui, end - 12.0);
             sep(ui, end + 1.0);
-            ui.hit(Rect::new(580.0, 4.0, end - 580.0, r.h - 8.0), sid(Control::StatusScene), HitKind::Tap);
+            ui.hit(Rect::new(580.0 + shift, 4.0, end - 580.0 - shift, r.h - 8.0), sid(Control::StatusScene), HitKind::Tap);
         }
     });
 }

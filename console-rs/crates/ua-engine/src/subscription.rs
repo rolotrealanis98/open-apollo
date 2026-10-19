@@ -289,6 +289,12 @@ impl SubscriptionPlan {
                     .filter_map(|k| value(&format!("{dev}/{k}"))),
             );
         }
+        // open-apollo's own status nodes (Settings › PIPEWIRE; absent on UA's engine).
+        for n in ["/openapollo/pipewire", "/openapollo/latency"] {
+            if let Some(node) = tree.node(n) {
+                g.extend(node.properties.iter().filter_map(|k| value(&format!("{n}/{k}"))));
+            }
+        }
         batches.push(Batch {
             label: "global".into(),
             paths: g,

@@ -1061,6 +1061,7 @@ impl ViewState {
                     "midi" => SettingsTab::Midi,
                     "dante" => SettingsTab::DanteDevices,
                     "network" => SettingsTab::Network,
+                    "pipewire" => SettingsTab::PipeWire,
                     _ => return false,
                 };
                 return true;
