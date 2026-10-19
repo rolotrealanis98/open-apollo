@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Plug-in panels 2026.10.19: the Distressor's BYPASS, REDLINE and THD lamps were drawn 3x wide; the API Vision Channel Strip drew its PRE DYN / DYN SC block twice, squeezed. `tools/check-sprite-fit.py` (in CI, against the pinned panels release) fails on any panel element whose shape differs from its sprite frame unless it is on the reviewed list `tools/sprite-fit-reviewed.txt`.
+
 ### Added
 - Native plug-in hosting merged into main, experimental and off by default: the driver plug-in host (`plugin_host=1`, `input_strips=1`) and the daemon's native insert transactions, chains, delay compensation and licence mirror. No plug-in mappings ship; a user-side bundle builder is in progress.
 
