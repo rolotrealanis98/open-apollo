@@ -392,6 +392,7 @@ int ua_unison_restore(struct ua_device *, u64, const struct ua_unison_image *);
 /* ---- Console input strips on DSP 0 (ua_strips.c, input_strips=1) ---- */
 bool ua_strips_wanted(void);
 void ua_strips_init(struct ua_device *ua);		/* probe */
+bool ua_strips_model_known(u32 device_type);
 void ua_strips_free(struct ua_device *ua);		/* host free */
 void ua_strips_connected(struct ua_device *ua);	/* ua->lock */
 void ua_strips_run(struct ua_device *ua);		/* host work */

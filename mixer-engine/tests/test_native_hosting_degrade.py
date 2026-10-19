@@ -15,13 +15,27 @@ class Router:
 
 def test_reasons_the_user_can_act_on():
     stale = ValueError('initial native compensation could not be confirmed: Compensation device operation unconfirmed')
-    assert native_unavailable_reason(stale).startswith('Power-cycle the Apollo')
+    assert native_unavailable_reason(stale, dsp_state='').startswith('Power-cycle the Apollo')
     chained = RuntimeError('device operation unconfirmed')
     chained.__cause__ = OSError(errno.ESTALE, 'Stale file handle')
-    assert native_unavailable_reason(chained).startswith('Power-cycle the Apollo')
+    assert native_unavailable_reason(chained, dsp_state='').startswith('Power-cycle the Apollo')
     rate = ValueError('native provider sample rate does not match hardware')
     assert '48 kHz' in native_unavailable_reason(rate)
     assert native_unavailable_reason(KeyError('x')).startswith('Plug-in hosting unavailable')
+
+
+def test_strips_off_names_the_driver_reason_not_a_power_cycle():
+    """#91: on a Twin X the strips are off for want of an input map; a power cycle cannot help."""
+    dsp_state = ("dsps 2 (connected yes)\n"
+                 "\ninput strips\ton (input_strips=1, mask 0xf, form recipe), state off\n"
+                 "  disabled: no verified analog input map for this model\n")
+    stale = RuntimeError('device operation unconfirmed')
+    stale.__cause__ = OSError(errno.ESTALE, 'Stale file handle')
+    reason = native_unavailable_reason(stale, dsp_state=dsp_state)
+    assert 'Power-cycle' not in reason
+    assert 'no verified analog input map for this model' in reason
+    live = "\ninput strips\ton (input_strips=1, mask 0xf, form recipe), state live\n  pools: ok\n"
+    assert native_unavailable_reason(stale, dsp_state=live).startswith('Power-cycle the Apollo')
 
 
 def test_stale_strips_then_cold_start_turns_hosting_on():

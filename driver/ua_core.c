@@ -4243,8 +4243,12 @@ static int ua_dsp_init_and_load(struct ua_device *ua, bool resume,
 	if (!dsp_was_dead) {
 		dev_info(&pdev->dev,
 			 "mixer DSP alive! Skipping DMA reset to preserve state\n");
+		/* Only worth keeping when this driver knows the model's
+		 * strips; otherwise skipping the ring connect just leaves
+		 * the DSPs unconnected and playback silent (Twin X). */
 		if (!resume)
-			ua->dsp_inherited = true;
+			ua->dsp_inherited =
+				ua_strips_model_known(ua->device_type);
 		/* plug-in host: a running DSP may hold another host's resources */
 		ua_plugin_dsp_start(ua, false);
 		if (ua_read(ua, UA_REG_FPGA_REV) != ua->fpga_rev) {

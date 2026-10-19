@@ -633,6 +633,17 @@ static const struct {
 	{ UA_DEV_APOLLO_X4, 0 },
 };
 
+/* True when this driver can build the input strips for @device_type */
+bool ua_strips_model_known(u32 device_type)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(ua_strips_models); i++)
+		if (ua_strips_models[i].device_type == device_type)
+			return true;
+	return false;
+}
+
 enum ua_strips_state {
 	UA_STRIPS_OFF,		/* disabled for this device (off_why) */
 	UA_STRIPS_IDLE,		/* nothing of ours on DSP 0 */
