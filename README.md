@@ -83,6 +83,9 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 | Issue | Severity | Workaround |
 |-------|----------|------------|
+| **Plug-ins don't process audio** — the Console lists every plug-in from your UAD install and opens its window, but inserting one changes nothing in the sound. Running plug-ins on the Apollo's DSP is in development and not in this release. | By design (this release) | None. The mixer, preamps, sends and monitoring work without them. |
+| **Apollo Solo USB init is untested in this release** — the USB bring-up is now built from the DSP modules setup extracts from your own UAD install (the Windows capture it used to ship is gone). The frames match the capture byte for byte, but no Solo has run them yet. | Moderate | If capture or playback doesn't come up, [open an issue](https://github.com/rolotrealanis98/open-apollo/issues/new?template=bug_report.yml) with the install log, and use v1.3.2 meanwhile. |
+| **Secure Boot refuses the driver** — a DKMS module isn't signed by your distribution. | Moderate | The installer prints the `mokutil` steps to enroll your DKMS signing key; it never runs them for you. Reboot, enroll the key in the MOK screen, then run setup again or `sudo modprobe ua_apollo`. |
 | **Firefox Snap crashes** — kernel `hrtimer` lockup when using WebRTC capture | Critical | Use Chromium or Firefox .deb instead of Snap |
 | **Raw pro-audio node crash** — apps selecting "Apollo x4 Pro" (22ch) as input can hang the system | Critical | Default source is set to Mic 1; avoid selecting the raw multichannel device |
 | **WebRTC capture pitch drift** — brief pitch wobble (~1-3s) when browser capture starts; stabilizes automatically. This is normal PipeWire DLL lock-in behavior affecting all pro-audio interfaces through the PulseAudio bridge. | Minor | Normal — wait for it to stabilize. Native PipeWire apps (`pw-record`, Ardour, OBS) have zero drift. |
@@ -142,7 +145,7 @@ testers for the rest: see [Testing your Apollo](tools/TESTING.md).
 
 | Device | Status |
 |--------|--------|
-| Apollo Solo USB | **Verified** — USB, playback + capture, preamp control, PipeWire integration |
+| Apollo Solo USB | **Verified on v1.3** — USB, playback + capture, preamp control, PipeWire integration. This release's init path (built from your own UAD install) needs re-testing; see Known Issues. |
 | Apollo Twin USB | Needs Testing |
 | Apollo Twin X USB | Needs Testing |
 
