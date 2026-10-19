@@ -134,6 +134,40 @@ class TestCueBusCount:
                 for n in (14, 15, 16, 17)] == [True, True, False, False]
         assert d.state is tree
 
+    def test_lowering_the_count_disables_the_cue_buses(self, router, backend):
+        router.on_set("/CueBusCount/value", 4)
+        backend.mixer_params.clear()
+        router.on_set("/CueBusCount/value", 3)
+        assert backend.mixer_params == [(0, 5, 0x01, 1), (0, 6, 0x01, 0)]
+        backend.mixer_params.clear()
+        router.on_set("/CueBusCount/value", 2)
+        assert backend.mixer_params == [(0, 5, 0x01, 0)]
+        backend.mixer_params.clear()
+        router.on_set("/CueBusCount/value", 2)
+        assert backend.mixer_params == []
+
+    def test_cue_3_4_are_off_at_176k_and_return_when_it_drops(
+            self, tree, backend):
+        router = HardwareRouter(backend, tree)
+        d = MixerDaemon(tree, router)
+
+        def active():
+            return [tree.get_value(f"/devices/0/outputs/{n}/Active/value")
+                    for n in (14, 15, 16, 17)]
+        tree.set("/CueBusCount/value", 4)
+        router.on_set("/CueBusCount/value", 4)
+        assert active() == [True] * 4
+        backend.mixer_params.clear()
+        tree.set("/SampleRate/value", 192000)
+        assert active() == [True, True, False, False]
+        assert backend.mixer_params == [(0, 5, 0x01, 0), (0, 6, 0x01, 0)]
+        assert tree.get_value("/CueBusCount/value") == 4
+        backend.mixer_params.clear()
+        tree.set("/SampleRate/value", 96000)
+        assert active() == [True] * 4
+        assert backend.mixer_params == [(0, 5, 0x01, 1), (0, 6, 0x01, 1)]
+        assert d.state is tree
+
 
 class TestTalkback:
     def daemon(self, tree, backend):

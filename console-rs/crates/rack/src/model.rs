@@ -296,6 +296,9 @@ pub struct SendState {
     /// The send's pan knob, 0…1 (0.5 = centre; `sends/k/Pan` −1…1). Sends without a pan
     /// (aux → cue, stereo strips) read 0.5.
     pub pan: f64,
+    /// The send's own meter (`sends/k/meters/*`, post-fader): the full send strip's bar, the
+    /// mini send's knob ring and the overview's signal LED.
+    pub meter: MeterFrame,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -306,13 +309,33 @@ pub struct MonitorState {
     pub mute: bool,
 }
 
-/// Meter levels as 0…1 scale fractions plus clip LEDs.
+/// Meter levels as 0…1 scale fractions, the engine-held peaks (`MeterPeakLevel`, same scale)
+/// and clip LEDs.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MeterFrame {
     pub left: f64,
     pub right: f64,
+    pub peak_left: f64,
+    pub peak_right: f64,
     pub clip_left: bool,
     pub clip_right: bool,
+}
+
+impl MeterFrame {
+    /// The louder leg, 0…1: what a single-valued indicator (knob ring, signal LED) shows.
+    pub fn level(&self) -> f64 {
+        self.left.max(self.right)
+    }
+
+    /// Both legs folded into the left (a mono bar showing a stereo send).
+    pub fn mono(&self) -> MeterFrame {
+        MeterFrame {
+            left: self.level(),
+            peak_left: self.peak_left.max(self.peak_right),
+            clip_left: self.clip_left || self.clip_right,
+            ..Default::default()
+        }
+    }
 }
 
 /// One entry of the plug-in browser (`/plugins/P/{Name, Categories, Authorized, …}`).
@@ -434,6 +457,8 @@ pub struct EngineSettings {
     pub connected: bool,
     pub sample_rate: Option<u32>,
     pub sample_rates: Vec<u32>,
+    /// The engine's per-rate `enabled` flag, parallel to `sample_rates`; missing = enabled.
+    pub sample_rate_enabled: Vec<bool>,
     pub clock_source: Option<String>,
     pub clock_sources: Vec<String>,
     /// `/BufferSize` (Windows engine only).
@@ -574,6 +599,10 @@ pub trait MixerModel {
     fn meters(&self, s: &StripInfo) -> MeterFrame;
     fn monitor(&self) -> MonitorState;
     fn monitor_meters(&self) -> MeterFrame;
+    /// Meter of the send at property node `node` (`…/sends/N`, as the Sends window addresses it).
+    fn send_meter(&self, _node: &str) -> MeterFrame {
+        MeterFrame::default()
+    }
     fn apply(&mut self, action: &Action);
     /// Applies pending external updates (engine pushes); true if anything changed.
     /// Called once per frame by the app.
@@ -583,6 +612,9 @@ pub trait MixerModel {
     /// The app went to the background (window hidden, iPad app inactive) or came back. An
     /// engine model tells the engine (`set /Sleep true|false`); default: nothing.
     fn set_background(&mut self, _background: bool) {}
+    /// The user quit the app. An engine model tells the engine to save its last-used session
+    /// (`post /SaveLastUsedSession {}`, as Console does on its way out); default: nothing.
+    fn quit(&mut self) {}
 
     // ---- UI surfaces; every method has a default so existing models keep compiling. ----
 
@@ -825,7 +857,7 @@ impl Default for PreviewMixer {
         if let Some(InsertState::Loaded { power, .. }) = inserts.get_mut("in1").and_then(|v: &mut Vec<InsertState>| v.get_mut(3)) {
             *power = false;
         }
-        let send = |name: &str, level: f64, muted: bool| SendState { name: name.into(), level, muted, pan: 0.5 };
+        let send = |name: &str, level: f64, muted: bool| SendState { name: name.into(), level, muted, pan: 0.5, meter: MeterFrame::default() };
         let mut sends = HashMap::new();
         for (i, s) in inputs.iter().enumerate() {
             let lvl = 0.25 + 0.08 * i as f64;
@@ -866,6 +898,7 @@ impl Default for PreviewMixer {
                 connected: false,
                 sample_rate: Some(48_000),
                 sample_rates: vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
+                sample_rate_enabled: Vec::new(),
                 clock_source: Some("Internal".into()),
                 clock_sources: vec!["Internal".into(), "S/PDIF".into(), "Word Clock".into()],
                 buffer_size: Some(256),
@@ -1045,6 +1078,16 @@ impl MixerModel for PreviewMixer {
                 }
             }
             Control::SettingEdit(ref k) => self.apply_setting(k, &crate::settings::SettingOp::Text(text.to_string())),
+            // The typed-value popover: dB through the fader taper (sends share it).
+            Control::Fader | Control::SendLevel(_) => {
+                let Ok(db) = text.trim().parse::<f64>() else { return };
+                let v = scales::fader_tapered(db);
+                match id.control {
+                    Control::Fader => self.mains.get_mut(&id.strip).into_iter().for_each(|m| m.fader = v),
+                    Control::SendLevel(k) => self.sends.get_mut(&id.strip).and_then(|s| s.get_mut(k as usize)).into_iter().for_each(|s| s.0.level = v),
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }

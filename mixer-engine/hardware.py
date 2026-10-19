@@ -596,6 +596,17 @@ ALTMON_ENABLE_PARAMS = (0x3B, 0x3C)
 OUT_PAD_PARAMS = (0x19, 0x1A, 0x1B, 0x1C)
 # DSP bus-enable ids of CUE 1..4 (SetBusEnable; CueBusCount decides)
 CUE_BUS_ENABLE_BUSES = (1, 2, 5, 6)
+# Console: "cue 3/4 are off at sample rates >= 176.4 kHz"
+CUE_34_OFF_RATE = 176400
+
+
+def effective_cue_count(count: int, rate) -> int:
+    """CUE BUS COUNT as the engine runs it: CUE 3/4 drop out at >= 176.4 kHz."""
+    try:
+        high = int(rate) >= CUE_34_OFF_RATE
+    except (TypeError, ValueError):
+        high = False
+    return min(count, 2) if high else count
 AUX_MONO_PARAMS = {0: 0x0A, 1: 0x0F}     # CMxAuxBus MixToMono, aux 1 / 2
 
 
@@ -2596,6 +2607,8 @@ class HardwareRouter:
         self.backend = backend
         self.stereo_sends = stereo_sends
         self.state_tree = state_tree
+        # DSP buses 5/6 (CUE 3/4) this router turned on
+        self._cue_buses_on: set[int] = set()
         # The device's clock-source menu, {name: value} (device_clock_menu):
         # the daemon sets it from UA_IOCTL_GET_CLOCK_SOURCES; it names an
         # AES/EBU or MADI source as the device does.  CLOCK_SOURCE_MAP
@@ -4766,12 +4779,25 @@ class HardwareRouter:
                 count = int(value)
             except (TypeError, ValueError):
                 return
-            for idx, bus in enumerate(CUE_BUS_ENABLE_BUSES):
-                if idx >= 2 and count > idx:
-                    log.info("HW MONITOR: CueBusCount = %d → enable bus %d "
-                             "(CUE %d)", count, bus, idx + 1)
-                    self.backend.set_mixer_param(0, bus, 0x01, 1)
+            self.apply_cue_buses(count)
             return
+
+    def apply_cue_buses(self, count: int):
+        """Enable the DSP buses of the CUEs the effective count keeps and
+        disable the ones that dropped out (lowered count or a rate >=
+        176.4 kHz).  Bus 5/6 are only disabled after we enabled them."""
+        eff = effective_cue_count(count, self._tree_value("/SampleRate/value"))
+        for idx, bus in enumerate(CUE_BUS_ENABLE_BUSES):
+            if idx < 2:
+                continue
+            on = eff > idx
+            if not on and bus not in self._cue_buses_on:
+                continue
+            log.info("HW MONITOR: CueBusCount = %d (effective %d) → %s bus "
+                     "%d (CUE %d)", count, eff, "enable" if on else "disable",
+                     bus, idx + 1)
+            self.backend.set_mixer_param(0, bus, 0x01, int(on))
+            (self._cue_buses_on.add if on else self._cue_buses_on.discard)(bus)
 
     @staticmethod
     def _enum_index(value, names) -> int | None:

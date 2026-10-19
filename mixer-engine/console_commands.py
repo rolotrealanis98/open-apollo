@@ -1,11 +1,15 @@
 """Console 1.3.1 host commands composed over the daemon's state tree."""
+import logging
 from pathlib import Path
+import ua_catalogue
 from console_history import History
 from console_sessions import Sessions
 from console_inserts import Inserts, SLOT
-from console_presets import Presets
+from console_presets import Presets, CHANNEL_STRIP
 from console_network import Network
 import re
+
+log = logging.getLogger("ua-mixer-daemon")
 
 
 class ConsoleCommands:
@@ -16,6 +20,9 @@ class ConsoleCommands:
         # plug-in list the daemon has already laid on /plugins; None
         # without one (no plug-ins, no factory preset names)
         self.state = state
+        # Where RESCAN looks again: the import folder of the overlay in use
+        # (None: the default one)
+        self.catalogue_dir = catalogue.directory if catalogue else None
         self.scenes = {}
         self.history = History(state, self.publish)
         self.inserts = Inserts(state, self.history, self.publish, software_only)
@@ -45,12 +52,7 @@ class ConsoleCommands:
                 if state.get_prop_dict(base + "/ChannelHidden") is None:
                     self.publish(base + "/ChannelHidden", False)
             if re.fullmatch(r"/plugins/\d+/Name", path):
-                base = path.removesuffix("/Name")
-                for key in ("Unison", "Demoing", "DemoAvailable"):
-                    if state.get_prop_dict(base + "/" + key) is None:
-                        self.publish(base + "/" + key, False)
-                if state.get_prop_dict(base + "/DemoDaysRemaining") is None:
-                    self.publish(base + "/DemoDaysRemaining", 0, "int")
+                self.plugin_defaults(path.removesuffix("/Name"))
             if path.endswith("/MixInSource"):
                 meta = state.get_prop_dict(path)
                 values = meta.get("values") or []
@@ -66,6 +68,38 @@ class ConsoleCommands:
             self.publish("/TalkbackInPhysicalCR", False)
         if state.get_prop_dict("/TalkbackMaster") is None:
             self.publish("/TalkbackMaster", 0, "int")
+
+    def plugin_defaults(self, base):
+        """The footer state every /plugins/N entry carries for Console."""
+        for key in ("Unison", "Demoing", "DemoAvailable"):
+            if self.state.get_prop_dict(base + "/" + key) is None:
+                self.publish(base + "/" + key, False)
+        if self.state.get_prop_dict(base + "/DemoDaysRemaining") is None:
+            self.publish(base + "/DemoDaysRemaining", 0, "int")
+
+    def rescan_plugins(self):
+        """UpdatePlugInStatus (Settings > Plug-Ins RESCAN): read the UA
+        import again and lay it on the live tree, publishing the /plugins
+        entries it adds (a newer `oa-assets import`) and the factory preset
+        names.  Plug-ins already listed keep their index; licence state is
+        never touched (ua_catalogue)."""
+        cat = ua_catalogue.load(self.catalogue_dir)
+        if cat is None:
+            log.info("UpdatePlugInStatus: no UA catalogue imported; the "
+                     "plug-in list stays as it is")
+            return True
+        before = set(self.state.all_paths())
+        done = ua_catalogue.apply_to_state(self.state, cat, rescan=True)
+        for path in sorted(set(self.state.all_paths()) - before):
+            if re.fullmatch(r"/plugins/\d+/Name", path):
+                self.plugin_defaults(path.removesuffix("/Name"))
+        for path in sorted(set(self.state.all_paths()) - before):
+            self.state._notify_subscribers(path + "/value", self.state.get_value(path))
+        self.catalogue_dir = cat.directory
+        self.presets.catalogue = ua_catalogue.factory_trees(cat, CHANNEL_STRIP)
+        self.presets.refresh()
+        log.info("UpdatePlugInStatus: %d new plug-ins from %s", done["plugins"], cat.directory)
+        return True
 
     def publish(self, path, value, kind="bool"):
         meta = self.state.get_prop_dict(path)
@@ -131,6 +165,8 @@ class ConsoleCommands:
             self.publish(plugin + "/DemoAvailable", False)
             self.publish(plugin + "/DemoDaysRemaining", 14, "int")
             return True  # A simulated footer state, never vendor authorization.
+        if command == "UpdatePlugInStatus":
+            return self.rescan_plugins()
         if path != "/SceneOperation":
             return self.sessions.post(path.removeprefix("/"), args)
         if len(args) != 1:

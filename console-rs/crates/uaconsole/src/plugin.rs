@@ -178,6 +178,7 @@ impl PluginHook for PluginUiHook {
             panel_gesture: false,
             meter_poll: MeterPoller::new(),
             origin: (0.0, 0.0),
+            title_bar: Rect::default(),
             specs: self.specs.clone(),
             scales: self.scales.clone(),
             plugin_path: None,
@@ -211,6 +212,8 @@ pub struct WindowPanel {
     /// The spec panel's meters (read-only VendorSpecific gets while the window is open).
     meter_poll: MeterPoller,
     origin: (f32, f32),
+    /// Its title bar at the last build (window points).
+    title_bar: Rect,
     #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     specs: Option<Arc<PluginSpecLibrary>>,
     scales: Rc<RefCell<PluginScales>>,
@@ -404,7 +407,7 @@ impl Panel for WindowPanel {
     fn build(&mut self, ui: &mut Ui, rect: Rect) {
         self.origin = (rect.x, rect.y);
         let first = ui.hits.len();
-        self.window.build(ui, self.origin, &self.snapshot);
+        self.title_bar = self.window.build(ui, self.origin, &self.snapshot).title_bar;
         // The stack drops panel hits from the frame; keep ours for `pointer`.
         self.hits = ui.hits[first..].to_vec();
     }
@@ -422,6 +425,18 @@ impl Panel for WindowPanel {
 
     fn popup_rect(&self) -> Option<Rect> {
         self.popup
+    }
+
+    fn key(&self) -> Option<String> {
+        Some(format!("{}:{}", self.strip, self.slot))
+    }
+
+    fn title(&self) -> Option<String> {
+        Some(self.window.chrome.title.clone())
+    }
+
+    fn title_bar_at(&self, x: f32, y: f32) -> bool {
+        self.title_bar.contains(x, y) && !self.hits.iter().any(|h| h.rect.contains(x, y))
     }
 
     fn pointer(&mut self, ev: PointerEvent, model: &mut dyn MixerModel) -> PanelResponse {

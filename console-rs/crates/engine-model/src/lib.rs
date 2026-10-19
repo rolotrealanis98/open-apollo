@@ -284,9 +284,17 @@ impl EngineMixer {
         MeterFrame {
             left: scales::meter_fraction(l.level_db as f64),
             right: scales::meter_fraction(rr.level_db as f64),
+            peak_left: scales::meter_fraction(l.peak_db as f64),
+            peak_right: scales::meter_fraction(rr.peak_db as f64),
             clip_left: l.clip,
             clip_right: rr.clip,
         }
+    }
+
+    /// The meter of the send at `base` (`…/sends/N`): its `meters/0` and, on a stereo strip, `meters/1`.
+    pub(crate) fn send_frame(&self, base: &str) -> MeterFrame {
+        let legs: Vec<MeterPaths> = (0..2).map(|k| MeterPaths::new(format!("{base}/meters/{k}"))).collect();
+        self.frame(&legs)
     }
 
     fn slot_state(&self, slot: &InsertPaths) -> InsertState {
@@ -552,6 +560,7 @@ impl MixerModel for EngineMixer {
                 level: self.f64_at(&s.gain()).unwrap_or(0.0),
                 muted: self.bool_at(&s.bypass()).unwrap_or(false),
                 pan: 0.5,
+                meter: self.send_frame(&s.base),
             })
             .collect()
     }
@@ -606,6 +615,10 @@ impl MixerModel for EngineMixer {
             Some(m) => self.frame(&m.meters.clone()),
             None => MeterFrame::default(),
         }
+    }
+
+    fn send_meter(&self, node: &str) -> MeterFrame {
+        self.send_frame(node)
     }
 
     fn input_sends(&self, strip: &StripInfo) -> Vec<SendState> {
@@ -732,6 +745,12 @@ impl MixerModel for EngineMixer {
 
     fn set_background(&mut self, background: bool) {
         self.store.set_sleep(background);
+    }
+
+    /// Console posts `SaveLastUsedSession` when it quits; through the session command path, so
+    /// a read-only run sends nothing.
+    fn quit(&mut self) {
+        self.session_command(&ua_engine::SessionCommand::SaveLastUsed);
     }
 
     fn apply(&mut self, action: &Action) {

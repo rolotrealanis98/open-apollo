@@ -227,6 +227,10 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
         Popover::SessionRename => text_popover(ui, a, bounds, "RENAME SESSION", view.text_edit.as_ref()),
         Popover::SessionNewFolder => text_popover(ui, a, bounds, "NEW FOLDER", view.text_edit.as_ref()),
         Popover::Tempo => text_popover(ui, a, bounds, "TEMPO", view.text_edit.as_ref()),
+        Popover::Value { target } => {
+            let a = ui.hit_rect(anchor).or_else(|| ui.hit_rect(target)).unwrap_or(a);
+            crate::surfaces::panels::value_popover(ui, view, a, bounds);
+        }
         Popover::Confirm { title, message, ok, ok_label } => confirm_dialog(ui, title, message, ok, ok_label, bounds),
         Popover::CueOutputs => cue_outputs_popover(ui, model, a, bounds),
         Popover::Headphone { output } => {
@@ -279,7 +283,8 @@ pub fn sample_rate_menu(model: &dyn MixerModel) -> PopupMenu {
         m.push(PopupItem::new("OFFLINE", gid(Control::SampleRate(0))).enabled(false));
     }
     for (i, hz) in st.sample_rates.iter().enumerate() {
-        m.push(PopupItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).ticked(Some(*hz) == st.sample_rate));
+        let on = st.sample_rate_enabled.get(i).copied().unwrap_or(true);
+        m.push(PopupItem::new(rate_label(*hz), gid(Control::SampleRate(i as u8))).ticked(Some(*hz) == st.sample_rate).enabled(on));
     }
     m
 }

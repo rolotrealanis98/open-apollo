@@ -193,3 +193,24 @@ fn writes_after(server: &MockEngine, n: usize) -> Vec<String> {
     }
     server.write_commands()
 }
+
+#[test]
+fn quit_posts_save_last_used_session_only_with_writes_on() {
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server, true);
+    m.quit();
+    let end = Instant::now() + Duration::from_secs(10);
+    while server.write_commands().is_empty() {
+        assert!(Instant::now() < end, "timed out waiting for the post");
+        m.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(server.write_commands(), ["post /SaveLastUsedSession {}"]);
+
+    let server = MockEngine::start(tree(), MockOptions::default()).unwrap();
+    let mut m = live(&server, false);
+    m.quit();
+    std::thread::sleep(Duration::from_millis(100));
+    m.pump();
+    assert!(server.write_commands().is_empty(), "{:?}", server.write_commands());
+}

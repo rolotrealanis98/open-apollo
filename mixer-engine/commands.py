@@ -39,8 +39,9 @@ What is implemented needs no UA file format:
                                    volatile paths, the preamps and the
                                    monitor level are never undone
 
-Every other command of the engine's list is known and answers "Unable to
-execute command."; the licensing commands (PluginStartDemo,
+Import (an I/O preset file picked in a dialog on the engine's host) is
+refused with the reason logged.  Every other command of the engine's list
+is known and answers "Unable to execute command."; the licensing commands (PluginStartDemo,
 SIDRLicenseStateUpdated, GetPluginAuth, anything about authorization or
 licenses) and anything not in the list answer "Unable to resolve the command
 for the post.".
@@ -104,7 +105,7 @@ KNOWN_UNSUPPORTED = frozenset(n.lower() for n in """
     MoveChannel ToXML FromXML LEDTest AddDevice RemoveDevice
     CloseModalDialog DeleteFolder NewFolder UpdatePlugInStatus
     PluginBarCopySettings PluginBarPasteSettings SetTouch
-    Import Export DumpChains
+    Export DumpChains
     GetMidiBuffers SetSpeakerCorrectionSpec GetSpeakerCorrectionSpec
     SetSpeakerTrims GetSpeakerTrims SetHeadphoneCorrectionSpec
     GetHeadphoneCorrectionSpec SetHeadphone2CorrectionSpec
@@ -213,17 +214,30 @@ def _bool(v: Any, default: bool = False) -> bool:
     return bool(v)
 
 
-def clean_name(value: Any) -> str:
+def clean_name(value: Any, folders: bool = False) -> str:
     """A snapshot, preset or session name: 1..64 printable characters, no
-    path separators, not starting with a dot."""
+    path separators, not starting with a dot.  `folders` allows Console's
+    "[folder/]name" (each part checked the same way; snapshots are keys of
+    one JSON file, never file names)."""
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         raise CommandError("name")
     name = str(value).strip()
-    if (not name or len(name) > NAME_MAX or name[0] == "."
-            or "/" in name or "\\" in name
+    parts = name.split("/") if folders else [name]
+    if (not name or len(name) > NAME_MAX or "\\" in name
+            or any(not p.strip() or p != p.strip() or p[0] == "." or "/" in p
+                   for p in parts)
             or any(ord(c) < 32 or ord(c) == 127 for c in name)):
         raise CommandError("bad name")
     return name
+
+
+def _arg(params: dict, *keys: str) -> Any:
+    """The first of `keys` the post carries: Console 1.3.1's own key first,
+    then the keys this daemon took before it (MAP.md "Commands")."""
+    for key in keys:
+        if key in params:
+            return params[key]
+    return None
 
 
 def _index(value: Any, upper: int) -> int:
@@ -309,6 +323,7 @@ class CommandEngine:
             "saveiomappreset": self._iomap_save,
             "deleteiomappreset": self._iomap_delete,
             "renameiomappreset": self._iomap_rename,
+            "import": self._import,
             "undo": self._undo,
             "redo": self._redo,
         }
@@ -331,6 +346,18 @@ class CommandEngine:
         self.store_dir = Path(directory)
         self.stem = stem
         self._publish_iomap_list()
+
+    def _import(self, obj: str, params: dict):
+        """Console's I/O preset LOAD (Import {"type": "IOMapPreset"}): the
+        engine opens a file dialog on its own host and loads the preset file
+        picked there.  This daemon has no dialog and no such file, so it
+        refuses (and says why); its saved presets are recalled by setting
+        /IOMapPreset, which Console does for them."""
+        log.warning("Import %r refused: the Mixer Engine loads an I/O preset "
+                    "file picked in a host-side file dialog, and this daemon "
+                    "has none; set /IOMapPreset to recall a saved preset",
+                    params.get("type"))
+        raise CommandError("no host file dialog")
 
     # ── Dispatch ───────────────────────────────────────────────────
 
@@ -835,7 +862,10 @@ class CommandEngine:
                 self.state.set(prop + "/value", name)
 
     def _snapshot_save(self, obj: str, params: dict):
-        name = clean_name(params.get("name", params.get("value")))
+        # Console: {"snapshotName", "isNew"}; isNew only tells its list
+        # whether the row is new, a save of an existing name replaces it
+        name = clean_name(_arg(params, "snapshotName", "name", "value"),
+                          folders=True)
         data = self._snapshots()
         data["snapshots"][name] = {"saved": _now(),
                                    "values": self._snapshot_values()}
@@ -873,8 +903,26 @@ class CommandEngine:
         return dirty.suppress() if dirty is not None else nullcontext()
 
     def _snapshot_move(self, obj: str, params: dict):
-        name = clean_name(params.get("name"))
         data = self._snapshots()
+        if "origName" in params:
+            # Console: {"origName", "newName", "shuffle"}: a rename (and
+            # folder move) that keeps the snapshot's place in the list;
+            # `shuffle` only orders Console's own list (ponytail: ignored)
+            old = clean_name(params["origName"], folders=True)
+            new = clean_name(params.get("newName"), folders=True)
+            if old not in data["snapshots"]:
+                raise CommandError("no such snapshot")
+            if new != old:
+                if new in data["snapshots"]:
+                    raise CommandError("name taken")
+                data["snapshots"][new] = data["snapshots"].pop(old)
+                data["order"][data["order"].index(old)] = new
+                self._snapshots_save(data)
+                for prop in ("/Snapshot", "/PrimedSnapshot"):
+                    if self.state.get_value(prop + "/value") == old:
+                        self.state.set(prop + "/value", new)
+            return {"name": new, "snapshots": data["order"]}
+        name = clean_name(params.get("name"), folders=True)
         if name not in data["snapshots"]:
             raise CommandError("no such snapshot")
         order = data["order"]
@@ -885,7 +933,8 @@ class CommandEngine:
         return {"snapshots": order}
 
     def _snapshot_delete(self, obj: str, params: dict):
-        name = clean_name(params.get("name", params.get("value")))
+        name = clean_name(_arg(params, "snapshotName", "name", "value"),
+                          folders=True)
         data = self._snapshots()
         if name not in data["snapshots"]:
             raise CommandError("no such snapshot")
@@ -1079,7 +1128,7 @@ class CommandEngine:
                                hardware=False)
 
     def _iomap_save(self, obj: str, params: dict):
-        name = clean_name(params.get("name", params.get("value")))
+        name = clean_name(_arg(params, "ioPresetName", "name", "value"))
         data = self._iomaps()
         data["presets"][name] = {"saved": _now(),
                                  "values": self._iomap_values()}
@@ -1090,7 +1139,7 @@ class CommandEngine:
         return {"name": name, "presets": data["order"]}
 
     def _iomap_delete(self, obj: str, params: dict):
-        name = clean_name(params.get("name", params.get("value")))
+        name = clean_name(_arg(params, "ioPresetName", "name", "value"))
         data = self._iomaps()
         if name not in data["presets"]:
             raise CommandError("no such preset")
@@ -1102,8 +1151,8 @@ class CommandEngine:
         return {"presets": data["order"]}
 
     def _iomap_rename(self, obj: str, params: dict):
-        old = clean_name(params.get("name", params.get("from")))
-        new = clean_name(params.get("new_name", params.get("to")))
+        old = clean_name(_arg(params, "origPreset", "name", "from"))
+        new = clean_name(_arg(params, "newPreset", "new_name", "to"))
         data = self._iomaps()
         if old not in data["presets"]:
             raise CommandError("no such preset")
@@ -1209,8 +1258,8 @@ class CommandEngine:
         return {"sessions": self.session_names()}
 
     def _session_rename(self, obj: str, params: dict):
-        old = clean_name(params.get("name", params.get("from")))
-        new = clean_name(params.get("new_name", params.get("to")))
+        old = clean_name(_arg(params, "origName", "name", "from"))
+        new = clean_name(_arg(params, "newName", "new_name", "to"))
         src = self._session_file(old)
         if not src.path.exists():
             raise CommandError("no such session")

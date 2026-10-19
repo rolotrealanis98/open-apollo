@@ -166,6 +166,9 @@ fn meters_use_the_console_scale() {
     assert!((f.left - scales::meter_fraction(-6.0)).abs() < 1e-9);
     assert!((f.right - scales::meter_fraction(-18.0)).abs() < 1e-9);
     assert!(!f.clip_left && f.clip_right);
+    // The engine-held peaks ride along on the same scale.
+    assert!((f.peak_left - scales::meter_fraction(-3.0)).abs() < 1e-9);
+    assert!((f.peak_right - scales::meter_fraction(-12.0)).abs() < 1e-9);
     // Mono strips mirror the left meter.
     let mono = m.store().topology().inputs[0].meters[0].base.clone();
     m.store().meters().set(
@@ -181,6 +184,43 @@ fn meters_use_the_console_scale() {
     assert_eq!(f.left, f.right);
     m.set_live_meters(false);
     assert_eq!(m.meters(&inputs[2]).left, 0.0);
+}
+
+#[test]
+fn aux_and_monitor_meters_carry_peaks() {
+    let m = offline();
+    let reading = |level_db, peak_db| MeterReading { level_db, peak_db, clip: false, updates: 1 };
+    let topology = m.store().topology();
+    let aux = topology.auxes[0].meters[0].base.clone();
+    let mon = topology.monitor.as_ref().expect("monitor").meters[0].base.clone();
+    m.store().meters().set(&aux, reading(-30.0, -9.0));
+    m.store().meters().set(&mon, reading(-30.0, -6.0));
+    let aux_frame = m.meters(&m.auxes()[0]);
+    assert!((aux_frame.peak_left - scales::meter_fraction(-9.0)).abs() < 1e-9);
+    assert!((m.monitor_meters().peak_left - scales::meter_fraction(-6.0)).abs() < 1e-9);
+    assert!(m.monitor_meters().peak_left > m.monitor_meters().left);
+}
+
+#[test]
+fn send_meters_reach_the_send_states() {
+    let m = offline();
+    let reading = |level_db, peak_db| MeterReading { level_db, peak_db, clip: false, updates: 1 };
+    let inputs = m.inputs();
+    let topology = m.store().topology();
+    // An input send (post-fader meter under `sends/S/meters/0`) and an aux's cue send.
+    let strip = topology.inputs.iter().position(|s| !s.sends.is_empty() && !s.sends[0].meters.is_empty()).expect("an input with send meters");
+    let key = topology.inputs[strip].sends[0].meters[0].base.clone();
+    let cue = topology.auxes[0].sends.iter().find(|s| s.is_cue() && !s.meters.is_empty()).expect("aux cue send meter").meters[0].base.clone();
+    assert_eq!(m.input_sends(&inputs[strip])[0].meter, rack::model::MeterFrame::default());
+    m.store().meters().set(&key, reading(-12.0, -6.0));
+    m.store().meters().set(&cue, reading(-24.0, -18.0));
+    let send = &m.input_sends(&inputs[strip])[0];
+    assert!((send.meter.left - scales::meter_fraction(-12.0)).abs() < 1e-9);
+    assert!((send.meter.peak_left - scales::meter_fraction(-6.0)).abs() < 1e-9);
+    let aux = m.sends(&m.auxes()[0]);
+    assert!(aux.iter().any(|s| (s.meter.left - scales::meter_fraction(-24.0)).abs() < 1e-9));
+    // The Sends window asks by node.
+    assert_eq!(m.send_meter(key.trim_end_matches("/meters/0")).left, send.meter.left);
 }
 
 /// Offline (no connection, writer gate closed): actions move local values only.

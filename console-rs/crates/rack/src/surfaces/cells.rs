@@ -251,7 +251,8 @@ fn mini_send(ui: &mut Ui, s: &StripInfo, k: usize, send: &SendState, pre: Option
     ui.text(&send.name, label, Rect::new(plate.x, plate.y + 0.5, plate.w, plate.h - 0.5), Align::Center);
     ui.background(s.send_plate_skin(), Rect::new(6.0, sy + top - 1.0, STRIP_W - 12.0, SEND_H - top - 1.0));
     let knob = Rect::new(7.0, sy + top - 4.0, 41.0, 49.0);
-    ui.film("meters", "Knob-Meter", "image-film", 0.0, knob);
+    // The ring grows with the send's post-fader level (101 frames, `Rack_HWInsertKnobMeter`).
+    ui.film("meters", "Knob-Meter", "image-film", send.meter.level(), knob);
     ui.knob(s.send_knob_skin(), send.level, knob, cid(s, Control::SendLevel(k as u8)), Some(crate::scales::UNITY));
     let y = sy + top + 14.0;
     match pre {
@@ -328,7 +329,7 @@ pub(crate) fn full_send_strip(ui: &mut Ui, fader_skin: &str, send: &SendState, r
     };
     ui.toggle("Send-Mute", Some("M"), send.muted, true, mute, ids.mute, None);
     let fader = Rect::new(2.0, 4.0, (STRIP_W / 2.0).floor(), fm.h - 4.0);
-    ui.fader_and_meters_with(fader_skin, false, send.level, Default::default(), readout, fm, ids.level, Some(fader));
+    ui.fader_and_meters_with(fader_skin, false, send.level, send.meter.mono(), readout, fm, ids.level, Some(fader));
 }
 
 /// SENDS OVERVIEW panel (`Rack_Overview_Sends`, one per strip): `Birds-Eye-Send-Background`
@@ -348,7 +349,13 @@ fn overview_panel(ui: &mut Ui, s: &StripInfo, sends: &[SendState], y: f32) {
         let ix = (panel.x + gap * (k as f32 + 1.0) + iw * k as f32).round();
         let cx = ix + 2.5;
         if !aux {
-            ui.film("meters", "Signal-Present", "image-film", 0.0, Rect::new(ix, y + 12.0, 5.0, 5.0));
+            // A 101-frame ramp (dark green → green → yellow → orange) over the meter scale: frame 0,
+            // dark, below the −60 dB floor; the clip lamp over it while the send clips.
+            let led = Rect::new(ix, y + 12.0, 5.0, 5.0);
+            ui.film("meters", "Signal-Present", "image-film", send.meter.level(), led);
+            if send.meter.clip_left || send.meter.clip_right {
+                ui.film("meters", "Signal-Present", "image-clip", 0.0, led);
+            }
         }
         // Caps (top) at y + 38.5 for −∞, + 23.5 at −6 dB, + 21.5 at 0 dB (s46/s47): a 22-pt
         // travel, which the skin's 5-pt margin gives in a 39-pt box from y + 12.5.
@@ -377,6 +384,94 @@ fn short_send_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draw::Draw;
+    use crate::model::MeterFrame;
+
+    const METERS: &str = r#"{"file_format":"appearance","meters":{
+        "Mono-Input-Meter":{"width":8,"height":196,"peak-height":1,"bounds-content":"0,14,16,372","bounds-clip":"0,4,16,10",
+            "image-background":"meters/bg.png","image-content":"meters/on.png","image-clip":"meters/clip.png"}}}"#;
+
+    /// What a full send strip draws of its meter: (lit-art draws, peak-line clips).
+    fn send_meter_draws(meter: MeterFrame) -> (usize, usize) {
+        let assets = crate::test_support::assets(METERS);
+        let mut ui = Ui::new(&assets);
+        let send = SendState { name: "AUX 1".into(), level: 0.5, muted: false, pan: 0.5, meter };
+        let ids = FullSendIds { bus: false, pan: None, mute: None, level: None };
+        full_send_strip(&mut ui, "Sends-Input-Fader", &send, "0.0", 0.0, SEND_H_FULL, ids);
+        let lit = ui.list.items.iter().filter(|d| matches!(d, Draw::Image { key, .. } if &**key == "meters/on.png")).count();
+        let peaks = ui.list.items.iter().filter(|d| matches!(d, Draw::Clip(Some(r)) if r.h == 1.0)).count();
+        (lit, peaks)
+    }
+
+    const LEDS: &str = r#"{"file_format":"appearance","meters":{
+        "Signal-Present":{"width":5,"height":5,"frame-height":10,"image-film":"runtime:sp","image-clip":"runtime:spc"},
+        "Knob-Meter":{"width":41,"height":49,"frame-height":98,"image-film":"runtime:km"}}}"#;
+
+    /// Film frame indices drawn from `runtime:<name>`.
+    fn frames(ui: &Ui, name: &str) -> Vec<u32> {
+        let key = format!("runtime:{name}");
+        ui.list.items.iter().filter_map(|d| match d {
+            Draw::Image { key: k, frame: Some(f), .. } if **k == *key => Some(f.index),
+            Draw::Image { key: k, frame: None, .. } if **k == *key => Some(0),
+            _ => None,
+        }).collect()
+    }
+
+    fn led_assets() -> crate::Assets {
+        let a = crate::test_support::assets(LEDS);
+        crate::test_support::raster(&a, "sp", 10, 1010);
+        crate::test_support::raster(&a, "spc", 10, 10);
+        crate::test_support::raster(&a, "km", 82, 9898);
+        a
+    }
+
+    fn input_strip() -> StripInfo {
+        crate::MixerModel::inputs(&crate::PreviewMixer::default()).remove(0)
+    }
+
+    fn send_with(meter: MeterFrame) -> SendState {
+        SendState { name: "AUX 1".into(), level: 0.5, muted: false, pan: 0.5, meter }
+    }
+
+    #[test]
+    fn the_signal_present_led_lights_above_the_floor() {
+        let a = led_assets();
+        let led = |meter| {
+            let mut ui = Ui::new(&a);
+            overview_panel(&mut ui, &input_strip(), &[send_with(meter)], 0.0);
+            (frames(&ui, "sp"), frames(&ui, "spc"))
+        };
+        let (dark, clip) = led(MeterFrame::default());
+        assert_eq!((dark, clip), (vec![0], vec![]), "silence: the dark frame, no clip lamp");
+        let (lit, _) = led(MeterFrame { left: crate::scales::meter_fraction(-20.0), ..Default::default() });
+        assert!(lit[0] > 0, "-20 dBFS lights the LED: {lit:?}");
+        let (hot, _) = led(MeterFrame { left: 1.0, ..Default::default() });
+        assert_eq!(hot[0], 100, "full scale is the last frame");
+        // A stereo send follows its louder leg; clipping adds the clip lamp.
+        let (right, clip) = led(MeterFrame { right: 0.5, clip_right: true, ..Default::default() });
+        assert_eq!((right[0], clip), (50, vec![0]));
+    }
+
+    #[test]
+    fn the_mini_send_knob_ring_follows_the_send_level() {
+        let a = led_assets();
+        let ring = |meter| {
+            let mut ui = Ui::new(&a);
+            mini_send(&mut ui, &input_strip(), 0, &send_with(meter), None, 0.0);
+            frames(&ui, "km")
+        };
+        assert_eq!(ring(MeterFrame::default()), vec![0]);
+        assert_eq!(ring(MeterFrame { left: 0.3, ..Default::default() }), vec![30]);
+        assert_eq!(ring(MeterFrame { left: 0.1, right: 0.8, ..Default::default() }), vec![80]);
+    }
+
+    #[test]
+    fn a_send_with_level_draws_its_meter() {
+        assert_eq!(send_meter_draws(MeterFrame::default()), (0, 0), "a silent send lights nothing");
+        assert_eq!(send_meter_draws(MeterFrame { left: 0.4, ..Default::default() }), (1, 0));
+        // A stereo send shows the louder leg on its one bar, with the held peak.
+        assert_eq!(send_meter_draws(MeterFrame { left: 0.1, right: 0.4, peak_right: 0.7, ..Default::default() }), (2, 1));
+    }
 
     #[test]
     fn cell_heights_match_geometry() {

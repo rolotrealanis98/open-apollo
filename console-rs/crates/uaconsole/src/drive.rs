@@ -9,15 +9,19 @@
 //! `in0:Insert(0)`, `monitor:MonitorLevel`, `browser:BrowserRow(3)`); `hits` prints every name
 //! on screen. `@X,Y` is a point in console points.
 //!
+//! MODS are modifier words held for that command, alone or joined with `+` (`alt`, `cmd+alt`):
+//! `alt` = Option / Alt, `cmd` = Command / Ctrl, `shift` (or `fine`) = Shift, as the window
+//! reads them (`rack::KeyMods`; Shift is the fine adjust).
+//!
 //! ```text
 //! size W H            window size in points (default 1920 1050)
 //! view SPEC           --view spec; open NAME: --open name
-//! click T [double]    press + release on T (`double` for a double-click)
+//! click T [double] [MODS]   press + release on T (`double` for a double-click)
 //! rclick T            secondary click (context menus)
-//! press T / move T|@X,Y [fine] / release
-//! drag T DX DY [N]    press T, move by (DX, DY) in N steps (default 8), release
+//! press T [MODS] / move T|@X,Y [MODS] / release   (press's MODS hold until the release)
+//! drag T DX DY [N] [MODS]   press T, move by (DX, DY) in N steps (default 8), release
 //! dragto T1 T2 [copy] press T1, move onto T2's centre, release (Console's drag and drop)
-//! wheel T LINES       scroll wheel over T
+//! wheel T LINES [MODS]      scroll wheel over T (with `alt` it adjusts T; else it scrolls)
 //! menu LABEL          click the row LABEL of the open menu (opens submenus on the way)
 //! key TEXT|enter|escape|backspace   text to the focused field
 //! command ID          a Console command id (`show_browser`, `undo`, …)
@@ -37,7 +41,7 @@ use std::time::{Duration, Instant};
 
 use houston::Rect;
 use rack::menu::MenuCmd;
-use rack::{Action, Assets, Control, ControlId, Hit, Interaction, MixerModel, ViewState};
+use rack::{Action, Assets, Control, ControlId, Hit, Interaction, KeyMods, MixerModel, ViewState};
 use rack::surfaces::Effect;
 
 use crate::frame::{Frame, build_frame, layout_for};
@@ -52,6 +56,8 @@ pub struct Driver {
     frame: Frame,
     cursor: (f32, f32),
     deferred_tap: Option<Hit>,
+    /// Modifiers held (a command's MODS words): Option/Alt and Command/Ctrl, and Shift (fine).
+    keys: KeyMods,
     fine: bool,
     copy: bool,
     scale: f32,
@@ -60,6 +66,20 @@ pub struct Driver {
 pub fn name(id: &ControlId) -> String {
     let c = format!("{:?}", id.control);
     format!("{}:{}", id.strip, c.split_whitespace().collect::<String>())
+}
+
+/// A command's modifier words (`alt`, `cmd`, `shift`/`fine`, or joined: `cmd+alt`).
+fn key_words(args: &[&str]) -> (KeyMods, bool) {
+    let (mut k, mut shift) = (KeyMods::default(), false);
+    for w in args.iter().flat_map(|a| a.split('+')) {
+        match w {
+            "alt" | "option" => k.alt = true,
+            "cmd" | "ctrl" => k.cmd = true,
+            "shift" | "fine" => shift = true,
+            _ => {}
+        }
+    }
+    (k, shift)
 }
 
 fn centre(r: Rect) -> (f32, f32) {
@@ -80,6 +100,7 @@ impl Driver {
             frame,
             cursor: (0.0, 0.0),
             deferred_tap: None,
+            keys: KeyMods::default(),
             fine: false,
             copy: false,
             scale,
@@ -175,6 +196,7 @@ impl Driver {
         }
         let armed = self.mixer.drag_press(&self.frame.hits, x, y, &*self.model);
         self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
+        self.interaction.mods = self.keys;
         let actions = self.interaction.pointer_down(&self.frame.hits, x, y, double);
         if armed {
             if let [Action::Tap(_)] = actions.as_slice() {
@@ -280,6 +302,7 @@ impl Driver {
         let Some((&cmd, args)) = words.split_first() else { return Ok(()) };
         let arg = |i: usize| args.get(i).copied().ok_or_else(|| format!("{cmd}: missing argument {}", i + 1));
         let num = |i: usize| -> Result<f32, String> { arg(i)?.parse().map_err(|_| format!("{cmd}: bad number {:?}", args[i])) };
+        let (keys, shift) = key_words(args);
         match cmd {
             "#" => {}
             "size" => {
@@ -298,14 +321,16 @@ impl Driver {
             }
             "click" => {
                 let p = self.find(arg(0)?)?;
-                let double = args.get(1) == Some(&"double");
+                let double = args.contains(&"double");
                 self.move_to(p, 1);
+                (self.keys, self.fine) = (keys, shift);
                 if double {
                     self.down(false);
                     self.up();
                 }
                 self.down(double);
                 self.up();
+                (self.keys, self.fine) = Default::default();
             }
             "rclick" => {
                 let p = self.find(arg(0)?)?;
@@ -315,22 +340,28 @@ impl Driver {
             "press" => {
                 let p = self.find(arg(0)?)?;
                 self.move_to(p, 1);
+                (self.keys, self.fine) = (keys, shift);
                 self.down(false);
             }
             "move" => {
                 let p = self.find(arg(0)?)?;
-                self.fine = args.get(1) == Some(&"fine");
+                self.fine = shift;
                 self.move_to(p, 8);
             }
-            "release" => self.up(),
+            "release" => {
+                self.up();
+                (self.keys, self.fine) = Default::default();
+            }
             "drag" => {
                 let p = self.find(arg(0)?)?;
                 let (dx, dy) = (num(1)?, num(2)?);
                 let steps = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(8);
                 self.move_to(p, 1);
+                (self.keys, self.fine) = (keys, shift);
                 self.down(false);
                 self.move_to((p.0 + dx, p.1 + dy), steps);
                 self.up();
+                (self.keys, self.fine) = Default::default();
             }
             "dragto" => {
                 let a = self.find(arg(0)?)?;
@@ -346,9 +377,13 @@ impl Driver {
                 let p = self.find(arg(0)?)?;
                 let lines = num(1)?;
                 self.move_to(p, 1);
-                if !self.route(PointerEvent::Wheel { x: p.0, y: p.1, lines, fine: false }) {
-                    if let Some(actions) = crate::input::wheel_actions(&self.frame.hits, p.0, p.1, lines as f64, false) {
+                if !self.route(PointerEvent::Wheel { x: p.0, y: p.1, lines, fine: shift }) {
+                    // As App::wheel: Option/Alt adjusts the control, a plain wheel scrolls.
+                    let adjust = keys.alt.then(|| crate::input::wheel_actions(&self.frame.hits, p.0, p.1, lines as f64, shift)).flatten();
+                    if let Some(actions) = adjust {
                         self.apply(actions);
+                    } else if self.mixer.wheel(&self.frame.scrolls, p.0, p.1, -lines * crate::app::SCROLL_PER_LINE) {
+                        self.rebuild();
                     }
                 }
             }
