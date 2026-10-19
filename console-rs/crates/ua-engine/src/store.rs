@@ -1105,17 +1105,22 @@ impl Store {
         }
     }
 
-    /// Runs a snapshot command through the writer gate.
+    /// Runs a snapshot command through the writer gate. Recall and prime move the local values
+    /// at once, like any `commit`; the posts re-read `/Snapshot/values` after them (the engine
+    /// pushes no list change; Console re-reads it too).
     pub fn snapshot_command(&mut self, command: &crate::session::SnapshotCommand) {
         use crate::session::SnapshotCommand as S;
         match command {
             S::Recall(n) => self.commit(session::SNAPSHOT, n.as_str()),
             S::Prime(n) => self.commit(session::PRIMED_SNAPSHOT, n.as_str()),
-            other => self.writer.send_now(
-                &self.model,
-                sink_of(&self.sink, &self.handle),
-                other.command(),
-            ),
+            other => {
+                self.writer.send_now(
+                    &self.model,
+                    sink_of(&self.sink, &self.handle),
+                    other.command(),
+                );
+                self.model.values_wanted = self.model.live;
+            }
         }
     }
 

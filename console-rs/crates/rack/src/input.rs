@@ -242,6 +242,10 @@ pub enum Control {
     /// fader readout's hit (a double-click opens it), and what [`Interaction`] sends for a
     /// double-click on a send: `Action::Set(id, v)` opens the popover showing `v` (0…1).
     ValueEntry(Box<Control>),
+    /// [view] A Snapshots section button or list row (`surfaces::snapshots`).
+    Snapshots(crate::surfaces::snapshots::SnapshotOp),
+    /// [model] A snapshot request (recall, prime, save, delete, move, import, export).
+    SnapshotRequest(crate::surfaces::snapshots::SnapshotRequest),
 }
 
 /// Plug-in window chrome buttons: UAD Console's `Rack_PluginWindow` title bar, the

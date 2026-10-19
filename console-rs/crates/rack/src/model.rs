@@ -542,6 +542,10 @@ pub trait MixerModel {
         crate::surfaces::session::SessionInfo::from_name(&self.session_name())
     }
     fn inputs(&self) -> Vec<StripInfo>;
+    /// The Snapshots section's lists and CURRENT / PRIMED. Default: none.
+    fn snapshots(&self) -> crate::surfaces::SnapshotInfo {
+        crate::surfaces::SnapshotInfo::default()
+    }
     /// The visible projection; complete lookups keep offline strips addressable.
     fn inputs_for_view(&self, _show_offline: bool) -> Vec<StripInfo> { self.inputs() }
     fn auxes(&self) -> Vec<StripInfo>;
@@ -723,6 +727,7 @@ pub struct PreviewMixer {
     pub isolated: HashSet<Arc<str>>,
     pub catalog: Vec<PluginEntry>,
     pub scenes: Vec<String>,
+    pub snapshots: crate::surfaces::SnapshotInfo,
     pub status: StatusInfo,
     pub settings: EngineSettings,
     pub monitor_options: MonitorOptions,
@@ -883,6 +888,15 @@ impl Default for PreviewMixer {
             isolated: HashSet::from([Arc::from("in2")]),
             catalog: demo_catalog(),
             scenes: vec!["Tracking".into(), "Overdubs".into(), "Mix Prep".into()],
+            snapshots: {
+                use crate::surfaces::SnapshotFolder as F;
+                let f = |name: &str, s: &[&str]| F { name: name.into(), snapshots: s.iter().map(|n| n.to_string()).collect() };
+                crate::surfaces::SnapshotInfo {
+                    folders: vec![f("000 - Untitled", &["001 - Intro", "002 - Verse"]), f("001 - Show", &["001 - Intro", "002 - Chorus"])],
+                    volumes: vec!["Macintosh HD".into()],
+                    ..Default::default()
+                }
+            },
             status: StatusInfo { tempo: 120.0, sample_rate: None, clock_source: None, dsp_load: 42.0, pgm_load: 31.0, mem_load: 18.0, plugin_scenes: true, scene: None, clock_locked: None },
             settings: EngineSettings {
                 host: "127.0.0.1:4710".into(),
@@ -937,6 +951,9 @@ impl PreviewMixer {
 impl MixerModel for PreviewMixer {
     fn session_name(&self) -> String {
         "Session*".into()
+    }
+    fn snapshots(&self) -> crate::surfaces::SnapshotInfo {
+        self.snapshots.clone()
     }
     fn session(&self) -> crate::surfaces::session::SessionInfo {
         use crate::surfaces::session::{SessionFile, SessionInfo};
@@ -1142,6 +1159,7 @@ impl MixerModel for PreviewMixer {
                 Control::ClockSource(i) => return self.settings.clock_source = self.settings.clock_sources.get(*i as usize).cloned(),
                 Control::BufferSize(i) => return self.settings.buffer_size = self.settings.buffer_sizes.get(*i as usize).copied(),
                 Control::RecallScene(i) => return self.status.scene = self.scenes.get(*i as usize).cloned(),
+                Control::SnapshotRequest(r) => return self.snapshots.apply(r),
                 Control::SceneCommand(op, i) => {
                     use crate::menu::SceneOp;
                     let i = *i as usize;

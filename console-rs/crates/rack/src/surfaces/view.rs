@@ -167,6 +167,8 @@ pub enum Popover {
     Tempo,
     /// The navigator SESSION box's menu.
     Session,
+    /// A Snapshots section name field (`TextTarget::Snapshot`), titled.
+    SnapshotText { title: String },
     /// "SAVE SESSION": the session has unsaved changes; `then` runs after the answer.
     SaveChanges { then: SessionOp },
     /// Session name field (Save As; uses `ViewState::text_edit`).
@@ -215,6 +217,9 @@ pub enum TextTarget {
     Preset(Arc<str>, crate::presets::PresetScope, crate::presets::PresetCmd),
     /// A [`Popover::Value`] field; `fresh` until the first key, which replaces the shown value.
     Value { target: ControlId, fresh: bool },
+    /// A Snapshots section field: `from` is the renamed / moved snapshot or folder (`folder`),
+    /// or SAVE AS...'s folder.
+    Snapshot { field: crate::surfaces::snapshots::SnapshotField, from: String, folder: bool },
 }
 
 /// A text field with keyboard focus.
@@ -280,6 +285,9 @@ pub struct ViewState {
     pub show_ctrl_room: bool,
     /// The PLUG-IN SCENES panel column, left of the browser (user capture s10).
     pub show_scenes: bool,
+    /// The Snapshots section column, after PLUG-IN SCENES (View › Show Snapshots).
+    pub show_snapshots: bool,
+    pub snapshots: crate::surfaces::snapshots::SnapshotsView,
     /// The CURRENT SESSION panel in the browser column (the SESSION box; capture sess-panel).
     pub session_panel: crate::surfaces::session::SessionPanel,
     /// The status bar has its SCENE field. Console creates it lazily: the 08:27 captures show
@@ -369,6 +377,8 @@ impl Default for ViewState {
             show_aux: true,
             show_ctrl_room: false,
             show_scenes: false,
+            show_snapshots: false,
+            snapshots: Default::default(),
             session_panel: Default::default(),
             scene_info: true,
             cells_scroll: 0.0,
@@ -564,6 +574,7 @@ impl ViewState {
                 "aux" => self.show_aux = flag()?,
                 "ctrl" => self.show_ctrl_room = flag()?,
                 "scenes" => self.show_scenes = flag()?,
+                "snapshots" => self.show_snapshots = flag()?,
                 "scene-info" => self.scene_info = flag()?,
                 "compact" => self.compact = flag()?,
                 "first" => self.first_strip = v.parse().map_err(|_| format!("view: first={v}: expected a strip index"))?,
@@ -699,6 +710,10 @@ impl ViewState {
         if let C::Session(op) = id.control {
             self.menu = None;
             return self.route_session(op, model);
+        }
+        if let C::Snapshots(op) = id.control {
+            self.menu = None;
+            return self.route_snapshots(op, model);
         }
         // Any other press while a popup menu is open came from one of its rows: it closes.
         let from_popup = self.menu.take().is_some();
@@ -965,6 +980,7 @@ impl ViewState {
             TextTarget::Value { target, .. } => value_effects(target, &edit.text),
             TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
             TextTarget::Preset(strip, scope, cmd) => self.commit_preset_text(strip, scope, cmd, edit.text),
+            TextTarget::Snapshot { field, from, folder } => self.commit_snapshot_text(field, from, folder, edit.text, model),
             t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder | TextTarget::SessionFolderRename(_) | TextTarget::SessionNewFolderIn(_)) => self.commit_session_text(&t, edit.text, model),
         }
     }
@@ -978,6 +994,10 @@ impl ViewState {
             return self.open_named(a) && self.open_named(b);
         }
         let (what, tab) = name.split_once(':').unwrap_or((name, ""));
+        if what == "snapshots" {
+            self.show_snapshots = true;
+            return true;
+        }
         let panel = match what {
             "settings" => {
                 self.sheet = Some(Sheet::Settings);

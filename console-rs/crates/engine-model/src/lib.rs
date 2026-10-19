@@ -352,6 +352,10 @@ impl MixerModel for EngineMixer {
         self.session_info()
     }
 
+    fn snapshots(&self) -> rack::surfaces::SnapshotInfo {
+        self.snapshot_info()
+    }
+
     fn inputs(&self) -> Vec<StripInfo> {
         self.store
             .topology()
@@ -766,7 +770,7 @@ impl MixerModel for EngineMixer {
                 _ => {}
             }
         }
-        if self.apply_session(action) {
+        if self.apply_session(action) || self.apply_snapshot(action) {
             return;
         }
         if self.apply_presets(action) {

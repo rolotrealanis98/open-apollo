@@ -119,10 +119,16 @@ class TestConsoleKeys:
         assert r["data"]["snapshots"] == ["Live/uno", "Live/two"]
         assert post(d, "/MoveSnapshot", {"origName": "nope",
                                          "newName": "x"})["error"] == ERR_FAILED
+        # onto an existing name: Shuffle is refused, Overwrite (Console asked
+        # first) replaces it
         assert post(d, "/MoveSnapshot", {"origName": "Live/uno",
-                                         "newName": "Live/two"})["error"] == ERR_FAILED
+                                         "newName": "Live/two",
+                                         "shuffle": True})["error"] == ERR_FAILED
+        r = post(d, "/MoveSnapshot", {"origName": "Live/two",
+                                      "newName": "Live/uno", "shuffle": False})
+        assert r["data"]["snapshots"] == ["Live/uno"]
         r = post(d, "/DeleteSnapshot", {"snapshotName": "Live/uno"})
-        assert r["data"]["snapshots"] == ["Live/two"]
+        assert r["data"]["snapshots"] == []
         assert post(d, "/DeleteSnapshot",
                     {"snapshotName": "Live/uno"})["error"] == ERR_FAILED
         assert post(d, "/SaveAsSnapshot", {"snapshotName": "../x"})[
