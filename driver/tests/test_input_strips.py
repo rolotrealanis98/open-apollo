@@ -1300,7 +1300,8 @@ def test_waits_are_off_lock():
         assert before.rfind('mutex_unlock(&ua->lock)') > before.rfind('mutex_lock(&ua->lock)')
     hooks = re.findall(r'ua_strips_\w+\(', csrc.source('ua_core.c') +
                        csrc.source('ua_audio.c') + csrc.source('ua_dsp.c'))
-    assert set(hooks) <= {'ua_strips_init(', 'ua_strips_proc('}, hooks
+    assert set(hooks) <= {'ua_strips_init(', 'ua_strips_proc(',
+                          'ua_strips_model_known('}, hooks
 
 
 def test_strip_start_waits_for_confirmed_clock_without_acquiring_resources():

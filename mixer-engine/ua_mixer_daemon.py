@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import errno
 import functools
+import glob
 import importlib.util
 import json
 import logging
@@ -508,13 +509,41 @@ def learn_native_defaults(providers):
     return {p: names[p] for p in missing}
 
 
-def native_unavailable_reason(error) -> str:
+def driver_strips_disabled(dsp_state=None) -> str:
+    """Why the driver disabled the input strips ('' when it did not), from
+    /proc/asound/cardN/dsp_state ("  disabled: <why>" under "input strips")."""
+    if dsp_state is None:
+        dsp_state = ""
+        for path in sorted(glob.glob("/proc/asound/card*/dsp_state")):
+            try:
+                text = Path(path).read_text()
+            except OSError:
+                continue
+            if "input strips" in text:
+                dsp_state = text
+                break
+    section = dsp_state.split("input strips", 1)
+    if len(section) < 2:
+        return ""
+    for line in section[1].splitlines()[1:]:
+        if not line.startswith(" "):
+            break
+        if line.strip().startswith("disabled:"):
+            return line.split("disabled:", 1)[1].strip()
+    return ""
+
+
+def native_unavailable_reason(error, dsp_state=None) -> str:
     """What the user can do about native hosting being unavailable, from the error."""
     text = str(error)
     cause = error
     while cause is not None and not isinstance(cause, OSError):
         cause = cause.__cause__ or cause.__context__
     if (isinstance(cause, OSError) and cause.errno == errno.ESTALE) or 'compensation could not be confirmed' in text:
+        disabled = driver_strips_disabled(dsp_state)
+        if disabled:
+            # A power cycle cannot help: the driver builds no input strips here
+            return f"Plug-ins are not available on this Apollo yet: the driver's input strips are off ({disabled})"
         return ("Power-cycle the Apollo to enable plug-ins: its DSPs have not cold-started "
                 "since the driver loaded")
     if 'sample rate' in text:

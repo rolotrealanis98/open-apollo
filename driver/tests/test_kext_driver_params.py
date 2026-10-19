@@ -120,7 +120,12 @@ def test_inherited_dsp_keeps_its_input_strips():
     assert fn.index('ua->dsp_inherited') < fn.index('ua_dsp_connect_retry(')
     init = csrc.extract(core, 'static int ua_dsp_init_and_load(')
     alive = init.index('mixer DSP alive!')
-    assert 'ua->dsp_inherited = true' in init[alive:alive + 400]
+    window = init[alive:alive + 600]
+    # Only for a model whose strips this driver knows: on the Twin X the
+    # skipped ring connect kept nothing and left playback silent (#91)
+    assert 'ua->dsp_inherited =' in window
+    assert 'ua_strips_model_known(ua->device_type)' in window
+    assert 'ua->dsp_inherited = true' not in window
     # A cold re-init (resume after the Apollo lost power) has nothing to
     # keep: the fresh DSPs get the ring connect again
     cold = init.index('ret = ua_program_registers(ua);')

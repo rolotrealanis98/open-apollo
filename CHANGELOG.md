@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Apollo Twin X (and every model without a verified input strip map): a warm move from another
+  OS no longer skips the DSP ring connect, which kept no input strips there and left playback
+  silent. Only models whose strips the driver builds (Apollo x4) keep the inherited DSP state (#91).
+- Plug-in hosting no longer asks for a power cycle when the driver has the input strips off for
+  the model; the daemon now shows the driver's reason from `dsp_state` (#91).
+
 ## [2.1.0] - 2026-10-19
 
 UAD plug-ins can run on the Apollo's DSP, as an experimental opt-in. open-apollo still ships no
