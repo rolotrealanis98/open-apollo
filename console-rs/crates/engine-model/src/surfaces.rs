@@ -102,6 +102,9 @@ impl EngineMixer {
     pub(crate) fn surface_catalog(&self) -> Vec<PluginEntry> {
         let mut order = self.store.tree().indices("/plugins");
         order.sort_unstable();
+        // Native hosting lists only plug-ins that load in both mono and stereo; without
+        // `/NativePluginHosting` (UA's engine, no hosting) the catalogue is shown whole.
+        let hosting = self.bool_at("/NativePluginHosting") == Some(true);
         order
             .into_iter()
             .filter_map(|p| {
@@ -123,11 +126,16 @@ impl EngineMixer {
                         PluginBadge::Buy
                     }
                 });
+                let has_slots = |k: &str| {
+                    self.store.value(&format!("{base}/{k}")).map(self::categories).is_some_and(|l| !l.is_empty())
+                };
+                let hidden = hosting && !(has_slots("NativeMonoSlots") && has_slots("NativeStereoSlots"));
                 let category = categories.first().cloned().unwrap_or_default();
                 Some(PluginEntry {
                     name, category, categories, enabled, favorite: false, badge,
                     native_supported: flag("NativeLoadSupported"),
                     native_hint: self.str_at(&format!("{base}/NativeLoadHint")).map(str::to_owned),
+                    hidden,
                 })
             })
             .collect()

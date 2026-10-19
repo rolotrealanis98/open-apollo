@@ -356,6 +356,9 @@ pub struct PluginEntry {
     /// Optional native host support, independent of the device licence.
     pub native_supported: Option<bool>,
     pub native_hint: Option<String>,
+    /// Kept in the catalogue (indices stay stable) but not listed: the engine hosts plug-ins
+    /// natively and this one cannot load in both mono and stereo on this device.
+    pub hidden: bool,
 }
 
 /// `Rack_PluginsTreeViewBadgedItem` badges (`Rack_PluginsBrowserManager::_GetRowData`).
@@ -390,6 +393,7 @@ impl PluginEntry {
             badge: (!enabled).then_some(PluginBadge::Demo),
             native_supported: None,
             native_hint: None,
+            hidden: false,
         }
     }
     /// Listed under `category` (any of its categories).

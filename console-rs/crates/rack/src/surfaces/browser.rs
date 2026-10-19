@@ -77,6 +77,7 @@ pub fn filtered(catalog: &[PluginEntry], categories: &[String], view: &ViewState
     catalog
         .iter()
         .enumerate()
+        .filter(|(_, p)| !p.hidden)
         .filter(|(_, p)| cat.is_none_or(|c| p.in_category(c)))
         .filter(|(_, p)| !b.favorites_only || p.favorite)
         .filter(|(_, p)| q.is_empty() || p.name.to_lowercase().contains(&q))
@@ -414,7 +415,13 @@ fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     let content_w = r.w - SCROLLBAR_W;
     if lines.is_empty() {
         let msg = if catalog.is_empty() { "Plug-in catalog not loaded" } else { "No matching plug-ins" };
-        ui.text(msg, Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4)), Rect::new(r.x, r.y, content_w, 30.0), Align::Center);
+        let style = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4));
+        ui.text(msg, style.clone(), Rect::new(r.x, r.y, content_w, 30.0), Align::Center);
+        // Native hosting hides every entry that can't load in both layouts; say why nothing is left.
+        if !catalog.is_empty() && catalog.iter().all(|p| p.hidden) {
+            let why = Rect::new(r.x + 8.0, r.y + 30.0, content_w - 16.0, 44.0);
+            ui.text("No plug-ins load in both mono and stereo on this device yet", style, why, Align::Center);
+        }
     }
     // Line tops in window points, scrolled.
     let mut tops = Vec::with_capacity(lines.len());

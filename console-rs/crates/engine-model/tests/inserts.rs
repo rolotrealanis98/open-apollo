@@ -479,3 +479,53 @@ fn native_unison_uses_input_stereo_state_and_has_no_follower_slot() {
     m.set_text(&id("/devices/0/inputs/1", Control::Insert(UNISON_SLOT)), "UAD Neve 1073 Preamp");
     assert_eq!(server.write_commands().len(), 1);
 }
+
+/// Four-plug-in catalogue: A mono + stereo, B mono only, C stereo only, D neither.
+fn filter_tree(hosting: bool) -> ua_engine::Tree {
+    let mut t = tree();
+    if hosting {
+        t.set_value("/NativePluginHosting", true.into());
+    }
+    let node = |name: &str, mono: &str, stereo: &str| {
+        serde_json::json!({"properties": {
+            "Name": {"type": "string", "value": name},
+            "Authorized": {"type": "bool", "value": true},
+            "Categories": {"type": "string", "value": "Compressors"},
+            "NativeMonoSlots": {"type": "string", "value": mono},
+            "NativeStereoSlots": {"type": "string", "value": stereo},
+        }})
+    };
+    t.insert_node(
+        &serde_json::json!({"children": {
+            "0": node("A", SLOT0, "/devices/0/inputs/0/effects/1"),
+            "1": node("B", SLOT0, ""),
+            "2": node("C", "", "/devices/0/inputs/0/effects/1"),
+            "3": node("D", "", ""),
+        }}),
+        "/plugins",
+    );
+    t
+}
+
+fn visible(m: &EngineMixer) -> Vec<String> {
+    let catalog = m.plugin_catalog();
+    let mut view = ViewState::default();
+    view.browser.assign_to = Some(id("x", Control::Insert(0)));
+    let shown = rack::surfaces::browser::filtered(&catalog, &m.plugin_categories(), &view);
+    shown.into_iter().map(|i| catalog[i].name.clone()).collect()
+}
+
+#[test]
+fn browser_lists_only_plugins_native_in_both_layouts_when_hosting() {
+    let server = MockEngine::start(filter_tree(true), MockOptions::default()).unwrap();
+    let m = live(&server);
+    assert_eq!(m.plugin_catalog().len(), 4, "indices stay those of the full catalogue");
+    assert_eq!(visible(&m), ["A"]);
+}
+
+#[test]
+fn browser_lists_everything_without_native_hosting() {
+    let server = MockEngine::start(filter_tree(false), MockOptions::default()).unwrap();
+    let m = live(&server);
+    assert_eq!(visible(&m), ["A", "B", "C", "D"]);
+}
