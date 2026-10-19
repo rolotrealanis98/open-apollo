@@ -985,7 +985,7 @@ impl Task {
                     values.push((path::property_path(&m.path).to_owned(), v));
                 } else if m.path == "/ping" && m.error.is_none() {
                     // Keep-alive reply.
-                } else if let Some(err) = m.error.clone() {
+                } else if let Some(err) = m.error_text() {
                     let _ = self.updates.send(Update::Error {
                         path: m.path,
                         message: err,
@@ -1016,10 +1016,10 @@ impl Task {
     ) {
         match kind {
             PendingKind::Reply(tx) => {
-                let r = match &msg.error {
-                    Some(e) => Err(Error::Engine {
+                let r = match msg.error_text() {
+                    Some(message) => Err(Error::Engine {
                         path: msg.path.clone(),
-                        message: e.clone(),
+                        message,
                     }),
                     None => Ok(msg),
                 };

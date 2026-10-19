@@ -793,12 +793,14 @@ class MixerDaemon:
         try:
             result = native.set_compensation(value)
             if result.status is Outcome.FAILED:
-                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_failed', params)
+                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_failed', params,
+                                              result.detail)
                 return
             if result.status is Outcome.INDETERMINATE:
                 transactions.quarantined = True
                 transactions.quarantine_reason = result.detail
-                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params)
+                self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params,
+                                              result.detail)
                 return
             if result.status is not Outcome.CONFIRMED or result.setting != value:
                 raise RuntimeError('Backend did not confirm the requested compensation setting')
@@ -824,7 +826,8 @@ class MixerDaemon:
             except Exception:
                 log.exception('Could not invalidate native compensation backend')
             log.warning('%s', transactions.quarantine_reason)
-            self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params)
+            self._send_local_plugin_error(client, path, 'openapollo.plugin_transaction_indeterminate', params,
+                                          transactions.quarantine_reason)
             return
         finally:
             self._plugin_publication_active = False
@@ -2969,9 +2972,12 @@ class MixerDaemon:
                             resp_params if resp_params else None)
 
     def _send_local_plugin_error(self, client: MixerClient, path: str,
-                                 error: str, params: dict):
-        """Local diagnostics shared by control SET and remote readback GET."""
+                                 error: str, params: dict, detail: str | None = None):
+        """Local diagnostics shared by control SET and remote readback GET.
+        `error` stays the stable code; `detail` is the optional human reason."""
         response = {"path": path, "error": error}
+        if detail:
+            response["detail"] = detail
         if params:
             response["parameters"] = self._coerce_params(params)
         if client.ubjson:
@@ -3091,7 +3097,7 @@ class MixerDaemon:
             if plugin_result.error:
                 # Local Open Apollo error namespace; not a claimed native UA code.
                 self._send_local_plugin_error(client, path, plugin_result.error,
-                                              resp_params)
+                                              resp_params, plugin_result.detail)
             elif "func_id" in resp_params:
                 self._send_response(client, path, cmd.value, resp_params)
             return
