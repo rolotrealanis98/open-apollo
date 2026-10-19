@@ -67,15 +67,16 @@ pub fn write(root: &Path, data: &Path) -> Result<Written, String> {
             .or_else(|| x.and_then(|p| p.vstids.as_deref()))
             .map(|s| s.split(',').next().unwrap_or("").to_string())
             .unwrap_or_default();
-        let render_id = m["renderID"]
-            .as_u64()
-            .or_else(|| m["renderid"].as_u64())
-            .or_else(|| x.and_then(|p| p.renderid));
+        let render_id =
+            m["renderID"].as_u64().or_else(|| m["renderid"].as_u64()).or_else(|| x.and_then(|p| p.renderid));
         let tree = presets.as_ref().and_then(|p| ci_path(p, &[name])).map(|d| dir_tree(&d, ".fxp")).unwrap_or_default();
         let mut categories = ua.categories.get(name).cloned().unwrap_or_default();
         if categories.is_empty() {
             // macOS manifests carry the categories; Windows ones rely on UA.xml.
-            categories = m["categories"].as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+            categories = m["categories"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect())
+                .unwrap_or_default();
         }
         categories.sort();
         categories.dedup();
@@ -105,7 +106,12 @@ pub fn write(root: &Path, data: &Path) -> Result<Written, String> {
     let mut io: Vec<String> = presets
         .as_ref()
         .and_then(|p| ci_path(p, &["IOPresets"]))
-        .map(|d| list(&d).into_iter().filter_map(|f| f.file_name()?.to_str()?.strip_suffix(".uadio").map(str::to_owned)).collect())
+        .map(|d| {
+            list(&d)
+                .into_iter()
+                .filter_map(|f| f.file_name()?.to_str()?.strip_suffix(".uadio").map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
     io.sort_by(|a, b| natural_cmp(a, b));
 
@@ -118,7 +124,13 @@ pub fn write(root: &Path, data: &Path) -> Result<Written, String> {
         let path = dir.join(format!("{part}.json"));
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
     };
-    let written = Written { dir: dir.clone(), plugins: plugins.len(), channel_presets: count(&channel), io_presets: io.len(), uad_version: ua.release.clone() };
+    let written = Written {
+        dir: dir.clone(),
+        plugins: plugins.len(),
+        channel_presets: count(&channel),
+        io_presets: io.len(),
+        uad_version: ua.release.clone(),
+    };
     doc("plugins", "plugins", &source, Value::Array(plugins))?;
     doc("channel-presets", "presets", &json!({ "uad": ua.release, "from": root, "via": via }), channel)?;
     doc("io-presets", "presets", &source, json!(io))?;
@@ -132,11 +144,14 @@ pub fn write(root: &Path, data: &Path) -> Result<Written, String> {
 }
 
 fn count(tree: &Value) -> usize {
-    tree.as_array().map(|a| a.iter().map(|e| if e["type"] == "folder" { count(&e["children"]) } else { 1 }).sum()).unwrap_or(0)
+    tree.as_array()
+        .map(|a| a.iter().map(|e| if e["type"] == "folder" { count(&e["children"]) } else { 1 }).sum())
+        .unwrap_or(0)
 }
 
 fn list(dir: &Path) -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+    let mut v: Vec<PathBuf> =
+        std::fs::read_dir(dir).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
     v.sort();
     v
 }
@@ -223,10 +238,17 @@ fn channel_strip_names(msi: &Path) -> Option<Vec<Vec<String>>> {
             }
         } else if &magic == b"MSCF" {
             let Ok(mut cab) = cab::Cabinet::new(s) else { continue };
-            let members: Vec<String> = cab.folder_entries().flat_map(|f| f.file_entries()).filter(|f| (22..=MAX_ZIP).contains(&f.uncompressed_size())).map(|f| f.name().to_owned()).collect();
+            let members: Vec<String> = cab
+                .folder_entries()
+                .flat_map(|f| f.file_entries())
+                .filter(|f| (22..=MAX_ZIP).contains(&f.uncompressed_size()))
+                .map(|f| f.name().to_owned())
+                .collect();
             for name in members {
                 let mut zip = Vec::new();
-                if cab.read_file(&name).and_then(|mut r| r.read_to_end(&mut zip)).is_ok() && zip.starts_with(b"PK\x03\x04") {
+                if cab.read_file(&name).and_then(|mut r| r.read_to_end(&mut zip)).is_ok()
+                    && zip.starts_with(b"PK\x03\x04")
+                {
                     if let Some(n) = zip_channel_strips(&zip) {
                         return Some(n);
                     }
@@ -242,7 +264,8 @@ fn channel_strip_names(msi: &Path) -> Option<Vec<Vec<String>>> {
 fn zip_channel_strips(zip: &[u8]) -> Option<Vec<Vec<String>>> {
     let le16 = |o: usize| zip.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize);
     let le32 = |o: usize| zip.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
-    let eocd = (0..=zip.len().checked_sub(22)?).rev().take(22 + 0xFFFF).find(|&o| zip[o..].starts_with(b"PK\x05\x06"))?;
+    let eocd =
+        (0..=zip.len().checked_sub(22)?).rev().take(22 + 0xFFFF).find(|&o| zip[o..].starts_with(b"PK\x05\x06"))?;
     let (count, mut at) = (le16(eocd + 10)?, le32(eocd + 16)?);
     let mut out = Vec::new();
     for _ in 0..count {
@@ -370,7 +393,13 @@ impl UaXml {
                 "plugins" | "categories" | "shortnames" => section = if tag.starts_with('/') { "" } else { name },
                 "plugin" if section == "plugins" => {
                     if let Some(title) = attr(tag, "title") {
-                        out.plugins.insert(title, UaPlugin { renderid: attr(tag, "renderid").and_then(|v| v.parse().ok()), vstids: attr(tag, "vstids") });
+                        out.plugins.insert(
+                            title,
+                            UaPlugin {
+                                renderid: attr(tag, "renderid").and_then(|v| v.parse().ok()),
+                                vstids: attr(tag, "vstids"),
+                            },
+                        );
                     }
                 }
                 "category" if section == "categories" => parent = attr(tag, "title").unwrap_or_default(),
@@ -399,7 +428,14 @@ fn attr(tag: &str, key: &str) -> Option<String> {
     let pat = format!("{key}=\"");
     let s = tag.find(&pat)? + pat.len();
     let e = tag[s..].find('"')?;
-    Some(tag[s..s + e].replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'"))
+    Some(
+        tag[s..s + e]
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'"),
+    )
 }
 
 #[cfg(test)]
@@ -425,12 +461,24 @@ mod tests {
         fs::create_dir_all(pp.join("Presets/UAD Test Comp/Vocals")).unwrap();
         fs::create_dir_all(pp.join("Presets/Channel Strip/Bass")).unwrap();
         fs::create_dir_all(pp.join("Presets/IOPresets")).unwrap();
-        fs::write(pp.join("UA.xml"), r#"<?xml version="1.0"?><UA><verinfo><swReleaseName>12.0.0.602</swReleaseName></verinfo>
+        fs::write(
+            pp.join("UA.xml"),
+            r#"<?xml version="1.0"?><UA><verinfo><swReleaseName>12.0.0.602</swReleaseName></verinfo>
 <plugins><plugin id="0" title="UAD Test Comp" renderid="2096" vstids="58AU"/></plugins>
 <categories><category title="Compressors &amp; Limiters"><plugin title="UAD Test Comp"/></category></categories>
-<shortnames><names title="UAD Test Comp"><name title="Test Comp"/><name title="TC"/></names></shortnames></UA>"#).unwrap();
-        fs::write(pp.join("Manifest/UAD Test Comp/manifest.json"), r#"{"name":"UAD Test Comp","plugin_id":"uaudio_test_comp"}"#).unwrap();
-        fs::write(pp.join("Manifest/UAD Console Input Strip Header/manifest.json"), r#"{"name":"UAD Console Input Strip Header"}"#).unwrap();
+<shortnames><names title="UAD Test Comp"><name title="Test Comp"/><name title="TC"/></names></shortnames></UA>"#,
+        )
+        .unwrap();
+        fs::write(
+            pp.join("Manifest/UAD Test Comp/manifest.json"),
+            r#"{"name":"UAD Test Comp","plugin_id":"uaudio_test_comp"}"#,
+        )
+        .unwrap();
+        fs::write(
+            pp.join("Manifest/UAD Console Input Strip Header/manifest.json"),
+            r#"{"name":"UAD Console Input Strip Header"}"#,
+        )
+        .unwrap();
         fs::write(pp.join("Presets/UAD Test Comp/Default.fxp"), "").unwrap();
         fs::write(pp.join("Presets/UAD Test Comp/Vocals/Lead 10.fxp"), "").unwrap();
         fs::write(pp.join("Presets/UAD Test Comp/Vocals/Lead 9.fxp"), "").unwrap();
@@ -446,11 +494,15 @@ mod tests {
         assert_eq!(e["name"], "UAD Test Comp");
         assert_eq!(e["short_names"], json!(["TC", "Test Comp"]));
         assert_eq!(e["categories"], json!(["Compressors & Limiters"]));
-        assert_eq!((e["vst_id"].as_str(), e["render_id"].as_u64(), e["plugin_id"].as_str()), (Some("58AU"), Some(2096), Some("uaudio_test_comp")));
+        assert_eq!(
+            (e["vst_id"].as_str(), e["render_id"].as_u64(), e["plugin_id"].as_str()),
+            (Some("58AU"), Some(2096), Some("uaudio_test_comp"))
+        );
         assert_eq!(e["presets"][0]["value"], "Default");
         assert_eq!(e["presets"][1]["type"], "folder");
         assert_eq!(e["presets"][1]["children"][0]["value"], "Lead 9");
-        let c: Value = serde_json::from_slice(&fs::read(data.join("ua-catalogue/channel-presets.json")).unwrap()).unwrap();
+        let c: Value =
+            serde_json::from_slice(&fs::read(data.join("ua-catalogue/channel-presets.json")).unwrap()).unwrap();
         assert_eq!(c["presets"][0]["children"][0]["value"], "Fat Bass");
         let m = crate::import::read_manifest(&data);
         assert_eq!(m["ua_catalogue"]["plugins"], 1);
@@ -464,7 +516,11 @@ mod tests {
         let mut zip = std::io::Cursor::new(Vec::new());
         let mut w = zip::ZipWriter::new(&mut zip);
         for n in names {
-            w.start_file(*n, zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored)).unwrap();
+            w.start_file(
+                *n,
+                zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
             w.write_all(b"x").unwrap();
         }
         w.finish().unwrap();
@@ -474,7 +530,11 @@ mod tests {
         f.add_file("ChannelStrip.zip_1");
         let mut cw = b.build(std::io::Cursor::new(Vec::new())).unwrap();
         while let Some(mut file) = cw.next_file().unwrap() {
-            if file.file_name() == "driver.sys" { file.write_all(&[7u8; 4096]).unwrap() } else { file.write_all(zip.get_ref()).unwrap() }
+            if file.file_name() == "driver.sys" {
+                file.write_all(&[7u8; 4096]).unwrap()
+            } else {
+                file.write_all(zip.get_ref()).unwrap()
+            }
         }
         let cabinet = cw.finish().unwrap().into_inner();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -493,13 +553,27 @@ mod tests {
         fs::create_dir_all(&pp).unwrap();
         fs::write(pp.join("UA.xml"), "<UA></UA>").unwrap();
         let cache = root.join("ProgramData/Package Cache");
-        fake_msi(&cache.join(format!("{APOLLO_MSI_GUID}v9.0.0/apollo-32bit.msi")), &["Channel Strip/Old/Old.uadchannel"], cab::CompressionType::None);
+        fake_msi(
+            &cache.join(format!("{APOLLO_MSI_GUID}v9.0.0/apollo-32bit.msi")),
+            &["Channel Strip/Old/Old.uadchannel"],
+            cab::CompressionType::None,
+        );
         fake_msi(
             &cache.join(format!("{APOLLO_MSI_GUID}v12.0.0/apollo-32bit.msi")),
-            &["Channel Strip/", "Channel Strip/Vocals/", "Channel Strip/Vocals/Lead 10.uadchannel", "Channel Strip/Vocals/Lead 9.uadchannel", "Channel Strip/Init.uadchannel", "Channel Strip/Vocals/readme.txt", "Other/x.uadchannel"],
+            &[
+                "Channel Strip/",
+                "Channel Strip/Vocals/",
+                "Channel Strip/Vocals/Lead 10.uadchannel",
+                "Channel Strip/Vocals/Lead 9.uadchannel",
+                "Channel Strip/Init.uadchannel",
+                "Channel Strip/Vocals/readme.txt",
+                "Other/x.uadchannel",
+            ],
             cab::CompressionType::MsZip,
         );
-        let chan = |data: &Path| -> Value { serde_json::from_slice(&fs::read(data.join("ua-catalogue/channel-presets.json")).unwrap()).unwrap() };
+        let chan = |data: &Path| -> Value {
+            serde_json::from_slice(&fs::read(data.join("ua-catalogue/channel-presets.json")).unwrap()).unwrap()
+        };
 
         let data = t.join("data");
         let w = write(&root, &data).unwrap();
