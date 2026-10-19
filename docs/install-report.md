@@ -57,7 +57,10 @@ With an answer:
   bundle `scripts/setup-plugin-hosting.sh` built and passed offline on this machine, per
   layout. Empty without plug-in hosting.
 - `native.failed`: those of `authorized` the plug-in mapper tried on this machine and could
-  not build (in neither layout). A plug-in that is not on the known-good list is in none of
+  not build (in neither layout). Read from the maps' `index.json`
+  (`~/.local/share/open-apollo-plugin-maps/`, or `open-apollo/plugin-bundles/` before maps
+  v2.1); a plug-in only skipped at setup (not installed, no panel spec) or still waiting for
+  its licence counts as not tried. A plug-in that is not on the known-good list is in none of
   the three.
 - Every `native` id is also in `authorized`.
 

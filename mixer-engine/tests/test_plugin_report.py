@@ -112,3 +112,37 @@ def test_main_prints_only_the_report(monkeypatch, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out) == pr.build(STATES, MANIFEST, INDEX)
     assert asked["manifest"] == tmp_path / "manifest.json"
     logging.disable(logging.NOTSET)        # main() silences logging for its own process
+
+
+INDEX_V2 = {"schema": "open-apollo-plugin-bundles/2",
+            "bundles": [{"name": "UAD Neve 1084", "layout": "mono", "file": "x.json", "key": {}}],
+            "failures": {
+                "UAD Pultec EQP-1A": {"key": None, "reasons": {"stereo": "execution timeout"}},
+                "UAD Expired": {"key": None, "reasons": {"execution": "crash"}},       # not authorized
+                "UAD Twice": {"key": None, "reasons": {"discovery": "x"}},           # no render id
+            },
+            "waiting_for_licence": ["UAD Expired"]}
+
+
+def test_maps_v2_index():
+    assert pr.build(STATES, MANIFEST, INDEX_V2)["native"] == {
+        "built_mono": [2276], "built_stereo": [], "failed": [2100]}
+
+
+def test_maps_v2_setup_reasons_were_never_tried():
+    index = dict(INDEX_V2, failures={
+        "UAD Pultec EQP-1A": {"key": None, "reasons": {"setup": "no panel spec"}},
+        "UAD Neve 1084": {"key": None, "reasons": {"setup": "not installed"}}})
+    assert pr.build(STATES, MANIFEST, index)["native"]["failed"] == []
+
+
+def test_default_maps_folder(tmp_path, monkeypatch):
+    new, old = tmp_path / "open-apollo-plugin-maps", tmp_path / "open-apollo/plugin-bundles"
+    monkeypatch.setattr(pr, "MAPS_DIRS", (new, old))
+    assert pr.default_bundles() == new
+    old.mkdir(parents=True)
+    (old / "index.json").write_text("{}")
+    assert pr.default_bundles() == old
+    new.mkdir()
+    (new / "index.json").write_text("{}")
+    assert pr.default_bundles() == new

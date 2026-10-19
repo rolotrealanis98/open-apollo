@@ -43,7 +43,15 @@ SCHEMA = "open-apollo-plugin-report/1"
 REASONS = ("no_device", "no_answer")
 NATIVE_KEYS = ("built_mono", "built_stereo", "failed")
 RENDER_MIN, RENDER_MAX = pl.BOARD_BASE, pl.BOARD_BASE + pl.BOARD_WORDS - 1
-DEFAULT_BUNDLES = Path.home() / ".local/share/open-apollo/plugin-bundles"
+# The plug-in maps (setup-plugin-hosting.sh): their own folder since maps v2.1,
+# open-apollo/plugin-bundles before.
+MAPS_DIRS = (Path.home() / ".local/share/open-apollo-plugin-maps",
+             Path.home() / ".local/share/open-apollo/plugin-bundles")
+
+
+def default_bundles() -> Path:
+    """The maps folder that has an index, else the current one."""
+    return next((d for d in MAPS_DIRS if (d / "index.json").is_file()), MAPS_DIRS[0])
 
 
 def unavailable(reason: str) -> dict:
@@ -81,7 +89,11 @@ def licence_ids_by_name(manifest) -> dict[str, int]:
 
 def native_status(index, ids_by_name: dict, authorized) -> dict:
     """Of the authorized render ids: which have bundles built here (per
-    layout) and which the mapper tried and could not build."""
+    layout) and which the mapper tried and could not build.  Reads both
+    index schemas: "open-apollo-plugin-bundles/1" (failures keyed "Name" or
+    "Name (layout)", a reason each) and /2 (keyed by name, {"reasons":
+    {"mono"|"stereo"|"discovery"|"execution"|"setup": reason}}, where only a
+    "setup" reason means it was never tried here)."""
     auth = set(authorized)
     built = {"mono": set(), "stereo": set()}
     failed: set[int] = set()
@@ -94,7 +106,13 @@ def native_status(index, ids_by_name: dict, authorized) -> dict:
                 built[b["layout"]].add(rid)
         failures = index.get("failures")
         for key, why in (failures.items() if isinstance(failures, dict) else ()):
-            if why == "not installed" or not isinstance(key, str):
+            if not isinstance(key, str):
+                continue
+            if isinstance(why, dict):           # schema 2
+                reasons = why.get("reasons")
+                if not isinstance(reasons, dict) or not set(reasons) - {"setup"}:
+                    continue
+            elif why == "not installed":        # schema 1
                 continue
             name = key.rsplit(" (", 1)[0] if key.endswith((" (mono)", " (stereo)")) else key
             rid = ids_by_name.get(name)
@@ -147,12 +165,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Authorized UAD plug-ins, for the install report")
     ap.add_argument("--device", default="/dev/ua_apollo0", help="the device node")
     ap.add_argument("--manifest", type=Path, default=pl.DEFAULT_MANIFEST)
-    ap.add_argument("--bundles", type=Path, default=DEFAULT_BUNDLES,
-                    help="setup-plugin-hosting.sh's bundle folder (its index.json)")
+    ap.add_argument("--bundles", type=Path, default=None,
+                    help="the plug-in maps folder (its index.json); default: "
+                         "~/.local/share/open-apollo-plugin-maps, else the older open-apollo/plugin-bundles")
     args = ap.parse_args(argv)
     logging.disable(logging.CRITICAL)       # nothing about the device on stderr
     answer = pa.authorized_plugins(device=args.device, manifest=args.manifest)
-    doc = build(answer["plugins"], _load(args.manifest), _load(args.bundles / "index.json"))
+    doc = build(answer["plugins"], _load(args.manifest), _load((args.bundles or default_bundles()) / "index.json"))
     json.dump(doc, sys.stdout, sort_keys=True)
     sys.stdout.write("\n")
     return 0

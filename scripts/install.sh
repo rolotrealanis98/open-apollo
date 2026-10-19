@@ -1327,7 +1327,10 @@ add_plugin_report() {
     fi
     local home bundles plugins_json
     home=$(getent passwd "$(desktop_user)" 2>/dev/null | cut -d: -f6)
-    bundles="${home:-/nonexistent}/.local/share/open-apollo/plugin-bundles"
+    # The plug-in maps: their own folder since maps v2.1, open-apollo/plugin-bundles before
+    bundles="${home:-/nonexistent}/.local/share/open-apollo-plugin-maps"
+    [ -f "$bundles/index.json" ] || [ ! -f "${home:-/nonexistent}/.local/share/open-apollo/plugin-bundles/index.json" ] \
+        || bundles="$home/.local/share/open-apollo/plugin-bundles"
     if [ "${STEP_STATUS[init]:-}" = "ok" ]; then
         plugins_json=$(timeout 30 python3 "$PROJECT_DIR/mixer-engine/plugin_report.py" \
             --bundles "$bundles" 2>/dev/null) || plugins_json=""
