@@ -51,7 +51,7 @@ from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK,
                     UA_EVT_PAUSED, UA_EVT_RESUMED, UA_PAUSE_DEVICE)
 from model_info import ModelInfo, monitor_param_allowed
-from hardware import (CLOCK_CONTROL_PATHS, CLOCK_SOURCE_MAP,
+from hardware import (CLOCK_CONTROL_PATHS, effective_cue_count, CLOCK_SOURCE_MAP,
                       DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
                       HardwareBackend, HardwareRouter, clock_source_names,
@@ -1137,6 +1137,15 @@ class MixerDaemon:
     def _on_cue_bus_count(self, path: str, value):
         if path == "/CueBusCount/value":
             self._apply_cue_bus_count(value)
+        elif path == "/SampleRate/value":
+            # CUE 3/4 are off at >= 176.4 kHz and come back when it drops
+            count = self.state.get_value("/CueBusCount/value")
+            self._apply_cue_bus_count(count)
+            if self.hw_router and count is not None:
+                try:
+                    self.hw_router.apply_cue_buses(int(count))
+                except (TypeError, ValueError):
+                    pass
 
     def _apply_cue_bus_count(self, value):
         """The state a CUE BUS COUNT implies: the device's read-only
@@ -1149,6 +1158,10 @@ class MixerDaemon:
         except (TypeError, ValueError):
             return
         self._push_if_present("/devices/0/CueBusCount", count)
+        # ponytail: the device's CueBusCount keeps the chosen count; whether
+        # the real engine publishes the reduced one at >= 176.4 kHz is
+        # unconfirmed (MAP.md only lists values 0-4 with `enabled`)
+        count = effective_cue_count(count, self.state.get_value("/SampleRate/value"))
         k = 0
         for n in range(64):
             base = f"/devices/0/outputs/{n}"
