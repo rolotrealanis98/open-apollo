@@ -805,6 +805,7 @@ impl App {
 
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         self.save_settings();
+        self.model.quit();
         event_loop.exit();
     }
 

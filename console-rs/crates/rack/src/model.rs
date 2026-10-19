@@ -578,6 +578,9 @@ pub trait MixerModel {
     /// The app went to the background (window hidden, iPad app inactive) or came back. An
     /// engine model tells the engine (`set /Sleep true|false`); default: nothing.
     fn set_background(&mut self, _background: bool) {}
+    /// The user quit the app. An engine model tells the engine to save its last-used session
+    /// (`post /SaveLastUsedSession {}`, as Console does on its way out); default: nothing.
+    fn quit(&mut self) {}
 
     // ---- UI surfaces; every method has a default so existing models keep compiling. ----
 
