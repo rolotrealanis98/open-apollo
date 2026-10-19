@@ -51,7 +51,7 @@ from events import (DriverEvents, OFFLINE as EVENTS_OFFLINE,
                     UA_EVT_EVENTS_LOST, UA_EVT_CLOCK_LOCK,
                     UA_EVT_PAUSED, UA_EVT_RESUMED, UA_PAUSE_DEVICE)
 from model_info import ModelInfo, monitor_param_allowed
-from hardware import (CLOCK_CONTROL_PATHS, effective_cue_count, CLOCK_SOURCE_MAP,
+from hardware import (CLOCK_CONTROL_PATHS, CUE_34_OFF_RATE, effective_cue_count, CLOCK_SOURCE_MAP,
                       DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
                       HardwareBackend, HardwareRouter, clock_source_names,
@@ -620,6 +620,11 @@ class MixerDaemon:
         self.state.register_change_observer(
             "openapollo.cue_bus_count", self._on_cue_bus_count)
         self._apply_cue_bus_count(self.state.get_value("/CueBusCount/value"))
+        # Settings > CHANNEL DSP PAIRING (/devices/0/ActiveSpans) decides how
+        # many Virtual inputs are Active
+        self.state.register_change_observer(
+            "openapollo.active_spans", self._on_active_spans)
+        self._apply_active_spans()
         # `enabled` on IOType, Stereo, 48V, Pad and SRConvert follows the
         # Hi-Z jack, IOType and the clock source
         install_enabled_meta(self.state)
@@ -1174,6 +1179,43 @@ class MixerDaemon:
             if self.state.get_value(f"{base}/IOType/value") != "Cue":
                 continue
             self._push_if_present(f"{base}/Active", k < count)
+            k += 1
+
+    def _on_active_spans(self, path: str, value):
+        if path in ("/devices/0/ActiveSpans/value", "/SampleRate/value"):
+            self._apply_active_spans()
+
+    def _apply_active_spans(self):
+        """CHANNEL DSP PAIRING: each DSP pair (ActiveSpans, 0..MaxSpans) takes
+        one virtual channel's DSP, so MaxSpans - ActiveSpans Virtual inputs
+        are Active (x4 engine 12 snapshot: ActiveSpans 0, MaxSpans 4, VIRTUAL
+        1-4 Active, 5-8 not; a linked pair's right leg stays inactive).
+        Pairing is off at >= 176.4 kHz (manual 20.1).  An out-of-range value
+        (the x4 map's capture holds garbage) is reset to 0."""
+        # ponytail: tree only; the DSP side of spanning (input param 0x16,
+        # the 69-sample latency) needs the plug-in DSP backend
+        base = "/devices/0"
+        top = self.state.get_value(f"{base}/MaxSpans/value")
+        spans = self.state.get_value(f"{base}/ActiveSpans/value")
+        if not isinstance(top, int) or not isinstance(spans, int):
+            return
+        if not 0 <= spans <= top:
+            self._push_if_present(f"{base}/ActiveSpans", 0)
+            spans = 0
+        try:
+            high = int(self.state.get_value("/SampleRate/value")) >= CUE_34_OFF_RATE
+        except (TypeError, ValueError):
+            high = False
+        virtual = top - (0 if high else spans)
+        k = 0
+        for n in range(64):
+            ib = f"{base}/inputs/{n}"
+            if not self.state.path_exists(f"{ib}/Name/value"):
+                break
+            if self.state.get_value(f"{ib}/IOType/value") != "Virtual":
+                continue
+            right = k % 2 == 1 and self.state.get_value(f"{ib}/Stereo/value") is True
+            self._push_if_present(f"{ib}/Active", k < virtual and not right)
             k += 1
 
     def _push_if_present(self, path: str, value, force: bool = False):

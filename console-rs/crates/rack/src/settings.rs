@@ -838,17 +838,23 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
                     f.extend(mapped(src, "ref_level", &format!("{ip}/Pad"), &label, 3));
                 }
             }
-            // CHANNEL DSP PAIRING: DSP PAIRS ↔ VIRTUAL CHANNELS (`MaxSpans`, `ActiveSpans`).
-            // [I] left = MaxSpans − ActiveSpans, right = ActiveSpans; one cell per position.
+            // CHANNEL DSP PAIRING: DSP PAIRS ↔ VIRTUAL CHANNELS. Each pair (`ActiveSpans`,
+            // 0…`MaxSpans`) takes a virtual channel: the x4 engine 12 snapshot has ActiveSpans 0,
+            // MaxSpans 4 and VIRTUAL 1–4 Active. Left = pairs, right = MaxSpans − pairs; the lit
+            // cell is the virtual count (`spans:` writes ActiveSpans = MaxSpans − cell). Off at
+            // ≥ 176.4 kHz (manual 20.1); an out-of-range ActiveSpans reads as 0.
             if bool_at(src, &format!("{p}/DSPSpanning")).is_some() {
-                let spans = src.prop(&format!("{p}/ActiveSpans")).and_then(|v| v.as_i64()).unwrap_or(0).max(0);
                 let max = src.prop(&format!("{p}/MaxSpans")).and_then(|v| v.as_i64()).unwrap_or(4).max(1);
-                f.push(SettingField::new(
-                    format!("{p}/ActiveSpans"),
+                let spans = src.prop(&format!("{p}/ActiveSpans")).and_then(|v| v.as_i64()).filter(|s| (0..=max).contains(s)).unwrap_or(0);
+                let high = src.prop("/SampleRate").and_then(|v| v.as_i64()).is_some_and(|r| r >= 176_400);
+                let mut field = SettingField::new(
+                    format!("spans:{p}"),
                     "CHANNEL DSP PAIRING",
-                    FieldKind::Slider { segments: (max + 1) as u8, lit: spans.min(max) as u8, left: (max - spans.min(max)).to_string(), right: spans.to_string(), left_label: "DSP PAIRS".into(), right_label: "VIRTUAL CHANNELS".into() },
+                    FieldKind::Slider { segments: (max + 1) as u8, lit: (max - spans) as u8, left: spans.to_string(), right: (max - spans).to_string(), left_label: "DSP PAIRS".into(), right_label: "VIRTUAL CHANNELS".into() },
                     4,
-                ));
+                );
+                field.enabled = bool_at(src, &format!("{p}/DSPSpanning")) == Some(true) && !high;
+                f.push(field);
             }
             if bool_at(src, &format!("{p}/SupportsDante")) == Some(true) {
                 let dn = str_at(src, &format!("{p}/DanteDeviceName")).unwrap_or_default();
@@ -1107,6 +1113,11 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             .map(|c| vec![Write::Helper(rest.to_string(), c.value.clone())])
             .unwrap_or_default(),
         ("fader", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0))),
+        // CHANNEL DSP PAIRING: cell `i` = `i` virtual channels, MaxSpans − i DSP pairs.
+        ("spans", SettingOp::Choose(i)) => {
+            let max = src.prop(&format!("{rest}/MaxSpans")).and_then(|v| v.as_i64()).unwrap_or(0);
+            if (*i as i64) > max { Vec::new() } else { set(&format!("{rest}/ActiveSpans"), PropValue::Int(max - *i as i64)) }
+        }
         // A Sends window fader's typed value: dB on the send's `Gain` (−144…+12).
         ("db", SettingOp::Text(t)) => t.trim().parse::<f64>().ok().filter(|d| d.is_finite()).map(|d| set(rest, PropValue::Float(d.clamp(-144.0, 12.0)))).unwrap_or_default(),
         // A send's pan knob (Sends window): knob 0…1 → `Pan` −1…1.
@@ -1483,5 +1494,25 @@ mod tests {
         let dev = fields(&m, SettingsGroup::Device(0));
         let pair = dev.iter().find(|f| f.label == "1-2").unwrap();
         assert_eq!(resolve(&m, &pair.key, &SettingOp::Choose(0)).len(), 2);
+    }
+
+    /// CHANNEL DSP PAIRING: 0 pairs = MaxSpans virtual channels (the x4 snapshot); a cell
+    /// writes ActiveSpans = MaxSpans − cell; disabled at ≥ 176.4 kHz.
+    #[test]
+    fn dsp_pairing_slider_writes_active_spans() {
+        let mut m = MemoryProperties::demo_x4();
+        let pairing = |m: &MemoryProperties| fields(m, SettingsGroup::Device(0)).into_iter().find(|f| f.label == "CHANNEL DSP PAIRING").unwrap();
+        let f = pairing(&m);
+        let FieldKind::Slider { segments, lit, left, right, .. } = &f.kind else { panic!() };
+        assert_eq!((*segments, *lit, left.as_str(), right.as_str()), (5, 4, "0", "4"));
+        assert!(f.enabled);
+        let w = resolve(&m, &f.key, &SettingOp::Choose(1));
+        assert_eq!(w, vec![Write::Set("/devices/0/ActiveSpans".into(), PropValue::Int(3))]);
+        assert!(resolve(&m, &f.key, &SettingOp::Choose(5)).is_empty());
+        m.apply(&w[0]);
+        let FieldKind::Slider { lit, left, right, .. } = &pairing(&m).kind else { panic!() };
+        assert_eq!((*lit, left.as_str(), right.as_str()), (1, "3", "1"));
+        m.apply(&Write::Set("/SampleRate".into(), PropValue::Int(192000)));
+        assert!(!pairing(&m).enabled);
     }
 }

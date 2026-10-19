@@ -35,3 +35,12 @@ settle
 click nav:Modifier(SetDefault)
 settle
 #! tree /devices/0/inputs/2/FaderLevelTapered/value 0.7818181818181819
+
+# Settings > HARDWARE > CHANNEL DSP PAIRING: the cell for 1 virtual channel writes ActiveSpans
+# = MaxSpans - 1 = 3 (x4); the daemon then leaves VIRTUAL 1 the only Active virtual input.
+click nav:ShowSettings
+settle
+click settings:SettingChoose("spans:/devices/0",1)
+settle
+#! tree /devices/0/ActiveSpans/value 3
+#! tree /devices/0/inputs/15/Active/value False
