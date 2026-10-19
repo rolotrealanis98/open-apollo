@@ -23,6 +23,10 @@ folder (console-rs/tools/drive/fixtures/catalogue is a synthetic one), so
 the plug-in browser has rows.  --native-slots also publishes native hosting's
 capability properties for that catalogue (NATIVE-HOSTING.md): "UAD Test Comp"
 loads stereo only and "UAD Test EQ" mono only, on inputs 1-4; the rest none.
+--pipewire-fixture FILE serves that pw-dump JSON as the PipeWire the daemon
+polls (Settings › PIPEWIRE; tests/fixtures/pipewire_dump.json is a synthetic
+one); its pw-metadata writes are logged as {"hw": "pw-metadata", ...} and
+change the fixture.  Without it PipeWire is not available.
 """
 
 import argparse
@@ -38,6 +42,7 @@ ENGINE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ENGINE_DIR))
 
 import hardware  # noqa: E402
+import pipewire_state  # noqa: E402
 import ua_catalogue  # noqa: E402
 import ua_mixer_daemon  # noqa: E402
 from events import UA_EVT_CLOCK_LOCK, UA_EVT_RATE_CHANGED  # noqa: E402
@@ -175,6 +180,27 @@ def publish_native_slots(state):
         prop(base + "/NativeStereoSlots", ",".join(stereo), "string")
 
 
+class FixturePipeWire:
+    """A PipeWire made of a pw-dump object list (pipewire_state's `run`):
+    pw-dump serves it, `pw-metadata -n settings 0 KEY VALUE` sets KEY in
+    its settings metadata (and calls `log`), pw-top has nothing."""
+
+    def __init__(self, objs, log=None):
+        self.objs, self.log = objs, log or (lambda entry: None)
+
+    def run(self, cmd, env):
+        if cmd[0] == "pw-dump":
+            return json.dumps(self.objs)
+        if cmd[:4] == pipewire_state.SETTINGS and len(cmd) == 6:
+            self.log({"hw": "pw-metadata", "args": cmd[4:]})
+            for o in self.objs:
+                for m in o.get("metadata") or []:
+                    if m.get("key") == cmd[4]:
+                        m["value"] = int(cmd[5])
+            return ""
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--port", type=int, default=0)
@@ -190,6 +216,8 @@ def main():
     parser.add_argument("--native-slots", action="store_true",
                         help="publish native slot lists for the synthetic "
                              "catalogue (stereo-only and mono-only bundles)")
+    parser.add_argument("--pipewire-fixture", type=Path,
+                        help="serve this pw-dump JSON as PipeWire")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     if args.port in FORBIDDEN_PORTS:
@@ -233,6 +261,12 @@ def main():
     daemon.commands.set_store(Path(scratch.name), "device")
     daemon.console.catalogue_dir = args.catalogue or daemon.console.catalogue_dir
     daemon.mute_on_rate_change = 0.0
+    pw = (FixturePipeWire(json.loads(args.pipewire_fixture.read_text()), log)
+          if args.pipewire_fixture else None)
+    daemon.pipewire = pipewire_state.PipeWireState(
+        run=pw.run if pw else lambda cmd, env: None,
+        locate=lambda card: ({}, "pipewire (4242)" if pw else ""))
+    daemon._publish_pipewire(daemon.pipewire.poll())
 
     async def run():
         loop = asyncio.get_running_loop()

@@ -51,7 +51,6 @@ import math
 import os
 import re
 import struct
-import subprocess
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -844,17 +843,9 @@ def pipewire_force_rate(rate: int, device: str | None = None) -> bool:
     env = pipewire_env(owner[0])
     if env is None:
         return False
-    cmd = ["pw-metadata", "-n", "settings", "0"]
-    try:
-        out = subprocess.run(cmd + ["clock.rate"], capture_output=True,
-                             text=True, timeout=3, env=env).stdout
-        m = re.search(r"key:'clock\.rate' value:'(\d+)'", out)
-        force = 0 if m and int(m.group(1)) == rate else rate
-        r = subprocess.run(cmd + ["clock.force-rate", str(force)],
-                           capture_output=True, timeout=3, env=env)
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return r.returncode == 0
+    from pipewire_state import get_setting, set_setting
+    force = 0 if get_setting("clock.rate", env) == str(rate) else rate
+    return set_setting("clock.force-rate", force, env)
 
 # ── Mirror Source value encoding (CUE OutputDestination) ─────────
 # CUE Mirror Source: param 0x2e (MirrorA) / 0x2f (MirrorB), ch_idx=9.

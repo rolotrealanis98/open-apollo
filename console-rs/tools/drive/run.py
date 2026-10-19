@@ -3,7 +3,7 @@
 (fake) Apollo.
 
     tools/drive/run.py SCRIPT.txt [--uaconsole BIN] [--daemon-arg ARG]... [--catalogue]
-                      [--native-slots] [--specs] [--keep]
+                      [--native-slots] [--specs] [--pipewire-fixture] [--keep]
 
 `tools/drive/suite.sh [BIN]` runs every script in scripts/, with the flags of its `#: ` line.
 
@@ -65,11 +65,15 @@ def main():
                     help="the daemon also publishes native slot lists for that catalogue")
     ap.add_argument("--specs", action="store_true",
                     help="give uaconsole the synthetic panel specs (fixtures/specs), drawn as wireframes")
+    ap.add_argument("--pipewire-fixture", action="store_true",
+                    help="the daemon serves the synthetic pw-dump (mixer-engine/tests/fixtures) as PipeWire")
     a = ap.parse_args()
     if a.catalogue or a.native_slots:
         a.daemon_arg += ["--catalogue", str(HERE / "fixtures" / "catalogue")]
     if a.native_slots:
         a.daemon_arg += ["--native-slots"]
+    if a.pipewire_fixture:
+        a.daemon_arg += ["--pipewire-fixture", str(FAKE.parent / "fixtures" / "pipewire_dump.json")]
 
     tmp = Path(tempfile.mkdtemp(prefix="oa-drive-"))
     (tmp / "home").mkdir()

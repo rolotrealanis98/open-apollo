@@ -70,7 +70,7 @@ The 7 still not wired, and why:
 | 2 | CLOCK (status bar menu) | `set /ClockSource/value?func_id=n "S/PDIF"` | surface `ClockSource(i)` → `commit` | `set_global` → `set_driver_param(1, code)` (Internal 0x0C, S/PDIF 0x00, ADAT 0x05); `/ClockLocked` from `UA_EVT_CLOCK_LOCK` and the readback | partial: nothing showed an unlocked clock | wired: an amber `Info-Focus` outline blinks round CLOCK (500 ms on, 500 ms off) while `/ClockLocked` is false, as `Rack_ClockInfo::paint` 0x181547d00 does. A pending rate shows the requested value, as in Console | same |
 | 3 | Settings › SAMPLE RATE | as 1 | settings `""` kind → `write_settings` → `commit` | as 1 | partial (as 1) | wired | same |
 | 4 | Settings › CLOCK SOURCE | as 2 | settings | as 2 | partial (as 2) | wired | same |
-| 5 | Settings › BUFFER SIZE (shown because the daemon publishes `/BufferSize`) | `set /BufferSize/value` (Windows engines) | settings | stored; the 1 Hz poll replaces it with PipeWire's period while a stream runs | ignored | ignored, by design: PipeWire sets the quantum (`pw-metadata clock.force-quantum`) | — |
+| 5 | Settings › BUFFER SIZE (shown because the daemon publishes `/BufferSize`) | `set /BufferSize/value` (Windows engines) | settings | while PipeWire answers: `pw-metadata -n settings 0 clock.force-quantum N` (`/openapollo/pipewire/ForceQuantum`), and `/BufferSize` follows PipeWire's effective quantum; without PipeWire stored only | ignored | wired on Linux (PipeWire's quantum); stored only without PipeWire | `mixer-engine/tests/test_pipewire_state.py` |
 | 6 | Settings › PT MODE | `set /PTMode/value` | settings | tree only | host | host | — |
 | 7 | TEMPO | `set /Tempo/value` | `surface_set_text` | tree only (plug-in tempo) | host | host | — |
 

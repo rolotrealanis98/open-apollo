@@ -1,0 +1,20 @@
+# Settings › PIPEWIRE from the synthetic pw-dump: the NODES and STREAMS tables, then QUANTUM 256.
+#: --pipewire-fixture
+open settings:pipewire
+settle
+text NODES
+text STREAMS
+text Apollo Test Pro
+text Test Mic 1
+text Test Player
+text PLAYBACK
+text Test Monitor L/R
+text AUTO (1024)
+text pipewire (4242)
+click settings:SettingMenu("pw-quantum:/openapollo/pipewire/ForceQuantum")
+menu 256
+settle
+text 256
+#! hw pw-metadata clock.force-quantum 256
+#! tree /openapollo/pipewire/ForceQuantum/value 256
+#! tree /BufferSize/value 256

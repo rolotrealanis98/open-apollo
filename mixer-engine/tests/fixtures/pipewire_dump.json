@@ -1,0 +1,56 @@
+[
+  {"id": 0, "type": "PipeWire:Interface:Core", "info": {"props": {"core.name": "pipewire-0"}}},
+  {"id": 30, "type": "PipeWire:Interface:Metadata", "props": {"metadata.name": "settings"},
+   "metadata": [
+     {"subject": 0, "key": "log.level", "type": "", "value": 2},
+     {"subject": 0, "key": "clock.rate", "type": "", "value": 48000},
+     {"subject": 0, "key": "clock.allowed-rates", "type": "", "value": "[ 44100 48000 96000 ]"},
+     {"subject": 0, "key": "clock.quantum", "type": "", "value": 1024},
+     {"subject": 0, "key": "clock.min-quantum", "type": "", "value": 32},
+     {"subject": 0, "key": "clock.max-quantum", "type": "", "value": 2048},
+     {"subject": 0, "key": "clock.force-quantum", "type": "", "value": 0},
+     {"subject": 0, "key": "clock.force-rate", "type": "", "value": 0}]},
+  {"id": 40, "type": "PipeWire:Interface:Client", "info": {"props": {"application.name": "Test Player", "application.process.id": 4242}}},
+  {"id": 100, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 24, "n-output-ports": 24, "state": "running",
+    "props": {"alsa.driver_name": "ua_apollo", "media.class": "Audio/Sink", "audio.channels": 24,
+              "node.name": "alsa_output.pci-test.pro-output-0", "node.description": "Apollo Test Pro",
+              "node.driver-id": 101}}},
+  {"id": 101, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 0, "n-output-ports": 22, "state": "running",
+    "props": {"alsa.driver_name": "ua_apollo", "media.class": "Audio/Source", "audio.channels": 22,
+              "node.name": "alsa_input.pci-test.pro-input-0", "node.description": "Apollo Test Pro",
+              "node.driver": true, "node.driver-id": 101}}},
+  {"id": 110, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 0, "n-output-ports": 1, "state": "suspended",
+    "props": {"media.class": "Audio/Source", "node.name": "apollo_mic_1", "node.description": "Test Mic 1",
+              "node.group": "loopback-test-1"}}},
+  {"id": 111, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 1, "n-output-ports": 0, "state": "suspended",
+    "props": {"media.class": "Stream/Input/Audio", "node.name": "input.loopback-test-1",
+              "node.description": "Test Mic 1", "node.group": "loopback-test-1"}}},
+  {"id": 120, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 2, "n-output-ports": 2, "state": "running",
+    "props": {"media.class": "Audio/Sink", "node.name": "apollo_monitor", "node.description": "Test Monitor L/R",
+              "node.group": "loopback-test-2", "node.latency": "256/48000"}}},
+  {"id": 121, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 0, "n-output-ports": 2, "state": "running",
+    "props": {"media.class": "Stream/Output/Audio", "node.name": "output.loopback-test-2",
+              "node.description": "Test Monitor L/R", "node.group": "loopback-test-2"}}},
+  {"id": 130, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 0, "n-output-ports": 2, "state": "running",
+    "props": {"media.class": "Stream/Output/Audio", "node.name": "test_player", "client.id": 40,
+              "application.name": "Test Player"}}},
+  {"id": 140, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 2, "n-output-ports": 2, "state": "suspended",
+    "props": {"alsa.driver_name": "snd_hda_intel", "media.class": "Audio/Sink", "audio.channels": 2,
+              "node.name": "alsa_output.pci-other.analog-stereo", "node.description": "Other Card"}}},
+  {"id": 141, "type": "PipeWire:Interface:Node", "info": {
+    "n-input-ports": 0, "n-output-ports": 2, "state": "running",
+    "props": {"media.class": "Stream/Output/Audio", "node.name": "other_app", "application.name": "Other App"}}},
+  {"id": 200, "type": "PipeWire:Interface:Link", "info": {"output-node-id": 101, "input-node-id": 111, "state": "paused"}},
+  {"id": 201, "type": "PipeWire:Interface:Link", "info": {"output-node-id": 121, "input-node-id": 100, "state": "active"}},
+  {"id": 202, "type": "PipeWire:Interface:Link", "info": {"output-node-id": 121, "input-node-id": 100, "state": "active"}},
+  {"id": 203, "type": "PipeWire:Interface:Link", "info": {"output-node-id": 130, "input-node-id": 120, "state": "active"}},
+  {"id": 204, "type": "PipeWire:Interface:Link", "info": {"output-node-id": 141, "input-node-id": 140, "state": "active"}}
+]

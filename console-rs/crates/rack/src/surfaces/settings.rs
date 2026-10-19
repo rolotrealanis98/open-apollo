@@ -360,6 +360,7 @@ pub fn draw_settings_sheet(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState
             field_grid(ui, &f, (page.x + 10.0, page.y + 10.0), page.w, edit, &mut drawn);
         }
         SettingsTab::Network => network_page(ui, src, page, edit, &mut drawn),
+        SettingsTab::PipeWire => pipewire_page(ui, src, view, page, edit, &mut drawn),
         SettingsTab::PlugIns | SettingsTab::DanteDevices | SettingsTab::IoSettings | SettingsTab::Controllers => {}
     }
     ui.clip(None);
@@ -615,6 +616,65 @@ fn network_page(ui: &mut Ui, src: &dyn PropertySource, page: Rect, edit: Option<
         for (k, f) in r.iter().enumerate() {
             ui.text(&f.value_text(), text.clone(), Rect::new(t.x + [0.0, 0.11, 0.395, 0.85][k] * w, y, 0.11 * w, 30.0), Align::Center);
         }
+    }
+}
+
+/// PIPEWIRE (open-apollo): the SAMPLE RATE / QUANTUM / latency / XRUNS / OWNER grid, then the
+/// NODES and STREAMS tables side by side in the I/O MATRIX table look (one scroll for both).
+fn pipewire_page(ui: &mut Ui, src: &dyn PropertySource, view: &ViewState, page: Rect, edit: Option<&TextEdit>,
+                 drawn: &mut Vec<Drawn>) {
+    let f = settings::fields(src, SettingsGroup::PipeWire);
+    let top = page.y + 10.0 + field_grid(ui, &f, (page.x + 10.0, page.y + 10.0), page.w, edit, drawn);
+    let table = Rect::new(page.x + 10.0, top, page.w - 20.0, page.max_y() - top);
+    let nodes: Vec<Vec<String>> = settings::pipewire_nodes(src).into_iter().map(Vec::from).collect();
+    let streams: Vec<Vec<String>> = settings::pipewire_streams(src).into_iter().map(Vec::from).collect();
+    let row_h = 30.0;
+    let list_y = top + 29.0 + 26.0;
+    let list_h = (((table.max_y() - list_y) / row_h).floor() * row_h).max(0.0);
+    let overflow = (nodes.len().max(streams.len()) as f32 * row_h - list_h).max(0.0);
+    let off = (overflow * view.settings.scroll).round();
+    let half = 471.0;
+    let node_cols: [(f32, &str); 5] = [(160.0, "NAME"), (95.0, "CLASS"), (80.0, "STATE"), (70.0, "RATE"), (66.0, "CH")];
+    let stream_cols: [(f32, &str); 4] =
+        [(165.0, "APP"), (80.0, "DIRECTION"), (160.0, "TARGET"), (table.w - half - 405.0, "STATE")];
+    for (k, (title, cols, rows)) in [("NODES", &node_cols[..], &nodes), ("STREAMS", &stream_cols[..], &streams)]
+        .into_iter()
+        .enumerate()
+    {
+        let x = table.x + k as f32 * half;
+        let w = if k == 0 { half } else { table.w - half };
+        section_header(ui, title, Rect::new(x, top, w, 29.0));
+        let head = Rect::new(x, top + 29.0, w, 26.0);
+        ui.fill(head, Rgba::rgb8(72, 78, 80));
+        ui.fill(Rect::new(x, head.y, w, 1.0), Rgba::rgb8(51, 55, 56));
+        ui.fill(Rect::new(x, head.y + 1.0, w, 0.5), Rgba::rgb8(98, 104, 106));
+        ui.fill(Rect::new(x, head.max_y() - 1.0, w, 1.0), DIVIDER);
+        let hs = ui.style("views", "Settings-Col-Header-Text");
+        let area = Rect::new(x, list_y, w, list_h);
+        ui.fill(area, Rgba::rgb8(43, 46, 48));
+        let text = Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.85));
+        let dim = Ui::plain_style("Helvetica", 10.0, false, Rgba::WHITE.with_alpha(0.4));
+        let mut cx = x;
+        for (c, (cw, label)) in cols.iter().enumerate() {
+            ui.text(label, hs.clone(), Rect::new(cx, head.y + 1.5, *cw, head.h), Align::Center);
+            if c > 0 {
+                ui.fill(Rect::new(cx, head.y, 1.0, head.h), Rgba::rgb8(30, 33, 35));
+            }
+            ui.clip(Some(area));
+            for (i, row) in rows.iter().enumerate() {
+                let y = area.y + i as f32 * row_h - off;
+                if y + row_h < area.y || y > area.max_y() {
+                    continue;
+                }
+                ui.fill(Rect::new(cx + 0.5, y, cw - 0.5, row_h - 0.5), Rgba::rgb8(28, 37, 42));
+                // Suspended / idle nodes and streams read dimmed.
+                let st = if row.iter().any(|v| v == "RUNNING") { &text } else { &dim };
+                ui.text(&row[c], st.clone(), Rect::new(cx + 4.0, y + 1.0, cw - 8.0, row_h), Align::Center);
+            }
+            ui.clip(None);
+            cx += cw;
+        }
+        ui.scroll_region(area, ScrollTarget::Settings, overflow);
     }
 }
 

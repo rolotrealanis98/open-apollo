@@ -190,10 +190,12 @@ pub enum SettingsTab {
     Controllers,
     Network,
     DanteDevices,
+    /// open-apollo's own: the Linux audio side of the Apollo (`/openapollo/pipewire/*`).
+    PipeWire,
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 9] = [
+    pub const ALL: [SettingsTab; 10] = [
         SettingsTab::Hardware,
         SettingsTab::IoMatrix,
         SettingsTab::IoSettings,
@@ -203,6 +205,7 @@ impl SettingsTab {
         SettingsTab::Controllers,
         SettingsTab::Network,
         SettingsTab::DanteDevices,
+        SettingsTab::PipeWire,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -215,6 +218,7 @@ impl SettingsTab {
             SettingsTab::Controllers => "CONTROLLERS",
             SettingsTab::Network => "NETWORK",
             SettingsTab::DanteDevices => "DANTE DEVICES",
+            SettingsTab::PipeWire => "PIPEWIRE",
         }
     }
     /// The `settings_*_tab` component id.
@@ -229,6 +233,7 @@ impl SettingsTab {
             SettingsTab::Controllers => "settings_controllers_tab",
             SettingsTab::Network => "settings_network_tab",
             SettingsTab::DanteDevices => "settings_dante_network_tab",
+            SettingsTab::PipeWire => "settings_pipewire_tab",
         }
     }
 }
@@ -358,6 +363,8 @@ pub enum SettingsGroup {
     Dante,
     /// NETWORK: interface, Dante controller / patents / discovery (`Rack_NetworkSettings`).
     Network,
+    /// PIPEWIRE (open-apollo): SAMPLE RATE, QUANTUM, latency, XRUNS, OWNER.
+    PipeWire,
 }
 
 /// How a field draws and edits.
@@ -662,6 +669,81 @@ fn supports_headroom(type_id: &str) -> bool {
     type_id.contains("Gen 2") && !type_id.contains("Twin") && !type_id.contains("x4")
 }
 
+// ---- PipeWire (open-apollo) ----
+
+/// open-apollo's PipeWire properties (`mixer-engine/pipewire_state.py`).
+pub const PW: &str = "/openapollo/pipewire";
+
+fn pw_int(src: &dyn PropertySource, key: &str) -> i64 {
+    src.prop(&format!("{PW}/{key}")).and_then(|v| v.as_i64()).unwrap_or(0)
+}
+
+/// "48 kHz", "44.1 kHz".
+fn khz(hz: i64) -> String {
+    format!("{} kHz", hz as f64 / 1000.0)
+}
+
+/// QUANTUM's choices after AUTO: powers of two 32…2048 within PipeWire's min / max quantum.
+fn pw_quanta(src: &dyn PropertySource) -> Vec<i64> {
+    let (lo, hi) = (pw_int(src, "MinQuantum"), pw_int(src, "MaxQuantum"));
+    (5..=11).map(|e| 1i64 << e).filter(|q| *q >= lo && (hi == 0 || *q <= hi)).collect()
+}
+
+/// SAMPLE RATE's choices after AUTO: the rates the Apollo offers (`/SampleRate`).
+fn pw_rates(src: &dyn PropertySource) -> Vec<i64> {
+    src.choices("/SampleRate").iter().filter(|c| c.enabled).filter_map(|c| c.value.as_i64()).collect()
+}
+
+/// AUTO (`clock.force-* 0`, showing what runs) or one of `values`.
+fn pw_choice(key: &str, label: &str, forced: i64, running: Option<String>, values: &[(i64, String)]) -> SettingField {
+    let mut options = vec!["AUTO".to_string()];
+    options.extend(values.iter().map(|(_, l)| l.clone()));
+    let selected = if forced == 0 { Some(0) } else { values.iter().position(|(v, _)| *v == forced).map(|i| i + 1) };
+    let mut f = SettingField::new(key, label, FieldKind::Choice { enabled: vec![true; options.len()], options, selected }, 0);
+    f.display = match (forced, running) {
+        (0, Some(r)) => Some(format!("AUTO ({r})")),
+        (0, None) => None,
+        _ => selected.is_none().then(|| forced.to_string()),
+    };
+    f
+}
+
+/// One parsed row list of the panel (`Nodes`, `Streams`: JSON lists of objects).
+fn pw_list(src: &dyn PropertySource, key: &str) -> Vec<serde_json::Map<String, serde_json::Value>> {
+    let text = str_at(src, &format!("{PW}/{key}")).unwrap_or_default();
+    let list: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap_or_default();
+    list.into_iter().filter_map(|v| if let serde_json::Value::Object(o) = v { Some(o) } else { None }).collect()
+}
+
+fn cell(o: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
+    match o.get(key) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Number(n)) if n.as_i64() != Some(0) => n.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// PIPEWIRE › NODES rows: NAME, CLASS, STATE, RATE, CHANNELS (the Apollo's ALSA nodes and the
+/// `apollo_*` virtual ones).
+pub fn pipewire_nodes(src: &dyn PropertySource) -> Vec<[String; 5]> {
+    pw_list(src, "Nodes")
+        .iter()
+        .map(|n| {
+            let name = Some(cell(n, "description")).filter(|d| !d.is_empty()).unwrap_or_else(|| cell(n, "name"));
+            let rate = n.get("rate").and_then(|r| r.as_i64()).filter(|r| *r > 0).map(khz).unwrap_or_default();
+            [name, cell(n, "class"), cell(n, "state").to_uppercase(), rate, cell(n, "channels")]
+        })
+        .collect()
+}
+
+/// PIPEWIRE › STREAMS rows: APP, DIRECTION, TARGET, STATE (client streams on those nodes).
+pub fn pipewire_streams(src: &dyn PropertySource) -> Vec<[String; 4]> {
+    pw_list(src, "Streams")
+        .iter()
+        .map(|s| [cell(s, "app"), cell(s, "direction").to_uppercase(), cell(s, "target"), cell(s, "state").to_uppercase()])
+        .collect()
+}
+
 // ---- Groups ----
 
 /// The tabs Console shows for this engine (`Rack_SettingsHeader::UpdateTabs`, Apollo type).
@@ -678,6 +760,10 @@ pub fn tabs(src: &dyn PropertySource) -> Vec<SettingsTab> {
         t.push(SettingsTab::Midi);
     }
     t.push(SettingsTab::Network);
+    // open-apollo's daemon publishes its PipeWire state (`mixer-engine/pipewire_state.py`).
+    if src.prop(&format!("{PW}/Available")).is_some() {
+        t.push(SettingsTab::PipeWire);
+    }
     t
 }
 
@@ -933,6 +1019,30 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             f.push(SettingField::new("launch:dante_patents", "DANTE PATENT INFORMATION", FieldKind::Action("MORE INFO".into()), 0));
             f.push(SettingField::new("launch:dante_discovery", "DANTE DISCOVERY", FieldKind::Action("REFRESH".into()), 0));
         }
+        SettingsGroup::PipeWire => {
+            // SAMPLE RATE and QUANTUM force PipeWire's graph (`clock.force-rate` /
+            // `clock.force-quantum`; AUTO releases it); the read-outs follow the 2 s poll.
+            let up = bool_at(src, &format!("{PW}/Available")) == Some(true);
+            let (rate, quantum) = (pw_int(src, "Rate"), pw_int(src, "Quantum"));
+            let rates: Vec<(i64, String)> = pw_rates(src).into_iter().map(|r| (r, khz(r))).collect();
+            let quanta: Vec<(i64, String)> = pw_quanta(src).into_iter().map(|q| (q, q.to_string())).collect();
+            let running = |v: i64, l: String| (up && v > 0).then_some(l);
+            f.push(pw_choice(&format!("pw-rate:{PW}/ForceRate"), "SAMPLE RATE", pw_int(src, "ForceRate"), running(rate, khz(rate)), &rates).disabled(!up));
+            f.push(pw_choice(&format!("pw-quantum:{PW}/ForceQuantum"), "QUANTUM", pw_int(src, "ForceQuantum"), running(quantum, quantum.to_string()), &quanta).disabled(!up));
+            // Round trip one way: the quantum plus the converters (`/openapollo/latency`).
+            for (dir, conv) in [("INPUT", "input_frames"), ("OUTPUT", "output_frames")] {
+                let frames = quantum as f64 + src.prop(&format!("/openapollo/latency/{conv}")).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let text = if up && rate > 0 && quantum > 0 { format!("{frames:.0} · {:.2} ms", frames * 1000.0 / rate as f64) } else { "N/A".into() };
+                f.push(SettingField::new(format!("{PW}/Latency{dir}"), format!("{dir} LATENCY"), FieldKind::Readout(text), 0));
+            }
+            let xruns = if up { pw_int(src, "Xruns").to_string() } else { "N/A".into() };
+            f.push(SettingField::new(format!("{PW}/Xruns"), "XRUNS", FieldKind::Readout(xruns), 0));
+            let owner = str_at(src, &format!("{PW}/Owner")).filter(|o| !o.is_empty()).unwrap_or_else(|| "NONE".into());
+            f.push(SettingField::new(format!("{PW}/Owner"), "OWNER", FieldKind::Readout(owner), 1).width(330.0));
+            if !up {
+                f.push(SettingField::new(format!("{PW}/Available"), "PIPEWIRE", FieldKind::Readout("PipeWire is not running".into()), 1).width(330.0).disabled(true));
+            }
+        }
         SettingsGroup::PlugIns => {
             let plugins = src.indices("/plugins");
             let authorized = plugins.iter().filter(|i| bool_at(src, &format!("/plugins/{i}/Authorized")) == Some(true)).count();
@@ -1122,6 +1232,9 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             .get(*i)
             .map(|c| vec![Write::Helper(rest.to_string(), c.value.clone())])
             .unwrap_or_default(),
+        // PIPEWIRE: option 0 is AUTO (0 releases the force), then the field's values.
+        ("pw-quantum", SettingOp::Choose(i)) => (if *i == 0 { Some(0) } else { pw_quanta(src).get(i - 1).copied() }).map(|q| set(rest, PropValue::Int(q))).unwrap_or_default(),
+        ("pw-rate", SettingOp::Choose(i)) => (if *i == 0 { Some(0) } else { pw_rates(src).get(i - 1).copied() }).map(|r| set(rest, PropValue::Int(r))).unwrap_or_default(),
         ("fader", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0))),
         // CHANNEL DSP PAIRING: cell `i` = `i` virtual channels, MaxSpans − i DSP pairs.
         ("spans", SettingOp::Choose(i)) => {
@@ -1188,7 +1301,7 @@ fn json_str(s: &str) -> String {
 /// Finds a field by key among every group a settings page or panel can show (the text editor
 /// needs a field's current text from its key alone).
 pub fn find_field(src: &dyn PropertySource, key: &str) -> Option<SettingField> {
-    let mut groups = vec![SettingsGroup::Hardware, SettingsGroup::IoMatrix, SettingsGroup::Display, SettingsGroup::Editing, SettingsGroup::Midi, SettingsGroup::PlugIns, SettingsGroup::Dante, SettingsGroup::Network];
+    let mut groups = vec![SettingsGroup::Hardware, SettingsGroup::IoMatrix, SettingsGroup::Display, SettingsGroup::Editing, SettingsGroup::Midi, SettingsGroup::PlugIns, SettingsGroup::Dante, SettingsGroup::Network, SettingsGroup::PipeWire];
     for d in src.indices("/devices").into_iter().map(|d| d as u8) {
         groups.extend([
             SettingsGroup::Device(d),
@@ -1504,6 +1617,54 @@ mod tests {
         let dev = fields(&m, SettingsGroup::Device(0));
         let pair = dev.iter().find(|f| f.label == "1-2").unwrap();
         assert_eq!(resolve(&m, &pair.key, &SettingOp::Choose(0)).len(), 2);
+    }
+
+    /// PIPEWIRE from the values the daemon publishes for `mixer-engine/tests/fixtures/
+    /// pipewire_dump.json`: the tab, the grid, the tables, and QUANTUM writing ForceQuantum.
+    #[test]
+    fn pipewire_tab_builds_from_the_fixture() {
+        use PropValue::{Bool as B, Int as I, Str as S};
+        let nodes = r#"[{"id": 100, "name": "alsa_output.pci-test.pro-output-0", "description": "Apollo Test Pro",
+            "class": "Audio/Sink", "state": "running", "channels": 24, "rate": 48000, "quantum": 0},
+            {"id": 110, "name": "apollo_mic_1", "description": "Test Mic 1", "class": "Audio/Source",
+            "state": "suspended", "channels": 1, "rate": 0, "quantum": 0}]"#;
+        let streams = r#"[{"id": 130, "app": "Test Player", "direction": "playback", "target": "Test Monitor L/R",
+            "state": "running", "pid": 4242}]"#;
+        let mut m = MemoryProperties::demo_x4();
+        assert!(!tabs(&m).contains(&SettingsTab::PipeWire));
+        for (k, v) in [("Available", B(true)), ("Rate", I(48000)), ("Quantum", I(1024)), ("MinQuantum", I(32)),
+            ("MaxQuantum", I(2048)), ("ForceQuantum", I(0)), ("ForceRate", I(0)), ("Xruns", I(3)),
+            ("Owner", S("pipewire (4242)".into())), ("Nodes", S(nodes.into())), ("Streams", S(streams.into()))]
+        {
+            m.insert(&format!("{PW}/{k}"), v, Vec::new());
+        }
+        m.insert("/openapollo/latency/input_frames", PropValue::Float(40.0), Vec::new());
+        assert_eq!(tabs(&m).last(), Some(&SettingsTab::PipeWire));
+        let f = fields(&m, SettingsGroup::PipeWire);
+        assert_eq!(labels(&f), ["SAMPLE RATE", "QUANTUM", "INPUT LATENCY", "OUTPUT LATENCY", "XRUNS", "OWNER"]);
+        assert_eq!((f[0].value_text().as_str(), f[1].value_text().as_str()), ("AUTO (48 kHz)", "AUTO (1024)"));
+        assert_eq!(f[2].value_text(), "1064 · 22.17 ms");
+        assert_eq!((f[4].value_text().as_str(), f[5].value_text().as_str()), ("3", "pipewire (4242)"));
+        let FieldKind::Choice { options, .. } = &f[1].kind else { panic!() };
+        assert_eq!(options, &["AUTO", "32", "64", "128", "256", "512", "1024", "2048"]);
+        let FieldKind::Choice { options, .. } = &f[0].kind else { panic!() };
+        assert_eq!(options[..3], ["AUTO", "44.1 kHz", "48 kHz"]);
+        // QUANTUM 256 forces it; AUTO releases it.
+        let w = resolve(&m, &f[1].key, &SettingOp::Choose(4));
+        assert_eq!(w, vec![Write::Set(format!("{PW}/ForceQuantum"), I(256))]);
+        assert_eq!(resolve(&m, &f[1].key, &SettingOp::Choose(0)), vec![Write::Set(format!("{PW}/ForceQuantum"), I(0))]);
+        assert_eq!(resolve(&m, &f[0].key, &SettingOp::Choose(4)), vec![Write::Set(format!("{PW}/ForceRate"), I(96000))]);
+        m.apply(&w[0]);
+        assert_eq!(fields(&m, SettingsGroup::PipeWire)[1].value_text(), "256");
+        assert_eq!(pipewire_nodes(&m)[0], ["Apollo Test Pro", "Audio/Sink", "RUNNING", "48 kHz", "24"].map(String::from));
+        assert_eq!(pipewire_nodes(&m)[1][3], "");
+        assert_eq!(pipewire_streams(&m), [["Test Player", "PLAYBACK", "Test Monitor L/R", "RUNNING"].map(String::from)]);
+        // Without PipeWire: greyed, with the reason.
+        m.apply(&Write::Set(format!("{PW}/Available"), B(false)));
+        let f = fields(&m, SettingsGroup::PipeWire);
+        assert!(!f[0].enabled && !f[1].enabled);
+        assert_eq!(f.last().unwrap().value_text(), "PipeWire is not running");
+        assert_eq!(f[4].value_text(), "N/A");
     }
 
     /// CHANNEL DSP PAIRING: 0 pairs = MaxSpans virtual channels (the x4 snapshot); a cell
