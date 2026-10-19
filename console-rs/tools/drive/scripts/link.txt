@@ -1,0 +1,9 @@
+settle
+rclick /devices/0/inputs/0:Name
+menu Link
+settle
+rclick /devices/0/inputs/0:Name
+menu Link
+settle
+#! tree /devices/0/inputs/1/Active/value False
+#! tree /devices/0/inputs/1/Active/value True

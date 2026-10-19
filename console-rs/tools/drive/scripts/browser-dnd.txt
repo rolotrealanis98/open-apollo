@@ -1,0 +1,13 @@
+# Needs the synthetic catalogue: run.py --catalogue (fixtures/catalogue).
+settle
+dragto browser:BrowserItem(0) /devices/0/inputs/0:Insert(0)
+settle
+dragto browser:BrowserItem(2) /devices/0/inputs/0:Insert(255)
+settle
+dragto browser:BrowserItem(1) /devices/0/auxs/0:Insert(1)
+settle
+click browser:BrowserItem(1) double
+settle
+#! tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test Comp
+#! tree /devices/0/inputs/0/preamps/0/effects/0/EffectName/value UAD Test Pre
+#! tree /devices/0/auxs/0/effects/1/EffectName/value UAD Test EQ

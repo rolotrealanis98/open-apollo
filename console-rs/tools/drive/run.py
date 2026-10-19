@@ -2,7 +2,9 @@
 """Drive uaconsole headless against the recording fake daemon and check what reached the
 (fake) Apollo.
 
-    tools/drive/run.py SCRIPT.txt [--uaconsole BIN] [--daemon-arg ARG]... [--keep]
+    tools/drive/run.py SCRIPT.txt [--uaconsole BIN] [--daemon-arg ARG]... [--catalogue] [--keep]
+
+`tools/drive/suite.sh [BIN]` runs every script in scripts/ (browser-dnd.txt with --catalogue).
 
 SCRIPT is a `uaconsole --drive` script (crates/uaconsole/src/drive.rs). Lines starting with
 `#! ` are assertions on the daemon log, run after the script:
@@ -45,17 +47,22 @@ def matches(pattern, entry):
         want = pattern[2:]
         return len(args) >= len(want) and all(w == "*" or w == a for w, a in zip(want, args))
     if pattern[0] == "tree":
-        return entry.get("tree") == pattern[1] and (len(pattern) < 3 or str(entry.get("value")) == pattern[2])
+        # the value may contain spaces: everything after the path
+        return entry.get("tree") == pattern[1] and (len(pattern) < 3 or str(entry.get("value")) == " ".join(pattern[2:]))
     raise SystemExit(f"bad assertion {' '.join(pattern)}")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("script", type=Path)
+    ap.add_argument("script", type=lambda p: Path(p).resolve())
     ap.add_argument("--uaconsole", default=os.environ.get("UACONSOLE", "uaconsole"))
     ap.add_argument("--daemon-arg", action="append", default=[])
     ap.add_argument("--keep", action="store_true", help="keep the temp dir")
+    ap.add_argument("--catalogue", action="store_true",
+                    help="give the daemon the synthetic plug-in catalogue (fixtures/catalogue)")
     a = ap.parse_args()
+    if a.catalogue:
+        a.daemon_arg += ["--catalogue", str(HERE / "fixtures" / "catalogue")]
 
     tmp = Path(tempfile.mkdtemp(prefix="oa-drive-"))
     (tmp / "home").mkdir()
