@@ -408,6 +408,21 @@ struct Active {
     span: f32,
     /// A knob under a circular CONTROLS MODE: its centre and the last pointer angle.
     circular: Option<((f32, f32), f64)>,
+    /// The pressed control's value at the press, and every control the drag moves with their
+    /// values at the press (Cmd: the same control on each strip of its kind; else just it).
+    origin: f64,
+    group: Vec<(ControlId, f64)>,
+}
+
+impl Active {
+    /// The pressed control at `v`: the group moves by the same amount, stopping when one of
+    /// them reaches 0 or 1 (Console: relative offsets kept until one hits min/max).
+    fn sets(&self, v: f64) -> Vec<Action> {
+        let lo = self.group.iter().map(|g| g.1).fold(1.0, f64::min);
+        let hi = self.group.iter().map(|g| g.1).fold(0.0, f64::max);
+        let d = (v - self.origin).clamp(-lo, 1.0 - hi);
+        self.group.iter().map(|(id, s)| Action::Set(id.clone(), (s + d).clamp(0.0, 1.0))).collect()
+    }
 }
 
 /// The same control as `hit` on every strip of its kind (inputs, auxes; the talkback strip is
@@ -446,7 +461,7 @@ impl Interaction {
     /// A press. Console's modifiers (manual "Controls Shortcuts"): Option/Alt-click returns a
     /// knob or fader to its default (`Action::Reset`: the engine gets `"default"`), with Cmd
     /// (Ctrl) every strip's; Option/Alt-click on a Mute or Solo sets every strip
-    /// ([`Control::ToggleAll`]).
+    /// ([`Control::ToggleAll`]); Cmd (Ctrl)-drag moves the same control on every strip.
     pub fn pointer_down(&mut self, hits: &[Hit], x: f32, y: f32, double: bool) -> Vec<Action> {
         let Some(hit) = hits.iter().rev().find(|h| h.rect.contains(x, y)) else { return vec![] };
         let mods = self.mods;
@@ -498,12 +513,21 @@ impl Interaction {
                     let c = hit.rect.center();
                     (c, angle(c, x, y))
                 });
-                self.active = Some(Active { id: hit.id.clone(), start_y: y, start_x: x, start_value: *value, span: *span, circular });
+                let group = if mods.cmd { peers(hits, hit) } else { vec![hit] };
+                let group = group
+                    .into_iter()
+                    .filter_map(|h| match h.kind {
+                        HitKind::Drag { value, .. } | HitKind::Knob { value, .. } => Some((h.id.clone(), value)),
+                        _ => None,
+                    })
+                    .collect();
+                let a = Active { id: hit.id.clone(), start_y: y, start_x: x, start_value: *value, span: *span, circular, origin: *value, group };
                 let mut out = vec![Action::GestureBegin(hit.id.clone())];
                 // Circular: the press itself moves the knob to the pointer.
-                if let (Some((_, a)), ControlsMode::Circular) = (circular, self.controls_mode) {
-                    out.push(Action::Set(hit.id.clone(), Self::circular_value(a)));
+                if let (Some((_, angle)), ControlsMode::Circular) = (circular, self.controls_mode) {
+                    out.extend(a.sets(Self::circular_value(angle)));
                 }
+                self.active = Some(a);
                 out
             }
         }
@@ -530,10 +554,10 @@ impl Interaction {
                 a.start_value = (a.start_value + turn / (KNOB_SWEEP_DEG * scale)).clamp(0.0, 1.0);
                 a.start_value
             };
-            return vec![Action::Set(a.id.clone(), v)];
+            return a.sets(v);
         }
         let delta = ((a.start_y - y) as f64 + (x - a.start_x) as f64 * 0.25) / (a.span.max(1.0) as f64 * scale);
-        vec![Action::Set(a.id.clone(), (a.start_value + delta).clamp(0.0, 1.0))]
+        a.sets((a.start_value + delta).clamp(0.0, 1.0))
     }
 
     pub fn pointer_up(&mut self) -> Vec<Action> {
@@ -625,6 +649,19 @@ mod tests {
         let hits = strip_hits();
         assert_eq!(with(true, false).pointer_down(&hits, 10.0, 315.0, false), vec![Action::Toggle(cid("/d/inputs/0", Control::ToggleAll(Box::new(Control::Mute))))]);
         assert_eq!(with(false, true).pointer_down(&hits, 10.0, 315.0, false), vec![Action::Toggle(cid("/d/inputs/0", Control::Mute))]);
+    }
+
+    /// Cmd-drag: both input faders move by the same amount and stop when one reaches the top.
+    #[test]
+    fn cmd_drag_moves_every_strip_keeping_offsets() {
+        let hits = strip_hits();
+        let mut i = with(false, true);
+        i.pointer_down(&hits, 10.0, 100.0, false);
+        let (in0, in1) = (cid("/d/inputs/0", Control::Fader), cid("/d/inputs/1", Control::Fader));
+        let set = |a: Vec<Action>| a.into_iter().map(|a| if let Action::Set(id, v) = a { (id, (v * 1000.0).round() / 1000.0) } else { panic!("{a:?}") }).collect::<Vec<_>>();
+        assert_eq!(set(i.pointer_move(10.0, 95.0, false)), vec![(in0.clone(), 0.55), (in1.clone(), 0.95)]);
+        assert_eq!(set(i.pointer_move(10.0, 50.0, false)), vec![(in0.clone(), 0.6), (in1.clone(), 1.0)], "stops at in1's max");
+        assert_eq!(set(i.pointer_move(10.0, 150.0, true)), vec![(in0, 0.45), (in1, 0.85)], "Shift: a tenth");
     }
 
     /// TALK: a click latches (toggle on press, nothing on release); held for 0.5 s it is
