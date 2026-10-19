@@ -119,6 +119,19 @@ pub trait Panel {
     fn open_menu(&mut self, _which: &str) -> bool {
         false
     }
+    /// What it shows (a plug-in window: "in0:1"), so reopening it raises it instead.
+    fn key(&self) -> Option<String> {
+        None
+    }
+    /// Its window title ("<strip>, Insert N").
+    fn title(&self) -> Option<String> {
+        None
+    }
+    /// Whether a press at (`x`, `y`) (window points) is on its title bar, off its controls:
+    /// the press moves the window.
+    fn title_bar_at(&self, _x: f32, _y: f32) -> bool {
+        false
+    }
 }
 
 /// Called when the user opens a plug-in insert (`Action::Tap` on `Control::Insert(slot)`).
@@ -255,6 +268,8 @@ pub struct OverlayStack {
     area: Rect,
     /// The top panel took the pointer-down: moves and the release go to it.
     captured: bool,
+    /// A panel reopened while open (layer id): the shell focuses its window.
+    pub focus: Option<String>,
 }
 
 pub const DIM: Rgba = Rgba {
@@ -271,6 +286,7 @@ impl OverlayStack {
             hook,
             area: Rect::default(),
             captured: false,
+            focus: None,
         }
     }
 
@@ -283,15 +299,63 @@ impl OverlayStack {
         self.captured = false;
     }
 
-    /// Asks the hook for a panel for `strip_id`/`slot` and opens it. Returns whether one opened.
+    /// Asks the hook for a panel for `strip_id`/`slot` and opens it, or raises the one already
+    /// open for it (Console has one window per insert). Returns whether one opened.
     pub fn on_open_plugin(&mut self, strip_id: &str, slot: u8, model: &dyn MixerModel) -> bool {
         match self.hook.on_open_plugin(strip_id, slot, model) {
             Some(p) => {
-                self.push(p);
+                let open = p.key().and_then(|k| self.panels.iter().position(|q| q.key().as_deref() == Some(&k)));
+                match open {
+                    Some(i) => {
+                        let id = self.layer_id(i);
+                        self.raise(&id);
+                        self.focus = Some(id);
+                    }
+                    None => self.push(p),
+                }
                 true
             }
             None => false,
         }
+    }
+
+    /// The layer (separate window) id of panel `i`: stable while it is open.
+    fn layer_id(&self, i: usize) -> String {
+        match self.panels[i].key() {
+            Some(k) => format!("plugin:{k}"),
+            None => format!("plugin:{i}"),
+        }
+    }
+
+    fn index_of(&self, layer_id: &str) -> Option<usize> {
+        (0..self.panels.len()).find(|&i| self.layer_id(i) == layer_id)
+    }
+
+    /// Brings the panel of layer `layer_id` to the top (pointer input goes to the top panel).
+    pub fn raise(&mut self, layer_id: &str) {
+        if let Some(i) = self.index_of(layer_id).filter(|&i| i + 1 < self.panels.len()) {
+            let p = self.panels.remove(i);
+            self.panels.push(p);
+            self.captured = false;
+        }
+    }
+
+    /// Closes the panel of layer `layer_id` (its window was closed). False when there is none.
+    pub fn close(&mut self, layer_id: &str) -> bool {
+        let Some(i) = self.index_of(layer_id) else { return false };
+        self.panels.remove(i);
+        self.captured = false;
+        true
+    }
+
+    /// The window title of layer `layer_id`'s panel.
+    pub fn title(&self, layer_id: &str) -> Option<String> {
+        self.panels[self.index_of(layer_id)?].title()
+    }
+
+    /// A press at (`x`, `y`) (window points) on that panel's title bar (`Panel::title_bar_at`).
+    pub fn title_bar_at(&self, layer_id: &str, x: f32, y: f32) -> bool {
+        self.index_of(layer_id).is_some_and(|i| self.panels[i].title_bar_at(x, y))
     }
 
     /// Lets every panel read the model before the next build.
@@ -342,14 +406,14 @@ impl OverlayStack {
                 ui.fill(area, DIM);
             }
             // Console's plug-in windows are windows of their own (`rack::layers`).
-            ui.begin_layer(format!("plugin:{i}"), rack::LayerKind::Popover, r, 0.0);
+            ui.begin_layer(self.layer_id(i), rack::LayerKind::Popover, r, 0.0);
             ui.clip(Some(r));
             self.panels[i].build(ui, r);
             ui.clip(None);
             ui.end_layer();
             match self.panels[i].popup_rect() {
                 Some(p) => {
-                    ui.begin_layer(format!("plugin-menu:{i}"), rack::LayerKind::Menu, p, 0.0);
+                    ui.begin_layer(self.layer_id(i).replacen("plugin:", "plugin-menu:", 1), rack::LayerKind::Menu, p, 0.0);
                     self.panels[i].build_popups(ui, r);
                     ui.end_layer();
                 }
