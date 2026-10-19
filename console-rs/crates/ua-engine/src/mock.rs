@@ -42,6 +42,9 @@ pub struct MockOptions {
     pub port: u16,
     /// Speak like the open-apollo daemon (see the module docs).
     pub daemon_style: bool,
+    /// Apply a client's `set` without echoing it to anyone (no push, no reply): a slow or
+    /// lossy engine, for tests of what a client does when its own echo never comes.
+    pub withhold_echoes: bool,
 }
 
 impl Default for MockOptions {
@@ -51,6 +54,7 @@ impl Default for MockOptions {
             meter_tick: Duration::from_millis(30),
             port: 0,
             daemon_style: false,
+            withhold_echoes: false,
         }
     }
 }
@@ -71,6 +75,7 @@ struct State {
     pulse: i64,
     meter_state: HashMap<String, f64>,
     daemon_style: bool,
+    withhold_echoes: bool,
     read_rpc_replies: HashMap<String, Json>,
     /// `set`s answered with `{"error":"Unable to set value."}` and no change: (property, value).
     refused: Vec<(String, Value)>,
@@ -103,34 +108,25 @@ impl MockEngine {
         let state: Shared = Arc::new(Mutex::new(State {
             tree,
             daemon_style: options.daemon_style,
+            withhold_echoes: options.withhold_echoes,
             ..Default::default()
         }));
         let (stx, srx) = oneshot::channel();
         let st = state.clone();
-        let thread = std::thread::Builder::new()
-            .name(format!("mock-engine :{port}"))
-            .spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("tokio runtime");
-                rt.block_on(async move {
-                    let listener = TcpListener::from_std(std_listener).expect("listener");
-                    if options.simulate_meters {
-                        tokio::spawn(meter_loop(st.clone(), options.meter_tick));
-                    }
-                    tokio::select! {
-                        _ = accept_loop(listener, st) => {}
-                        _ = srx => {}
-                    }
-                });
-            })?;
-        Ok(MockEngine {
-            port,
-            state,
-            shutdown: Some(stx),
-            thread: Some(thread),
-        })
+        let thread = std::thread::Builder::new().name(format!("mock-engine :{port}")).spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+            rt.block_on(async move {
+                let listener = TcpListener::from_std(std_listener).expect("listener");
+                if options.simulate_meters {
+                    tokio::spawn(meter_loop(st.clone(), options.meter_tick));
+                }
+                tokio::select! {
+                    _ = accept_loop(listener, st) => {}
+                    _ = srx => {}
+                }
+            });
+        })?;
+        Ok(MockEngine { port, state, shutdown: Some(stx), thread: Some(thread) })
     }
 
     pub fn port(&self) -> u16 {
@@ -245,15 +241,7 @@ async fn accept_loop(listener: TcpListener, state: Shared) {
             let mut s = lock(&state);
             s.next_client += 1;
             let id = s.next_client;
-            s.clients.insert(
-                id,
-                Client {
-                    tx,
-                    multi: false,
-                    subs: HashSet::new(),
-                    aborts: Vec::new(),
-                },
-            );
+            s.clients.insert(id, Client { tx, multi: false, subs: HashSet::new(), aborts: Vec::new() });
             id
         };
         let (rd, wr) = stream.into_split();
@@ -265,10 +253,7 @@ async fn accept_loop(listener: TcpListener, state: Shared) {
     }
 }
 
-async fn write_loop(
-    mut wr: tokio::net::tcp::OwnedWriteHalf,
-    mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
-) {
+async fn write_loop(mut wr: tokio::net::tcp::OwnedWriteHalf, mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
     while let Some(mut buf) = rx.recv().await {
         while let Ok(more) = rx.try_recv() {
             buf.extend(more);
@@ -316,14 +301,9 @@ async fn meter_loop(state: Shared, tick: Duration) {
             if subs.iter().any(|p| p == "/MeterPulse") {
                 items.push(("/MeterPulse".into(), Value::Number(pulse as f64)));
             }
-            for p in subs
-                .iter()
-                .filter(|p| p.ends_with("/MeterLevel") || p.ends_with("/MeterPeakLevel"))
-            {
+            for p in subs.iter().filter(|p| p.ends_with("/MeterLevel") || p.ends_with("/MeterPeakLevel")) {
                 let seed = (fnv(p) % 97) as f64;
-                let level = ((-30.0 + 20.0 * (t * 1.3 + seed).sin()).clamp(-77.0, 0.0) * 10.0)
-                    .round()
-                    / 10.0;
+                let level = ((-30.0 + 20.0 * (t * 1.3 + seed).sin()).clamp(-77.0, 0.0) * 10.0).round() / 10.0;
                 if s.meter_state.get(p) != Some(&level) {
                     s.meter_state.insert(p.clone(), level);
                     items.push((p.clone(), Value::Number(level)));
@@ -337,22 +317,14 @@ async fn meter_loop(state: Shared, tick: Duration) {
 }
 
 fn fnv(s: &str) -> u64 {
-    s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
-        (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
-    })
+    s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3))
 }
 
 fn send_json(c: &Client, json: &Json) {
     let _ = c.tx.send(NulFramer::encode(&json.to_string()));
 }
 
-fn reply(
-    c: &Client,
-    path: &str,
-    data: Option<Json>,
-    params: &serde_json::Map<String, Json>,
-    error: Option<&str>,
-) {
+fn reply(c: &Client, path: &str, data: Option<Json>, params: &serde_json::Map<String, Json>, error: Option<&str>) {
     let mut o = serde_json::Map::new();
     o.insert("path".into(), Json::String(path.into()));
     if !params.is_empty() {
@@ -372,17 +344,12 @@ fn deliver(c: &Client, items: &[(String, Value)]) {
         return;
     }
     if c.multi {
-        let data: Vec<Json> = items
-            .iter()
-            .map(|(p, v)| serde_json::json!({"path": format!("{p}/value"), "data": v.to_json()}))
-            .collect();
+        let data: Vec<Json> =
+            items.iter().map(|(p, v)| serde_json::json!({"path": format!("{p}/value"), "data": v.to_json()})).collect();
         send_json(c, &serde_json::json!({"path": "multi", "data": data}));
     } else {
         for (p, v) in items {
-            send_json(
-                c,
-                &serde_json::json!({"path": format!("{p}/value"), "data": v.to_json()}),
-            );
+            send_json(c, &serde_json::json!({"path": format!("{p}/value"), "data": v.to_json()}));
         }
     }
 }
@@ -408,10 +375,7 @@ fn split_query(s: &str) -> (&str, Vec<(String, String)>) {
 
 fn echo_params(query: &[(String, String)], daemon_style: bool) -> serde_json::Map<String, Json> {
     if daemon_style {
-        return query
-            .iter()
-            .map(|(k, v)| (k.clone(), Json::String(v.clone())))
-            .collect();
+        return query.iter().map(|(k, v)| (k.clone(), Json::String(v.clone()))).collect();
     }
     query
         .iter()
@@ -486,13 +450,7 @@ fn handle(s: &mut State, id: u64, text: String) {
                 if let Some(c) = s.clients.get_mut(&id) {
                     c.subs.insert(prop.clone());
                     if let Some(v) = v {
-                        reply(
-                            c,
-                            &path::value_path(&prop),
-                            Some(v.to_json()),
-                            &Default::default(),
-                            None,
-                        );
+                        reply(c, &path::value_path(&prop), Some(v.to_json()), &Default::default(), None);
                     }
                 }
             }
@@ -571,10 +529,8 @@ fn session_post(s: &mut State, command: &str, body: &str) {
         _ => {}
     }
     if files != before {
-        let list: Vec<Json> = files
-            .iter()
-            .map(|f| serde_json::json!({"value": f, "type": "file", "locked": false}))
-            .collect();
+        let list: Vec<Json> =
+            files.iter().map(|f| serde_json::json!({"value": f, "type": "file", "locked": false})).collect();
         set_values(s, session::SESSION, Json::Array(list));
     }
 }
@@ -592,17 +548,9 @@ fn get(s: &State, id: u64, raw: &str, query: &[(String, String)]) {
     let Some(c) = s.clients.get(&id) else { return };
     let params = echo_params(query, s.daemon_style);
     // The daemon's errors carry no parameters (so no func_id).
-    let err_params = if s.daemon_style {
-        serde_json::Map::new()
-    } else {
-        params.clone()
-    };
+    let err_params = if s.daemon_style { serde_json::Map::new() } else { params.clone() };
     let recursive = query.iter().any(|(k, v)| k == "recursive" && v != "0");
-    let p = if raw.len() > 1 && raw.ends_with('/') {
-        &raw[..raw.len() - 1]
-    } else {
-        raw
-    };
+    let p = if raw.len() > 1 && raw.ends_with('/') { &raw[..raw.len() - 1] } else { raw };
     if s.tree.has_node(p) {
         let mut json = s.tree.node_json(p);
         if !recursive && let Some(Json::Object(kids)) = json.get_mut("children") {
@@ -618,22 +566,12 @@ fn get(s: &State, id: u64, raw: &str, query: &[(String, String)]) {
         reply(c, raw, Some(prop.to_json()), &params, None);
     } else if let Some(prop) = s.tree.property(node) {
         let data = match selector {
-            "value" => Some(
-                prop.value
-                    .as_ref()
-                    .map(Value::to_json)
-                    .unwrap_or(Json::Null),
-            ),
+            "value" => Some(prop.value.as_ref().map(Value::to_json).unwrap_or(Json::Null)),
             "values" => Some(prop.meta.values.clone().unwrap_or(Json::Array(Vec::new()))),
             "enabled" => Some(Json::Bool(prop.meta.enabled.unwrap_or(true))),
-            "default" => Some(
-                prop.meta
-                    .default
-                    .as_ref()
-                    .or(prop.value.as_ref())
-                    .map(Value::to_json)
-                    .unwrap_or(Json::Null),
-            ),
+            "default" => {
+                Some(prop.meta.default.as_ref().or(prop.value.as_ref()).map(Value::to_json).unwrap_or(Json::Null))
+            }
             _ => None,
         };
         match data {
@@ -649,23 +587,12 @@ fn set(s: &mut State, id: u64, raw: &str, value_text: &str, query: &[(String, St
     let prop = path::property_path(raw).to_owned();
     let Some(meta) = s.tree.meta(&prop).cloned() else {
         if let Some(c) = s.clients.get(&id) {
-            let params = if s.daemon_style {
-                Default::default()
-            } else {
-                echo_params(query, false)
-            };
-            reply(
-                c,
-                raw,
-                None,
-                &params,
-                Some("Unable to resolve path for set."),
-            );
+            let params = if s.daemon_style { Default::default() } else { echo_params(query, false) };
+            reply(c, raw, None, &params, Some("Unable to resolve path for set."));
         }
         return;
     };
-    let parsed = serde_json::from_str::<Json>(value_text)
-        .unwrap_or_else(|_| Json::String(value_text.to_owned()));
+    let parsed = serde_json::from_str::<Json>(value_text).unwrap_or_else(|_| Json::String(value_text.to_owned()));
     let mut v = Value::from_json_owned(parsed);
     match meta.ty.as_deref() {
         Some("bool") => v = Value::Bool(v.as_bool().unwrap_or(value_text == "true")),
@@ -689,6 +616,10 @@ fn set(s: &mut State, id: u64, raw: &str, value_text: &str, query: &[(String, St
         }
         return;
     }
+    if s.withhold_echoes {
+        s.tree.set_value(&prop, v);
+        return;
+    }
     change(s, &prop, v.clone());
     if prop == crate::session::SESSION || prop == crate::session::MODIFIED_SESSIONS {
         // Loading a session (assumed): the loaded session is clean.
@@ -697,13 +628,7 @@ fn set(s: &mut State, id: u64, raw: &str, value_text: &str, query: &[(String, St
     if query.iter().any(|(k, _)| k == "func_id")
         && let Some(c) = s.clients.get(&id)
     {
-        reply(
-            c,
-            raw,
-            Some(v.to_json()),
-            &echo_params(query, s.daemon_style),
-            None,
-        );
+        reply(c, raw, Some(v.to_json()), &echo_params(query, s.daemon_style), None);
     }
 }
 
@@ -719,11 +644,7 @@ fn change(s: &mut State, prop: &str, v: Value) {
         s.tree.set_value(p, value.clone());
     }
     for c in s.clients.values() {
-        let items: Vec<(String, Value)> = updates
-            .iter()
-            .filter(|(p, _)| c.subs.contains(p))
-            .cloned()
-            .collect();
+        let items: Vec<(String, Value)> = updates.iter().filter(|(p, _)| c.subs.contains(p)).cloned().collect();
         deliver(c, &items);
     }
 }
@@ -768,33 +689,20 @@ impl MockHelper {
         let std_listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
         std_listener.set_nonblocking(true)?;
         let port = std_listener.local_addr()?.port();
-        let state = Arc::new(Mutex::new(HelperState {
-            root,
-            ..Default::default()
-        }));
+        let state = Arc::new(Mutex::new(HelperState { root, ..Default::default() }));
         let (stx, srx) = oneshot::channel();
         let st = state.clone();
-        let thread = std::thread::Builder::new()
-            .name(format!("mock-helper :{port}"))
-            .spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("tokio runtime");
-                rt.block_on(async move {
-                    let listener = TcpListener::from_std(std_listener).expect("listener");
-                    tokio::select! {
-                        _ = helper_accept(listener, st) => {}
-                        _ = srx => {}
-                    }
-                });
-            })?;
-        Ok(MockHelper {
-            port,
-            state,
-            shutdown: Some(stx),
-            thread: Some(thread),
-        })
+        let thread = std::thread::Builder::new().name(format!("mock-helper :{port}")).spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+            rt.block_on(async move {
+                let listener = TcpListener::from_std(std_listener).expect("listener");
+                tokio::select! {
+                    _ = helper_accept(listener, st) => {}
+                    _ = srx => {}
+                }
+            });
+        })?;
+        Ok(MockHelper { port, state, shutdown: Some(stx), thread: Some(thread) })
     }
 
     pub fn port(&self) -> u16 {
@@ -821,9 +729,7 @@ impl MockHelper {
                 .entry("properties")
                 .or_insert_with(|| Json::Object(Default::default()));
             if let Some(p) = props.as_object_mut() {
-                let entry = p
-                    .entry(name.to_owned())
-                    .or_insert_with(|| serde_json::json!({}));
+                let entry = p.entry(name.to_owned()).or_insert_with(|| serde_json::json!({}));
                 if let Some(e) = entry.as_object_mut() {
                     e.insert("value".into(), value.clone());
                 }
@@ -843,11 +749,8 @@ impl MockHelper {
             o.insert("path".into(), Json::String(name.to_owned()));
         }
         if let Some(n) = helper_node_mut(&mut s.root, parent) {
-            let kids = n
-                .as_object_mut()
-                .expect("node object")
-                .entry("children")
-                .or_insert_with(|| Json::Array(Vec::new()));
+            let kids =
+                n.as_object_mut().expect("node object").entry("children").or_insert_with(|| Json::Array(Vec::new()));
             if let Some(list) = kids.as_array_mut() {
                 list.retain(|c| c.get("path").and_then(Json::as_str) != Some(name));
                 list.push(node);
@@ -873,17 +776,12 @@ impl Drop for MockHelper {
 }
 
 fn helper_child<'a>(node: &'a Json, name: &str) -> Option<&'a Json> {
-    node.get("children")?
-        .as_array()?
-        .iter()
-        .find(|c| c.get("path").and_then(Json::as_str) == Some(name))
+    node.get("children")?.as_array()?.iter().find(|c| c.get("path").and_then(Json::as_str) == Some(name))
 }
 
 /// The helper node at `path` (`/` is the root).
 fn helper_node<'a>(root: &'a Json, path: &str) -> Option<&'a Json> {
-    path.split('/')
-        .filter(|c| !c.is_empty())
-        .try_fold(root, helper_child)
+    path.split('/').filter(|c| !c.is_empty()).try_fold(root, helper_child)
 }
 
 fn helper_node_mut<'a>(root: &'a mut Json, path: &str) -> Option<&'a mut Json> {
@@ -926,14 +824,7 @@ async fn helper_accept(listener: TcpListener, state: Arc<Mutex<HelperState>>) {
             let mut s = hlock(&state);
             s.next_client += 1;
             let id = s.next_client;
-            s.clients.insert(
-                id,
-                HelperClient {
-                    tx,
-                    subs: HashSet::new(),
-                    aborts: Vec::new(),
-                },
-            );
+            s.clients.insert(id, HelperClient { tx, subs: HashSet::new(), aborts: Vec::new() });
             id
         };
         let (mut rd, wr) = stream.into_split();
@@ -990,11 +881,7 @@ fn helper_handle(s: &mut HelperState, id: u64, text: String) {
         }
         "get" | "subscribe" => {
             let recursive = query.iter().any(|(k, v)| k == "recursive" && v != "0");
-            let p = if raw.len() > 1 && raw.ends_with('/') {
-                &raw[..raw.len() - 1]
-            } else {
-                raw
-            };
+            let p = if raw.len() > 1 && raw.ends_with('/') { &raw[..raw.len() - 1] } else { raw };
             let prop_path = path::property_path(p).to_owned();
             let (node_part, selector) = path::split(p);
             let data = if let Some(node) = helper_node(&s.root, p) {
@@ -1010,20 +897,14 @@ fn helper_handle(s: &mut HelperState, id: u64, text: String) {
                     Some(helper_shallow(node))
                 }
             } else if selector == "values" {
-                helper_property(&s.root, node_part)
-                    .map(|p| p.get("values").cloned().unwrap_or(Json::Array(Vec::new())))
+                helper_property(&s.root, node_part).map(|p| p.get("values").cloned().unwrap_or(Json::Array(Vec::new())))
             } else {
-                helper_property(&s.root, &prop_path)
-                    .map(|p| p.get("value").cloned().unwrap_or(Json::Null))
+                helper_property(&s.root, &prop_path).map(|p| p.get("value").cloned().unwrap_or(Json::Null))
             };
             match data {
                 Some(d) => {
                     if verb == "subscribe" {
-                        let key = if helper_node(&s.root, p).is_some() {
-                            p.to_owned()
-                        } else {
-                            prop_path
-                        };
+                        let key = if helper_node(&s.root, p).is_some() { p.to_owned() } else { prop_path };
                         if let Some(c) = s.clients.get_mut(&id) {
                             c.subs.insert(key);
                         }
@@ -1052,16 +933,25 @@ fn helper_handle(s: &mut HelperState, id: u64, text: String) {
 
 /// `set /Sleep …` / `set /sleep …`: a per-socket hint, not a mixer write.
 fn is_sleep_hint(c: &str) -> bool {
-    c.starts_with("set /Sleep ") || c.starts_with("set /sleep ") || c.starts_with("set /Sleep?") || c.starts_with("set /sleep?")
+    c.starts_with("set /Sleep ")
+        || c.starts_with("set /sleep ")
+        || c.starts_with("set /Sleep?")
+        || c.starts_with("set /sleep?")
 }
 
-fn is_read_rpc(c:&str)->bool {
-    let Some(rest)=c.strip_prefix("post ") else {return false};
-    let (target,body)=split_first(rest);
-    let Ok(Json::Object(args))=serde_json::from_str::<Json>(body) else {return false};
+fn is_read_rpc(c: &str) -> bool {
+    let Some(rest) = c.strip_prefix("post ") else { return false };
+    let (target, body) = split_first(rest);
+    let Ok(Json::Object(args)) = serde_json::from_str::<Json>(body) else { return false };
     match split_query(target).0 {
-        "/GetMidiBuffers"=>args.is_empty(),
-        "/GetCorrectionImage"=>args.len()==1 && args.get("type").and_then(Json::as_str).is_some_and(|s|matches!(s,"speaker"|"headphone"|"headphone2")),
-        _=>false,
+        "/GetMidiBuffers" => args.is_empty(),
+        "/GetCorrectionImage" => {
+            args.len() == 1
+                && args
+                    .get("type")
+                    .and_then(Json::as_str)
+                    .is_some_and(|s| matches!(s, "speaker" | "headphone" | "headphone2"))
+        }
+        _ => false,
     }
 }
