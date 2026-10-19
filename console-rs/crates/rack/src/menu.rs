@@ -1949,6 +1949,8 @@ pub fn context_menu_at(hits: &[Hit], x: f32, y: f32) -> Option<MenuState> {
             Control::Solo => Some(MenuState::under(MenuTarget::Solo { strip }, hit.rect)),
             Control::Preamp(k) if &**k == "input_source" => Some(MenuState::under(MenuTarget::InputSource { strip }, hit.rect)),
             Control::InputSource(_) => Some(MenuState::under(MenuTarget::InputSource { strip }, hit.rect)),
+            // The preamp plate (`Rack_Overview_Preamp`): its menu at the pointer.
+            Control::PreampPlate => Some(MenuState::pointer(MenuTarget::Preamp { strip }, x, y)),
             Control::Fader | Control::PanL | Control::PanR if channel(&strip) => Some(MenuState::pointer(MenuTarget::CopyMix { strip }, x, y)),
             Control::ShowPanel(crate::settings::Panel::MeterWindow) => Some(MenuState::pointer(MenuTarget::MonitorMeter, x, y)),
             Control::SceneSelect(i) => Some(MenuState::at(MenuTarget::SceneRow(*i), hit.rect.x + SCENE_MENU_DX, hit.rect.y + SCENE_MENU_DY)),

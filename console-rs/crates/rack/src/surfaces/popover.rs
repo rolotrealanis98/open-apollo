@@ -233,6 +233,7 @@ pub fn draw_popover(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bound
             crate::surfaces::panels::value_popover(ui, view, a, bounds);
         }
         Popover::Confirm { title, message, ok, ok_label } => confirm_dialog(ui, title, message, ok, ok_label, bounds),
+        Popover::Notifications { lines } => notifications_dialog(ui, lines, bounds),
         Popover::CueOutputs => cue_outputs_popover(ui, model, a, bounds),
         Popover::Headphone { output } => {
             let hps = model.headphone_outputs();
@@ -364,6 +365,33 @@ fn confirm_dialog(ui: &mut Ui, title: &str, message: &str, ok: &ControlId, ok_la
     let by = r.max_y() - 34.0;
     ui.flat_button("CANCEL", false, Rect::new(r.max_x() - 12.0 - 96.0 * 2.0 - 8.0, by, 96.0, 22.0), pid(Control::PopoverDismiss));
     ui.flat_button(ok_label, true, Rect::new(r.max_x() - 12.0 - 96.0, by, 96.0, 22.0), ok.clone());
+}
+
+/// Window › Notifications (`show_notification_browser`): the confirm dialog's look, one line per
+/// refusal (at most 12, newest first), OK closes it. [I] Console's notification browser is not
+/// captured.
+fn notifications_dialog(ui: &mut Ui, lines: &[String], bounds: Rect) {
+    const ROW: f32 = 16.0;
+    let shown = lines.len().clamp(1, 12);
+    let (w, h) = (480.0, 36.0 + shown as f32 * ROW + 46.0);
+    let (cx, cy) = bounds.center();
+    let r = Rect::new((cx - w / 2.0).round(), (cy - h / 2.0).round(), w, h);
+    ui.fill(r.offset(2.0, 3.0), Rgba::BLACK.with_alpha(0.35));
+    ui.fill(r, Rgba::rgb8(16, 17, 18));
+    ui.fill(r.inset(1.0, 1.0, 1.0, 1.0), Rgba::rgb8(47, 50, 53));
+    ui.hit(r, pid(Control::PopoverDismiss), HitKind::Drag { value: 0.0, span: 1.0, reset: None });
+    let band = Rect::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, 24.0);
+    ui.fill(band, Rgba::rgb8(36, 38, 41));
+    let mut ts = ui.style("views", "Popover-Header");
+    ts.size = 11.0;
+    ui.text("NOTIFICATIONS", ts, band, Align::Center);
+    let body = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.85));
+    let empty = ["No notifications.".to_string()];
+    let rows = if lines.is_empty() { &empty[..] } else { &lines[..shown] };
+    for (i, line) in rows.iter().enumerate() {
+        ui.text(line, body.clone(), Rect::new(r.x + 16.0, r.y + 34.0 + i as f32 * ROW, r.w - 32.0, ROW), Align::Left);
+    }
+    ui.flat_button("OK", true, Rect::new(r.max_x() - 12.0 - 96.0, r.max_y() - 34.0, 96.0, 22.0), pid(Control::PopoverDismiss));
 }
 
 fn text_popover(ui: &mut Ui, anchor: Rect, bounds: Rect, title: &str, edit: Option<&TextEdit>) {

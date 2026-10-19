@@ -113,22 +113,26 @@ impl EngineMixer {
         out
     }
 
+    /// Remove / Enable / Disable on every loaded slot of `slots`: one undo step for the batch
+    /// (one `/UndoRecording` bracket; the per-slot commits nest inside it).
     fn plugin_op(&mut self, slots: &[InsertPaths], op: PluginOp) {
-        for slot in slots {
-            let loaded = self.str_at(&slot.effect_name()).is_some_and(|n| !n.is_empty());
-            if !loaded {
-                continue;
-            }
-            match op {
-                PluginOp::Remove => self.store.commit(&slot.effect_name(), String::new()),
-                PluginOp::Enable | PluginOp::Disable => {
-                    let on = op == PluginOp::Enable;
-                    if self.bool_at(&slot.power()) != Some(on) {
-                        self.store.commit(&slot.power(), on);
-                    }
-                }
-            }
+        let on = op == PluginOp::Enable;
+        let writes: Vec<(String, ua_engine::Value)> = slots
+            .iter()
+            .filter(|slot| self.str_at(&slot.effect_name()).is_some_and(|n| !n.is_empty()))
+            .filter_map(|slot| match op {
+                PluginOp::Remove => Some((slot.effect_name(), String::new().into())),
+                _ => (self.bool_at(&slot.power()) != Some(on)).then(|| (slot.power(), on.into())),
+            })
+            .collect();
+        if writes.is_empty() {
+            return;
         }
+        self.store.begin_gesture();
+        for (path, v) in writes {
+            self.store.commit(&path, v);
+        }
+        self.store.end_gesture();
     }
 
     /// A model-scope `MenuCmd` on `strip`.

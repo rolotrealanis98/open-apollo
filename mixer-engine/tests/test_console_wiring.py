@@ -169,6 +169,29 @@ class TestCueBusCount:
         assert d.state is tree
 
 
+class TestChannelDspPairing:
+    """Settings > CHANNEL DSP PAIRING writes /devices/0/ActiveSpans; each DSP
+    pair takes a virtual channel (x4: MaxSpans 4, VIRTUAL 1-4 at 0 pairs)."""
+
+    def test_pairs_take_virtual_channels(self, tree):
+        MixerDaemon(tree, None)
+
+        def active():
+            return [tree.get_value(f"{IN}/{n}/Active/value") for n in range(14, 22)]
+        # The map's garbage ActiveSpans is reset: no pairs, four virtual channels
+        assert tree.get_value("/devices/0/ActiveSpans/value") == 0
+        assert active() == [True] * 4 + [False] * 4
+        tree.set("/devices/0/ActiveSpans/value", 3)
+        assert active() == [True] + [False] * 7
+        # Off at >= 176.4 kHz: every virtual channel back, the setting kept
+        tree.set("/SampleRate/value", 192000)
+        assert active() == [True] * 4 + [False] * 4
+        assert tree.get_value("/devices/0/ActiveSpans/value") == 3
+        tree.set("/SampleRate/value", 48000)
+        tree.set("/devices/0/ActiveSpans/value", 4)
+        assert active() == [False] * 8
+
+
 class TestTalkback:
     def daemon(self, tree, backend):
         router = HardwareRouter(backend, tree)

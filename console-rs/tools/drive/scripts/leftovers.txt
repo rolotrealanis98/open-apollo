@@ -1,0 +1,46 @@
+# 1:1 leftovers: the Sends window's typed-dB popover, the INS switch, CHANNEL DSP PAIRING.
+settle
+size 1920 1300
+click nav:SectionsOpenAll
+settle
+
+# The Sends window (a send's right-click): double-click a fader's readout, -18 OK writes the
+# send's Gain (manual §9.2: double-click a send value to type it).
+rclick /devices/0/inputs/0:SendLevel(0)
+settle
+click settings:ValueEntry(SettingSet("fader:/devices/0/inputs/0/sends/2/GainTapered")) double
+key -18
+key enter
+settle
+click settings:PanelClose
+settle
+#! tree /devices/0/inputs/0/sends/2/Gain/value -18.0
+
+# The INS switch beside UAD REC/MON (Rack_UADRecord's press target): flips the input's
+# RecordPreEffects, as the LEDs do. Twice: one value each way.
+click /devices/0/inputs/1:RecMon
+settle
+click /devices/0/inputs/1:RecMon
+settle
+#! tree /devices/0/inputs/1/RecordPreEffects/value True
+#! tree /devices/0/inputs/1/RecordPreEffects/value False
+
+# MODIFIERS > SET DEFAULT: a plain click on a moved fader returns it to its default (manual
+# §4.7); the fake daemon resolves "default" to 0.7818181818181819.
+drag /devices/0/inputs/2:Fader 0 -60
+settle
+click nav:Modifier(SetDefault)
+click /devices/0/inputs/2:Fader
+settle
+click nav:Modifier(SetDefault)
+settle
+#! tree /devices/0/inputs/2/FaderLevelTapered/value 0.7818181818181819
+
+# Settings > HARDWARE > CHANNEL DSP PAIRING: the cell for 1 virtual channel writes ActiveSpans
+# = MaxSpans - 1 = 3 (x4); the daemon then leaves VIRTUAL 1 the only Active virtual input.
+click nav:ShowSettings
+settle
+click settings:SettingChoose("spans:/devices/0",1)
+settle
+#! tree /devices/0/ActiveSpans/value 3
+#! tree /devices/0/inputs/15/Active/value False

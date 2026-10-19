@@ -667,6 +667,10 @@ pub trait MixerModel {
     /// Text edits committed by the UI: `Name` (channel name), `Insert(k)` (load plug-in by
     /// catalogue name), `Tempo`.
     fn set_text(&mut self, _id: &ControlId, _text: &str) {}
+    /// Window › Notifications: what went wrong lately (engine refusals), newest first.
+    fn notifications(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// Properties behind the Settings window and secondary panels (engine paths and `pref:`
     /// client preferences). None leaves those pages empty.
     fn properties(&self) -> Option<&dyn crate::settings::PropertySource> {

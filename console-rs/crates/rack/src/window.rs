@@ -811,6 +811,7 @@ fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, size: InsertSi
             // Rack_Overview_Preamp's secondary_background (Secondary-Channel-Inserts-Background)
             // runs 2 pt past the 129-pt plate, as under SR CONVERT.
             ui.background("Secondary-Channel-Inserts-Background", Rect::new(4.0, 101.0 - dy, STRIP_W - 8.0, 131.0));
+            ui.hit(Rect::new(0.0, 101.0 - dy, STRIP_W, 129.0), ControlId { strip: s.id.clone(), control: Control::PreampPlate }, HitKind::Tap);
             draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0 - dy, STRIP_W, 129.0));
         }
     } else if s.shows_sr_convert {
@@ -824,6 +825,7 @@ fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, size: InsertSi
 /// secondary background, label plate `(4, 0, w−8, 24)` with the Silk-Screen title `(0, 5, w, 16)`,
 /// lower plate `(6, 24, w−12, 19 + 2·10)`, radio background and OFF / ON at `(10+6, 34)` / `(48, 34)`.
 fn sr_convert(ui: &mut Ui, s: &StripInfo, on: bool, r: Rect) {
+    ui.hit(r, ControlId { strip: s.id.clone(), control: Control::PreampPlate }, HitKind::Tap);
     ui.background("Secondary-Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, r.h));
     ui.background("Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, 24.0));
     ui.font_text("Silk-Screen", "SR CONVERT", Rect::new(r.x, r.y + 5.0, r.w, 16.0), Align::Center);
@@ -858,7 +860,10 @@ fn unison(ui: &mut Ui, state: &crate::model::InsertState, label: Option<&crate::
 fn rec_mon(ui: &mut Ui, monitor_only: bool, s: &StripInfo, y: f32) {
     let h = 42.0;
     ui.toggle("UAD-Record-LEDs", None, !monitor_only, true, Rect::new(6.0, y - 2.0, 43.0, h), cid(s, Control::RecMon), None);
-    ui.toggle("Switch", Some("INS"), false, true, Rect::new(STRIP_W / 2.0, y - 2.0, 40.0, h), None, None);
+    // INS (`Rack_UADRecord` 0x14ff288, button "toggle"): not a state of its own. A press anywhere
+    // on the component flips this input's `RecordPreEffects` (mouseDown 0x14fff98), the LEDs
+    // show it; INS only takes the pressed look while held (mouseUp 0x15004c0 clears it).
+    ui.toggle("Switch", Some("INS"), false, true, Rect::new(STRIP_W / 2.0, y - 2.0, 40.0, h), cid(s, Control::RecMon), None);
 }
 
 fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos) {

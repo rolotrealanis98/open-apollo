@@ -494,9 +494,7 @@ impl EngineMixer {
                 let on = self.store.writer().writes_enabled;
                 self.store.set_engine_writes(!on);
             }
-            // No engine path known (clear clips is a helper command; set-default is a preset op).
             Control::ClearClips => self.store.post("/ClearClips", Some(&ua_engine::Json::Object(Default::default()))),
-            Control::InsertSetDefault(_) => {}
             Control::InsertMove { .. } | Control::PresetDrop(_) => {
                 self.apply_drop(id);
             }

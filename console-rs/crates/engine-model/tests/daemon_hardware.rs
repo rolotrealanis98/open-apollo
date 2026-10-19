@@ -456,6 +456,10 @@ fn monitor_controls_reach_the_mixer() {
     let o = r.m.monitor_options();
     assert_eq!((o.dim, o.cr_source, o.alt_selection), (Some(true), 1, 1));
     assert_eq!(r.m.headphone_outputs()[0].source, cue2 as usize);
+    // Window › Notifications lists both refusals, newest first.
+    let n = r.m.notifications();
+    assert_eq!(n.len(), 2, "{n:?}");
+    assert!(n.iter().all(|l| l.starts_with('/') && l.contains(": ")), "{n:?}");
 }
 
 /// Settings › HARDWARE and the device OPTIONS, OPTIONS › DISPLAY, CUE OUTPUTS.

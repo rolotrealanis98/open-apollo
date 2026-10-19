@@ -848,16 +848,23 @@ fn utc_string(secs: u64) -> String {
 pub fn inside(out: &Path, root: &Path) -> bool {
     let Ok(root) = fs::canonicalize(root) else { return false };
     let abs = std::path::absolute(out).unwrap_or_else(|_| out.to_path_buf());
-    // Canonicalize the deepest existing ancestor; keep the rest as given.
+    // Canonicalize the deepest existing ancestor, then apply the rest lexically (it does not
+    // exist, so it holds no symlinks); a `..` there steps out of what came before it.
     let mut base = abs.as_path();
     let mut tail = Vec::new();
     while !base.exists() {
-        let (Some(parent), Some(name)) = (base.parent(), base.file_name()) else { break };
-        tail.push(name.to_os_string());
+        let (Some(parent), Some(name)) = (base.parent(), base.components().next_back()) else { break };
+        tail.push(name.as_os_str().to_os_string());
         base = parent;
     }
     let mut p = fs::canonicalize(base).unwrap_or_else(|_| base.to_path_buf());
-    p.extend(tail.iter().rev());
+    for c in tail.iter().rev() {
+        if c == ".." {
+            p.pop();
+        } else {
+            p.push(c);
+        }
+    }
     p.starts_with(&root)
 }
 
@@ -1300,6 +1307,7 @@ mod tests {
         fs::create_dir_all(root.join("Windows")).unwrap();
         assert!(inside(&root.join("Windows/new/dir"), &root));
         assert!(inside(&root.join("x/../Windows"), &root));
+        assert!(!inside(&root.join("x/../../out"), &root));
         assert!(!inside(&t.0.join("out"), &root));
         assert!(!inside(&t.0.join("winx"), &root));
     }
