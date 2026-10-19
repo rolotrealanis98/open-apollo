@@ -317,7 +317,8 @@ mod tests {
 
     #[test]
     fn mixer_prefs_apply_to_view() {
-        let prefs = Settings::parse("sends = true\ninputs = false\ninsert_size = \"small\"\nwindow = \"1200x800\"\n").mixer;
+        let text = "sends = true\ninputs = false\ninsert_size = \"small\"\nwindow = \"1200x800\"\n";
+        let prefs = Settings::parse(text).mixer;
         let mut v = ViewState::default();
         prefs.apply(&mut v);
         assert!(v.sections.sends && !v.sections.inputs && v.sections.fader);
