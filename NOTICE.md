@@ -60,6 +60,12 @@ copies.
 The generic mixer icon in `console-rs/packaging/` is original to this project and is
 not a Universal Audio mark.
 
+`tools/plugin-mapper/plugin_mapper/executor/win32-ctype.json` is a character-type table
+generated from Wine 11.19's `sortdefault.nls` (as read by `kernelbase/locale.c`), so the
+plug-in mapper's Windows emulation classifies characters as Windows does. Wine is licensed
+under the GNU LGPL 2.1 or later (https://www.winehq.org); the source and its SHA-256 are
+recorded in the file.
+
 ## Trademarks
 
 Universal Audio, Apollo, UAD, UAD Console, and related names and logos are
