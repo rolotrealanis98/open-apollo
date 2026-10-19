@@ -30,7 +30,10 @@ use std::time::{Duration, Instant};
 use engine_model::EngineMixer;
 use houston::{Resources, Rgba};
 use rack::model::{InsertState, StripInfo};
-use rack::{Action, Assets, Control, ControlId, Draw, DrawList, Effect, Hit, Interaction, MixerModel, PreviewMixer, ScrollRegion, Ui, ViewState, build_window_with};
+use rack::{
+    Action, Assets, Control, ControlId, Draw, DrawList, Effect, Hit, Interaction, MixerModel, PreviewMixer,
+    ScrollRegion, Ui, ViewState, build_window_with,
+};
 use ua_engine::{Endpoint, Status};
 
 // MARK: constants (mirror uaconsole.h)
@@ -54,15 +57,27 @@ pub const UAC_POINTER_SECONDARY: i32 = 4;
 /// Pointer motion with no button down (mouse hover): highlights rows of an open menu.
 pub const UAC_POINTER_HOVER: i32 = 5;
 
-/// Double tap / double click: resets a dragged control to its default.
+/// Double tap / double click: resets a dragged control to its default; on a send knob or a
+/// fader readout it opens the typed-dB popover (type with `uac_key_text`, commit with
+/// `UAC_KEY_ENTER`).
 pub const UAC_POINTER_DOUBLE: u32 = 1 << 0;
-/// Fine adjustment (Console's modifier-drag): motion divided by 10. While dragging an insert
-/// (drag and drop) it is Console's copy modifier (Option): the drop copies instead of moving.
-pub const UAC_POINTER_FINE: u32 = 1 << 1;
+/// Shift held: fine adjustment (Console's modifier-drag), motion divided by 10, read on every
+/// `UAC_POINTER_MOVE` and on the Option+wheel step of `uac_scroll`.
+pub const UAC_POINTER_SHIFT: u32 = 1 << 1;
+/// Old name of [`UAC_POINTER_SHIFT`] (same bit).
+pub const UAC_POINTER_FINE: u32 = UAC_POINTER_SHIFT;
 /// The pointer is a touch. With [`UAC_POINTER_SECONDARY`] (a long press) on a loaded insert or a
 /// browser row it picks the item up: following `UAC_POINTER_MOVE`s drag it, `UAC_POINTER_UP`
 /// drops it, and a long press released without moving opens the context menu instead.
 pub const UAC_POINTER_TOUCH: u32 = 1 << 2;
+/// Option (macOS) / Alt held, read at `UAC_POINTER_DOWN` (and by the drop on `MOVE`). Click on a
+/// knob or fader: back to its default (the engine gets `"default"`); with [`UAC_POINTER_CMD`]
+/// every strip's; on a Mute or Solo: every strip's. Dragging an insert or plug-in row: copy
+/// instead of move. With `uac_scroll`: the wheel adjusts the control under the pointer.
+pub const UAC_POINTER_ALT: u32 = 1 << 3;
+/// Command (macOS) / Ctrl held, read at `UAC_POINTER_DOWN`: a drag moves the same control on
+/// every strip; with [`UAC_POINTER_ALT`] a click resets it on every strip.
+pub const UAC_POINTER_CMD: u32 = 1 << 4;
 
 /// `uac_set_model_engine` flag: open the write gates (both the connection and the writer).
 pub const UAC_ENGINE_WRITES: u32 = 1 << 0;
@@ -264,7 +279,9 @@ impl View {
     fn clamp(&mut self, content: (f32, f32)) {
         let z = self.zoom(content);
         let (w, h) = self.size_pt();
-        let axis = |o: f32, visible: f32, total: f32| if total <= visible { -(visible - total) / 2.0 } else { o.clamp(0.0, total - visible) };
+        let axis = |o: f32, visible: f32, total: f32| {
+            if total <= visible { -(visible - total) / 2.0 } else { o.clamp(0.0, total - visible) }
+        };
         self.origin = (axis(self.origin.0, w / z, content.0), axis(self.origin.1, h / z, content.1));
     }
 
@@ -272,6 +289,22 @@ impl View {
     fn px_per_pt(&self, content: (f32, f32)) -> f32 {
         self.zoom(content) * self.screen_scale
     }
+}
+
+/// Touchpad points per wheel line (`uaconsole`'s `PIXELS_PER_LINE`).
+const WHEEL_PX_PER_LINE: f64 = 24.0;
+/// Value change per wheel line with Option held, and with Shift too (`uaconsole`'s `WHEEL_STEP`).
+const WHEEL_STEP: f64 = 0.01;
+const WHEEL_STEP_FINE: f64 = 0.001;
+
+/// Option + wheel over a knob or fader: a one-step gesture; None when none is under the point.
+/// Mirrors `uaconsole::input::wheel_actions` (a binary crate this library cannot link).
+fn wheel_actions(hits: &[rack::Hit], x: f32, y: f32, lines: f64, fine: bool) -> Option<Vec<Action>> {
+    let hit = hits.iter().rev().find(|h| h.rect.contains(x, y))?;
+    let (rack::HitKind::Drag { value, .. } | rack::HitKind::Knob { value, .. }) = &hit.kind else { return None };
+    let v = (value + lines * if fine { WHEEL_STEP_FINE } else { WHEEL_STEP }).clamp(0.0, 1.0);
+    let id = hit.id.clone();
+    Some(vec![Action::GestureBegin(id.clone()), Action::Set(id.clone(), v), Action::GestureEnd(id)])
 }
 
 fn offset_list(list: &mut DrawList, dx: f32, dy: f32) {
@@ -394,14 +427,14 @@ fn offscreen_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Textu
 /// `layer` is a live `CAMetalLayer *`.
 #[cfg(target_vendor = "apple")]
 unsafe fn layer_surface(instance: &wgpu::Instance, layer: *mut c_void) -> Result<wgpu::Surface<'static>, String> {
-    unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer)) }.map_err(|e| format!("CAMetalLayer surface: {e}"))
+    unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer)) }
+        .map_err(|e| format!("CAMetalLayer surface: {e}"))
 }
 
 #[cfg(not(target_vendor = "apple"))]
 unsafe fn layer_surface(_: &wgpu::Instance, _: *mut c_void) -> Result<wgpu::Surface<'static>, String> {
     Err("a CAMetalLayer needs an Apple target; pass NULL for offscreen rendering".into())
 }
-
 
 // MARK: context
 
@@ -417,7 +450,10 @@ enum Source {
     Preview,
     /// File name of the snapshot.
     Snapshot(String),
-    Engine { addr: String, writes: bool },
+    Engine {
+        addr: String,
+        writes: bool,
+    },
 }
 
 struct PluginRequest {
@@ -497,9 +533,17 @@ pub struct UacContext {
 }
 
 impl UacContext {
-    fn new(resources: Option<PathBuf>, layer: *mut c_void, width: u32, height: u32, scale: f32) -> Result<Box<Self>, String> {
+    fn new(
+        resources: Option<PathBuf>,
+        layer: *mut c_void,
+        width: u32,
+        height: u32,
+        scale: f32,
+    ) -> Result<Box<Self>, String> {
         let resources = match resources {
-            Some(p) => Resources::at(&p).ok_or_else(|| format!("{}: not a UAD Console Resources folder (no appearance/Appearance.json)", p.display()))?,
+            Some(p) => Resources::at(&p).ok_or_else(|| {
+                format!("{}: not a UAD Console Resources folder (no appearance/Appearance.json)", p.display())
+            })?,
             None => Resources::locate().ok_or("UAD Console Resources not found; pass a path")?,
         };
         let assets = Box::new(Assets::load(resources).map_err(|e| format!("appearance: {e}"))?);
@@ -680,7 +724,16 @@ impl UacContext {
             let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
             let off = (-(layer.rect.x - o.0) * scale, -(layer.rect.y - o.1) * scale);
             let size = (frame.texture.width(), frame.texture.height());
-            self.renderer.render_at(&self.gpu.hl.device, &self.gpu.hl.queue, &part.list, &view, size, scale, off, CLEAR);
+            self.renderer.render_at(
+                &self.gpu.hl.device,
+                &self.gpu.hl.queue,
+                &part.list,
+                &view,
+                size,
+                scale,
+                off,
+                CLEAR,
+            );
             self.gpu.hl.queue.present(frame);
         }
         let s = self.renderer.stats;
@@ -739,7 +792,8 @@ impl UacContext {
 
     fn use_snapshot(&mut self, path: &Path) -> Result<(), String> {
         let model = EngineMixer::from_snapshot(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
+        let name =
+            path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
         self.set_model(Box::new(model), Source::Snapshot(name));
         Ok(())
     }
@@ -775,7 +829,9 @@ impl UacContext {
         for a in actions {
             for effect in self.mixer.route(a, self.model.as_ref()) {
                 match effect {
-                    Effect::Model(Action::Tap(ControlId { strip, control: Control::Insert(slot) })) => self.request_plugin(&strip, slot),
+                    Effect::Model(Action::Tap(ControlId { strip, control: Control::Insert(slot) })) => {
+                        self.request_plugin(&strip, slot)
+                    }
                     Effect::Model(a) => self.model.apply(&a),
                     Effect::SetText(id, text) => self.model.set_text(&id, &text),
                 }
@@ -872,6 +928,10 @@ impl UacContext {
                 if flags & UAC_POINTER_TOUCH == 0 {
                     self.mixer.drag_press(&self.hits, cx, cy, self.model.as_ref());
                 }
+                // As `uaconsole`'s `pointer_down`: CONTROLS MODE from the engine, modifiers at the press.
+                self.interaction.controls_mode = rack::ControlsMode::of(self.model.as_ref());
+                self.interaction.mods =
+                    rack::KeyMods { alt: flags & UAC_POINTER_ALT != 0, cmd: flags & UAC_POINTER_CMD != 0 };
                 let actions = self.interaction.pointer_down(&self.hits, cx, cy, flags & UAC_POINTER_DOUBLE != 0);
                 if let [Action::Tap(_)] = actions.as_slice() {
                     // Taps (inserts, menu items, browser rows) fire on release.
@@ -885,7 +945,7 @@ impl UacContext {
                 }
             }
             UAC_POINTER_MOVE if self.mixer.drag_pending.is_some() || self.mixer.dragging() => {
-                let copy = flags & UAC_POINTER_FINE != 0;
+                let copy = flags & UAC_POINTER_ALT != 0;
                 if self.mixer.drag_motion(&self.hits, cx, cy, copy, self.model.as_ref()) {
                     self.pending_tap = None;
                     self.long_press = None;
@@ -906,7 +966,7 @@ impl UacContext {
                     if !self.interaction.is_dragging() && self.mixer.menu.is_some() {
                         self.dirty |= self.mixer.menu_hover(&self.hits, cx, cy);
                     }
-                    self.interaction.pointer_move(cx, cy, flags & UAC_POINTER_FINE != 0)
+                    self.interaction.pointer_move(cx, cy, flags & UAC_POINTER_SHIFT != 0)
                 }
             },
             UAC_POINTER_HOVER => {
@@ -971,18 +1031,30 @@ impl UacContext {
     }
 
     /// Wheel / trackpad scroll in view points (AppKit's `scrollingDelta`: positive reveals
-    /// content above / to the left). Scrolls the browser list or the cells column under the
-    /// point (returns 1), else pans a zoomed view (returns 0).
-    fn scroll(&mut self, x: f32, y: f32, dx: f32, dy: f32) -> i32 {
+    /// content above / to the left). With Option (`UAC_POINTER_ALT`) over a knob or fader it
+    /// adjusts that control (Shift: fine); else it scrolls the browser list or the cells column
+    /// under the point (returns 1), else pans a zoomed view (returns 0).
+    fn scroll(&mut self, x: f32, y: f32, dx: f32, dy: f32, flags: u32) -> i32 {
         if self.dirty {
             self.build();
         }
         let (cx, cy) = self.view.console_point(self.content, x, y);
         let z = self.view.zoom(self.content);
-        if dy != 0.0 && !self.interaction.is_dragging() && self.mixer.wheel(&self.scrolls, cx, cy, -dy / z) {
-            self.dirty = true;
-            return 1;
+        if dy != 0.0 && !self.interaction.is_dragging() {
+            if flags & UAC_POINTER_ALT != 0
+                && let Some(actions) =
+                    wheel_actions(&self.hits, cx, cy, f64::from(dy) / WHEEL_PX_PER_LINE, flags & UAC_POINTER_SHIFT != 0)
+            {
+                self.apply(actions);
+                return 1;
+            }
+            if self.mixer.wheel(&self.scrolls, cx, cy, -dy / z) {
+                self.dirty = true;
+                return 1;
+            }
         }
+        // Shift+wheel pans horizontally.
+        let (dx, dy) = if flags & UAC_POINTER_SHIFT != 0 && dx == 0.0 { (dy, 0.0) } else { (dx, dy) };
         let before = self.view.origin;
         self.view.origin = (before.0 - dx / z, before.1 - dy / z);
         self.view.clamp(self.content);
@@ -991,16 +1063,19 @@ impl UacContext {
     }
 
     fn layer_scroll(&mut self, id: &str, x: f32, y: f32, dy: f32) -> i32 {
-        if self.dirty { self.build(); }
-        let Some(k)=self.layers.iter().position(|l|l.id==id) else {
+        if self.dirty {
+            self.build();
+        }
+        let Some(k) = self.layers.iter().position(|l| l.id == id) else {
             set_error(format!("no separate window {id:?}"));
             return UAC_ERR_ARG;
         };
-        let z=self.view.zoom(self.content);
-        let r=self.layers[k].rect;
-        let consumed=dy!=0.0 && !self.interaction.is_dragging()
-            && self.mixer.wheel(&self.layer_parts[k].scrolls,r.x+x/z,r.y+y/z,-dy/z);
-        self.dirty|=consumed;
+        let z = self.view.zoom(self.content);
+        let r = self.layers[k].rect;
+        let consumed = dy != 0.0
+            && !self.interaction.is_dragging()
+            && self.mixer.wheel(&self.layer_parts[k].scrolls, r.x + x / z, r.y + y / z, -dy / z);
+        self.dirty |= consumed;
         // An empty child window never pans the main mixer.
         i32::from(consumed)
     }
@@ -1009,7 +1084,11 @@ impl UacContext {
     fn key(&mut self, key: i32) -> i32 {
         let consumed = match key {
             UAC_KEY_ESCAPE => {
-                let open = self.mixer.menu.is_some() || self.mixer.popover.is_some() || self.mixer.sheet.is_some() || self.mixer.modifier.is_some() || self.mixer.editing();
+                let open = self.mixer.menu.is_some()
+                    || self.mixer.popover.is_some()
+                    || self.mixer.sheet.is_some()
+                    || self.mixer.modifier.is_some()
+                    || self.mixer.editing();
                 if open {
                     self.mixer.key_escape();
                 }
@@ -1065,7 +1144,9 @@ impl UacContext {
         let r = if gpu.format == OFFSCREEN_FORMAT {
             renderer
         } else {
-            png_renderer.get_or_insert_with(|| gfx::Renderer::new(&gpu.hl.device, &gpu.hl.queue, OFFSCREEN_FORMAT, assets.images.clone()))
+            png_renderer.get_or_insert_with(|| {
+                gfx::Renderer::new(&gpu.hl.device, &gpu.hl.queue, OFFSCREEN_FORMAT, assets.images.clone())
+            })
         };
         gpu.hl.render_png(r, list, size_pt, scale, path).map_err(|e| format!("{}: {e}", path.display()))
     }
@@ -1135,7 +1216,13 @@ pub unsafe extern "C" fn uac_resources_valid(path: *const c_char) -> bool {
 /// `resources_path` is null or a valid NUL-terminated string. `metal_layer` is null or a
 /// `CAMetalLayer *` that stays alive until `uac_destroy`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uac_create(resources_path: *const c_char, metal_layer: *mut c_void, width_px: u32, height_px: u32, scale: f32) -> *mut UacContext {
+pub unsafe extern "C" fn uac_create(
+    resources_path: *const c_char,
+    metal_layer: *mut c_void,
+    width_px: u32,
+    height_px: u32,
+    scale: f32,
+) -> *mut UacContext {
     guard(std::ptr::null_mut(), || {
         let path = unsafe { path_arg(resources_path) };
         match UacContext::new(path, metal_layer, width_px, height_px, scale) {
@@ -1187,7 +1274,8 @@ pub unsafe extern "C" fn uac_set_background(ctx: *mut UacContext, background: bo
 pub unsafe extern "C" fn uac_set_window_size(ctx: *mut UacContext, width_pt: f32, height_pt: f32) {
     guard((), || {
         if let Some(c) = unsafe { ctx_mut(ctx) } {
-            let window = (width_pt.is_finite() && height_pt.is_finite() && width_pt > 0.0 && height_pt > 0.0).then_some((width_pt, height_pt));
+            let window = (width_pt.is_finite() && height_pt.is_finite() && width_pt > 0.0 && height_pt > 0.0)
+                .then_some((width_pt, height_pt));
             if c.window != window {
                 c.window = window;
                 c.build();
@@ -1255,12 +1343,21 @@ pub unsafe extern "C" fn uac_dragging(ctx: *mut UacContext) -> bool {
 /// Wheel / trackpad scroll at a point, deltas in view points (AppKit `scrollingDelta`
 /// convention: positive reveals content above / to the left). Scrolls the plug-in browser list
 /// or the cells column under the point (returns 1), else pans a zoomed view (returns 0).
+/// `flags` are the modifier bits of `uac_pointer`: with `UAC_POINTER_ALT` over a knob or fader
+/// the wheel adjusts it instead (returns 1; `UAC_POINTER_SHIFT`: fine); Shift pans sideways.
 ///
 /// # Safety
 /// `ctx` is null or a live context.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uac_scroll(ctx: *mut UacContext, x_pt: f32, y_pt: f32, dx_pt: f32, dy_pt: f32) -> i32 {
-    unsafe { with_ctx(ctx, |c| c.scroll(x_pt, y_pt, dx_pt, dy_pt)) }
+pub unsafe extern "C" fn uac_scroll(
+    ctx: *mut UacContext,
+    x_pt: f32,
+    y_pt: f32,
+    dx_pt: f32,
+    dy_pt: f32,
+    flags: u32,
+) -> i32 {
+    unsafe { with_ctx(ctx, |c| c.scroll(x_pt, y_pt, dx_pt, dy_pt, flags)) }
 }
 
 /// True while a text field (channel rename, tempo, browser search) has keyboard focus.
@@ -1636,7 +1733,13 @@ pub unsafe extern "C" fn uac_layer_info(ctx: *mut UacContext, index: u32, out: *
 /// that outlives the attachment (until `uac_detach_layer`, the window closing, or
 /// `uac_destroy`).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uac_attach_layer(ctx: *mut UacContext, id: *const c_char, metal_layer: *mut c_void, width_px: u32, height_px: u32) -> i32 {
+pub unsafe extern "C" fn uac_attach_layer(
+    ctx: *mut UacContext,
+    id: *const c_char,
+    metal_layer: *mut c_void,
+    width_px: u32,
+    height_px: u32,
+) -> i32 {
     let id = unsafe { str_arg(id) };
     unsafe {
         with_ctx(ctx, |c| {
@@ -1707,7 +1810,14 @@ pub unsafe extern "C" fn uac_detach_layer(ctx: *mut UacContext, id: *const c_cha
 /// # Safety
 /// `ctx` is null or a live context; `id` a C string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uac_layer_pointer(ctx: *mut UacContext, id: *const c_char, kind: i32, x_pt: f32, y_pt: f32, flags: u32) -> i32 {
+pub unsafe extern "C" fn uac_layer_pointer(
+    ctx: *mut UacContext,
+    id: *const c_char,
+    kind: i32,
+    x_pt: f32,
+    y_pt: f32,
+    flags: u32,
+) -> i32 {
     let id = unsafe { str_arg(id) };
     unsafe {
         with_ctx(ctx, |c| match &id {
@@ -1726,12 +1836,20 @@ pub unsafe extern "C" fn uac_layer_pointer(ctx: *mut UacContext, id: *const c_ch
 /// # Safety
 /// `ctx` is null or live; `id` is a valid NUL-terminated string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uac_layer_scroll(ctx:*mut UacContext,id:*const c_char,x_pt:f32,y_pt:f32,dy_pt:f32)->i32 {
-    let id=unsafe{str_arg(id)};
-    unsafe{with_ctx(ctx,|c|match id {
-        Some(id)=>c.layer_scroll(&id,x_pt,y_pt,dy_pt),
-        None=>UAC_ERR_ARG,
-    })}
+pub unsafe extern "C" fn uac_layer_scroll(
+    ctx: *mut UacContext,
+    id: *const c_char,
+    x_pt: f32,
+    y_pt: f32,
+    dy_pt: f32,
+) -> i32 {
+    let id = unsafe { str_arg(id) };
+    unsafe {
+        with_ctx(ctx, |c| match id {
+            Some(id) => c.layer_scroll(&id, x_pt, y_pt, dy_pt),
+            None => UAC_ERR_ARG,
+        })
+    }
 }
 
 /// The user moved separate window `id` (a `UAC_LAYER_WINDOW` / `_DIALOG` dragged by its title
@@ -1896,7 +2014,11 @@ mod tests {
 
     /// An offscreen context (holding the GPU test lock), or None (skipped) without installed
     /// Console resources or a GPU.
-    unsafe fn offscreen(width_px: u32, height_px: u32, scale: f32) -> Option<(std::sync::MutexGuard<'static, ()>, *mut UacContext)> {
+    unsafe fn offscreen(
+        width_px: u32,
+        height_px: u32,
+        scale: f32,
+    ) -> Option<(std::sync::MutexGuard<'static, ()>, *mut UacContext)> {
         let lock = GPU.lock().unwrap_or_else(|e| e.into_inner());
         if Resources::locate().is_none() {
             eprintln!("skipping: no Console resources");
@@ -1943,7 +2065,12 @@ mod tests {
 
             // Tap the first strip's solo button: find it through the hit list.
             let c = &mut *ctx;
-            let solo = c.hits.iter().find(|h| &*h.id.strip == "in0" && h.id.control == rack::Control::Solo).cloned().expect("solo hit");
+            let solo = c
+                .hits
+                .iter()
+                .find(|h| &*h.id.strip == "in0" && h.id.control == rack::Control::Solo)
+                .cloned()
+                .expect("solo hit");
             let (vx, vy) = to_view(&s, solo.rect.x + 2.0, solo.rect.y + 2.0);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_DOWN, vx, vy, 0), 1);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_UP, vx, vy, 0), 1);
@@ -2040,7 +2167,8 @@ mod tests {
 
             // A tap released outside its control does nothing.
             let s = stats(ctx);
-            let hit = c.hits.iter().find(|h| &*h.id.strip == "in1" && h.id.control == Control::Insert(0)).cloned().unwrap();
+            let hit =
+                c.hits.iter().find(|h| &*h.id.strip == "in1" && h.id.control == Control::Insert(0)).cloned().unwrap();
             let (x, y) = to_view(&s, hit.rect.x + 2.0, hit.rect.y + 2.0);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_DOWN, x, y, 0), 1);
             assert!(uac_pointer(ctx, UAC_POINTER_UP, x, y - 200.0, 0) >= 0);
@@ -2060,7 +2188,7 @@ mod tests {
     }
 
     /// Drag and drop through the pointer API (`rack::dnd`): a mouse drag moves a loaded insert
-    /// onto an empty slot, Option (`FINE`) copies, and a touch long press picks one up (or opens
+    /// onto an empty slot, Option (`ALT`) copies, and a touch long press picks one up (or opens
     /// the context menu when released in place).
     #[test]
     fn pointer_drag_and_drop_moves_inserts() {
@@ -2070,7 +2198,12 @@ mod tests {
             let s = stats(ctx);
             let c = &mut *ctx;
             let centre = |c: &UacContext, strip: &str, k: u8| {
-                let h = c.hits.iter().find(|h| &*h.id.strip == strip && h.id.control == Control::Insert(k)).cloned().expect("slot");
+                let h = c
+                    .hits
+                    .iter()
+                    .find(|h| &*h.id.strip == strip && h.id.control == Control::Insert(k))
+                    .cloned()
+                    .expect("slot");
                 to_view(&s, h.rect.x + h.rect.w / 2.0, h.rect.y + h.rect.h / 2.0)
             };
             let state = |c: &UacContext, strip: &str, k: u8| {
@@ -2097,8 +2230,8 @@ mod tests {
             let (x0, y0) = centre(c, "in0", empty);
             let (x1, y1) = centre(c, "in0", 0);
             c.pointer(UAC_POINTER_DOWN, x0, y0, 0);
-            c.pointer(UAC_POINTER_MOVE, x1, y1, UAC_POINTER_FINE);
-            c.pointer(UAC_POINTER_UP, x1, y1, UAC_POINTER_FINE);
+            c.pointer(UAC_POINTER_MOVE, x1, y1, UAC_POINTER_ALT);
+            c.pointer(UAC_POINTER_UP, x1, y1, UAC_POINTER_ALT);
             assert_eq!(state(c, "in0", 0), loaded);
             assert_eq!(state(c, "in0", empty), loaded);
             c.frame();
@@ -2128,7 +2261,8 @@ mod tests {
             assert_eq!(uac_layer_count(ctx), 0);
             assert_eq!(uac_frame(ctx), UAC_OK);
             let s = stats(ctx);
-            let label = c.hits.iter().find(|h| &*h.id.strip == "in0" && h.id.control == Control::Name).cloned().expect("label");
+            let label =
+                c.hits.iter().find(|h| &*h.id.strip == "in0" && h.id.control == Control::Name).cloned().expect("label");
             let (x, y) = to_view(&s, label.rect.x + 4.0, label.rect.y + 4.0);
             assert_eq!(uac_pointer(ctx, UAC_POINTER_SECONDARY, x, y, 0), 1);
             assert!(c.mixer.menu.is_some());
@@ -2142,9 +2276,17 @@ mod tests {
             let (lx, ly) = to_view(&s, label.rect.x, label.rect.max_y());
             assert!((l.x - lx).abs() < 0.01 && (l.y - ly).abs() < 0.01, "under the label: {l:?} vs ({lx}, {ly})");
             // The view's own hits no longer have the menu's rows; the layer's do.
-            assert!(!c.hits.iter().any(|h| matches!(h.id.control, Control::Menu(rack::MenuCmd::Row { index, .. }) if index != u16::MAX)));
+            assert!(
+                !c.hits.iter().any(
+                    |h| matches!(h.id.control, Control::Menu(rack::MenuCmd::Row { index, .. }) if index != u16::MAX)
+                )
+            );
             let id = CString::new("menu:0").unwrap();
-            assert_eq!(uac_layer_pointer(ctx, id.as_ptr(), UAC_POINTER_HOVER, 10.0, l.height / 2.0, 0), 1, "hover a row");
+            assert_eq!(
+                uac_layer_pointer(ctx, id.as_ptr(), UAC_POINTER_HOVER, 10.0, l.height / 2.0, 0),
+                1,
+                "hover a row"
+            );
             // Not drawn without a host layer (offscreen): attaching needs a CAMetalLayer.
             assert_ne!(uac_attach_layer(ctx, id.as_ptr(), std::ptr::null_mut(), 10, 10), UAC_OK);
             assert_eq!(uac_frame(ctx), UAC_OK);
@@ -2159,35 +2301,46 @@ mod tests {
     #[test]
     fn child_scroll_uses_its_settings_region_without_panning_mixer() {
         unsafe {
-            let Some((_gpu,ctx))=offscreen(2940,1400,2.0) else{return};
-            assert_eq!(uac_set_windowing(ctx,-800.0,-300.0,3200.0,1770.0),UAC_OK);
-            let c=&mut *ctx;
-            let mut tree=ua_engine::Tree::default();
-            tree.set_property("/TotalDriverInputRoutes",ua_engine::Property::with_value(64.into()));
+            let Some((_gpu, ctx)) = offscreen(2940, 1400, 2.0) else { return };
+            assert_eq!(uac_set_windowing(ctx, -800.0, -300.0, 3200.0, 1770.0), UAC_OK);
+            let c = &mut *ctx;
+            let mut tree = ua_engine::Tree::default();
+            tree.set_property("/TotalDriverInputRoutes", ua_engine::Property::with_value(64.into()));
             for i in 0..64 {
-                tree.set_property(&format!("/inputroutes/{i}/Name"),ua_engine::Property::with_value(format!("Fixture {i}").into()));
-                tree.set_property(&format!("/inputroutes/{i}/IOType"),ua_engine::Property::with_value("Line".into()));
+                tree.set_property(
+                    &format!("/inputroutes/{i}/Name"),
+                    ua_engine::Property::with_value(format!("Fixture {i}").into()),
+                );
+                tree.set_property(&format!("/inputroutes/{i}/IOType"), ua_engine::Property::with_value("Line".into()));
             }
-            let snapshot=ua_engine::Snapshot::new(tree,Default::default());
-            c.set_model(Box::new(EngineMixer::new(ua_engine::Store::from_snapshot(snapshot))),Source::Snapshot("synthetic routes".into()));
-            c.mixer.sheet=Some(rack::surfaces::Sheet::Settings);
-            c.mixer.settings.tab=rack::settings::SettingsTab::IoMatrix;
-            assert_eq!(uac_frame(ctx),UAC_OK);
-            let k=c.layers.iter().position(|l|l.id=="settings").unwrap();
-            let region=c.layer_parts[k].scrolls.iter().find(|r|r.target==rack::ScrollTarget::Settings && r.max>0.0).unwrap().clone();
-            let layer=c.layers[k].rect;
-            let z=c.view.zoom(c.content);
-            let x=(region.rect.x+4.0-layer.x)*z;
-            let y=(region.rect.y+4.0-layer.y)*z;
-            let origin=c.view.origin;
-            let id=CString::new("settings").unwrap();
-            assert_eq!(uac_layer_scroll(ctx,id.as_ptr(),x,y,-30.0),1);
-            assert!(c.mixer.settings.scroll>0.0);
-            assert_eq!(c.view.origin,origin);
-            assert_eq!(uac_layer_scroll(ctx,id.as_ptr(),-20.0,-20.0,-30.0),0);
-            assert_eq!(c.view.origin,origin);
-            let absent=CString::new("absent").unwrap();
-            assert_eq!(uac_layer_scroll(ctx,absent.as_ptr(),0.0,0.0,-30.0),UAC_ERR_ARG);
+            let snapshot = ua_engine::Snapshot::new(tree, Default::default());
+            c.set_model(
+                Box::new(EngineMixer::new(ua_engine::Store::from_snapshot(snapshot))),
+                Source::Snapshot("synthetic routes".into()),
+            );
+            c.mixer.sheet = Some(rack::surfaces::Sheet::Settings);
+            c.mixer.settings.tab = rack::settings::SettingsTab::IoMatrix;
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            let k = c.layers.iter().position(|l| l.id == "settings").unwrap();
+            let region = c.layer_parts[k]
+                .scrolls
+                .iter()
+                .find(|r| r.target == rack::ScrollTarget::Settings && r.max > 0.0)
+                .unwrap()
+                .clone();
+            let layer = c.layers[k].rect;
+            let z = c.view.zoom(c.content);
+            let x = (region.rect.x + 4.0 - layer.x) * z;
+            let y = (region.rect.y + 4.0 - layer.y) * z;
+            let origin = c.view.origin;
+            let id = CString::new("settings").unwrap();
+            assert_eq!(uac_layer_scroll(ctx, id.as_ptr(), x, y, -30.0), 1);
+            assert!(c.mixer.settings.scroll > 0.0);
+            assert_eq!(c.view.origin, origin);
+            assert_eq!(uac_layer_scroll(ctx, id.as_ptr(), -20.0, -20.0, -30.0), 0);
+            assert_eq!(c.view.origin, origin);
+            let absent = CString::new("absent").unwrap();
+            assert_eq!(uac_layer_scroll(ctx, absent.as_ptr(), 0.0, 0.0, -30.0), UAC_ERR_ARG);
             uac_destroy(ctx);
         }
     }
@@ -2225,7 +2378,11 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(10);
             while uac_model_state(ctx) != UAC_MODEL_LIVE {
                 uac_needs_frame(ctx);
-                assert!(Instant::now() < deadline, "not live: {}", CStr::from_ptr(uac_model_status(ctx)).to_string_lossy());
+                assert!(
+                    Instant::now() < deadline,
+                    "not live: {}",
+                    CStr::from_ptr(uac_model_status(ctx)).to_string_lossy()
+                );
                 std::thread::sleep(Duration::from_millis(5));
             }
             let status = CStr::from_ptr(uac_model_status(ctx)).to_string_lossy().into_owned();
@@ -2252,6 +2409,139 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
             uac_needs_frame(ctx);
             assert!(server.write_commands().is_empty(), "{:?}", server.write_commands());
+            uac_destroy(ctx);
+        }
+    }
+
+    /// The centre (view points) of the `control` hit on `strip`.
+    fn control_pt(c: &UacContext, s: &UacStats, strip: &str, control: Control) -> (f32, f32) {
+        let h = c.hits.iter().find(|h| &*h.id.strip == strip && h.id.control == control).cloned().expect("control hit");
+        to_view(s, h.rect.x + h.rect.w / 2.0, h.rect.y + h.rect.h / 2.0)
+    }
+
+    /// Option-click on a fader resets it to the engine's default: `set …/value "default"`.
+    #[test]
+    fn option_click_resets_to_default() {
+        unsafe {
+            let Some((_gpu, ctx)) = offscreen(2940, 2210, 2.0) else { return };
+            let tree = Snapshot::load(fixture()).unwrap().tree;
+            let server = MockEngine::start(tree, MockOptions::default()).unwrap();
+            assert_eq!(uac_set_model_engine(ctx, c"127.0.0.1".as_ptr(), server.port(), UAC_ENGINE_WRITES), UAC_OK);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while uac_model_state(ctx) != UAC_MODEL_LIVE {
+                uac_needs_frame(ctx);
+                assert!(
+                    Instant::now() < deadline,
+                    "not live: {}",
+                    CStr::from_ptr(uac_model_status(ctx)).to_string_lossy()
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            let s = stats(ctx);
+            let strip =
+                (*ctx).hits.iter().find(|h| h.id.control == Control::Fader).expect("fader hit").id.strip.clone();
+            let (x, y) = control_pt(&*ctx, &s, &strip, Control::Fader);
+            assert_eq!(uac_pointer(ctx, UAC_POINTER_DOWN, x, y, UAC_POINTER_ALT), 1);
+            assert!(!uac_dragging(ctx), "a reset is not a drag");
+            uac_pointer(ctx, UAC_POINTER_UP, x, y, UAC_POINTER_ALT);
+            while !server.write_commands().iter().any(|w| w.ends_with(r#"/value "default""#)) {
+                uac_needs_frame(ctx);
+                assert!(Instant::now() < deadline, "no default write: {:?}", server.write_commands());
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            uac_destroy(ctx);
+        }
+    }
+
+    /// Cmd-drag moves the same control on every strip: a plain drag moves one fader, a Cmd drag two.
+    #[test]
+    fn cmd_drag_moves_every_strip() {
+        unsafe {
+            let Some((_gpu, ctx)) = offscreen(3840, 2100, 2.0) else { return };
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            let s = stats(ctx);
+            let c = &mut *ctx;
+            let ids: Vec<_> = c.model.inputs().iter().map(|i| i.id.clone()).collect();
+            let (a, b) = (ids[0].clone(), ids[1].clone());
+            let fader = |c: &UacContext, id: &str| {
+                let st = c.model.inputs().into_iter().find(|i| &*i.id == id).unwrap();
+                c.model.main(&st).fader
+            };
+            let (x, y) = control_pt(c, &s, &a, Control::Fader);
+            let (a0, b0) = (fader(c, &a), fader(c, &b));
+            c.pointer(UAC_POINTER_DOWN, x, y, 0);
+            c.pointer(UAC_POINTER_MOVE, x, y + 30.0, 0);
+            c.pointer(UAC_POINTER_UP, x, y + 30.0, 0);
+            assert_ne!(fader(c, &a), a0);
+            assert_eq!(fader(c, &b), b0, "a plain drag moves one strip");
+            c.frame();
+            let (a1, b1) = (fader(c, &a), fader(c, &b));
+            let (x, y) = control_pt(c, &s, &a, Control::Fader);
+            c.pointer(UAC_POINTER_DOWN, x, y, UAC_POINTER_CMD);
+            c.pointer(UAC_POINTER_MOVE, x, y - 30.0, 0);
+            c.pointer(UAC_POINTER_UP, x, y - 30.0, 0);
+            assert!(
+                fader(c, &a) > a1 && fader(c, &b) > b1,
+                "Cmd-drag moves both: {a1} -> {}, {b1} -> {}",
+                fader(c, &a),
+                fader(c, &b)
+            );
+            uac_destroy(ctx);
+        }
+    }
+
+    /// Option + wheel adjusts the fader under the pointer (Shift: a tenth); a plain wheel does not.
+    #[test]
+    fn option_wheel_adjusts_a_fader() {
+        unsafe {
+            let Some((_gpu, ctx)) = offscreen(3840, 2100, 2.0) else { return };
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            let s = stats(ctx);
+            let strip = (*ctx).model.inputs()[0].id.clone();
+            let (x, y) = control_pt(&*ctx, &s, &strip, Control::Fader);
+            let fader = |c: &UacContext| c.model.main(&c.model.inputs()[0]).fader;
+            let before = fader(&*ctx);
+            uac_scroll(ctx, x, y, 0.0, 24.0, 0);
+            assert_eq!(fader(&*ctx), before, "a plain wheel only scrolls");
+            assert_eq!(uac_scroll(ctx, x, y, 0.0, -48.0, UAC_POINTER_ALT), 1);
+            assert!((fader(&*ctx) - (before - 0.02)).abs() < 1e-9);
+            let mid = fader(&*ctx);
+            uac_scroll(ctx, x, y, 0.0, 24.0, UAC_POINTER_ALT | UAC_POINTER_SHIFT);
+            assert!((fader(&*ctx) - (mid + 0.001)).abs() < 1e-9);
+            uac_destroy(ctx);
+        }
+    }
+
+    /// Double-click a fader readout: the typed-dB popover; digits via `uac_key_text`, Enter commits.
+    #[test]
+    fn typed_db_popover_through_the_keys() {
+        unsafe {
+            let Some((_gpu, ctx)) = offscreen(3840, 2100, 2.0) else { return };
+            assert_eq!(uac_frame(ctx), UAC_OK);
+            let s = stats(ctx);
+            let strip = (*ctx).model.inputs()[0].id.clone();
+            let (x, y) = control_pt(&*ctx, &s, &strip, Control::ValueEntry(Box::new(Control::Fader)));
+            uac_pointer(ctx, UAC_POINTER_DOWN, x, y, 0);
+            uac_pointer(ctx, UAC_POINTER_UP, x, y, 0);
+            assert!(!uac_text_editing(ctx), "one click does nothing");
+            uac_pointer(ctx, UAC_POINTER_DOWN, x, y, UAC_POINTER_DOUBLE);
+            uac_pointer(ctx, UAC_POINTER_UP, x, y, 0);
+            assert!(uac_text_editing(ctx));
+            assert_eq!(uac_key_text(ctx, c"-6".as_ptr()), 1);
+            assert_eq!(uac_key(ctx, UAC_KEY_BACKSPACE), 1);
+            assert_eq!(uac_key_text(ctx, c"12".as_ptr()), 1);
+            assert_eq!(uac_key(ctx, UAC_KEY_ENTER), 1);
+            assert!(!uac_text_editing(ctx));
+            let c = &*ctx;
+            let fader = c.model.main(&c.model.inputs()[0]).fader;
+            assert!((fader - rack::scales::fader_tapered(-12.0)).abs() < 1e-9, "{fader}");
+            // Escape closes it without a write.
+            uac_pointer(ctx, UAC_POINTER_DOWN, x, y, UAC_POINTER_DOUBLE);
+            uac_pointer(ctx, UAC_POINTER_UP, x, y, 0);
+            assert!(uac_text_editing(ctx));
+            assert_eq!(uac_key(ctx, UAC_KEY_ESCAPE), 1);
+            assert!(!uac_text_editing(ctx));
             uac_destroy(ctx);
         }
     }
