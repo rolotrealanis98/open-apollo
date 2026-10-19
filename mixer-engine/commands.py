@@ -92,6 +92,10 @@ UNDO_MAX = 50           # batches kept
 UNDO_GAP = 0.5          # seconds: SETs closer than this from one client are one batch
 NAME_MAX = 64
 FORMAT_SNAPSHOTS = "open-apollo-snapshots"
+# The one import/export target the daemon offers in /Snapshot's `volumes`
+# (Console's IMPORT ALL / EXPORT ALL chooser lists the engine host's disks;
+# here {volume, folder} names <state>/<device>.exports/<folder>.json)
+SNAPSHOT_VOLUME = "open-apollo"
 FORMAT_SESSION = "open-apollo-session"
 FORMAT_PRESETS = "open-apollo-presets"
 FORMAT_IOMAPS = "open-apollo-iomap-presets"
@@ -346,6 +350,7 @@ class CommandEngine:
         self.store_dir = Path(directory)
         self.stem = stem
         self._publish_iomap_list()
+        self._publish_snapshot_list(self._snapshots())
 
     def _import(self, obj: str, params: dict):
         """Console's I/O preset LOAD (Import {"type": "IOMapPreset"}): the
@@ -844,6 +849,45 @@ class CommandEngine:
 
     def _snapshots_save(self, data: dict):
         self._file(".snapshots.json").save(data)
+        self._publish_snapshot_list(data)
+
+    def _publish_snapshot_list(self, data: dict):
+        """/Snapshot `values`: the folder tree Console's FOLDERS / SNAPSHOTS
+        lists read (`{type: folder|file, value, locked, children}`, the
+        /Session shape); `volumes`: the import/export targets."""
+        prop = self.state.get_prop_dict("/Snapshot")
+        if prop is None:
+            return
+        root: list = []
+        for name in data["order"]:
+            level, parts = root, name.split("/")
+            for part in parts[:-1]:
+                node = next((n for n in level if n["type"] == "folder"
+                             and n["value"] == part), None)
+                if node is None:
+                    node = {"type": "folder", "value": part,
+                            "locked": False, "children": []}
+                    level.append(node)
+                level = node["children"]
+            level.append({"type": "file", "value": parts[-1],
+                          "locked": False})
+        prop["values"] = root
+        prop["volumes"] = [{"volume": SNAPSHOT_VOLUME, "user": True,
+                            "removable": False, "locked": False}]
+
+    @staticmethod
+    def _in_folder(data: dict, folder: str) -> list:
+        """Snapshot names under `folder` (Console's folder rename, move and
+        delete post the folder's own name to Move/DeleteSnapshot)."""
+        return [n for n in data["order"] if n.startswith(folder + "/")]
+
+    def _snapshot_names_moved(self, renames: dict):
+        """/Snapshot and /PrimedSnapshot follow renamed (new name) or deleted
+        (None) snapshots."""
+        for prop in ("/Snapshot", "/PrimedSnapshot"):
+            cur = self.state.get_value(prop + "/value")
+            if cur in renames:
+                self.state.set(prop + "/value", renames[cur] or "")
 
     def _snapshot_values(self) -> dict:
         """{absolute /value path: value} of every channel (preamps, meters
@@ -908,23 +952,37 @@ class CommandEngine:
     def _snapshot_move(self, obj: str, params: dict):
         data = self._snapshots()
         if "origName" in params:
-            # Console: {"origName", "newName", "shuffle"}: a rename (and
-            # folder move) that keeps the snapshot's place in the list;
-            # `shuffle` only orders Console's own list (ponytail: ignored)
+            # Console: {"origName", "newName", "shuffle"}: a rename or move
+            # of a snapshot or of a whole folder (the folder's own name;
+            # MxClnt_Snapshots has no folder command) that keeps its place
+            # in the list.  Console asks before a move onto an existing
+            # name: Overwrite posts shuffle=false, so the destination goes
             old = clean_name(params["origName"], folders=True)
             new = clean_name(params.get("newName"), folders=True)
-            if old not in data["snapshots"]:
+            snaps, order = data["snapshots"], data["order"]
+            moves = ({old: new} if old in snaps else
+                     {n: new + n[len(old):]
+                      for n in self._in_folder(data, old)})
+            if not moves:
                 raise CommandError("no such snapshot")
-            if new != old:
-                if new in data["snapshots"]:
-                    raise CommandError("name taken")
-                data["snapshots"][new] = data["snapshots"].pop(old)
-                data["order"][data["order"].index(old)] = new
-                self._snapshots_save(data)
-                for prop in ("/Snapshot", "/PrimedSnapshot"):
-                    if self.state.get_value(prop + "/value") == old:
-                        self.state.set(prop + "/value", new)
-            return {"name": new, "snapshots": data["order"]}
+            if new == old:
+                return {"name": new, "snapshots": order}
+            taken = [t for t in moves.values()
+                     if t in snaps and t not in moves]
+            if taken and _bool(params.get("shuffle")):
+                # ponytail: Shuffle renumbers Console's "NNN - " prefixes
+                # to make room; refused until a client needs it
+                raise CommandError("name taken")
+            for t in taken:
+                del snaps[t]
+                order.remove(t)
+            moved = {o: snaps.pop(o) for o in moves}
+            for o, t in moves.items():
+                snaps[t] = moved[o]
+                order[order.index(o)] = t
+            self._snapshots_save(data)
+            self._snapshot_names_moved(moves)
+            return {"name": new, "snapshots": order}
         name = clean_name(params.get("name"), folders=True)
         if name not in data["snapshots"]:
             raise CommandError("no such snapshot")
@@ -936,20 +994,34 @@ class CommandEngine:
         return {"snapshots": order}
 
     def _snapshot_delete(self, obj: str, params: dict):
+        # A folder's name deletes the folder (MxClnt_Snapshots deleteFolder
+        # posts DeleteSnapshot {"snapshotName": "<folder>"} once)
         name = clean_name(_arg(params, "snapshotName", "name", "value"),
                           folders=True)
         data = self._snapshots()
-        if name not in data["snapshots"]:
+        gone = ([name] if name in data["snapshots"]
+                else self._in_folder(data, name))
+        if not gone:
             raise CommandError("no such snapshot")
-        del data["snapshots"][name]
-        data["order"].remove(name)
+        for n in gone:
+            del data["snapshots"][n]
+            data["order"].remove(n)
         self._snapshots_save(data)
-        for prop in ("/Snapshot", "/PrimedSnapshot"):
-            if self.state.get_value(prop + "/value") == name:
-                self.state.set(prop + "/value", "")
+        self._snapshot_names_moved(dict.fromkeys(gone))
         return {"snapshots": data["order"]}
 
+    def _volume_file(self, params: dict) -> dict:
+        """Console's {volume, folder} (EXPORT ALL / IMPORT ALL) as the
+        daemon's {file}: <folder>.json in the exports directory."""
+        if "file" in params or "folder" not in params:
+            return params
+        volume = params.get("volume", SNAPSHOT_VOLUME)
+        if volume != SNAPSHOT_VOLUME:
+            raise CommandError("unknown volume")
+        return dict(params, file=f"{params['folder']}.json")
+
     def _snapshot_export(self, obj: str, params: dict):
+        params = self._volume_file(params)
         data = self._snapshots()
         names = params.get("names")
         if names is not None:
@@ -964,6 +1036,7 @@ class CommandEngine:
         return data
 
     def _snapshot_import(self, obj: str, params: dict):
+        params = self._volume_file(params)
         if "file" in params:
             src = JsonFile(self._export_file(params["file"])).load({})
         else:
@@ -973,12 +1046,16 @@ class CommandEngine:
                 or not isinstance(src.get("snapshots"), dict)):
             raise CommandError("not a snapshot export")
         data = self._snapshots()
+        if not _bool(params.get("append"), True):
+            # IMPORT ALL's Replace
+            self._snapshot_names_moved(dict.fromkeys(data["order"]))
+            data["snapshots"], data["order"] = {}, []
         overwrite = _bool(params.get("overwrite"), True)
         added = 0
         for name in src.get("order") or list(src["snapshots"]):
             snap = src["snapshots"].get(name)
             try:
-                clean_name(name)
+                clean_name(name, folders=True)
             except CommandError:
                 continue
             if (not isinstance(snap, dict)
