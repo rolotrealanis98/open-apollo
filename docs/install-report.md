@@ -29,9 +29,11 @@ the user name, home folder, host name, machine id, serial numbers and MAC addres
 ## `plugins` (schema `open-apollo-plugin-report/1`)
 
 The plug-ins the user's Apollo itself says are authorized, so the project can verify those
-first. Made by `mixer-engine/plugin_report.py` from one read-only board query
-(`UA_IOCTL_BOARD_QUERY`, the answer the daemon mirrors on `/plugins/N/Authorized`), and
-re-checked by `plugin_report.sanitize()` just before sending, which drops anything else.
+first. Made by `mixer-engine/plugin_report.py` from `mixer-engine/plugin_authorization.py`
+(the helper plug-in hosting setup also uses: the running daemon's `/plugins/N/Authorized`,
+else one read-only `UA_IOCTL_BOARD_QUERY`), with names turned into render ids by the
+oa-assets DSP manifest, and re-checked by `plugin_report.sanitize()` just before sending,
+which drops anything else.
 
 With an answer:
 
@@ -48,9 +50,9 @@ With an answer:
 }
 ```
 
-- `authorized`: sorted, unique render ids (UA's plug-in product numbers, 2048..2815) whose
-  board-table word means authorized. Demo states (running, not started, expired) and
-  unavailable plug-ins are not listed and not counted.
+- `authorized`: sorted, unique render ids (UA's plug-in product numbers, 2048..2815) of the
+  installed plug-ins the device says are authorized. Demos (running, not started, expired),
+  unavailable plug-ins and plug-ins without a render id in the manifest are not listed.
 - `native.built_mono`, `native.built_stereo`: those of `authorized` whose native-hosting
   bundle `scripts/setup-plugin-hosting.sh` built and passed offline on this machine, per
   layout. Empty without plug-in hosting.
@@ -65,9 +67,9 @@ Without an answer:
 "plugins": {"schema": "open-apollo-plugin-report/1", "available": false, "reason": "plugin_host_off"}
 ```
 
-`reason` is one of `no_device` (no driver or no Apollo), `plugin_host_off` (the driver runs
-without `plugin_host=1`: the Apollo only answers with plug-in hosting on), `query_failed`,
-`bad_answer`.
+`reason` is `no_device` (the driver didn't come up in this install) or `no_answer` (neither
+the daemon nor the device answered: usually the driver runs without `plugin_host=1`, and the
+Apollo only answers with plug-in hosting on).
 
 Never in it: licence states other than authorized, demo days, serial numbers, UA account
 details, device or host ids, plug-in names, file paths, error text.

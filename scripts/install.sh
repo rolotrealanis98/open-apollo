@@ -1316,8 +1316,9 @@ with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
 
 # The plug-ins this Apollo is authorized for, added to a report the user
 # agreed to send (never to the local copy otherwise): the device's own
-# answer to a read-only board query (mixer-engine/plugin_report.py), only
-# render ids, and which of them built here for native hosting.  Needs the
+# answer, through the daemon or a read-only board query
+# (mixer-engine/plugin_report.py on plugin_authorization.py), only render
+# ids, and which of them built here for native hosting.  Needs the
 # driver loaded with plugin_host=1; without it the report says why not.
 add_plugin_report() {
     if [ "$PLUGIN_REPORT" != "1" ]; then
