@@ -85,7 +85,7 @@ impl Ui<'_> {
         }
         if let Some(id) = id {
             let sens = self.skin("knobs", key).and_then(|s| s.number("sensitivity")).unwrap_or(1.0) as f32;
-            self.hit(r, id, HitKind::Drag { value, span: 250.0 / sens.max(0.1), reset });
+            self.hit(r, id, HitKind::Knob { value, span: 250.0 / sens.max(0.1), reset });
         }
     }
 

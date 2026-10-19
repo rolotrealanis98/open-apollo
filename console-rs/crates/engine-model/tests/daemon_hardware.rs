@@ -400,6 +400,8 @@ fn monitor_controls_reach_the_mixer() {
     r.mixer("DIM amount", |m| m.apply(&Action::Set(mon(Control::DimLevel), 0.5)), (MONITOR, 0, 0x43, 3));
     r.mixer("SOURCE CUE 1", |m| m.apply(&Action::Tap(mon(Control::CrSource(1)))), (MONITOR, 1, 0x04, 1));
     r.mixer("ALT 1", |m| m.apply(&Action::Tap(mon(Control::MonitorAlt(1)))), (MONITOR, 0, 0x3a, 1));
+    // ALT 1 TRIM +15 dB: `AltMonTrim` on line outs 1/2 → 0x38, 15 × 2 + 60.
+    r.other("ALT 1 TRIM", |m| m.apply(&Action::Set(mon(Control::AltTrim(0)), 0.75)), (MONITOR, 0x38, 90));
     let hp = r.m.headphone_outputs();
     let cue2 = hp[0].options.iter().position(|o| o == "CUE 2").unwrap() as u8;
     r.mixer(
@@ -417,6 +419,11 @@ fn monitor_controls_reach_the_mixer() {
         m.headphone_outputs()[0].source == cue2 as usize && m.store().refusals().count() == 1
     });
     assert!(r.d.hw_since(mark).iter().all(|(n, a)| mixer_param(n, a).is_none_or(|(_, _, p, _)| p != 0x3f)));
+    // SOURCE CUE 3: no verified encoding; refused, the button snaps back to CUE 1.
+    let mark = r.d.mark();
+    r.m.apply(&Action::Tap(mon(Control::CrSource(3))));
+    pump_until(&mut r.m, "SOURCE back on CUE 1", |m| m.monitor_options().cr_source == 1 && m.store().refusals().count() == 2);
+    assert!(r.d.hw_since(mark).iter().all(|(n, a)| mixer_param(n, a).is_none_or(|(t, _, p, _)| (t, p) != (MONITOR, 0x04))));
     let o = r.m.monitor_options();
     assert_eq!((o.dim, o.cr_source, o.alt_selection), (Some(true), 1, 1));
     assert_eq!(r.m.headphone_outputs()[0].source, cue2 as usize);

@@ -129,7 +129,7 @@ fn send_pan_knob_shows_and_sets_the_send_pan() {
     let pan = ControlId { strip: in0.clone(), control: Control::SendPan(0) };
     let hit = hits.iter().rev().find(|h| h.id == pan).expect("send pan");
     assert!(
-        matches!(hit.kind, HitKind::Drag { value, reset: Some(r), .. } if value == 0.25 && r == 0.5),
+        matches!(hit.kind, HitKind::Knob { value, reset: Some(r), .. } if value == 0.25 && r == 0.5),
         "{:?}",
         hit.kind
     );

@@ -453,6 +453,64 @@ fn surface_actions_move_local_values() {
     assert!(m.engine_settings().writes_enabled);
 }
 
+/// Rename on a linked pair writes `StereoName` (the label) and leaves `Name`; a mono strip
+/// writes `Name`. The pair's title is its `StereoName/default`.
+#[test]
+fn rename_of_a_stereo_pair_writes_stereo_name() {
+    let mut m = offline();
+    let pair = m.inputs().into_iter().find(|s| s.stereo).expect("a linked pair");
+    assert_eq!(pair.id.as_ref(), "/devices/0/inputs/2");
+    assert_eq!(pair.title, "ANALOG 3/4");
+    m.set_text(&id(&pair, Control::Name), "Synth");
+    assert_eq!(m.main(&pair).name, "Synth");
+    let v = |p: &str| m.store().value(p).and_then(Value::as_str).map(str::to_owned);
+    assert_eq!(v("/devices/0/inputs/2/StereoName").as_deref(), Some("Synth"));
+    assert_eq!(v("/devices/0/inputs/2/Name").as_deref(), Some("ANALOG 3"));
+    let mono = m.inputs()[1].clone();
+    m.set_text(&id(&mono, Control::Name), "Bass");
+    assert_eq!(m.store().value("/devices/0/inputs/1/Name").and_then(Value::as_str), Some("Bass"));
+    assert_eq!(m.main(&mono).name, "Bass");
+}
+
+/// CTRL ROOM SOURCE CUE 3 writes `MixInSource` "cue3" (in the engine's list) and reads back.
+#[test]
+fn control_room_source_cue_3() {
+    let mut m = offline();
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Tap(mon(Control::CrSource(3))));
+    assert_eq!(m.store().value("/devices/0/outputs/18/MixInSource").and_then(Value::as_str), Some("cue3"));
+    assert_eq!(m.monitor_options().cr_source, 3);
+    m.apply(&Action::Tap(mon(Control::CrSource(0))));
+    assert_eq!(m.monitor_options().cr_source, 0);
+}
+
+/// Settings › ALT COUNT 1 enables one pair (both legs): the monitor column shows one ALT
+/// button and one ALT TRIM knob; the knob writes `AltMonTrim` (±30 dB) on both legs.
+#[test]
+fn alt_count_counts_pairs_and_trims_write_alt_mon_trim() {
+    let mut m = offline();
+    let s = |c: Control| ControlId { strip: "settings".into(), control: c };
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Tap(s(Control::SettingChoose("alt:/devices/0".into(), 1))));
+    for o in [0, 1] {
+        assert_eq!(m.store().value(&format!("/devices/0/outputs/{o}/AltMonEnabled")).and_then(Value::as_bool), Some(true));
+    }
+    let opts = m.monitor_options();
+    assert_eq!(opts.alt_count, 1);
+    assert_eq!(opts.alt_trim, [0.5, 0.5], "0 dB");
+    m.apply(&Action::Set(mon(Control::AltTrim(0)), 0.75));
+    for o in [0, 1] {
+        assert_eq!(m.store().value(&format!("/devices/0/outputs/{o}/AltMonTrim")).and_then(Value::as_f64), Some(15.0));
+    }
+    assert_eq!(m.store().value("/devices/0/outputs/2/AltMonTrim").and_then(Value::as_f64), Some(0.0));
+    assert_eq!(m.monitor_options().alt_trim[0], 0.75);
+    m.apply(&Action::Tap(s(Control::SettingChoose("alt:/devices/0".into(), 2))));
+    assert_eq!(m.monitor_options().alt_count, 2);
+    m.apply(&Action::Set(mon(Control::AltTrim(1)), 0.0));
+    assert_eq!(m.store().value("/devices/0/outputs/3/AltMonTrim").and_then(Value::as_f64), Some(-30.0));
+    assert_eq!(m.monitor_options().alt_trim, [0.75, 0.0]);
+}
+
 /// `/plugins/P`: engine (numeric) order, every category, active vs. inactive and the badge of
 /// inactive entries.
 #[test]

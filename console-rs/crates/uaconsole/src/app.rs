@@ -520,6 +520,7 @@ impl App {
         // A loaded insert or a browser row: the tap waits for the release (it may be a drag);
         // a double-click still activates the row now (as the FFI host does).
         let armed = self.mixer.drag_press(active_hits!(self), x, y, &*self.model);
+        self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
         let actions = self
             .interaction
             .pointer_down(active_hits!(self), x, y, double);

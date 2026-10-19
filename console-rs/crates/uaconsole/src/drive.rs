@@ -174,6 +174,7 @@ impl Driver {
             return;
         }
         let armed = self.mixer.drag_press(&self.frame.hits, x, y, &*self.model);
+        self.interaction.controls_mode = rack::ControlsMode::of(&*self.model);
         let actions = self.interaction.pointer_down(&self.frame.hits, x, y, double);
         if armed {
             if let [Action::Tap(_)] = actions.as_slice() {
