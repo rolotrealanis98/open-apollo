@@ -443,8 +443,6 @@ class TestLink:
         assert tree.get_value(f"{IN}/1/Active/value") is False
         assert tree.get_value(f"{IN}/0/Pan/value") == -1.0
         assert tree.get_value(f"{IN}/0/Pan2/value") == 1.0
-        echoes = [json.loads(f.rstrip(b"\0")) for f in client.writer.frames]
-        assert any(e["path"] == f"{IN}/1/Active/value" for e in echoes)
 
     def test_unlink_restores_the_right_leg(self, tree, backend):
         d, client = self.setup(tree, backend)
@@ -453,7 +451,8 @@ class TestLink:
         assert tree.get_value(f"{IN}/1/Stereo/value") is False
         assert tree.get_value(f"{IN}/1/Active/value") is True
 
-    def test_right_leg_set_is_not_mirrored(self, tree, backend):
+    def test_right_leg_set_links_from_the_leader(self, tree, backend):
         d, client = self.setup(tree, backend)
         self.set(d, client, f"{IN}/1/Stereo/value", True)
-        assert tree.get_value(f"{IN}/0/Stereo/value") is not True
+        assert tree.get_value(f"{IN}/0/Stereo/value") is True
+        assert tree.get_value(f"{IN}/1/Active/value") is False

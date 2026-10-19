@@ -187,9 +187,6 @@ _LEVEL_COMPANION = {"FaderLevelTapered": "FaderLevel",
                     "FaderLevel": "FaderLevelTapered",
                     "GainTapered": "Gain", "Gain": "GainTapered"}
 
-# Link (Console's SetStereo) on a pair's left input
-_RE_STEREO = re_mod.compile(r"^(/devices/\d+/inputs/)(\d+)/Stereo(?:/value)?$")
-
 
 # NOTE: Do NOT add "/BufferSize/values" or other "/Foo/values" paths here!
 # set_value("/Foo/values", x) resolves to the /Foo property and overwrites its
@@ -1012,16 +1009,17 @@ class MixerDaemon:
         as silence.
         """
         ids = tuple(self._metering.channel_ids)
-        key = (entry['kind'], entry['channel'], entry['meter_idx'])
+        base = f"/devices/0/{entry['kind']}/{entry['channel']}"
+        # a runtime Link moves meters/1 to the pair's right channel
+        stereo = bool(self.state.get_value(f"{base}/Stereo/value"))
+        key = (entry['kind'], entry['channel'], entry['meter_idx'], stereo)
         if ids != self._meter_map_ids:
             self._meter_map = {}
             self._meter_map_ids = ids
         if key not in self._meter_map:
-            base = f"/devices/0/{entry['kind']}/{entry['channel']}"
             self._meter_map[key] = meter_channel(
                 entry['kind'], entry['channel'], entry['meter_idx'],
-                self.state.get_value(f"{base}/Name/value"),
-                bool(self.state.get_value(f"{base}/Stereo/value")), ids)
+                self.state.get_value(f"{base}/Name/value"), stereo, ids)
         cap = self._meter_map[key]
         if cap is None:
             level, peak, clip = SILENCE_DB, SILENCE_DB, False
@@ -1253,9 +1251,23 @@ class MixerDaemon:
             if micline != last_rb.get(f"{prefix}_micline"):
                 iotype = "Line" if micline else "Mic"
                 self._push_to_clients(f"{in_base}/IOType", iotype)
+            # Link: the driver reports the bit on both preamps of a pair;
+            # the leader's goes through the router's Link (the right leg
+            # parks, the pans spread, the buses are rewritten), as a
+            # front-panel link would in UA's engine.  Not right after a
+            # client SET on either leg.
             link = rb.get(f"{prefix}_link", False)
-            if link != last_rb.get(f"{prefix}_link"):
-                self._push_if_present(f"{in_base}/Stereo", link, force=True)
+            pair = router._pair_of(inp)
+            if link != last_rb.get(f"{prefix}_link") and pair and \
+                    pair[0] == inp and \
+                    self.state.get_value(f"{in_base}/Stereo/value") \
+                    not in (None, link) and \
+                    not any(self._readback_suppressed(p)
+                            for leg in pair
+                            for p in (f"/devices/0/inputs/{leg}/Stereo",
+                                      f"/devices/0/inputs/{leg}/Stereo/value")):
+                self._push_to_clients(f"{in_base}/Stereo", link)
+                router.link_readback(inp, link)
 
         self._sync_front_panel(rb, last_rb, preamps)
 
@@ -2730,31 +2742,6 @@ class MixerDaemon:
                 self.state.set(companion, value, source_client=client.id,
                                hardware=False)
                 self._send_response(client, companion, value)
-
-        # Link: UA's engine sets Stereo on both legs, parks the right leg
-        # (Active false: Console draws one "ANALOG 1/2" strip) and spreads the
-        # leader's pans hard left / right (the x4 engine dump of a linked
-        # pair: Stereo true on both, right Active false, Pan -1, Pan2 1).
-        # Tree only: the leader's param 0x02 write already links the hardware
-        m = _RE_STEREO.match(path)
-        if m and int(m.group(2)) % 2 == 0:
-            base, ch = m.group(1), int(m.group(2))
-            on = cmd.value is True or cmd.value in (1, "true", "True")
-            right = f"{base}{ch + 1}"
-            if self.state.path_exists(f"{right}/Stereo/value"):
-                companions = [(f"{right}/Stereo/value", on),
-                              (f"{right}/Active/value", not on)]
-                if on:
-                    companions += [(f"{base}{ch}/Pan/value", -1.0),
-                                   (f"{base}{ch}/Pan2/value", 1.0),
-                                   (f"{right}/Pan/value", -1.0),
-                                   (f"{right}/Pan2/value", 1.0)]
-                for cpath, cvalue in companions:
-                    if self.state.path_exists(cpath) and \
-                            self.state.get_value(cpath) != cvalue:
-                        self.state.set(cpath, cvalue, source_client=client.id,
-                                       hardware=False)
-                        self._send_response(client, cpath, cvalue)
 
         # Fader and send levels: Console writes the tapered value, but the
         # hardware router's later writes read the dB one (unmute, a solo,

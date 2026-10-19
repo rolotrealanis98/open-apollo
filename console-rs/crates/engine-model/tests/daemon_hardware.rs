@@ -275,6 +275,33 @@ fn preamp_and_input_strip_controls_reach_the_mixer() {
     r.bus("M on", |m| m.apply(&Action::Toggle(id(IN0, Control::Mute))), |b, s, v| (b, s) == (0, 0) && v == 0.0);
 }
 
+/// Link on ANALOG 1 (and from ANALOG 2): one stereo strip, the right preamp ganged, and bus 1
+/// carrying the leader's level hard right (UA's engine: SetProperty 0x45, UpdateHardwareState).
+#[test]
+fn link_drives_the_pair() {
+    let Some(mut r) = Rig::start(&[]) else { return };
+    let strips = r.m.inputs().len();
+    let link = |base: &'static str| move |m: &mut EngineMixer| m.apply(&Action::Tap(id(base, Control::Menu(MenuCmd::Link))));
+    r.mixer("Link from ANALOG 2", link("/devices/0/inputs/1"), (PREAMP, 0, 0x02, 1));
+    pump_until(&mut r.m, "one stereo strip", |m| m.inputs().len() == strips - 1);
+    assert!(strip(&r.m, IN0).stereo);
+    let p = |name: &str| id(IN0, Control::Preamp(name.into()));
+    r.mixer("48V on both", |m| m.apply(&Action::Toggle(p("48v"))), (PREAMP, 1, 0x03, 1));
+    r.mixer("GAIN on both", |m| m.apply(&Action::Set(p("preamp_gain"), 0.5)), (PREAMP, 1, 0x06, 29));
+    // Unmute: bus 1 (ANALOG 2) gets the leader's 0 dB hard right, never input 1's own mute.
+    let mark = r.d.mark();
+    r.press(
+        "M off",
+        |m| m.apply(&Action::Toggle(id(IN0, Control::Mute))),
+        |n, a| bus_param(n, a).is_some_and(|(b, s, v, side)| (b, s, side) == (1, 0, 1) && near(v, 1.0)),
+    );
+    settle(&mut r.m, 300);
+    let last = r.d.hw_since(mark).iter().filter_map(|(n, a)| bus_param(n, a)).filter(|x| (x.0, x.1, x.3) == (1, 0, 1)).last();
+    assert!(last.is_some_and(|x| near(x.2, 1.0)), "bus 1 right: {last:?}");
+    r.mixer("Unlink", link(IN0), (PREAMP, 0, 0x02, 0));
+    pump_until(&mut r.m, "two mono strips", |m| m.inputs().len() == strips);
+}
+
 /// An input's sends: level, M, PRE / POST, pan (pans move a stereo send pair with
 /// `--stereo-sends`).
 #[test]
