@@ -245,8 +245,8 @@ and the driver's kernel log lines, redacted the same way as the logs. It goes to
 **Authorized plug-ins**, in a report you send: so open-apollo can verify first the plug-ins
 people own, the report also lists the render ids (UA's plug-in product numbers, such as 2276)
 of the plug-ins your Apollo itself says are authorized, and which of those built for native
-hosting on this computer. It is your Apollo's own answer to a read-only query
-(`mixer-engine/plugin_report.py`), so it is there only when the driver runs with plug-in
+hosting on this computer. It is your Apollo's own answer, read through the mixer daemon or one read-only
+query (`mixer-engine/plugin_report.py`), so it is there only when the driver runs with plug-in
 hosting on. Nothing else about plug-ins is sent: no demo or licence details, no serial number,
 account, plug-in names or files. Leave it out with the wizard's second box or
 `--no-plugin-report`. The fields are listed in [install-report.md](install-report.md).
