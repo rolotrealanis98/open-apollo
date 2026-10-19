@@ -1,10 +1,11 @@
 # UAD REC / MON (`RecordPreEffects`) on native insert chains
 
-Status, 2026-10-19: **open**. The switch's meaning is proven; the DSP word UA changes is
-not. Nothing in this repository or on the development machine records what UA's Mixer
-Engine sends when the switch flips with an insert loaded. This note lists what is known,
-ranks the candidates, gives a capture plan that settles it, and the implementation steps
-to take once it is settled. No driver or daemon code changes yet.
+Status, 2026-10-19: **record half proven, monitor half open.** UA's Mixer Engine was not
+traced; instead a bench run on the x4 (HARDWARE-SESSIONS.md, "record tap flag") showed that
+bit `0x4` of a block's word 4 picks the record tap: on the Mic strip the record channel is
+dry, on the last effect it is wet, set at CREATE or flipped live through SERVICE. Whether the
+monitor mix stays wet when the flag moves (candidate A below) was not measured: input 1 was
+not in the monitor mix during the run. No driver or daemon code changes yet.
 
 ## What the switch means (proven)
 
@@ -71,8 +72,10 @@ INSTANCE SERVICE ABI**; only a topology change needs a new CREATE and swap.
 | D | **`{0x001E0004, input, sub, value}`** with a new sub. | It is the existing per-input DSP parameter command. | Known subs are 5 (scale), 7 (route), 8 (span), all strip I/O, not chain internals (`driver/ua_apollo.h:620`). Weakest. |
 | E | **UA rebuilds the chain** (new CREATE with A/B/C baked in, then swap). | Always possible; UA's engine already rebuilds on delay-comp changes. | Would glitch; nothing says Console glitches on REC/MON. |
 
-A can be tested on our own hardware without UA (see the bench test below); a capture settles
-all five at once.
+Bench result, 2026-10-19: moving the flag to `m0` makes the record channel dry (live or at
+CREATE), so the flag is the record tap, and A explains the record side with no other word.
+What is left for A is the monitor side: if the monitor mix also went dry, the flag is "last sub
+output" and REC/MON needs another mechanism (B–E) on top. A capture still settles everything.
 
 ## Capture plan (Titan's Windows VM, or a Mac with UA Console)
 
@@ -108,13 +111,14 @@ between runs), then diff the REC→MON burst against the MON→REC burst. Expect
 - a `0x001E0004` with a sub other than 5/7/8 → **D**;
 - an allocation, full init and a swap → **E** (then diff the two recipes the same way).
 
-### Bench test of A without UA (owner present)
+### Bench test of A without UA
 
-On this machine, with the 2026-10-14 1176 Input 0.8 recipe (+18 dB over dry on input 1):
-build the chain once with `0x4` on `m0` word 4 and cleared on the 1176. Record ALSA ch 0
-(input 1) and ch 14/15 (MON L/R). Result **record dry, monitor wet** proves A; **both dry**
-means the flag is "last sub output" and A is wrong. Risk: an unknown flag layout can stall the
-DSP; run it like the 2026-10-14 sessions (audio stack masked, a power cycle at hand).
+Run 2026-10-19 with `tools/rectap-bench.py` (HARDWARE-SESSIONS.md, "record tap flag"):
+record side proven, monitor side not measured. To finish it, rerun with input 1 the only
+thing in the monitor mix (unmuted and soloed through the daemon, PipeWire stopped, nobody
+else driving the mixer) and compare MON L/R with input 1 at each step. MON stays a scaled
+copy of the wet signal when the flag is on `m0` → **A proven**; MON turns into a scaled
+copy of the dry signal → the flag is "last sub output" and A alone is not REC/MON.
 
 ## Implementation, once the word is known
 

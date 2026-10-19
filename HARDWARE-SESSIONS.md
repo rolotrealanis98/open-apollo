@@ -446,3 +446,39 @@ private artifacts and were corrected before the passing runs above.
 End state: normal daemon/PipeWire/WirePlumber/Pulse/AES67 services restored,
 all tones and lab daemons stopped, all four DSPs owned, zero instances, zero held,
 awaiting, or leaked transactions. Tested module remains loaded; DKMS unchanged.
+
+## Results, 2026-10-19: record tap flag (UAD REC / MON bench)
+
+Mac Studio (Asahi, `7.1.13-1-tbt`), Apollo x4 over Thunderbolt, 48 kHz, DKMS `ua_apollo`
+as installed; owner present. Script: `tools/rectap-bench.py` (the daemon's own composer,
+driver client and the user-built `UAD UA 1176 Rev A` mono bundle). Daemon and PipeWire
+stopped for the run; recorded with `arecord` (22 ch), RMS from 1 s on. Input 1 carried a
+steady room/mic signal at about -40.9 dBFS. Question and background:
+`mixer-engine/RECORD-PRE-EFFECTS.md`.
+
+The two recipes differ in exactly two words: Mic strip `m0` word 4 (row 1) and the
+1176's word 4 (row 10), i.e. where bit `0x4` sits.
+
+| Step | Bit `0x4` on | Input 1 record (ch 0) |
+|---|---|---:|
+| B0 plain strip | Mic `m0` (plain recipe) | -40.85 |
+| C chain as composed today, 1176 Input 0.8 | 1176 | **-17.44** (wet) |
+| L same chain, flag moved live by SERVICE | Mic `m0` | **-40.91** (dry) |
+| L2 flag moved back live | 1176 | **-17.47** (wet) |
+| B1 chain destroyed | plain | -40.88 |
+| F fresh chain built with the flag on `m0`, Input 0.8 | Mic `m0` | **-40.82** (dry) |
+| B2 chain destroyed | plain | -40.86 |
+
+- **Proven:** the block holding bit `0x4` of word 4 is the record tap. On the Mic strip the
+  record channel is dry to within 0.1 dB of the plain strip; on the last effect it is wet.
+  The flag works at CREATE and live through SERVICE, both directions, with readback
+  matching, no fault, no quarantine, no kernel message beyond the two placements.
+- **Not measured:** the monitor side. MON L/R did not correlate with input 1 in any step
+  (it followed input 2's source), so this run cannot tell "record dry, monitor wet" (the
+  REC/MON switch) from "the whole chain output dry". Rerun with input 1 alone in the
+  monitor mix (unmuted, soloed) and nobody else driving the mixer.
+- Side effect to know: restarting the daemon afterwards restored its saved state file
+  (input 1 muted, preamp gain 65 dB), not the live state it had before the stop.
+
+End state: daemon, PipeWire, WirePlumber and Pulse running; zero bench instances (fd
+closed after both destroys); Console reconnected.
