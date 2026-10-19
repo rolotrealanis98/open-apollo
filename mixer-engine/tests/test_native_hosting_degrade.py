@@ -117,3 +117,13 @@ def test_preparation_progress_and_preparing_status(tmp_path, monkeypatch):
     daemon._native_prepare_poll()
     assert state.get_value('/NativePluginsPreparing') == 0 and state.get_value('/NativePluginsReady') == 1
     assert state.get_value('/NativePluginHostingStatus') == ''
+
+
+def test_preparation_values_exist_with_nothing_to_prepare():
+    p = provider(1)
+    state, driver, backend, tx = rig((p,), max_instances=4)
+    daemon = MixerDaemon(state, None, helper_tree=backend.publisher.helper,
+                         plugin_transactions=tx, plugin_hosting=True)
+    daemon._native_prepare_poll()
+    assert state.get_value('/NativePluginsReady') == 1 and state.get_value('/NativePluginsPreparing') == 0
+    assert state.get_value('/NativePluginHostingStatus') == ''

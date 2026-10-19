@@ -641,6 +641,7 @@ class MixerDaemon:
         # one of them starts its emulator first (a few seconds), so the slot says "Preparing".
         self._native_preparing: dict = {}
         self._native_prepare_total = 0
+        self._native_prepare_published = False
         # Maps the mapper builds on this machine (profiled_bundle_registry.BundleWatcher), offered
         # as they land; None without --native-plugin-bundles.
         self.plugin_maps = None
@@ -915,7 +916,7 @@ class MixerDaemon:
     def _native_prepare_poll(self):
         """Publish how many plug-ins are ready to load at once (their load-time state learned):
         /NativePluginsReady, /NativePluginsPreparing and /NativePluginHostingStatus."""
-        if not self._native_preparing and not self._native_prepare_total:
+        if not self._native_preparing and not self._native_prepare_total and self._native_prepare_published:
             return
         try:
             from native_profiled_carrier_provider import load_defaults
@@ -935,6 +936,8 @@ class MixerDaemon:
         self._publish_license("/NativePluginHostingStatus", status, "string")
         if not preparing:
             self._native_prepare_total = 0
+        # Published once even with nothing to prepare, so a client can always read them.
+        self._native_prepare_published = native is not None
 
     async def _native_prepare_watch(self, interval: float = 3.0):
         while True:
