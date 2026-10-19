@@ -872,10 +872,11 @@ impl ViewState {
             C::CueOutputs => self.toggle_panel(Panel::CueOutputs, model),
             C::HeadphoneMenu(o) => self.open(Popover::Headphone { output: o }, id),
             C::PopoverDismiss => {
-                self.popover = None;
+                let had_popover = self.popover.take().is_some();
                 self.text_edit = self.text_edit.take().filter(|t| t.target == TextTarget::Search);
-                // A tap outside closes an open settings dropdown first, then an anchored panel.
-                if self.settings.menu.take().is_none() && self.sheet == Some(Sheet::Panel(Panel::CueOutputs)) {
+                // A tap outside closes an open popover or settings dropdown first, then an
+                // anchored panel (the HP source menu over CUE OUTPUTS keeps the panel).
+                if !had_popover && self.settings.menu.take().is_none() && self.sheet == Some(Sheet::Panel(Panel::CueOutputs)) {
                     self.sheet = None;
                 }
             }

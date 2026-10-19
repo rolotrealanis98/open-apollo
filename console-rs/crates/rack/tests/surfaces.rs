@@ -351,6 +351,44 @@ fn monitor_buttons_open_their_panels() {
     assert_eq!(view.sheet, Some(Sheet::Panel(Panel::HeadphoneCorrection)));
 }
 
+/// CUE OUTPUTS: an empty cell in a cue's column puts that HP on the cue; the lit tile opens the
+/// HP's source menu (MON, CUE 1…4, NONE), which closes on a pick and keeps the panel.
+#[test]
+fn cue_outputs_headphone_tiles_pick_the_source() {
+    use rack::settings::Panel;
+    use rack::surfaces::Sheet;
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::CueOutputs);
+    let (hits, _) = build(&assets, &model, &view);
+    // HP 1 plays CUE 1 (lit tile → menu); its CUE 2 cell assigns CUE 2 (option 2).
+    assert!(find(&hits, "monitor", &Control::HeadphoneMenu(0)).is_some());
+    assert!(find(&hits, "monitor", &Control::HeadphoneSource { output: 1, option: 2 }).is_none(), "HP 2's lit cell is a menu");
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneSource { output: 0, option: 2 });
+    assert_eq!(model.headphones[0].source, 2);
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::HeadphoneSource { output: 0, option: 1 }).is_some());
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneMenu(0));
+    assert!(matches!(view.popover, Some(PopoverState { kind: Popover::Headphone { output: 0 }, .. })));
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneSource { output: 0, option: 5 });
+    assert_eq!(model.headphones[0].source, 5, "NONE");
+    assert!(view.popover.is_none());
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
+    // A tap outside an open HP menu closes the menu only.
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneSource { output: 0, option: 1 });
+    let (hits, _) = build(&assets, &model, &view);
+    press(&mut view, &mut model, &hits, "monitor", Control::HeadphoneMenu(0));
+    let (hits, _) = build(&assets, &model, &view);
+    let outside = hits.iter().rev().find(|h| h.rect.contains(2.0, 1040.0)).unwrap().clone();
+    tap(&hits, &outside, &mut view, &mut model);
+    assert!(view.popover.is_none());
+    assert_eq!(view.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
+}
+
 #[test]
 fn plugin_scenes_panel_primes_and_recalls() {
     let assets = assets();

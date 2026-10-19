@@ -880,8 +880,9 @@ impl Default for PreviewMixer {
                 CueOutput { name: "CUE 2".into(), source_cue: false, mono: true, destination: "HP 2".into() },
             ],
             headphones: vec![
-                HeadphoneOutput { name: "HP 1".into(), source: 0, options: vec!["MON".into(), "CUE 1".into(), "CUE 2".into()] },
-                HeadphoneOutput { name: "HP 2".into(), source: 2, options: vec!["MON".into(), "CUE 1".into(), "CUE 2".into()] },
+                // The engine's `outputs/19,20/MixInSource` list: default, cue1…cue4, none.
+                HeadphoneOutput { name: "HP 1".into(), source: 1, options: ["MON", "CUE 1", "CUE 2", "CUE 3", "CUE 4", "NONE"].map(String::from).to_vec() },
+                HeadphoneOutput { name: "HP 2".into(), source: 2, options: ["MON", "CUE 1", "CUE 2", "CUE 3", "CUE 4", "NONE"].map(String::from).to_vec() },
             ],
             clipboard: None,
             props: crate::settings::MemoryProperties::demo_x4(),
