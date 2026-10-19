@@ -517,14 +517,18 @@ impl App {
         if self.dirty {
             self.rebuild(); // hit values must match what the model holds now
         }
-        // A loaded insert or a browser row: the tap waits for the release (it may be a drag).
-        if self.mixer.drag_press(active_hits!(self), x, y, &*self.model) {
-            self.deferred_tap = active_hits!(self).iter().rev().find(|h| h.rect.contains(x, y)).cloned();
-            return;
-        }
+        // A loaded insert or a browser row: the tap waits for the release (it may be a drag);
+        // a double-click still activates the row now (as the FFI host does).
+        let armed = self.mixer.drag_press(active_hits!(self), x, y, &*self.model);
         let actions = self
             .interaction
             .pointer_down(active_hits!(self), x, y, double);
+        if armed {
+            if let [Action::Tap(_)] = actions.as_slice() {
+                self.deferred_tap = active_hits!(self).iter().rev().find(|h| h.rect.contains(x, y)).cloned();
+                return;
+            }
+        }
         self.apply(actions);
     }
 

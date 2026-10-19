@@ -173,11 +173,14 @@ impl Driver {
         if self.route(PointerEvent::Down { x, y, double }) {
             return;
         }
-        if self.mixer.drag_press(&self.frame.hits, x, y, &*self.model) {
-            self.deferred_tap = self.frame.hits.iter().rev().find(|h| h.rect.contains(x, y)).cloned();
-            return;
-        }
+        let armed = self.mixer.drag_press(&self.frame.hits, x, y, &*self.model);
         let actions = self.interaction.pointer_down(&self.frame.hits, x, y, double);
+        if armed {
+            if let [Action::Tap(_)] = actions.as_slice() {
+                self.deferred_tap = self.frame.hits.iter().rev().find(|h| h.rect.contains(x, y)).cloned();
+                return;
+            }
+        }
         self.apply(actions);
     }
 

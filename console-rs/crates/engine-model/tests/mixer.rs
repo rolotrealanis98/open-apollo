@@ -491,3 +491,16 @@ fn plugin_catalog_maps_licence_states() {
     assert_eq!((cat[2].enabled, cat[2].badge), (false, Some(PluginBadge::Buy)));
     assert_eq!((cat[3].enabled, cat[3].badge), (false, Some(PluginBadge::Activate)));
 }
+
+/// open-apollo's catalogue publishes no licence state (`Authorized` absent): every entry is
+/// usable and draggable, with no badge.
+#[test]
+fn plugin_catalog_without_licence_state_is_enabled() {
+    let json = r#"{"format":"consolelab-engine-snapshot","info":{},"tree":{"children":{"plugins":{"children":{"0":{"properties":{"Name":{"type":"string","value":"UAD A"},"Categories":{"type":"string","value":"Delay"}}}}}}},"version":1}"#;
+    let path = std::env::temp_dir().join(format!("engine-model-catalog-nolic-{}.json", std::process::id()));
+    std::fs::write(&path, json).unwrap();
+    let m = EngineMixer::from_snapshot(&path).expect("snapshot");
+    std::fs::remove_file(&path).ok();
+    let cat = m.plugin_catalog();
+    assert!(cat[0].enabled && cat[0].badge.is_none());
+}

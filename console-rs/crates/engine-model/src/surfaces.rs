@@ -102,7 +102,9 @@ impl EngineMixer {
                 let flag = |k: &str| self.bool_at(&format!("{base}/{k}"));
                 let name = self.str_at(&format!("{base}/Name"))?.to_owned();
                 let categories = self.store.value(&format!("{base}/Categories")).map(categories).unwrap_or_default();
-                let enabled = flag("Authorized").unwrap_or(false) || flag("Demoing").unwrap_or(false);
+                // No `Authorized` at all (open-apollo's catalogue never invents licence
+                // state): the entry is usable, as the plug-in footer assumes too.
+                let enabled = flag("Authorized").unwrap_or(true) || flag("Demoing").unwrap_or(false);
                 let badge = (!enabled).then(|| {
                     if flag("AuthUpdateRequired").unwrap_or(false) {
                         PluginBadge::Activate
