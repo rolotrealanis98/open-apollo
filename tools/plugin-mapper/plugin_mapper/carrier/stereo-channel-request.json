@@ -1,0 +1,7 @@
+{
+  "contract": "profiles named here get stereo_channel_request=true (parent 0x518/0x520 answer 2 when original descriptor IO is 2/2); applied by catalog-execution/run_catalog.py load_profiles",
+  "plugins": {
+    "UAD Empirical Labs FATSO Sr": "loader 0x1800d9190 stores parent+0x518 as the channel mode",
+    "UAD Precision K-Stereo": "setter 0x1800cfba6 stores params 12,15 only on a stereo request"
+  }
+}

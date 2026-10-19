@@ -27,6 +27,12 @@ breaks that rule or carries personal data:
   panel-spec    a plug-in panel spec (PluginSpec_*.json); the specs live in
                 the open-apollo-panels repository, installed by
                 scripts/install-panels.sh
+  plugin-bundle a native plug-in runtime bundle or what it is built from:
+                *-runtime-bundle*.json, a JSON file carrying a bundle,
+                execution, discovery-profile or parameter-metadata schema or
+                startup/control-sweep DSP word tables, or an .asm dump.
+                tools/plugin-mapper builds these on the user's machine from
+                their own install; they hold UA-derived data
 
 Reviewed exceptions live in tools/check-clean-repo.allow. Findings print as
 path:line: [rule] message; the exit status is 1 when there are any.
@@ -58,7 +64,14 @@ PINS_PATH = "console-rs/crates/oa-assets/data/firmware-pins.json"
 ALLOW_PATH = "tools/check-clean-repo.allow"
 
 RULES = ("ua-bill", "ua-pinned", "raster-image", "private-ipv4", "home-path",
-         "email", "serial", "host-name", "large-file", "panel-spec")
+         "email", "serial", "host-name", "large-file", "panel-spec", "plugin-bundle")
+
+# Schemas of what plugin-mapper writes on the user's machine (never committed).
+BUNDLE_SCHEMAS = (b"openapollo-profiled-runtime-bundle/", b"openapollo-generic-execution/",
+                  b"openapollo-catalog-execution/", b"openapollo-discovered-control-profile/",
+                  b"openapollo-dspaudioprocessor-profile/", b"openapollo-vst2-iuadplug-profile/",
+                  b"openapollo-synthetic-metadata/")
+DSP_WORD_KEYS = (b'"control_sweep"', b'"startup_events"', b'"final_shadow"')
 
 # ---- Bill records -------------------------------------------------------
 
@@ -318,6 +331,17 @@ class Scanner:
         if fnmatch.fnmatchcase(Path(path).name, "PluginSpec_*.json"):
             self.add("panel-spec", path, "-", "plug-in panel specs live in open-apollo-panels "
                      "(scripts/install-panels.sh installs them)")
+
+        # (g) native plug-in bundles and their inputs are built on the user's machine
+        name = Path(path).name
+        if fnmatch.fnmatchcase(name, "*-runtime-bundle*.json") or name.endswith(".asm"):
+            self.add("plugin-bundle", path, "-", "UA-derived plug-in data; tools/plugin-mapper "
+                     "builds it on the user's machine")
+        elif name.endswith(".json") and not binary:
+            hit = next((s for s in BUNDLE_SCHEMAS + DSP_WORD_KEYS if s in data), None)
+            if hit:
+                self.add("plugin-bundle", path, where(data.find(hit)),
+                         f"{hit.decode()} is plugin-mapper output (UA-derived); it is never committed")
 
         # (b) whole file
         digest = hashlib.sha256(data).hexdigest()

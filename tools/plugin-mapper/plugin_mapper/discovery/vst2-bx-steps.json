@@ -1,0 +1,205 @@
+{
+ "UAD ADA Flanger": {
+  "steps": {
+   "15": 16
+  }
+ },
+ "UAD ADA STD-1 Stereo Tapped Delay": {
+  "steps_slot": "0x258"
+ },
+ "UAD Ampeg B15N": {
+  "steps": {
+   "5": 43
+  }
+ },
+ "UAD Ampeg SVT3Pro": {
+  "steps": {
+   "7": 27
+  }
+ },
+ "UAD Ampeg SVTVR": {
+  "steps": {
+   "5": 24
+  }
+ },
+ "UAD Chandler GAV19T": {
+  "steps": {
+   "6": 76
+  }
+ },
+ "UAD Dangerous BAX EQ Master": {
+  "steps": {
+   "13": 21,
+   "14": 21,
+   "17": 21,
+   "5": 21,
+   "6": 21,
+   "9": 21
+  }
+ },
+ "UAD Dangerous BAX EQ Mix": {
+  "steps": {
+   "3": 21,
+   "4": 21,
+   "7": 21
+  }
+ },
+ "UAD Diezel Herbert": {
+  "steps": {
+   "6": 120
+  }
+ },
+ "UAD Diezel VH4": {
+  "steps": {
+   "6": 120
+  }
+ },
+ "UAD ENGL E646 VS": {
+  "steps": {
+   "6": 65
+  }
+ },
+ "UAD ENGL E765 RT": {
+  "steps": {
+   "6": 65
+  }
+ },
+ "UAD ENGL Savage 120": {
+  "steps": {
+   "6": 101
+  }
+ },
+ "UAD Friedman BE100": {
+  "steps": {
+   "6": 67
+  }
+ },
+ "UAD Friedman Buxom Betty": {
+  "steps": {
+   "6": 101
+  }
+ },
+ "UAD Friedman DS40": {
+  "steps": {
+   "6": 67
+  }
+ },
+ "UAD Fuchs Overdrive Supreme 50": {
+  "steps": {
+   "6": 83
+  }
+ },
+ "UAD Fuchs Train II": {
+  "steps": {
+   "6": 101
+  }
+ },
+ "UAD Gallien Krueger 800RB": {
+  "steps": {
+   "11": 65,
+   "7": 65
+  }
+ },
+ "UAD Maag EQ4": {
+  "steps": {
+   "1": 21,
+   "2": 21,
+   "3": 21,
+   "4": 21,
+   "5": 21,
+   "6": 21
+  }
+ },
+ "UAD Maag EQ4 MS": {
+  "steps": {
+   "10": 21,
+   "29": 41,
+   "30": 21,
+   "31": 21,
+   "32": 21,
+   "33": 21,
+   "34": 21,
+   "35": 21,
+   "4": 41,
+   "5": 21,
+   "59": 20,
+   "6": 21,
+   "7": 21,
+   "8": 21,
+   "9": 21
+  },
+  "steps_slot": "0x278"
+ },
+ "UAD Millennia NSEQ-2": {
+  "steps": {
+   "14": 21,
+   "19": 21,
+   "23": 21,
+   "30": 21,
+   "35": 21,
+   "40": 21,
+   "44": 21,
+   "9": 21
+  }
+ },
+ "UAD SPL Vitalizer MK3-T": {
+  "steps": {
+   "10": 41,
+   "13": 41,
+   "17": 41,
+   "18": 41,
+   "19": 41,
+   "2": 41,
+   "20": 41,
+   "21": 41,
+   "5": 41,
+   "6": 41,
+   "7": 20
+  },
+  "steps_slot": "0x278"
+ },
+ "UAD Shadow Hills Class A Mastering Comp": {
+  "steps": {
+   "17": 24,
+   "18": 24,
+   "20": 24,
+   "24": 24,
+   "29": 24,
+   "30": 24,
+   "32": 24,
+   "36": 24,
+   "8": 20
+  },
+  "steps_slot": "0x278"
+ },
+ "UAD Shadow Hills Mastering Compressor": {
+  "steps": {
+   "14": 24,
+   "15": 24,
+   "17": 24,
+   "2": 24,
+   "21": 24,
+   "3": 24,
+   "5": 24,
+   "9": 24
+  }
+ },
+ "UAD Suhr PT100": {
+  "steps": {
+   "6": 120
+  }
+ },
+ "UAD Suhr SE100": {
+  "steps": {
+   "6": 121
+  }
+ },
+ "UAD elysia alpha compressor V2": {
+  "steps": {
+   "13": 20,
+   "39": 17,
+   "61": 17
+  },
+  "steps_slot": "0x278"
+ }
+}

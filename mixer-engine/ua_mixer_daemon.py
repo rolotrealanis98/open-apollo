@@ -4123,9 +4123,19 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                                help="Exit (status 1) when the device node "
                                     "cannot be opened at start, instead of "
                                     "waiting for it")
-    parser.add_argument("--native-plugin-provider", type=Path, metavar="FILE",
-                        help="Experimental single-insert hosting through an explicitly "
-                             "trusted local Python provider; requires --preserve-hardware")
+    native_source = parser.add_mutually_exclusive_group()
+    native_source.add_argument("--native-plugin-provider", type=Path, metavar="FILE",
+                               help="Experimental single-insert hosting through an explicitly "
+                                    "trusted local Python provider; requires --preserve-hardware")
+    native_source.add_argument("--native-plugin-bundles", type=Path, metavar="DIR", nargs="?",
+                               const=Path.home() / ".local/share/open-apollo/plugin-bundles",
+                               help="Host UA plug-ins on the Apollo's DSP from the runtime bundles "
+                                    "tools/plugin-mapper built on this machine (default DIR "
+                                    "~/.local/share/open-apollo/plugin-bundles); requires "
+                                    "--preserve-hardware. See NATIVE-HOSTING.md")
+    parser.add_argument("--advertise-all-plugins", action="store_true",
+                        help="With --native-plugin-bundles: offer every built bundle, not "
+                             "only the plug-ins on device_maps/native_known_good.json")
     parser.add_argument("--preserve-hardware", action="store_true",
                         help="Attach to a running Apollo without the init "
                              "sequence: publish what the hardware reports "
@@ -4188,7 +4198,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     parser.add_argument("--factory-presets-dir", type=Path,
                         help="Read-only factory .fxp/.uadchannel directory")
     args = parser.parse_args()
-    if args.native_plugin_provider and (
+    native_enabled = bool(args.native_plugin_provider or args.native_plugin_bundles)
+    if args.advertise_all_plugins and not args.native_plugin_bundles:
+        parser.error("--advertise-all-plugins needs --native-plugin-bundles")
+    if native_enabled and (
             not args.preserve_hardware or args.no_hardware or args.usb or args.no_helper):
         parser.error("native hosting requires --preserve-hardware, PCIe hardware and helper")
 
@@ -4269,7 +4282,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     # Persisted intent never establishes a native DSP lease.
     state.enable_persistence(state_file, restore_filter=(
         (lambda key: not is_plugin_slot_path(key))
-        if args.native_plugin_provider else None))
+        if native_enabled else None))
     store_stem = state_file.name.removesuffix(".state.json")
     network_id = load_network_id(state_file.with_name(
         state_file.name.removesuffix(".state.json") + ".network.json"))
@@ -4324,11 +4337,17 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
         log.info("Software-only mode (--no-hardware)")
 
     native_backend = native_transactions = None
-    if args.native_plugin_provider:
+    if native_enabled:
         from plugin_native import load_provider, register_native
         try:
+            if args.native_plugin_bundles:
+                from profiled_bundle_registry import create_profiled_providers
+                providers = create_profiled_providers(
+                    args.native_plugin_bundles, advertise_all=args.advertise_all_plugins)
+            else:
+                providers = load_provider(args.native_plugin_provider)
             native_backend, native_transactions = register_native(
-                state, helper_tree, backend, load_provider(args.native_plugin_provider))
+                state, helper_tree, backend, providers)
         except Exception as error:
             parser.error(f"native hosting unavailable: {type(error).__name__}: {error}")
 

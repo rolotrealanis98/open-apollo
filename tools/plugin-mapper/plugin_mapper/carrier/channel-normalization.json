@@ -1,0 +1,21 @@
+{
+  "contract": "descriptor IO is clamped by original SDK actual plugin IO, then Support requested chain IO",
+  "sdk": {
+    "file": "UAD2SDK.dll",
+    "actual_getter_calls": [
+      "0x2b1ad",
+      "0x2b1c7"
+    ],
+    "clamp": [
+      "0x2b1cd",
+      "0x2b207"
+    ]
+  },
+  "support": {
+    "requested_input_output_clamp": [
+      "0xecc9",
+      "0xed85"
+    ]
+  },
+  "scope": "generated executor explicitly requests mono48k through known parent channels callbacks; rawdescriptor2/2 remains raw, normalized=min(requested,raw)"
+}
