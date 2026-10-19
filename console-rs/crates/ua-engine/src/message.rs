@@ -9,6 +9,8 @@ pub struct Message {
     pub data: Option<Json>,
     pub parameters: Option<serde_json::Map<String, Json>>,
     pub error: Option<String>,
+    /// Human reason for `error` (the open-apollo daemon's `detail`); absent from a UA engine's replies.
+    pub detail: Option<String>,
 }
 
 impl Message {
@@ -18,6 +20,7 @@ impl Message {
             data,
             parameters: None,
             error: None,
+            detail: None,
         }
     }
 
@@ -41,11 +44,25 @@ impl Message {
             Some(Json::String(e)) => Some(e),
             _ => None,
         };
+        let detail = match o.remove("detail") {
+            Some(Json::String(d)) if !d.is_empty() => Some(d),
+            _ => None,
+        };
         Some(Message {
             path,
             data: o.remove("data"),
             parameters,
             error,
+            detail,
+        })
+    }
+
+    /// The error for display: the `detail` reason with the code in parentheses, else the bare code.
+    pub fn error_text(&self) -> Option<String> {
+        let code = self.error.as_deref()?;
+        Some(match &self.detail {
+            Some(d) => format!("{d} ({code})"),
+            None => code.to_owned(),
         })
     }
 
@@ -91,5 +108,25 @@ impl Message {
     /// True for `…/value` pushes without an error.
     pub fn is_value_push(&self) -> bool {
         self.error.is_none() && self.data.is_some() && self.path.ends_with("/value")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_text_prefers_the_daemon_detail_and_keeps_the_code() {
+        let frame = br#"{"path":"/devices/1/inputs/0/effects/0/EffectName/value",
+            "error":"openapollo.plugin_transaction_failed",
+            "detail":"This driver does not support stereo native chains"}"#;
+        let m = Message::decode(frame).unwrap();
+        assert_eq!(
+            m.error_text().as_deref(),
+            Some("This driver does not support stereo native chains (openapollo.plugin_transaction_failed)")
+        );
+        let bare = Message::decode(br#"{"path":"/SampleRate","error":"Unable to set value."}"#).unwrap();
+        assert_eq!(bare.error_text().as_deref(), Some("Unable to set value."));
+        assert_eq!(Message::decode(br#"{"path":"/x","data":1}"#).unwrap().error_text(), None);
     }
 }

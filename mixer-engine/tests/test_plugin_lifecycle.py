@@ -95,6 +95,7 @@ class PluginTests(unittest.TestCase):
                         {
                             "path": path,
                             "error": "openapollo.plugin_backend_unavailable",
+                            "detail": "No native plugin loader is connected",
                             "parameters": {"func_id": 17},
                         },
                     )
