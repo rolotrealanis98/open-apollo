@@ -477,5 +477,6 @@ def register_native(state, helper, hardware, provider):
         result = backend.set_compensation(setting)
         if result.status is not Outcome.CONFIRMED:
             backend.invalidate()
-            raise ValueError('initial native compensation could not be confirmed')
+            raise ValueError('initial native compensation could not be confirmed: '
+                             + (getattr(result, 'detail', '') or result.status.name))
     return backend, PluginTransactions(publisher, backend)
