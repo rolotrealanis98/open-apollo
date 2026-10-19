@@ -225,18 +225,25 @@ fn echoes_do_not_pull_back_a_drag() {
     );
     let fader = store.topology().inputs[0].fader();
     store.set_writes_enabled(true);
+    // A hold long enough that a slow runner cannot expire it before the engine's own echo of
+    // the final value arrives (the release then applies that echo, not the stale 0.3).
+    store.set_echo_hold(Duration::from_millis(1500));
     store.begin_gesture();
     store.set(&fader, 0.3);
     store.flush();
     store.set(&fader, 0.6); // local value ahead of the engine
+    drain_until(&mut store, "the 0.3 echo arrives", T, |_| {
+        server.value(&fader) == Some(Value::Number(0.3))
+    });
     std::thread::sleep(Duration::from_millis(60));
-    store.drain(); // the 0.3 echo arrives here and is held
+    store.drain(); // the 0.3 echo is held, the local value stays
     assert_eq!(store.value(&fader), Some(&Value::Number(0.6)));
     store.end_gesture();
     drain_until(&mut store, "engine settles on 0.6", T, |_| {
         server.value(&fader) == Some(Value::Number(0.6))
     });
-    std::thread::sleep(Duration::from_millis(400));
+    // Past the hold's release: never pulled back to 0.3.
+    std::thread::sleep(Duration::from_millis(1600));
     store.drain();
     assert_eq!(store.value(&fader), Some(&Value::Number(0.6)));
 }
