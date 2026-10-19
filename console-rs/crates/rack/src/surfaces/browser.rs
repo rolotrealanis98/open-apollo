@@ -503,9 +503,13 @@ fn entry_row(ui: &mut Ui, p: &PluginEntry, i: usize, view: &ViewState, row: Rect
         let icon = Rect::new(row.x + 14.0, row.y + 4.5, ICON.0, ICON.1);
         let key = p.icon_key();
         match ui.image_size(&key) {
+            // As Console's row (`Rack_PluginsBrowserItemListRow` 0x18180ed40, Windows 1.3.1): fitted
+            // inside the box keeping its aspect, centred, never enlarged. UA's macOS 400×160 art
+            // fills the box; the Windows installer's smaller portraits sit centred in it.
             Some((iw, ih)) => {
-                let s = (icon.w / iw).min(icon.h / ih);
-                ui.image(&key, Rect::new(icon.x, icon.y + (icon.h - ih * s) / 2.0, iw * s, ih * s), None, None, 1.0);
+                let s = (icon.w / iw).min(icon.h / ih).min(1.0);
+                let (w, h) = (iw * s, ih * s);
+                ui.image(&key, Rect::new(icon.x + (icon.w - w) / 2.0, icon.y + (icon.h - h) / 2.0, w, h), None, None, 1.0);
             }
             None => ui.fill(icon, Rgba::rgb8(60, 63, 66)),
         }
