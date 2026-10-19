@@ -50,8 +50,6 @@ def test_mixer_controls_pass_the_native_gate(lab, path, value):
 
 
 @pytest.mark.parametrize('path,value', [
-    ('/SampleRate/value', 96000),
-    ('/ClockSource/value', 'S/PDIF'),
     ('/devices/0/inputs/0/Preset/value', 'Vocal'),
     ('/UndoRedo/value', 3),
     ('/Session/value', 'x.uadmix'),
@@ -81,7 +79,8 @@ def test_posts(lab, path, allowed):
 def test_link_refusals_say_why():
     assert 'Remove the plug-ins first' in native_refusal_detail('/devices/0/inputs/0/Stereo')
     assert 'Analog 1-2 and Analog 3-4' in native_refusal_detail('/devices/0/inputs/4/Stereo')
-    assert native_refusal_detail('/SampleRate') is None
+    assert 'Remove the plug-ins first' in native_refusal_detail('/SampleRate')
+    assert native_refusal_detail('/BufferSize') is None
 
 
 def test_a_refused_link_carries_its_reason(lab):
@@ -89,3 +88,40 @@ def test_a_refused_link_carries_its_reason(lab):
                                                raw_params={'func_id': 1}))
     assert refused(lab)
     assert 'Analog 1-2' in lab.daemon._send_local_plugin_error.call_args.kwargs['detail']
+
+
+@pytest.mark.parametrize('path,value', [
+    ('/SampleRate/value', 96000),
+    ('/ClockSource/value', 'S/PDIF'),
+])
+def test_rate_and_clock_pause_idle_hosting(lab, path, value):
+    """Nothing loaded: the rate changes and hosting pauses, to come back by itself."""
+    native = lab.daemon._native_plugin_backend
+    attach = Mock(side_effect=ValueError('native provider sample rate does not match hardware'))
+    lab.daemon._native_attach_fn = attach
+    lab.daemon.hw_router = SimpleNamespace(backend=SimpleNamespace(connected=True))
+    lab.daemon._publish_license = Mock()
+    lab.daemon._handle_clock_set = Mock(return_value=True)
+    lab.daemon._handle_set(lab.client, Command('set', path, value, raw_params={'func_id': 1}))
+    assert not refused(lab)
+    lab.daemon._handle_clock_set.assert_called_once()
+    assert lab.daemon._native_plugin_backend is None
+    assert lab.daemon._native_attach is attach
+    assert not native.publisher.connected
+    # At another rate the retry says what to do; it never raises
+    assert lab.daemon._native_hosting_try() is False
+    assert '48 kHz' in lab.daemon._native_unavailable_reason
+
+
+@pytest.mark.parametrize('path,value', [
+    ('/SampleRate/value', 96000),
+    ('/ClockSource/value', 'S/PDIF'),
+])
+def test_rate_and_clock_are_refused_with_plugins_loaded(lab, path, value):
+    native = lab.daemon._native_plugin_backend
+    native._leases['/devices/0/inputs/0/effects/0'] = object()
+    lab.daemon._native_attach_fn = Mock()
+    lab.daemon._handle_set(lab.client, Command('set', path, value, raw_params={'func_id': 1}))
+    assert refused(lab)
+    assert 'Remove the plug-ins first' in lab.daemon._send_local_plugin_error.call_args.kwargs['detail']
+    assert lab.daemon._native_plugin_backend is native
