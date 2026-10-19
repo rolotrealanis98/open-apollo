@@ -37,6 +37,8 @@ pub struct WindowLayout {
     pub browser: bool,
     /// The PLUG-IN SCENES panel column, left of the browser.
     pub scenes: bool,
+    /// The Snapshots section column, after PLUG-IN SCENES (`Resized_SnapshotsSection`).
+    pub snapshots: bool,
     /// The control-room column before the monitor column (SHOW CTRL ROOM).
     pub ctrl_room: bool,
     /// The navigator column is shown (View > Section > Show Mixer Navigation; full layout).
@@ -79,6 +81,7 @@ impl WindowLayout {
             browser: (view.show_browser || view.session_panel.open) && !view.compact,
             navigator: view.show_navigator,
             scenes: view.show_scenes && !view.compact,
+            snapshots: view.show_snapshots && !view.compact,
             ctrl_room: view.show_ctrl_room,
             width: w,
             height: h,
@@ -123,9 +126,13 @@ impl WindowLayout {
     pub fn scenes_x(&self) -> f32 {
         0.0
     }
+    /// Snapshots column x (full layout).
+    pub fn snapshots_x(&self) -> f32 {
+        if self.scenes { SCENES_W } else { 0.0 }
+    }
     /// Browser column x (full layout).
     pub fn browser_x(&self) -> f32 {
-        if self.scenes { SCENES_W } else { 0.0 }
+        self.snapshots_x() + if self.snapshots { crate::surfaces::snapshots::SNAPSHOTS_W } else { 0.0 }
     }
     /// Navigator column x (full layout).
     pub fn nav_x(&self) -> f32 {
@@ -309,6 +316,10 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     if !l.compact {
         if l.scenes {
             draw_scenes_column(ui, model, view, Rect::new(l.scenes_x(), W::TITLE_BAR, SCENES_W, status_y - W::TITLE_BAR));
+        }
+        if l.snapshots {
+            let w = crate::surfaces::snapshots::SNAPSHOTS_W;
+            crate::surfaces::snapshots::draw_snapshots_section(ui, model, view, Rect::new(l.snapshots_x(), W::TITLE_BAR, w, status_y - W::TITLE_BAR));
         }
         if l.browser {
             let col = Rect::new(l.browser_x(), W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR);
