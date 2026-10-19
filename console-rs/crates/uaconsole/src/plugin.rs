@@ -259,7 +259,7 @@ impl WindowPanel {
         self.serve_web(model);
     }
 
-    /// Opens UA's GUI on first use, then services GTK and the bridge (called at 30 Hz: the
+    /// Opens UA's GUI on first use, then services GTK and the bridge (called at the meter rate: the
     /// panel is live while a GUI is open).
     #[cfg(feature = "webview")]
     fn serve_web(&mut self, model: &mut dyn MixerModel) {

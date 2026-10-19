@@ -103,8 +103,9 @@ pub const UAC_UNISON_SLOT: i32 = 255;
 /// Letterbox colour around the Console window.
 const CLEAR: Rgba = Rgba::rgb8(24, 25, 27);
 const MAX_ZOOM: f32 = 4.0;
-/// Live meters redraw at most this often (Console's meter rate).
-const METER_PERIOD: Duration = Duration::from_millis(33);
+/// Live meters redraw at most this often: Console's meter step, 16 666 µs (`Rack_Meter`,
+/// Rack.dll 0x1809c9780). The ballistics are time-based (`rack::ballistics`).
+const METER_PERIOD: Duration = Duration::from_nanos(16_666_667);
 /// Plug-in requests kept for a host that never takes them.
 const MAX_PLUGIN_REQUESTS: usize = 8;
 

@@ -37,6 +37,7 @@ mod correction;
 
 pub use slots::{SlotInfo, SlotSource};
 
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -47,7 +48,8 @@ use rack::model::{
     MixerModel, MonitorOptions, MonitorState, PluginEntry, PreampState, SendState, StatusInfo,
     StripInfo,
 };
-use rack::{Action, Control, ControlId, scales};
+use rack::ballistics::{Hold, MeterBank};
+use rack::{Action, Control, ControlId};
 use ua_engine::{
     AuxStrip, Endpoint, InputKind, InputStrip, InsertPaths, MeterPaths, MeterReading, Options,
     SendPaths, Snapshot, Store, Value, tapers,
@@ -78,6 +80,13 @@ pub struct EngineMixer {
     local_sessions_dir: Option<String>,
     midi: midi::MidiState,
     correction: correction::CorrectionState,
+    /// Engine and Console meter ballistics ([`rack::ballistics`]), per meter node.
+    ballistics: RefCell<MeterBank>,
+    /// Epoch of the meter clock.
+    meter_epoch: Instant,
+    /// The frame's time on the meter clock, set by [`EngineMixer::pump`]; every meter drawn in a
+    /// frame is evaluated at it.
+    frame_time: Cell<Option<f64>>,
 }
 
 impl EngineMixer {
@@ -95,6 +104,9 @@ impl EngineMixer {
             local_sessions_dir: None,
             midi: midi::MidiState::default(),
             correction: correction::CorrectionState::default(),
+            ballistics: RefCell::default(),
+            meter_epoch: Instant::now(),
+            frame_time: Cell::new(None),
         }
     }
 
@@ -144,11 +156,18 @@ impl EngineMixer {
     /// frame. Returns true when values, topology or status changed (meters are separate: see
     /// [`EngineMixer::meter_generation`]).
     pub fn pump(&mut self) -> bool {
+        self.frame_time.set(Some(self.meter_epoch.elapsed().as_secs_f64()));
         let engine = self.store.drain();
         let helper = self.helper.as_mut().is_some_and(|h| h.drain());
         let midi = self.poll_midi();
         let correction = self.poll_correction();
         engine || helper || midi || correction
+    }
+
+    /// Sets the meter clock (seconds) the next frames are drawn at, as [`EngineMixer::pump`] does
+    /// with the wall clock: for tests and scripted runs that step time themselves.
+    pub fn set_meter_time(&self, seconds: f64) {
+        self.frame_time.set(Some(seconds));
     }
 
     /// Alias of [`EngineMixer::pump`].
@@ -281,11 +300,21 @@ impl EngineMixer {
         let r = self.store.meters().readings(&keys);
         let l = r.first().copied().unwrap_or(MeterReading::SILENT);
         let rr = r.get(1).copied().unwrap_or(l);
+        // Drawn with the engine's release and peak hold and Console's easing, against the frame
+        // clock: the daemon publishes raw levels at its own rate.
+        let now = self.frame_time.get().unwrap_or_else(|| self.meter_epoch.elapsed().as_secs_f64());
+        let hold = self.str_at("/PeakHold").and_then(Hold::from_label).unwrap_or(Hold::DEFAULT_PEAK);
+        let mut bank = self.ballistics.borrow_mut();
+        let left = bank.update(&meters[0].base, now, l.level_db as f64, l.peak_db as f64, hold);
+        let right = match meters.get(1) {
+            Some(m) => bank.update(&m.base, now, rr.level_db as f64, rr.peak_db as f64, hold),
+            None => left,
+        };
         MeterFrame {
-            left: scales::meter_fraction(l.level_db as f64),
-            right: scales::meter_fraction(rr.level_db as f64),
-            peak_left: scales::meter_fraction(l.peak_db as f64),
-            peak_right: scales::meter_fraction(rr.peak_db as f64),
+            left: left.level,
+            right: right.level,
+            peak_left: left.peak,
+            peak_right: right.peak,
             clip_left: l.clip,
             clip_right: rr.clip,
         }
