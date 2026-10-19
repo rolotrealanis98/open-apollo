@@ -451,6 +451,8 @@ pub struct MonitorOptions {
     /// Number of ALT speaker sets (0 hides the MONITOR/ALT rows) and the selection (0 = main).
     pub alt_count: u8,
     pub alt_selection: u8,
+    /// ALT 1 / ALT 2 TRIM knobs 0…1 (`outputs/N/AltMonTrim` −30…+30 dB, 0.5 = 0 dB).
+    pub alt_trim: [f64; 2],
     /// MONITOR CONTROLLER button shown (`Rack_MonitorSection_UAD2::resized`: hidden when the
     /// mixer reports no controller support; the column then closes up by 40 pt).
     pub controller: bool,
@@ -868,6 +870,7 @@ impl Default for PreviewMixer {
                 talkback: Some(false),
                 alt_count: 0,
                 alt_selection: 0,
+                alt_trim: [0.5; 2],
                 controller: true,
                 hp_correction: Some(true),
                 speaker_correction: Some(true),
@@ -1119,6 +1122,12 @@ impl MixerModel for PreviewMixer {
             Action::Set(id, v) => {
                 if id.control == Control::MonitorLevel {
                     self.monitor.level = *v;
+                    return;
+                }
+                if let Control::AltTrim(k) = id.control {
+                    if let Some(t) = self.monitor_options.alt_trim.get_mut(k as usize) {
+                        *t = *v;
+                    }
                     return;
                 }
                 if id.control == Control::DimLevel {

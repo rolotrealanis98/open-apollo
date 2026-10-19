@@ -170,11 +170,20 @@ impl EngineMixer {
         }
     }
 
+    /// The monitor unit's outputs that carry `AltMonEnabled` (line outs 1–4 on the x4): pair k
+    /// of them is ALT k+1 (as Settings › ALT COUNT writes it).
+    fn alt_outputs(&self) -> Vec<String> {
+        let Some(m) = &self.store.topology().monitor else { return Vec::new() };
+        let dev = format!("/devices/{}", m.device);
+        self.store.tree().indices(&format!("{dev}/outputs")).into_iter().map(|n| format!("{dev}/outputs/{n}")).filter(|o| self.store.tree().has_property(&format!("{o}/AltMonEnabled"))).collect()
+    }
+
     pub(crate) fn surface_monitor_options(&self) -> MonitorOptions {
         let Some(m) = &self.store.topology().monitor else { return MonitorOptions::default() };
         let atten = self.f64_at(&m.dim_attenuation()).unwrap_or(17.0);
         let dev = format!("/devices/{}", m.device);
-        let alt_count = self.store.tree().indices(&format!("{dev}/outputs")).into_iter().filter(|n| self.bool_at(&format!("{dev}/outputs/{n}/AltMonEnabled")) == Some(true)).count().min(2) as u8;
+        // ALT COUNT counts output pairs (Settings writes `AltMonEnabled` on both legs).
+        let alt_count = self.alt_outputs().chunks(2).filter(|pair| pair.iter().any(|o| self.bool_at(&format!("{o}/AltMonEnabled")) == Some(true))).count().min(2) as u8;
         MonitorOptions {
             dim: self.bool_at(&m.dim()),
             dim_level: (atten / 60.0).clamp(0.0, 1.0),
@@ -182,6 +191,10 @@ impl EngineMixer {
             talkback: self.bool_at(&self.store.topology().talkback.on()),
             talkback_to_monitor: self.bool_at(&self.store.topology().talkback.in_physical_cr()),
             alt_count,
+            alt_trim: [0, 1].map(|k| {
+                let db = self.alt_outputs().get(2 * k).and_then(|o| self.f64_at(&format!("{o}/AltMonTrim"))).unwrap_or(0.0);
+                ((db + 30.0) / 60.0).clamp(0.0, 1.0)
+            }),
             alt_selection: self.store.value(&m.alt_mon_selection()).and_then(Value::as_i64).unwrap_or(0).clamp(0, 2) as u8,
             // Rack's controller predicate is unresolved; Console 1.3.1 shows the button for an
             // Apollo x4 with `RemoteMonitorController` false.
@@ -283,6 +296,15 @@ impl EngineMixer {
                     }
                     None => false,
                 },
+                // ALT k TRIM: −30…+30 dB in Console's 0.5 dB steps on both outputs of the pair
+                // (the daemon routes either leg to 0x38 / 0x39).
+                Control::AltTrim(k) => {
+                    let db = ((v * 60.0 - 30.0) * 2.0).round() / 2.0;
+                    for o in self.alt_outputs().into_iter().skip(2 * *k as usize).take(2) {
+                        self.store.set(&format!("{o}/AltMonTrim"), db);
+                    }
+                    true
+                }
                 Control::DimLevel => {
                     if let Some(m) = self.store.topology().monitor.as_ref().map(|m| m.dim_attenuation()) {
                         self.store.set(&m, (v * 60.0).round() as i64);

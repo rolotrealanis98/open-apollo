@@ -373,6 +373,8 @@ fn monitor_controls_reach_the_mixer() {
     r.mixer("DIM amount", |m| m.apply(&Action::Set(mon(Control::DimLevel), 0.5)), (MONITOR, 0, 0x43, 3));
     r.mixer("SOURCE CUE 1", |m| m.apply(&Action::Tap(mon(Control::CrSource(1)))), (MONITOR, 1, 0x04, 1));
     r.mixer("ALT 1", |m| m.apply(&Action::Tap(mon(Control::MonitorAlt(1)))), (MONITOR, 0, 0x3a, 1));
+    // ALT 1 TRIM +15 dB: `AltMonTrim` on line outs 1/2 → 0x38, 15 × 2 + 60.
+    r.other("ALT 1 TRIM", |m| m.apply(&Action::Set(mon(Control::AltTrim(0)), 0.75)), (MONITOR, 0x38, 90));
     let hp = r.m.headphone_outputs();
     let cue2 = hp[0].options.iter().position(|o| o == "CUE 2").unwrap() as u8;
     r.mixer(

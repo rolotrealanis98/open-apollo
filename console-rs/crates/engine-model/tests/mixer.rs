@@ -453,6 +453,33 @@ fn surface_actions_move_local_values() {
     assert!(m.engine_settings().writes_enabled);
 }
 
+/// Settings › ALT COUNT 1 enables one pair (both legs): the monitor column shows one ALT
+/// button and one ALT TRIM knob; the knob writes `AltMonTrim` (±30 dB) on both legs.
+#[test]
+fn alt_count_counts_pairs_and_trims_write_alt_mon_trim() {
+    let mut m = offline();
+    let s = |c: Control| ControlId { strip: "settings".into(), control: c };
+    let mon = |c: Control| ControlId { strip: "monitor".into(), control: c };
+    m.apply(&Action::Tap(s(Control::SettingChoose("alt:/devices/0".into(), 1))));
+    for o in [0, 1] {
+        assert_eq!(m.store().value(&format!("/devices/0/outputs/{o}/AltMonEnabled")).and_then(Value::as_bool), Some(true));
+    }
+    let opts = m.monitor_options();
+    assert_eq!(opts.alt_count, 1);
+    assert_eq!(opts.alt_trim, [0.5, 0.5], "0 dB");
+    m.apply(&Action::Set(mon(Control::AltTrim(0)), 0.75));
+    for o in [0, 1] {
+        assert_eq!(m.store().value(&format!("/devices/0/outputs/{o}/AltMonTrim")).and_then(Value::as_f64), Some(15.0));
+    }
+    assert_eq!(m.store().value("/devices/0/outputs/2/AltMonTrim").and_then(Value::as_f64), Some(0.0));
+    assert_eq!(m.monitor_options().alt_trim[0], 0.75);
+    m.apply(&Action::Tap(s(Control::SettingChoose("alt:/devices/0".into(), 2))));
+    assert_eq!(m.monitor_options().alt_count, 2);
+    m.apply(&Action::Set(mon(Control::AltTrim(1)), 0.0));
+    assert_eq!(m.store().value("/devices/0/outputs/3/AltMonTrim").and_then(Value::as_f64), Some(-30.0));
+    assert_eq!(m.monitor_options().alt_trim, [0.75, 0.0]);
+}
+
 /// `/plugins/P`: engine (numeric) order, every category, active vs. inactive and the badge of
 /// inactive entries.
 #[test]

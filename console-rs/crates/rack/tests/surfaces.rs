@@ -389,6 +389,40 @@ fn cue_outputs_headphone_tiles_pick_the_source() {
     assert_eq!(view.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
 }
 
+/// ALT COUNT 1: one ALT button and one ALT TRIM knob in the control room; 2: two of each.
+#[test]
+fn alt_trim_knobs_follow_the_alt_count() {
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    view.show_ctrl_room = true;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::AltTrim(0)).is_none(), "ALT COUNT 0");
+    model.monitor_options.alt_count = 1;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::MonitorAlt(1)).is_some());
+    assert!(find(&hits, "monitor", &Control::MonitorAlt(2)).is_none());
+    assert!(find(&hits, "monitor", &Control::AltTrim(1)).is_none());
+    let h = find(&hits, "monitor", &Control::AltTrim(0)).expect("ALT 1 TRIM").clone();
+    assert!(matches!(h.kind, rack::input::HitKind::Drag { reset: Some(r), .. } if r == 0.5), "0 dB default");
+    // Drag up 30 pt over a 120-pt span: +0.25 → +15 dB.
+    let (cx, cy) = h.rect.center();
+    let mut i = Interaction::default();
+    for a in i.pointer_down(&hits, cx, cy, false) {
+        view.dispatch(a, &mut model);
+    }
+    for a in i.pointer_move(cx, cy - 30.0, false) {
+        view.dispatch(a, &mut model);
+    }
+    for a in i.pointer_up() {
+        view.dispatch(a, &mut model);
+    }
+    assert!((model.monitor_options.alt_trim[0] - 0.75).abs() < 1e-9);
+    model.monitor_options.alt_count = 2;
+    let (hits, _) = build(&assets, &model, &view);
+    assert!(find(&hits, "monitor", &Control::AltTrim(1)).is_some());
+}
+
 #[test]
 fn plugin_scenes_panel_primes_and_recalls() {
     let assets = assets();

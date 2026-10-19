@@ -145,6 +145,8 @@ pub enum Control {
     MonitorAlt(u8),
     /// [model] Dim attenuation knob (drag 0…1).
     DimLevel,
+    /// [model] ALT 1 / ALT 2 TRIM knob (k = 0, 1; drag 0…1 = −30…+30 dB, `AltMonTrim`).
+    AltTrim(u8),
     /// [model] Cue output `MixInSource` (cue mix ↔ monitor mix) and `MixToMono`.
     CueSource(u8),
     CueMono(u8),
