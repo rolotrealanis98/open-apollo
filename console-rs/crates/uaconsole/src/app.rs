@@ -21,7 +21,7 @@ use crate::frame::{Frame, FrameTimes, Hud, build_frame, layout_for};
 use crate::popups::Popups;
 use crate::input::{ClickTracker, Command, PIXELS_PER_LINE, shortcut, wheel_actions};
 use crate::overlay::{OverlayStack, PointerEvent, Routed};
-use crate::settings::Settings;
+use crate::settings::{MixerPrefs, Settings};
 use crate::source::{ModelSource, OpenedModel};
 use crate::view::{Transform, View, ViewMode, zoom_in, zoom_out};
 
@@ -130,6 +130,28 @@ pub struct App {
     deferred_tap: Option<rack::Hit>,
     /// The plug-in windows Window › Show/Hide Floating Windows hid (Some while hidden).
     hidden_floating: Option<Vec<Box<dyn crate::overlay::Panel>>>,
+    /// When the changed view state is written (SAVE_DELAY after the first change; quit writes at once).
+    save_at: Option<Instant>,
+}
+
+/// How long after a view-state change it is written.
+const SAVE_DELAY: Duration = Duration::from_secs(2);
+
+/// The mixer's starting view: the saved view state, then `--view` over it.
+fn initial_mixer(compact: bool, settings: &Settings, view_spec: Option<&str>) -> ViewState {
+    let mut mixer = ViewState {
+        compact,
+        // No native menu bar here: Windows Console's in-window one, in the title bar.
+        menu_bar: true,
+        ..ViewState::default()
+    };
+    settings.mixer.apply(&mut mixer);
+    if let Some(spec) = view_spec {
+        if let Err(e) = mixer.apply_spec(spec) {
+            eprintln!("uaconsole: --view: {e}");
+        }
+    }
+    mixer
 }
 
 /// Runs the window until it is closed. Returns an error message if it could not start.
@@ -177,17 +199,7 @@ impl App {
         }
         overlays.sync(&mut *model);
         let area = houston::Rect::new(0.0, 0.0, 1.0, 1.0);
-        let mut mixer = ViewState {
-            compact: opts.compact,
-            // No native menu bar here: Windows Console's in-window one, in the title bar.
-            menu_bar: true,
-            ..ViewState::default()
-        };
-        if let Some(spec) = &opts.view_spec {
-            if let Err(e) = mixer.apply_spec(spec) {
-                eprintln!("uaconsole: --view: {e}");
-            }
-        }
+        let mut mixer = initial_mixer(opts.compact, &opts.settings, opts.view_spec.as_deref());
         if let Some(name) = &opts.open {
             mixer.open_named(name);
         }
@@ -230,6 +242,7 @@ impl App {
             focus_check: false,
             pending_menu: opts.menu,
             pending_open,
+            save_at: None,
         }
     }
 
@@ -815,12 +828,24 @@ impl App {
         }
     }
 
-    /// Persists zoom, view mode, compact and the engine when they changed.
-    fn save_settings(&mut self) {
+    /// The settings as the app currently stands.
+    fn current_settings(&self) -> Settings {
         let mut next = self.settings.clone();
         next.zoom = self.view.zoom;
         next.compact = self.mixer.compact;
         next.view = self.view.mode;
+        next.mixer = MixerPrefs::capture(&self.mixer);
+        // A full-screen window's size is the screen's, not the user's.
+        if self.gpu.as_ref().is_some_and(|g| g.window.fullscreen().is_some()) {
+            next.mixer.window = self.settings.mixer.window;
+        }
+        next
+    }
+
+    /// Persists zoom, view mode, compact, the mixer's view state and the engine when they changed.
+    fn save_settings(&mut self) {
+        self.save_at = None;
+        let mut next = self.current_settings();
         if let ModelSource::Engine { addr, .. } = &self.source {
             next.engine = Some(addr.clone());
         }
@@ -1122,6 +1147,15 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Changed view state is written once it has been still for SAVE_DELAY.
+        let now = Instant::now();
+        if self.current_settings().mixer == self.settings.mixer {
+            self.save_at = None;
+        } else if self.save_at.is_some_and(|t| now >= t) {
+            self.save_settings();
+        } else {
+            self.save_at.get_or_insert(now + SAVE_DELAY);
+        }
         // Console closes its menus when the app loses focus (none of its windows has it).
         if std::mem::take(&mut self.focus_check)
             && !self.main_focused
@@ -1135,7 +1169,10 @@ impl ApplicationHandler for App {
         if self.mixer.expire_modifier(self.model.as_ref(), Instant::now()) {
             self.changed();
         }
-        let modifier_deadline = self.mixer.modifier_deadline(self.model.as_ref());
+        let modifier_deadline = [self.mixer.modifier_deadline(self.model.as_ref()), self.save_at]
+            .into_iter()
+            .flatten()
+            .min();
         let live =
             (self.live_meters || self.overlays.live()) && self.gpu.is_some() && !self.occluded;
         if !live {
@@ -1321,4 +1358,27 @@ impl App {
         }
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_view_state_applies_and_view_spec_overrides() {
+        let settings = Settings::parse(
+            "sends = true\ninputs = false\ninsert_size = \"small\"\nfixed_slots = false\nbrowser = false\n\
+             browser_tab = \"presets\"\nctrl_room = true\nwindow = \"1300x700\"\n",
+        );
+        let m = initial_mixer(false, &settings, None);
+        assert!(m.sections.sends && !m.sections.inputs && m.sections.inserts);
+        assert_eq!(m.insert_size, rack::surfaces::InsertSize::Small);
+        assert!(!m.fixed_slots && !m.show_browser && m.show_ctrl_room);
+        assert_eq!(m.browser.tab, rack::surfaces::BrowserTab::Presets);
+        assert_eq!(m.window, Some((1300.0, 700.0)));
+        // Nothing saved: the stock view. `--view` wins over what was saved.
+        assert_eq!(initial_mixer(false, &Settings::default(), None).sections, ViewState::default().sections);
+        assert!(!initial_mixer(false, &settings, Some("sends=0,large")).sections.sends);
+        assert!(initial_mixer(true, &settings, None).compact);
+    }
 }
