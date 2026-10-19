@@ -741,6 +741,12 @@ impl MixerModel for EngineMixer {
         self.store.set_sleep(background);
     }
 
+    /// Console posts `SaveLastUsedSession` when it quits; through the session command path, so
+    /// a read-only run sends nothing.
+    fn quit(&mut self) {
+        self.session_command(&ua_engine::SessionCommand::SaveLastUsed);
+    }
+
     fn apply(&mut self, action: &Action) {
         // A double-click reset: the same control → path mapping as a drag, written as Console's
         // `set <prop>/value "default"` (MAP.md: CMxNtwk_Server::setObjectValue).

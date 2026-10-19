@@ -3776,6 +3776,8 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
     daemon.mute_on_rate_change = max(0.0, args.mute_on_rate_change)
     daemon.model_data = hw_router.model_data if hw_router else {}
     daemon.commands.set_store(state_file.parent, store_stem)
+    # Settings > Plug-Ins RESCAN reads this folder again (default: the import's)
+    daemon.console.catalogue_dir = args.ua_catalogue or daemon.console.catalogue_dir
 
     # Create WebSocket server (shares state tree + hw router)
     ws_server = None

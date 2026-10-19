@@ -195,6 +195,7 @@ def main():
                          presets_dir=Path(scratch.name) / "presets",
                          catalogue=catalogue)
     daemon.model_data = router.model_data
+    daemon.console.catalogue_dir = args.catalogue or daemon.console.catalogue_dir
     daemon.mute_on_rate_change = 0.0
 
     async def run():
