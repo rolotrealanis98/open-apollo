@@ -289,6 +289,12 @@ impl EngineMixer {
         }
     }
 
+    /// The meter of the send at `base` (`…/sends/N`): its `meters/0` and, on a stereo strip, `meters/1`.
+    pub(crate) fn send_frame(&self, base: &str) -> MeterFrame {
+        let legs: Vec<MeterPaths> = (0..2).map(|k| MeterPaths::new(format!("{base}/meters/{k}"))).collect();
+        self.frame(&legs)
+    }
+
     fn slot_state(&self, slot: &InsertPaths) -> InsertState {
         match self.str_at(&slot.effect_name()) {
             Some(name) if !name.is_empty() => InsertState::Loaded {
@@ -552,6 +558,7 @@ impl MixerModel for EngineMixer {
                 level: self.f64_at(&s.gain()).unwrap_or(0.0),
                 muted: self.bool_at(&s.bypass()).unwrap_or(false),
                 pan: 0.5,
+                meter: self.send_frame(&s.base),
             })
             .collect()
     }
@@ -606,6 +613,10 @@ impl MixerModel for EngineMixer {
             Some(m) => self.frame(&m.meters.clone()),
             None => MeterFrame::default(),
         }
+    }
+
+    fn send_meter(&self, node: &str) -> MeterFrame {
+        self.send_frame(node)
     }
 
     fn input_sends(&self, strip: &StripInfo) -> Vec<SendState> {

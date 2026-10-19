@@ -328,7 +328,7 @@ pub(crate) fn full_send_strip(ui: &mut Ui, fader_skin: &str, send: &SendState, r
     };
     ui.toggle("Send-Mute", Some("M"), send.muted, true, mute, ids.mute, None);
     let fader = Rect::new(2.0, 4.0, (STRIP_W / 2.0).floor(), fm.h - 4.0);
-    ui.fader_and_meters_with(fader_skin, false, send.level, Default::default(), readout, fm, ids.level, Some(fader));
+    ui.fader_and_meters_with(fader_skin, false, send.level, send.meter.mono(), readout, fm, ids.level, Some(fader));
 }
 
 /// SENDS OVERVIEW panel (`Rack_Overview_Sends`, one per strip): `Birds-Eye-Send-Background`
@@ -377,6 +377,32 @@ fn short_send_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draw::Draw;
+    use crate::model::MeterFrame;
+
+    const METERS: &str = r#"{"file_format":"appearance","meters":{
+        "Mono-Input-Meter":{"width":8,"height":196,"peak-height":1,"bounds-content":"0,14,16,372","bounds-clip":"0,4,16,10",
+            "image-background":"meters/bg.png","image-content":"meters/on.png","image-clip":"meters/clip.png"}}}"#;
+
+    /// What a full send strip draws of its meter: (lit-art draws, peak-line clips).
+    fn send_meter_draws(meter: MeterFrame) -> (usize, usize) {
+        let assets = crate::test_support::assets(METERS);
+        let mut ui = Ui::new(&assets);
+        let send = SendState { name: "AUX 1".into(), level: 0.5, muted: false, pan: 0.5, meter };
+        let ids = FullSendIds { bus: false, pan: None, mute: None, level: None };
+        full_send_strip(&mut ui, "Sends-Input-Fader", &send, "0.0", 0.0, SEND_H_FULL, ids);
+        let lit = ui.list.items.iter().filter(|d| matches!(d, Draw::Image { key, .. } if &**key == "meters/on.png")).count();
+        let peaks = ui.list.items.iter().filter(|d| matches!(d, Draw::Clip(Some(r)) if r.h == 1.0)).count();
+        (lit, peaks)
+    }
+
+    #[test]
+    fn a_send_with_level_draws_its_meter() {
+        assert_eq!(send_meter_draws(MeterFrame::default()), (0, 0), "a silent send lights nothing");
+        assert_eq!(send_meter_draws(MeterFrame { left: 0.4, ..Default::default() }), (1, 0));
+        // A stereo send shows the louder leg on its one bar, with the held peak.
+        assert_eq!(send_meter_draws(MeterFrame { left: 0.1, right: 0.4, peak_right: 0.7, ..Default::default() }), (2, 1));
+    }
 
     #[test]
     fn cell_heights_match_geometry() {

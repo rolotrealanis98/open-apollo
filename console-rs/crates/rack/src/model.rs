@@ -296,6 +296,9 @@ pub struct SendState {
     /// The send's pan knob, 0…1 (0.5 = centre; `sends/k/Pan` −1…1). Sends without a pan
     /// (aux → cue, stereo strips) read 0.5.
     pub pan: f64,
+    /// The send's own meter (`sends/k/meters/*`, post-fader): the full send strip's bar, the
+    /// mini send's knob ring and the overview's signal LED.
+    pub meter: MeterFrame,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -322,6 +325,16 @@ impl MeterFrame {
     /// The louder leg, 0…1: what a single-valued indicator (knob ring, signal LED) shows.
     pub fn level(&self) -> f64 {
         self.left.max(self.right)
+    }
+
+    /// Both legs folded into the left (a mono bar showing a stereo send).
+    pub fn mono(&self) -> MeterFrame {
+        MeterFrame {
+            left: self.level(),
+            peak_left: self.peak_left.max(self.peak_right),
+            clip_left: self.clip_left || self.clip_right,
+            ..Default::default()
+        }
     }
 }
 
@@ -579,6 +592,10 @@ pub trait MixerModel {
     fn meters(&self, s: &StripInfo) -> MeterFrame;
     fn monitor(&self) -> MonitorState;
     fn monitor_meters(&self) -> MeterFrame;
+    /// Meter of the send at property node `node` (`…/sends/N`, as the Sends window addresses it).
+    fn send_meter(&self, _node: &str) -> MeterFrame {
+        MeterFrame::default()
+    }
     fn apply(&mut self, action: &Action);
     /// Applies pending external updates (engine pushes); true if anything changed.
     /// Called once per frame by the app.
@@ -826,7 +843,7 @@ impl Default for PreviewMixer {
         if let Some(InsertState::Loaded { power, .. }) = inserts.get_mut("in1").and_then(|v: &mut Vec<InsertState>| v.get_mut(3)) {
             *power = false;
         }
-        let send = |name: &str, level: f64, muted: bool| SendState { name: name.into(), level, muted, pan: 0.5 };
+        let send = |name: &str, level: f64, muted: bool| SendState { name: name.into(), level, muted, pan: 0.5, meter: MeterFrame::default() };
         let mut sends = HashMap::new();
         for (i, s) in inputs.iter().enumerate() {
             let lvl = 0.25 + 0.08 * i as f64;
