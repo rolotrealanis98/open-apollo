@@ -6,11 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-- Plug-in panels 2026.10.19: the Distressor's BYPASS, REDLINE and THD lamps were drawn 3x wide; the API Vision Channel Strip drew its PRE DYN / DYN SC block twice, squeezed. `tools/check-sprite-fit.py` (in CI, against the pinned panels release) fails on any panel element whose shape differs from its sprite frame unless it is on the reviewed list `tools/sprite-fit-reviewed.txt`.
+## [2.1.0] - 2026-10-19
+
+UAD plug-ins can run on the Apollo's DSP, as an experimental opt-in. open-apollo still ships no
+Universal Audio files: setup builds each plug-in's control mapping on your computer from your own
+UAD install, for the plug-ins your Apollo says you are licensed for. Tested on one Apollo x4 at
+48 kHz: 111 plug-ins load mono and stereo there. Expect rough edges; see Known issues below and in
+`docs/install.md`.
 
 ### Added
-- Native plug-in hosting merged into main, experimental and off by default: the driver plug-in host (`plugin_host=1`, `input_strips=1`) and the daemon's native insert transactions, chains, delay compensation and licence mirror. No plug-in mappings ship; a user-side bundle builder is in progress.
+- Plug-in hosting (experimental, off by default): the **Plug-ins on the Apollo (experimental)** box
+  on the setup wizard's Review page or `sudo bash scripts/install.sh --plugin-hosting=/path/to/windows`.
+  The driver loads with `plugin_host=1 input_strips=1`; the daemon runs native insert transactions,
+  chains, delay compensation and the licence mirror, and publishes why hosting is off
+  (`/NativePluginHostingReason`) instead of exiting.
+- Plug-in mapper (`tools/plugin-mapper`): builds a mono and a stereo bundle per plug-in from the
+  user's own Powered plug-in DLLs, offline, in the background (`open-apollo-plugin-maps` user
+  service), only for authorized plug-ins, kept across reinstalls, re-mapped only when a DLL
+  changes. Setup and the Console show the progress.
+- `mixer-engine/device_maps/native_known_good.json`: which plug-ins passed the live gate in each
+  layout (names, layouts and latency only). The Console's browser lists only those.
+- Console: plug-in windows open on the drop and stay locked until the plug-in is live, follow
+  their slot (close when it empties, reopen on a swap) and resize their OS window with Resize
+  Plug-In; Unison slots list only Unison plug-ins; refused loads, links and writes say why; the
+  browser shows the daemon's hosting and preparation status.
+- Console: meters with UA's engine tick, release and peak hold; Settings › PIPEWIRE panel and a
+  status-bar BUFFER readout (the daemon publishes PipeWire's state under `/openapollo/pipewire`);
+  the Snapshots section; Show/Hide Floating Windows, Next/Previous Window, Notifications; the
+  view is remembered between launches.
+- Hi-Z: the input follows the jack when a cable goes in or out.
+- `oa-assets icons` imports the Console's plug-in icons from your install.
+- Install logs for every setup run, and an opt-in report of which plug-ins the Apollo authorizes
+  (no serials or personal data).
+- Driver: builds on 16K-page arm64 kernels (Asahi); see `driver/BUILDING.md`. Not tested on hardware.
+
+### Fixed
+- Plug-in panels 2026.10.19: the Distressor's BYPASS, REDLINE and THD lamps were drawn 3x wide; the API Vision Channel Strip drew its PRE DYN / DYN SC block twice, squeezed. `tools/check-sprite-fit.py` (in CI, against the pinned panels release) fails on any panel element whose shape differs from its sprite frame unless it is on the reviewed list `tools/sprite-fit-reviewed.txt`.
+- First run: quiet retries while the Apollo waits for its power-cycle, no write storm on connect.
+
+### Known issues
+- Hosting is rough: loading, unloading and swapping plug-ins can fail or need a retry, and
+  linking or unlinking a stereo pair with a plug-in already in the slot is unreliable.
+- After the driver is loaded with hosting on, power-cycle the Apollo once; until then hosting
+  reports why it is off.
+- K-Stereo, Studio D Chorus and the Hitsville EQ Mastering (stereo) are left out. Lexicon 480L
+  takes about 6 s to load.
+- Tested only on an Apollo x4 at 48 kHz.
 
 ## [2.0.0] - 2026-10-19
 

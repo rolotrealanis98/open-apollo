@@ -83,7 +83,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 | Issue | Severity | Workaround |
 |-------|----------|------------|
-| **Plug-ins don't process audio** — the Console lists every plug-in from your UAD install and opens its window, but inserting one changes nothing in the sound. Running plug-ins on the Apollo's DSP is in development and not in this release. | By design (this release) | None. The mixer, preamps, sends and monitoring work without them. |
+| **Plug-in hosting is experimental** — running UAD plug-ins on the Apollo's DSP is opt-in and rough: loads, unloads and swaps can fail or need a retry, and linking or unlinking a stereo pair with a plug-in in the slot is unreliable. Tested only on an Apollo x4 at 48 kHz. Without hosting, plug-in windows open but don't change the sound. | Moderate | Retry the drop, or clear the slot and load again. After the driver loads with hosting on, power-cycle the Apollo once. See [Running plug-ins on the Apollo](docs/install.md#running-plug-ins-on-the-apollo-experimental). |
 | **Apollo Solo USB init is untested in this release** — the USB bring-up is now built from the DSP modules setup extracts from your own UAD install (the Windows capture it used to ship is gone). The frames match the capture byte for byte, but no Solo has run them yet. | Moderate | If capture or playback doesn't come up, [open an issue](https://github.com/rolotrealanis98/open-apollo/issues/new?template=bug_report.yml) with the install log, and use v1.3.2 meanwhile. |
 | **Secure Boot refuses the driver** — a DKMS module isn't signed by your distribution. | Moderate | The installer prints the `mokutil` steps to enroll your DKMS signing key; it never runs them for you. Reboot, enroll the key in the MOK screen, then run setup again or `sudo modprobe ua_apollo`. |
 | **Firefox Snap crashes** — kernel `hrtimer` lockup when using WebRTC capture | Critical | Use Chromium or Firefox .deb instead of Snap |
@@ -113,7 +113,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 ## Not Yet Implemented
 
-Talkback audio routing, virtual/monitor loopback, parts of the console (see [console-rs/WIRING.md](console-rs/WIRING.md) for what is wired), multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested), and running UAD plug-ins on the Apollo's DSP (in development, not in this release; setup already stores the plug-ins' DSP modules from your install). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
+Talkback audio routing, virtual/monitor loopback, parts of the console (see [console-rs/WIRING.md](console-rs/WIRING.md) for what is wired), multi-device support, digital I/O and external clock (S/PDIF, ADAT; untested), suspend/resume (untested). Code in the tree that is present but unsupported is listed on the [Experimental Features](https://github.com/rolotrealanis98/open-apollo/wiki/Experimental-Features) wiki page.
 
 ## Supported Devices
 

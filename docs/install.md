@@ -181,6 +181,14 @@ What to expect:
 - The plug-ins run with UA's own DSP code; a refused licence leaves the input as it was.
 - The bundles are made from UA's code on your computer. Don't share or publish them.
 
+Known issues:
+- Loading, unloading and swapping can fail or need a retry; linking or unlinking a stereo pair
+  with a plug-in already in the slot is unreliable. Clearing the slot and loading again helps.
+- After the driver loads with hosting on, power-cycle the Apollo once (the driver hosts only on
+  DSPs it cold-started). Until then the browser shows why hosting is off.
+- K-Stereo, Studio D Chorus and the Hitsville EQ Mastering (stereo) are not offered. Lexicon 480L
+  takes about 6 s to load.
+
 ## Updating, reinstalling and uninstalling
 
 To update, pull the repository and run `bash scripts/setup.sh` again. setup always reinstalls
