@@ -21,7 +21,7 @@
 //! press T [MODS] / move T|@X,Y [MODS] / release   (press's MODS hold until the release)
 //! drag T DX DY [N] [MODS]   press T, move by (DX, DY) in N steps (default 8), release
 //! dragto T1 T2 [copy] press T1, move onto T2's centre, release (Console's drag and drop)
-//! wheel T LINES [MODS]      scroll wheel over T (Shift: fine)
+//! wheel T LINES [MODS]      scroll wheel over T (with `alt` it adjusts T; else it scrolls)
 //! menu LABEL          click the row LABEL of the open menu (opens submenus on the way)
 //! key TEXT|enter|escape|backspace   text to the focused field
 //! command ID          a Console command id (`show_browser`, `undo`, …)
@@ -378,8 +378,12 @@ impl Driver {
                 let lines = num(1)?;
                 self.move_to(p, 1);
                 if !self.route(PointerEvent::Wheel { x: p.0, y: p.1, lines, fine: shift }) {
-                    if let Some(actions) = crate::input::wheel_actions(&self.frame.hits, p.0, p.1, lines as f64, shift) {
+                    // As App::wheel: Option/Alt adjusts the control, a plain wheel scrolls.
+                    let adjust = keys.alt.then(|| crate::input::wheel_actions(&self.frame.hits, p.0, p.1, lines as f64, shift)).flatten();
+                    if let Some(actions) = adjust {
                         self.apply(actions);
+                    } else if self.mixer.wheel(&self.frame.scrolls, p.0, p.1, -lines * crate::app::SCROLL_PER_LINE) {
+                        self.rebuild();
                     }
                 }
             }

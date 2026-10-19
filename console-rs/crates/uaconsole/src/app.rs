@@ -50,7 +50,7 @@ pub const LETTERBOX: Rgba = Rgba::rgb8(18, 19, 21);
 /// Pan distance per wheel line, in pixels.
 const PAN_PER_LINE: f32 = 60.0;
 /// Scroll distance per wheel line in the browser list and cells column, in points.
-const SCROLL_PER_LINE: f32 = 40.0;
+pub(crate) const SCROLL_PER_LINE: f32 = 40.0;
 
 pub struct Options {
     pub source: ModelSource,
@@ -251,7 +251,7 @@ impl App {
         })
     }
 
-    /// Shift: fine adjust (knob / fader drags).
+    /// Shift: fine adjust (knob / fader drags, Option+wheel).
     fn fine(&self) -> bool {
         self.mods.shift_key()
     }
@@ -639,9 +639,12 @@ impl App {
             if self.dirty {
                 self.rebuild();
             }
-            if let Some(actions) = wheel_actions(active_hits!(self), x, y, lines.1, fine) {
-                self.apply(actions);
-                return;
+            // Option / Alt + wheel adjusts the control under the pointer; a plain wheel scrolls.
+            if self.mods.alt_key() {
+                if let Some(actions) = wheel_actions(active_hits!(self), x, y, lines.1, fine) {
+                    self.apply(actions);
+                    return;
+                }
             }
             if self.mixer.wheel(
                 active_scrolls!(self),
