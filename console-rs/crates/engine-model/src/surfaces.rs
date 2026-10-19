@@ -128,6 +128,7 @@ impl EngineMixer {
                     name, category, categories, enabled, favorite: false, badge,
                     native_supported: flag("NativeLoadSupported"),
                     native_hint: self.str_at(&format!("{base}/NativeLoadHint")).map(str::to_owned),
+                    unison: flag("Unison"),
                 })
             })
             .collect()

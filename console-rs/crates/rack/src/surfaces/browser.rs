@@ -69,17 +69,23 @@ fn bold(size: f32, color: Rgba) -> TextStyle {
     Ui::plain_style("Helvetica", size, true, color)
 }
 
-/// Catalog indices shown for the current filters (category, favorites, search).
+/// Catalog indices shown for the current filters (category, favorites, search, assign target).
 pub fn filtered(catalog: &[PluginEntry], categories: &[String], view: &ViewState) -> Vec<usize> {
     let b = &view.browser;
     let cat = b.category.and_then(|i| categories.get(i as usize));
     let q = b.search.trim().to_lowercase();
+    let assign_slot = match b.assign_to {
+        Some(ControlId { control: Control::Insert(k), .. }) => Some(k),
+        _ => None,
+    };
     catalog
         .iter()
         .enumerate()
         .filter(|(_, p)| cat.is_none_or(|c| p.in_category(c)))
         .filter(|(_, p)| !b.favorites_only || p.favorite)
         .filter(|(_, p)| q.is_empty() || p.name.to_lowercase().contains(&q))
+        // Assign mode lists only what the target slot takes (the Unison slot: Unison plug-ins).
+        .filter(|(_, p)| assign_slot.is_none_or(|k| p.refusal(k).is_none()))
         .map(|(i, _)| i)
         .collect()
 }
@@ -230,7 +236,9 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         }
         let catalog = model.plugin_catalog();
         let selected_hint = b.selected.and_then(|i| catalog.get(i as usize)).and_then(|p| p.native_hint.as_deref());
-        if let Some(notice) = model.plugin_notice().or(selected_hint) {
+        // A refused assignment keeps its target (assign mode or the selected row) and says why.
+        let refused = b.notice.filter(|_| b.assign_to.is_some() || b.selected.is_some());
+        if let Some(notice) = refused.or(model.plugin_notice()).or(selected_hint) {
             // Keep a visible reason even if the original assign hint was dismissed.
             let width = list.w - 2.0 * MARGIN;
             let chars_per_line = ((width / 5.5) as usize).max(12);
