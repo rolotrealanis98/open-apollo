@@ -358,6 +358,47 @@ fn angle(c: (f32, f32), x: f32, y: f32) -> f64 {
     ((x - c.0) as f64).atan2((c.1 - y) as f64).to_degrees()
 }
 
+/// A knob drag under a circular CONTROLS MODE (rack knobs and plug-in panel knobs): the knob's
+/// centre, the last pointer angle and the value.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KnobTurn {
+    mode: ControlsMode,
+    centre: (f32, f32),
+    last: f64,
+    value: f64,
+}
+
+impl KnobTurn {
+    /// A press at (x, y) on a knob centred at `centre` showing `value`; None under Linear (the
+    /// caller's vertical drag).
+    pub fn begin(mode: ControlsMode, centre: (f32, f32), x: f32, y: f32, value: f64) -> Option<KnobTurn> {
+        (mode != ControlsMode::Linear).then(|| KnobTurn { mode, centre, last: angle(centre, x, y), value })
+    }
+
+    /// What the press itself sets: Circular jumps the knob to the pointer.
+    pub fn press_value(&self) -> Option<f64> {
+        (self.mode == ControlsMode::Circular).then(|| Self::circular_value(self.last))
+    }
+
+    /// The knob value with the pointer at (x, y); `fine` divides a relative turn by 10.
+    pub fn move_to(&mut self, x: f32, y: f32, fine: bool) -> f64 {
+        let now = angle(self.centre, x, y);
+        if self.mode == ControlsMode::Circular {
+            return Self::circular_value(now);
+        }
+        // Relative: the turn since the last move (unwrapped across 6 o'clock) accumulates.
+        let turn = (now - self.last + 540.0).rem_euclid(360.0) - 180.0;
+        self.last = now;
+        self.value = (self.value + turn / (KNOB_SWEEP_DEG * if fine { 10.0 } else { 1.0 })).clamp(0.0, 1.0);
+        self.value
+    }
+
+    /// The knob value at pointer angle `a` (the dead zone at 6 o'clock snaps to the nearer end).
+    fn circular_value(a: f64) -> f64 {
+        (a / KNOB_SWEEP_DEG + 0.5).clamp(0.0, 1.0)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hit {
     pub rect: Rect,
@@ -410,8 +451,8 @@ struct Active {
     start_x: f32,
     start_value: f64,
     span: f32,
-    /// A knob under a circular CONTROLS MODE: its centre and the last pointer angle.
-    circular: Option<((f32, f32), f64)>,
+    /// A knob under a circular CONTROLS MODE.
+    circular: Option<KnobTurn>,
     /// The pressed control's value at the press, and every control the drag moves with their
     /// values at the press (Cmd: the same control on each strip of its kind; else just it).
     origin: f64,
@@ -534,10 +575,7 @@ impl Interaction {
                     }
                 }
                 let knob = matches!(hit.kind, HitKind::Knob { .. });
-                let circular = (knob && self.controls_mode != ControlsMode::Linear).then(|| {
-                    let c = hit.rect.center();
-                    (c, angle(c, x, y))
-                });
+                let circular = knob.then(|| KnobTurn::begin(self.controls_mode, hit.rect.center(), x, y, *value)).flatten();
                 let group = if mods.cmd { peers(hits, hit) } else { vec![hit] };
                 let group = group
                     .into_iter()
@@ -549,8 +587,8 @@ impl Interaction {
                 let a = Active { id: hit.id.clone(), start_y: y, start_x: x, start_value: *value, span: *span, circular, origin: *value, group };
                 let mut out = vec![Action::GestureBegin(hit.id.clone())];
                 // Circular: the press itself moves the knob to the pointer.
-                if let (Some((_, angle)), ControlsMode::Circular) = (circular, self.controls_mode) {
-                    out.extend(a.sets(Self::circular_value(angle)));
+                if let Some(v) = circular.and_then(|t| t.press_value()) {
+                    out.extend(a.sets(v));
                 }
                 self.active = Some(a);
                 out
@@ -558,27 +596,11 @@ impl Interaction {
         }
     }
 
-    /// The knob value at pointer angle `a` (the dead zone at 6 o'clock snaps to the nearer end).
-    fn circular_value(a: f64) -> f64 {
-        (a / KNOB_SWEEP_DEG + 0.5).clamp(0.0, 1.0)
-    }
-
     /// `fine` (Shift) divides the motion by 10 (Console's fine adjust).
     pub fn pointer_move(&mut self, x: f32, y: f32, fine: bool) -> Vec<Action> {
-        let mode = self.controls_mode;
         let Some(a) = &mut self.active else { return vec![] };
         let scale = if fine { 10.0 } else { 1.0 };
-        if let Some((c, last)) = &mut a.circular {
-            let now = angle(*c, x, y);
-            let v = if mode == ControlsMode::Circular {
-                Self::circular_value(now)
-            } else {
-                // Relative: the turn since the last move (unwrapped across 6 o'clock) accumulates.
-                let turn = (now - *last + 540.0).rem_euclid(360.0) - 180.0;
-                *last = now;
-                a.start_value = (a.start_value + turn / (KNOB_SWEEP_DEG * scale)).clamp(0.0, 1.0);
-                a.start_value
-            };
+        if let Some(v) = a.circular.as_mut().map(|t| t.move_to(x, y, fine)) {
             return a.sets(v);
         }
         let delta = ((a.start_y - y) as f64 + (x - a.start_x) as f64 * 0.25) / (a.span.max(1.0) as f64 * scale);

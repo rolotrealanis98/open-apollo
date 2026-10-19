@@ -170,6 +170,29 @@ fn knob_drag_tap_action_and_touch_state_timeouts() {
     assert_eq!(params.value(0), Some(0.5));
 }
 
+/// Settings › CONTROLS MODE, as rack's knobs: Circular jumps to the pointer's angle on the
+/// press (3 o'clock = 90° of the 270° sweep); Relative Circular adds the angle turned.
+#[test]
+fn knob_drags_follow_controls_mode() {
+    let mut p = panel();
+    let mut params = MockParams::from_spec(&p.spec);
+    p.controls_mode = rack::ControlsMode::Circular;
+    build(&p, &params);
+    // The gain knob is centred at (30, 30).
+    p.pointer_down_at(45.0, 30.0, false, 0.0, &mut params);
+    assert!((params.value(0).unwrap() - (90.0 / 270.0 + 0.5)).abs() < 1e-9, "the press moves it");
+    p.pointer_move_at(30.0, 10.0, 0.1, &mut params);
+    p.pointer_up_at(30.0, 10.0, 0.2, &mut params);
+    assert!((params.value(0).unwrap() - 0.5).abs() < 1e-9, "12 o'clock is the middle");
+    p.controls_mode = rack::ControlsMode::RelativeCircular;
+    build(&p, &params);
+    p.pointer_down_at(30.0, 15.0, false, 1.0, &mut params);
+    assert!((params.value(0).unwrap() - 0.5).abs() < 1e-9, "the press alone does not move it");
+    p.pointer_move_at(45.0, 30.0, 1.1, &mut params);
+    p.pointer_up_at(45.0, 30.0, 1.2, &mut params);
+    assert!((params.value(0).unwrap() - (0.5 + 90.0 / 270.0)).abs() < 1e-9);
+}
+
 #[test]
 fn horizontal_faders_and_stepped_quantisation() {
     let mut p = panel();
