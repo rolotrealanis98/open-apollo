@@ -99,21 +99,35 @@ pub fn hit_layer(marks: &[LayerMark], i: usize) -> u16 {
 /// Splits a frame into the mixer window (part 0) and one part per layer (part `k` = layer
 /// `k − 1`). Each part starts unclipped.
 pub fn split(list: &DrawList, hits: &[Hit], scrolls: &[ScrollRegion], layers: usize, marks: &[LayerMark]) -> Vec<LayerPart> {
-    let mut parts = vec![LayerPart::default(); layers + 1];
+    split_into(list, hits, scrolls, &(1..=layers as u16).collect::<Vec<_>>(), marks)
+}
+
+/// [`split`] with layer `k`'s items going to part `parts[k − 1]` instead (a shell that shows
+/// some layers inside another window: native Wayland keeps menus in the window they opened
+/// from). There are `parts.len() + 1` parts; a part fed by another layer is unclipped first.
+pub fn split_into(list: &DrawList, hits: &[Hit], scrolls: &[ScrollRegion], parts_of: &[u16], marks: &[LayerMark]) -> Vec<LayerPart> {
+    let part = |layer: u16| if layer == 0 { 0 } else { parts_of.get(layer as usize - 1).copied().unwrap_or(layer) as usize };
+    let mut parts = vec![LayerPart::default(); parts_of.len() + 1];
+    let mut fed_by = vec![0u16; parts.len()];
     for (i, d) in list.items.iter().enumerate() {
-        let k = owner(marks, i, |m| m.draw) as usize;
+        let layer = owner(marks, i, |m| m.draw);
+        let k = part(layer);
         if let Some(p) = parts.get_mut(k) {
+            if fed_by[k] != layer && k != layer as usize {
+                p.list.items.push(Draw::Clip(None));
+            }
+            fed_by[k] = layer;
             p.list.items.push(d.clone());
         }
     }
     for (i, h) in hits.iter().enumerate() {
-        let k = owner(marks, i, |m| m.hit) as usize;
+        let k = part(owner(marks, i, |m| m.hit));
         if let Some(p) = parts.get_mut(k) {
             p.hits.push(h.clone());
         }
     }
     for (i, s) in scrolls.iter().enumerate() {
-        let k = owner(marks, i, |m| m.scroll) as usize;
+        let k = part(owner(marks, i, |m| m.scroll));
         if let Some(p) = parts.get_mut(k) {
             p.scrolls.push(s.clone());
         }
@@ -218,6 +232,12 @@ mod tests {
         assert_eq!(parts[1].hits.len(), 2);
         assert_eq!(hit_layer(&marks, 0), 0);
         assert_eq!(hit_layer(&marks, 2), 1);
+        // Layer 1 drawn in the mixer window: one part, in order, unclipped where it starts.
+        let parts = split_into(&list, &hits, &[], &[0], &marks);
+        assert_eq!(parts[0].list.len(), 5);
+        assert!(matches!(parts[0].list.items[1], Draw::Clip(None)));
+        assert_eq!(parts[0].hits.len(), 3);
+        assert!(parts[1].list.is_empty());
     }
 
     #[test]
