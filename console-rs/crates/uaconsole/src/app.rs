@@ -530,7 +530,13 @@ impl App {
                         }
                     }
                     Effect::Model(a) => self.model.apply(&a),
-                    Effect::SetText(id, text) => self.model.set_text(&id, &text),
+                    Effect::SetText(id, text) => {
+                        if self.overlays.set_text(&mut *self.model, &id, &text) {
+                            if let Some(id) = self.overlays.top_layer_id() {
+                                self.popups.focus(&id);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -634,7 +640,13 @@ impl App {
         for e in effects {
             match e {
                 Effect::Model(a) => self.model.apply(&a),
-                Effect::SetText(id, text) => self.model.set_text(&id, &text),
+                Effect::SetText(id, text) => {
+                        if self.overlays.set_text(&mut *self.model, &id, &text) {
+                            if let Some(id) = self.overlays.top_layer_id() {
+                                self.popups.focus(&id);
+                            }
+                        }
+                    }
             }
         }
         self.changed();

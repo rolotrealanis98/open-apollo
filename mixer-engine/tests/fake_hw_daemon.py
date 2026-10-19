@@ -207,6 +207,39 @@ class FixturePipeWire:
         return None
 
 
+def plugin_loads(daemon, delay, refused):
+    """Plug-in loads (set <slot>/EffectName) as the engine answers them: Power
+    follows (true with a plug-in, false empty), as UA's engine has it. With
+    `delay`, as the native host does: Status "Loading" at once, then after
+    `delay` s the load commits (EffectName, Power true, Status cleared, the
+    reply), or a name containing one of `refused` gets an error with a reason."""
+    handle_set = daemon._handle_set
+
+    def set_(client, cmd):
+        m = re.fullmatch(r"(/devices/\d+/\w+/\d+/effects/\d+)/EffectName(/value)?",
+                         cmd.path)
+        if not m:
+            return handle_set(client, cmd)
+        slot = m[1]
+
+        def done():
+            daemon._push_to_clients(slot + "/Status", "")
+            if cmd.value and any(r in cmd.value for r in refused):
+                daemon._send_local_plugin_error(
+                    client, cmd.path, "openapollo.plugin_transaction_failed", {},
+                    detail=f"{cmd.value}: refused by the test daemon")
+                return
+            handle_set(client, cmd)
+            daemon._push_to_clients(slot + "/Power", bool(cmd.value))
+
+        if not cmd.value or not delay:
+            return done()
+        daemon._push_to_clients(slot + "/Status", "Loading")
+        asyncio.get_running_loop().call_later(delay, done)
+
+    daemon._handle_set = set_
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--port", type=int, default=0)
@@ -227,6 +260,13 @@ def main():
     parser.add_argument("--readback", type=Path,
                         help="the hardware readback: a JSON list of the "
                              "words, re-read on every poll (absent: none)")
+    parser.add_argument("--load-delay", type=float, default=0.0,
+                        help="a plug-in load (set <slot>/EffectName) commits "
+                             "after this many seconds, with <slot>/Status "
+                             "\"Loading\" meanwhile (a native load)")
+    parser.add_argument("--refuse-load", action="append", default=[],
+                        help="a plug-in whose name contains this is refused "
+                             "(after --load-delay) with a reason")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     if args.port in FORBIDDEN_PORTS:
@@ -277,6 +317,7 @@ def main():
         run=pw.run if pw else lambda cmd, env: None,
         locate=lambda card: ({}, "pipewire (4242)" if pw else ""))
     daemon._publish_pipewire(daemon.pipewire.poll())
+    plugin_loads(daemon, args.load_delay, args.refuse_load)
 
     async def run():
         loop = asyncio.get_running_loop()

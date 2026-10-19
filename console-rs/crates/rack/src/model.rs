@@ -697,9 +697,9 @@ pub trait MixerModel {
     fn notifications(&self) -> Vec<String> {
         Vec::new()
     }
-    /// The newest refused write that has no notice of its own (a link the engine refused), with
-    /// when it came: shown over the status bar for a few seconds (plug-in loads show theirs
-    /// under the slot).
+    /// The newest refused write (a link, a plug-in load the engine refused after its seconds of
+    /// loading), with when it came: shown over the status bar for a few seconds, unless the
+    /// notice under a dropped plug-in's slot is showing it.
     fn last_refusal(&self) -> Option<(String, std::time::Instant)> {
         None
     }

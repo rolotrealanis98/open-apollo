@@ -336,18 +336,14 @@ impl EngineMixer {
         }
     }
 
-    /// A loaded slot draws bypassed only when its `Power` is false and no load is in flight. A
-    /// load is in flight while the daemon publishes `Status` "Loading", or (a daemon without it)
-    /// while the plug-in name is newer than `Power`: the empty slot's `Power` false is the
-    /// previous state, not this plug-in's (the daemon pushes `Power` true once the plug-in runs:
-    /// seconds for a native one).
+    /// A loaded slot draws bypassed only when its `Power` is false and no load is in flight
+    /// ([`Store::insert_loading`](ua_engine::Store::insert_loading)).
     pub(crate) fn slot_power(&self, slot: &InsertPaths) -> bool {
         self.bool_at(&slot.power()) != Some(false) || self.slot_loading(slot)
     }
 
     pub(crate) fn slot_loading(&self, slot: &InsertPaths) -> bool {
-        self.str_at(&slot.status()) == Some("Loading")
-            || self.store.path_revision(&slot.effect_name()) > self.store.path_revision(&slot.power())
+        self.store.insert_loading(slot)
     }
 
     /// Commits the negation of a bool property (`default` when it has no value).
@@ -761,7 +757,7 @@ impl MixerModel for EngineMixer {
 
     fn last_refusal(&self) -> Option<(String, std::time::Instant)> {
         let r = self.store.refusals().last()?;
-        (!r.path.ends_with("/EffectName")).then(|| (r.message.clone(), r.at))
+        Some((r.message.clone(), r.at))
     }
 
     /// The writes the engine refused (`Store::refusals`), newest first.

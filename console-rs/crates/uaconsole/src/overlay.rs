@@ -320,6 +320,18 @@ impl OverlayStack {
         self.panels.len().checked_sub(1).map(|i| self.layer_id(i))
     }
 
+    /// Writes `text` into `id` ([`MixerModel::set_text`]). A plug-in name dropped or assigned
+    /// into an insert also opens its window at once: the slot shows the load in flight and the
+    /// window its panel, locked until the engine reports the plug-in live (a refused load empties
+    /// the slot, which closes the window). True when a window opened or was raised.
+    pub fn set_text(&mut self, model: &mut dyn MixerModel, id: &rack::ControlId, text: &str) -> bool {
+        model.set_text(id, text);
+        match id.control {
+            rack::Control::Insert(slot) if !text.is_empty() => self.on_open_plugin(&id.strip, slot, &*model),
+            _ => false,
+        }
+    }
+
     /// Asks the hook for a panel for `strip_id`/`slot` and opens it, or raises the one already
     /// open for it (Console has one window per insert). Returns whether one opened.
     pub fn on_open_plugin(&mut self, strip_id: &str, slot: u8, model: &dyn MixerModel) -> bool {

@@ -23,6 +23,8 @@ pub struct EngineSlot {
     seen: Option<(u64, u64)>,
     /// While the list is empty: when the slot was last re-read and how many times.
     reread: (Instant, u32),
+    /// A plug-in load into the slot is in flight ([`Store::insert_loading`]).
+    loading: bool,
 }
 
 /// An empty slot is re-read this often (`get <slot>?recursive=1`) and at most [`REREADS`] times:
@@ -49,16 +51,24 @@ impl EngineSlot {
     }
 
     fn new(slot: InsertPaths, params: Vec<PluginParameter>) -> Self {
-        Self { slot, params, retained: Vec::new(), seen: None, reread: (Instant::now(), 0) }
+        Self { slot, params, retained: Vec::new(), seen: None, reread: (Instant::now(), 0), loading: false }
     }
 
     /// Re-lists the parameters when the tree changed (refresh landed, plug-in swapped) and keeps
     /// `NormalizedValue`, `StringValue` and `StepValue` of each subscribed. An empty list is
     /// re-read now and then (see [`REREAD`]). True when the list changed.
     pub fn sync(&mut self, store: &mut Store) -> bool {
+        // A load that commits publishes its parameters in the daemon's tree, and its name push
+        // repeats the console's own optimistic one: re-read the slot once it is live.
+        let loading = store.insert_loading(&self.slot);
+        if self.loading && !loading {
+            store.refresh(&self.slot.base);
+            self.reread = (Instant::now(), 0);
+        }
+        self.loading = loading;
         let rev = (store.tree_revision(), store.node_revision());
         if self.seen == Some(rev) {
-            if self.params.is_empty() && self.reread.1 < REREADS && self.reread.0.elapsed() >= REREAD {
+            if !loading && self.params.is_empty() && self.reread.1 < REREADS && self.reread.0.elapsed() >= REREAD {
                 store.refresh(&self.slot.base);
                 self.reread = (Instant::now(), self.reread.1 + 1);
             }
@@ -80,9 +90,15 @@ impl EngineSlot {
         changed
     }
 
-    /// Whether [`sync`](Self::sync) still re-reads an empty slot (the window keeps ticking).
+    /// Whether [`sync`](Self::sync) still waits for the plug-in: a load in flight, or an empty
+    /// slot it re-reads (the window keeps ticking).
     pub fn rereading(&self) -> bool {
-        self.params.is_empty() && self.reread.1 < REREADS
+        self.loading || (self.params.is_empty() && self.reread.1 < REREADS)
+    }
+
+    /// A plug-in load into the slot is in flight: its window shows the panel locked.
+    pub fn loading(&self) -> bool {
+        self.loading
     }
 
     /// Releases the subscriptions taken by [`open`](Self::open)/[`sync`](Self::sync).

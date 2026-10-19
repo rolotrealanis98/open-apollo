@@ -294,6 +294,9 @@ pub struct PluginWindow {
     /// The matching spec's [`Availability`] when one exists. `Pending` lists the ids the
     /// importer can still make: the host may run it (`oa-assets build`) and reopen the window.
     pub availability: Option<Availability>,
+    /// A load is in flight: the panel shows dimmed with "LOADING…" and takes no input (the shell
+    /// keeps only Close) until the engine reports the plug-in live.
+    pub loading: bool,
 }
 
 /// `OA_PLUGIN_WIREFRAME=1`: open spec panels even when their art is not all generated
@@ -352,6 +355,7 @@ impl PluginWindow {
             version: None,
             inline_popover: true,
             availability,
+            loading: false,
         }
     }
 
@@ -431,7 +435,14 @@ impl PluginWindow {
                 ui.text(&format!("{}\nUA plug-in GUI", c.name), style, l.editor, Align::Center);
             }
             Content::Spec(p) => p.build(ui, l.editor, params),
+            // No "no parameters" text while the parameters are still coming.
+            Content::Generic(_) if self.loading => {}
             Content::Generic(g) => g.build(ui, l.editor, params),
+        }
+        if self.loading {
+            ui.fill(l.editor, BLACK.with_alpha(0.55));
+            let style = Ui::plain_style("Helvetica", 12.0, true, LABEL);
+            ui.text("LOADING…", style, l.editor, Align::Center);
         }
         if let Some(f) = l.footer {
             self.footer(ui, &l, f);

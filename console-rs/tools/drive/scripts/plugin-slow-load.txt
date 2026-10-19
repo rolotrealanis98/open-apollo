@@ -1,0 +1,23 @@
+# A plug-in load the daemon takes 8 s to commit (a native load) feels instant: on the drop the slot
+# shows the plug-in loading ("…") and its window opens at once, locked ("LOADING…"); at the commit
+# the same window goes live without reopening. A load the daemon refuses after its seconds closes
+# the window, empties the slot and shows the reason.
+#: --catalogue --specs --daemon-arg=--load-delay --daemon-arg=8 --daemon-arg=--refuse-load --daemon-arg=EQ
+settle
+dragto browser:BrowserItem(0) /devices/0/inputs/0:Insert(0)
+wait 300
+layer plugin:/devices/0/inputs/0:0
+text LOADING…
+text Test Comp…
+wait 9000
+notext LOADING…
+notext Test Comp…
+layer plugin:/devices/0/inputs/0:0 same
+dragto browser:BrowserItem(1) /devices/0/inputs/0:Insert(1)
+wait 300
+layer plugin:/devices/0/inputs/0:1
+text LOADING…
+wait 9000
+nolayer plugin:/devices/0/inputs/0:1
+text refused by the test daemon
+#! tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test Comp
