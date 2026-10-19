@@ -439,6 +439,10 @@ impl Panel for WindowPanel {
         self.title_bar.contains(x, y) && !self.hits.iter().any(|h| h.rect.contains(x, y))
     }
 
+    fn hits(&self) -> &[Hit] {
+        &self.hits
+    }
+
     fn pointer(&mut self, ev: PointerEvent, model: &mut dyn MixerModel) -> PanelResponse {
         let (dx, dy) = self.origin;
         // Spec panels recognise their own gestures (long presses, repeats, held looks, swipes,

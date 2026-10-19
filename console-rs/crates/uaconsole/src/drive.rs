@@ -28,7 +28,12 @@
 //! wait MS             pump the model for MS milliseconds
 //! settle              pump until nothing changes for 300 ms (≤ 5 s)
 //! shot PATH           render a PNG of the current frame
-//! hits [PREFIX]       print the names and rects of the hits on screen
+//! hits [PREFIX]       print the names and rects of the hits on screen (the top plug-in
+//!                     window's too)
+//! layers              print each layer (separate window) id, kind and rect
+//! layer PREFIX [larger|smaller|same]   print the first layer whose id starts with PREFIX;
+//!                     with a word, fail unless its size compares so with the last `layer PREFIX`
+//! text TEXT           fail unless TEXT is drawn (texts joined by spaces: wrapped lines match)
 //! echo TEXT
 //! ```
 //!
@@ -61,6 +66,8 @@ pub struct Driver {
     fine: bool,
     copy: bool,
     scale: f32,
+    /// Sizes the `layer` command printed, by prefix.
+    layer_sizes: std::collections::HashMap<String, (f32, f32)>,
 }
 
 pub fn name(id: &ControlId) -> String {
@@ -104,6 +111,7 @@ impl Driver {
             fine: false,
             copy: false,
             scale,
+            layer_sizes: Default::default(),
         };
         d.rebuild();
         d
@@ -147,10 +155,12 @@ impl Driver {
             let (x, y) = p.split_once(',').ok_or("point is @X,Y")?;
             return Ok((x.parse().map_err(|_| "bad x")?, y.parse().map_err(|_| "bad y")?));
         }
-        self.frame
-            .hits
+        // The top plug-in window's controls first (the overlay takes presses on it).
+        self.overlays
+            .top_hits()
             .iter()
             .rev()
+            .chain(self.frame.hits.iter().rev())
             .find(|h| name(&h.id) == target)
             .map(|h| centre(h.rect))
             .ok_or_else(|| format!("no hit named {target:?} (try `hits`)"))
@@ -409,11 +419,55 @@ impl Driver {
             "shot" => self.shot(Path::new(arg(0)?))?,
             "hits" => {
                 let prefix = args.first().copied().unwrap_or("");
-                for h in &self.frame.hits {
+                for h in self.frame.hits.iter().chain(self.overlays.top_hits()) {
                     let n = name(&h.id);
                     if n.starts_with(prefix) {
                         println!("hit {n} [{:.0},{:.0},{:.0},{:.0}]", h.rect.x, h.rect.y, h.rect.w, h.rect.h);
                     }
+                }
+            }
+            "layers" => {
+                for l in &self.frame.layers {
+                    let r = l.rect;
+                    println!("layer {} {:?} [{:.0},{:.0},{:.0},{:.0}]", l.id, l.kind, r.x, r.y, r.w, r.h);
+                }
+            }
+            "layer" => {
+                let prefix = arg(0)?;
+                let l = self
+                    .frame
+                    .layers
+                    .iter()
+                    .find(|l| l.id.starts_with(prefix))
+                    .ok_or_else(|| format!("no layer {prefix:?} (try `layers`)"))?;
+                let r = l.rect;
+                println!("layer {} [{:.0},{:.0},{:.0},{:.0}]", l.id, r.x, r.y, r.w, r.h);
+                let now = (r.w, r.h);
+                let before = self.layer_sizes.insert(prefix.to_string(), now);
+                if let Some(word) = args.get(1) {
+                    let (w0, h0) = before.ok_or("layer: nothing to compare with yet")?;
+                    let ok = match *word {
+                        "larger" => now.0 > w0 && now.1 > h0,
+                        "smaller" => now.0 < w0 && now.1 < h0,
+                        "same" => now == (w0, h0),
+                        _ => return Err(format!("layer: {word:?} is not larger, smaller or same")),
+                    };
+                    if !ok {
+                        return Err(format!("{w0}x{h0} -> {}x{} is not {word}", now.0, now.1));
+                    }
+                }
+            }
+            "text" => {
+                let want = args.join(" ");
+                let drawn: Vec<&str> = self
+                    .frame
+                    .list
+                    .items
+                    .iter()
+                    .filter_map(|d| if let rack::Draw::Text { text, .. } = d { Some(text.as_str()) } else { None })
+                    .collect();
+                if !drawn.join(" ").contains(&want) {
+                    return Err(format!("{want:?} is not drawn"));
                 }
             }
             "echo" => println!("{}", args.join(" ")),

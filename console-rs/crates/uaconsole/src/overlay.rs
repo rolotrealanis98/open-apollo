@@ -136,6 +136,10 @@ pub trait Panel {
     fn title_bar_at(&self, _x: f32, _y: f32) -> bool {
         false
     }
+    /// Its hit regions at the last build (window points), for `--drive` scripts.
+    fn hits(&self) -> &[rack::Hit] {
+        &[]
+    }
 }
 
 /// Called when the user opens a plug-in insert (`Action::Tap` on `Control::Insert(slot)`).
@@ -372,7 +376,11 @@ impl OverlayStack {
         self.index_of(layer_id).is_some_and(|i| self.panels[i].title_bar_at(x, y))
     }
 
-    /// Lets every panel read the model before the next build.
+    /// The top panel's hit regions (pointer input goes to it), for `--drive` scripts.
+    pub fn top_hits(&self) -> &[rack::Hit] {
+        self.panels.last().map_or(&[], |p| p.hits())
+    }
+
     /// Opens a menu of the top panel (`Panel::open_menu`).
     pub fn open_menu(&mut self, which: &str) -> bool {
         self.panels.last_mut().is_some_and(|p| p.open_menu(which))
@@ -383,6 +391,7 @@ impl OverlayStack {
         self.panels.iter_mut().flat_map(|p| p.take_mixer_actions()).collect()
     }
 
+    /// Lets every panel read the model before the next build.
     pub fn sync(&mut self, model: &mut dyn MixerModel) {
         for p in &mut self.panels {
             p.sync(model);
