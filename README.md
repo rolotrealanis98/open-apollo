@@ -26,13 +26,16 @@ your own UAD install (see [NOTICE.md](NOTICE.md)).
 [![UA driver parity](docs/status/badge-parity.svg)](docs/status/)
 [![work plan](docs/status/badge-plan.svg)](docs/status/)
 [![models verified](docs/status/badge-models.svg)](docs/status/)
+[![plug-ins live on the Apollo](docs/status/badge-plugins.svg)](docs/status/#plug-in-mapping)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/status/progress-dark.svg">
-  <img alt="Status map: one square per behaviour of UA's drivers, task of the work plan or Apollo model, coloured by status" src="docs/status/progress-light.svg">
+  <img alt="Status map: one square per behaviour of UA's drivers, task of the work plan, Apollo model or UAD plug-in, coloured by status" src="docs/status/progress-light.svg">
 </picture>
 
-Each square is one thing UA's own drivers do (left), one task of the work plan (right) or one Apollo model (bottom right). The legend under the map gives the colours: verified on real hardware, done in code, partial, still to figure out (needs reverse engineering), understood but not done, plugin hosting (being built), and needs hardware (a test on an Apollo, or hardware the project doesn't have). The numbers per area and the open tasks are in [docs/status](docs/status/).
+Each square is one thing UA's own drivers do (top left), one task of the work plan (top right), one Apollo model (right) or one UAD plug-in (bottom). The legend under the map gives the colours: verified on real hardware, done in code, partial, still to figure out (needs reverse engineering), understood but not done, plugin hosting (being built), and needs hardware (a test on an Apollo, or hardware the project doesn't have). The numbers per area and the open tasks are in [docs/status](docs/status/).
+
+The bottom row tracks the plug-in work that is not released yet: each UA-built UAD-2 plug-in whose controls have been mapped to the Apollo's DSP by running UA's own code offline, and whether it has loaded on the Apollo with every control set and read back. Red there means the test Apollo doesn't authorize that plug-in, so it can't be checked.
 
 ## What Works (Apollo x4 — Thunderbolt, Ubuntu 24.04)
 

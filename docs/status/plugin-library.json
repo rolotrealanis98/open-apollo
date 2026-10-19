@@ -1,0 +1,831 @@
+{
+ "exported": "2026-10-18",
+ "source": "the plug-in library ledger (every UA-built UAD-2 plug-in in scope, by pipeline stage)",
+ "scope": 206,
+ "items": [
+  [
+   "4K Buss Compressor",
+   "ready"
+  ],
+  [
+   "4K Channel Strip",
+   "ready"
+  ],
+  [
+   "A-Type Multiband Enhancer",
+   "hold"
+  ],
+  [
+   "ADA Flanger",
+   "live"
+  ],
+  [
+   "ADA STD-1 Stereo Tapped Delay",
+   "ready"
+  ],
+  [
+   "AKG BX 20",
+   "live"
+  ],
+  [
+   "AMS DMX 15-80 S",
+   "live"
+  ],
+  [
+   "AMS RMX16",
+   "live"
+  ],
+  [
+   "AMS RMX16 Expanded",
+   "live"
+  ],
+  [
+   "API 2500",
+   "live"
+  ],
+  [
+   "API 550A",
+   "live"
+  ],
+  [
+   "API 560",
+   "live"
+  ],
+  [
+   "API Preamp",
+   "live"
+  ],
+  [
+   "API Vision Channel Strip",
+   "blocked"
+  ],
+  [
+   "API Vision Channel Strip Legacy",
+   "live"
+  ],
+  [
+   "Ampeg B15N",
+   "live"
+  ],
+  [
+   "Ampeg SVT3Pro",
+   "live"
+  ],
+  [
+   "Ampeg SVTVR",
+   "live"
+  ],
+  [
+   "Ampeg SVTVR Classic",
+   "live"
+  ],
+  [
+   "Ampex ATR-102",
+   "live"
+  ],
+  [
+   "Auto-Tune Realtime Access",
+   "live"
+  ],
+  [
+   "Auto-Tune Realtime Advanced",
+   "live"
+  ],
+  [
+   "Auto-Tune Realtime X",
+   "live"
+  ],
+  [
+   "Avalon VT-737sp",
+   "live"
+  ],
+  [
+   "Bermuda Triangle",
+   "live"
+  ],
+  [
+   "Brigade Chorus",
+   "live"
+  ],
+  [
+   "C-Suite C-Vox",
+   "live"
+  ],
+  [
+   "CS-1",
+   "hold"
+  ],
+  [
+   "Cambridge",
+   "live"
+  ],
+  [
+   "Capitol Chambers",
+   "live"
+  ],
+  [
+   "Century Tube Channel Strip",
+   "live"
+  ],
+  [
+   "Chandler GAV19T",
+   "ready"
+  ],
+  [
+   "not authorized on the test Apollo (1)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (2)",
+   "unlicensed"
+  ],
+  [
+   "Cooper Time Cube",
+   "live"
+  ],
+  [
+   "Dangerous BAX EQ Master",
+   "ready"
+  ],
+  [
+   "Dangerous BAX EQ Mix",
+   "ready"
+  ],
+  [
+   "Diezel Herbert",
+   "ready"
+  ],
+  [
+   "Diezel VH4",
+   "ready"
+  ],
+  [
+   "DreamVerb",
+   "live"
+  ],
+  [
+   "Dytronics Cyclosonic Panner",
+   "hold"
+  ],
+  [
+   "Dytronics Tri-Stereo Chorus",
+   "hold"
+  ],
+  [
+   "EMT 140",
+   "live"
+  ],
+  [
+   "EMT 250",
+   "hold"
+  ],
+  [
+   "ENGL E646 VS",
+   "ready"
+  ],
+  [
+   "ENGL E765 RT",
+   "live"
+  ],
+  [
+   "ENGL Savage 120",
+   "ready"
+  ],
+  [
+   "EP-34 Tape Echo",
+   "live"
+  ],
+  [
+   "Eden WT800",
+   "hold"
+  ],
+  [
+   "Empirical Labs Distressor",
+   "live"
+  ],
+  [
+   "Empirical Labs FATSO Jr",
+   "live"
+  ],
+  [
+   "Empirical Labs FATSO Sr",
+   "live"
+  ],
+  [
+   "Fairchild 660",
+   "live"
+  ],
+  [
+   "Fairchild 670",
+   "live"
+  ],
+  [
+   "Fairchild 670 Legacy",
+   "live"
+  ],
+  [
+   "Fender 55 Tweed Deluxe",
+   "live"
+  ],
+  [
+   "Friedman BE100",
+   "ready"
+  ],
+  [
+   "Friedman Buxom Betty",
+   "ready"
+  ],
+  [
+   "Friedman DS40",
+   "ready"
+  ],
+  [
+   "Fuchs Overdrive Supreme 50",
+   "ready"
+  ],
+  [
+   "Galaxy Tape Echo",
+   "live"
+  ],
+  [
+   "Gallien Krueger 800RB",
+   "ready"
+  ],
+  [
+   "Harrison 32C",
+   "live"
+  ],
+  [
+   "Harrison 32C SE",
+   "live"
+  ],
+  [
+   "Helios Type 69",
+   "live"
+  ],
+  [
+   "Helios Type 69 Legacy",
+   "live"
+  ],
+  [
+   "Hitsville EQ",
+   "live"
+  ],
+  [
+   "Hitsville EQ Mastering",
+   "live"
+  ],
+  [
+   "Hitsville Reverb Chambers",
+   "live"
+  ],
+  [
+   "Ibanez Tube Screamer TS808",
+   "ready"
+  ],
+  [
+   "Korg SDD-3000",
+   "live"
+  ],
+  [
+   "LA-6176 Channel Strip",
+   "live"
+  ],
+  [
+   "Lexicon 224",
+   "hold"
+  ],
+  [
+   "Lexicon 480L",
+   "live"
+  ],
+  [
+   "Little Labs IBP",
+   "live"
+  ],
+  [
+   "Little Labs VOG",
+   "live"
+  ],
+  [
+   "MXR Flanger-Doubler",
+   "live"
+  ],
+  [
+   "Maag EQ4",
+   "ready"
+  ],
+  [
+   "Maag EQ4 MS",
+   "ready"
+  ],
+  [
+   "Manley Massive Passive",
+   "live"
+  ],
+  [
+   "Manley Massive Passive MST",
+   "live"
+  ],
+  [
+   "Manley Reference Mic Preamp",
+   "live"
+  ],
+  [
+   "Manley VOXBOX",
+   "live"
+  ],
+  [
+   "Manley Variable Mu",
+   "live"
+  ],
+  [
+   "not authorized on the test Apollo (3)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (4)",
+   "unlicensed"
+  ],
+  [
+   "Marshall Plexi Classic",
+   "hold"
+  ],
+  [
+   "Marshall Plexi Super Lead 1959",
+   "hold"
+  ],
+  [
+   "not authorized on the test Apollo (5)",
+   "unlicensed"
+  ],
+  [
+   "Millennia NSEQ-2",
+   "ready"
+  ],
+  [
+   "Moog Multimode Filter",
+   "live"
+  ],
+  [
+   "Moog Multimode Filter SE",
+   "live"
+  ],
+  [
+   "Moog Multimode Filter XL",
+   "blocked"
+  ],
+  [
+   "Neve 1073",
+   "live"
+  ],
+  [
+   "Neve 1073 Legacy",
+   "live"
+  ],
+  [
+   "Neve 1073SE Legacy",
+   "live"
+  ],
+  [
+   "Neve 1081",
+   "ready"
+  ],
+  [
+   "Neve 1081SE",
+   "ready"
+  ],
+  [
+   "Neve 1084",
+   "live"
+  ],
+  [
+   "Neve 2254 E",
+   "live"
+  ],
+  [
+   "Neve 2254 E Dual",
+   "live"
+  ],
+  [
+   "Neve 31102",
+   "ready"
+  ],
+  [
+   "Neve 31102SE",
+   "ready"
+  ],
+  [
+   "Neve 33609 C",
+   "live"
+  ],
+  [
+   "Neve 33609SE",
+   "live"
+  ],
+  [
+   "Neve 88RS",
+   "live"
+  ],
+  [
+   "Neve 88RS Legacy",
+   "live"
+  ],
+  [
+   "Neve Preamp",
+   "live"
+  ],
+  [
+   "not authorized on the test Apollo (6)",
+   "unlicensed"
+  ],
+  [
+   "Ocean Way Studios",
+   "hold"
+  ],
+  [
+   "Oxford Dynamic EQ",
+   "live"
+  ],
+  [
+   "Oxford Inflator",
+   "live"
+  ],
+  [
+   "Oxford Limiter",
+   "live"
+  ],
+  [
+   "Oxford SuprEsser DS",
+   "live"
+  ],
+  [
+   "Oxide Tape",
+   "live"
+  ],
+  [
+   "Precision Buss Compressor",
+   "live"
+  ],
+  [
+   "Precision Channel Strip",
+   "live"
+  ],
+  [
+   "Precision De-Esser",
+   "live"
+  ],
+  [
+   "Precision Delay Mod",
+   "live"
+  ],
+  [
+   "Precision Delay Mod L",
+   "live"
+  ],
+  [
+   "Precision Enhancer Hz",
+   "live"
+  ],
+  [
+   "Precision Enhancer kHz",
+   "live"
+  ],
+  [
+   "Precision Equalizer",
+   "live"
+  ],
+  [
+   "Precision K-Stereo",
+   "live"
+  ],
+  [
+   "Precision Limiter",
+   "live"
+  ],
+  [
+   "Precision Maximizer",
+   "live"
+  ],
+  [
+   "Precision Multiband",
+   "live"
+  ],
+  [
+   "Precision Reflection Engine",
+   "live"
+  ],
+  [
+   "Pultec EQP-1A",
+   "live"
+  ],
+  [
+   "Pultec EQP-1A Legacy",
+   "live"
+  ],
+  [
+   "Pultec HLF-3C",
+   "live"
+  ],
+  [
+   "Pultec MEQ-5",
+   "live"
+  ],
+  [
+   "Pultec-Pro Legacy",
+   "live"
+  ],
+  [
+   "Pure Plate",
+   "live"
+  ],
+  [
+   "Raw",
+   "live"
+  ],
+  [
+   "RealVerb-Pro",
+   "live"
+  ],
+  [
+   "Roland CE-1",
+   "ready"
+  ],
+  [
+   "Roland Dimension D",
+   "ready"
+  ],
+  [
+   "Roland RE-201",
+   "ready"
+  ],
+  [
+   "SPL Transient Designer",
+   "ready"
+  ],
+  [
+   "SPL TwinTube",
+   "ready"
+  ],
+  [
+   "SPL Vitalizer MK2-T",
+   "ready"
+  ],
+  [
+   "SPL Vitalizer MK3-T",
+   "ready"
+  ],
+  [
+   "SSL E Channel Strip",
+   "live"
+  ],
+  [
+   "SSL E Channel Strip Legacy",
+   "live"
+  ],
+  [
+   "SSL G Bus Compressor",
+   "live"
+  ],
+  [
+   "SSL G Bus Compressor Legacy",
+   "live"
+  ],
+  [
+   "Shadow Hills Class A Mastering Comp",
+   "ready"
+  ],
+  [
+   "Shadow Hills Mastering Compressor",
+   "ready"
+  ],
+  [
+   "not authorized on the test Apollo (7)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (8)",
+   "unlicensed"
+  ],
+  [
+   "Softube Bass Amp Room 8x10",
+   "hold"
+  ],
+  [
+   "not authorized on the test Apollo (9)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (10)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (11)",
+   "unlicensed"
+  ],
+  [
+   "Sound Machine Wood Works",
+   "live"
+  ],
+  [
+   "Sphere Mic Collection",
+   "live"
+  ],
+  [
+   "Sphere Mic Collection 180",
+   "live"
+  ],
+  [
+   "Studer A800",
+   "live"
+  ],
+  [
+   "Studio D Chorus",
+   "live"
+  ],
+  [
+   "Suhr PT100",
+   "ready"
+  ],
+  [
+   "Suhr SE100",
+   "ready"
+  ],
+  [
+   "not authorized on the test Apollo (12)",
+   "unlicensed"
+  ],
+  [
+   "TS Overdrive",
+   "live"
+  ],
+  [
+   "Teletronix LA-2",
+   "live"
+  ],
+  [
+   "Teletronix LA-2A Gray",
+   "live"
+  ],
+  [
+   "Teletronix LA-2A Legacy",
+   "live"
+  ],
+  [
+   "Teletronix LA-2A Silver",
+   "live"
+  ],
+  [
+   "Teletronix LA-3A",
+   "live"
+  ],
+  [
+   "Thermionic Culture Vulture",
+   "live"
+  ],
+  [
+   "not authorized on the test Apollo (13)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (14)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (15)",
+   "unlicensed"
+  ],
+  [
+   "Trident A-Range",
+   "live"
+  ],
+  [
+   "Tube-Tech CL 1B",
+   "hold"
+  ],
+  [
+   "Tube-Tech CL 1B mk II",
+   "hold"
+  ],
+  [
+   "not authorized on the test Apollo (16)",
+   "unlicensed"
+  ],
+  [
+   "not authorized on the test Apollo (17)",
+   "unlicensed"
+  ],
+  [
+   "UA 1176 Rev A",
+   "live"
+  ],
+  [
+   "UA 1176AE",
+   "live"
+  ],
+  [
+   "UA 1176LN Legacy",
+   "live"
+  ],
+  [
+   "UA 1176LN Rev E",
+   "live"
+  ],
+  [
+   "UA 1176SE Legacy",
+   "live"
+  ],
+  [
+   "UA 175-B",
+   "live"
+  ],
+  [
+   "UA 176",
+   "live"
+  ],
+  [
+   "UA 610-A",
+   "live"
+  ],
+  [
+   "UA 610-B",
+   "live"
+  ],
+  [
+   "V76 Preamp",
+   "live"
+  ],
+  [
+   "not authorized on the test Apollo (18)",
+   "unlicensed"
+  ],
+  [
+   "Vertigo VSC-2",
+   "ready"
+  ],
+  [
+   "Vertigo VSM-3",
+   "ready"
+  ],
+  [
+   "bx_digital V2",
+   "ready"
+  ],
+  [
+   "bx_digital V2 Mono",
+   "ready"
+  ],
+  [
+   "bx_digital V3",
+   "ready"
+  ],
+  [
+   "bx_digital V3 mix",
+   "ready"
+  ],
+  [
+   "bx_masterdesk",
+   "ready"
+  ],
+  [
+   "bx_masterdesk Classic",
+   "ready"
+  ],
+  [
+   "bx_refinement",
+   "ready"
+  ],
+  [
+   "bx_saturator V2",
+   "ready"
+  ],
+  [
+   "bx_subsynth",
+   "ready"
+  ],
+  [
+   "bx_tuner",
+   "live"
+  ],
+  [
+   "dbx 160",
+   "live"
+  ],
+  [
+   "elysia alpha compressor V2",
+   "ready"
+  ],
+  [
+   "elysia alpha master",
+   "ready"
+  ],
+  [
+   "elysia alpha mix",
+   "ready"
+  ],
+  [
+   "elysia mpressor",
+   "ready"
+  ]
+ ]
+}
