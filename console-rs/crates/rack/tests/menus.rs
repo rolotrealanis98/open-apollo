@@ -364,3 +364,22 @@ fn plugin_window_insert_menu() {
     assert_eq!(l[l.len() - 2..], ["[OPTIONS]".to_string(), "Assign...".to_string()]);
     assert!(m.items().iter().any(|i| i.ticked), "the window's own plug-in is ticked");
 }
+
+/// The Unison slot's right-click menu is the shared `Rack_Inserts` slot menu (0x18143c320;
+/// capture unison): "INSERT 1 (EMPTY)", Assign..., Paste, then the channel's Presets...; its
+/// Assign... arms the Unison assign browser, and a non-Unison clipboard cannot be pasted.
+#[test]
+fn unison_slot_menu_matches_console() {
+    let mut model = PreviewMixer::default();
+    let in0: std::sync::Arc<str> = "in0".into();
+    let m = menu::insert_menu(&model, &in0, 255);
+    assert_eq!(labels(&m), ["[INSERT 1 (EMPTY)]", "Assign...", "Paste", "[SM7B]", "Presets...", "Remove All", "Disable All", "Enable All"]);
+    let mut view = ViewState::default();
+    view.dispatch(Action::Tap(ControlId { strip: in0.clone(), control: Control::Menu(MenuCmd::Assign(255)) }), &mut model);
+    assert_eq!(view.browser.assign_to, Some(ControlId { strip: in0.clone(), control: Control::Insert(255) }));
+    view.dispatch(Action::Tap(ControlId { strip: in0.clone(), control: Control::InsertCopy(0) }), &mut model);
+    let InsertState::Loaded { name, .. } = &model.inserts["in0"][0] else { panic!("in0 insert 1 loaded") };
+    assert_eq!(model.plugin_is_unison(name), Some(false));
+    assert!(labels(&menu::insert_menu(&model, &in0, 3)).iter().any(|l| l.starts_with("Paste \"")), "copied");
+    assert!(!menu::insert_menu(&model, &in0, 255).find("Paste").unwrap().enabled, "Unison takes only Unison plug-ins");
+}

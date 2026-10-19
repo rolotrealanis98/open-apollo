@@ -6,9 +6,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 BIN="${1:-${UACONSOLE:-$HERE/../../target/debug/uaconsole}}"
 fail=0
 for s in "$HERE"/scripts/*.txt; do
-    extra=()
-    grep -q "run.py --catalogue" "$s" && extra=(--catalogue)
-    if python3 "$HERE/run.py" "$s" --uaconsole "$BIN" "${extra[@]}" >/tmp/drive-$$.log 2>&1; then
+    # A `#: --flag ...` line: run.py flags the script needs.
+    read -r -a extra <<<"$(sed -n 's/^#: //p' "$s" | head -1)"
+    if python3 "$HERE/run.py" "$s" --uaconsole "$BIN" ${extra[@]+"${extra[@]}"} >/tmp/drive-$$.log 2>&1; then
         echo "ok    $(basename "$s")"
     else
         echo "FAIL  $(basename "$s")"; cat /tmp/drive-$$.log; fail=1

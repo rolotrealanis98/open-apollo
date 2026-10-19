@@ -356,6 +356,11 @@ pub struct PluginEntry {
     /// Optional native host support, independent of the device licence.
     pub native_supported: Option<bool>,
     pub native_hint: Option<String>,
+    /// Kept in the catalogue (indices stay stable) but not listed: the engine hosts plug-ins
+    /// natively and this one cannot load in both mono and stereo on this device.
+    pub hidden: bool,
+    /// `/plugins/P/Unison`: loads in a Unison (preamp) slot. None: unknown (allowed).
+    pub unison: Option<bool>,
 }
 
 /// `Rack_PluginsTreeViewBadgedItem` badges (`Rack_PluginsBrowserManager::_GetRowData`).
@@ -390,7 +395,14 @@ impl PluginEntry {
             badge: (!enabled).then_some(PluginBadge::Demo),
             native_supported: None,
             native_hint: None,
+            hidden: false,
+            unison: None,
         }
+    }
+    /// Why insert `slot` (`255`: Unison) refuses this plug-in, None if it takes it. Console's
+    /// Unison assign browser lists only Unison plug-ins (manual §7.3, §8.1).
+    pub fn refusal(&self, slot: u8) -> Option<&'static str> {
+        (slot == 255 && self.unison == Some(false)).then_some("Only Unison plug-ins load in the Unison slot.")
     }
     /// Listed under `category` (any of its categories).
     pub fn in_category(&self, category: &str) -> bool {
@@ -590,8 +602,8 @@ pub trait MixerModel {
     }
     /// The catalogue's `/plugins/P/Unison` for plug-in `name`: whether it can sit in a Unison
     /// slot (drag and drop, paste). None: unknown (allowed).
-    fn plugin_is_unison(&self, _name: &str) -> Option<bool> {
-        None
+    fn plugin_is_unison(&self, name: &str) -> Option<bool> {
+        self.plugin_catalog().into_iter().find(|p| p.name == name).and_then(|p| p.unison)
     }
     /// Console's label for the Unison slot (None: from [`MixerModel::unison`]'s name).
     fn unison_label(&self, _s: &StripInfo) -> Option<InsertLabel> {
@@ -649,6 +661,11 @@ pub trait MixerModel {
     }
     /// Latest assignment refusal or engine error, displayed in the browser.
     fn plugin_notice(&self) -> Option<&str> {
+        None
+    }
+    /// Why plug-in `name` cannot load on insert `slot` (a `Control::Insert` id), when the model
+    /// knows before asking the engine (native hosting's per-plug-in slot lists).
+    fn insert_refusal(&self, _slot: &ControlId, _name: &str) -> Option<String> {
         None
     }
     fn plugin_categories(&self) -> Vec<String> {
@@ -809,9 +826,14 @@ fn demo_catalog() -> Vec<PluginEntry> {
     ];
     let enabled = ["UAD Neve 1073", "UAD Teletronix LA-2A Gray", "UAD Pultec EQP-1A", "UAD Oxide Tape", "UAD Galaxy Tape Echo"];
     let favorites = ["UAD Neve 1073", "UAD Teletronix LA-2A Gray", "UAD Lexicon 224", "UAD Fairchild 670"];
+    let unison = ["UAD API Vision Channel Strip", "UAD Avalon VT-737sp", "UAD Neve 1073", "UAD SSL E Channel Strip"];
     entries
         .iter()
-        .map(|(n, c)| PluginEntry { favorite: favorites.contains(n), ..PluginEntry::new(n, c, enabled.contains(n)) })
+        .map(|(n, c)| PluginEntry {
+            favorite: favorites.contains(n),
+            unison: Some(unison.contains(n)),
+            ..PluginEntry::new(n, c, enabled.contains(n))
+        })
         .collect()
 }
 

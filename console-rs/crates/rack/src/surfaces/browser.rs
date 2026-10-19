@@ -38,7 +38,7 @@ const SECTION_EDGE: Rgba = Rgba::rgb8(43, 46, 47);
 const CELL: Rgba = Rgba::rgb8(34, 36, 38);
 const CELL_ON: Rgba = Rgba::rgb8(64, 68, 71);
 const CELL_EDGE: Rgba = Rgba::rgb8(27, 29, 30);
-const AMBER: Rgba = Rgba::rgb8(255, 186, 0);
+pub(crate) const AMBER: Rgba = Rgba::rgb8(255, 186, 0);
 
 const MARGIN: f32 = 5.0;
 const TAB_Y: f32 = 6.0;
@@ -69,17 +69,24 @@ fn bold(size: f32, color: Rgba) -> TextStyle {
     Ui::plain_style("Helvetica", size, true, color)
 }
 
-/// Catalog indices shown for the current filters (category, favorites, search).
+/// Catalog indices shown for the current filters (category, favorites, search, assign target).
 pub fn filtered(catalog: &[PluginEntry], categories: &[String], view: &ViewState) -> Vec<usize> {
     let b = &view.browser;
     let cat = b.category.and_then(|i| categories.get(i as usize));
     let q = b.search.trim().to_lowercase();
+    let assign_slot = match b.assign_to {
+        Some(ControlId { control: Control::Insert(k), .. }) => Some(k),
+        _ => None,
+    };
     catalog
         .iter()
         .enumerate()
+        .filter(|(_, p)| !p.hidden)
         .filter(|(_, p)| cat.is_none_or(|c| p.in_category(c)))
         .filter(|(_, p)| !b.favorites_only || p.favorite)
         .filter(|(_, p)| q.is_empty() || p.name.to_lowercase().contains(&q))
+        // Assign mode lists only what the target slot takes (the Unison slot: Unison plug-ins).
+        .filter(|(_, p)| assign_slot.is_none_or(|k| p.refusal(k).is_none()))
         .map(|(i, _)| i)
         .collect()
 }
@@ -230,21 +237,12 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         }
         let catalog = model.plugin_catalog();
         let selected_hint = b.selected.and_then(|i| catalog.get(i as usize)).and_then(|p| p.native_hint.as_deref());
-        if let Some(notice) = model.plugin_notice().or(selected_hint) {
+        // A refused assignment keeps its target (assign mode or the selected row) and says why.
+        let refused = b.notice.filter(|_| b.assign_to.is_some() || b.selected.is_some());
+        if let Some(notice) = refused.or(model.plugin_notice()).or(selected_hint) {
             // Keep a visible reason even if the original assign hint was dismissed.
             let width = list.w - 2.0 * MARGIN;
-            let chars_per_line = ((width / 5.5) as usize).max(12);
-            let mut lines = vec![String::new()];
-            for word in notice.split_whitespace() {
-                let last = lines.last_mut().unwrap();
-                if !last.is_empty() && last.len() + word.len() + 1 > chars_per_line {
-                    lines.push(word.to_owned());
-                } else {
-                    if !last.is_empty() { last.push(' '); }
-                    last.push_str(word);
-                }
-            }
-            for line in lines.iter().take(4) {
+            for line in wrap(notice, ((width / 5.5) as usize).max(12)).iter().take(4) {
                 ui.text(line, bold(10.0, AMBER), Rect::new(list.x + MARGIN, y, width, 15.0), Align::Left);
                 y += 15.0;
             }
@@ -252,6 +250,23 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         }
         plugin_list(ui, model, view, Rect::new(list.x, y, list.w, list.max_y() - MARGIN - y));
     });
+}
+
+/// `text` in lines of at most `chars` characters (a longer word gets a line of its own).
+pub(crate) fn wrap(text: &str, chars: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for word in text.split_whitespace() {
+        let last = lines.last_mut().expect("one line");
+        if !last.is_empty() && last.len() + word.len() + 1 > chars {
+            lines.push(word.to_owned());
+        } else {
+            if !last.is_empty() {
+                last.push(' ');
+            }
+            last.push_str(word);
+        }
+    }
+    lines
 }
 
 /// The browser's title in assign mode: "<channel>: INSERT n" (s08 "AUX 1: INSERT 2") or
@@ -414,7 +429,13 @@ fn plugin_list(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Rect) {
     let content_w = r.w - SCROLLBAR_W;
     if lines.is_empty() {
         let msg = if catalog.is_empty() { "Plug-in catalog not loaded" } else { "No matching plug-ins" };
-        ui.text(msg, Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4)), Rect::new(r.x, r.y, content_w, 30.0), Align::Center);
+        let style = Ui::plain_style("Helvetica", 11.0, false, Rgba::WHITE.with_alpha(0.4));
+        ui.text(msg, style.clone(), Rect::new(r.x, r.y, content_w, 30.0), Align::Center);
+        // Native hosting hides every entry that can't load in both layouts; say why nothing is left.
+        if !catalog.is_empty() && catalog.iter().all(|p| p.hidden) {
+            let why = Rect::new(r.x + 8.0, r.y + 30.0, content_w - 16.0, 44.0);
+            ui.text("No plug-ins load in both mono and stereo on this device yet", style, why, Align::Center);
+        }
     }
     // Line tops in window points, scrolled.
     let mut tops = Vec::with_capacity(lines.len());

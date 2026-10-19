@@ -1,0 +1,13 @@
+# With native hosting the browser lists only plug-ins that load in both layouts (the owner's
+# gate): with the synthetic catalogue's slot lists, UAD Test Comp (stereo only) and UAD Test EQ
+# (mono only) are hidden and UAD Test Pre (both) is the one row; it drops and loads. The
+# under-slot refusal text for a layout the bundle lacks is covered by the rack / engine-model
+# unit tests (insert_refusal), since such a plug-in is never listed.
+#: --native-slots
+settle
+hits browser:BrowserItem 1
+hits browser:BrowserItem(2) 1
+dragto browser:BrowserItem(2) /devices/0/inputs/0:Insert(0)
+settle
+#! tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test Pre
+#! no tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test Comp

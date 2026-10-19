@@ -290,7 +290,11 @@ fn native_stereo_requires_the_advertised_layout_and_pair_leader() {
     let server = MockEngine::start(t, MockOptions::default()).unwrap();
     let mut m = live(&server);
     assign_native(&mut m, 2, 0);
-    assert!(m.plugin_notice().unwrap().contains("No native stereo loader"));
+    // A mono-only bundle on a linked (stereo) input: the reason says what to do.
+    assert_eq!(
+        m.plugin_notice(),
+        Some("UAD 1176LN Rev E: mono only — unlink the input or use a stereo bundle.")
+    );
     // Linked followers are absent from the assignable topology.
     assert!(m.insert_slot(&id("/devices/0/inputs/3", Control::Insert(0))).is_none());
     assign_native(&mut m, 3, 0);
@@ -308,7 +312,39 @@ fn native_mono_does_not_use_a_stereo_only_capability() {
     let server = MockEngine::start(t, MockOptions::default()).unwrap();
     let mut m = live(&server);
     assign_native(&mut m, 0, 0);
-    assert!(m.plugin_notice().unwrap().contains("No native mono loader"));
+    assert_eq!(
+        m.plugin_notice(),
+        Some("UAD 1176LN Rev E: stereo only — link the input or use a mono bundle.")
+    );
+    assert!(server.write_commands().is_empty());
+}
+
+#[test]
+fn a_browser_drag_onto_an_input_without_the_bundles_layout_is_forbidden_and_explained() {
+    let mut t = native_tree(4);
+    t.set_value("/devices/0/inputs/0/Stereo", true.into());
+    t.set_value("/devices/0/inputs/1/Stereo", true.into());
+    t.set_value("/plugins/1/NativeStereoSlots", "".into());
+    let server = MockEngine::start(t, MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    pump_until(&mut m, "catalogue", |m| m.plugin_catalog().len() == 2);
+    let s = in0(&m);
+    let hits = [
+        hit("browser", Control::BrowserItem(1), Rect::new(0.0, 0.0, 300.0, 40.0)),
+        hit(&s.id, Control::Insert(0), Rect::new(400.0, 0.0, 80.0, 48.0)),
+    ];
+    let mut v = ViewState::default();
+    assert!(v.drag_press(&hits, 20.0, 20.0, &m));
+    assert!(v.drag_motion(&hits, 420.0, 20.0, false, &m));
+    let d = v.drag.as_ref().unwrap();
+    assert!(d.target.is_none(), "no image-targeted highlight");
+    let why = "UAD 1176LN Rev E: mono only — unlink the input or use a stereo bundle.";
+    assert_eq!(d.forbidden.as_ref().map(|(_, r)| r.as_str()), Some(why));
+    // The drop: refused without a write, the reason in the browser notice and under the slot.
+    apply(v.drag_release(&m).unwrap(), &mut m);
+    assert_eq!(m.plugin_notice(), Some(why));
+    assert!(v.drop_notice.is_some());
+    std::thread::sleep(Duration::from_millis(100));
     assert!(server.write_commands().is_empty());
 }
 
@@ -478,4 +514,54 @@ fn native_unison_uses_input_stereo_state_and_has_no_follower_slot() {
     assert_eq!(writes_after(&server, 1), [format!("set {UNISON0}/EffectName/value \"UAD Neve 1073 Preamp\"")]);
     m.set_text(&id("/devices/0/inputs/1", Control::Insert(UNISON_SLOT)), "UAD Neve 1073 Preamp");
     assert_eq!(server.write_commands().len(), 1);
+}
+
+/// Four-plug-in catalogue: A mono + stereo, B mono only, C stereo only, D neither.
+fn filter_tree(hosting: bool) -> ua_engine::Tree {
+    let mut t = tree();
+    if hosting {
+        t.set_value("/NativePluginHosting", true.into());
+    }
+    let node = |name: &str, mono: &str, stereo: &str| {
+        serde_json::json!({"properties": {
+            "Name": {"type": "string", "value": name},
+            "Authorized": {"type": "bool", "value": true},
+            "Categories": {"type": "string", "value": "Compressors"},
+            "NativeMonoSlots": {"type": "string", "value": mono},
+            "NativeStereoSlots": {"type": "string", "value": stereo},
+        }})
+    };
+    t.insert_node(
+        &serde_json::json!({"children": {
+            "0": node("A", SLOT0, "/devices/0/inputs/0/effects/1"),
+            "1": node("B", SLOT0, ""),
+            "2": node("C", "", "/devices/0/inputs/0/effects/1"),
+            "3": node("D", "", ""),
+        }}),
+        "/plugins",
+    );
+    t
+}
+
+fn visible(m: &EngineMixer) -> Vec<String> {
+    let catalog = m.plugin_catalog();
+    let mut view = ViewState::default();
+    view.browser.assign_to = Some(id("x", Control::Insert(0)));
+    let shown = rack::surfaces::browser::filtered(&catalog, &m.plugin_categories(), &view);
+    shown.into_iter().map(|i| catalog[i].name.clone()).collect()
+}
+
+#[test]
+fn browser_lists_only_plugins_native_in_both_layouts_when_hosting() {
+    let server = MockEngine::start(filter_tree(true), MockOptions::default()).unwrap();
+    let m = live(&server);
+    assert_eq!(m.plugin_catalog().len(), 4, "indices stay those of the full catalogue");
+    assert_eq!(visible(&m), ["A"]);
+}
+
+#[test]
+fn browser_lists_everything_without_native_hosting() {
+    let server = MockEngine::start(filter_tree(false), MockOptions::default()).unwrap();
+    let m = live(&server);
+    assert_eq!(visible(&m), ["A", "B", "C", "D"]);
 }

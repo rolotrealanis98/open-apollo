@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "effectName": "UAD Test Comp",
+  "namePattern": "Test Comp",
+  "size": {"w": 400, "h": 200},
+  "parameters": [{"index": 0, "name": "Ratio", "default": 0.5}],
+  "elements": [{"id": "ratio", "kind": "knob", "x": 180, "y": 80, "w": 40, "h": 40, "param": 0}]
+}

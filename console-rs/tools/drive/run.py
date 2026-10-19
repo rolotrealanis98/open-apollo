@@ -2,9 +2,10 @@
 """Drive uaconsole headless against the recording fake daemon and check what reached the
 (fake) Apollo.
 
-    tools/drive/run.py SCRIPT.txt [--uaconsole BIN] [--daemon-arg ARG]... [--catalogue] [--keep]
+    tools/drive/run.py SCRIPT.txt [--uaconsole BIN] [--daemon-arg ARG]... [--catalogue]
+                      [--native-slots] [--specs] [--keep]
 
-`tools/drive/suite.sh [BIN]` runs every script in scripts/ (browser-dnd.txt with --catalogue).
+`tools/drive/suite.sh [BIN]` runs every script in scripts/, with the flags of its `#: ` line.
 
 SCRIPT is a `uaconsole --drive` script (crates/uaconsole/src/drive.rs). Lines starting with
 `#! ` are assertions on the daemon log, run after the script:
@@ -60,17 +61,27 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep the temp dir")
     ap.add_argument("--catalogue", action="store_true",
                     help="give the daemon the synthetic plug-in catalogue (fixtures/catalogue)")
+    ap.add_argument("--native-slots", action="store_true",
+                    help="the daemon also publishes native slot lists for that catalogue")
+    ap.add_argument("--specs", action="store_true",
+                    help="give uaconsole the synthetic panel specs (fixtures/specs), drawn as wireframes")
     a = ap.parse_args()
-    if a.catalogue:
+    if a.catalogue or a.native_slots:
         a.daemon_arg += ["--catalogue", str(HERE / "fixtures" / "catalogue")]
+    if a.native_slots:
+        a.daemon_arg += ["--native-slots"]
 
     tmp = Path(tempfile.mkdtemp(prefix="oa-drive-"))
     (tmp / "home").mkdir()
     log = tmp / "calls.jsonl"
     daemon, port = start_daemon(log, a.daemon_arg)
+    # Plug-in window scales are saved under the config home: keep the user's out of it.
+    env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "config")}
+    if a.specs:
+        env.update(OA_PLUGIN_SPECS=str(HERE / "fixtures" / "specs"), OA_PLUGIN_WIREFRAME="1")
     try:
         run = subprocess.run([a.uaconsole, "--drive", str(a.script), "--engine", f"127.0.0.1:{port}", "--writes"],
-                             cwd=a.script.parent, text=True, capture_output=True)
+                             cwd=a.script.parent, text=True, capture_output=True, env=env)
         sys.stdout.write(run.stdout)
         if run.returncode:
             sys.stderr.write(run.stderr)

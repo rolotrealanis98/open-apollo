@@ -110,6 +110,22 @@ class NativePluginBackend:
             return (first, first + 1) if first in (0, 2) else ()
         return (first,)
 
+    def _layout_refusal(self, slot, name, channels):
+        """Why `name` has no provider for this layout when it has one for the other.
+
+        A bundle is mono or stereo: on an input whose link state it lacks, say which it is
+        and what to do, instead of a generic missing-recipe error."""
+        if not channels:
+            return None
+        first = channels[0]
+        if len(channels) == 2:
+            other, kind, verb, want = (first,), 'mono', 'unlink', 'stereo'
+        else:
+            other, kind, verb, want = (first, first + 1), 'stereo', 'link', 'mono'
+        if (slot, name, other) not in self.providers:
+            return None
+        return f'{name}: {kind} only — {verb} the input or use a {want} bundle'
+
     @staticmethod
     def _provider_channels(provider):
         return getattr(provider, 'channels', (int(provider.slot.split('/')[4]),))
@@ -213,7 +229,8 @@ class NativePluginBackend:
             return PrepareOutcome(Outcome.FAILED, detail='This driver does not support stereo native chains')
         provider = self.providers.get((slot, name, channels))
         if provider is None:
-            return PrepareOutcome(Outcome.FAILED, detail='This effect has no native recipe for this slot')
+            return PrepareOutcome(Outcome.FAILED, detail=self._layout_refusal(slot, name, channels)
+                                  or 'This effect has no native recipe for this slot')
         previous = self._leases.get(slot)
         if slot in self._pending:
             return PrepareOutcome(Outcome.FAILED, detail='A native replacement is pending')
