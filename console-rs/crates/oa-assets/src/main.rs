@@ -2,10 +2,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use oa_assets::catalogue;
-use oa_assets::detect::{self, Install};
+use oa_assets::detect::{self, Install, PluginIcons};
 use oa_assets::discover::{self, Root, Source};
 use oa_assets::dsp;
 use oa_assets::firmware::{self, Event, Pins};
+use oa_assets::icons;
 use oa_assets::import;
 
 const USAGE: &str = "\
@@ -16,8 +17,12 @@ USAGE:
   oa-assets mount  DEVICE                      mount a Windows partition read-only, then scan it
   oa-assets attach IMAGE                       attach a (shut down) VM's raw disk image read-only, then scan it
   oa-assets detach IMAGE|LOOPDEVICE            unmount an attached image and release it
-  oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs and
-                                               write the plug-in catalogue (as `catalogue`)
+  oa-assets import [--from PATH] [--dry-run]   copy UAD Console's resources for console-rs, write the
+                                               plug-in catalogue (as `catalogue`) and import the
+                                               plug-in icons (as `icons`)
+  oa-assets icons  [--from PATH]               copy the plug-in browser icons (from the installed
+                                               `Plug-In Icons` folder, or UA's cached installer)
+                                               to <data>/console-resources/Plug-In Icons
   oa-assets catalogue [--from PATH]            write UA's plug-in list and factory preset menus
                                                (names only) to ~/.local/share/open-apollo/ua-catalogue
   oa-assets status [--out DIR]                 show what has been imported and built
@@ -120,6 +125,7 @@ fn main() -> ExitCode {
         "detach" => detach(&args),
         "import" => run_import(&args),
         "catalogue" => run_catalogue(&args),
+        "icons" => run_icons(&args),
         "status" => status(&args),
         "firmware" => return run_firmware(&args),
         "dsp" => return run_dsp(&args),
@@ -285,6 +291,11 @@ fn run_import(args: &Args) -> Result<(), String> {
         let (files, bytes) = import::measure(&console.resources).map_err(|e| e.to_string())?;
         println!("Would copy UAD Console {version} resources: {files} files, {:.1} MB", bytes as f64 / 1e6);
         println!("  from {}\n  to   {}", console.resources.display(), args.data.join(import::CONSOLE_DIR).display());
+        match &chosen.plugin_icons {
+            Some(PluginIcons::Folder(p)) => println!("Would copy the plug-in icons from {}", p.display()),
+            Some(PluginIcons::CachedMsi(p)) => println!("Would extract the plug-in icons from {}", p.display()),
+            None => {}
+        }
         return Ok(());
     }
     let done = import::import_console(console, &args.data).map_err(|e| format!("copy failed: {e}"))?;
@@ -299,6 +310,33 @@ fn run_import(args: &Args) -> Result<(), String> {
         Ok(w) => print_catalogue(&w),
         Err(e) => eprintln!("oa-assets: plug-in catalogue not written ({e}); the plug-in browser stays empty"),
     }
+    import_icons(chosen.plugin_icons.as_ref(), &args.data);
+    Ok(())
+}
+
+/// The plug-in browser still works without icons, so a missing or unreadable source only warns.
+fn import_icons(src: Option<&PluginIcons>, data: &std::path::Path) {
+    let Some(src) = src else {
+        let system = std::path::Path::new("/Library/Application Support/Universal Audio/Plug-In Icons");
+        if cfg!(target_os = "macos") && system.is_dir() {
+            println!("Plug-in icons: read from {} directly; nothing to import", system.display());
+        } else {
+            eprintln!(
+                "oa-assets: no plug-in icons found (no `Plug-In Icons` folder, no cached apollo-32bit.msi); \
+                 the plug-in browser shows blank icons"
+            );
+        }
+        return;
+    };
+    match icons::import(src, data) {
+        Ok(i) => println!("Imported {} plug-in icons -> {}", i.count, i.dest.display()),
+        Err(e) => eprintln!("oa-assets: plug-in icons not imported ({e}); the plug-in browser shows blank icons"),
+    }
+}
+
+fn run_icons(args: &Args) -> Result<(), String> {
+    let installs: Vec<Install> = roots(args).iter().map(detect::inspect).collect();
+    import_icons(installs.iter().find_map(|i| i.plugin_icons.as_ref()), &args.data);
     Ok(())
 }
 
@@ -332,6 +370,9 @@ fn status(args: &Args) -> Result<(), String> {
             c["from"].as_str().unwrap_or("?")
         ),
         None => println!("Nothing imported yet. Run `oa-assets scan`, then `oa-assets import`."),
+    }
+    if let Some(i) = m.get("plugin_icons") {
+        println!("Plug-in icons: {} from {}", i["count"], i["from"].as_str().unwrap_or("?"));
     }
     let art = args.out.clone().unwrap_or_else(oa_assets::plugins::default_out);
     let pm = import::read_manifest(&art);
