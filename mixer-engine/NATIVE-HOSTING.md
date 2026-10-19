@@ -1,7 +1,8 @@
 # Experimental native plug-in hosting
 
-This private development path connects the daemon's insert transactions to the
-kernel INSTANCE API. Select a trusted local provider explicitly and preserve the
+Experimental and off by default (driver `plugin_host=1`, daemon `--native-plugin-provider`). It
+connects the daemon's insert transactions to the kernel INSTANCE API. The bundles a provider
+loads are built on your own machine from your own UAD install; open-apollo ships none. Select a trusted local provider explicitly and preserve the
 running hardware configuration:
 
 ```sh
