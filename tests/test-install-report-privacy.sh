@@ -77,7 +77,7 @@ check "other device's MAC dropped" absent "AA:BB:CC:DD:EE:FF"
 check "other device's name dropped" absent "Fake Headset XYZ"
 check "Apollo node kept" present "alsa_output.pci-0000_44_00.0.pro-output-0"
 check "other devices only counted" present "other_media_classes"
-check "pw-dump temp file removed" test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -newer "$REPORT_FILE" -name 'tmp.*' -user "$me" -size +0 2>/dev/null | xargs -r grep -l 'Fake Headset' 2>/dev/null)"
+check "pw-dump temp file removed" test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -newer "$REPORT_FILE" -name 'tmp.*' -user "$me" -size +0 -print0 2>/dev/null | xargs -0 -r grep -l 'Fake Headset' 2>/dev/null)"
 
 echo
 if [ "$failures" -eq 0 ]; then

@@ -52,7 +52,7 @@ ok()     { echo -e "${GREEN}[ OK ]${NC}  $*"; }
 warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()   { echo -e "${RED}[FAIL]${NC}  $*"; }
 header() { echo -e "\n${BOLD}── $* ──${NC}"; }
-usage()  { sed -n '2,/^set -uo/{/^set -uo/d;s/^# \{0,1\}//;p}' "${BASH_SOURCE[0]}"; }
+usage()  { sed -n '2,/^set -uo/{/^set -uo/d;s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"; }
 
 parse_args() {
     local arg
@@ -549,6 +549,10 @@ main() {
         exec </dev/null
     fi
     resolve_desktop_user
+    # shellcheck source=scripts/oa-log.sh
+    . "$SCRIPT_DIR/oa-log.sh"
+    oa_log_start uninstall "$DESKTOP_USER" "$@"
+    trap 'oa_log_finish "Uninstall log"' EXIT
 
     echo ""
     echo -e "${BOLD}Open Apollo — Uninstaller${NC}"

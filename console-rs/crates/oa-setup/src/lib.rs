@@ -16,6 +16,7 @@ pub mod importer;
 pub mod installlog;
 pub mod jobs;
 pub mod options;
+pub mod runlog;
 pub mod scan;
 pub mod setuprun;
 pub mod steps;

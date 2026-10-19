@@ -31,10 +31,19 @@
 #   --panels TARBALL  install these plug-in panel specs instead of downloading
 #                     the pinned release (see install-panels.sh)
 #   --panels-sha256 HEX  the SHA-256 --panels must have, when not the pinned one
-#   --send-report     upload install.sh's anonymous report (opt-in)
+#   --send-report     upload install.sh's anonymous report (opt-in); it also
+#                     lists the render ids of the plug-ins the Apollo is
+#                     authorized for, unless --no-plugin-report
+#   --no-plugin-report  leave the authorized plug-ins out of a sent report
+#   --log FILE        append this run's log to FILE (the setup wizard's own log)
+#                     instead of a new ~/.local/state/open-apollo/setup-*.log
 #   --plugin-hosting  experimental: load the driver with its plug-in host on and
 #                     map the user's plug-ins for it (install.sh --plugin-hosting)
 #   -h, --help        show this help
+#
+# The whole run's output is also logged, redacted (scripts/oa-log.sh), in the
+# user's ~/.local/state/open-apollo/setup-<date>-<time>.log; the last line
+# says where.
 #
 # Exit status: 0 done (perhaps with warnings), 1 a step failed, 2 a bad option.
 
@@ -52,6 +61,8 @@ OA_ASSETS=""
 DATA_DIR=""
 KEEP_CURRENT=0
 SEND_REPORT=0
+PLUGIN_REPORT=1
+LOG_TO=""
 PLUGIN_HOSTING=0
 PANELS_FROM=""
 PANELS_SHA=""
@@ -68,13 +79,15 @@ warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()   { echo -e "${RED}[FAIL]${NC}  $*"; }
 header() { echo -e "\n${BOLD}── $* ──${NC}"; }
 marker() { echo "::step $*"; }
-usage()  { sed -n '2,/^set -uo/{/^set -uo/d;s/^# \{0,1\}//;p}' "${BASH_SOURCE[0]}"; }
+# shellcheck source=scripts/oa-log.sh
+. "$SCRIPT_DIR/oa-log.sh"
+usage()  { sed -n '2,/^set -uo/{/^set -uo/d;s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"; }
 bad_usage() { echo "setup-root.sh: $* (try --help)" >&2; exit 2; }
 
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --user|--from|--mount|--oa-assets|--data|--panels|--panels-sha256)
+            --user|--from|--mount|--oa-assets|--data|--panels|--panels-sha256|--log)
                 [ $# -ge 2 ] && [ -n "$2" ] || bad_usage "$1 needs a value"
                 case "$1" in
                     --user) TARGET_USER="$2" ;;
@@ -84,10 +97,12 @@ parse_args() {
                     --data) DATA_DIR="$2" ;;
                     --panels) PANELS_FROM="$2" ;;
                     --panels-sha256) PANELS_SHA="$2" ;;
+                    --log) LOG_TO="$2" ;;
                 esac
                 shift 2 ;;
             --keep-current) KEEP_CURRENT=1; shift ;;
             --send-report) SEND_REPORT=1; shift ;;
+            --no-plugin-report) PLUGIN_REPORT=0; shift ;;
             --plugin-hosting) PLUGIN_HOSTING=1; shift ;;
             -h|--help) usage; exit 0 ;;
             *) bad_usage "unknown option $1" ;;
@@ -98,6 +113,10 @@ parse_args() {
         bad_usage "use --from or --mount, not both"
     fi
     [ -n "$FROM" ] || [ -n "$MOUNT_DEV" ] || bad_usage "--from or --mount is required"
+    case "$LOG_TO" in
+        ""|/*) ;;
+        *) bad_usage "--log takes an absolute path" ;;
+    esac
     case "$MOUNT_DEV" in
         ""|/dev/*) ;;
         *) bad_usage "--mount takes a partition such as /dev/nvme0n1p3" ;;
@@ -310,6 +329,7 @@ step_driver() {
     header "Installing the driver"
     local -a args=(--yes)
     [ "$SEND_REPORT" = 1 ] && args+=(--send-report)
+    [ "$PLUGIN_REPORT" = 1 ] || args+=(--no-plugin-report)
     # The install is still open here (it closes on exit), so the plug-ins can be mapped from it.
     [ "$PLUGIN_HOSTING" = 1 ] && args+=("--plugin-hosting=$FROM")
     DRIVER_LOG=$(mktemp "${TMPDIR:-/tmp}/open-apollo-install.XXXXXX") || DRIVER_LOG=/dev/null
@@ -350,6 +370,12 @@ cleanup() {
     fi
 }
 
+# Last thing on exit: say where the log is and let it catch up.
+finish_log() {
+    cleanup
+    oa_log_finish "Setup log (attach it to a bug report)"
+}
+
 main() {
     parse_args "$@"
     if [ "$(id -u)" -ne 0 ]; then
@@ -367,7 +393,9 @@ main() {
     export SUDO_USER="$TARGET_USER"
     # A closed wizard window must not kill the install halfway
     trap '' PIPE
-    trap cleanup EXIT
+    [ -n "$LOG_TO" ] && OA_INSTALL_LOG="$LOG_TO"
+    oa_log_start setup "$TARGET_USER" "$@"
+    trap finish_log EXIT
     cd / || return 1
     exec </dev/null
 

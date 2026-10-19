@@ -39,7 +39,7 @@ ok()     { echo -e "${GREEN}[ OK ]${NC}  $*"; }
 warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()   { echo -e "${RED}[FAIL]${NC}  $*" >&2; }
 header() { echo -e "\n${BOLD}── $* ──${NC}"; }
-usage()  { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "${BASH_SOURCE[0]}"; }
+usage()  { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"; }
 
 PREFIX=""
 BUILD=1
@@ -48,6 +48,7 @@ SMOKE=0
 UNINSTALL=0
 COPY_FROM=""
 
+ARGS=("$@")
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --prefix)
@@ -372,6 +373,12 @@ smoke_test() {
 }
 
 main() {
+    if [[ "$CHECK_ONLY" != 1 ]]; then
+        # shellcheck source=scripts/oa-log.sh
+        . "$REPO/scripts/oa-log.sh"
+        oa_log_start uaconsole "" "${ARGS[@]}"
+        trap 'oa_log_finish "Log"' EXIT
+    fi
     if [[ "$UNINSTALL" == 1 ]]; then
         do_uninstall
         exit 0

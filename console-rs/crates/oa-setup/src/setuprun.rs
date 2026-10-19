@@ -348,6 +348,9 @@ pub struct Plan {
     pub data: Option<PathBuf>,
     pub keep_current: bool,
     pub send_report: bool,
+    /// With `send_report`: the report also lists the render ids of the plug-ins
+    /// the Apollo says are authorized (off: `--no-plugin-report`).
+    pub plugin_report: bool,
     /// `--plugin-hosting`: load the driver with its plug-in host on and map the
     /// user's plug-ins (scripts/setup-plugin-hosting.sh). Experimental, opt-in.
     pub plugin_hosting: bool,
@@ -376,6 +379,9 @@ impl Plan {
         }
         if self.send_report {
             a.push("--send-report".into());
+            if !self.plugin_report {
+                a.push("--no-plugin-report".into());
+            }
         }
         if self.plugin_hosting {
             a.push("--plugin-hosting".into());
@@ -761,6 +767,7 @@ mod tests {
             data: None,
             keep_current: false,
             send_report: true,
+            plugin_report: true,
             plugin_hosting: false,
             panels: None,
             panels_sha256: None,
@@ -770,12 +777,16 @@ mod tests {
             "pkexec bash /repo/scripts/setup-root.sh --user me --from '/run/media/me/OS Disk' \
              --oa-assets /repo/console-rs/target/release/oa-assets --send-report"
         );
+        let opted_out = Plan { plugin_report: false, ..plan.clone() };
+        let args: Vec<String> = opted_out.args().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args[args.len() - 2..], ["--send-report", "--no-plugin-report"]);
         let plan = Plan {
             source: Source::Partition("/dev/nvme0n1p3".into()),
             oa_assets: None,
             data: Some("/tmp/d".into()),
             keep_current: true,
             send_report: false,
+            plugin_report: false,
             ..plan
         };
         let args: Vec<String> = plan.args().iter().map(|a| a.to_string_lossy().into_owned()).collect();

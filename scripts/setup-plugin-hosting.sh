@@ -34,6 +34,7 @@ OUT="$DATA/plugin-bundles"
 DROPIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/ua-mixer-daemon.service.d"
 DROPIN="$DROPIN_DIR/plugin-hosting.conf"
 FROM="" ALL=() WORKERS=() DAEMON=1 REMOVE=0
+ARGS=("$@")
 
 die() { echo "setup-plugin-hosting: $*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
@@ -44,11 +45,15 @@ while [ $# -gt 0 ]; do
         --workers) WORKERS=(--workers "${2:-}"); shift 2 ;;
         --no-daemon) DAEMON=0; shift ;;
         --remove) REMOVE=1; shift ;;
-        -h|--help) sed -n '2,/^set -uo/{/^set -uo/d;s/^# \{0,1\}//;p}' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help) sed -n '2,/^set -uo/{/^set -uo/d;s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) die "unknown option $1 (see --help)" ;;
     esac
 done
 [ "$(id -u)" != 0 ] || die "run this as your normal user, not root"
+# shellcheck source=scripts/oa-log.sh
+. "$SCRIPT_DIR/oa-log.sh"
+oa_log_start plugin-hosting "" "${ARGS[@]}"
+trap 'oa_log_finish "Log"' EXIT
 
 restart_daemon() {
     systemctl --user daemon-reload 2>/dev/null || true

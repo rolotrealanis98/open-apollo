@@ -52,7 +52,9 @@ The wizard's pages:
    [Getting a UAD install](uad-install.md).
 3. **Review and install.** It shows where everything goes and lists what an earlier
    open-apollo install left. The earlier install is removed first, unless you tick **Keep my
-   current install**. The report box sends an anonymous install report and is off by default.
+   current install**. The report box sends an anonymous install report and is off by default;
+   with it, a second box (on by default) adds the plug-ins your Apollo says are authorized. The
+   page says exactly what each holds; see [Install logs and the install report](#install-logs-and-the-install-report).
    **Install** asks for your password once.
 4. **The install itself.** One privileged run (`scripts/setup-root.sh`) does the next four
    pages in order and stops at the first failure:
@@ -69,7 +71,8 @@ The wizard's pages:
 5. **Console.** Builds and installs the mixer console (`uaconsole`) as you, with no password,
    and restarts the mixer daemon.
 6. **Done.** Start the Console from here or from your app menu. Restart first if the driver
-   step asked you to (for `iommu=pt`, or a module Secure Boot must accept).
+   step asked you to (for `iommu=pt`, or a module Secure Boot must accept). This page, and any
+   page where a step failed, shows the run's setup log to attach to a bug report.
 
 **Secure Boot.** If Secure Boot is on and refuses the driver, the installer explains how to
 enroll your DKMS signing key with `mokutil`. It never runs `mokutil` itself.
@@ -102,7 +105,8 @@ bash scripts/install-uaconsole.sh              # the mixer console, for you
 `install.sh` walks you through power-cycling the Apollo for a clean Thunderbolt start, checks
 the driver and DSP, and plays a test tone. `--yes` asks nothing: it takes every question's
 default answer and skips the power-cycle pause and the test tone. `--skip-init` skips the
-hardware initialization and `--no-dkms` skips the DKMS setup.
+hardware initialization and `--no-dkms` skips the DKMS setup. Each script leaves a log of
+its run and says where at the end (see below).
 
 ## USB Apollos
 
@@ -203,15 +207,55 @@ It ends with a check that lists anything still there. `--yes` asks nothing.
 | Mixer daemon | systemd user unit `ua-mixer-daemon` | `uninstall.sh` |
 | Console | `~/.local/bin/uaconsole`, menu entry **Open Apollo Console** | `uninstall.sh` |
 | Audio settings | `/etc/pipewire`, `/etc/wireplumber`, `/usr/share/alsa/ucm2`, `/etc/udev/rules.d` | `uninstall.sh` |
+| Install logs | `~/.local/state/open-apollo/*.log` (`/var/log/open-apollo/` for a root run with no desktop user) | kept; delete them when you like |
 
 Nothing from your UAD install leaves your computer. setup downloads only the plug-in panel
 specs, and sends an install report only when you tick the box. The report has no user name,
 host name, home path or serial numbers.
 
+## Install logs and the install report
+
+**Logs.** Every run leaves one log you can attach to a bug report, kept after the run:
+
+| Run | Log |
+|---|---|
+| The setup wizard (everything it ran, the Console build included) | `~/.local/state/open-apollo/setup-<date>-<time>.log` |
+| `sudo bash scripts/setup-root.sh` | `~/.local/state/open-apollo/setup-<date>-<time>.log` (the `--user`'s) |
+| `sudo bash scripts/install.sh` | `~/.local/state/open-apollo/install-<date>-<time>.log` (the user who ran sudo) |
+| `bash scripts/install-uaconsole.sh` | `~/.local/state/open-apollo/uaconsole-<date>-<time>.log` |
+| `bash scripts/setup-plugin-hosting.sh` | `~/.local/state/open-apollo/plugin-hosting-<date>-<time>.log` |
+| `sudo bash scripts/uninstall.sh` | `~/.local/state/open-apollo/uninstall-<date>-<time>.log` |
+
+Dates and times are UTC. A script run from another one writes into its parent's log, so the
+wizard's log holds the driver install, the importer, the firmware extraction and the plug-in
+mapping too. Without a desktop user (a root login) the log goes to `/var/log/open-apollo/`.
+Only you can read your logs (mode 600). Before a line is written, `scripts/oa_redact.py` takes
+out your user name, home folder, host name, machine id, serial numbers and MAC addresses, and
+the terminal colours. The logs hold the scripts' output only: file names and checksums, never
+the contents of your UAD install. Read a log before you attach it all the same.
+`OA_NO_LOG=1` turns logging off.
+
+**The install report** is sent only when you tick the box (the wizard) or pass
+`--send-report` (`install.sh`, `setup-root.sh`); otherwise it stays in
+`/tmp/open-apollo-install-report.json`. It holds your distro, kernel, CPU, RAM, PCI and sound
+devices, PipeWire's Apollo devices (other devices only counted), each install step's result
+and the driver's kernel log lines, redacted the same way as the logs. It goes to
+`open-apollo-api.rolotrealanis.workers.dev`.
+
+**Authorized plug-ins**, in a report you send: so open-apollo can verify first the plug-ins
+people own, the report also lists the render ids (UA's plug-in product numbers, such as 2276)
+of the plug-ins your Apollo itself says are authorized, and which of those built for native
+hosting on this computer. It is your Apollo's own answer to a read-only query
+(`mixer-engine/plugin_report.py`), so it is there only when the driver runs with plug-in
+hosting on. Nothing else about plug-ins is sent: no demo or licence details, no serial number,
+account, plug-in names or files. Leave it out with the wizard's second box or
+`--no-plugin-report`. The fields are listed in [install-report.md](install-report.md).
+
 ## Troubleshooting
 
 | Symptom | What to do |
 |---|---|
+| Something failed and you want help | Attach the run's log from `~/.local/state/open-apollo/` (the wizard shows its name) to a [bug report](../SUPPORT.md#opening-an-issue). |
 | The wizard finds no UAD install | See [Getting a UAD install](uad-install.md). Check with `oa-assets scan`. |
 | "A DSP program in your install is a version open-apollo doesn't know yet" | Your UAD is newer than the versions open-apollo has checked. Please [open an issue](https://github.com/rolotrealanis98/open-apollo/issues) with your UAD version. |
 | The Apollo isn't detected (`lspci -d 1a00:` is empty) | Power-cycle the Apollo, check the Thunderbolt cable and port, and authorize the device (`boltctl list`). |

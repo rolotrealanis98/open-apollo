@@ -24,6 +24,7 @@ SKIP_INIT=0
 NO_DKMS=0
 ASSUME_YES=0
 SEND_REPORT=0
+PLUGIN_REPORT=1
 PLUGIN_HOSTING_FROM=""
 PLUGIN_HOSTING_CONF=/etc/modprobe.d/open-apollo-plugin-hosting.conf
 # Only main() parses arguments, so sourcing this file (tests do) is
@@ -36,6 +37,7 @@ parse_args() {
             --no-dkms)   NO_DKMS=1 ;;
             -y|--yes)    ASSUME_YES=1 ;;
             --send-report) SEND_REPORT=1 ;;
+            --no-plugin-report) PLUGIN_REPORT=0 ;;
             --plugin-hosting=*) PLUGIN_HOSTING_FROM="${arg#*=}" ;;
             -h|--help)
                 cat <<EOF
@@ -51,7 +53,11 @@ Options:
   --send-report Upload the anonymous install report at the end (opt-in).
                 Without it the report is uploaded only if you answer yes
                 when asked at a terminal; otherwise it stays in
-                /tmp/open-apollo-install-report.json
+                /tmp/open-apollo-install-report.json.  Sent reports also
+                list the plug-ins your Apollo is authorized for (render ids
+                only; see --no-plugin-report)
+  --no-plugin-report
+                Leave the authorized plug-ins out of a sent report
   --plugin-hosting=ROOT
                 Experimental: host your UA plug-ins on the Apollo's DSP.
                 Loads the driver with plugin_host=1 input_strips=1 and runs
@@ -70,6 +76,10 @@ Steps performed:
      and enable the mixer daemon (systemd user unit)
   7. Generate install report
   8. Opt-in anonymous install report (asked at a terminal, or --send-report)
+
+Every run leaves a log (user name, host name and serials taken out) in
+~/.local/state/open-apollo/install-<date>-<time>.log of the user who ran
+sudo (/var/log/open-apollo/ without one): attach it to a bug report.
 EOF
                 exit 0
                 ;;
@@ -97,6 +107,8 @@ header()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 hc_warn() { warn "$@"; }
 hc_info() { info "$@"; }
 hc_cmd()  { echo -e "          ${BOLD}$*${NC}"; }
+# shellcheck source=scripts/oa-log.sh
+. "$SCRIPT_DIR/oa-log.sh"
 # shellcheck source=scripts/apollo-hostcheck.sh
 [ -f "$SCRIPT_DIR/apollo-hostcheck.sh" ] && . "$SCRIPT_DIR/apollo-hostcheck.sh"
 SB_GUIDANCE_SHOWN=0
@@ -770,7 +782,8 @@ setup_plugin_hosting() {
     [ -n "$PLUGIN_HOSTING_FROM" ] || return 0
     header "Plug-ins on the Apollo (experimental)"
     info "Mapping your Powered plug-ins offline from $PLUGIN_HOSTING_FROM (10-40 minutes; nothing leaves this computer)"
-    if as_desktop_user bash "$PROJECT_DIR/scripts/setup-plugin-hosting.sh" --from "$PLUGIN_HOSTING_FROM"; then
+    if as_desktop_user OA_LOG_CAPTURED="${OA_LOG_CAPTURED:-0}" \
+        bash "$PROJECT_DIR/scripts/setup-plugin-hosting.sh" --from "$PLUGIN_HOSTING_FROM"; then
         STEP_STATUS[plugins]="ok"
     else
         warn "Plug-in mapping failed — rerun: bash scripts/setup-plugin-hosting.sh --from $PLUGIN_HOSTING_FROM"
@@ -1078,7 +1091,7 @@ generate_report() {
 
     # Write report data as env vars, then use python3 for clean JSON
     local _steps_csv=""
-    for key in distro deps build dkms configs init; do
+    for key in distro deps build dkms configs init daemon plugins; do
         _steps_csv+="${key}:${STEP_STATUS[$key]:-skipped}:${STEP_DETAIL[$key]:-}|"
     done
 
@@ -1131,8 +1144,9 @@ generate_report() {
     REPORT_AUDIO_ARECORD="$AUDIO_ARECORD" \
     REPORT_AUDIO_PWDUMP_FILE="$pwdump_file" \
     REPORT_USER="$(desktop_user)" \
+    REPORT_LIB="$SCRIPT_DIR" \
     python3 -c '
-import json, subprocess, os, datetime, re, socket, pwd
+import json, subprocess, os, sys, datetime
 
 def dmesg_grep(pattern, lines=10):
     try:
@@ -1191,42 +1205,10 @@ def apollo_pw_nodes(path):
             others[cls] = others.get(cls, 0) + 1
     return json.dumps({"apollo": kept, "other_media_classes": others}, sort_keys=True)
 
-# Serial numbers (the driver logs the Apollo serial) and the machine identity are
-# removed from every string in the report.
-SERIAL_RE = re.compile(r"((?:serial(?:\s+number)?|s/n)\s*[:=#]?\s*)[0-9A-Za-z][0-9A-Za-z-]{5,}", re.I)
-
-def identity_words():
-    words = []
-    user = os.environ.get("REPORT_USER") or ""
-    if user:
-        try:
-            words.append((re.escape(pwd.getpwnam(user).pw_dir), "<home>"))
-        except KeyError:
-            pass
-    try:
-        with open("/etc/machine-id") as f:
-            mid = f.read().strip()
-        if mid:
-            words.append((re.escape(mid), "<machine-id>"))
-    except OSError:
-        pass
-    for host in {socket.gethostname(), socket.gethostname().split(".")[0]}:
-        if len(host) >= 2:
-            words.append((r"(?<![A-Za-z0-9])" + re.escape(host) + r"(?![A-Za-z0-9])", "<host>"))
-    if len(user) >= 2:
-        words.append((r"(?<![A-Za-z0-9])" + re.escape(user) + r"(?![A-Za-z0-9])", "<user>"))
-    return [(re.compile(p), r) for p, r in words]
-
-def scrub(obj, words):
-    if isinstance(obj, dict):
-        return {k: scrub(v, words) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [scrub(v, words) for v in obj]
-    if isinstance(obj, str):
-        obj = SERIAL_RE.sub(lambda m: m.group(1) + "<redacted>", obj)
-        for pat, repl in words:
-            obj = pat.sub(repl, obj)
-    return obj
+# The user, host, machine id, serial numbers and MAC addresses are removed
+# from every string in the report (scripts/oa_redact.py, shared with the logs).
+sys.path.insert(0, os.environ["REPORT_LIB"])
+from oa_redact import identity_words, scrub
 
 e = os.environ
 report = {
@@ -1271,7 +1253,7 @@ report = {
         "dmesg_iommu": dmesg_grep("iommu", 5),
     },
 }
-report = scrub(report, identity_words())
+report = scrub(report, identity_words(e.get("REPORT_USER") or ""))
 with open(e["REPORT_FILE"], "w") as f:
     json.dump(report, f, indent=2)
 '
@@ -1312,6 +1294,8 @@ with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
 " "$gh_user"
         fi
 
+        add_plugin_report
+
         info "Sending report to $TELEMETRY_URL..."
         local http_code
         http_code=$(curl -s -o /dev/null -w '%{http_code}' \
@@ -1330,6 +1314,45 @@ with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
     fi
 }
 
+# The plug-ins this Apollo is authorized for, added to a report the user
+# agreed to send (never to the local copy otherwise): the device's own
+# answer to a read-only board query (mixer-engine/plugin_report.py), only
+# render ids, and which of them built here for native hosting.  Needs the
+# driver loaded with plugin_host=1; without it the report says why not.
+add_plugin_report() {
+    if [ "$PLUGIN_REPORT" != "1" ]; then
+        info "Authorized plug-ins left out of the report (--no-plugin-report)"
+        return 0
+    fi
+    local home bundles plugins_json
+    home=$(getent passwd "$(desktop_user)" 2>/dev/null | cut -d: -f6)
+    bundles="${home:-/nonexistent}/.local/share/open-apollo/plugin-bundles"
+    if [ "${STEP_STATUS[init]:-}" = "ok" ]; then
+        plugins_json=$(timeout 30 python3 "$PROJECT_DIR/mixer-engine/plugin_report.py" \
+            --bundles "$bundles" 2>/dev/null) || plugins_json=""
+    fi
+    [ -n "${plugins_json:-}" ] || plugins_json='{"available": false, "reason": "no_device"}'
+    PLUGINS_JSON="$plugins_json" REPORT_FILE="$REPORT_FILE" ENGINE_DIR="$PROJECT_DIR/mixer-engine" python3 -c '
+import json, os, sys
+sys.path.insert(0, os.environ["ENGINE_DIR"])
+from plugin_report import sanitize
+try:
+    doc = json.loads(os.environ["PLUGINS_JSON"])
+except ValueError:
+    doc = None
+section = sanitize(doc)
+with open(os.environ["REPORT_FILE"]) as f:
+    report = json.load(f)
+report["plugins"] = section
+with open(os.environ["REPORT_FILE"], "w") as f:
+    json.dump(report, f, indent=2)
+if section["available"]:
+    print("Authorized plug-ins in the report: %d (render ids only)" % len(section["authorized"]))
+else:
+    print("Authorized plug-ins not in the report: %s" % section["reason"])
+' | while IFS= read -r line; do info "$line"; done
+}
+
 # ================================================================
 # Main
 # ================================================================
@@ -1343,6 +1366,8 @@ main() {
         SUDO_USER=$(id -nu "$PKEXEC_UID" 2>/dev/null || echo "")
         export SUDO_USER
     fi
+    oa_log_start install "$(desktop_user)" "$@"
+    trap 'oa_log_finish "Install log (attach it to a bug report)"' EXIT
 
     echo ""
     echo -e "${BOLD}Open Apollo — Installer${NC}"
@@ -1490,7 +1515,9 @@ main() {
     header "Summary"
 
     ALL_OK=true
-    for key in deps build dkms configs init daemon; do
+    local -a summary_keys=(deps build dkms configs init daemon)
+    [ -n "$PLUGIN_HOSTING_FROM" ] && summary_keys+=(plugins)
+    for key in "${summary_keys[@]}"; do
         status="${STEP_STATUS[$key]:-skipped}"
         case "$status" in
             ok)      echo -e "  ${GREEN}[OK]${NC}    $key" ;;
@@ -1517,6 +1544,7 @@ main() {
     generate_report
     telemetry_prompt
     echo ""
+    return 0
 }
 
 # Run only when executed directly; sourcing (tests) just loads the
