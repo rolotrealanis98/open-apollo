@@ -1107,6 +1107,8 @@ pub fn resolve(src: &dyn PropertySource, key: &str, op: &SettingOp) -> Vec<Write
             .map(|c| vec![Write::Helper(rest.to_string(), c.value.clone())])
             .unwrap_or_default(),
         ("fader", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0))),
+        // A Sends window fader's typed value: dB on the send's `Gain` (−144…+12).
+        ("db", SettingOp::Text(t)) => t.trim().parse::<f64>().ok().filter(|d| d.is_finite()).map(|d| set(rest, PropValue::Float(d.clamp(-144.0, 12.0)))).unwrap_or_default(),
         // A send's pan knob (Sends window): knob 0…1 → `Pan` −1…1.
         ("pan", SettingOp::Value(v)) => set(rest, PropValue::Float(v.clamp(0.0, 1.0) * 2.0 - 1.0)),
         ("post-text", SettingOp::Text(t)) => {

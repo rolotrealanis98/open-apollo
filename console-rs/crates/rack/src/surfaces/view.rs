@@ -502,7 +502,15 @@ fn toggle_all(model: &dyn MixerModel, strip: &Arc<str>, control: &Control) -> Ve
 fn value_effects(target: ControlId, text: &str) -> Vec<Effect> {
     let t = text.trim().trim_end_matches("dB").trim();
     let db = if t.contains('∞') || t.eq_ignore_ascii_case("-inf") { Some(-144.0) } else { t.parse::<f64>().ok().filter(|d| d.is_finite()) };
-    db.map(|db| Effect::SetText(target, format!("{}", db.clamp(-144.0, 12.0)))).into_iter().collect()
+    let db = db.map(|db| format!("{}", db.clamp(-144.0, 12.0)));
+    // A Sends window fader (`fader:<node>/GainTapered`): the send's `Gain` through the setting
+    // path (`db:<node>/Gain`).
+    if let Control::SettingSet(k) = &target.control {
+        let Some(node) = k.strip_prefix("fader:").and_then(|p| p.strip_suffix("/GainTapered")) else { return Vec::new() };
+        let edit = ControlId { strip: target.strip.clone(), control: Control::SettingEdit(format!("db:{node}/Gain").into()) };
+        return db.map(|db| Effect::SetText(edit, db)).into_iter().collect();
+    }
+    db.map(|db| Effect::SetText(target, db)).into_iter().collect()
 }
 
 fn find_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
@@ -1270,6 +1278,21 @@ mod tests {
         v.key_text("loud");
         v.key_enter(&mut model);
         assert_eq!(model.main(&s).fader, 1.0);
+    }
+
+    /// A Sends window fader's readout opens the same popover; OK writes the send's `Gain` dB.
+    #[test]
+    fn sends_window_value_popover_writes_gain() {
+        use crate::settings::PropertySource;
+        let mut model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        let fader = Control::SettingSet("fader:/devices/0/inputs/22/sends/2/GainTapered".into());
+        v.dispatch(Action::Set(cid("settings", Control::ValueEntry(Box::new(fader.clone()))), 0.5), &mut model);
+        assert_eq!(v.popover.as_ref().map(|p| &p.kind), Some(&Popover::Value { target: cid("settings", fader) }));
+        v.key_text("-20");
+        v.key_enter(&mut model);
+        assert!(v.popover.is_none());
+        assert_eq!(model.props.prop("/devices/0/inputs/22/sends/2/Gain").and_then(|p| p.as_f64()), Some(-20.0));
     }
 
     #[test]

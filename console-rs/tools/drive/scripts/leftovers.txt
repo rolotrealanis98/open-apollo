@@ -1,0 +1,17 @@
+# 1:1 leftovers: the Sends window's typed-dB popover, the INS switch, CHANNEL DSP PAIRING.
+settle
+size 1920 1300
+click nav:SectionsOpenAll
+settle
+
+# The Sends window (a send's right-click): double-click a fader's readout, -18 OK writes the
+# send's Gain (manual §9.2: double-click a send value to type it).
+rclick /devices/0/inputs/0:SendLevel(0)
+settle
+click settings:ValueEntry(SettingSet("fader:/devices/0/inputs/0/sends/2/GainTapered")) double
+key -18
+key enter
+settle
+click settings:PanelClose
+settle
+#! tree /devices/0/inputs/0/sends/2/Gain/value -18.0
