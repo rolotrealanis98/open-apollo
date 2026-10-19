@@ -195,8 +195,10 @@ Open **Open Apollo Console** from your app menu. `uaconsole` is a native Linux r
 UAD Console: the mixer, its windows and menus, meters, and plug-in windows drawn from the
 open-apollo-panels specs. It drives the Apollo end to end: preamps, stereo link, sends, aux
 returns, cue sends (Sends window), monitor and control room (DIM, ALT, ALT TRIM, source,
-headphones), talkback, sample rate and clock, and Settings. Option/Alt-click resets a control
-to its default. CUE 3/4 and the headphone MON/NONE sources are refused until their hardware
+headphones), talkback, sample rate and clock, and Settings. Controls follow UAD Console:
+Shift = fine adjust; Alt-click = reset to default; Ctrl+Alt-click = reset that control on every
+channel; Alt-click MUTE or SOLO = all channels; Ctrl-drag = move the same control on every
+channel; Alt+wheel = adjust; double-click a fader or send readout = type a dB value. CUE 3/4 and the headphone MON/NONE sources are refused until their hardware
 encoding is verified; Unison and insert DSP need the plug-in host, which isn't in this release.
 
 It talks to the mixer daemon on 127.0.0.1:4710. The menu entry controls your Apollo
