@@ -38,7 +38,7 @@ const SECTION_EDGE: Rgba = Rgba::rgb8(43, 46, 47);
 const CELL: Rgba = Rgba::rgb8(34, 36, 38);
 const CELL_ON: Rgba = Rgba::rgb8(64, 68, 71);
 const CELL_EDGE: Rgba = Rgba::rgb8(27, 29, 30);
-const AMBER: Rgba = Rgba::rgb8(255, 186, 0);
+pub(crate) const AMBER: Rgba = Rgba::rgb8(255, 186, 0);
 
 const MARGIN: f32 = 5.0;
 const TAB_Y: f32 = 6.0;
@@ -242,18 +242,7 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         if let Some(notice) = refused.or(model.plugin_notice()).or(selected_hint) {
             // Keep a visible reason even if the original assign hint was dismissed.
             let width = list.w - 2.0 * MARGIN;
-            let chars_per_line = ((width / 5.5) as usize).max(12);
-            let mut lines = vec![String::new()];
-            for word in notice.split_whitespace() {
-                let last = lines.last_mut().unwrap();
-                if !last.is_empty() && last.len() + word.len() + 1 > chars_per_line {
-                    lines.push(word.to_owned());
-                } else {
-                    if !last.is_empty() { last.push(' '); }
-                    last.push_str(word);
-                }
-            }
-            for line in lines.iter().take(4) {
+            for line in wrap(notice, ((width / 5.5) as usize).max(12)).iter().take(4) {
                 ui.text(line, bold(10.0, AMBER), Rect::new(list.x + MARGIN, y, width, 15.0), Align::Left);
                 y += 15.0;
             }
@@ -261,6 +250,23 @@ pub fn draw_browser(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, r: Re
         }
         plugin_list(ui, model, view, Rect::new(list.x, y, list.w, list.max_y() - MARGIN - y));
     });
+}
+
+/// `text` in lines of at most `chars` characters (a longer word gets a line of its own).
+pub(crate) fn wrap(text: &str, chars: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for word in text.split_whitespace() {
+        let last = lines.last_mut().expect("one line");
+        if !last.is_empty() && last.len() + word.len() + 1 > chars {
+            lines.push(word.to_owned());
+        } else {
+            if !last.is_empty() {
+                last.push(' ');
+            }
+            last.push_str(word);
+        }
+    }
+    lines
 }
 
 /// The browser's title in assign mode: "<channel>: INSERT n" (s08 "AUX 1: INSERT 2") or

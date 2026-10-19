@@ -65,6 +65,13 @@ pub fn toplevel(l: &Layer) -> bool {
     l.kind == LayerKind::Window || l.id.starts_with("plugin:")
 }
 
+/// The plug-in window layer whose panel takes the input of window `id`: its own, or the one
+/// whose menu it is (`plugin-menu:…`). None for every other window.
+pub fn plugin_layer(id: &str) -> Option<String> {
+    let key = id.strip_prefix("plugin:").or_else(|| id.strip_prefix("plugin-menu:"))?;
+    Some(format!("plugin:{key}"))
+}
+
 /// Window › Next / Previous Window: the window after (before) `current` among the mixer (None)
 /// and the free windows `ids` (layer order), wrapping round.
 pub fn cycle(ids: &[String], current: Option<&str>, forward: bool) -> Option<String> {
@@ -89,6 +96,12 @@ pub fn to_mixer(inner: PhysicalPosition<i32>, tf: Transform, s: PhysicalPosition
         ((s.x - inner.x) as f32 - tf.offset.0) / tf.scale,
         ((s.y - inner.y) as f32 - tf.offset.1) / tf.scale,
     )
+}
+
+/// Where a layer's window goes (screen, physical px) and its inner size (physical px).
+pub fn layer_px(inner: PhysicalPosition<i32>, tf: Transform, r: Rect) -> (PhysicalPosition<i32>, (u32, u32)) {
+    let size = (((r.w * tf.scale).round() as u32).max(1), ((r.h * tf.scale).round() as u32).max(1));
+    (to_screen(inner, tf, (r.x, r.y)), size)
 }
 
 impl Popups {
@@ -159,32 +172,26 @@ impl Popups {
             keep
         });
         for l in windowed {
-            let at = to_screen(inner, tf, (l.rect.x, l.rect.y));
-            let size = (
-                ((l.rect.w * tf.scale).round() as u32).max(1),
-                ((l.rect.h * tf.scale).round() as u32).max(1),
-            );
+            let (at, size) = layer_px(inner, tf, l.rect);
             if let Some(w) = self.wins.iter_mut().find(|w| w.id == l.id) {
                 w.rect = l.rect;
                 w.title_h = l.title_h;
-                if self.placed && w.at != at {
-                    w.window.set_outer_position(at);
-                    w.at = at;
-                    if std::env::var_os("UACONSOLE_DEBUG_WINDOWS").is_some() {
-                        eprintln!("window {} moved to {at:?} (mixer content at {inner:?})", w.id);
-                    }
+                let (moved, resized) = follow(&*w.window, (&mut w.at, &mut w.size), (at, size), self.placed);
+                if moved && debug {
+                    eprintln!("window {} moved to {at:?} (mixer content at {inner:?})", w.id);
                 }
-                if w.size != size {
-                    let _ = w.window.request_inner_size(PhysicalSize::new(size.0, size.1));
+                if resized {
                     w.surface.resize(gpu, size.0, size.1);
-                    w.size = size;
+                    if debug {
+                        eprintln!("window {} resized to {}x{} px", w.id, size.0, size.1);
+                    }
                 }
                 continue;
             }
             match open(event_loop, gpu, l, &title(l), self.placed.then_some(at), size) {
                 Ok(w) => {
                     // `UACONSOLE_DEBUG_WINDOWS=1`: where each window was asked for and landed.
-                    if std::env::var_os("UACONSOLE_DEBUG_WINDOWS").is_some() {
+                    if debug {
                         let got = w.window.outer_position().ok();
                         eprintln!(
                             "window {} {:?}: rect {:?} -> at {:?} {}x{} px (outer {:?})",
@@ -198,6 +205,51 @@ impl Popups {
         }
         // Stack in layer order (later layers above): new windows are created on top.
     }
+}
+
+/// The winit calls [`follow`] makes (a trait so tests can watch them).
+pub trait Shell {
+    fn place(&self, at: PhysicalPosition<i32>);
+    /// Resizes to `size` and keeps it there: min = max = size. Console's separate windows
+    /// have a fixed size (a plug-in window grows and shrinks by its toolbar's Resize Plug-In
+    /// scale, never by dragging an edge). `with_resizable(false)` pins winit's Wayland min/max
+    /// to the size at creation, and a compositor keeps a window inside those, so they move too.
+    fn fix_size(&self, size: (u32, u32));
+}
+
+impl Shell for Window {
+    fn place(&self, at: PhysicalPosition<i32>) {
+        self.set_outer_position(at);
+    }
+
+    fn fix_size(&self, (w, h): (u32, u32)) {
+        let s = PhysicalSize::new(w, h);
+        self.set_min_inner_size(Some(s));
+        self.set_max_inner_size(Some(s));
+        let _ = self.request_inner_size(s);
+    }
+}
+
+/// Makes a window that is at `cur` (screen position, inner size; updated) show a layer that
+/// wants `want`: moved there where windows are placed, resized to its size everywhere.
+/// Returns (moved, resized).
+pub fn follow(
+    shell: &dyn Shell,
+    cur: (&mut PhysicalPosition<i32>, &mut (u32, u32)),
+    want: (PhysicalPosition<i32>, (u32, u32)),
+    placed: bool,
+) -> (bool, bool) {
+    let moved = placed && *cur.0 != want.0;
+    if moved {
+        shell.place(want.0);
+        *cur.0 = want.0;
+    }
+    let resized = *cur.1 != want.1;
+    if resized {
+        shell.fix_size(want.1);
+        *cur.1 = want.1;
+    }
+    (moved, resized)
 }
 
 /// A window for layer `l` at `at` (None: where the compositor puts it, native Wayland).
@@ -276,12 +328,57 @@ mod tests {
     }
 
     #[test]
+    fn only_plug_in_windows_and_their_menus_feed_the_overlays() {
+        assert_eq!(plugin_layer("plugin:in0:1").as_deref(), Some("plugin:in0:1"));
+        assert_eq!(plugin_layer("plugin-menu:in0:1").as_deref(), Some("plugin:in0:1"));
+        for other in ["settings", "panel:about", "menu:0", "channels", "popover"] {
+            assert_eq!(plugin_layer(other), None, "{other}");
+        }
+    }
+
+    #[test]
     fn screen_round_trip() {
         let tf = Transform { scale: 2.0, offset: (10.0, 0.0) };
         let inner = PhysicalPosition::new(1706, 660);
         let s = to_screen(inner, tf, (488.0, 1065.0));
         assert_eq!(s, PhysicalPosition::new(1706 + 10 + 976, 660 + 2130));
         assert_eq!(to_mixer(inner, tf, s), (488.0, 1065.0));
+    }
+
+    /// Records what [`follow`] asks of a window.
+    #[derive(Default)]
+    struct Watch(std::cell::RefCell<Vec<String>>);
+
+    impl Shell for Watch {
+        fn place(&self, at: PhysicalPosition<i32>) {
+            self.0.borrow_mut().push(format!("place {},{}", at.x, at.y));
+        }
+        fn fix_size(&self, (w, h): (u32, u32)) {
+            self.0.borrow_mut().push(format!("size {w}x{h}"));
+        }
+    }
+
+    #[test]
+    fn a_layer_that_grows_or_shrinks_resizes_its_window() {
+        let tf = Transform { scale: 2.0, offset: (0.0, 0.0) };
+        let inner = PhysicalPosition::new(100, 50);
+        // A plug-in window at 100 %, then Resize Plug-In 150 %, then 75 % (unplaced: Wayland).
+        let (mut at, mut size) = layer_px(inner, tf, Rect::new(10.0, 20.0, 400.0, 300.0));
+        let watch = Watch::default();
+        for (rect, want) in [
+            (Rect::new(10.0, 20.0, 600.0, 450.0), "size 1200x900"),
+            (Rect::new(10.0, 20.0, 300.0, 225.0), "size 600x450"),
+        ] {
+            let (moved, resized) = follow(&watch, (&mut at, &mut size), layer_px(inner, tf, rect), false);
+            assert!(!moved && resized);
+            assert_eq!(watch.0.borrow_mut().drain(..).collect::<Vec<_>>(), [want]);
+        }
+        // Unchanged: nothing asked. Placed (X11, macOS): moved too.
+        let same = (at, size);
+        assert_eq!(follow(&watch, (&mut at, &mut size), same, false), (false, false));
+        let want = layer_px(inner, tf, Rect::new(0.0, 0.0, 300.0, 225.0));
+        assert_eq!(follow(&watch, (&mut at, &mut size), want, true), (true, false));
+        assert_eq!(watch.0.borrow().as_slice(), ["place 100,50"]);
     }
 
     #[test]

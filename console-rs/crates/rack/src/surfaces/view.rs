@@ -349,6 +349,8 @@ pub struct ViewState {
     pub drag: Option<crate::dnd::DragState>,
     /// A press on a drag source, not yet moved far enough to drag.
     pub drag_pending: Option<crate::dnd::PendingDrag>,
+    /// The slot the last plug-in drop landed on: its refusal shows there for a while.
+    pub drop_notice: Option<crate::dnd::DropNotice>,
     /// Console's `GUI_BlinkManager` slow flag (a 125 ms timer flipped every fourth tick: 500 ms
     /// on, 500 ms off; ctor 0x181c345b0, tick 0x181c34850). The status bar's CLOCK outline
     /// blinks with it while the clock is not locked. Off until the host calls
@@ -408,6 +410,7 @@ impl Default for ViewState {
             deferred: Vec::new(),
             drag: None,
             drag_pending: None,
+            drop_notice: None,
             open_urls: Vec::new(),
             modifier_armed: None,
             windowing: None,

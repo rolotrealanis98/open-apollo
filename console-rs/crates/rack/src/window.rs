@@ -432,7 +432,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     ui.end_layers();
     ui.clear_layer_hint();
     crate::menu::draw_menu(ui, model, view, pb);
-    crate::dnd::draw_drag(ui, view);
+    crate::dnd::draw_drag(ui, view, model);
     l
 }
 

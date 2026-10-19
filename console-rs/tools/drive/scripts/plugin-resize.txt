@@ -1,0 +1,16 @@
+# Resize Plug-In: the plug-in window's layer (the rect its OS window follows,
+# `popups::follow`) takes the panel's new size, up and down. Needs the synthetic catalogue
+# and panel spec (UAD Test Comp, 400 x 200 at 100 %).
+#: --catalogue --specs
+settle
+dragto browser:BrowserItem(0) /devices/0/inputs/0:Insert(0)
+settle
+click /devices/0/inputs/0:Insert(0)
+layer plugin:/devices/0/inputs/0:0
+click /devices/0/inputs/0/effects/0:PluginWindow(More)
+click /devices/0/inputs/0/effects/0:PluginWindow(Scale(150))
+layer plugin:/devices/0/inputs/0:0 larger
+click /devices/0/inputs/0/effects/0:PluginWindow(More)
+click /devices/0/inputs/0/effects/0:PluginWindow(Scale(75))
+layer plugin:/devices/0/inputs/0:0 smaller
+#! tree /devices/0/inputs/0/effects/0/EffectName/value UAD Test Comp

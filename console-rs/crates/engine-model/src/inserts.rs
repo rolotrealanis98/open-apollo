@@ -47,7 +47,7 @@ impl EngineMixer {
 
     /// An advertised native host is a restricted loader, not the entire licensed catalogue.
     /// Older engines omit this extension and retain their original assignment behavior.
-    fn native_assignment_refusal(&self, slot: &InsertPaths, name: &str) -> Option<String> {
+    pub(crate) fn native_assignment_refusal(&self, slot: &InsertPaths, name: &str) -> Option<String> {
         if name.is_empty() || self.bool_at("/NativePluginHosting") != Some(true) {
             return None;
         }
@@ -73,9 +73,22 @@ impl EngineMixer {
         } else {
             self.str_at(&format!("{base}/NativeLoadSlots")).unwrap_or("")
         };
-        if !slots.split(',').any(|s| s == slot.base) {
+        let here = |list: &str| list.split(',').any(|s| s == slot.base);
+        if !here(slots) {
             return Some(if layout_advertised {
-                format!("No native {} loader for this slot.", if linked { "stereo" } else { "mono" })
+                // The bundle's other layout: link or unlink the input, or pick another bundle.
+                let (want, other, other_slots, verb) = if linked {
+                    ("stereo", "mono", mono.unwrap_or(""), "unlink")
+                } else {
+                    ("mono", "stereo", stereo.unwrap_or(""), "link")
+                };
+                if slots.is_empty() && !other_slots.is_empty() {
+                    format!("{name}: {other} only — {verb} the input or use a {want} bundle.")
+                } else if here(other_slots) {
+                    format!("{name}: no native {want} loader on this input — {verb} it to load the {other} bundle.")
+                } else {
+                    format!("{name}: no native {want} loader for this slot.")
+                }
             } else {
                 self.str_at(&format!("{base}/NativeLoadHint")).unwrap_or("This slot is not supported by the native loader.").into()
             });
@@ -188,6 +201,9 @@ impl EngineMixer {
         if src.base == dst.base {
             return;
         }
+        // A refusal shown now is this move's (the slot's drop notice reads it).
+        self.native_load_notice = None;
+        self.store.clear_error();
         let args: Json = [("copy", Json::Bool(copy)), ("dstPath", Json::String(dst.base.clone())), ("srcPath", Json::String(src.base.clone()))].into_iter().collect();
         self.store.post("/MoveInsert", Some(&args));
     }

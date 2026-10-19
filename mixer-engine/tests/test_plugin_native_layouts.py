@@ -102,3 +102,12 @@ def test_registration_uses_explicit_driver_features():
         backend,_=register_native(StateTree(),HelperTree(),hw,(provider(2),))
         assert backend.max_instances==maximum and backend.stereo is stereo
         hw.open.assert_not_called()
+
+def test_missing_layout_names_the_bundles_layout_and_the_fix():
+    stereo_only,mono_only=provider(0,'UAD Stereo',stereo=True),provider(2,'UAD Mono')
+    state,driver,backend,tx=rig((stereo_only,mono_only),linked=(2,3),max_instances=4,stereo=True)
+    result=tx.load(stereo_only.slot,stereo_only.name)
+    assert 'UAD Stereo: stereo only — link the input or use a mono bundle' == result.detail
+    result=tx.load(mono_only.slot,mono_only.name)
+    assert 'UAD Mono: mono only — unlink the input or use a stereo bundle' == result.detail
+    assert not driver.calls
