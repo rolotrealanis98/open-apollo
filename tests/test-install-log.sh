@@ -133,7 +133,10 @@ ASSUME_YES=1 SEND_REPORT=1 PLUGIN_REPORT=1
 declare -A STEP_STATUS=([init]=ok)
 report_run
 check "a sent report asks for the plug-ins" test -e "$tmp_dir/queried"
-check "it reads this user's bundles" has "$tmp_dir/queried" "--bundles $home/.local/share/open-apollo/plugin-bundles"
+maps="$home/.local/share/open-apollo-plugin-maps"
+[ -f "$maps/index.json" ] || [ ! -f "$home/.local/share/open-apollo/plugin-bundles/index.json" ] \
+    || maps="$home/.local/share/open-apollo/plugin-bundles"
+check "it reads this user's plug-in maps" has "$tmp_dir/queried" "--bundles $maps"
 check "the report has exactly the documented keys" test "$(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))["plugins"]
