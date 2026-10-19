@@ -719,12 +719,13 @@ impl Topology {
         for &n in &indices {
             let base = format!("{dev}/inputs/{n}");
             let stereo = b(tree, &format!("{base}/Stereo")).unwrap_or(false);
-            if stereo
-                && n % 2 == 1
+            // The right leg of a pair: its left input is linked, whatever its own `Stereo` says
+            // (UA links both; a daemon may push the leader's flag first or alone).
+            if n % 2 == 1
                 && has(n - 1)
                 && b(tree, &format!("{dev}/inputs/{}/Stereo", n - 1)).unwrap_or(false)
             {
-                continue; // right leg of a pair
+                continue;
             }
             let right = (stereo && n % 2 == 0 && has(n + 1)).then_some(n + 1);
             let strip = bld.input(device, n, base, right);
@@ -896,11 +897,17 @@ impl Builder<'_> {
             } else {
                 name
             },
-            default_name: tree
-                .meta(&format!("{base}/Name"))
-                .and_then(|m| m.default.as_ref())
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            // A pair's factory label is `StereoName/default` ("ANALOG 1/2").
+            default_name: right
+                .map(|_| "StereoName")
+                .into_iter()
+                .chain(["Name"])
+                .find_map(|p| {
+                    tree.meta(&format!("{base}/{p}"))
+                        .and_then(|m| m.default.as_ref())
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                }),
             kind: InputKind::classify(io.as_deref(), preamp.is_some()),
             io_type: io,
             io_type_choices: choices,

@@ -255,7 +255,8 @@ impl EngineMixer {
         match id.control {
             Control::Name => {
                 let path = match (self.input(&id.strip), self.aux(&id.strip)) {
-                    (Some(s), _) => Some(s.name_path()),
+                    // A pair renames its `StereoName` (the label), as Console does.
+                    (Some(s), _) => Some(s.display_name_path()),
                     (None, Some(a)) => Some(a.name_path()),
                     _ => None,
                 };
