@@ -546,12 +546,13 @@ impl Panel for WindowPanel {
         false
     }
 
-    /// A web GUI needs GTK and its bridge serviced every tick.
+    /// A web GUI needs GTK and its bridge serviced every tick; an empty slot re-reads itself.
     fn live(&self) -> bool {
         matches!(self.window.content, Content::Web(_))
             || self.panel_gesture
             || self.window.animating(&self.snapshot)
             || (self.engine.is_some() && !self.window.meter_queries().is_empty())
+            || self.engine.as_ref().is_some_and(EngineSlot::rereading)
     }
 }
 
