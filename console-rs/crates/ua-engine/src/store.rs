@@ -1221,7 +1221,9 @@ mod error_notice_tests {
         }
         store.model.set_value(&property, "Rejected plug-in".into());
         store.model.holds.insert(property.clone(), Hold {
-            until: Instant::now() + Duration::from_secs(30), latest: Some("Rejected plug-in".into()),
+            until: Instant::now() + Duration::from_secs(30),
+            latest: Some("Rejected plug-in".into()),
+            local: "Rejected plug-in".into(),
         });
         store.handle_update(Update::Error {
             path: format!("{property}/value"), message: "Device refused this plug-in".into(),

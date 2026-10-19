@@ -162,7 +162,9 @@ jobs:
             -e SOUND -e SND -e SND_PCM -e SND_HWDEP -e PCI -e PCI_MSI \
             -e CRYPTO_LIB_SHA256 -e FW_LOADER -e MODULES
           make -C "$KSRC" -s olddefconfig
-          make -C "$KSRC" -s -j"$(nproc)" modules_prepare
+          # 5.15's tools/lib/subcmd trips gcc 13's -Werror=use-after-free in its own
+          # host tools (fixed in later 5.15.y); this flag reaches only that build.
+          EXTRA_CFLAGS=-Wno-error=use-after-free make -C "$KSRC" -s -j"$(nproc)" modules_prepare
           echo "KSRC=$KSRC" >> "$GITHUB_ENV"
       - name: Build the module
         run: make -C driver KDIR="$KSRC" KBUILD_MODPOST_WARN=1 W=1 2>&1 | tee build.log; test "${PIPESTATUS[0]}" -eq 0
