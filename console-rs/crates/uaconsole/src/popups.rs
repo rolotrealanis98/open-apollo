@@ -65,6 +65,15 @@ pub fn toplevel(l: &Layer) -> bool {
     l.kind == LayerKind::Window || l.id.starts_with("plugin:")
 }
 
+/// Window › Next / Previous Window: the window after (before) `current` among the mixer (None)
+/// and the free windows `ids` (layer order), wrapping round.
+pub fn cycle(ids: &[String], current: Option<&str>, forward: bool) -> Option<String> {
+    let n = ids.len() + 1;
+    let at = current.and_then(|c| ids.iter().position(|i| i == c)).map_or(0, |i| i + 1);
+    let next = if forward { (at + 1) % n } else { (at + n - 1) % n };
+    (next > 0).then(|| ids[next - 1].clone())
+}
+
 /// Screen position (physical px) of mixer point `p` for a mixer window whose content starts
 /// at `inner` (physical px) under transform `tf`.
 pub fn to_screen(inner: PhysicalPosition<i32>, tf: Transform, p: (f32, f32)) -> PhysicalPosition<i32> {
@@ -246,6 +255,16 @@ pub fn title(l: &Layer) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_and_previous_window_cycle_through_the_mixer() {
+        let ids = ["settings".to_string(), "plugin:in0:1".to_string()];
+        assert_eq!(cycle(&ids, None, true).as_deref(), Some("settings"));
+        assert_eq!(cycle(&ids, Some("settings"), true).as_deref(), Some("plugin:in0:1"));
+        assert_eq!(cycle(&ids, Some("plugin:in0:1"), true), None, "back to the mixer");
+        assert_eq!(cycle(&ids, None, false).as_deref(), Some("plugin:in0:1"));
+        assert_eq!(cycle(&[], None, true), None);
+    }
 
     #[test]
     fn screen_round_trip() {

@@ -279,6 +279,9 @@ pub(crate) fn slider(ui: &mut Ui, f: &SettingField, r: Rect) {
     for i in 0..*segments {
         let c = Rect::new(track.x + i as f32 * seg, track.y, seg - 1.0, track.h);
         ui.fill(c, if i == *lit { Rgba::rgb8(214, 166, 52) } else { Rgba::rgb8(58, 50, 34) });
+        if f.enabled {
+            ui.hit(Rect::new(c.x, r.y, seg, r.h), sid(Control::SettingChoose(f.key.clone(), i as u16)), HitKind::Tap);
+        }
     }
 }
 

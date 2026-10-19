@@ -200,32 +200,42 @@ final class ConsoleMetalView: UIView {
 
     // MARK: input (one tracked touch → uac_pointer; pinch → uac_set_zoom)
 
-    private func send(_ kind: Int32, _ touch: UITouch, flags: UInt32 = 0) {
+    /// Hardware-keyboard modifiers held with the touch, as `UAC_POINTER_*` bits.
+    private func modifierBits(_ event: UIEvent?) -> UInt32 {
+        guard let m = event?.modifierFlags else { return 0 }
+        var bits: UInt32 = 0
+        if m.contains(.shift) { bits |= UAC_POINTER_SHIFT }
+        if m.contains(.alternate) { bits |= UAC_POINTER_ALT }
+        if m.contains(.command) { bits |= UAC_POINTER_CMD }
+        return bits
+    }
+
+    private func send(_ kind: Int32, _ touch: UITouch, _ event: UIEvent?, flags: UInt32 = 0) {
         guard let context else { return }
         let p = touch.location(in: self)
-        _ = uac_pointer(context.raw, kind, Float(p.x), Float(p.y), flags)
+        _ = uac_pointer(context.raw, kind, Float(p.x), Float(p.y), flags | modifierBits(event))
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard activeTouch == nil, let touch = touches.first else { return }
         activeTouch = touch
-        send(UAC_POINTER_DOWN, touch, flags: touch.tapCount >= 2 ? UAC_POINTER_DOUBLE : 0)
+        send(UAC_POINTER_DOWN, touch, event, flags: touch.tapCount >= 2 ? UAC_POINTER_DOUBLE : 0)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = activeTouch, touches.contains(touch) else { return }
-        send(UAC_POINTER_MOVE, touch)
+        send(UAC_POINTER_MOVE, touch, event)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = activeTouch, touches.contains(touch) else { return }
-        send(UAC_POINTER_UP, touch)
+        send(UAC_POINTER_UP, touch, event)
         activeTouch = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = activeTouch, touches.contains(touch) else { return }
-        send(UAC_POINTER_CANCEL, touch)
+        send(UAC_POINTER_CANCEL, touch, event)
         activeTouch = nil
     }
 

@@ -228,7 +228,8 @@ impl Ui<'_> {
             }
             ui.font_text("Small-Label-Font", readout, g.value_label, Align::Center);
             // Double-click the readout: the typed-value popover (`Rack_FaderAndMeters::buttonClicked`).
-            if let Some(id) = id.as_ref().filter(|id| matches!(id.control, Control::Fader | Control::SendLevel(_))) {
+            // A Sends window fader (`SettingSet("fader:…/GainTapered")`) too.
+            if let Some(id) = id.as_ref().filter(|id| matches!(&id.control, Control::Fader | Control::SendLevel(_)) || matches!(&id.control, Control::SettingSet(k) if k.starts_with("fader:"))) {
                 ui.hit(g.value_label, ControlId { strip: id.strip.clone(), control: Control::ValueEntry(Box::new(id.control.clone())) }, HitKind::Tap);
             }
             // Meter scale (`Rack_MeterMarks`, labels 0x1809d1470): a 3×1 tick at the scale's left

@@ -51,13 +51,22 @@ extern "C" {
 #define UAC_POINTER_HOVER  5 /* motion with no button down: highlights an open menu's rows */
 
 /* uac_pointer flags. */
-#define UAC_POINTER_DOUBLE (1u << 0) /* double tap: reset a dragged control to its default */
-#define UAC_POINTER_FINE   (1u << 1) /* fine adjustment: motion / 10; while dragging an insert: copy (Option) */
+#define UAC_POINTER_DOUBLE (1u << 0) /* double tap/click: reset a dragged control to its default; on a send knob or a
+                                      * fader readout it opens the typed-dB popover (uac_key_text digits, UAC_KEY_ENTER) */
+#define UAC_POINTER_SHIFT  (1u << 1) /* Shift: fine adjustment (motion / 10), read on every MOVE and by uac_scroll */
+#define UAC_POINTER_FINE   UAC_POINTER_SHIFT /* old name of UAC_POINTER_SHIFT (same bit) */
 /* The pointer is a touch. UAC_POINTER_SECONDARY (long press) with this flag on a loaded insert or a
  * browser plug-in row picks it up: send the long press's later positions as UAC_POINTER_MOVE and
  * its end as UAC_POINTER_UP (with this flag) to drag and drop it; a long press released without
  * moving opens the context menu. Mouse: press, move 4 pt and release drags; no flag needed. */
 #define UAC_POINTER_TOUCH  (1u << 2)
+/* Option (macOS) / Alt, read at DOWN: click a knob or fader = back to its default (the engine gets
+ * "default"); click a Mute or Solo = set it on every strip; with UAC_POINTER_CMD a reset hits that
+ * control on every strip. Dragging an insert or plug-in row (MOVE/UP): copy instead of move.
+ * With uac_scroll: the wheel adjusts the control under the pointer. */
+#define UAC_POINTER_ALT    (1u << 3)
+/* Command (macOS) / Ctrl, read at DOWN: a drag moves the same control on every strip. */
+#define UAC_POINTER_CMD    (1u << 4)
 
 /* uac_set_model_engine flags. */
 #define UAC_ENGINE_WRITES  (1u << 0) /* open both write gates (only after the user asked) */
@@ -188,12 +197,15 @@ bool uac_dragging(UacContext *ctx);
 
 /* Wheel/trackpad scroll at a point; deltas in view points, AppKit's scrollingDelta convention
  * (positive reveals content above / to the left). Scrolls the browser list or the cells
- * column under the point (returns 1), else pans a zoomed view (returns 0). */
-int32_t uac_scroll(UacContext *ctx, float x_pt, float y_pt, float dx_pt, float dy_pt);
+ * column under the point (returns 1), else pans a zoomed view (returns 0). `flags` are the
+ * uac_pointer modifier bits: UAC_POINTER_ALT over a knob or fader adjusts it instead
+ * (1% per 24 pt; UAC_POINTER_SHIFT: 0.1%, returns 1); Shift pans sideways. */
+int32_t uac_scroll(UacContext *ctx, float x_pt, float y_pt, float dx_pt, float dy_pt, uint32_t flags);
 
 /* Keyboard for a focused text field (channel rename, tempo, browser search). */
 bool uac_text_editing(UacContext *ctx);
-/* UTF-8 text; returns 1 if a field took it. */
+/* UTF-8 text; returns 1 if a field took it (also the typed-dB popover: uac_text_editing is true
+ * while it is open; UAC_KEY_ENTER commits, UAC_KEY_ESCAPE cancels). */
 int32_t uac_key_text(UacContext *ctx, const char *utf8);
 /* UAC_KEY_ENTER / BACKSPACE (focused field), ESCAPE (closes field, popover, sheet or
  * modifier). Returns 1 if consumed. */

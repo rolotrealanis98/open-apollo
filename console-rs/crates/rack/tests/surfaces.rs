@@ -85,6 +85,22 @@ fn every_surface_registers_its_controls() {
     assert!(scrolls.iter().any(|s| s.target == ScrollTarget::Cells && s.max > 0.0), "sends overflow the cells column");
 }
 
+/// The INS switch beside the UAD REC/MON LEDs flips the input's `RecordPreEffects`, as the
+/// LEDs do (`Rack_UADRecord` has one state; INS is its press target).
+#[test]
+fn ins_switch_toggles_record_pre_effects() {
+    let assets = assets();
+    let mut model = PreviewMixer::default();
+    let mut view = ViewState::default();
+    let (hits, _) = build(&assets, &model, &view);
+    // INS is the 40-pt `Switch` (the fixture has no LED art, so the LEDs add no hit).
+    let ins = hits.iter().find(|h| &*h.id.strip == "in0" && h.id.control == Control::RecMon && h.rect.w == 40.0).expect("INS hit");
+    let s = model.inputs().into_iter().find(|s| &*s.id == "in0").unwrap();
+    let before = model.records_pre_effects(&s);
+    tap(&hits, ins, &mut view, &mut model);
+    assert_eq!(model.records_pre_effects(&s), !before);
+}
+
 #[test]
 fn section_toggle_collapses_the_input_row() {
     let assets = assets();

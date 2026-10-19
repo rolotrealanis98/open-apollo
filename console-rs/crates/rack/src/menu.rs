@@ -406,6 +406,7 @@ commands! {
     ShowControlRoom = "show_control_room", "Show Control Room", View, Some(Shortcut::cmd("r"));
     ShowMonitor = "show_monitor", "Show Monitor", View, None;
     ShowMonitorCorrection = "show_monitor_correction", "Show Monitor Correction", View, None;
+    ShowSnapshots = "show_snapshots", "Show Snapshots", View, None;
     ShowNotifications = "show_notification_browser", "Notifications", Shell, None;
     ToggleCompactMonitor = "toggle_compact_monitor_fader", "Toggle Compact Monitor", View, None;
     ShowHideChannels = "show_hide_channels", "Show/Hide Channels", View, Some(Shortcut::cmd("i"));
@@ -808,11 +809,17 @@ pub fn command_enabled(c: Command, model: &dyn MixerModel, view: &ViewState) -> 
         C::ToggleCompactMonitor => false,
         // `Rack_ShowOfflineDevices`: only meaningful with a unit that is offline.
         C::ShowOfflineDevices => model.devices().iter().any(|d| !d.online),
-        C::ShowMixerNav | C::ShowBrowser => !view.compact,
+        C::ShowMixerNav | C::ShowBrowser | C::ShowSnapshots => !view.compact,
         C::MixerTabLeft | C::MixerTabRight => false,
         C::ShowPluginScenes => model.status().plugin_scenes,
         _ => true,
     }
+}
+
+/// The `show_snapshots` client preference (`console-prefs.json`): View › Show Snapshots is
+/// offered.
+pub fn snapshots_enabled(model: &dyn MixerModel) -> bool {
+    model.properties().and_then(|p| p.prop("pref:show_snapshots")).is_some_and(|v| matches!(v, crate::settings::PropValue::Bool(true)))
 }
 
 /// Whether a command shows a tick.
@@ -825,6 +832,7 @@ pub fn command_ticked(c: Command, view: &ViewState) -> bool {
         C::ShowControlRoom => view.show_ctrl_room,
         C::ShowMonitor => view.show_monitor,
         C::ShowMonitorCorrection => view.show_monitor_correction,
+        C::ShowSnapshots => view.show_snapshots && !view.compact,
         C::ShowHideChannels => view.show_channels,
         C::ShowOfflineDevices => view.show_offline_devices,
         C::ShowSettings => view.sheet == Some(Sheet::Settings),
@@ -877,6 +885,11 @@ pub fn menu_bar(model: &dyn MixerModel, view: &ViewState, mac: bool) -> Vec<BarM
     let opts = model.monitor_options();
     if opts.hp_correction.is_some() || opts.speaker_correction.is_some() {
         section.push(item(C::ShowMonitorCorrection));
+    }
+    // `UpdateViewMenu` 0x1771df8 adds Show Snapshots after Show Monitor Correction behind a
+    // feature flag Console 1.3.1 keeps off on an Apollo; here the `show_snapshots` preference.
+    if snapshots_enabled(model) {
+        section.push(item(C::ShowSnapshots));
     }
     section.push(item(C::ShowNotifications));
     let mut viewm = PopupMenu::new();
@@ -1738,6 +1751,7 @@ impl ViewState {
             C::ShowControlRoom => self.show_ctrl_room ^= true,
             C::ShowMonitor => self.show_monitor ^= true,
             C::ShowMonitorCorrection => self.show_monitor_correction ^= true,
+            C::ShowSnapshots => self.show_snapshots ^= true,
             C::ShowHideChannels => self.show_channels ^= true,
             C::ShowOfflineDevices => self.show_offline_devices ^= true,
             C::ShowSettings => self.sheet = if self.sheet == Some(Sheet::Settings) { None } else { Some(Sheet::Settings) },
@@ -1935,6 +1949,8 @@ pub fn context_menu_at(hits: &[Hit], x: f32, y: f32) -> Option<MenuState> {
             Control::Solo => Some(MenuState::under(MenuTarget::Solo { strip }, hit.rect)),
             Control::Preamp(k) if &**k == "input_source" => Some(MenuState::under(MenuTarget::InputSource { strip }, hit.rect)),
             Control::InputSource(_) => Some(MenuState::under(MenuTarget::InputSource { strip }, hit.rect)),
+            // The preamp plate (`Rack_Overview_Preamp`): its menu at the pointer.
+            Control::PreampPlate => Some(MenuState::pointer(MenuTarget::Preamp { strip }, x, y)),
             Control::Fader | Control::PanL | Control::PanR if channel(&strip) => Some(MenuState::pointer(MenuTarget::CopyMix { strip }, x, y)),
             Control::ShowPanel(crate::settings::Panel::MeterWindow) => Some(MenuState::pointer(MenuTarget::MonitorMeter, x, y)),
             Control::SceneSelect(i) => Some(MenuState::at(MenuTarget::SceneRow(*i), hit.rect.x + SCENE_MENU_DX, hit.rect.y + SCENE_MENU_DY)),

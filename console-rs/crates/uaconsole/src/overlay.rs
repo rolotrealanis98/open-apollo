@@ -375,6 +375,24 @@ impl OverlayStack {
         }
     }
 
+    /// Takes the floating (non-modal) panels out of the stack, oldest first: Window ›
+    /// Show/Hide Floating Windows hides the plug-in windows (their OS windows close with
+    /// their layers).
+    pub fn take_floating(&mut self) -> Vec<Box<dyn Panel>> {
+        let (floating, modal): (Vec<_>, Vec<_>) = std::mem::take(&mut self.panels).into_iter().partition(|p| !p.modal());
+        self.panels = modal;
+        self.captured = false;
+        floating
+    }
+
+    /// Puts hidden panels back under the open ones, skipping any reopened since (same key).
+    pub fn restore_floating(&mut self, panels: Vec<Box<dyn Panel>>) {
+        let open: Vec<String> = self.panels.iter().filter_map(|p| p.key()).collect();
+        let back: Vec<_> = panels.into_iter().filter(|p| p.key().is_none_or(|k| !open.contains(&k))).collect();
+        self.panels.splice(0..0, back);
+        self.captured = false;
+    }
+
     /// Escape: closes the top modal panel.
     pub fn dismiss_top(&mut self) -> bool {
         if self.panels.last().is_some_and(|p| p.modal()) {
@@ -483,6 +501,37 @@ pub enum Routed {
 mod tests {
     use super::*;
     use rack::PreviewMixer;
+
+    /// A non-modal panel (a plug-in window).
+    struct Free(&'static str);
+    impl Panel for Free {
+        fn size(&self) -> (f32, f32) {
+            (100.0, 100.0)
+        }
+        fn build(&mut self, _ui: &mut Ui, _rect: Rect) {}
+        fn modal(&self) -> bool {
+            false
+        }
+        fn key(&self) -> Option<String> {
+            Some(self.0.into())
+        }
+    }
+
+    /// Show/Hide Floating Windows: the plug-in windows leave the stack (modal panels stay) and
+    /// come back under what opened since, without doubling one reopened meanwhile.
+    #[test]
+    fn floating_panels_hide_and_return() {
+        let mut stack = OverlayStack::new(Box::new(PlaceholderHook));
+        stack.push(Box::new(Free("in0:0")));
+        stack.push(Box::new(Free("in1:0")));
+        let hidden = stack.take_floating();
+        assert_eq!(hidden.len(), 2);
+        assert!(stack.panels.is_empty());
+        stack.push(Box::new(Free("in1:0")));
+        stack.restore_floating(hidden);
+        let keys: Vec<_> = stack.panels.iter().filter_map(|p| p.key()).collect();
+        assert_eq!(keys, ["in0:0", "in1:0"]);
+    }
 
     #[test]
     fn placeholder_opens_and_dismisses() {

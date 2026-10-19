@@ -352,6 +352,10 @@ impl MixerModel for EngineMixer {
         self.session_info()
     }
 
+    fn snapshots(&self) -> rack::surfaces::SnapshotInfo {
+        self.snapshot_info()
+    }
+
     fn inputs(&self) -> Vec<StripInfo> {
         self.store
             .topology()
@@ -702,6 +706,13 @@ impl MixerModel for EngineMixer {
         Some(self)
     }
 
+    /// The writes the engine refused (`Store::refusals`), newest first.
+    fn notifications(&self) -> Vec<String> {
+        let mut n: Vec<String> = self.store.refusals().map(|r| format!("{}: {}", r.path, r.message)).collect();
+        n.reverse();
+        n
+    }
+
     fn apply_setting_writes(&mut self, writes: Vec<rack::settings::Write>) {
         self.write_settings(writes);
     }
@@ -766,7 +777,7 @@ impl MixerModel for EngineMixer {
                 _ => {}
             }
         }
-        if self.apply_session(action) {
+        if self.apply_session(action) || self.apply_snapshot(action) {
             return;
         }
         if self.apply_presets(action) {

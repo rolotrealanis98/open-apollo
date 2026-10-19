@@ -436,6 +436,10 @@ impl Panel for WindowPanel {
         // graph handles, menus); chrome and popovers stay with rack's interaction.
         match ev {
             PointerEvent::Down { x, y, double } => {
+                // Knobs follow Settings › CONTROLS MODE, read on each press (as the mixer's).
+                let mode = rack::ControlsMode::of(&*model);
+                self.interaction.controls_mode = mode;
+                self.window.set_controls_mode(mode);
                 let hits = std::mem::take(&mut self.hits);
                 let taken = self.with_params(model, |w, p| w.panel_pointer_down(&hits, x + dx, y + dy, double, p));
                 self.hits = hits;

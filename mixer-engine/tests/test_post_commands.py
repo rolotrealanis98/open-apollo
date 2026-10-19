@@ -571,6 +571,57 @@ class TestSnapshots:
         assert stack.commands.execute(
             "/SaveAsSnapshot", {"name": "../x"})[1] == ERR_FAILED
 
+    def test_console_save_recall_and_prime_on_the_wire(self, stack):
+        # The Snapshots section's requests, as console-rs sends them:
+        # SAVE AS posts {"snapshotName"}, RECALL sets /Snapshot, a row
+        # selection sets /PrimedSnapshot (a prime recalls nothing)
+        t = stack.state
+        t.set(f"{IN}/0/FaderLevel/value", -5.0)
+        c = post(stack, 'post /SaveAsSnapshot {"snapshotName":"Live/A"}')
+        assert "error" not in c.last(), c.last()
+        assert t.get_prop_dict("/Snapshot")["values"] == [
+            {"type": "folder", "value": "Live", "locked": False,
+             "children": [{"type": "file", "value": "A", "locked": False}]}]
+        t.set(f"{IN}/0/FaderLevel/value", -20.0)
+        post(stack, 'set /PrimedSnapshot/value "Live/A"')
+        assert t.get_value("/PrimedSnapshot/value") == "Live/A"
+        assert t.get_value(f"{IN}/0/FaderLevel/value") == -20.0
+        post(stack, 'set /Snapshot/value "Live/A"')
+        assert t.get_value("/Snapshot/value") == "Live/A"
+        assert t.get_value(f"{IN}/0/FaderLevel/value") == -5.0
+        # a recall is not an edit
+        assert t.get_value("/Dirty/value") is not True
+
+    def test_folder_rename_and_delete_by_folder_name(self, stack):
+        for n in ("Live/A", "Live/B", "C"):
+            ok(stack, "/SaveAsSnapshot", {"snapshotName": n})
+        post(stack, 'set /PrimedSnapshot/value "Live/B"')
+        r = ok(stack, "/MoveSnapshot",
+               {"origName": "Live", "newName": "Show", "shuffle": False})
+        assert r["snapshots"] == ["Show/A", "Show/B", "C"]
+        assert stack.state.get_value("/PrimedSnapshot/value") == "Show/B"
+        assert ok(stack, "/DeleteSnapshot",
+                  {"snapshotName": "Show"})["snapshots"] == ["C"]
+        assert stack.state.get_value("/PrimedSnapshot/value") == ""
+        assert [n["value"] for n in
+                stack.state.get_prop_dict("/Snapshot")["values"]] == ["C"]
+
+    def test_export_and_import_all_through_the_volume(self, stack, tmp_path):
+        vol = stack.state.get_prop_dict("/Snapshot")["volumes"][0]["volume"]
+        ok(stack, "/SaveAsSnapshot", {"snapshotName": "Live/A"})
+        ok(stack, "/ExportSnapshots", {"volume": vol, "folder": "Backup"})
+        assert (tmp_path / "x4.exports" / "Backup.json").exists()
+        ok(stack, "/SaveAsSnapshot", {"snapshotName": "B"})
+        r = ok(stack, "/ImportSnapshots",
+               {"volume": vol, "folder": "Backup", "append": False})
+        assert r["snapshots"] == ["Live/A"]
+        r = ok(stack, "/ImportSnapshots",
+               {"volume": vol, "folder": "Backup", "append": True})
+        assert r["snapshots"] == ["Live/A"]
+        assert stack.commands.execute(
+            "/ExportSnapshots", {"volume": "elsewhere", "folder": "x"})[1] \
+            == ERR_FAILED
+
     def test_setting_an_unknown_snapshot_name_does_nothing(self, stack):
         stack.state.set(f"{IN}/0/FaderLevel/value", -5.0)
         post(stack, "set /Snapshot/value Nope")

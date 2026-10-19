@@ -231,6 +231,27 @@ fn toggle_all_writes_every_input_in_one_step() {
     assert_eq!(w.iter().filter(|c| c.ends_with(&format!("/Mute/value {target}"))).count(), changed, "{w:?}");
 }
 
+/// Edit › Disable All Plug-Ins: every loaded slot's Power in one undo step (one
+/// `/UndoRecording` bracket around the batch, not one per slot).
+#[test]
+fn disable_all_plugins_is_one_undo_step() {
+    let mut t = tree();
+    for n in [0, 1] {
+        t.set_value(&format!("/devices/0/inputs/{n}/effects/0/EffectName"), ua_engine::Value::from("UAD Test Comp".to_string()));
+        t.set_value(&format!("/devices/0/inputs/{n}/effects/0/Power"), ua_engine::Value::from(true));
+    }
+    let server = MockEngine::start(t, MockOptions::default()).unwrap();
+    let mut m = live(&server);
+    let strip = m.inputs()[0].id.clone();
+    m.apply(&Action::Tap(ControlId { strip, control: Control::Menu(MenuCmd::App(rack::menu::Command::DisableAllPlugins)) }));
+    let w = writes_after(&server, 4);
+    assert_eq!(w.iter().filter(|c| c.starts_with("set /UndoRecording/value")).count(), 2, "{w:?}");
+    assert_eq!(w.first().map(String::as_str), Some("set /UndoRecording/value true"));
+    assert_eq!(w.last().map(String::as_str), Some("set /UndoRecording/value false"));
+    assert!(w[1..w.len() - 1].iter().all(|c| c.ends_with("/Power/value false")), "{w:?}");
+    assert!(w.contains(&"set /devices/0/inputs/1/effects/0/Power/value false".to_string()), "{w:?}");
+}
+
 /// The typed-value popover's OK writes the fader's dB property (`FaderLevel`).
 #[test]
 fn typed_value_writes_the_db_property() {

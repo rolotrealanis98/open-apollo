@@ -195,6 +195,8 @@ struct Gesture {
     next_repeat: Option<f64>,
     /// A parameter gesture (undo bracket) is open.
     began: bool,
+    /// A rotary knob under a circular CONTROLS MODE.
+    turn: Option<rack::KnobTurn>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -248,6 +250,9 @@ pub struct PluginPanel {
     last_tick: Option<f64>,
     rng: u64,
     gesture: Option<Gesture>,
+    /// Settings › CONTROLS MODE for knob drags (the host sets it from [`rack::ControlsMode::of`]),
+    /// as rack's [`rack::Interaction::controls_mode`].
+    pub controls_mode: rack::ControlsMode,
     popup: Option<Popup>,
     placement: Mutex<Option<Placement>>,
     hits: Mutex<Vec<PanelHit>>,
@@ -351,6 +356,7 @@ impl PluginPanel {
             last_tick: None,
             rng: 0x9E37_79B9_7F4A_7C15 ^ n,
             gesture: None,
+            controls_mode: rack::ControlsMode::Linear,
             popup: None,
             placement: Mutex::new(None),
             hits: Mutex::new(Vec::new()),
@@ -2119,6 +2125,7 @@ impl PluginPanel {
             long_fired: false,
             next_repeat: None,
             began: false,
+            turn: None,
         };
         match &hit.target {
             Target::Knob { el, param, .. } | Target::DragZone { el, param } => {
@@ -2131,6 +2138,13 @@ impl PluginPanel {
                     self.drag_write(*param, d, params);
                 }
                 g.start_value = self.value(*param, params);
+                // A rotary knob follows CONTROLS MODE; Circular jumps to the pointer on the press.
+                if matches!(hit.target, Target::Knob { horizontal: false, .. }) && !double {
+                    g.turn = rack::KnobTurn::begin(self.controls_mode, hit.rect.center(), x, y, g.start_value);
+                    if let Some(v) = g.turn.and_then(|t| t.press_value()) {
+                        self.drag_write(*param, v, params);
+                    }
+                }
             }
             Target::Button { el } => {
                 let el = self.spec.elements[*el].clone();
@@ -2178,7 +2192,10 @@ impl PluginPanel {
                 // SwiftUI's binding setter touches the element on every drag event.
                 let touch = self.spec.elements[*el].touch_state.clone();
                 let travel = if *horizontal { dx } else { -dy } / s;
-                let v = clamp01(g.start_value + travel as f64 / DRAG_SPAN as f64);
+                let v = match &mut g.turn {
+                    Some(t) => t.move_to(x, y, false),
+                    None => clamp01(g.start_value + travel as f64 / DRAG_SPAN as f64),
+                };
                 self.touch(touch.as_ref());
                 self.drag_write(*param, v, params);
             }

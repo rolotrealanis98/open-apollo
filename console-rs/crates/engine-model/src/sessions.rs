@@ -3,9 +3,9 @@
 //! makes, sent as [`ua_engine::SessionCommand`]s through the store's write gates.
 
 use rack::surfaces::session::{PanelRowKind, panel_rows};
-use rack::surfaces::{SessionFile, SessionInfo, SessionOp};
+use rack::surfaces::{SessionFile, SessionInfo, SessionOp, SnapshotFolder, SnapshotInfo, SnapshotRequest};
 use rack::{Action, Control, ControlId};
-use ua_engine::{SessionCommand, SessionEntry, SessionState};
+use ua_engine::{SessionCommand, SessionEntry, SessionState, SnapshotCommand};
 
 use crate::EngineMixer;
 
@@ -45,6 +45,42 @@ impl EngineMixer {
             PanelRowKind::Folder { path, root } if !root && !path.is_empty() => Some(path),
             _ => None,
         }
+    }
+
+    /// The Snapshots section's view of `/Snapshot`, `/PrimedSnapshot` and `/Snapshot/values`:
+    /// top-level folders with their snapshots; loose snapshots in a folder named `""`.
+    pub(crate) fn snapshot_info(&self) -> SnapshotInfo {
+        let st = self.store.session_state();
+        let mut folders: Vec<SnapshotFolder> = Vec::new();
+        for e in &st.snapshots {
+            match e {
+                SessionEntry::Folder { name, .. } => folders.push(SnapshotFolder {
+                    name: name.clone(),
+                    snapshots: e.files().iter().map(|f| f.path()[name.len() + 1..].to_owned()).collect(),
+                }),
+                SessionEntry::File { name, .. } => match folders.iter_mut().find(|f| f.name.is_empty()) {
+                    Some(f) => f.snapshots.push(name.clone()),
+                    None => folders.push(SnapshotFolder { name: String::new(), snapshots: vec![name.clone()] }),
+                },
+            }
+        }
+        SnapshotInfo { current: st.snapshot, primed: st.primed_snapshot, folders, volumes: st.snapshot_volumes }
+    }
+
+    /// A Snapshots section request as the engine's snapshot command (through the write gates).
+    pub(crate) fn apply_snapshot(&mut self, action: &Action) -> bool {
+        let Action::Tap(ControlId { control: Control::SnapshotRequest(r), .. }) = action else { return false };
+        let command = match r.clone() {
+            SnapshotRequest::Recall(n) => SnapshotCommand::Recall(n),
+            SnapshotRequest::Prime(n) => SnapshotCommand::Prime(n),
+            SnapshotRequest::Save { name, is_new } => SnapshotCommand::SaveAs { name, is_new },
+            SnapshotRequest::Delete(name) => SnapshotCommand::Delete { name },
+            SnapshotRequest::Move { from, to, shuffle } => SnapshotCommand::Move { from, to, shuffle },
+            SnapshotRequest::Export { volume, folder } => SnapshotCommand::Export { volume, folder },
+            SnapshotRequest::Import { volume, folder, append } => SnapshotCommand::Import { volume, folder, append },
+        };
+        self.store.snapshot_command(&command);
+        true
     }
 
     /// Sends a session command (gated: suppressed while writes are off).

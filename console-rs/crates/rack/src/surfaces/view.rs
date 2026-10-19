@@ -167,6 +167,8 @@ pub enum Popover {
     Tempo,
     /// The navigator SESSION box's menu.
     Session,
+    /// A Snapshots section name field (`TextTarget::Snapshot`), titled.
+    SnapshotText { title: String },
     /// "SAVE SESSION": the session has unsaved changes; `then` runs after the answer.
     SaveChanges { then: SessionOp },
     /// Session name field (Save As; uses `ViewState::text_edit`).
@@ -183,6 +185,9 @@ pub enum Popover {
     /// Typed-value entry for `target` (a fader or send level; `ViewState::text_edit` holds the
     /// dB text): OK sets it, −144…+12 dB. The anchor is the readout's hit (or `target`'s).
     Value { target: ControlId },
+    /// Window › Notifications: the engine's recent refusals, newest first
+    /// ([`MixerModel::notifications`]), with OK.
+    Notifications { lines: Vec<String> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -215,6 +220,9 @@ pub enum TextTarget {
     Preset(Arc<str>, crate::presets::PresetScope, crate::presets::PresetCmd),
     /// A [`Popover::Value`] field; `fresh` until the first key, which replaces the shown value.
     Value { target: ControlId, fresh: bool },
+    /// A Snapshots section field: `from` is the renamed / moved snapshot or folder (`folder`),
+    /// or SAVE AS...'s folder.
+    Snapshot { field: crate::surfaces::snapshots::SnapshotField, from: String, folder: bool },
 }
 
 /// A text field with keyboard focus.
@@ -280,6 +288,9 @@ pub struct ViewState {
     pub show_ctrl_room: bool,
     /// The PLUG-IN SCENES panel column, left of the browser (user capture s10).
     pub show_scenes: bool,
+    /// The Snapshots section column, after PLUG-IN SCENES (View › Show Snapshots).
+    pub show_snapshots: bool,
+    pub snapshots: crate::surfaces::snapshots::SnapshotsView,
     /// The CURRENT SESSION panel in the browser column (the SESSION box; capture sess-panel).
     pub session_panel: crate::surfaces::session::SessionPanel,
     /// The status bar has its SCENE field. Console creates it lazily: the 08:27 captures show
@@ -343,6 +354,8 @@ pub struct ViewState {
     pub blink: bool,
     /// When [`ViewState::tick_blink`] first ran (the blink phase counts from it).
     pub blink_epoch: Option<std::time::Instant>,
+    /// The free window Window › Show/Hide Floating Windows hid ([`ViewState::hide_floating`]).
+    pub hidden_sheet: Option<Sheet>,
 }
 
 impl ViewState {
@@ -369,6 +382,8 @@ impl Default for ViewState {
             show_aux: true,
             show_ctrl_room: false,
             show_scenes: false,
+            show_snapshots: false,
+            snapshots: Default::default(),
             session_panel: Default::default(),
             scene_info: true,
             cells_scroll: 0.0,
@@ -396,6 +411,7 @@ impl Default for ViewState {
             windowing: None,
             blink: false,
             blink_epoch: None,
+            hidden_sheet: None,
         }
     }
 }
@@ -475,6 +491,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::SessionPanelDots
             | C::SessionSaveChoice(_)
             | C::ValueEntry(_)
+            | C::PreampPlate
     ) || matches!(c, C::Preamp(p) if &**p == "input_source")
         || matches!(c, C::Menu(m) if m.is_view())
 }
@@ -502,7 +519,15 @@ fn toggle_all(model: &dyn MixerModel, strip: &Arc<str>, control: &Control) -> Ve
 fn value_effects(target: ControlId, text: &str) -> Vec<Effect> {
     let t = text.trim().trim_end_matches("dB").trim();
     let db = if t.contains('∞') || t.eq_ignore_ascii_case("-inf") { Some(-144.0) } else { t.parse::<f64>().ok().filter(|d| d.is_finite()) };
-    db.map(|db| Effect::SetText(target, format!("{}", db.clamp(-144.0, 12.0)))).into_iter().collect()
+    let db = db.map(|db| format!("{}", db.clamp(-144.0, 12.0)));
+    // A Sends window fader (`fader:<node>/GainTapered`): the send's `Gain` through the setting
+    // path (`db:<node>/Gain`).
+    if let Control::SettingSet(k) = &target.control {
+        let Some(node) = k.strip_prefix("fader:").and_then(|p| p.strip_suffix("/GainTapered")) else { return Vec::new() };
+        let edit = ControlId { strip: target.strip.clone(), control: Control::SettingEdit(format!("db:{node}/Gain").into()) };
+        return db.map(|db| Effect::SetText(edit, db)).into_iter().collect();
+    }
+    db.map(|db| Effect::SetText(target, db)).into_iter().collect()
 }
 
 fn find_strip(model: &dyn MixerModel, id: &str) -> Option<StripInfo> {
@@ -564,6 +589,7 @@ impl ViewState {
                 "aux" => self.show_aux = flag()?,
                 "ctrl" => self.show_ctrl_room = flag()?,
                 "scenes" => self.show_scenes = flag()?,
+                "snapshots" => self.show_snapshots = flag()?,
                 "scene-info" => self.scene_info = flag()?,
                 "compact" => self.compact = flag()?,
                 "first" => self.first_strip = v.parse().map_err(|_| format!("view: first={v}: expected a strip index"))?,
@@ -700,6 +726,10 @@ impl ViewState {
             self.menu = None;
             return self.route_session(op, model);
         }
+        if let C::Snapshots(op) = id.control {
+            self.menu = None;
+            return self.route_snapshots(op, model);
+        }
         // Any other press while a popup menu is open came from one of its rows: it closes.
         let from_popup = self.menu.take().is_some();
         if from_popup {
@@ -730,7 +760,9 @@ impl ViewState {
                 Some(Modifier::Power) => Action::Tap(to(C::InsertPower(k))),
                 Some(Modifier::Remove) => Action::Tap(to(C::InsertRemove(k))),
                 Some(Modifier::Copy) => Action::Tap(to(C::InsertCopy(k))),
-                Some(Modifier::SetDefault) => Action::Tap(to(C::InsertSetDefault(k))),
+                // SET DEFAULT leaves plug-in inserts alone (manual §4.7); Rack_Inserts consumes
+                // the click under any modifier (`buttonClicked` 0x145c510 acts in mode 0 only).
+                Some(Modifier::SetDefault) => return Vec::new(),
                 _ => action,
             })];
         }
@@ -965,6 +997,7 @@ impl ViewState {
             TextTarget::Value { target, .. } => value_effects(target, &edit.text),
             TextTarget::SceneName(i) => vec![Effect::SetText(ControlId { strip: "global".into(), control: Control::SceneName(i) }, edit.text)],
             TextTarget::Preset(strip, scope, cmd) => self.commit_preset_text(strip, scope, cmd, edit.text),
+            TextTarget::Snapshot { field, from, folder } => self.commit_snapshot_text(field, from, folder, edit.text, model),
             t @ (TextTarget::SessionSaveAs { .. } | TextTarget::SessionOpen | TextTarget::SessionRename(_) | TextTarget::SessionNewFolder | TextTarget::SessionFolderRename(_) | TextTarget::SessionNewFolderIn(_)) => self.commit_session_text(&t, edit.text, model),
         }
     }
@@ -978,6 +1011,10 @@ impl ViewState {
             return self.open_named(a) && self.open_named(b);
         }
         let (what, tab) = name.split_once(':').unwrap_or((name, ""));
+        if what == "snapshots" {
+            self.show_snapshots = true;
+            return true;
+        }
         let panel = match what {
             "settings" => {
                 self.sheet = Some(Sheet::Settings);
@@ -1113,6 +1150,36 @@ impl ViewState {
         };
         *slot = (*slot + dy / r.max).clamp(0.0, 1.0);
         true
+    }
+
+    /// Window › Show/Hide Floating Windows: hides the open free window (Settings, or a panel
+    /// whose layer is a `LayerKind::Window`: MONITOR CONTROLLER, PLUG-IN SCENES, …). True when
+    /// there was one.
+    pub fn hide_floating(&mut self) -> bool {
+        let free = match self.sheet {
+            Some(Sheet::Settings) => true,
+            Some(Sheet::Panel(p)) => crate::layers::panel_kind(p) == crate::layers::LayerKind::Window,
+            None => false,
+        };
+        if free {
+            self.hidden_sheet = self.sheet.take();
+        }
+        free
+    }
+
+    /// Shows the free window [`Self::hide_floating`] hid, unless another opened meanwhile.
+    pub fn show_floating(&mut self) {
+        if let Some(s) = self.hidden_sheet.take() {
+            self.sheet.get_or_insert(s);
+        }
+    }
+
+    /// Window › Notifications: the recent engine refusals in a dialog (the daemon publishes no
+    /// notification list of its own).
+    pub fn show_notifications(&mut self, model: &dyn MixerModel) {
+        self.menu = None;
+        let anchor = ControlId { strip: "popover".into(), control: Control::PopoverDismiss };
+        self.popover = Some(PopoverState { kind: Popover::Notifications { lines: model.notifications() }, anchor });
     }
 
     pub fn key_text(&mut self, s: &str) {
@@ -1272,6 +1339,40 @@ mod tests {
         assert_eq!(model.main(&s).fader, 1.0);
     }
 
+    /// A Sends window fader's readout opens the same popover; OK writes the send's `Gain` dB.
+    #[test]
+    fn sends_window_value_popover_writes_gain() {
+        use crate::settings::PropertySource;
+        let mut model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        let fader = Control::SettingSet("fader:/devices/0/inputs/22/sends/2/GainTapered".into());
+        v.dispatch(Action::Set(cid("settings", Control::ValueEntry(Box::new(fader.clone()))), 0.5), &mut model);
+        assert_eq!(v.popover.as_ref().map(|p| &p.kind), Some(&Popover::Value { target: cid("settings", fader) }));
+        v.key_text("-20");
+        v.key_enter(&mut model);
+        assert!(v.popover.is_none());
+        assert_eq!(model.props.prop("/devices/0/inputs/22/sends/2/Gain").and_then(|p| p.as_f64()), Some(-20.0));
+    }
+
+    /// Window › Show/Hide Floating Windows hides a free window and shows it again; a callout
+    /// (CUE OUTPUTS) is not a floating window. Notifications opens a dialog OK closes.
+    #[test]
+    fn floating_windows_and_notifications() {
+        let mut model = PreviewMixer::default();
+        let mut v = ViewState { sheet: Some(Sheet::Settings), ..ViewState::default() };
+        assert!(v.hide_floating());
+        assert_eq!((v.sheet.clone(), v.hidden_sheet.clone()), (None, Some(Sheet::Settings)));
+        v.show_floating();
+        assert_eq!((v.sheet.clone(), v.hidden_sheet.clone()), (Some(Sheet::Settings), None));
+        v.sheet = Some(Sheet::Panel(Panel::CueOutputs));
+        assert!(!v.hide_floating());
+        assert_eq!(v.sheet, Some(Sheet::Panel(Panel::CueOutputs)));
+        v.show_notifications(&model);
+        assert_eq!(v.popover.as_ref().map(|p| &p.kind), Some(&Popover::Notifications { lines: Vec::new() }));
+        v.dispatch(Action::Tap(cid("popover", Control::PopoverDismiss)), &mut model);
+        assert!(v.popover.is_none());
+    }
+
     #[test]
     fn modifiers_translate_insert_taps() {
         let mut model = PreviewMixer::default();
@@ -1288,6 +1389,9 @@ mod tests {
         assert_eq!(v.modifier, None);
         let e = v.route(Action::Tap(cid("in0", Control::Insert(1))), &model);
         assert_eq!(e, vec![Effect::Model(Action::Tap(cid("in0", Control::Insert(1))))]);
+        // SET DEFAULT does not apply to inserts: the tap is consumed (no open, no write).
+        v.dispatch(Action::Toggle(cid("nav", Control::Modifier(Modifier::SetDefault))), &mut model);
+        assert!(v.route(Action::Tap(cid("in0", Control::Insert(1))), &model).is_empty());
     }
 
     #[test]

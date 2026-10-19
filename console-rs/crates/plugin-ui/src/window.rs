@@ -819,6 +819,13 @@ impl PluginWindow {
         p.pointer_down(x, y, double, params)
     }
 
+    /// Settings › CONTROLS MODE for a spec panel's knob drags.
+    pub fn set_controls_mode(&mut self, mode: rack::ControlsMode) {
+        if let Content::Spec(p) = &mut self.content {
+            p.controls_mode = mode;
+        }
+    }
+
     pub fn panel_pointer_move(&mut self, x: f32, y: f32, params: &mut dyn ParamSource) -> bool {
         match &mut self.content {
             Content::Spec(p) => p.pointer_move(x, y, params),

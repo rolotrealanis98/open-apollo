@@ -37,6 +37,8 @@ pub struct WindowLayout {
     pub browser: bool,
     /// The PLUG-IN SCENES panel column, left of the browser.
     pub scenes: bool,
+    /// The Snapshots section column, after PLUG-IN SCENES (`Resized_SnapshotsSection`).
+    pub snapshots: bool,
     /// The control-room column before the monitor column (SHOW CTRL ROOM).
     pub ctrl_room: bool,
     /// The navigator column is shown (View > Section > Show Mixer Navigation; full layout).
@@ -79,6 +81,7 @@ impl WindowLayout {
             browser: (view.show_browser || view.session_panel.open) && !view.compact,
             navigator: view.show_navigator,
             scenes: view.show_scenes && !view.compact,
+            snapshots: view.show_snapshots && !view.compact,
             ctrl_room: view.show_ctrl_room,
             width: w,
             height: h,
@@ -123,9 +126,13 @@ impl WindowLayout {
     pub fn scenes_x(&self) -> f32 {
         0.0
     }
+    /// Snapshots column x (full layout).
+    pub fn snapshots_x(&self) -> f32 {
+        if self.scenes { SCENES_W } else { 0.0 }
+    }
     /// Browser column x (full layout).
     pub fn browser_x(&self) -> f32 {
-        if self.scenes { SCENES_W } else { 0.0 }
+        self.snapshots_x() + if self.snapshots { crate::surfaces::snapshots::SNAPSHOTS_W } else { 0.0 }
     }
     /// Navigator column x (full layout).
     pub fn nav_x(&self) -> f32 {
@@ -309,6 +316,10 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     if !l.compact {
         if l.scenes {
             draw_scenes_column(ui, model, view, Rect::new(l.scenes_x(), W::TITLE_BAR, SCENES_W, status_y - W::TITLE_BAR));
+        }
+        if l.snapshots {
+            let w = crate::surfaces::snapshots::SNAPSHOTS_W;
+            crate::surfaces::snapshots::draw_snapshots_section(ui, model, view, Rect::new(l.snapshots_x(), W::TITLE_BAR, w, status_y - W::TITLE_BAR));
         }
         if l.browser {
             let col = Rect::new(l.browser_x(), W::TITLE_BAR, W::BROWSER_W, status_y - W::TITLE_BAR);
@@ -800,6 +811,7 @@ fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, size: InsertSi
             // Rack_Overview_Preamp's secondary_background (Secondary-Channel-Inserts-Background)
             // runs 2 pt past the 129-pt plate, as under SR CONVERT.
             ui.background("Secondary-Channel-Inserts-Background", Rect::new(4.0, 101.0 - dy, STRIP_W - 8.0, 131.0));
+            ui.hit(Rect::new(0.0, 101.0 - dy, STRIP_W, 129.0), ControlId { strip: s.id.clone(), control: Control::PreampPlate }, HitKind::Tap);
             draw_preamp(ui, layout, &state, &s.id, Rect::new(0.0, 101.0 - dy, STRIP_W, 129.0));
         }
     } else if s.shows_sr_convert {
@@ -813,6 +825,7 @@ fn input_cell(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, size: InsertSi
 /// secondary background, label plate `(4, 0, w−8, 24)` with the Silk-Screen title `(0, 5, w, 16)`,
 /// lower plate `(6, 24, w−12, 19 + 2·10)`, radio background and OFF / ON at `(10+6, 34)` / `(48, 34)`.
 fn sr_convert(ui: &mut Ui, s: &StripInfo, on: bool, r: Rect) {
+    ui.hit(r, ControlId { strip: s.id.clone(), control: Control::PreampPlate }, HitKind::Tap);
     ui.background("Secondary-Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, r.h));
     ui.background("Channel-Inserts-Background", Rect::new(r.x + 4.0, r.y, r.w - 8.0, 24.0));
     ui.font_text("Silk-Screen", "SR CONVERT", Rect::new(r.x, r.y + 5.0, r.w, 16.0), Align::Center);
@@ -847,7 +860,10 @@ fn unison(ui: &mut Ui, state: &crate::model::InsertState, label: Option<&crate::
 fn rec_mon(ui: &mut Ui, monitor_only: bool, s: &StripInfo, y: f32) {
     let h = 42.0;
     ui.toggle("UAD-Record-LEDs", None, !monitor_only, true, Rect::new(6.0, y - 2.0, 43.0, h), cid(s, Control::RecMon), None);
-    ui.toggle("Switch", Some("INS"), false, true, Rect::new(STRIP_W / 2.0, y - 2.0, 40.0, h), None, None);
+    // INS (`Rack_UADRecord` 0x14ff288, button "toggle"): not a state of its own. A press anywhere
+    // on the component flips this input's `RecordPreEffects` (mouseDown 0x14fff98), the LEDs
+    // show it; INS only takes the pressed look while held (mouseUp 0x15004c0 clears it).
+    ui.toggle("Switch", Some("INS"), false, true, Rect::new(STRIP_W / 2.0, y - 2.0, 40.0, h), cid(s, Control::RecMon), None);
 }
 
 fn main_strip(ui: &mut Ui, model: &dyn MixerModel, s: &StripInfo, pos: GroupPos) {

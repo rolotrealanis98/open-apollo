@@ -57,7 +57,7 @@ One row can cover a few closely related controls (MUTE / MONO, the CUE OUTPUTS r
 The 7 still not wired, and why:
 - BUFFER SIZE: PipeWire owns the quantum.
 - UAD REC/MON, inserts and Unison: they need the plug-in DSP backend.
-- CHANNEL DSP PAIRING: it needs the DSP backend too.
+- CHANNEL DSP PAIRING's DSP side (spanning, 69 samples latency): it needs the DSP backend too.
 - Monitor and headphone correction: there is no SoundID DSP.
 - SOURCE CUE 3/4, and HP source MON or NONE: no hardware encoding is known. The daemon refuses
   them and the console snaps back.
@@ -159,7 +159,7 @@ The 7 still not wired, and why:
 | 61 | DIGITAL OUTPUT | `…/TOSLinkOutput` | settings | `(2, 0, 0x21, 8 = ADAT)` | wired | wired | same |
 | 62 | MON LEVEL 14 / 20 dBu | `…/outputs/18/Pad` | settings `map:mon_level` | `(2, 1, 0x32, …)` | wired | wired | same |
 | 63 | OUTPUT REFERENCE LEVELS 1-2, 3-4 | `…/outputs/0-3/Pad` | settings `pair:` | `(2, 0, 0x19-0x1c, …)` | wired | wired | same |
-| 64 | CHANNEL DSP PAIRING | `ActiveSpans` | drawn, no hit | no route | UI-only | UI-only: needs the DSP backend | — |
+| 64 | CHANNEL DSP PAIRING | `set /devices/N/ActiveSpans/value` (MaxSpans − cell) | settings `spans:` (one hit per cell; off at ≥ 176.4 kHz) | tree only: the Virtual inputs' `Active` follow (MaxSpans − ActiveSpans virtual channels); the DSP side needs the plug-in DSP backend | UI-only | tree | `dsp_pairing_slider_writes_active_spans`, `TestChannelDspPairing` |
 | 65 | OPTIONS › METERING pre / post | `set /PostFaderMetering/value` | settings `map:metering`, meter menu | host meters | host | host | — |
 | 66 | OPTIONS › CLIP HOLD | `set /ClipHold/value` | settings | `(2, 0, 0x13, idx)` | wired | wired | same |
 | 67 | OPTIONS › PEAK HOLD | `set /PeakHold/value` | settings | `(2, 0, 0x14, idx)` | wired | wired | same |
