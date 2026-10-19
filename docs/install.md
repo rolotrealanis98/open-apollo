@@ -17,7 +17,7 @@ have**, because it includes no Universal Audio files. The setup wizard does ever
 | You need | Notes |
 |---|---|
 | An Apollo | Thunderbolt 3/4 models on a Thunderbolt 3/4 or USB4 port, or a USB model. Thunderbolt 2 models don't enumerate on Linux; see the [README](../README.md#thunderbolt-2-devices-not-supported). |
-| A Linux distribution | Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed, Linux Mint 22, Pop!_OS 24.04 or Manjaro. Kernel 6.8 or newer is the safe choice. |
+| A Linux distribution | Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed, Linux Mint 22, Pop!_OS 24.04 or Manjaro. Kernel 6.8 or newer is the safe choice. Apple Silicon Macs on Asahi Linux need a second kernel first: [open-apollo on Asahi Linux](asahi-linux.md). |
 | A UAD install | On a Windows partition, in a Windows VM, in a Wine prefix, or copied from a Windows PC: see [Getting a UAD install](uad-install.md). |
 | Rust 1.89 or newer | From [rustup](https://rustup.rs): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh`. Distribution Rust packages are often too old. |
 | Build tools | A C compiler and `make` (`build-essential`, `gcc make`, `base-devel`). The installer adds kernel headers, DKMS and the audio packages it needs. |
