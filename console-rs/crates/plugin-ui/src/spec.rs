@@ -446,6 +446,10 @@ pub struct TextStyle {
     /// With `value`: print `names[round(value)]` (empty out of range).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub names: Option<Vec<String>>,
+    /// Schema 2, with `value` in Hz: print the nearest equal-tempered note name ("A", "A#", …),
+    /// tuned to A = this value in Hz (a tuner's reference).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<GraphValue>,
     /// Computed readout instead of the Console string, printed with `format`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<GraphValue>,

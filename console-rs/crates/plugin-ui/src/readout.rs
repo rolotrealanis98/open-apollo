@@ -4,6 +4,14 @@
 
 use crate::spec::SpriteFont;
 
+/// The equal-tempered note nearest `hz` with A = `a_hz` ("A", "A#", …); empty unless both are
+/// positive frequencies. Exactly ±50 cents rounds away from the reference's note.
+pub fn note_name(hz: f64, a_hz: f64) -> &'static str {
+    const NAMES: [&str; 12] = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"];
+    let semitones = (12.0 * (hz / a_hz).log2()).round();
+    if hz > 0.0 && semitones.is_finite() { NAMES[semitones.rem_euclid(12.0) as usize] } else { "" }
+}
+
 /// `String(format: fmt, v)` for formats holding one `%f`/`%F`/`%e`/`%E`/`%g`/`%G` conversion
 /// (flags `-+ 0#`, width, precision) plus literal text and `%%` — the formats the pipeline
 /// validator admits. Anything else is copied through.
@@ -262,6 +270,41 @@ pub fn fitted_size(text: &str, width: f32, size: f32, monospaced: bool, bold: bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn note_names_from_a_period_in_samples() {
+        // A tuner meter reporting the period in samples at 48 kHz, as `ratio: [48000, meter]`.
+        let note = |period: f64, a: f64| note_name(48000.0 / period, a);
+        let cents = |name_hz: f64, c: f64| 48000.0 / (name_hz * 2f64.powf(c / 1200.0));
+        assert_eq!(note(48000.0 / 440.0, 440.0), "A");
+        assert_eq!(note(48000.0 / 261.6256, 440.0), "C", "middle C");
+        assert_eq!(note(48000.0 / 82.4069, 440.0), "E", "low E string");
+        assert_eq!(note(48000.0 / 30.8677, 440.0), "B", "5-string bass low B");
+        assert_eq!(note(48000.0 / 4186.009, 440.0), "C", "C8");
+        // Semitone boundaries: ±49.9 cents stays, ±50.1 cents is the neighbour.
+        assert_eq!(note(cents(440.0, 49.9), 440.0), "A");
+        assert_eq!(note(cents(440.0, 50.1), 440.0), "A#");
+        assert_eq!(note(cents(440.0, -49.9), 440.0), "A");
+        assert_eq!(note(cents(440.0, -50.1), 440.0), "G#");
+        assert_eq!(note(cents(261.6256, -50.1), 440.0), "B", "wraps below C");
+        // Reference 438…442 (`param 2` normalized 0…1 → 438 + 4·n): each one's A is "A", and
+        // A440 + 49 cents (452.6 Hz) is A# against 438 and 439 (+56.9, +53.0 cents), A against 440…442.
+        for a in [438.0, 439.0, 440.0, 441.0, 442.0] {
+            assert_eq!(note(48000.0 / a, a), "A", "reference {a}");
+            assert_eq!(note(cents(a, 50.1), a), "A#", "reference {a}");
+            assert_eq!(note(cents(a, -50.1), a), "G#", "reference {a}");
+        }
+        let a49 = cents(440.0, 49.0);
+        assert_eq!((note(a49, 438.0), note(a49, 439.0)), ("A#", "A#"));
+        for a in [440.0, 441.0, 442.0] {
+            assert_eq!(note(a49, a), "A", "reference {a}");
+        }
+        // No pitch: no name.
+        assert_eq!(note_name(0.0, 440.0), "");
+        assert_eq!(note_name(-1.0, 440.0), "");
+        assert_eq!(note_name(440.0, 0.0), "");
+        assert_eq!(note_name(f64::NAN, 440.0), "");
+    }
 
     #[test]
     fn printf_like_swift() {
