@@ -20,6 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Virtual n`. Inserts on Virtual strips are not mapped yet. Verified on an x4 at 48 kHz: a
   -30 dBFS tone on VIRTUAL 1 meters and records at -30.0, and fader, pan and mute act on it in
   the monitor mix. The strips need a cold start (an Apollo power cycle with the driver loaded).
+- `setup-apollo-io.sh` creates the "Apollo Virtual Out n+m" sinks (playback VIRTUAL n, m) and
+  "Apollo Virtual In n+m" sources (record VIRTUAL n, m) by default for each pair whose two
+  inputs have a live Input Strip in `dsp_state`; `--virtual` still forces every pair,
+  `--no-virtual` none, `--dsp-state FILE` reads a saved copy. On the x4 both pairs pass audio
+  at unity, left and right apart.
 
 ### Fixed
 - Apollo Twin X (and every model without a verified input strip map): a warm move from another

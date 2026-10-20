@@ -1,0 +1,12 @@
+input strips	on (input_strips=1, mask 0xff, virtual 0xf, form sdk), state live
+  pools: empty: cold-started by this driver, code pool 0xe0000, tops 0x9d1b8 0xc6ffe 0x08ffe000
+  DSP 0: owned by this driver, boot word 0x00000003 at the last cold start
+  passes 1, completed 1, teardowns 0, failures 0, rate 48000 Hz
+  strip 0: input 1 (DSP input 0), instance 0x9d1b0, live (taken after 2 ms)
+  strip 1: input 2 (DSP input 1), instance 0x9d15c, live (taken after 2 ms)
+  strip 2: input 3 (DSP input 2), instance 0x9d108, live (taken after 2 ms)
+  strip 3: input 4 (DSP input 3), instance 0x9d0b4, live (taken after 1 ms)
+  strip 4: Virtual 1 (DSP input 24), instance 0x9d060, live (taken after 1 ms)
+  strip 5: Virtual 2 (DSP input 25), instance 0x9d03a, live (taken after 1 ms)
+  strip 6: Virtual 3 (DSP input 26), instance 0x9d014, live (taken after 1 ms)
+  strip 7: Virtual 4 (DSP input 27), instance 0x9cfee, queued

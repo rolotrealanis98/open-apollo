@@ -1,0 +1,15 @@
+[apollo-io] Virtual loopbacks: Input Strips live on Virtual 1 2 3
+[apollo-io] Channel map: configs/pipewire/tests/x4-io_map-48k.txt (record 22 ch, playback 24 ch)
+[apollo-io] source apollo_mic_1             "Apollo Mic 1" <- AUX0 [MIC/LINE/HIZ 1]
+[apollo-io] source apollo_mic_2             "Apollo Mic 2" <- AUX1 [MIC/LINE/HIZ 2]
+[apollo-io] source apollo_mic_stereo        "Apollo Mic 1+2" <- AUX0 AUX1 [MIC/LINE/HIZ 1 + MIC/LINE/HIZ 2]
+[apollo-io] source apollo_mic_3             "Apollo Mic 3" <- AUX2 [MIC/LINE 3]
+[apollo-io] source apollo_mic_4             "Apollo Mic 4" <- AUX3 [MIC/LINE 4]
+[apollo-io] source apollo_line_34           "Apollo Line In 3+4" <- AUX2 AUX3 [MIC/LINE 3 + MIC/LINE 4]
+[apollo-io] source apollo_spdif_in          "Apollo S/PDIF In" <- AUX4 AUX5 [S/PDIF L + S/PDIF R]
+[apollo-io] source apollo_virtual_in_12     "Apollo Virtual In 1+2" <- AUX6 AUX7 [VIRTUAL 1 + VIRTUAL 2]
+[apollo-io] sink   apollo_monitor           "Apollo Monitor L/R" <- AUX0 AUX1 [MON L + MON R]
+[apollo-io] sink   apollo_line_out_12       "Apollo Line Out 1+2" <- AUX2 AUX3 [LINE 1 + LINE 2]
+[apollo-io] sink   apollo_line_out_34       "Apollo Line Out 3+4" <- AUX4 AUX5 [LINE 3 + LINE 4]
+[apollo-io] sink   apollo_spdif_out         "Apollo S/PDIF Out" <- AUX6 AUX7 [S/PDIF L + S/PDIF R]
+[apollo-io] sink   apollo_virtual_out_12    "Apollo Virtual Out 1+2" <- AUX8 AUX9 [VIRTUAL 1 + VIRTUAL 2]
