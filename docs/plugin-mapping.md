@@ -218,7 +218,8 @@ stays next to the bundle and `tools/check-clean-repo.py` refuses it (rule `plugi
 
 Learning is quick for all-stepped plug-ins (Studio D Chorus, Pultec HLF-3C, bx_tuner: about 15 s
 to a minute each); each continuous axis costs one emulator sweep of 32769 changes (about two
-minutes) per key it is recorded at, so the API Preamp takes about 15 minutes and 7 MB per layout.
+minutes) per key it is recorded at, so the API Preamp takes about 10 minutes per layout (six sweeps)
+and its file is 3.7 MB (14 MB of words before compression).
 Readback cannot tell a wrong table from a right one, only the gate and audio can: the gate is the
 reason a table is trusted, so a change to the learner keeps its differential test.
 
