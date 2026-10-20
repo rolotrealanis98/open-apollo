@@ -11,10 +11,12 @@ Parent side: EmulatorPool (a few workers, started on first use) and RemoteCaptur
 `python3 emulator_worker.py READ_FD WRITE_FD`, a loop answering pickled requests from the daemon
 that started it (trusted: only that daemon holds the pipe ends).
 """
+import gc
 import itertools
 import logging
 import os
 import pickle
+import select
 import struct
 import subprocess
 import sys
@@ -75,7 +77,14 @@ def _serve(read_fd, write_fd):
     # imported at the first build, after they are applied.
     GenericCapture = None
     captures = {}
+    dropped = False
     while True:
+        # A dropped emulator (unicorn and its hooks) is a reference cycle holding its emulated
+        # memory: free it now, while no request waits (a full collection takes ~0.5 s here).
+        if dropped and not select.select([read_fd], [], [], 0)[0]:
+            cap = None  # the last request's emulator, possibly a dropped one
+            gc.collect()
+            dropped = False
         try:
             request = _receive(read_fd)
         except EOFError:
@@ -115,7 +124,7 @@ def _serve(read_fd, write_fd):
                         pass
                 reply = os.getpid()
             elif op == 'drop':
-                captures.pop(ident, None)
+                dropped |= captures.pop(ident, None) is not None
                 continue  # no answer
             else:
                 raise ValueError(f'unknown emulator request {op!r}')

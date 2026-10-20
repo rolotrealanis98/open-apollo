@@ -1,5 +1,6 @@
 """emulator_worker: real worker processes running a fake capture (no unicorn, no DLL)."""
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -67,3 +68,18 @@ def test_settings_made_after_the_workers_started_reach_the_emulator(monkeypatch,
     pool.start()
     monkeypatch.setenv('OA_TEST_SETTING', 'from the maps')
     assert pool.capture(PROFILE).format_parameter(0)['console_trimmed'] == 'from the maps'
+
+
+def test_a_dropped_emulator_is_freed_although_it_is_a_reference_cycle(monkeypatch, tmp_path, pool):
+    # GenericCapture and its unicorn instance are a cycle holding the emulated memory; a worker
+    # left them to the collector, and one that met many plug-ins kept gigabytes (2026-10-20).
+    freed = tmp_path / 'freed'
+    monkeypatch.setenv('OA_EMULATOR_CAPTURE', 'fake_capture:CyclicCapture')
+    monkeypatch.setenv('OA_TEST_FREED', str(freed))
+    cap = pool.capture(PROFILE)
+    del cap
+    pool.workers[0].call('ping', 0, ())               # sends the drop; the worker frees it when idle
+    deadline = time.monotonic() + 5
+    while not freed.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert freed.exists()
