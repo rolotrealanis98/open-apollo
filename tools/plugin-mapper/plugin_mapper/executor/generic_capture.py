@@ -1054,8 +1054,13 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
         self.phase='ready'
 
     def _verify_replay(self):
-        replay=Replay();replay.apply(self.events)
+        # Replays only the events since the last check (Replay keeps its words): a long session's
+        # changes stay O(1) each instead of replaying the whole history every time.
+        replay,done=getattr(self,'_replay',None),getattr(self,'_replayed',0)
+        if replay is None or done>len(self.events):replay,done=Replay(),0
+        self._replay=None;replay.apply(self.events[done:])
         if replay.words!=self.shadow:raise ValueError('shared event replay differs from complete original shadow')
+        self._replay,self._replayed=replay,len(self.events)
 
     def set_control(self,index,value):
         if type(index)is not int or not 0<=index<len(self.maxima)or type(value)is not int or not 0<=value<=self.maxima[index]:

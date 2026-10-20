@@ -27,6 +27,14 @@ and `--retry-failures`.
 plug-in DLLs, `UAD2SDK.dll`, the few data files plug-ins open) into DIR, laid out like the
 install; setup maps from that copy so mapping can go on after the Windows partition is closed.
 
+`python3 -m plugin_mapper tables [--only NAME ...]` learns emulator-free control tables for mapped
+plug-ins (`tables.py`): which words each control writes and which controls they depend on, every
+value of them, the formatter texts, checked by a differential gate against the emulator (random
+control sequences from freshly loaded plug-ins must give identical events, values and texts).
+A passing bundle gets `<bundle>.tables` and the daemon controls it without the emulator; a refused
+one gets its reason in `index.json` `tables`. Options: `--changes N` (gate length, default 3000),
+`--workers`, `--force`, `--retry-failures`, `--out`. See docs/plugin-mapping.md.
+
 Plug-ins are mapped one per worker, each line on stdout as it starts and ends (`Mapping 12/37:
 UAD Pultec EQP-1A (mono, stereo)…`, then `done 41.0 s · ~6 min left`), with `progress.json` and
 `index.json` rewritten after each one. A plug-in's maps are reused until its DLL, `UAD2SDK.dll`,

@@ -3,7 +3,9 @@ hosted on one input or input pair. The native backend owns device I/O.
 
 Control changes are planned by running the plug-in's own setter in the offline emulator
 (tools/plugin-mapper's executor, on the user's own DLL), so hosting needs numpy, unicorn,
-capstone and pefile, and the DLL where the bundle was built from.
+capstone and pefile, and the DLL where the bundle was built from. A bundle with passing tables
+(`<bundle>.tables`, `python3 -m plugin_mapper tables`) is controlled from them instead: no venv,
+DLL or emulator worker for that plug-in.
 """
 from copy import deepcopy
 from dataclasses import dataclass
@@ -17,6 +19,8 @@ from native_carrier import (DSP_INPUTS, STEREO_FIRST, GeneratedOrdinaryCarrier, 
                             write as _write)
 from plugin_native import ControlPlan
 from plugin_publication import LoadedPlugin
+from probe_transactions import Replay
+import table_capture
 
 
 # An emulator_worker.EmulatorPool: emulators run in worker processes (the daemon sets it, see
@@ -33,8 +37,26 @@ def use_emulator_workers(pool):
 def _emulator():
     """Imported on first use: a daemon without native bundles never needs unicorn."""
     from generic_capture import GenericCapture
-    from probe_transactions import Replay
-    return GenericCapture, Replay
+    return GenericCapture
+
+
+# A bundle's emulator-free tables (or None), per bundle and tables file on disk: a provider copy
+# (chain planning makes many) reuses them instead of reading the file again.
+_TABLES: dict = {}
+_TABLES_LOCK = threading.Lock()
+
+
+def load_tables(bundle_path):
+    """The bundle's passing tables (table_capture.load), or None: then the emulator plans."""
+    try:
+        sidecar = os.stat(table_capture.sidecar_path(bundle_path))
+        key = (_bundle_key(bundle_path), sidecar.st_mtime_ns, sidecar.st_size)
+    except OSError:
+        return None
+    with _TABLES_LOCK:
+        if key not in _TABLES:
+            _TABLES[key] = table_capture.load(bundle_path, _bundle_sha256(bundle_path))
+        return _TABLES[key]
 
 _FIELD = re.compile(r'parameters/(\d+)/(NormalizedValue|StepValue)$')
 
@@ -178,10 +200,9 @@ class ProfiledCarrierProvider:
         # only bounds the standalone recipe. Unchanged (200) unless the latency needs Long.
         latency = self.data['descriptor'].get('latency_samples', 0)
         budget = 200 if latency <= 200 else 1000  # MAX_DELAY_COMP_SAMPLES Medium / Long
-        self.capture_type, replay = _emulator()
         self.recipe = GeneratedOrdinaryCarrier(self.data['descriptor'], self.data['startup'], input_index=input_index,
                                                record_budget=budget, overload_ok=latency > 1000, shared_cells_ok=True,
-                                               module_store=module_store, replay=replay)
+                                               module_store=module_store, replay=Replay)
         self.remote_reads = self.recipe.remote_reads
         # A row reference is an 8-bit field; it must also name a private row this carrier really has.
         private_rows = len(self.recipe.composition_arguments()["private_rows"])
@@ -247,10 +268,14 @@ class ProfiledCarrierProvider:
             building.set()
 
     def _capture(self, values=None):
-        if _WORKERS is not None:
+        tables = load_tables(self.bundle_path) if self.bundle_path is not None else None
+        if tables is not None:
+            cap = table_capture.TableCapture(tables, self.profile)
+        elif _WORKERS is not None:
             return _WORKERS.capture(self.profile, values)
-        cap = self.capture_type(self.profile, auto_start=False)
-        cap.start()
+        else:
+            cap = _emulator()(self.profile, auto_start=False)
+            cap.start()
         if values is not None:
             if len(values) != len(cap.defaults_values):
                 raise ValueError('complete original parameter vector required')

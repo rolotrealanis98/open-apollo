@@ -167,7 +167,7 @@ The emulator is used in two places, and they are worth keeping apart.
 **When mapping (always).** The mapper is the emulator: it is how a plug-in's DSP commands are
 extracted at all. It runs once per plug-in per UAD version, offline, and its output is the bundle.
 
-**When hosting (today, for every control change).** The bundle holds three samples per control
+**When hosting (for every control change, unless the plug-in has tables, below).** The bundle holds three samples per control
 (0, middle, maximum). Between them, the DSP words a knob position needs are computed by the
 plug-in's own code: coefficient math, tables, coupled parameters. So the daemon keeps one emulator
 per loaded plug-in and, on each change, runs the plug-in's own setter in it to translate the knob
@@ -180,27 +180,51 @@ Loading itself already avoids the emulator when it can: the CREATE recipe and th
 static (from the bundle) and the load-time values come from `*.defaults.json`, so a plug-in loads
 at once and its emulator warms in the background for the first knob turn.
 
-**Without the emulator at all** would mean a plug-in whose every control can be translated without
-running UA's code on the user's machine at play time. Two ways to get there:
+**Without the emulator (tables).** A plug-in whose words depend on few controls at a time can be
+controlled from tables learned from its emulator once, on this machine:
 
-| | Translate with the emulator (now) | Without the emulator |
-|---|---|---|
-| Control translation | The plug-in's own setter, run live in Unicorn | A complete table (every step of a stepped control, every value of a small domain) recorded at map time, or the plug-in's math reimplemented and checked word-for-word against the emulator |
-| Needs at runtime | venv (unicorn, capstone, pefile, numpy), the DLL, a worker process | Only the bundle |
-| Load / first change | Instant load with learned defaults; first change waits for the emulator build (seconds) | Instant |
-| Covers | Every mapped plug-in, any parameter | Only plug-ins whose controls are finite or whose math is reproduced; coupled and formatter-dependent parameters are the hard part |
-| Risk | A plug-in that reads something the emulator does not provide fails the change, visibly | A table or formula that disagrees with the original in a corner the sweep missed; readback cannot catch it, only audio and the emulator can |
+```bash
+cd tools/plugin-mapper
+~/.local/share/open-apollo/plugin-venv/bin/python3 -m plugin_mapper tables --only "UAD Pultec HLF-3C"
+```
 
-Both are open for contributions, and they are not in competition: the emulator path is what gives
-the widest plug-in support today, and it is also the oracle any emulator-free translation is checked
-against, so work on it pays off either way.
+For each of its bundles (`plugin_mapper/tables.py`):
 
-The Pultec-Pro Legacy was shown to run from pinned scalar data and pure math with no DLL at run
-time (NATIVE-HOSTING.md); no such path is in the daemon today. Work toward it sweeps a control
-densely in the mapper's executor, compares the candidate translation against `set_control` for
-every value, and only then drops the emulator for that plug-in. Before writing a reimplementation
-meant for the repository, open an issue: it has to meet the same rule as everything else (no UA
-data, nothing copied from their code), and that needs agreeing first.
+1. **Probe.** Every control is set from several states (the load state, every control at 0, at its
+   maximum, random states) while one other control at a time changes. A change's events are a fixed
+   list per control: transaction brackets and writes of word runs (blocks). The probe finds which
+   controls each block's words, and each formatter text, depend on.
+2. **Contexts.** A block's stepped dependencies are its key (every step). Per key, at most one
+   continuous control may matter, recorded at every value 0..maximum (the API Preamp's gain block:
+   Input Select picks Mic Gain or Line Gain). A block on two continuous controls at once, coupled
+   controls, history-dependent words or a text on another continuous control: refused.
+3. **Load-time state.** From a freshly loaded plug-in, setting a control to the value it already has
+   may change another control's words: the plug-in's own copy of it was not in sync at load (the API
+   Preamp's Output writes no gain until Power is set once). Such a control reads as "not set yet" in
+   that block's key until it is set. This is learned per control, not known per plug-in.
+4. **Record** every key, every text (as runs over the parameter's value), every control's read-back
+   value, and how the begin/end transaction count moves (one global count, or one per start word).
+5. **Gate.** One random sequence per control, each from a freshly loaded plug-in and starting with
+   that control, 3000 changes in all (`--changes`): the emulator and the tables must give the same
+   events (counters included), values and texts at every step, and the same texts at load. Only then
+   is `<bundle>.tables` written; otherwise `index.json` `tables` records why.
+
+The file is a JSON header and zlib-compressed 32-bit words (`executor/table_capture.py`, standard
+library only), tied to the bundle's SHA-256. The daemon checks it when it first plans a control: a
+current, passing file gives a `TableCapture` (the surface `GenericCapture` and `RemoteCapture`
+have) and that plug-in needs no venv, DLL or emulator worker; anything else uses the emulator as
+before. A rebuilt bundle needs `tables` run again. Like the bundle, the file is UA-derived: it
+stays next to the bundle and `tools/check-clean-repo.py` refuses it (rule `plugin-bundle`).
+
+Learning is quick for all-stepped plug-ins (Studio D Chorus, Pultec HLF-3C, bx_tuner: about 15 s
+to a minute each); each continuous axis costs one emulator sweep of 32769 changes (about two
+minutes) per key it is recorded at, so the API Preamp takes about 15 minutes and 7 MB per layout.
+Readback cannot tell a wrong table from a right one, only the gate and audio can: the gate is the
+reason a table is trusted, so a change to the learner keeps its differential test.
+
+The other route, a plug-in's math reimplemented in the repository and checked word for word against
+the emulator (the Pultec-Pro Legacy was shown to run that way, NATIVE-HOSTING.md), has to meet the
+same rule as everything else (no UA data, nothing copied from their code): open an issue first.
 
 ## Improving the emulator side
 

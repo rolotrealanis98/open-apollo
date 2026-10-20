@@ -30,7 +30,8 @@ breaks that rule or carries personal data:
   plugin-bundle a native plug-in runtime bundle or what it is built from:
                 *-runtime-bundle*.json, a JSON file carrying a bundle,
                 execution, discovery-profile or parameter-metadata schema or
-                startup/control-sweep DSP word tables, or an .asm dump.
+                startup/control-sweep DSP word tables, an .asm dump, or its
+                emulator-free control tables (*.tables).
                 tools/plugin-mapper builds these on the user's machine from
                 their own install; they hold UA-derived data
 
@@ -334,7 +335,8 @@ class Scanner:
 
         # (g) native plug-in bundles and their inputs are built on the user's machine
         name = Path(path).name
-        if fnmatch.fnmatchcase(name, "*-runtime-bundle*.json") or name.endswith(".asm"):
+        if (fnmatch.fnmatchcase(name, "*-runtime-bundle*.json") or name.endswith((".asm", ".tables"))
+                or data[:8] == b"OATABLE1"):  # emulator-free control tables (table_capture.py)
             self.add("plugin-bundle", path, "-", "UA-derived plug-in data; tools/plugin-mapper "
                      "builds it on the user's machine")
         elif name.endswith(".json") and not binary:

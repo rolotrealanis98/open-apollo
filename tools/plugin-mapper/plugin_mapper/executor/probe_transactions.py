@@ -3,17 +3,18 @@ One replay implementation, without effect-specific coefficient/offset knowledge,
 recreates every original fixture's entire word shadow, including counters.
 """
 import struct
-from offline_host import STUBS
-from unicorn.x86_const import UC_X86_REG_XMM2,UC_X86_REG_XMM3
 
 def f32(x):return struct.unpack('<f',struct.pack('<f',x))[0]
 def bits(x):return struct.unpack('<I',struct.pack('<f',x))[0]
 def double(x):return struct.unpack('<d',struct.pack('<Q',x&0xffffffffffffffff))[0]
 
 class Recorder:
+ # Replay is imported by the daemon without the emulator: unicorn only where events are recorded.
  def _map_image(self,image):
   self.events=[];self.callback_names=set();super()._map_image(image)
  def hook(self,u,addr,size,unused):
+  from offline_host import STUBS
+  from unicorn.x86_const import UC_X86_REG_XMM2,UC_X86_REG_XMM3
   name,fn=self.handlers.get(addr,('',None));self.callback_names.add(name)
   event=None
   if fn is not None and STUBS<=addr<STUBS+0x800:

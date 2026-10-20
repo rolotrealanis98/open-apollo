@@ -33,10 +33,15 @@ a plug-in only when both are non-empty. `native_carrier.py` builds the CREATE re
 Mic Input Strip (the words `driver/ua_strips.c` writes for a plain strip), then the plug-in's
 rows and startup words. Control changes are planned by running the plug-in's own setter in the
 emulator, so the daemon needs the mapper's Python packages and the DLL it was mapped from
-(setup copies the DLLs next to the maps, `source/`).
+(setup copies the DLLs next to the maps, `source/`). A bundle with emulator-free tables
+(`<bundle>.tables`, `python3 -m plugin_mapper tables`, docs/plugin-mapping.md) is planned from
+them instead: `_capture` returns a `TableCapture` (`executor/table_capture.py`, standard library
+only) with the same calls, so that plug-in needs no venv, DLL or emulator worker. The daemon uses a
+tables file only when its gate record passed and it names the bundle's SHA-256; otherwise the
+emulator plans as before.
 
 The emulators run in worker processes (`emulator_worker.py`; `--emulator-workers N`, default 2,
-0 runs them in the daemon). Building one parses the plug-in's DLL and runs its constructor,
+0 runs them in the daemon; plug-ins with tables use none). Building one parses the plug-in's DLL and runs its constructor,
 seconds of pure Python: in the daemon's process that held the GIL and stalled the event loop for
 every client (14.7 s after a load). The daemon keeps a `RemoteCapture` with the calls the
 provider makes; a plug-in's emulators always use the same worker, a worker that exits is

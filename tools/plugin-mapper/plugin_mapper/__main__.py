@@ -3,6 +3,7 @@
   python3 -m plugin_mapper --from ROOT [--out DIR] [--all | --only NAME ...] [--authorized auto|all|FILE]
                            [--workers N] [--markers] [--force] [--retry-failures]
   python3 -m plugin_mapper stage --from ROOT --to DIR [--all]
+  python3 -m plugin_mapper tables [--out DIR] [--only NAME ...] [--force] [--retry-failures]
 
 ROOT is the Windows install root (a mounted Windows partition or a Wine drive_c), or a copy
 `stage` made of the files the mapper reads from it (the plug-in DLLs, UAD2SDK.dll and the few data
@@ -425,12 +426,79 @@ def stage(argv):
     return 0
 
 
+# ── Tables ─────────────────────────────────────────────────────────────
+
+def _learn_tables(path, changes):
+    import tables
+    return tables.learn_bundle(path, changes=changes, extra=dict(mapper=MAPPER_VERSION),
+                               log=lambda text: print(f'  {Path(path).name}: {text}', flush=True))
+
+
+def tables_command(argv):
+    """Emulator-free control tables (`<bundle>.tables`, tables.py) for mapped plug-ins: learned from
+    the emulator, written only when the differential gate passes; a refusal's reason goes to
+    index.json `tables`. The daemon then controls that plug-in without an emulator."""
+    ap = argparse.ArgumentParser(prog='python3 -m plugin_mapper tables', description=tables_command.__doc__)
+    ap.add_argument('--out', type=Path, default=DEFAULT_OUT)
+    ap.add_argument('--only', action='append', metavar='NAME', help='just this plug-in (repeatable; default every bundle)')
+    ap.add_argument('--changes', type=int, default=3000, help='random changes the gate compares (default 3000)')
+    ap.add_argument('--workers', type=int, default=default_workers())
+    ap.add_argument('--force', action='store_true', help='learn again even when the tables are current')
+    ap.add_argument('--retry-failures', action='store_true', help='learn again bundles refused with the same bundle')
+    args = ap.parse_args(argv)
+    lock = open(args.out / '.build.lock', 'a')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f'A plug-in map build is running for {args.out}; try again when it is done.', flush=True)
+        return 1
+    index = load_index(args.out)
+    if not index.get('uad_sdk'):
+        ap.error(f'no plug-in maps in {args.out} (build them first)')
+    os.environ.setdefault('OA_UAD_SDK', index['uad_sdk'])  # read by the emulator at import
+    sys.path.insert(0, str(PKG / 'executor'))
+    from table_capture import load
+    done = index.setdefault('tables', {})
+    todo = []
+    for bundle in index['bundles']:
+        if args.only and bundle['name'] not in args.only:
+            continue
+        path = args.out / bundle['file']
+        digest = sha(path)
+        old = done.get(bundle['file'], {})
+        if not args.force and (load(path, digest) is not None
+                               or (old.get('status') == 'refused' and old.get('bundle_sha256') == digest
+                                   and not args.retry_failures)):
+            print(f"{bundle['file']}: {old.get('status', 'pass')} (unchanged)", flush=True)
+            continue
+        todo.append(path)
+    print(f'Learning tables for {len(todo)} bundles ({args.workers} at a time)…', flush=True)
+    import multiprocessing  # fork: the workers run this module's _learn_tables (no threads run here)
+    with concurrent.futures.ProcessPoolExecutor(max(1, min(args.workers, len(todo) or 1)),
+                                                mp_context=multiprocessing.get_context('fork')) as pool:
+        futures = {pool.submit(_learn_tables, path, args.changes): path for path in todo}
+        for future in concurrent.futures.as_completed(futures):
+            path = futures[future]
+            try:
+                record = future.result()
+            except Exception as error:  # a worker that died: one bundle must not stop the others
+                record = dict(bundle_sha256=sha(path), status='refused', reason=f'{type(error).__name__}: {error}')
+            index = load_index(args.out)
+            index.setdefault('tables', {})[path.name] = record
+            save(args.out / INDEX, index)
+            print(f"{path.name}: {record['status']}" + (f": {record['reason']}" if record['status'] != 'pass' else
+                  f" ({record['bytes'] / 1e6:.1f} MB, gate {record['changes']} changes, {record['seconds']} s)"), flush=True)
+    return 0
+
+
 # ── Main ───────────────────────────────────────────────────────────────
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ['stage']:
         return stage(argv[1:])
+    if argv[:1] == ['tables']:
+        return tables_command(argv[1:])
     ap = argparse.ArgumentParser(prog='python3 -m plugin_mapper', description=__doc__.split('\n\n')[0])
     ap.add_argument('--from', dest='root', type=Path, required=True, help='Windows install root, or a staged copy')
     ap.add_argument('--out', type=Path, default=DEFAULT_OUT)

@@ -135,3 +135,46 @@ def test_stage_copies_what_mapping_reads(tmp_path):
     (dlls / f'{names[0]}.dll').unlink()   # uninstalled since
     assert mapper.stage(['--from', str(root), '--to', str(to)]) == 0
     assert not (to / f'Program Files/Universal Audio/Powered Plugins/UAD-2 Powered Plugins/{names[0]}.dll').exists()
+
+
+CALLS = None
+
+
+def _fake_learn(path, changes):
+    """Stands in for tables.learn_bundle in the mapper's forked workers (reports through a file)."""
+    import table_capture
+    with open(CALLS, 'a') as f:
+        f.write(path.name + '\n')
+    digest = mapper.sha(path)
+    if 'refused' in path.name:
+        return dict(bundle_sha256=digest, status='refused', reason='block 0x5 depends on two continuous controls')
+    table_capture.write(table_capture.sidecar_path(path), dict(bundle_sha256=digest, gate={'status': 'pass'}), [1])
+    return dict(bundle_sha256=digest, status='pass', bytes=1, changes=changes, seconds=0)
+
+
+def test_tables_are_learned_once_per_bundle_and_refusals_recorded(tmp_path, monkeypatch):
+    global CALLS
+    sys.path.insert(0, str(PKG / 'executor'))
+    calls = CALLS = tmp_path / 'calls'
+    monkeypatch.setattr(mapper, '_learn_tables', _fake_learn)
+    files = ['x-mono-runtime-bundle.json', 'refused-mono-runtime-bundle.json']
+    for file in files:
+        (tmp_path / file).write_text('{}')
+    index = mapper.load_index(tmp_path)
+    index.update(uad_sdk=str(tmp_path / 'UAD2SDK.dll'),
+                 bundles=[dict(name=f'UAD {f[0]}', layout='mono', file=f) for f in files])
+    mapper.save(tmp_path / mapper.INDEX, index)
+
+    def run(*extra):
+        assert mapper.main(['tables', '--out', str(tmp_path), '--workers', '2', '--changes', '10', *extra]) == 0
+        return mapper.load_index(tmp_path)['tables'], sorted(calls.read_text().split()) if calls.exists() else []
+    tables, learned = run()
+    assert tables[files[0]]['status'] == 'pass' and (tmp_path / (files[0] + '.tables')).is_file()
+    assert tables[files[1]] == dict(bundle_sha256=mapper.sha(tmp_path / files[1]), status='refused',
+                                    reason='block 0x5 depends on two continuous controls')
+    calls.unlink()
+    assert run()[1] == []                                          # current tables, same refusal: nothing to do
+    assert run('--retry-failures')[1] == [files[1]]
+    calls.unlink()
+    (tmp_path / files[0]).write_text('{"rebuilt": true}')
+    assert run()[1] == [files[0]]                                  # a rebuilt bundle is learned again
