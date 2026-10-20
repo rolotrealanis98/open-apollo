@@ -161,3 +161,33 @@ def test_a_virtual_input_chain_carries_the_input_strip(providers, count, channel
 def test_inputs_without_a_native_strip_or_pair_are_refused(providers, channels):
     with pytest.raises(ValueError):
         ncc.compose(providers(1, 0), channels=channels)
+
+
+def _writes_reference(words):
+    """The original per-group re-sort: the output _writes must keep."""
+    result = []
+    for row in sorted({r for r, _ in words}):
+        pending = {w: v for (r, w), v in words.items() if r == row}
+        while pending:
+            first = min(pending)
+            group = {w: pending.pop(w) for w in sorted(pending) if w <= first + 32}
+            result.extend(native_carrier.write(row, group))
+    return tuple(result)
+
+
+@pytest.mark.parametrize('seed', range(20))
+def test_writes_groups_words_as_before(seed):
+    import random
+    rng = random.Random(seed)
+    words = {(rng.randrange(10, 14), rng.randrange(0, 400)): rng.randrange(1 << 32) for _ in range(rng.randrange(1, 300))}
+    assert ncc._writes(words) == _writes_reference(words)
+
+
+def test_a_large_startup_composes_in_linear_time():
+    """ENGL E765 RT has 530k startup words; the old per-group re-sort took minutes."""
+    import time
+    words = {(10 + r, w): w & 0xffff for r in range(3) for w in range(0, 530000 // 3 * 3, 3)}
+    start = time.monotonic()
+    commands = ncc._writes(words)
+    assert time.monotonic() - start < 5
+    assert len(ncc._shadow(commands)) == len(words)
