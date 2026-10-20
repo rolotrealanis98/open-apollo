@@ -31,6 +31,11 @@ use crate::value::Value;
 
 pub const DEFAULT_PORT: u16 = 4710;
 
+/// The longest wait between reconnect attempts to an engine on this machine. A refused local
+/// connect costs nothing, and a restarted daemon should get its console back within a second
+/// of opening its port, not at the end of a 10 s backoff.
+pub const LOCAL_MAX_BACKOFF: Duration = Duration::from_secs(1);
+
 /// Where an engine is.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Endpoint {
@@ -48,6 +53,15 @@ impl Endpoint {
             host,
             port,
         }
+    }
+
+    /// The engine runs on this machine (`localhost` or a loopback address).
+    pub fn is_local(&self) -> bool {
+        self.host.eq_ignore_ascii_case("localhost")
+            || self
+                .host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
     }
 
     /// `host`, `host:port` or `[v6]:port`; the port defaults to 4710.
@@ -95,6 +109,7 @@ pub struct Options {
     pub send_identity: bool,
     pub reconnect: bool,
     pub min_backoff: Duration,
+    /// Capped at [`LOCAL_MAX_BACKOFF`] for an engine on this machine.
     pub max_backoff: Duration,
     pub connect_timeout: Duration,
     pub request_timeout: Duration,
@@ -130,6 +145,20 @@ impl Default for Options {
 }
 
 impl Options {
+    /// How long to wait before reconnect attempt `attempt` (1, 2, ...): doubling from
+    /// `min_backoff` up to `max_backoff`, or [`LOCAL_MAX_BACKOFF`] for a local engine.
+    pub fn retry_delay(&self, endpoint: &Endpoint, attempt: u32) -> Duration {
+        let cap = if endpoint.is_local() {
+            self.max_backoff.min(LOCAL_MAX_BACKOFF)
+        } else {
+            self.max_backoff
+        };
+        cap.min(
+            self.min_backoff
+                .mul_f64(2f64.powi(attempt.clamp(1, 30) as i32 - 1)),
+        )
+    }
+
     /// Read-only options for the UA Mixer Helper on 4720: `network_id` identity, a 5 s
     /// `get /ping` keep-alive, no engine-tree load (the [`HelperStore`](crate::HelperStore) reads
     /// the helper's own tree format).
@@ -670,11 +699,7 @@ impl Task {
                 return;
             }
             attempt += 1;
-            let delay = self.options.max_backoff.min(
-                self.options
-                    .min_backoff
-                    .mul_f64(2f64.powi(attempt.min(30) as i32 - 1)),
-            );
+            let delay = self.options.retry_delay(&self.endpoint, attempt);
             log::info!(
                 "engine {} lost ({reason}); retry in {:.1} s",
                 self.endpoint,
@@ -1094,5 +1119,26 @@ impl Task {
             info,
         });
         self.set_state(ConnectionState::Ready);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_local_engine_is_retried_at_least_every_second() {
+        let options = Options::default();
+        let local = Endpoint::new("127.0.0.1", DEFAULT_PORT);
+        let delays: Vec<_> = (1..=6).map(|a| options.retry_delay(&local, a)).collect();
+        assert_eq!(delays[0], Duration::from_millis(500));
+        assert!(delays[1..].iter().all(|d| *d == LOCAL_MAX_BACKOFF));
+        for host in ["localhost", "::1", "127.0.0.2"] {
+            assert!(Endpoint::new(host, DEFAULT_PORT).is_local(), "{host}");
+        }
+        let remote = Endpoint::new("192.168.1.4", DEFAULT_PORT);
+        assert!(!remote.is_local());
+        assert_eq!(options.retry_delay(&remote, 6), Duration::from_secs(10));
+        assert_eq!(options.retry_delay(&remote, 2), Duration::from_secs(1));
     }
 }
