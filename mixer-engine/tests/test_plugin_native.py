@@ -384,13 +384,16 @@ def test_observations_read_in_merged_spans():
 
     driver = Spans()
     backend = Mock(driver=driver)
-    # 25 runs on three rows as a codec emits them (16-word runs, gaps, a lone word).
+    # Runs as a codec emits them: 16-word runs that touch, a lone word after a gap, runs with
+    # a gap between them inside 64 words, another row.
     observations = tuple((14, 21 + 16 * i, tuple(14 << 16 | 21 + 16 * i + k for k in range(16)))
                          for i in range(12)) + ((14, 216, (14 << 16 | 216,)),
                                                 (15, 38, (15 << 16 | 38, 15 << 16 | 39)),
+                                                (15, 44, (15 << 16 | 44,)),
                                                 (17, 7, tuple(17 << 16 | 7 + k for k in range(16))))
     words = NativePluginBackend._read_spans(backend, None, observations)
+    # A read never covers a word between observations (the DSP may refuse it).
     assert driver.reads == [(14, 21, 64), (14, 85, 64), (14, 149, 64), (14, 216, 1),
-                            (15, 38, 2), (17, 7, 16)]
+                            (15, 38, 2), (15, 44, 1), (17, 7, 16)]
     assert all(words[row, offset + i] == v for row, offset, values in observations
                for i, v in enumerate(values))

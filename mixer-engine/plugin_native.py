@@ -228,11 +228,15 @@ class NativePluginBackend:
         """{(row, word): value} for every observed word, read in as few SERVICE calls as fit.
 
         Each SERVICE is a DSP round trip (tens of ms) and reads at most 64 words; codecs emit
-        16-word runs, so a control's 25 runs on one row are 8 reads, not 25."""
+        16-word runs, so a control's 25 runs on one row are 8 reads, not 25. Only runs that
+        touch are joined: a read never covers a word between observations. Reading such gap
+        words (API Preamp's load, 2026-10-19) got a reply the driver refused (EPROTO) and
+        quarantined the DSP until a power cycle."""
         spans = []
         for row, offset, expected in sorted(observations):
             end = offset + len(expected)
-            if spans and spans[-1][0] == row and end - spans[-1][1] <= 64:
+            if (spans and spans[-1][0] == row and offset <= spans[-1][2]
+                    and end - spans[-1][1] <= 64):
                 spans[-1][2] = max(spans[-1][2], end)
             else:
                 spans.append([row, offset, end])
@@ -240,7 +244,9 @@ class NativePluginBackend:
         for row, start, end in spans:
             try:
                 values = self.driver.service(native, read=(row, start, end - start))
-            except OSError:
+            except OSError as error:
+                log.error('native instance %s: read row %d words %d..%d failed: %s',
+                          native.handle, row, start, end - 1, error)
                 self.invalidate()
                 raise
             words.update(((row, start + i), v) for i, v in enumerate(values))
