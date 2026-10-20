@@ -71,7 +71,9 @@ const SPEC: &str = r##"{
                "curves": [{"stroke": "#FFFFFF"}],
                "handles": [{"band": "b", "drag": true, "touchState": {"state": "display", "value": 1}}]}},
     {"id": "moved", "kind": "image", "x": 0, "y": 250, "w": 10, "h": 10, "sprite": "img",
-     "move": {"x": {"param": 0, "scale": 100}}, "reveal": {"right": {"param": 0, "scale": 10}}}
+     "move": {"x": {"param": 0, "scale": 100}}, "reveal": {"right": {"param": 0, "scale": 10}}},
+    {"id": "note", "kind": "text", "x": 150, "y": 230, "w": 40, "h": 12,
+     "text": {"value": {"ratio": [48000, {"meter": "lvl"}]}, "note": {"param": 0, "scale": 4, "offset": 438}}}
   ],
   "meterSources": {
     "vu": {"vendorSpecificFloat": 1, "smoothing": 0, "calibration": [[0, 0], [1, 1]]},
@@ -372,6 +374,15 @@ fn readouts() {
     assert_eq!(text(&p, &params, "meter-text"), "10.0 dB", "max clamps");
     p.meters.set_raw("lvl", 1e-4);
     assert_eq!(text(&p, &params, "meter-text"), "--");
+    // Note readouts: a period in samples at 48 kHz, A = 438 + 4·param Hz.
+    assert_eq!(text(&panel(), &params, "note"), "", "no reply yet: no pitch");
+    p.set_all_local(0.5);
+    p.meters.set_raw("lvl", 48000.0 / 82.4069);
+    assert_eq!(text(&p, &params, "note"), "E", "low E against A440");
+    p.meters.set_raw("lvl", 48000.0 / (440.0 * 2f64.powf(49.0 / 1200.0)));
+    assert_eq!(text(&p, &params, "note"), "A", "A440 + 49 cents");
+    p.set_all_local(0.0);
+    assert_eq!(text(&p, &params, "note"), "A#", "the same pitch is +56.9 cents against A438");
     // Published parameters read Console's StringValue first.
     let params = MockParams::from_spec(&p.spec);
     assert_eq!(p.display(1, &params), "A");

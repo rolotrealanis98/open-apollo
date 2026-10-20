@@ -508,7 +508,7 @@ impl PluginPanel {
         el.param
     }
 
-    /// A readout's text (Swift's `readoutText`): static text, a name picked by a value, a meter
+    /// A readout's text (Swift's `readoutText`): static text, a note or a name picked by a value, a meter
     /// readout, a computed value, else the shown parameter's Console string.
     pub fn readout_text(&self, el: &Element, params: &dyn ParamSource) -> String {
         let ctx = self.ctx(params);
@@ -518,6 +518,9 @@ impl PluginPanel {
         }
         if let Some(fixed) = style.and_then(|t| t.string.as_ref()) {
             return fixed.clone();
+        }
+        if let (Some(a), Some(v)) = (style.and_then(|t| t.note.as_ref()), style.and_then(|t| t.value.as_ref())) {
+            return readout::note_name(v.resolve(&ctx), a.resolve(&ctx)).to_string();
         }
         if let (Some(names), Some(v)) =
             (style.and_then(|t| t.names.as_ref()).filter(|n| !n.is_empty()), style.and_then(|t| t.value.as_ref()))
@@ -886,7 +889,7 @@ impl PluginPanel {
             }
             ElementKind::Text => {
                 let style = el.text.as_ref();
-                if style.is_some_and(|t| t.meter.is_some() || t.string.is_some() || t.string_ref.is_some())
+                if style.is_some_and(|t| t.meter.is_some() || t.note.is_some() || t.string.is_some() || t.string_ref.is_some())
                     || self.readout_param(el).is_some()
                 {
                     let text = self.readout_text(el, params);
