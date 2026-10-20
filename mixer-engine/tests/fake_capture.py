@@ -33,3 +33,16 @@ class EnvironmentCapture(FakeCapture):
     def format_parameter(self, index):
         import os
         return dict(raw='', console_trimmed=os.environ.get('OA_TEST_SETTING', 'unset'))
+
+
+class CyclicCapture(FakeCapture):
+    """Refers to itself, as GenericCapture does through unicorn's hooks; records when freed."""
+
+    def __init__(self, profile, auto_start=True):
+        super().__init__(profile, auto_start)
+        self.cycle = self
+
+    def __del__(self):
+        import os
+        with open(os.environ['OA_TEST_FREED'], 'a') as freed:
+            freed.write('freed\n')
