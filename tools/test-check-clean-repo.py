@@ -239,6 +239,8 @@ class PersonalData(unittest.TestCase):
         self.assertEqual(rules("x/a.json", bundle), ["plugin-bundle"])
         self.assertEqual(rules("x/a.json", b'{"' + b'control_sweep": []}\n'), ["plugin-bundle"])
         self.assertEqual(rules("x/UAD_X-constructor.asm", b"0x1: ret\n"), ["plugin-bundle"])
+        self.assertEqual(rules("x/a-runtime-bundle.json.tables", b"\x00\x01"), ["plugin-bundle"])
+        self.assertEqual(rules("x/renamed.bin", b"OATABLE" + b"1\x00\x00"), ["plugin-bundle"])
         # The code that writes them names the schema; that is fine.
         self.assertEqual(rules("tools/build_bundle.py", bundle), [])
         self.assertEqual(rules("device_maps/native_known_good.json", b'{"plugins": []}\n'), [])
