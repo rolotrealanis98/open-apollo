@@ -35,6 +35,14 @@ rows and startup words. Control changes are planned by running the plug-in's own
 emulator, so the daemon needs the mapper's Python packages and the DLL it was mapped from
 (setup copies the DLLs next to the maps, `source/`).
 
+The emulators run in worker processes (`emulator_worker.py`; `--emulator-workers N`, default 2,
+0 runs them in the daemon). Building one parses the plug-in's DLL and runs its constructor,
+seconds of pure Python: in the daemon's process that held the GIL and stalled the event loop for
+every client (14.7 s after a load). The daemon keeps a `RemoteCapture` with the calls the
+provider makes; a plug-in's emulators always use the same worker, a worker that exits is
+restarted and its emulators rebuilt at their last values. Event-loop stalls over 1 s are logged
+with every thread's stack.
+
 The daemon may start before any map exists: `BundleWatcher` rereads `index.json` (the mapper
 rewrites it after each plug-in) every few seconds between transactions, hands the backend the
 new providers (`add_providers`) and republishes the advertisement, so a plug-in shows up in the
