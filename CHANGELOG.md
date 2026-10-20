@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   at unity, left and right apart.
 
 ### Fixed
+- With native plug-in hosting on, the Virtual, S/PDIF and ADAT inputs can be stereo linked and
+  unlinked. The daemon refused every link but Analog 1-2 / 3-4, though plug-in chains only
+  ever sit on inputs 1-4 and a link elsewhere only rewrites the mix. Verified on an x4: linked
+  Virtual 1/2 plays L and R hard left and right, one fader and mute drive both.
 - Apollo Twin X (and every model without a verified input strip map): a warm move from another
   OS no longer skips the DSP ring connect, which kept no input strips there and left playback
   silent. Only models whose strips the driver builds (Apollo x4) keep the inherited DSP state (#91).
