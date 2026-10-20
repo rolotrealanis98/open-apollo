@@ -1,0 +1,45 @@
+{
+ "plugin": "Pultec HLF-3C",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "3 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "3/3",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "3 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "3/3",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

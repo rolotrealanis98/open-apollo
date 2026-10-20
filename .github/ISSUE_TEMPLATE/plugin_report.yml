@@ -1,0 +1,55 @@
+name: Plug-in report
+description: Report what a UAD plug-in does (or doesn't) on the Apollo from Linux
+labels: ["plugin-status"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The status of every plug-in is in [docs/status/PLUGINS.md](https://github.com/rolotrealanis98/open-apollo/blob/main/docs/status/PLUGINS.md).
+        The best report is a PR with the JSON that `tools/plugin-qualify.py` writes (docs/plugin-mapping.md, *Report it*).
+        If you can't run it, fill this in. Never attach bundles, `*.defaults.json`, DLLs, captures or recordings: they are UA's code or your audio.
+  - type: input
+    id: plugin
+    attributes:
+      label: Plug-in
+      placeholder: "e.g., Pultec EQP-1A"
+    validations:
+      required: true
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Layout
+      options: ["mono", "stereo", "both"]
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Apollo model, sample rate, UAD version
+      placeholder: "Apollo x4, 48 kHz, UAD 11.8.3"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: What you checked and what passed (leave unticked what failed or wasn't tried, and say which in the notes)
+      options:
+        - label: "map: the mapper built a bundle for this layout"
+        - label: "panel: every control and meter on the panel moves something"
+        - label: "load: it loads in uaconsole without a readback error"
+        - label: "controls: every control turns and keeps its value"
+        - label: "text: each value reads the same as in UA's Console"
+        - label: "meters: every meter on the panel moves with a signal"
+        - label: "latency: measured (give samples in the notes)"
+        - label: "audio: the controls do what they say, bypass gives the dry signal"
+  - type: textarea
+    id: plugin-qualify
+    attributes:
+      label: plugin-qualify output
+      description: "If you ran `tools/plugin-qualify.py`, paste its summary"
+      render: shell
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: "What failed and how: which control, which meter, the daemon's journal lines (`journalctl --user -u ua-mixer-daemon`)"

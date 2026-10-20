@@ -1,0 +1,45 @@
+{
+ "plugin": "Neve 1073SE Legacy",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "9 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "9/9",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "9 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "9/9",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

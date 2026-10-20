@@ -1,0 +1,45 @@
+{
+ "plugin": "AMS RMX16 Expanded",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "14 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "14/14",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "14 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "14/14",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}
