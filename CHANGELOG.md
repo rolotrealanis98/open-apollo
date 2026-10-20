@@ -11,6 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cannot tunnel PCIe over Thunderbolt; the guide builds Ophuscado's out-of-tree `tbt/7.1` kernel
   (`docs/asahi/PKGBUILD`), boots it with its own device tree from m1n1, and installs open-apollo
   on it. Verified on a Mac Studio M2 Ultra with an Apollo x4 (Thunderbolt 3).
+- Virtual channels (Apollo x4, `input_strips=1`): the driver builds the Console's Input Strip
+  (pluginId 0x83E, modules A5 and C2, as UA's captured Solo USB stream does for VIRTUAL 1/2) on
+  DSP inputs 0x18-0x1B after the Mic strips, so DAW playback on VIRTUAL 1-4 reaches the Console's
+  Virtual strips and the VIRTUAL record channels. Before, nothing built them and a tone played to
+  VIRTUAL 1 never reached the mixer (meter at -77 dB, nothing in the monitor mix even unmuted).
+  `input_strips_virtual` (default `0x0f`) picks the inputs; `dsp_state` lists them as
+  `Virtual n`. Inserts on Virtual strips are not mapped yet. Verified on an x4 at 48 kHz: a
+  -30 dBFS tone on VIRTUAL 1 meters and records at -30.0, and fader, pan and mute act on it in
+  the monitor mix. The strips need a cold start (an Apollo power cycle with the driver loaded).
 
 ### Fixed
 - Apollo Twin X (and every model without a verified input strip map): a warm move from another

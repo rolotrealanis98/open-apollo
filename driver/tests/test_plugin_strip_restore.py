@@ -16,7 +16,7 @@ static void setup_plain(void)
     plain->state = UA_STRIPS_LIVE;
     plain->epoch = host.epoch;
     plain->gen = 9;
-    plain->n = 2;
+    plain->n = plain->n_mic = 2;
     plain->rebuild_seen = atomic_read(&ua_strips_rebuilds);
     for (unsigned int k = 0; k < 2; k++) {
         struct ua_strip *s = &plain->strip[k];

@@ -16,6 +16,14 @@
  * spec" and Track A section A6), and takes them down again before every
  * reconnect, rate change, suspend and removal (A6.9).
  *
+ * The Virtual inputs (DAW playback VIRTUAL 1-8, DSP inputs 0x18-0x1f on
+ * the x4) are the same: without a strip on their DSP input the Console's
+ * Virtual channels mix nothing and record silence.  Their strip is the
+ * plain Input Strip (pluginId 0x83E, the Mic strip's A5 and C2 modules
+ * only, six private blocks), as UA's captured Solo USB stream builds it
+ * for VIRTUAL 1/2 (tools/uausb/soloinit.py STRIP_KINDS["input"],
+ * solo-usb-init.json params.input); input_strips_virtual picks which.
+ *
  * Scope (licensing boundary): only the built-in Console strip modules
  * every Apollo runs (0xEB, 0xDA, 0xA5, 0xC2, 0x12B; 0xDB and 0xC9 are
  * reserved for the Input and Talkback strips) are ever loaded, from files
@@ -88,6 +96,15 @@ static unsigned int input_strips_mask = 0xff;
 module_param(input_strips_mask, uint, 0444);
 MODULE_PARM_DESC(input_strips_mask,
 		 "With input_strips=1: the analog inputs that get a strip, bit 0 = input 1 (default 0xff: every preamp input)");
+/*
+ * The x4's Console runs Virtual 1-4 with CHANNEL DSP PAIRING off (engine 12
+ * snapshot: MaxSpans 4, ActiveSpans 0, VIRTUAL 1-4 Active) and the mixer
+ * daemon routes only those at connect (model_info._ROUTED_VIRTUALS).
+ */
+static unsigned int input_strips_virtual = 0x0f;
+module_param(input_strips_virtual, uint, 0444);
+MODULE_PARM_DESC(input_strips_virtual,
+		 "With input_strips=1: the Virtual inputs (DAW playback into the Console) that get an Input Strip, bit 0 = Virtual 1 (default 0x0f: Virtual 1-4, the ones the Console has active; 0 = none)");
 static unsigned int input_strips_form = 1;
 module_param(input_strips_form, uint, 0444);
 MODULE_PARM_DESC(input_strips_form,
@@ -156,9 +173,18 @@ bool ua_strips_wanted(void)
 
 /* UA_STRIPS_PLANNER_BEGIN: no kernel calls in here, the host tests build it */
 
-#define UA_STRIP_MAX		8	/* strips per pass (x4: four preamps; 8 for input_strips_inputs) */
+#define UA_STRIP_MAX_MIC	8	/* Mic strips (x4: four preamps; 8 for input_strips_inputs) */
+#define UA_STRIP_MAX_VIRTUAL	8	/* Input Strips on VIRTUAL 1-8 */
+#define UA_STRIP_MAX		(UA_STRIP_MAX_MIC + UA_STRIP_MAX_VIRTUAL)	/* strips per pass */
 #define UA_STRIP_MODS		5	/* modules of the Mic strip: EB DA A5 C2 12B */
 #define UA_STRIP_PRIV		10	/* instance header, m0-m4, c0-c3 */
+#define UA_STRIP_INPUT_PRIV	6	/* Input Strip: instance header, m0, c0-c3 */
+
+/* What a strip is: the Mic Input Strip of a preamp, or the plain Input Strip */
+enum ua_strip_kind {
+	UA_STRIP_KIND_MIC,
+	UA_STRIP_KIND_INPUT,
+};
 
 /* DSP command words (word 0 = opcode << 16 | length in dwords) */
 #define UA_STRIP_OP(op, len)	(((u32)(op) << 16) | (u32)(len))
@@ -171,6 +197,7 @@ bool ua_strips_wanted(void)
 #define UA_STRIP_ROUTE_NONE	0x0001ffff	/* no direct-out route */
 #define UA_STRIP_SPAN_NONE	0x20		/* not linked */
 #define UA_STRIP_PLUGIN_MIC	0x846		/* pluginId of the Mic Input Strip */
+#define UA_STRIP_PLUGIN_INPUT	0x83e		/* pluginId of the Input Strip */
 
 /* Bill blob header, as CAllocator::RegisterSharedResource checks it */
 #define UA_STRIP_BILL_W2	0x02000000
@@ -356,6 +383,46 @@ static const struct ua_memspec_row ua_strip_rows[UA_STRIP_PRIV] = {
 };
 static const unsigned int ua_strip_desc[2] = { 0, 1 };	/* head, Mic */
 
+/*
+ * The Input Strip's private memory, as the Solo USB capture allocates it
+ * for VIRTUAL 1/2 (soloinit.py STRIP_KINDS["input"]): the instance header,
+ * the sub-plugin's m0 (0x1e words, linked at header[6]) and the four
+ * commons at the same m0 words as the Mic strip's.  The commons keep the
+ * captured 0x100 words, the capacity m0 word 5 selects; nothing grows them.
+ * The descriptors are the Mic strip's: head, then the sub-plugin.
+ */
+static const struct ua_memspec_row ua_strip_input_rows[UA_STRIP_INPUT_PRIV] = {
+	{ 1, 0x008, 0xffffffff, 0 },	/* instance header */
+	{ 1, 0x01e, 0x00000006, 0 },	/* m0 -> header[6] */
+	{ 3, 0x100, 0x0000000e, 0 },	/* c0 -> m0[0x0e] */
+	{ 3, 0x100, 0x0000000f, 0 },	/* c1 -> m0[0x0f] */
+	{ 3, 0x100, 0x00000006, 0 },	/* c2 -> m0[0x06] */
+	{ 3, 0x100, 0x00000007, 0 },	/* c3 -> m0[0x07] */
+};
+
+/*
+ * The Input Strip's parameters, m0[0..8], as captured (solo-usb-init.json
+ * params.input): the same first eight words as the Mic strip's m0 but the
+ * code word, then 0.004f.  48 kHz values; words 7 and 8 have no known rate
+ * rule (the Mic strip writes word 7 the same way at every rate).
+ */
+static const u32 ua_strip_input_m0[9] = {
+	0x00df7fe4, 0x40000000, 0x00000001, 0x00000001, 0x00000004, 0x00000100,
+	0x000000c8, 0x3a888889, 0x3b83126f,
+};
+
+/* A strip kind's private rows; their count in @n */
+static const struct ua_memspec_row *ua_strip_kind_rows(unsigned int kind,
+							unsigned int *n)
+{
+	if (kind == UA_STRIP_KIND_INPUT) {
+		*n = UA_STRIP_INPUT_PRIV;
+		return ua_strip_input_rows;
+	}
+	*n = UA_STRIP_PRIV;
+	return ua_strip_rows;
+}
+
 /* ua_strip_layout_check() results */
 #define UA_STRIP_LAYOUT_GONE	1	/* a register read all-ones */
 #define UA_STRIP_LAYOUT_CODE	2	/* code pool not at 0xe0000 */
@@ -366,12 +433,13 @@ static const unsigned int ua_strip_desc[2] = { 0, 1 };	/* head, Mic */
 /*
  * Check the pool registers against the layout the recipe was validated on
  * (A6.1: code pool at 0xe0000, pools 1-3 ending at 0x9d1b8 / 0xc6ffe /
- * 0x08ffe000) with room for @n strips above each pool's scratch area (the
- * register's or the Mic strip's, whichever is larger).  Fills @l.
- * Returns 0 or a UA_STRIP_LAYOUT_* code.
+ * 0x08ffe000) with room for @n Mic strips and @n_input Input Strips above
+ * each pool's scratch area (the register's or the Mic strip's, whichever
+ * is larger).  Fills @l.  Returns 0 or a UA_STRIP_LAYOUT_* code.
  */
 static int ua_strip_layout_check(const u32 size[4], const u32 base[4],
 				 const u32 scratch[4], unsigned int n,
+				 unsigned int n_input,
 				 struct ua_strip_layout *l)
 {
 	u32 need[4] = { 0, 0, 0, 0 };
@@ -396,6 +464,9 @@ static int ua_strip_layout_check(const u32 size[4], const u32 base[4],
 		need[0] += ua_strip_modules[j].sram;
 	for (j = 0; j < UA_STRIP_PRIV; j++)
 		need[ua_strip_rows[j].pool] += ua_strip_rows[j].dwords * n;
+	for (j = 0; j < UA_STRIP_INPUT_PRIV; j++)
+		need[ua_strip_input_rows[j].pool] +=
+			ua_strip_input_rows[j].dwords * n_input;
 
 	if (l->start[0] != UA_STRIP_CODE_BASE)
 		return UA_STRIP_LAYOUT_CODE;
@@ -427,20 +498,23 @@ static void ua_strip_code_dest(const struct ua_strip_layout *l,
 /*
  * The recipe's private block addresses of the strip in slot @k of a pass
  * that starts on empty pools: each pool hands out its blocks top-down,
- * strip after strip.
+ * strip after strip, each strip the rows of its kind (@kinds[0..@k]).
  */
 static void ua_strip_priv_addrs(const struct ua_strip_layout *l,
-				unsigned int k, u32 addr[UA_STRIP_PRIV])
+				const u8 *kinds, unsigned int k,
+				u32 addr[UA_STRIP_PRIV])
 {
+	const struct ua_memspec_row *rows;
 	u32 cur[4];
-	unsigned int p, j, s;
+	unsigned int p, j, s, n;
 
 	for (p = 0; p < 4; p++)
 		cur[p] = l->top[p];
 	for (s = 0; s <= k; s++) {
-		for (j = 0; j < UA_STRIP_PRIV; j++) {
-			cur[ua_strip_rows[j].pool] -= ua_strip_rows[j].dwords;
-			addr[j] = cur[ua_strip_rows[j].pool];
+		rows = ua_strip_kind_rows(kinds[s], &n);
+		for (j = 0; j < n; j++) {
+			cur[rows[j].pool] -= rows[j].dwords;
+			addr[j] = cur[rows[j].pool];
 		}
 	}
 }
@@ -477,6 +551,55 @@ static const u32 ua_strip_usb_m3[15] = {
 	0x3f7ffcd7, 0xbdbc4dc9, 0xbd565d96,
 };
 
+/* The main plugin's header at @hdr: in 1, out 1, sub-plugin @plugin */
+static void ua_strip_build_header(struct ua_xact *x, u32 hdr, u32 plugin)
+{
+	const u32 w[9] = {
+		UA_STRIP_OP(UA_STRIP_OP_WRITE, 9), hdr,
+		0x24, 0x40000000, 1, 1, 0x22, 1, plugin,
+	};
+
+	ua_strip_dma(x, w, ARRAY_SIZE(w));
+}
+
+/* @n words (at most 62) written at @addr, one DMA command */
+static void ua_strip_build_block(struct ua_xact *x, u32 addr, const u32 *v,
+				 unsigned int n)
+{
+	u32 w[64];
+	unsigned int j;
+
+	w[0] = UA_STRIP_OP(UA_STRIP_OP_WRITE, 2 + n);
+	w[1] = addr;
+	for (j = 0; j < n; j++)
+		w[2 + j] = v[j];
+	ua_strip_dma(x, w, 2 + n);
+}
+
+/*
+ * Steps 6-7 of a strip whose header is @hdr: SYNCH starts it, then the
+ * input's span (none) and direct-out route.  Returns the build error.
+ */
+static int ua_strip_build_start(struct ua_xact *x, u32 hdr, u32 synch,
+				unsigned int steps)
+{
+	if (steps && steps <= 5)
+		return x->err;
+
+	/* Start it, then the input's span (none) and direct-out route (none) */
+	ua_xact_inline(x, UA_STRIP_CMD_SYNCH, UA_STRIP_SYNCH_MONO << 16 | synch,
+		       hdr, 0);
+	if (steps && steps <= 6)
+		return x->err;
+	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_SPAN,
+		       UA_STRIP_SPAN_NONE);
+	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_SPAN,
+		       UA_STRIP_SPAN_NONE);
+	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_ROUTE,
+		       ua_strip_route);
+	return x->err;
+}
+
 /*
  * One Mic Input Strip for DSP input @synch at private addresses @addr
  * (A6 steps 3-8, DSP 0's entries after the code pages): the private blocks
@@ -509,18 +632,7 @@ static int ua_strip_build(struct ua_xact *x, const u32 addr[UA_STRIP_PRIV],
 	if (steps && steps <= 3)
 		return x->err;
 
-	/* Main plugin's header: in 1, out 1, sub-plugin id */
-	n = 0;
-	w[n++] = UA_STRIP_OP(UA_STRIP_OP_WRITE, 9);
-	w[n++] = addr[0];
-	w[n++] = 0x24;
-	w[n++] = 0x40000000;
-	w[n++] = 1;
-	w[n++] = 1;
-	w[n++] = 0x22;
-	w[n++] = 1;
-	w[n++] = UA_STRIP_PLUGIN_MIC;
-	ua_strip_dma(x, w, n);
+	ua_strip_build_header(x, addr[0], UA_STRIP_PLUGIN_MIC);
 	if (steps && steps <= 4)
 		return x->err;
 
@@ -589,21 +701,47 @@ static int ua_strip_build(struct ua_xact *x, const u32 addr[UA_STRIP_PRIV],
 		w[n++] = r->lowcut[j];
 	ua_strip_dma(x, w, n);
 start:
-	if (steps && steps <= 5)
+	return ua_strip_build_start(x, addr[0], synch, steps);
+}
+
+/*
+ * One Input Strip (pluginId 0x83E) for DSP input @synch at private
+ * addresses @addr: the Mic strip's steps 2-7 with the Input Strip's six
+ * rows, its header and its captured m0[0..8] (ua_strip_input_m0).  The
+ * same @steps limits.  Returns 0 or the first build error.
+ */
+static int ua_strip_build_input(struct ua_xact *x,
+				const u32 addr[UA_STRIP_INPUT_PRIV], u32 synch,
+				unsigned int steps)
+{
+	u32 w[2 * UA_STRIP_INPUT_PRIV];
+	unsigned int j;
+	int ret;
+
+	if (steps && steps <= 1)
+		return x->err;
+	for (j = 0; j < UA_STRIP_INPUT_PRIV; j++)
+		ua_xact_inline(x, UA_CMD_ZERO, addr[j], 0,
+			       ua_strip_input_rows[j].dwords);
+	if (steps && steps <= 2)
 		return x->err;
 
-	/* Start it, then the input's span (none) and direct-out route (none) */
-	ua_xact_inline(x, UA_STRIP_CMD_SYNCH, UA_STRIP_SYNCH_MONO << 16 | synch,
-		       addr[0], 0);
-	if (steps && steps <= 6)
+	ret = ua_memspec_compile(ua_strip_input_rows, UA_STRIP_INPUT_PRIV,
+				 ua_strip_desc, ARRAY_SIZE(ua_strip_desc),
+				 addr, w);
+	if (ret < 0)
+		return ret;
+	ua_strip_dma(x, w, (unsigned int)ret);
+	if (steps && steps <= 3)
 		return x->err;
-	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_SPAN,
-		       UA_STRIP_SPAN_NONE);
-	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_SPAN,
-		       UA_STRIP_SPAN_NONE);
-	ua_xact_inline(x, UA_STRIP_CMD_INPUT, synch, UA_STRIP_INPUT_ROUTE,
-		       ua_strip_route);
-	return x->err;
+
+	ua_strip_build_header(x, addr[0], UA_STRIP_PLUGIN_INPUT);
+	if (steps && steps <= 4)
+		return x->err;
+
+	ua_strip_build_block(x, addr[1], ua_strip_input_m0,
+			     ARRAY_SIZE(ua_strip_input_m0));
+	return ua_strip_build_start(x, addr[0], synch, steps);
 }
 
 /* SYNCH with address 0: stops the strip on DSP input @synch (A6.9) */
@@ -625,12 +763,16 @@ static void ua_strip_build_stop(struct ua_xact *x, u32 synch)
  * Models whose analog inputs are known, with the DSP input channel of
  * analog input 1: the x4's are 0-3 (the macOS Mic strip calls for analog
  * 4..1 have synch-in 3..0).  The preamp count comes from the model data.
+ * @first_virtual: DSP input of VIRTUAL 1, 0x18 on the x4 (bus 0x18-0x1f,
+ * devices/apollo-x4.json synch_in 24-31; the Solo USB capture's Input
+ * Strips sit on 0x18/0x19 as well).
  */
 static const struct {
 	u32 device_type;
 	u8 first_synch;
+	u8 first_virtual;
 } ua_strips_models[] = {
-	{ UA_DEV_APOLLO_X4, 0 },
+	{ UA_DEV_APOLLO_X4, 0, 0x18 },
 };
 
 /* True when this driver can build the input strips for @device_type */
@@ -672,7 +814,8 @@ enum ua_strip_mod_state {
 };
 
 struct ua_strip {
-	u8 input;		/* analog input, 0-based */
+	u8 kind;		/* enum ua_strip_kind */
+	u8 input;		/* analog (Mic) or Virtual (Input) input, 0-based */
 	u8 synch;		/* its DSP input channel */
 	u8 state;		/* UA_STRIP_* */
 	u32 header;		/* instance header in DSP 0 SRAM */
@@ -687,7 +830,8 @@ struct ua_strips {
 	struct ua_pool_lease code[UA_STRIP_MODS];	/* our holds on DSP 0 */
 	u8 mod_state[UA_STRIP_MODS];
 	bool mod_released[UA_STRIP_MODS];	/* a teardown released it */
-	unsigned int n;				/* strips per pass */
+	unsigned int n;				/* strips per pass: Mic, then Input */
+	unsigned int n_mic;			/* the first n_mic are Mic strips */
 	u8 first_synch;
 	struct ua_strip strip[UA_STRIP_MAX];
 	u32 dest[UA_STRIP_MODS];
@@ -716,6 +860,16 @@ static const char *ua_strips_state_name(enum ua_strips_state s)
 	case UA_STRIPS_LIVE:		return "live";
 	}
 	return "?";
+}
+
+/* "input 2" / "Virtual 1": the strip's input as the Console names it */
+static const char *ua_strip_label(const struct ua_strip *s, char *buf,
+				  size_t len)
+{
+	scnprintf(buf, len, "%s %u",
+		  s->kind == UA_STRIP_KIND_INPUT ? "Virtual" : "input",
+		  s->input + 1);
+	return buf;
 }
 
 static const char *ua_strips_pools_name(enum ua_strips_pools p)
@@ -782,8 +936,8 @@ void ua_strips_init(struct ua_device *ua)
 	struct ua_plugin_host *h = ua->host;
 	const struct ua_model_desc *m;
 	struct ua_strips *st;
-	unsigned int i, j, preamps;
-	u32 mask;
+	unsigned int i, i_model, j, preamps;
+	u32 mask, vmask;
 
 	if (!input_strips || !h)
 		return;
@@ -814,22 +968,35 @@ void ua_strips_init(struct ua_device *ua)
 		return;
 	}
 	st->first_synch = ua_strips_models[i].first_synch;
+	i_model = i;
 
 	m = ua_model_lookup(ua->device_type, NULL);
-	preamps = m ? min_t(unsigned int, m->preamps, UA_STRIP_MAX) : 0;
+	preamps = m ? min_t(unsigned int, m->preamps, UA_STRIP_MAX_MIC) : 0;
 	if (input_strips_inputs)
-		preamps = min_t(unsigned int, input_strips_inputs, UA_STRIP_MAX);
+		preamps = min_t(unsigned int, input_strips_inputs, UA_STRIP_MAX_MIC);
 	mask = input_strips_mask & (BIT(preamps) - 1);
 	for (i = 0; i < preamps; i++) {
 		if (!(mask & BIT(i)))
 			continue;
+		st->strip[st->n].kind = UA_STRIP_KIND_MIC;
 		st->strip[st->n].input = i;
 		st->strip[st->n].synch = st->first_synch + i;
 		st->n++;
 	}
+	st->n_mic = st->n;
+	/* Then the Virtual inputs' Input Strips, after every Mic strip */
+	vmask = input_strips_virtual & (BIT(UA_STRIP_MAX_VIRTUAL) - 1);
+	for (i = 0; i < UA_STRIP_MAX_VIRTUAL; i++) {
+		if (!(vmask & BIT(i)))
+			continue;
+		st->strip[st->n].kind = UA_STRIP_KIND_INPUT;
+		st->strip[st->n].input = i;
+		st->strip[st->n].synch = ua_strips_models[i_model].first_virtual + i;
+		st->n++;
+	}
 	if (!st->n) {
 		ua_strips_disable(ua, st,
-				  "input_strips_mask selects no analog preamp input");
+				  "input_strips_mask and input_strips_virtual select no input");
 		return;
 	}
 
@@ -843,8 +1010,8 @@ void ua_strips_init(struct ua_device *ua)
 
 	st->state = UA_STRIPS_IDLE;
 	dev_info(&ua->pdev->dev,
-		 "input strips: enabled for %u analog input(s) (mask 0x%x); modules 0x0eb 0x0da 0x0a5 0x0c2 0x12b read\n",
-		 st->n, mask);
+		 "input strips: enabled for %u analog input(s) (mask 0x%x) and %u Virtual input(s) (mask 0x%x); modules 0x0eb 0x0da 0x0a5 0x0c2 0x12b read\n",
+		 st->n_mic, mask, st->n - st->n_mic, vmask);
 }
 
 /* Host teardown (ua->lock held): drop the module references */
@@ -870,7 +1037,11 @@ bool ua_strips_live(struct ua_device *ua)
 	return st && st->state == UA_STRIPS_LIVE;
 }
 
-/* Every actual input must have a complete retained mono strip on this DSP. */
+/*
+ * Every actual input must have a complete retained mono strip on this DSP.
+ * Only Mic strips are override targets: an insert on a Virtual input's
+ * Input Strip is not mapped yet, so it stays -ENOENT as before they existed.
+ */
 int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 			     u32 synch, u64 epoch, u32 *generation)
 {
@@ -888,7 +1059,7 @@ int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 	for (ch = 0; ch < 2; ch++) {
 		if (input[ch] == UA_STRIP_SYNCH_MONO)
 			continue;
-		for (k = 0; k < st->n; k++) {
+		for (k = 0; k < st->n_mic; k++) {
 			struct ua_strip *s = &st->strip[k];
 
 			if (s->synch != input[ch])
@@ -901,7 +1072,7 @@ int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 					return -ESTALE;
 			break;
 		}
-		if (k == st->n)
+		if (k == st->n_mic)
 			return -ENOENT;
 	}
 	*generation = st->gen;
@@ -925,7 +1096,7 @@ int ua_strips_restore(struct ua_device *ua, struct ua_xact *x,
 	for (ch = 0; ch < 2; ch++) {
 		if (input[ch] == UA_STRIP_SYNCH_MONO)
 			continue;
-		for (k = 0; k < st->n; k++)
+		for (k = 0; k < st->n_mic; k++)
 			if (st->strip[k].synch == input[ch]) {
 				ua_xact_inline(x, UA_STRIP_CMD_SYNCH,
 					       UA_STRIP_SYNCH_MONO << 16 | input[ch],
@@ -1032,7 +1203,7 @@ int ua_strips_delay(struct ua_device *ua, u64 *epoch, u32 *generation,
 	if (mutex_lock_killable(&h->mutex))
 		return -EINTR;
 	mutex_lock(&ua->lock);
-	if (st->state != UA_STRIPS_LIVE || st->n != 4 || input_strips_steps ||
+	if (st->state != UA_STRIPS_LIVE || st->n_mic != 4 || input_strips_steps ||
 	    ua->audio.sample_rate != 48000 || !ua_audio_plugin_rate_ready(ua) ||
 	    !ua_plugin_dsp_admitted(ua, ua_strips_dsp) || st->epoch != h->epoch ||
 	    (fields && (*epoch != st->epoch || *generation != st->gen))) {
@@ -1172,16 +1343,18 @@ static const char *ua_strips_layout_why(int code, char *buf, size_t len)
 
 /* A pass ends early (ua->lock): strips already out stay tracked */
 static void ua_strips_fail(struct ua_device *ua, struct ua_strips *st,
-			   int err, const char *what, unsigned int input)
+			   int err, const char *what, const struct ua_strip *s)
 {
 	unsigned int k;
 	bool any = false;
+	char lbl[16];
 
+	ua_strip_label(s, lbl, sizeof(lbl));
 	st->failures++;
-	scnprintf(st->fail_why, sizeof(st->fail_why), "%s (input %u, %d)",
-		  what, input + 1, err);
-	dev_warn(&ua->pdev->dev, "input strips: %s (input %u, %d)\n", what,
-		 input + 1, err);
+	scnprintf(st->fail_why, sizeof(st->fail_why), "%s (%s, %d)",
+		  what, lbl, err);
+	dev_warn(&ua->pdev->dev, "input strips: %s (%s, %d)\n", what, lbl,
+		 err);
 	for (k = 0; k < st->n; k++)
 		any |= st->strip[k].state != UA_STRIP_NONE;
 	for (k = 0; k < UA_STRIP_MODS; k++)
@@ -1234,7 +1407,8 @@ static int ua_strips_begin(struct ua_device *ua, struct ua_strips *st)
 		base[p] = d->geom[p].base;
 		scratch[p] = d->geom[p].scratch;
 	}
-	ret = ua_strip_layout_check(size, base, scratch, st->n, &st->layout);
+	ret = ua_strip_layout_check(size, base, scratch, st->n_mic,
+				    st->n - st->n_mic, &st->layout);
 	if (ret) {
 		ua_strips_decide(ua, UA_POOLS_LAYOUT, "%s",
 				 ua_strips_layout_why(ret, buf, sizeof(buf)));
@@ -1337,14 +1511,19 @@ static struct ua_xact *ua_strips_prepare(struct ua_device *ua,
 	struct ua_host_dsp *d = &ua->host->dsp[ua_strips_dsp];
 	struct ua_strip *s = &st->strip[k];
 	u32 addr[UA_STRIP_PRIV], want[UA_STRIP_PRIV];
+	const struct ua_memspec_row *rows;
+	u8 kinds[UA_STRIP_MAX];
 	struct ua_xact *x;
-	unsigned int j;
+	unsigned int j, n;
 	int ret;
 
-	ua_strip_priv_addrs(&st->layout, k, want);
-	for (j = 0; j < UA_STRIP_PRIV; j++) {
-		ret = ua_pool_reserve(d->pools, ua_strip_rows[j].pool,
-				      ua_strip_rows[j].dwords, &s->priv[j],
+	for (j = 0; j <= k; j++)
+		kinds[j] = st->strip[j].kind;
+	ua_strip_priv_addrs(&st->layout, kinds, k, want);
+	rows = ua_strip_kind_rows(s->kind, &n);
+	for (j = 0; j < n; j++) {
+		ret = ua_pool_reserve(d->pools, rows[j].pool,
+				      rows[j].dwords, &s->priv[j],
 				      false, &s->priv[j]);
 		if (ret)
 			goto fail;
@@ -1360,7 +1539,11 @@ static struct ua_xact *ua_strips_prepare(struct ua_device *ua,
 		goto fail;
 	}
 	x->epoch = st->epoch;
-	ret = ua_strip_build(x, addr, s->synch, &st->rate, input_strips_steps);
+	if (s->kind == UA_STRIP_KIND_INPUT)
+		ret = ua_strip_build_input(x, addr, s->synch, input_strips_steps);
+	else
+		ret = ua_strip_build(x, addr, s->synch, &st->rate,
+				     input_strips_steps);
 	if (ret) {
 		ua_xact_discard(ua, x);
 		goto fail;
@@ -1429,6 +1612,7 @@ void ua_strips_run(struct ua_device *ua)
 	unsigned long t0;
 	u32 gen;
 	bool live = false;
+	char lbl[16];
 	int ret = 0;
 
 	if (!st)
@@ -1461,9 +1645,14 @@ void ua_strips_run(struct ua_device *ua)
 	st->state = UA_STRIPS_CREATING;
 	st->epoch = h->epoch;
 	gen = st->gen;
-	dev_info(&ua->pdev->dev,
-		 "input strips: DSP0 pools empty, creating %u Mic Input Strip(s) at %u Hz\n",
-		 st->n, st->rate.rate);
+	if (st->n > st->n_mic)
+		dev_info(&ua->pdev->dev,
+			 "input strips: DSP0 pools empty, creating %u Mic Input Strip(s) and %u Virtual Input Strip(s) at %u Hz\n",
+			 st->n_mic, st->n - st->n_mic, st->rate.rate);
+	else
+		dev_info(&ua->pdev->dev,
+			 "input strips: DSP0 pools empty, creating %u Mic Input Strip(s) at %u Hz\n",
+			 st->n, st->rate.rate);
 	mutex_unlock(&ua->lock);
 
 	ret = ua_strips_upload(ua, st, gen);
@@ -1472,7 +1661,7 @@ void ua_strips_run(struct ua_device *ua)
 		if (st->gen == gen)
 			ua_strips_fail(ua, st, ret,
 				       "a strip module was not accepted by DSP 0",
-				       st->strip[0].input);
+				       &st->strip[0]);
 		mutex_unlock(&ua->lock);
 		goto out;
 	}
@@ -1490,7 +1679,7 @@ void ua_strips_run(struct ua_device *ua)
 		if (!x) {
 			mutex_lock(&ua->lock);
 			ua_strips_fail(ua, st, ret, "a strip could not be laid out",
-				       st->strip[k].input);
+				       &st->strip[k]);
 			mutex_unlock(&ua->lock);
 			goto out;
 		}
@@ -1498,7 +1687,9 @@ void ua_strips_run(struct ua_device *ua)
 		ret = ua_xact_run(ua, x, UA_XACT_WAIT_MS);
 		mutex_lock(&ua->lock);
 		if (x->state >= UA_XACT_PUBLISHED) {
-			h->dsp[ua_strips_dsp].zero_fills += UA_STRIP_PRIV;
+			h->dsp[ua_strips_dsp].zero_fills +=
+				st->strip[k].kind == UA_STRIP_KIND_INPUT ?
+				UA_STRIP_INPUT_PRIV : UA_STRIP_PRIV;
 			h->dsp[ua_strips_dsp].memspecs++;
 			h->dsp[ua_strips_dsp].writes += 2;
 		}
@@ -1511,7 +1702,7 @@ void ua_strips_run(struct ua_device *ua)
 			ua_strips_fail(ua, st, ret, ret == -ETIMEDOUT ?
 				       "DSP 0 did not take a strip in time" :
 				       "a strip could not be sent",
-				       st->strip[k].input);
+				       &st->strip[k]);
 			mutex_unlock(&ua->lock);
 			goto out;
 		}
@@ -1527,8 +1718,9 @@ void ua_strips_run(struct ua_device *ua)
 						   UA_STRIP_ROUTE_NONE);
 			if (ret)
 				dev_warn(&ua->pdev->dev,
-					 "input strips: route default for input %u on DSP %u not queued (%d)\n",
-					 st->strip[k].input + 1, dsp, ret);
+					 "input strips: route default for %s on DSP %u not queued (%d)\n",
+					 ua_strip_label(&st->strip[k], lbl,
+							sizeof(lbl)), dsp, ret);
 		}
 		mutex_unlock(&ua->lock);
 	}
@@ -1540,8 +1732,11 @@ void ua_strips_run(struct ua_device *ua)
 		for (k = 0; k < st->n; k++)
 			if (st->strip[k].state == UA_STRIP_LIVE)
 				dev_info(&ua->pdev->dev,
-					 "input strips: input %u: Mic Input Strip at 0x%05x on DSP %u (taken after %u ms)\n",
-					 st->strip[k].input + 1,
+					 "input strips: %s: %s at 0x%05x on DSP %u (taken after %u ms)\n",
+					 ua_strip_label(&st->strip[k], lbl,
+							sizeof(lbl)),
+					 st->strip[k].kind == UA_STRIP_KIND_INPUT ?
+					 "Input Strip" : "Mic Input Strip",
 					 st->strip[k].header, ua_strips_dsp,
 					 st->strip[k].ack_ms);
 	}
@@ -1553,7 +1748,7 @@ void ua_strips_run(struct ua_device *ua)
 	if (live && input_strips_phantom) {
 		unsigned int mask = 0;
 
-		for (k = 0; k < st->n; k++)
+		for (k = 0; k < st->n_mic; k++)
 			mask |= BIT(st->strip[k].input);
 		ua_preamp_phantom_resync(ua, mask);
 	}
@@ -1702,14 +1897,15 @@ void ua_strips_proc(struct ua_device *ua, struct snd_info_buffer *buf)
 	struct ua_strips *st = h ? h->strips : NULL;
 	struct ua_host_dsp *d;
 	unsigned int k, j;
+	char lbl[16];
 
 	if (!st) {
 		snd_iprintf(buf, "\ninput strips\toff (input_strips=0)\n");
 		return;
 	}
 	d = &h->dsp[ua_strips_dsp];
-	snd_iprintf(buf, "\ninput strips\ton (input_strips=1, mask 0x%x, form %s), state %s\n",
-		    input_strips_mask,
+	snd_iprintf(buf, "\ninput strips\ton (input_strips=1, mask 0x%x, virtual 0x%x, form %s), state %s\n",
+		    input_strips_mask, input_strips_virtual,
 		    st->form == UA_STRIP_FORM_SDK ? "sdk" : "recipe",
 		    ua_strips_state_name(st->state));
 	if (st->state == UA_STRIPS_OFF) {
@@ -1729,8 +1925,9 @@ void ua_strips_proc(struct ua_device *ua, struct snd_info_buffer *buf)
 	for (k = 0; k < st->n; k++) {
 		const struct ua_strip *s = &st->strip[k];
 
-		snd_iprintf(buf, "  strip %u: input %u (DSP input %u), instance 0x%05x, %s",
-			    k, s->input + 1, s->synch, s->header,
+		snd_iprintf(buf, "  strip %u: %s (DSP input %u), instance 0x%05x, %s",
+			    k, ua_strip_label(s, lbl, sizeof(lbl)), s->synch,
+			    s->header,
 			    sname[s->state < ARRAY_SIZE(sname) ? s->state : 0]);
 		if (s->state == UA_STRIP_LIVE)
 			snd_iprintf(buf, " (taken after %u ms)", s->ack_ms);

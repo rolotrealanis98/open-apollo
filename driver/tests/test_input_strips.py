@@ -241,7 +241,7 @@ static void a6_layout(void)
 	static const u32 base[4] = { 0xe0000, 0x92800, 0xc5000, 0x8000000 };
 	static const u32 scratch[4] = { 0, 0x80, 0x80, 0x8000 };
 
-	assert(ua_strip_layout_check(size, base, scratch, 4, &lay) == 0);
+	assert(ua_strip_layout_check(size, base, scratch, 4, 0, &lay) == 0);
 }
 
 /* Inline entries and DMA stream of one transaction, appended */
@@ -305,10 +305,11 @@ static void take_strip(unsigned int k, u32 synch, u32 rate, unsigned int steps)
 {
 	struct ua_strip_rate r;
 	u32 addr[UA_STRIP_PRIV];
+	static const u8 mic[UA_STRIP_MAX];	/* every slot a Mic strip */
 	struct ua_xact *x = ua_xact_alloc(0, 3 * 4096);
 
 	assert(ua_strip_rate_lookup(rate, &r) == 0);
-	ua_strip_priv_addrs(&lay, k, addr);
+	ua_strip_priv_addrs(&lay, mic, k, addr);
 	assert(ua_strip_build(x, addr, synch, &r, steps) == 0);
 	take(x);
 	ua_xact_discard(&dev, x);
@@ -470,14 +471,14 @@ static int chk(void)
 {
 	struct ua_strip_layout l;
 
-	return ua_strip_layout_check(size, base, scr, 4, &l);
+	return ua_strip_layout_check(size, base, scr, 4, 0, &l);
 }
 
 int main(void)
 {
 	struct ua_strip_layout l;
 
-	assert(ua_strip_layout_check(size, base, scr, 4, &l) == 0);
+	assert(ua_strip_layout_check(size, base, scr, 4, 0, &l) == 0);
 	assert(l.top[1] == 0x9d1b8 && l.top[2] == 0xc6ffe && l.top[3] == 0x08ffe000);
 	assert(l.start[0] == 0xe0000);
 	/* An odd base rounds up, an odd size down (CResourcePool::Initialize) */
@@ -765,6 +766,7 @@ static void setup(u32 type)
 	all_blobs(false);
 	input_strips = true;
 	input_strips_mask = 0xff;
+	input_strips_virtual = 0;	/* the Mic tests: Virtual strips have their own */
 	input_strips_steps = 0;
 	input_strips_form = 0;
 	input_strips_params = 0;
@@ -823,6 +825,101 @@ static bool ledger_baseline(void)
 }
 #define HAS(s) K_HAS(s)
 '''
+
+
+# The Input Strip on a Virtual input, as the Solo USB capture builds it for
+# VIRTUAL 1/2 (tools/uausb/soloinit.py STRIP_KINDS["input"] and
+# solo-usb-init.json params.input), written out here: six private rows
+# (header 8 and m0 0x1e words in pool 1, four 0x100-word commons in pool 3),
+# m0 linked at header[6], the commons at m0[0x0e], [0x0f], [0x06], [0x07],
+# header {0x24, 0x40000000, 1, 1, 0x22, 1, 0x83e}, m0[0..8] as captured.
+INPUT_ROWS = [(1, 0x08), (1, 0x1e), (3, 0x100), (3, 0x100), (3, 0x100),
+              (3, 0x100)]
+INPUT_LINKS = [None, (0, 6), (1, 0x0e), (1, 0x0f), (1, 0x06), (1, 0x07)]
+INPUT_M0 = [0x00df7fe4, 0x40000000, 1, 1, 4, 0x100, 0xc8, 0x3a888889,
+            0x3b83126f]
+
+
+def input_strip_addrs(n_mic, k_virtual):
+    """Rows of Virtual strip k after n_mic Mic strips, top-down per pool."""
+    top = {1: 0x9d1b8 - 0x54 * n_mic, 2: 0xc6ffe - 0x10 * n_mic,
+           3: 0x08ffe000 - 0x2010 * n_mic}
+    addrs = []
+    for _ in range(k_virtual + 1):
+        addrs = []
+        for pool, size in INPUT_ROWS:
+            top[pool] -= size
+            addrs.append(top[pool])
+    return addrs
+
+
+def expected_input(n_mic, k_virtual, synch):
+    a = input_strip_addrs(n_mic, k_virtual)
+    inl = []
+    for addr, (_, size) in zip(a, INPUT_ROWS):
+        inl += [0x00080004, addr, 0, size]
+    inl += [0x001f0004, 0x00200000 | synch, a[0], 0,
+            0x001e0004, synch, 8, 0x20,
+            0x001e0004, synch, 8, 0x20,
+            0x001e0004, synch, 7, 0x1ffff]
+    memspec = [0x00150000 | (2 * len(INPUT_ROWS) - 1)]
+    for j, link in enumerate(INPUT_LINKS):
+        if link:
+            memspec += [a[link[0]] + link[1], a[j]]
+    header = [0x00140009, a[0], 0x24, 0x40000000, 1, 1, 0x22, 1, 0x83e]
+    m0 = [0x00140000 | (2 + len(INPUT_M0)), a[1]] + INPUT_M0
+    words = memspec + header + m0
+    return inl, struct.pack('<%dI' % len(words), *words), a
+
+
+def test_virtual_input_strip_words():
+    """Virtual 1 and 2 after the four Mic strips: zero-fills, memspec,
+    header with pluginId 0x83E, the captured m0 block, SYNCH on DSP input
+    0x18 / 0x19, span and route, at the addresses after the Mic strips'."""
+    inl0, dma0, a0 = expected_input(4, 0, 0x18)
+    inl1, dma1, a1 = expected_input(4, 1, 0x19)
+    assert a0[0] == 0x9d060 and a0[2] == 0x08ff5ec0 and a1[0] == 0x9d03a
+    main = (c_words('want_inl0', inl0) + c_bytes('want_dma0', dma0) +
+            c_words('want_inl1', inl1) + c_bytes('want_dma1', dma1) + r"""
+static void take_virtual(unsigned int k, u32 synch)
+{
+	static const u8 kinds[UA_STRIP_MAX] = {
+		UA_STRIP_KIND_MIC, UA_STRIP_KIND_MIC, UA_STRIP_KIND_MIC,
+		UA_STRIP_KIND_MIC, UA_STRIP_KIND_INPUT, UA_STRIP_KIND_INPUT,
+	};
+	u32 addr[UA_STRIP_PRIV];
+	struct ua_xact *x = ua_xact_alloc(0, 3 * 4096);
+
+	ua_strip_priv_addrs(&lay, kinds, k, addr);
+	assert(ua_strip_build_input(x, addr, synch, 0) == 0);
+	take(x);
+	ua_xact_discard(&dev, x);
+}
+
+int main(void)
+{
+	struct ua_strip_layout l;
+	static const u32 size[4] = { 0x4000, 0xa9b8, 0x1ffe, 0xffe000 };
+	static const u32 base[4] = { 0xe0000, 0x92800, 0xc5000, 0x8000000 };
+	static const u32 scratch[4] = { 0, 0x80, 0x80, 0x8000 };
+
+	a6_layout();
+	reset_take();
+	take_virtual(4, 0x18);
+	assert(ni == ARRAY_SIZE(want_inl0) && !memcmp(inl, want_inl0, sizeof(want_inl0)));
+	assert(sl == sizeof(want_dma0) && !memcmp(stream, want_dma0, sl));
+	reset_take();
+	take_virtual(5, 0x19);
+	assert(ni == ARRAY_SIZE(want_inl1) && !memcmp(inl, want_inl1, sizeof(want_inl1)));
+	assert(sl == sizeof(want_dma1) && !memcmp(stream, want_dma1, sl));
+	/* the layout check counts both kinds: 4 Mic and 8 Virtual fit */
+	assert(ua_strip_layout_check(size, base, scratch, 4, 8, &l) == 0);
+	assert(ua_strip_layout_check(size, base, scratch, 4, 0x4000, &l) ==
+	       UA_STRIP_LAYOUT_ROOM + 1);
+	return 0;
+}
+""")
+    build_planner(main)
 
 
 def test_cold_start_pass_waits_for_replies_and_tears_down():
@@ -921,6 +1018,101 @@ int main(void)
 	return 0;
 }
 ''')
+
+
+def test_virtual_input_strips_pass():
+    """input_strips_virtual=0xf (the default): after the four Mic strips the
+    pass builds an Input Strip on DSP inputs 0x18-0x1b (VIRTUAL 1-4), one
+    transaction each, with the same route defaults on the other DSPs; the
+    ledger holds both kinds' rows and is back at its baseline after the
+    teardown; a Virtual input is no insert target (-ENOENT, as before)."""
+    build_host(r"""
+int main(void)
+{
+	struct ua_strips *st;
+	u32 gen;
+
+	setup(0x1F);
+	input_strips_virtual = 0x0f;
+	ua_strips_init(&dev);
+	st = host.strips;
+	assert(st && st->state == UA_STRIPS_IDLE && st->n == 8 && st->n_mic == 4);
+	assert(HAS("enabled for 4 analog input(s) (mask 0xf) and 4 Virtual input(s) (mask 0xf)"));
+	for (int k = 4; k < 8; k++)
+		assert(st->strip[k].kind == UA_STRIP_KIND_INPUT &&
+		       st->strip[k].synch == 0x18 + k - 4 && st->strip[k].input == k - 4);
+	cold_connect();
+	ua_strips_run(&dev);
+	assert(!sleeps_locked && !dev.lock.held && !host.mutex.held);
+	assert(st->state == UA_STRIPS_LIVE);
+	assert(HAS("creating 4 Mic Input Strip(s) and 4 Virtual Input Strip(s) at 48000 Hz"));
+	assert(host.dsp[0].uploads == 5 && host.dsp[0].tx_xacts == 5 + 8);
+	assert(st->strip[4].header == 0x9d060 && st->strip[5].header == 0x9d03a);
+	assert(HAS("Virtual 1: Input Strip at 0x9d060 on DSP 0"));
+	assert(HAS("input 1: Mic Input Strip at 0x9d1b0 on DSP 0"));
+	assert(strstr(proc(), "strip 4: Virtual 1 (DSP input 24), instance 0x9d060, live"));
+	assert(strstr(proc(), "virtual 0xf"));
+	/* route defaults on DSPs 1-3 for each of the eight inputs */
+	assert(nraw == 24 && raw[12][2] == 0x18 && raw[12][3] == 7 &&
+	       raw[12][4] == 0x1ffff);
+	{
+		struct ua_pool_usage u[4];
+
+		assert(ua_pool_read_usage(host.dsp[0].pools, u) == 0);
+		assert(u[1].used_words == 4 * 0x54 + 4 * 0x26 &&
+		       u[2].used_words == 4 * 0x10 &&
+		       u[3].used_words == 4 * 0x2010 + 4 * 0x400);
+	}
+	mutex_lock(&dev.lock);
+	assert(ua_strips_override_target(&dev, 0, 0x18 | 0x20 << 16, host.epoch,
+					 &gen) == -ENOENT);
+	assert(ua_strips_override_target(&dev, 0, 0x00 | 0x20 << 16, host.epoch,
+					 &gen) == 0);
+	mutex_unlock(&dev.lock);
+
+	teardown("test");
+	assert(HAS("8 strip(s) stopped, modules released (test)"));
+	assert(st->state == UA_STRIPS_IDLE && host.dsp[0].stops == 8);
+	assert(ledger_baseline());
+
+	/* and again, from the proven teardown */
+	connect_again();
+	ua_strips_run(&dev);
+	assert(st->state == UA_STRIPS_LIVE && !host.fence[0]);
+	assert(st->strip[7].state == 2 && st->strip[7].header == 0x9d060 - 3 * 0x26);
+	teardown_host();
+	assert(!k_objects && !dma_live);
+	return 0;
+}
+""")
+
+
+def test_virtual_only():
+    """input_strips_mask=0 with Virtual strips: the pass still runs (the
+    modules go out for the Input Strips), and the Virtual strips sit at the
+    pool tops."""
+    build_host(r"""
+int main(void)
+{
+	struct ua_strips *st;
+
+	setup(0x1F);
+	input_strips_mask = 0;
+	input_strips_virtual = 0x03;
+	ua_strips_init(&dev);
+	st = host.strips;
+	assert(st && st->state == UA_STRIPS_IDLE && st->n == 2 && st->n_mic == 0);
+	cold_connect();
+	ua_strips_run(&dev);
+	assert(st->state == UA_STRIPS_LIVE);
+	assert(st->strip[0].header == 0x9d1b0 && st->strip[1].header == 0x9d18a);
+	teardown("test");
+	assert(ledger_baseline());
+	teardown_host();
+	assert(!k_objects && !dma_live);
+	return 0;
+}
+""")
 
 
 def test_fifty_rebuilds_keep_the_baseline():
