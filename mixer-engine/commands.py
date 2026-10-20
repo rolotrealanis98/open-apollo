@@ -113,7 +113,7 @@ KNOWN_UNSUPPORTED = frozenset(n.lower() for n in """
     GetMidiBuffers SetSpeakerCorrectionSpec GetSpeakerCorrectionSpec
     SetSpeakerTrims GetSpeakerTrims SetHeadphoneCorrectionSpec
     GetHeadphoneCorrectionSpec SetHeadphone2CorrectionSpec
-    GetHeadphone2CorrectionSpec GetBassManagementSpec GetCorrectionImage
+    GetHeadphone2CorrectionSpec GetBassManagementSpec
     ShowSoundIDReference BeginSpeakerMeasurement EndSpeakerMeasurement
     SceneOperation ResetDanteNetwork DumpDanteConnectionState
     ConnectToSpdif ConnectFromSpdif ConnectFromAes ConnectFromAndToSpdif
@@ -328,6 +328,7 @@ class CommandEngine:
             "deleteiomappreset": self._iomap_delete,
             "renameiomappreset": self._iomap_rename,
             "import": self._import,
+            "getcorrectionimage": self._correction_image,
             "undo": self._undo,
             "redo": self._redo,
         }
@@ -363,6 +364,11 @@ class CommandEngine:
                     "has none; set /IOMapPreset to recall a saved preset",
                     params.get("type"))
         raise CommandError("no host file dialog")
+
+    def _correction_image(self, obj: str, params: dict):
+        """Monitor correction (SoundID) is not hosted here, so no profile is
+        loaded: the engine's answer for that is an empty image."""
+        return {"image": ""}
 
     # ── Dispatch ───────────────────────────────────────────────────
 
