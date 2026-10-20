@@ -13,16 +13,59 @@ READ_FAKE = r'''
                 r[k + 2] = 0x12340000u + k;
             if (service_mode == 1) r[0] ^= 1;
             if (service_mode == 2) r[1] ^= 1;
-            reply_on(d, r, e[2] + 2);
+            if (service_mode == 3) {
+                /* one reply in two pieces, the first with its own length:
+                 * the second is owed to the next descriptor */
+                unsigned int half = (e[2] + 2) / 2;
+                r[0] = 0x80010000u | half;
+                deliver(d, r, half);
+                deliver(d, r + half, e[2] + 2 - half);
+            } else {
+                static const u32 junk[3] = { 0x8001ffff, 0xffffffff, 0 };
+                for (unsigned int k = 0; service_mode == 4 && k < 4; k++)
+                    deliver(d, junk, 3);	/* always four behind */
+                deliver(d, r, e[2] + 2);
+            }
+            if (service_mode < 4)
+                service_mode = 0;	/* one reply only */
 '''
+
+# Replies the fake DSP owes: each takes the next descriptor (up to its room)
+OWED = r'''
+static u32 owed[16][66];
+static unsigned int owed_len[16], n_owed;
+static void deliver(unsigned int d, const u32 *w, unsigned int n)
+{
+    unsigned int r = 2 * d + 1;
+
+    assert(n_owed < 16 && n <= 66);
+    memcpy(owed[n_owed], w, n * 4);
+    owed_len[n_owed++] = n;
+    while (n_owed && pos[r] != target[r]) {
+        u32 *e = slots[r][pos[r]];
+        unsigned int room = e[0] & 0xffff;
+
+        memcpy(bus(e[2], e[3]), owed[0], (owed_len[0] < room ? owed_len[0] : room) * 4);
+        pos[r] = (pos[r] + 1) & 1023;
+        replies_made++;
+        memmove(owed, owed + 1, sizeof(owed[0]) * --n_owed);
+        memmove(owed_len, owed_len + 1, sizeof(owed_len[0]) * n_owed);
+    }
+}
+'''
+
+
+def with_reads(fpga):
+    """The fake FPGA answering SERVICE reads (test_plugin_swap uses it too)."""
+    return ('static u32 service_addr; static int service_mode;\n' + fpga.replace(
+        '\t\t} else if (e[0] == 0x00100002) {',
+        READ_FAKE + '\t\t} else if (e[0] == 0x00100002) {').replace(
+        '/* DSP @d consumes command entries', OWED + '/* DSP @d consumes command entries'))
 
 
 def run(main):
     old = license.fake.FPGA
-    license.fake.FPGA = (
-        'static u32 service_addr; static int service_mode;\n' + old.replace(
-            '\t\t} else if (e[0] == 0x00100002) {',
-            READ_FAKE + '\t\t} else if (e[0] == 0x00100002) {'))
+    license.fake.FPGA = with_reads(old)
     try:
         license.build_license(HELPERS + main)
     finally:
@@ -102,16 +145,69 @@ def test_malformed_replies_do_not_escape():
 int main(void)
 {
     live();
-    for (service_mode = 1; service_mode <= 2; service_mode++) {
+    for (int mode = 1; mode <= 2; mode++) {
         values[0] = 0xdeadbeef;
+        service_mode = mode;
+        k_log_reset();
         assert(service(&file_a, NULL, 0, 0, 1, instance.epoch) == -EPROTO);
         assert(values[0] == 0xdeadbeef);
+        /* logged, then a probe found nothing stray */
+        assert(K_HAS("got a reply that is not its own"));
+        assert(K_HAS("SERVICE read: reply 0 of 3 words"));
+        assert(K_HAS("realigned after 0 stray replies"));
+        assert(!host.dsp[instance.dsp].quarantined);
+        /* the probe's three spare descriptors go with the next reads */
+        for (int i = 0; i < 3; i++)
+            assert(service(&file_a, NULL, 0, 0, 1, instance.epoch) == 0);
     }
-    service_mode = 0;
-    assert(service(&file_a, NULL, 0, 0, 1, instance.epoch) == 0);
     ua_plugin_file_release(&file_a);
     cleanup();
     assert(!dma_live);
+    return 0;
+}
+''')
+
+
+def test_split_reply_is_absorbed_and_the_next_read_is_clean():
+    run(r'''
+int main(void)
+{
+    live();
+    service_mode = 3;
+    k_log_reset();
+    assert(service(&file_a, NULL, 0, 0x01000000, 3, instance.epoch) == -EPROTO);
+    assert(K_HAS("SERVICE read: reply 0 of 5 words: 80010002 00000000 data ffcccccc ffcccccc ffcccccc 00000000 .. ffcccccc ffcccccc, 2 words written"));
+    assert(K_HAS("stray reply: reply 0 of 3 words: 12340000 12340001 data 12340002 00000000 00000000 00000000 .. 12340001 12340002, 3 words written"));
+    assert(K_HAS("realigned after 1 stray reply"));
+    assert(!host.dsp[instance.dsp].quarantined);
+    for (int i = 0; i < 3; i++) {
+        values[2] = 0;
+        assert(service(&file_a, NULL, 0, 0x01000000, 3, instance.epoch) == 0);
+        assert(values[0] == 0x12340000 && values[2] == 0x12340002);
+    }
+    ua_plugin_file_release(&file_a);
+    cleanup();
+    assert(!dma_live);
+    return 0;
+}
+''')
+
+
+def test_replies_that_stay_behind_quarantine():
+    run(r'''
+int main(void)
+{
+    live();
+    service_mode = 4;
+    k_log_reset();
+    assert(service(&file_a, NULL, 0, 0, 1, instance.epoch) == -EPROTO);
+    assert(K_HAS("stray reply: reply 3 of 4 words"));
+    assert(host.dsp[instance.dsp].quarantined);
+    assert(K_HAS("replies could not be realigned"));
+    assert(service(&file_a, NULL, 0, 0, 1, instance.epoch) == -ESTALE);
+    service_mode = 0;
+    ua_plugin_file_release(&file_a);
+    cleanup();
     return 0;
 }
 ''')

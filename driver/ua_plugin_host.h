@@ -132,6 +132,7 @@ int ua_dsp_ring_resync_now(struct ua_device *ua, struct ua_dsp_ring *ring);
 #define UA_XACT_RETAIN_BYTES	(8u << 20)
 #define UA_XACT_WAIT_MS		1000	/* the plan's 1 s bound */
 #define UA_XACT_PUBLISH_MS	50	/* room / an idle command ring, off-lock */
+#define UA_XACT_RESYNC_RX	4	/* a resync probe's reply descriptors */
 
 enum ua_xact_state {
 	UA_XACT_BUILDING,	/* entries and payload being laid out */
@@ -189,6 +190,10 @@ int ua_xact_wait(struct ua_device *ua, struct ua_xact *x,
 int ua_xact_run(struct ua_device *ua, struct ua_xact *x,
 		unsigned int timeout_ms);	/* host->mutex, no ua->lock */
 const __le32 *ua_xact_reply(const struct ua_xact *x, unsigned int i);
+void ua_xact_report_reply(struct ua_device *ua, const struct ua_xact *x,
+			  unsigned int i, const char *what);	/* ua->lock */
+int ua_xact_resync_replies(struct ua_device *ua, unsigned int dsp, u64 epoch,
+			   const u32 cmd[4], u32 hdr);	/* host->mutex, no ua->lock */
 void ua_xact_done(struct ua_device *ua, struct ua_xact *x);	/* ua->lock */
 void ua_xact_discard(struct ua_device *ua, struct ua_xact *x);	/* unpublished */
 void ua_xact_reclaim(struct ua_device *ua);			/* ua->lock */

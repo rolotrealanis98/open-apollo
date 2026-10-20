@@ -559,6 +559,142 @@ const __le32 *ua_xact_reply(const struct ua_xact *x, unsigned int i)
 	return (const __le32 *)((const u8 *)x->cpu + x->rx_base + x->rx_off[i]);
 }
 
+/**
+ * ua_xact_report_reply - log reply @i of @x as the DSP left it
+ * @ua: device (ua->lock held)
+ * @x: a published transaction
+ * @i: reply index
+ * @what: whose reply it was meant to be
+ *
+ * For the hardware sessions: the header and echo, the first and last data
+ * words, how far the DSP wrote (up to the last word that is not
+ * x->rx_fill), and where the descriptor sat: rx_base, rx_off, its bus
+ * address and that address's offset in a CPU page and in a 4 KiB page.
+ */
+void ua_xact_report_reply(struct ua_device *ua, const struct ua_xact *x,
+			  unsigned int i, const char *what)
+{
+	const __le32 *r;
+	dma_addr_t at;
+	unsigned int n, k, wrote = 0;
+	u32 w[8];
+
+	if (i >= x->n_rx || !x->cpu)
+		return;
+	r = (const __le32 *)((const u8 *)x->cpu + x->rx_base + x->rx_off[i]);
+	at = x->dma + x->rx_base + x->rx_off[i];
+	n = x->rx_words[i];
+	for (k = 0; k < n; k++)
+		if (le32_to_cpu(READ_ONCE(r[k])) != x->rx_fill)
+			wrote = k + 1;
+	/* header, echo, four data words, the last two (0 past the reply) */
+	for (k = 0; k < 6; k++)
+		w[k] = k < n ? le32_to_cpu(READ_ONCE(r[k])) : 0;
+	w[6] = n >= 2 ? le32_to_cpu(READ_ONCE(r[n - 2])) : 0;
+	w[7] = le32_to_cpu(READ_ONCE(r[n - 1]));
+	dev_warn(&ua->pdev->dev,
+		 "plug-in host: DSP %u %s: reply %u of %u words: %08x %08x data %08x %08x %08x %08x .. %08x %08x, %u words written; rx_base 0x%zx rx_off 0x%x bus 0x%llx (offset 0x%lx in a %lu-byte page, 0x%x in a 4 KiB page), resp pos %u end %u\n",
+		 x->dsp, what, i, n, w[0], w[1], w[2], w[3], w[4], w[5], w[6],
+		 w[7], wrote, x->rx_base, x->rx_off[i], (unsigned long long)at,
+		 (unsigned long)(at & (PAGE_SIZE - 1)), (unsigned long)PAGE_SIZE,
+		 (unsigned int)(at & (UA_XACT_PIECE - 1)),
+		 ua->dsp[x->dsp].resp.hw_pos, x->ref[1].end);
+}
+
+/* The first of @x's replies that starts @hdr, @echo, or -1 (ua->lock held) */
+static int ua_xact_find_reply(const struct ua_xact *x, u32 hdr, u32 echo)
+{
+	const __le32 *r;
+	unsigned int i;
+
+	dma_rmb();
+	for (i = 0; i < x->n_rx; i++) {
+		r = (const __le32 *)((const u8 *)x->cpu + x->rx_base +
+				     x->rx_off[i]);
+		if (le32_to_cpu(READ_ONCE(r[0])) == hdr &&
+		    le32_to_cpu(READ_ONCE(r[1])) == echo)
+			return i;
+	}
+	return -1;
+}
+
+/**
+ * ua_xact_resync_replies - realign @dsp's replies after one that was not ours
+ * @ua: device (host->mutex held, ua->lock NOT held)
+ * @dsp: DSP index
+ * @epoch: the host epoch the refused reply belonged to
+ * @cmd: an inline command whose reply is @hdr, then cmd[3]; @hdr's low 16
+ *       bits are the reply's length, and it must differ from the refused
+ *       reply's header or echo
+ * @hdr: that reply's header
+ *
+ * A reply that was not the one asked for may be another command's, and the
+ * DSP may still owe the one it was meant to be: the next reply transaction
+ * would then take that one, and every later one the reply before it.  One
+ * probe with UA_XACT_RESYNC_RX reply descriptors takes up to
+ * UA_XACT_RESYNC_RX - 1 stray replies ahead of its own (each is logged) and
+ * proves the ring realigned once its own reply is in.  Its descriptors the
+ * DSP did not fill are abandoned by the next reply transaction, as any
+ * unanswered descriptor is (ua_xact_submit()).  No own reply within
+ * UA_XACT_WAIT_MS quarantines the DSP, unless the device or the epoch went
+ * away meanwhile.  Returns the number of stray replies, or an error.
+ */
+int ua_xact_resync_replies(struct ua_device *ua, unsigned int dsp, u64 epoch,
+			   const u32 cmd[4], u32 hdr)
+{
+	unsigned long until = jiffies + msecs_to_jiffies(UA_XACT_WAIT_MS);
+	struct ua_xact *x = ua_xact_alloc(dsp, 0);
+	unsigned int i;
+	int ret = -ENOMEM, found = -1;
+
+	lockdep_assert_held(&ua->host->mutex);
+	if (x) {
+		x->epoch = epoch;
+		x->rx_fill = 0xffcccccc;
+		for (i = 0; i < UA_XACT_RESYNC_RX; i++)
+			ua_xact_rx(x, hdr & 0xffff);
+		ua_xact_inline(x, cmd[0], cmd[1], cmd[2], cmd[3]);
+		ret = ua_xact_map(ua, x);
+		if (!ret)
+			ret = ua_xact_publish(ua, x);
+	}
+	/* Its own reply is enough: POSITION passes the spare descriptors only
+	 * when strays fill them.
+	 */
+	while (!ret && found < 0) {
+		mutex_lock(&ua->lock);
+		ret = ua_xact_poll(ua, x);
+		if (ret >= 0)
+			found = ua_xact_find_reply(x, hdr, cmd[3]);
+		mutex_unlock(&ua->lock);
+		if (ret || found >= 0)
+			break;
+		if (time_after(jiffies, until) || fatal_signal_pending(current))
+			ret = -ETIMEDOUT;
+		else
+			usleep_range(1000, 1500);
+	}
+	mutex_lock(&ua->lock);
+	if (found >= 0)
+		ret = found;
+	else if (ret >= 0)
+		ret = -EPROTO;		/* every descriptor took a stray */
+	for (i = 0; x && x->state >= UA_XACT_PUBLISHED &&
+	     i < (found >= 0 ? (unsigned int)found : x->n_rx); i++)
+		ua_xact_report_reply(ua, x, i, "stray reply");
+	if (ret >= 0)
+		dev_warn(&ua->pdev->dev,
+			 "plug-in host: DSP %u replies realigned after %d stray repl%s\n",
+			 dsp, ret, ret == 1 ? "y" : "ies");
+	else if (ret < 0 && ret != -ENODEV && ua->host->epoch == epoch)
+		ua_plugin_quarantine(ua, dsp,
+				     "its replies could not be realigned after one that was not ours",
+				     ret);
+	ua_xact_done(ua, x);
+	mutex_unlock(&ua->lock);
+	return ret;
+}
+
 static void ua_xact_unlink_free(struct ua_device *ua, struct ua_xact *x)
 {
 	struct ua_plugin_host *h = ua->host;

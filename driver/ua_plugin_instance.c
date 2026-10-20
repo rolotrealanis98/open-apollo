@@ -1015,7 +1015,10 @@ static int ua_plugin_instance_service(struct ua_device *ua, struct ua_file *uf,
 	__le32 *dest;
 	unsigned int nw = req->reserved[1], nr = req->reserved[4];
 	unsigned int row = req->reserved[0] >> 24, i, ncmd = 0;
-	u32 word = req->reserved[0] & 0xffffff;
+	u32 word = req->reserved[0] & 0xffffff, probe[4];
+	bool resync = false;
+	unsigned int dsp = 0;
+	u64 epoch = 0;
 	int ret;
 
 	if (mutex_lock_killable(&h->mutex))
@@ -1078,6 +1081,21 @@ static int ua_plugin_instance_service(struct ua_device *ua, struct ua_file *uf,
 		if (!reply || le32_to_cpu(reply[0]) != (0x80010000u | (nr + 2)) ||
 		    le32_to_cpu(reply[1]) != word) {
 			ret = -EPROTO;
+			dev_warn(&ua->pdev->dev,
+				 "plug-in host: DSP %u SERVICE read of %u words at row %u word %u (DSP address 0x%x) got a reply that is not its own\n",
+				 in->dsp, nr, row, word,
+				 in->lease[in->n_res + row].base + word);
+			ua_xact_report_reply(ua, x, 0, "SERVICE read");
+			/* A different length than the refused read's: its late
+			 * reply cannot pass for the probe's.
+			 */
+			probe[0] = 0x000c0004;
+			probe[1] = in->lease[in->n_res + row].base + word;
+			probe[2] = nr == 1 && in->rows[row].dwords - word >= 2 ? 2 : 1;
+			probe[3] = word;
+			dsp = in->dsp;
+			epoch = in->epoch;
+			resync = true;
 		} else {
 			for (i = 0; i < nr; i++)
 				values[i] = le32_to_cpu(reply[i + 2]);
@@ -1086,6 +1104,9 @@ static int ua_plugin_instance_service(struct ua_device *ua, struct ua_file *uf,
 	ua_xact_done(ua, x);
 unlock:
 	mutex_unlock(&ua->lock);
+	if (resync)
+		ua_xact_resync_replies(ua, dsp, epoch, probe,
+				       0x80010000u | (probe[2] + 2));
 	mutex_unlock(&h->mutex);
 	return ret;
 }

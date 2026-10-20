@@ -41,11 +41,8 @@ static void assert_no_routes(unsigned int c)
 
 def run(main):
     old = license.fake.FPGA
-    license.fake.FPGA = (
-        'static u32 service_addr; static int service_mode;\n' + old.replace(
-            '\t\t} else if (e[0] == 0x00100002) {',
-            service.READ_FAKE + '\t\t} else if (e[0] == 0x00100002) {').replace(
-                'if (nputs++ == fail_put_at)', 'if (nputs++ >= fail_put_at)'))
+    license.fake.FPGA = service.with_reads(old).replace(
+        'if (nputs++ == fail_put_at)', 'if (nputs++ >= fail_put_at)')
     try:
         license.build_license(HELPERS + main, real_strips=True)
     finally:
