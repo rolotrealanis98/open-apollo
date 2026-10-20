@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `tools/virtual-insert-roundtrip.py`: the round trip through a Virtual strip as a PipeWire
+  client sees it (play to "Apollo Virtual Out 1+2", record "Apollo Virtual In 1+2", both
+  against the sink's monitor in one stream), with the insert's extra latency against a plain
+  Virtual lane. For the latency a DAW hardware-insert wrapper has to report.
 - `docs/asahi-linux.md`: open-apollo on Apple Silicon under Asahi Linux. The stock Asahi kernel
   cannot tunnel PCIe over Thunderbolt; the guide builds Ophuscado's out-of-tree `tbt/7.1` kernel
   (`docs/asahi/PKGBUILD`), boots it with its own device tree from m1n1, and installs open-apollo

@@ -172,6 +172,7 @@ jobs:
           python tools/test-apollo-wavcheck.py
           python tools/test-virtual-loopback.py
           python tools/test-extract-ua-dsp-modules.py
+          python tools/test-virtual-insert-roundtrip.py
 
   console-rs:
     # Native console workspace. The runners have no GPU and no UA resources:

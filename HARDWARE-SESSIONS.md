@@ -591,6 +591,13 @@ Monitors down first: every lane also reaches the monitor mix. Close `uaconsole`.
 5. Optional, stereo: link Virtual 1/2 (`set /devices/0/inputs/14/Stereo/value true`), load a
    stereo plug-in on input 14, and measure with `--lanes 1,2 --ref 3`.
 
+6. Optional, the round trip a DAW sees (for a hardware-insert plug-in's latency report): with
+   PipeWire running and the Virtual nodes (`bash configs/pipewire/setup-apollo-io.sh`),
+   `python3 tools/virtual-insert-roundtrip.py ~/oa-test/roundtrip` plays clicks and a tone into
+   "Apollo Virtual Out 1+2" and records that sink's monitor and "Apollo Virtual In 1+2" in one
+   stream. It prints the played-to-recorded offset per lane (PipeWire's own buffering included,
+   the client's quantum not) and Virtual 1's extra samples against plain Virtual 2.
+
 Rollback (at any point): Ctrl-C the branch daemon, then
 
 ```sh
