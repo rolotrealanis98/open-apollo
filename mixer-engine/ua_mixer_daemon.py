@@ -4795,7 +4795,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
             port=args.port,
             name=args.name or (f"{_default_name()} {index + 1}" if index else None),
             helper_port=helper_port or None)
-        bonjour.start()
+        bonjour.start_in_background()
 
     log.info("Starting ua-mixer-daemon...")
     log.info("  Device map: %s", device_map)
@@ -4811,7 +4811,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
              f"tcp://{args.host}:{helper_port}" if helper_port else "disabled")
     log.info("  WS (UA Connect): %s",
              f"ws://{args.host}:{args.ws_port}" if ws_server else "disabled")
-    log.info("  Bonjour: %s", "enabled" if bonjour and bonjour.zc else "disabled")
+    log.info("  Bonjour: %s", "registering" if bonjour else "disabled")
 
     async def run_all():
         """Run TCP servers, meter pump, heartbeat, and (optionally) WS server."""
