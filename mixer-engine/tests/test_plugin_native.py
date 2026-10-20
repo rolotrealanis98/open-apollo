@@ -372,7 +372,7 @@ def test_queued_parameter_sets_keep_only_the_newest_value():
     assert [a.get('parameters', {}).get('func_id') for a in answers] == [9]
 
 
-def test_observations_read_in_merged_spans():
+def test_observations_read_one_run_per_service():
     class Spans:
         def __init__(self):
             self.reads = []
@@ -392,8 +392,7 @@ def test_observations_read_in_merged_spans():
                                                 (15, 44, (15 << 16 | 44,)),
                                                 (17, 7, tuple(17 << 16 | 7 + k for k in range(16))))
     words = NativePluginBackend._read_spans(backend, None, observations)
-    # A read never covers a word between observations (the DSP may refuse it).
-    assert driver.reads == [(14, 21, 64), (14, 85, 64), (14, 149, 64), (14, 216, 1),
-                            (15, 38, 2), (15, 44, 1), (17, 7, 16)]
+    # One read per observation: the DSP refused a 64-word read of touching runs.
+    assert driver.reads == [(row, offset, len(values)) for row, offset, values in observations]
     assert all(words[row, offset + i] == v for row, offset, values in observations
                for i, v in enumerate(values))

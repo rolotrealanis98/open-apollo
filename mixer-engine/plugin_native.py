@@ -225,21 +225,14 @@ class NativePluginBackend:
         self._session()
 
     def _read_spans(self, native, observations):
-        """{(row, word): value} for every observed word, read in as few SERVICE calls as fit.
+        """{(row, word): value} for every observed word: one SERVICE read per observation.
 
-        Each SERVICE is a DSP round trip (tens of ms) and reads at most 64 words; codecs emit
-        16-word runs, so a control's 25 runs on one row are 8 reads, not 25. Only runs that
-        touch are joined: a read never covers a word between observations. Reading such gap
-        words (API Preamp's load, 2026-10-19) got a reply the driver refused (EPROTO) and
-        quarantined the DSP until a power cycle."""
-        spans = []
-        for row, offset, expected in sorted(observations):
-            end = offset + len(expected)
-            if (spans and spans[-1][0] == row and offset <= spans[-1][2]
-                    and end - spans[-1][1] <= 64):
-                spans[-1][2] = max(spans[-1][2], end)
-            else:
-                spans.append([row, offset, end])
+        Joining runs into longer reads (up to the ABI's 64 words) halved a control's DSP
+        round trips on the SVT-VR, but the API Preamp's load got a reply the driver refused
+        (EPROTO) for a 64-word read of touching runs (row 11, words 70..133), which
+        quarantined native hosting and then DSP 1 until a power cycle. Until the driver can
+        say which reads the DSP serves, every read is exactly one observation, as before."""
+        spans = [[row, offset, offset + len(expected)] for row, offset, expected in observations]
         words = {}
         for row, start, end in spans:
             try:
