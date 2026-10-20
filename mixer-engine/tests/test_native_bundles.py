@@ -47,6 +47,8 @@ def test_write_masks_gaps():
 
 
 class Stub:
+    sample_rate = 48000
+
     def __init__(self, path, input_index, *, data, module_store):
         self.name, self.input_index = data["name"], input_index
 
@@ -75,12 +77,58 @@ def test_registry_offers_each_verified_layout_from_its_own_bundle(tmp_path, monk
     bundles(tmp_path, ("UAD Both", "mono"), ("UAD Both", "stereo"), ("UAD Mono Only", "mono"),
             ("UAD Mono Only", "stereo"), ("UAD Not Yet Live", "mono"))
     offered = registry.create_profiled_providers(tmp_path)
-    assert sorted((p.name, type(p).__name__, p.input_index) for p in offered) == [
+    assert sorted((p.name, p.kind.__name__, p.input_index) for p in offered) == [
         ("UAD Both", "StereoStub", 0), ("UAD Both", "StereoStub", 2),
         *[("UAD Both", "Stub", i) for i in range(4)], *[("UAD Mono Only", "Stub", i) for i in range(4)]]
     assert callable(offered.composer)
     everything = registry.create_profiled_providers(tmp_path, advertise_all=True)
-    assert {(p.name, type(p).__name__) for p in everything} >= {("UAD Mono Only", "StereoStub"), ("UAD Not Yet Live", "Stub")}
+    assert {(p.name, p.kind.__name__) for p in everything} >= {("UAD Mono Only", "StereoStub"), ("UAD Not Yet Live", "Stub")}
+
+
+def test_offering_reads_no_bundle_and_the_first_use_builds_once(tmp_path, monkeypatch):
+    """The daemon offers every map at startup from index.json alone; a bundle is parsed (once for
+    all its inputs) and its provider built when a load first needs it."""
+    import copy
+    built = []
+
+    class Counting(Stub):
+        def __init__(self, path, input_index, *, data, module_store):
+            super().__init__(path, input_index, data=data, module_store=module_store)
+            built.append(input_index)
+            self.recipe = "built"
+    monkeypatch.setattr(registry, "ProfiledCarrierProvider", Counting)
+    monkeypatch.setattr(registry, "StereoProfiledCarrierProvider", type("StereoCounting", (Counting,), {}))
+    monkeypatch.setattr(registry, "known_good", lambda: {"UAD A": {"layouts": ["mono", "stereo"]}})
+    reads = []
+    original = registry.Path.read_text
+    monkeypatch.setattr(registry.Path, "read_text", lambda self, *a, **k: reads.append(self.name) or original(self, *a, **k))
+    bundles(tmp_path, ("UAD A", "mono"), ("UAD A", "stereo"))
+    offered = registry.create_profiled_providers(tmp_path)
+    assert reads == ["index.json"] and built == []
+    mono = sorted((p for p in offered if p.kind is Counting), key=lambda p: p.input_index)
+    stereo = [p for p in offered if p.kind is not Counting]
+    assert [p.slot for p in mono] == [f"/devices/0/inputs/{i}/effects/0" for i in range(4)]
+    assert not hasattr(mono[1], "channels") and [p.channels for p in stereo] == [(0, 1), (2, 3)]
+    assert all(p.sample_rate == 48000 for p in offered) and built == []   # all the backend asks to offer
+    assert mono[1].recipe == "built" and mono[1].recipe == "built" and built == [1]
+    assert mono[2].built().input_index == 2 and built == [1, 2]
+    assert reads.count("UAD-A-mono-runtime-bundle.json") == 1             # one parse for every input
+    clone = copy.deepcopy(mono[3])
+    assert type(clone) is Counting and clone is not mono[3].built() and clone.input_index == 3
+
+
+def test_a_bundle_found_unusable_fails_its_load_not_the_others(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(registry, "ProfiledCarrierProvider", Stub)
+    monkeypatch.setattr(registry, "known_good", lambda: {"UAD A": {"layouts": ["mono"]}, "UAD B": {"layouts": ["mono"]}})
+    bundles(tmp_path, ("UAD A", "mono"), ("UAD B", "mono"))
+    (tmp_path / "UAD-B-mono-runtime-bundle.json").write_text(json.dumps({"status": "fail", "name": "UAD B"}))
+    offered = {p.name: p for p in registry.create_profiled_providers(tmp_path, inputs=(0,))}
+    assert set(offered) == {"UAD A", "UAD B"}
+    assert offered["UAD A"].built().name == "UAD A"
+    import pytest
+    with pytest.raises(ValueError, match="passing runtime bundle required"):
+        offered["UAD B"].built()
+    assert "UAD-B-mono-runtime-bundle.json unusable" in caplog.text
 
 
 def test_a_native_transaction_runs_off_the_event_loop(monkeypatch):
@@ -146,12 +194,12 @@ def test_maps_landing_while_the_daemon_runs_are_offered_once(tmp_path, monkeypat
     first = registry.create_profiled_providers(watcher=watcher)
     assert list(first) == [] and first.growable          # no maps yet: hosting starts empty
     bundles(tmp_path, ("UAD A", "mono"), ("UAD A", "stereo"))
-    assert {(p.name, type(p).__name__) for p in watcher.poll()} == {("UAD A", "Stub"), ("UAD A", "StereoStub")}
+    assert {(p.name, p.kind.__name__) for p in watcher.poll()} == {("UAD A", "Stub"), ("UAD A", "StereoStub")}
     assert watcher.poll() == []                          # unchanged index: nothing new
     bundles(tmp_path, ("UAD A", "mono"), ("UAD A", "stereo"), ("UAD B", "mono"))
     import os
     os.utime(tmp_path / "index.json", ns=(1, 10**18))    # a new index even within one clock tick
-    assert {(p.name, type(p).__name__) for p in watcher.poll()} == {("UAD B", "Stub")}
+    assert {(p.name, p.kind.__name__) for p in watcher.poll()} == {("UAD B", "Stub")}
     assert "2 plug-ins (1 in both layouts)" in watcher.summary()
     (tmp_path / "progress.json").write_text(json.dumps({"state": "running", "done": 3, "total": 9, "eta_seconds": 300}))
     assert watcher.progress()["done"] == 3

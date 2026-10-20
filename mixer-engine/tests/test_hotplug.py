@@ -408,6 +408,13 @@ class TestBonjour:
         b.stop()
         assert FakeZeroconf.registered == [] and FakeZeroconf.closed
 
+    def test_background_start_registers_and_stop_waits_for_it(self, fake_zc):
+        b = bonjour.BonjourAnnouncer(4710, "Studio", helper_port=4720)
+        b.start_in_background()
+        b.stop()    # joins the registration before unregistering
+        assert FakeZeroconf.registered == [] and FakeZeroconf.closed
+        assert b._thread is not None and not b._thread.is_alive()
+
     def test_no_helper_port(self, fake_zc):
         b = bonjour.BonjourAnnouncer(4710, "Studio")
         assert b.start()

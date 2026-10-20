@@ -10,6 +10,7 @@ Services look that type up before they open the helper connection.
 
 import logging
 import socket
+import threading
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class BonjourAnnouncer:
         self.name = name or _default_name()
         self.zc: "Zeroconf | None" = None
         self.infos: list = []
+        self._thread: threading.Thread | None = None
 
     @property
     def info(self):
@@ -83,8 +85,17 @@ class BonjourAnnouncer:
             self.stop()
             return False
 
+    def start_in_background(self):
+        """start() on its own thread. Registering probes the network first (about 1.7 s per
+        service), and the daemon opens its ports meanwhile instead of after."""
+        self._thread = threading.Thread(target=self.start, name="bonjour", daemon=True)
+        self._thread.start()
+
     def stop(self):
         """Unregister the Bonjour services."""
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=5)   # a registration still running finishes first
         if self.zc:
             for info in self.infos:
                 try:
