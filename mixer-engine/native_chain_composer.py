@@ -6,7 +6,7 @@ Runtime must authorize every render_ids entry, then verify physical activation.
 from copy import deepcopy
 from dataclasses import dataclass
 from plugin_native import ControlPlan
-from native_carrier import L, NONE, check, write as _write
+from native_carrier import L, NONE, MeterReads, check, write as _write
 from native_profiled_carrier_provider import ProfiledCarrierProvider
 
 # Bit 0x4 of a block's word 4 is the record tap (HARDWARE-SESSIONS.md, "record tap flag"):
@@ -82,8 +82,9 @@ class ComposedEffect:
         self.slot = f'/devices/0/inputs/{channels[0]}/effects/{slot}'
         self.name, self.sample_rate = provider.name, provider.sample_rate
         self.record_delay_samples = record_delay_samples
-        self.remote_reads = {key: (self._row(row), word)
-                             for key, (row, word) in provider.remote_reads.items()}
+        reads = provider.remote_reads
+        self.remote_reads = (reads.rebased(base_row) if isinstance(reads, MeterReads) else
+                             {key: (self._row(row), word) for key, (row, word) in reads.items()})
 
     def _row(self, row):
         if not 10 <= row < 10 + self.row_count:
