@@ -335,6 +335,11 @@ class TestIdentify:
     def test_led_test_is_not_runnable(self, stack):
         assert post(stack, "post /LEDTest").last()["error"] == ERR_FAILED
 
+    def test_correction_image_is_empty(self, stack):
+        # no correction profile hosted: an empty image, so Console stops asking
+        assert stack.commands.execute("/GetCorrectionImage", None,
+                                      {"cmdparams": {"type": "speaker"}}) == ({"image": ""}, None)
+
 
 # ── ClearClips / ClearSolos ─────────────────────────────────────────
 

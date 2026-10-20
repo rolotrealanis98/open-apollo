@@ -68,7 +68,7 @@ def test_predicates():
 
 
 @pytest.mark.parametrize('path,allowed', [
-    ('/ClearSolos', True), ('/CopyToSends', True),
+    ('/ClearSolos', True), ('/CopyToSends', True), ('/GetCorrectionImage', True),
     ('/MoveInsert', False), ('/SaveSessionAs', False)])
 def test_posts(lab, path, allowed):
     lab.daemon._handle_post(lab.client, Command('post', path, {}, raw_params=None))

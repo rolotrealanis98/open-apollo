@@ -242,7 +242,8 @@ class _RestoreWriter:
         return False
 # Posts that change only the mixer, never an insert.
 _NATIVE_MIXER_POSTS = frozenset({
-    'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
+    'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch',
+    'GetCorrectionImage'})
 
 
 _LINK_PROPS = frozenset({'Stereo', 'StereoLink', 'Link'})
