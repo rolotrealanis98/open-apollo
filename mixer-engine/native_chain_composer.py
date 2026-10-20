@@ -30,13 +30,18 @@ def _blocks(commands):
 
 
 def _writes(words):
+    # One sorted sweep: each group starts at the lowest remaining word and takes every word up to
+    # first+32 (native_carrier.compact's rule). Re-sorting what remains per group was quadratic:
+    # ENGL E765 RT's 530k startup words held the GIL for minutes and stalled the event loop.
     result = []
-    for row in sorted({r for r, _ in words}):
-        pending = {w: v for (r, w), v in words.items() if r == row}
-        while pending:
-            first = min(pending)
-            group = {w: pending.pop(w) for w in sorted(pending) if w <= first + 32}
-            result.extend(_write(row, group))
+    items = sorted(words.items())
+    i = 0
+    while i < len(items):
+        (row, first), j = items[i][0], i
+        while j < len(items) and items[j][0][0] == row and items[j][0][1] <= first + 32:
+            j += 1
+        result.extend(_write(row, {w: v for (_, w), v in items[i:j]}))
+        i = j
     return tuple(result)
 
 
