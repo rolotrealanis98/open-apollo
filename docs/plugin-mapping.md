@@ -122,9 +122,30 @@ the repository, and turn the monitors down first.
 
 ### 5. Report it
 
-The live gate behind `native_known_good.json` is, per layout: it loads, every parameter is listed,
-three controls change with matching readback, it unloads. Add what you heard: the audio responds
-to the controls, and unloading restores the dry signal. Open an issue (or a PR adding the `native_known_good.json` entry) with:
+The status of every plug-in is [docs/status/PLUGINS.md](status/PLUGINS.md): one row per plug-in and
+layout, one column per check (map, panel, load, controls, text, meters, latency, audio), and a list
+of what fails under each check. It is generated from `docs/status/plugins/*.json`, which
+`tools/plugin-qualify.py` writes from measurements, never by hand. The live gate behind
+`native_known_good.json` (it loads, three controls read back, it unloads) is only where that
+table starts: a plug-in **works** when every check passes.
+
+```bash
+python3 tools/plugin-qualify.py offline                                # map, panel: no Apollo
+python3 tools/plugin-qualify.py live --device "Apollo x4"              # load, controls, text, meters
+python3 tools/plugin-qualify.py live --device "Apollo x4" --signal --only "UAD LA-2A Legacy"
+python3 tools/plugin-qualify.py mark "LA-2A Legacy" mono audio pass --device "Apollo x4"
+python3 tools/plugin-qualify.py mark "LA-2A Legacy" mono latency fail --detail "measured 55, entry 0" --device "Apollo x4"
+python3 tools/gen-status-graph.py                                      # redraw PLUGINS.md
+```
+
+`live` loads each plug-in the daemon offers into an empty insert slot (never one in use), sets
+every parameter to the three positions the mapper swept, checks each is accepted and that its text
+matches what the plug-in's own formatter gave there, reads the panel's meters (with `--signal`, a
+source on that input, checks they move), restores each value and unloads. Run it attended with the
+monitors down; add `--by <github handle>` and `--uad <version>` so your results say who and what.
+Audio and latency are measured by you (step 4) and recorded with `mark`. A PR with the changed
+JSON files and the regenerated `docs/status/` is the report; if you can't run the tool, use the
+**Plug-in report** issue form. Otherwise open an issue (or a PR adding the `native_known_good.json` entry) with:
 
 - the plug-in name, layout (mono / stereo) and input(s); Apollo model and sample rate;
 - UAD version, the `mapper` and `uad_sdk_sha256` fields of `index.json`;

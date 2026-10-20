@@ -27,6 +27,7 @@ your own UAD install (see [NOTICE.md](NOTICE.md)).
 [![work plan](docs/status/badge-plan.svg)](docs/status/)
 [![models verified](docs/status/badge-models.svg)](docs/status/)
 [![plug-ins live on the Apollo](docs/status/badge-plugins.svg)](docs/status/#plug-in-mapping)
+[![plug-ins fully working](docs/status/badge-plugins-working.svg)](docs/status/PLUGINS.md)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/status/progress-dark.svg">
@@ -35,7 +36,7 @@ your own UAD install (see [NOTICE.md](NOTICE.md)).
 
 Each square is one thing UA's own drivers do (top left), one task of the work plan (top right), one Apollo model (right) or one UAD plug-in (bottom). The legend under the map gives the colours: verified on real hardware, done in code, partial, still to figure out (needs reverse engineering), understood but not done, plugin hosting (being built), and needs hardware (a test on an Apollo, or hardware the project doesn't have). The numbers per area and the open tasks are in [docs/status](docs/status/).
 
-The bottom row tracks the plug-in work that is not released yet: each UA-built UAD-2 plug-in whose controls have been mapped to the Apollo's DSP by running UA's own code offline, and whether it has loaded on the Apollo with every control set and read back. Red there means the test Apollo doesn't authorize that plug-in, so it can't be checked.
+The bottom row tracks the plug-in work that is not released yet: each UA-built UAD-2 plug-in whose controls have been mapped to the Apollo's DSP by running UA's own code offline, and whether it has passed the live gate on the Apollo (it loads, controls read back, it unloads). Red there means the test Apollo doesn't authorize that plug-in, so it can't be checked. Passing the gate is not the same as working: [docs/status/PLUGINS.md](docs/status/PLUGINS.md) has every plug-in's measured checks (every control, its text, meters, latency, audio) and what each one still needs.
 
 ## What Works (Apollo x4 — Thunderbolt, Ubuntu 24.04)
 

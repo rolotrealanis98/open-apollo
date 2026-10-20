@@ -1,0 +1,105 @@
+{
+ "plugin": "Ampex ATR-102",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "40 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "40/40",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "load": {
+    "result": "pass",
+    "detail": "loads, reads back, unloads",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "controls": {
+    "result": "pass",
+    "detail": "40/40",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "text": {
+    "result": "fail",
+    "detail": "36/40; differs at ordinals 11, 15, 17, 19",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "meters": {
+    "result": "fail",
+    "detail": "meter read refused: plugin_remote_readback_unavailable ",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "40 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "40/40",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "load": {
+    "result": "pass",
+    "detail": "loads, reads back, unloads",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "controls": {
+    "result": "pass",
+    "detail": "40/40",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "text": {
+    "result": "fail",
+    "detail": "34/40; differs at ordinals 11, 15, 17, 19, 34, 36",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "meters": {
+    "result": "fail",
+    "detail": "meter read refused: plugin_remote_readback_unavailable ",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   }
+  }
+ }
+}

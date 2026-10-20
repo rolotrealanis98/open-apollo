@@ -1,0 +1,45 @@
+{
+ "plugin": "UA 610-A",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "9 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "fail",
+    "detail": "8/9 parameters have a panel control; none for ordinals 8",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "9 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "fail",
+    "detail": "8/9 parameters have a panel control; none for ordinals 8",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}
