@@ -5,8 +5,12 @@ word 4 is the record tap, and moving it is UAD REC / MON: on the last effect the
 monitor are both wet (REC, today's recipe); on the Mic strip `m0` (row 1 word 4) the record is
 dry and the monitor stays wet (MON). It works at CREATE and live through SERVICE, both ways,
 with no fault (HARDWARE-SESSIONS.md, "record tap flag"). Not yet checked: the Unison case
-(sub 0 is the Unison header), more than one insert, stereo, other rates. No driver or daemon
-code changes yet.
+(sub 0 is the Unison header), more than one insert, stereo, other rates.
+
+Implemented 2026-10-19 for native insert chains (steps 2, 4, 5 and 6 below; no driver change):
+`compose(record_pre_effects=)`, `ComposedChain.record_tap_plan`, `NativeChainBackend.set_record_tap`,
+`MixerDaemon._native_record_tap`. Hardware-free tests only; the daemon path has not run on the x4
+yet (check below).
 
 ## What the switch means (proven)
 
@@ -118,6 +122,20 @@ The monitor mix kept the 1176's level and shape with the flag on `m0` while the 
 the plain strip. The dry record also arrives 55 samples before the wet monitor: the 1176 Rev A
 chain adds 55 samples that `native_known_good.json` lists as 0, so delay compensation
 undercounts it today.
+
+## Hardware check of the implementation (owner)
+
+Daemon running this branch with plug-in hosting, PipeWire stopped (arecord needs `hw:x4`), input 1
+unmuted and soloed, nothing else driving the mixer, delay compensation Off. Load the 1176 Rev A on
+input 1 from the console, Input high. Then, measuring as `tools/rectap-bench.py` does (record ch 0 =
+input 1, ch 14 = MON L; RMS and the MON-vs-record correlation):
+
+1. UAD REC: record wet (well above the plain strip), MON wet.
+2. Click MON on input 1: record back at the plain-strip level, MON unchanged (wet). The daemon log
+   has no `record tap` warning and the console's LED stays on MON.
+3. Click REC: record wet again. Unload and reload the insert while in MON: it comes up dry.
+4. Delay compensation Medium, MON ↔ REC: the chain is rebuilt (`create`/`swap` in the log);
+   record and MON keep their levels.
 
 ## Implementation, once the word is known
 

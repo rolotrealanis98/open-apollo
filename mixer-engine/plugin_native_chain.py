@@ -39,6 +39,7 @@ class _Chain:
     native: object
     leases: dict
     sources: dict
+    composed: object = None
 
 
 @dataclass
@@ -107,12 +108,13 @@ class NativeChainBackend(NativePluginBackend):
         """What to read back once a chain runs. Its whole startup was verified while it was
         inactive (just created or staged); once the DSP runs it, plug-ins own some of those words
         (delay pointers, LFO phases), so only the chain's own header words are checked: row 0 and
-        each effect's count and tap words."""
+        each effect's count and tap words, and the Mic strip's tap word (UAD MON)."""
         effects = getattr(composed, 'effects', None)
         if not effects:
             return composed.observations
         heads = {getattr(effect, 'base_row', None) for effect in effects}
-        live = tuple(o for o in composed.observations if o[0] == 0 or (o[0] in heads and o[1] in (1, 4)))
+        live = tuple(o for o in composed.observations if o[0] == 0 or o[:2] == (1, 4)
+                     or (o[0] in heads and o[1] in (1, 4)))
         return live or composed.observations
 
     def _start(self, candidate):
@@ -161,12 +163,26 @@ class NativeChainBackend(NativePluginBackend):
             raise ValueError('authoritative descriptor latency required')
         return sum(values)
 
-    def _compensation_plan(self, setting):
+    def _record_pre(self, channels, override=None):
+        """UAD MON (True) or REC for a chain: its first input's RecordPreEffects, as published
+        (Console writes both inputs of a pair). `override` maps channels to a proposed value."""
+        if override and channels in override:
+            return override[channels]
+        path = f'/devices/0/inputs/{channels[0]}/RecordPreEffects'
+        state = self.publisher.state
+        return state.path_exists(path) and state.get_value(path) is True
+
+    def _input_latency(self, channels, sources, record_pre=None):
+        latency = self._latency(sources)
+        # UAD MON records ahead of the inserts: no plug-in latency on the record path.
+        record = 0 if self._record_pre(channels, record_pre) else latency
+        return InputLatency(channels, latency, record, self._group(channels))
+
+    def _compensation_plan(self, setting, record_pre=None):
         inputs, occupied = [], set()
         for channels, chain in self._chains.items():
             self._current(chain)
-            latency = self._latency(chain.sources)
-            inputs.append(InputLatency(channels, latency, latency, self._group(channels)))
+            inputs.append(self._input_latency(channels, chain.sources, record_pre))
             occupied.update(channels)
         inputs.extend(InputLatency((channel,), 0, 0, self._group((channel,))) for channel in range(4) if channel not in occupied)
         return plan_compensation(setting, inputs)
@@ -267,15 +283,14 @@ class NativeChainBackend(NativePluginBackend):
     def _delay_values(item):
         return item.record, item.monitor, item.capacity
 
-    def _plan_batch(self, slot, channels, sources):
+    def _plan_batch(self, slot, channels, sources, record_pre=None):
         old_plan = {item.channels: item for item in self._compensation_plan(self.compensation_setting)}
         prospective = {key: chain.sources for key, chain in self._chains.items() if key != channels}
         if sources:
             prospective[channels] = sources
         inputs, occupied = [], set()
         for key, providers in prospective.items():
-            latency = self._latency(providers)
-            inputs.append(InputLatency(key, latency, latency, self._group(key)))
+            inputs.append(self._input_latency(key, providers, record_pre))
             occupied.update(key)
         inputs.extend(InputLatency((channel,), 0, 0, self._group((channel,))) for channel in range(4) if channel not in occupied)
         inputs = plan_compensation(self.compensation_setting, inputs)
@@ -288,7 +303,8 @@ class NativeChainBackend(NativePluginBackend):
             if key not in prospective:
                 continue
             providers = copy.deepcopy(prospective[key])
-            composed, arguments, ordered = self._compose(providers, key, planned[key])
+            composed, arguments, ordered = self._compose(providers, key, planned[key],
+                                                         self._record_pre(key, record_pre))
             if composed.needs_staging and not previous[key] and not self.start_staged:
                 raise ValueError('this chain needs a driver that can start a staged chain '
                                  '(UA_FEAT2_PLUGIN_START_STAGED): update the driver')
@@ -433,6 +449,73 @@ class NativeChainBackend(NativePluginBackend):
             status = self._commit_batch(change)
         return RetireOutcome(status, handle, retired=status is Outcome.CONFIRMED)
 
+    def set_record_tap(self, channel, pre):
+        """UAD REC (False) / MON (True) on the chain whose first input is `channel`.
+
+        Caller must serialize this with plugin transactions and publish RecordPreEffects only
+        after CONFIRMED; INDETERMINATE requires session quarantine. With no such chain nothing
+        changes on the device: a chain composed later reads the published value."""
+        def outcome(status, detail=''):
+            return CompensationOutcome(status, self.compensation_setting, self.compensation_inputs, detail)
+        chain = next((chain for key, chain in self._chains.items() if key[0] == channel), None)
+        if type(pre) is not bool:
+            return outcome(Outcome.FAILED, 'Record tap must be true or false')
+        if chain is None:
+            return outcome(Outcome.CONFIRMED)
+        if self._pending or self._compensating:
+            return outcome(Outcome.FAILED, 'A native chain transition is pending')
+        try:
+            self._current(chain)
+            if self.compensation_supported:
+                def delays(override):
+                    return [self._delay_values(item) for item in
+                            self._compensation_plan(self.compensation_setting, override)]
+                if delays(None) != delays({chain.channels: pre}):
+                    return outcome(*self._rebuild_record_tap(chain, pre))
+            tap = chain.composed.record_tap_plan(pre)
+            restore = chain.composed.record_tap_plan(self._record_pre(chain.channels))
+        except Exception:
+            log.exception('native chain: record tap on input %d refused', channel)
+            return outcome(Outcome.FAILED, 'Record tap validation failed')
+        try:
+            self._apply_tap(chain.native, tap)
+        except ValueError as error:
+            log.warning('native chain: record tap on input %d refused: %s', channel, error)
+            try:
+                self._apply_tap(chain.native, restore)
+            except Exception:
+                self.invalidate()
+                return outcome(Outcome.INDETERMINATE, 'Record tap restoration unconfirmed')
+            return outcome(Outcome.FAILED, 'Previous record tap restored')
+        except Exception:
+            log.exception('native chain: record tap on input %d raised', channel)
+            self.invalidate()
+            return outcome(Outcome.INDETERMINATE, 'Record tap device operation unconfirmed')
+        return outcome(Outcome.CONFIRMED)
+
+    def _apply_tap(self, native, plan):
+        self._compensation_io(self.driver.service, native, writes=plan.writes)
+        self._observe(native, plan.observations)
+
+    def _rebuild_record_tap(self, chain, pre):
+        """The record delay moves with the tap: a new chain through the topology batch."""
+        label = f'/devices/0/inputs/{chain.channels[0]}/RecordPreEffects'
+        try:
+            change = self._plan_batch(label, chain.channels, chain.sources, {chain.channels: pre})
+        except Exception:
+            log.exception('native chain: record tap compensation refused on %s', label)
+            return Outcome.FAILED, 'Record tap compensation validation failed'
+        status = self._allocate_batch(change, 0)
+        if status is Outcome.CONFIRMED:
+            status = self._activate_batch(change).status
+        if status is Outcome.FAILED:
+            if self._rollback_batch(change).status is Outcome.CONFIRMED:
+                return Outcome.FAILED, 'Previous record tap restored'
+            status = Outcome.INDETERMINATE
+        if status is Outcome.CONFIRMED:
+            status = self._commit_batch(change)
+        return status, '' if status is Outcome.CONFIRMED else 'Record tap rebuild unconfirmed'
+
     def capabilities(self):
         return [entry | {'slots': (entry['slots'] if '/preamps/' in entry['slots'][0]
                                   else [entry['slots'][0].rsplit('/', 1)[0] + '/' + str(i)
@@ -457,7 +540,7 @@ class NativeChainBackend(NativePluginBackend):
             if self._channels(slot) != chain.channels:
                 raise ValueError('input layout changed while a chain was live')
 
-    def _compose(self, sources, channels, compensation=None):
+    def _compose(self, sources, channels, compensation=None, record_pre=None):
         def index(slot):
             return -1 if '/preamps/0/effects/' in slot else int(slot.rsplit('/', 1)[1])
         ordered = sorted(sources, key=index)
@@ -468,8 +551,12 @@ class NativeChainBackend(NativePluginBackend):
         if compensation is not None:
             delay = dict(record_delay_samples=compensation.record,
                 monitor_delay_samples=compensation.monitor, active_capacity=compensation.capacity)
+        if record_pre is None:
+            record_pre = self._record_pre(channels)
+        # UAD REC is every composer's default; only MON is passed.
+        mon = {'record_pre_effects': True} if record_pre else {}
         composed = self.composer([sources[slot] for slot in ordered], channels=channels, **delay,
-            slots=tuple(index(slot) for slot in ordered))
+            slots=tuple(index(slot) for slot in ordered), **mon)
         if len(composed.effects) != len(ordered):
             raise ValueError('composer effect count differs')
         for slot, view in zip(ordered, composed.effects):
@@ -537,7 +624,7 @@ class NativeChainBackend(NativePluginBackend):
             loaded = retained[slot] if slot in retained else view.initial(handle)
             self.publisher.validate(loaded)
             leases[slot] = _Lease(native, loaded, view)
-        return _Chain(tuple(composed.effects[0].channels), native, leases, sources)
+        return _Chain(tuple(composed.effects[0].channels), native, leases, sources, composed)
 
     def _install(self, previous, candidate):
         if previous:

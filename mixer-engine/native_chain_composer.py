@@ -9,6 +9,15 @@ from plugin_native import ControlPlan
 from native_carrier import L, NONE, check, write as _write
 from native_profiled_carrier_provider import ProfiledCarrierProvider
 
+# Bit 0x4 of a block's word 4 is the record tap (HARDWARE-SESSIONS.md, "record tap flag"):
+# UAD REC taps after the last effect, UAD MON after the Mic Input Strip m0 (row 1).
+RECORD_TAP = 0x4
+MON_TAP = (1, 4)
+
+
+def _tap(flags, last, record_pre_effects):
+    return flags | RECORD_TAP if last and not record_pre_effects else flags & ~RECORD_TAP
+
 
 def _blocks(commands):
     i = 0
@@ -145,6 +154,7 @@ class ComposedChain:
     render_ids: tuple
     observations: tuple
     hardware_qualified: bool = False
+    taps: tuple = ()  # (effect base row, its word 4 without the tap)
 
     @property
     def needs_staging(self):
@@ -160,13 +170,23 @@ class ComposedChain:
         arguments.update(stage=True,commands=chunks[0])
         return dict(create_arguments=arguments,initialize_chunks=chunks[1:])
 
+    def record_tap_plan(self, record_pre_effects):
+        """The live UAD REC (False) / MON (True) flip: word 4 of m0 and of each effect, all
+        outside the chain directory, so one SERVICE writes it on the running chain."""
+        words = {MON_TAP: RECORD_TAP if record_pre_effects else 0}
+        for index, (row, flags) in enumerate(self.taps):
+            words[row, 4] = _tap(flags, index == len(self.taps)-1, record_pre_effects)
+        return ControlPlan(_writes(words), tuple((row, word, (value,)) for (row, word), value in sorted(words.items())),
+                           {'RecordPreEffects': record_pre_effects}, None)
+
 
 def compose(providers, *, channels, record_delay_samples=200,
-            monitor_delay_samples=0, active_capacity=256, slots=None):
+            monitor_delay_samples=0, active_capacity=256, slots=None, record_pre_effects=False):
     """Compose ordered logical slots; the caller supplies already computed delay.
 
     All source providers are distinct retained state owners. No reset occurs.
     `slots` allows gaps while preserving the physical processing order.
+    `record_pre_effects` is UAD MON: the record taps the Mic strip, the monitor stays wet.
     """
     if type(providers) not in (tuple, list) or not 1 <= len(providers) <= 4:
         raise ValueError('one to four effects required')
@@ -181,6 +201,8 @@ def compose(providers, *, channels, record_delay_samples=200,
     if (type(active_capacity) is not int or not 0 <= active_capacity <= 2048
             or (active_capacity and active_capacity & (active_capacity - 1))):
         raise ValueError('active capacity must be Off or a power of two up to 2048')
+    if type(record_pre_effects) is not bool:
+        raise ValueError('explicit UAD REC / MON required')
     slots = tuple(range(len(providers))) if slots is None else slots
     if (type(slots) is not tuple or len(slots) != len(providers)
             or any(type(s) is not int or not 0 <= s < 4 for s in slots)
@@ -208,9 +230,12 @@ def compose(providers, *, channels, record_delay_samples=200,
             commands.extend(block)
     commands.extend(_write(1, {1: count, 2: count, 5: active_capacity,
                                8: monitor_delay_samples, 16: record_delay_samples}))
+    if record_pre_effects:
+        commands.extend(_write(MON_TAP[0], {MON_TAP[1]: RECORD_TAP}))
     effects = []
     resources = []
     render_ids = []
+    taps = []
     for index, (provider, a, slot) in enumerate(zip(underlying, args, slots)):
         base = len(rows)
         effect_rows = a['private_rows'][10:]
@@ -230,8 +255,9 @@ def compose(providers, *, channels, record_delay_samples=200,
         commands.extend(view._commands(_writes(current)))
         shadow = _shadow(a['commands'])
         old_flags = shadow.get((10, 4), 0)
-        tap = old_flags | 4 if index == len(providers)-1 else old_flags & ~4
-        commands.extend(_write(base, {1: count, 2: count, 4: tap}))
+        taps.append((base, old_flags & ~RECORD_TAP))
+        commands.extend(_write(base, {1: count, 2: count, 4: _tap(old_flags, index == len(providers)-1,
+                                                                   record_pre_effects)}))
         head[9+2*index] = a['render_id']
         render_ids.append(a['render_id'])
         for resource in a['resources']:
@@ -242,6 +268,8 @@ def compose(providers, *, channels, record_delay_samples=200,
     observations = [(0, 0, (0x40000000, count, count)), (0, 4, (0x22, 1+len(providers))),
                     (1, 1, (count, count)), (1, 5, (active_capacity,)),
                     (1, 8, (monitor_delay_samples,)), (1, 16, (record_delay_samples,))]
+    if record_pre_effects:
+        observations.append((*MON_TAP, (RECORD_TAP,)))
     for index, effect in enumerate(effects):
         observations.extend(effect.observations())
         observations.extend(((effect.base_row, 1, (count, count)),
@@ -250,4 +278,5 @@ def compose(providers, *, channels, record_delay_samples=200,
     arguments = dict(render_id=render_ids[0], resources=tuple(resources), private_rows=tuple(rows),
                      dsp=1, input_pair=(channels[0], 32) if count == 1 else channels,
                      commands=tuple(commands), scratch=tuple(max(a['scratch'][p] for a in args) for p in range(3)))
-    return ComposedChain(arguments, tuple(effects), tuple(render_ids), tuple(dict.fromkeys(observations)))
+    return ComposedChain(arguments, tuple(effects), tuple(render_ids), tuple(dict.fromkeys(observations)),
+                         taps=tuple(taps))
