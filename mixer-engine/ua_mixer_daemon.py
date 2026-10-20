@@ -222,6 +222,22 @@ _NATIVE_REFUSED_PATHS = frozenset({'/UndoRedo', '/Session', '/ModifiedSessions'}
 _NATIVE_RATE_PROPS = frozenset({'SampleRate', 'ClockSource'})
 _NATIVE_PARAMETER_SET = re_mod.compile(
     r'/devices/\d+/inputs/\d+/(?:preamps/\d+/)?effects/\d+/parameters/\d+/(?:NormalizedValue|StepValue)')
+# A saved insert intent key (MixerDaemon._publish_plugin_commit_inner): slot, field.
+_NATIVE_INTENT_KEY = re_mod.compile(
+    r'(/devices/\d+/inputs/(\d+)/(?:(preamps)/\d+/)?effects/(\d+))/(.+)/value')
+
+
+class _RestoreWriter:
+    """Where the daemon's own restore SETs are answered: nowhere."""
+
+    def get_extra_info(self, name):
+        return None
+
+    def write(self, data):
+        pass
+
+    def is_closing(self):
+        return False
 # Posts that change only the mixer, never an insert.
 _NATIVE_MIXER_POSTS = frozenset({
     'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
@@ -692,6 +708,9 @@ class MixerDaemon:
         self._native_retry_task = None
         self._native_unavailable_reason = ""
         self._native_retries = 0
+        # Reload the inserts the saved state names once hosting is on (main(): on unless
+        # --no-restore-plugins).
+        self.restore_native_inserts = False
         # Bundles whose load-time state is still being learned ({path: plug-in name}): a load of
         # one of them starts its emulator first (a few seconds), so the slot says "Preparing".
         self._native_preparing: dict = {}
@@ -945,6 +964,50 @@ class MixerDaemon:
         self._native_unavailable_reason = ""
         log.info("Native plug-in hosting on%s", " (it was unavailable at start)" if self._native_retries else "")
         self._publish_native_capabilities()
+        self._native_restore_inserts()
+
+    def _native_restore_inserts(self):
+        """Load again every insert the saved state names on a slot that is empty now.
+
+        A daemon restart, or a power cycle that turns hosting off and on, leaves the DSP
+        without the plug-ins the console had; their saved intent (name, Power and each
+        parameter, rewritten on every commit) is replayed as the console's own SETs would
+        be: the load, then each saved value, through the native queue, each verified and
+        published as usual. A load that fails leaves its intent saved for the next time."""
+        if not self.restore_native_inserts or self._native_plugin_backend is None:
+            return
+        with self.state._persistence_lock:
+            saved = dict(self.state._deferred_saved)
+            saved.update(self.state._dirty)
+        slots = {}
+        for key, value in saved.items():
+            match = _NATIVE_INTENT_KEY.fullmatch('/' + '/'.join(p for p in key.split('/') if p))
+            if match:
+                order = (int(match[2]), 0 if match[3] else 1, int(match[4]))
+                slots.setdefault((order, match[1]), {})[match[5]] = value
+        commands = []
+        for (_, slot), fields in sorted(slots.items()):
+            name = fields.get('EffectName')
+            if not isinstance(name, str) or not name or self.state.get_value(slot + '/EffectName') != '':
+                continue
+            commands.append(Command('set', slot + '/EffectName/value', name))
+            parameters = {}
+            for field, value in fields.items():
+                match = re_mod.fullmatch(r'parameters/(\d+)/(NormalizedValue|StepValue)', field)
+                if match:
+                    parameters.setdefault(int(match[1]), {})[match[2]] = value
+            for ident, values in sorted(parameters.items()):
+                kind = 'StepValue' if 'StepValue' in values else 'NormalizedValue'
+                commands.append(Command('set', f'{slot}/parameters/{ident}/{kind}/value', values[kind]))
+            if fields.get('Power') is False:
+                commands.append(Command('set', slot + '/Power/value', False))
+        if not commands:
+            return
+        names = [c.value for c in commands if c.path.endswith('/EffectName/value')]
+        log.info("Restoring %d saved plug-in insert(s): %s", len(names), ', '.join(names))
+        client = MixerClient(None, _RestoreWriter())
+        for command in commands:
+            self._handle_set(client, command)
 
     def _native_idle(self) -> bool:
         """Nothing loaded or loading: hosting can pause without losing a plug-in."""
@@ -4624,6 +4687,9 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                                     "bundles) tools/plugin-mapper builds on this machine (default DIR "
                                     "~/.local/share/open-apollo-plugin-maps), offering each plug-in as "
                                     "its maps land; requires --preserve-hardware. See NATIVE-HOSTING.md")
+    parser.add_argument("--no-restore-plugins", action="store_true",
+                        help="With native hosting: do not reload the saved inserts when "
+                             "hosting comes on (a restart, a power cycle)")
     parser.add_argument("--advertise-all-plugins", action="store_true",
                         help="With --native-plugin-bundles: offer every built bundle, not "
                              "only the plug-ins on device_maps/native_known_good.json")
@@ -4890,6 +4956,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                          plugin_hosting=native_enabled)
     daemon._native_attach = native_attach if native_backend is None else None
     daemon._native_attach_fn = native_attach
+    daemon.restore_native_inserts = native_enabled and not args.no_restore_plugins
     daemon._native_unavailable_reason = native_reason
     daemon._native_preparing.update(native_preparing)
     if native_backend is None and native_enabled:
@@ -4953,6 +5020,9 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
         ]
         if daemon._native_attach is not None:
             tasks.append(asyncio.create_task(daemon._native_hosting_retry()))
+        elif native_enabled:
+            # Hosting is on from the start: reload the saved inserts once the loop runs.
+            asyncio.get_running_loop().call_soon(daemon._native_restore_inserts)
         if native_enabled:
             tasks.append(asyncio.create_task(daemon._native_prepare_watch()))
         if daemon.plugin_maps is not None:
