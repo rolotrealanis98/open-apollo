@@ -1490,6 +1490,8 @@ static void ua_strips_forget(struct ua_device *ua, struct ua_strips *st)
 
 	ua_strips_unhold(ua, st, NULL);
 	for (k = 0; k < st->n; k++) {
+		if (st->strip[k].state == UA_STRIP_LIVE)
+			ua_dsp_set_bus_owner(ua, st->strip[k].synch, 0);
 		st->strip[k].state = UA_STRIP_NONE;
 		st->strip[k].header = 0;
 		st->strip[k].ack_ms = 0;
@@ -1708,6 +1710,15 @@ void ua_strips_run(struct ua_device *ua)
 		}
 		st->strip[k].state = UA_STRIP_LIVE;
 		st->strip[k].ack_ms = jiffies_to_msecs(jiffies - t0);
+		/*
+		 * The strip's DSP mixes the input now: fader, pan, mute and
+		 * solo must reach it (the x4's input bus is its DSP input).
+		 */
+		ret = ua_dsp_move_bus(ua, st->strip[k].synch, ua_strips_dsp);
+		if (ret)
+			dev_warn(&ua->pdev->dev,
+				 "input strips: input %u's mix coefficients not all sent to DSP %u (%d)\n",
+				 st->strip[k].input + 1, ua_strips_dsp, ret);
 		/* The input is not routed from the DSPs that do not host it */
 		for (dsp = 0; dsp < ua->num_dsps; dsp++) {
 			if (dsp == ua_strips_dsp || !ua->dsp[dsp].rings_allocated)

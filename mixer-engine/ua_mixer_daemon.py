@@ -216,6 +216,9 @@ _NATIVE_REFUSED_PROPS = frozenset({
     'SampleRate', 'ClockSource', 'BufferSize', 'MaxDelayComp', 'DelayCompGroup',
     'Stereo', 'StereoLink', 'Link', 'Preset'})
 _NATIVE_REFUSED_PATHS = frozenset({'/UndoRedo', '/Session', '/ModifiedSessions'})
+# The rate and clock change while nothing is loaded: hosting pauses and comes back
+# by itself at 48 kHz (MixerDaemon._native_pause).
+_NATIVE_RATE_PROPS = frozenset({'SampleRate', 'ClockSource'})
 # Posts that change only the mixer, never an insert.
 _NATIVE_MIXER_POSTS = frozenset({
     'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
@@ -244,8 +247,12 @@ def native_refuses_set(canonical: str) -> bool:
 
 
 def native_refusal_detail(canonical: str) -> str | None:
-    """The reason shown with a refused link / unlink (the console shows `detail`)."""
-    if canonical.rsplit('/', 1)[-1] not in _LINK_PROPS:
+    """The reason shown with a refused set (the console shows `detail`)."""
+    prop = canonical.rsplit('/', 1)[-1]
+    if prop in _NATIVE_RATE_PROPS:
+        return ('Remove the plug-ins first: the sample rate and clock cannot change '
+                'while plug-ins are loaded')
+    if prop not in _LINK_PROPS:
         return None
     if re_mod.fullmatch(r"/devices/0/inputs/[02]/Stereo", canonical):
         return ('Remove the plug-ins first: inputs cannot be linked or unlinked '
@@ -677,6 +684,9 @@ class MixerDaemon:
         # Hosting asked for but not available yet (no cold start since the driver loaded, a rate
         # other than 48 kHz): _native_attach retries it, the reason is published meanwhile.
         self._native_attach = None
+        # How hosting is turned on (register_native); kept to turn it back on after a pause.
+        self._native_attach_fn = None
+        self._native_retry_task = None
         self._native_unavailable_reason = ""
         self._native_retries = 0
         # Bundles whose load-time state is still being learned ({path: plug-in name}): a load of
@@ -846,6 +856,12 @@ class MixerDaemon:
                 self._sync_hw_readback(rb, {})
             log.info("Preserving the hardware's current settings: no init "
                      "sequence for this connection")
+            # Except the inputs' mix (fader, pan, mute, solo, post-fader sends):
+            # that is the tree's, and the Console shows it.  A cold-started
+            # Apollo mixes the strips at the DSP's own level, so without this an
+            # input Console shows muted is heard until its M is pressed twice.
+            # A daemon restart rewrites the values the driver already holds.
+            hw_router._handle_solo_recalc()
 
         self._publish_native_capabilities()
 
@@ -926,6 +942,38 @@ class MixerDaemon:
         self._native_unavailable_reason = ""
         log.info("Native plug-in hosting on%s", " (it was unavailable at start)" if self._native_retries else "")
         self._publish_native_capabilities()
+
+    def _native_idle(self) -> bool:
+        """Nothing loaded or loading: hosting can pause without losing a plug-in."""
+        native = self._native_plugin_backend
+        return (native is not None and not self._native_busy and not self._native_waiting
+                and not getattr(native, '_leases', None) and not getattr(native, '_pending', None))
+
+    def _native_pause(self, why: str, reason: str = "Plug-ins come back once the sample rate settles"):
+        """Turn hosting off and retry it: the rate, clock or connection changed under it.
+
+        The backend is bound to the rate it started at; a new one is registered once the
+        driver's plug-in host is usable again (48 kHz, strips rebuilt). Without the attach
+        function (tests, a backend injected by hand) it is only invalidated, as before."""
+        native = self._native_plugin_backend
+        if native is None:
+            return
+        native.invalidate()
+        if self._native_attach_fn is None:
+            return
+        self._native_plugin_backend = None
+        self._native_attach = self._native_attach_fn
+        self._native_unavailable_reason = reason
+        log.info("Native plug-in hosting paused (%s); it comes back when the driver allows", why)
+        self._publish_native_capabilities()
+        task = self._native_retry_task
+        if task is not None and not task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._native_retry_task = loop.create_task(self._native_hosting_retry())
 
     def _native_hosting_try(self) -> bool:
         """One attempt to turn hosting on; True once it is on (or nothing is left to try)."""
@@ -2310,7 +2358,11 @@ class MixerDaemon:
         if self._native_plugin_backend and (
                 code in (UA_EVT_RATE_CHANGED, UA_EVT_CONNECTED, UA_EVT_EVENTS_LOST)
                 or (code == UA_EVT_PAUSED and arg & UA_PAUSE_DEVICE)):
-            self._native_plugin_backend.invalidate()
+            # The driver drops loaded plug-ins here; a new session would not own their slots.
+            if self._native_idle():
+                self._native_pause(EVENT_NAMES.get(code, f"event 0x{code:x}"))
+            else:
+                self._native_plugin_backend.invalidate()
         name = EVENT_NAMES.get(code, f"0x{code:x}")
         log.debug("driver event %s arg=0x%x", name, arg)
         if code == UA_EVT_RATE_CHANGED:
@@ -3489,6 +3541,9 @@ class MixerDaemon:
 
         native = self._native_plugin_backend
         canonical = path.removesuffix('/value')
+        if native and canonical.rsplit('/', 1)[-1] in _NATIVE_RATE_PROPS and self._native_idle():
+            self._native_pause(f"{canonical} set")
+            native = None
         if native and (canonical.startswith('/Native') or canonical in (
                 '/InputDelayCompOverloaded', '/InputDelayCompWarning')
                 or re_mod.fullmatch(r'/plugins/\d+/Native\w+', canonical)):
@@ -3501,6 +3556,7 @@ class MixerDaemon:
                                    and native.allows_idle_mixer_link_change(canonical))
         if native and not native_allows_idle_link and not is_plugin_slot_path(path) \
                 and native_refuses_set(canonical):
+            log.info("SET %s = %r refused: native plug-in hosting owns it", path, cmd.value)
             self._send_local_plugin_error(
                 client, path, 'openapollo.native_operation_unsupported', resp_params,
                 detail=native_refusal_detail(canonical))
@@ -4761,6 +4817,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                          plugin_remote_backend=native_backend,
                          plugin_hosting=native_enabled)
     daemon._native_attach = native_attach if native_backend is None else None
+    daemon._native_attach_fn = native_attach
     daemon._native_unavailable_reason = native_reason
     daemon._native_preparing.update(native_preparing)
     if native_backend is None and native_enabled:
