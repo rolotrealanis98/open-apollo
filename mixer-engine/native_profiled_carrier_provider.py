@@ -182,6 +182,7 @@ class ProfiledCarrierProvider:
         self.recipe = GeneratedOrdinaryCarrier(self.data['descriptor'], self.data['startup'], input_index=input_index,
                                                record_budget=budget, overload_ok=latency > 1000, shared_cells_ok=True,
                                                module_store=module_store, replay=replay)
+        self.remote_reads = self.recipe.remote_reads
         # A row reference is an 8-bit field; it must also name a private row this carrier really has.
         private_rows = len(self.recipe.composition_arguments()["private_rows"])
         for row, _ in (*self.hardware_dynamic_observation_evidence, *self.hardware_observation_overrides):

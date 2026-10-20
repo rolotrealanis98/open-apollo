@@ -85,6 +85,11 @@ stereo, replacement, multiple chains or compensation support.
   and proposed provider state. State is accepted only after hardware readback.
 - Meter requests are explicit allowlists: scalar IDs or exact read-only opcode
   519 tuples. Arbitrary DSP locations and vendor writes are not exposed.
+  User-built bundles answer them with `MeterReads`: a meter ID is the original's
+  packed reference (row << 24 | word, row 0 untagged) inside the effect's own
+  rows, so only IDs the descriptor's rows hold are read. Every metered panel
+  spec's IDs fit its bundle's rows this way; Neve 33609's IDs land on the words
+  the load gate saw the DSP change.
 - Unload and owning-fd close restore retained plain input strips. Allocation
   ownership and scratch requirements include surviving and staged instances.
 - Device/rate changes require a new native session. Saved slot properties never
