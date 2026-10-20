@@ -201,3 +201,25 @@ fn echo_hold_drops_pushes_older_than_our_write() {
     store.drain();
     assert_eq!(store.value(&fader), Some(&Value::Number(0.2)), "the newer engine value wins at release");
 }
+
+/// A native plug-in parameter answers slowly and quantized: a drag's stale echoes keep the
+/// user's position past the echo hold, and the engine's (quantized) echo of the last write ends
+/// the hold at once.
+#[test]
+fn plugin_parameter_holds_until_its_quantized_echo() {
+    let mut store = x4_store();
+    store.set_writes_enabled(true);
+    let knob = "/devices/0/inputs/1/effects/0/parameters/14/NormalizedValue";
+    store.set_echo_hold(Duration::from_millis(20));
+    store.set(knob, 0.70423);
+    store.apply([push(knob, 0.31)]); // the engine still applying an earlier value of the drag
+    std::thread::sleep(Duration::from_millis(40));
+    store.drain(); // past the echo hold: still the user's position
+    assert_eq!(store.value(knob), Some(&Value::Number(0.70423)), "a stale echo pulled the knob back");
+    store.apply([push(knob, 0.45)]);
+    assert_eq!(store.value(knob), Some(&Value::Number(0.70423)));
+    store.apply([push(knob, 0.7042)]); // our write, quantized
+    assert_eq!(store.value(knob), Some(&Value::Number(0.7042)));
+    store.apply([push(knob, 0.2)]); // after the echo: someone else's change shows at once
+    assert_eq!(store.value(knob), Some(&Value::Number(0.2)));
+}

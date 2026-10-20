@@ -220,6 +220,8 @@ _NATIVE_REFUSED_PATHS = frozenset({'/UndoRedo', '/Session', '/ModifiedSessions'}
 # The rate and clock change while nothing is loaded: hosting pauses and comes back
 # by itself at 48 kHz (MixerDaemon._native_pause).
 _NATIVE_RATE_PROPS = frozenset({'SampleRate', 'ClockSource'})
+_NATIVE_PARAMETER_SET = re_mod.compile(
+    r'/devices/\d+/inputs/\d+/(?:preamps/\d+/)?effects/\d+/parameters/\d+/(?:NormalizedValue|StepValue)')
 # Posts that change only the mixer, never an insert.
 _NATIVE_MIXER_POSTS = frozenset({
     'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
@@ -3493,14 +3495,22 @@ class MixerDaemon:
             self._publish_license(slot + "/Status", "Preparing plug-in…" if preparing else "Loading", "string")
         self._native_busy = True
 
+        timing = {'submitted': time.monotonic()}
+
         def on_loop(publish):
             # The loop owns the state tree: stage and commit there, between its own updates.
+            timing['publish_asked'] = time.monotonic()
             return asyncio.run_coroutine_threadsafe(_call(publish), loop).result()
 
         async def _call(publish):
-            return publish()
+            timing['publish_started'] = time.monotonic()
+            try:
+                return publish()
+            finally:
+                timing['publish_done'] = time.monotonic()
 
         def run():
+            timing['started'] = time.monotonic()
             inline = transactions.publish_on
             transactions.publish_on = on_loop
             try:
@@ -3510,6 +3520,15 @@ class MixerDaemon:
                 transactions.publish_on = inline
 
         def finish(done):
+            finished = time.monotonic()
+            if not loading and finished - timing['submitted'] > 0.25 and 'publish_done' in timing:
+                log.info('native control %s: %.0f ms (worker start %.0f, before publish %.0f, '
+                         'loop wait %.0f, publish %.0f, after %.0f)', path, (finished - timing['submitted']) * 1e3,
+                         (timing['started'] - timing['submitted']) * 1e3,
+                         (timing['publish_asked'] - timing['started']) * 1e3,
+                         (timing['publish_started'] - timing['publish_asked']) * 1e3,
+                         (timing['publish_done'] - timing['publish_started']) * 1e3,
+                         (finished - timing['publish_done']) * 1e3)
             try:
                 result = done.result()
             except Exception as error:
@@ -3573,6 +3592,18 @@ class MixerDaemon:
         if self._native_busy:
             # A native plug-in transaction is running on the worker thread (_native_run):
             # nothing may change the state tree until it commits. Applied afterwards, in order.
+            # A knob drag sends ~60 values a second and each native control is several DSP
+            # round trips: keep only the newest queued value of a plug-in parameter, or the DSP
+            # replays the whole drag for seconds. Console tags every SET with func_id and does
+            # not wait for the answer: a superseded one is answered now, as accepted.
+            if _NATIVE_PARAMETER_SET.fullmatch(path.removesuffix('/value')):
+                waiting = []
+                for c, w in self._native_waiting:
+                    if w.path.removesuffix('/value') != path.removesuffix('/value'):
+                        waiting.append((c, w))
+                    elif "func_id" in w.raw_params:
+                        self._send_response(c, w.path, w.value, dict(w.raw_params))
+                self._native_waiting = waiting
             self._native_waiting.append((client, cmd))
             return
 

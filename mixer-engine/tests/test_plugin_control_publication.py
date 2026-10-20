@@ -28,6 +28,8 @@ class ControlPublicationTests(unittest.TestCase):
             field,
             {"NormalizedValue": 0.75, "StringValue": "6 dB", "StepValue": 0},
         )
+        p.check_control(slot, result)  # the same validation, nothing staged
+        self.assertEqual(before, (s.root, h.root))
         tx = p.stage_control(slot, result)
         self.assertEqual(before, (s.root, h.root))
         result.values["StringValue"] = "tampered adapter output"
@@ -111,6 +113,8 @@ class ControlPublicationTests(unittest.TestCase):
         for result in bad:
             with self.assertRaises(PublicationError):
                 p.stage_control(slot, result)
+            with self.assertRaises(PublicationError):
+                p.check_control(slot, result)
             self.assertEqual(before, (s.root, h.root))
         helper_node = h.root
         for part in (slot + "/parameters/0").strip("/").split("/"):
@@ -191,3 +195,38 @@ class ControlPublicationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CommitControlTests(unittest.TestCase):
+    model = ControlPublicationTests.model
+
+    def readback(self, lease):
+        return ControlReadback(
+            lease,
+            "parameters/0/NormalizedValue",
+            {"NormalizedValue": 0.75, "StringValue": "6 dB", "StepValue": 0},
+        )
+
+    def test_same_events_and_trees_as_a_staged_commit(self):
+        slot, s, h, p, lease = self.model()
+        staged = p.stage_control(slot, self.readback(lease)).commit()
+        expected = copy.deepcopy((s.root, h.root, p.version))
+        slot, s, h, p, lease = self.model()
+        self.assertEqual(p.commit_control(slot, self.readback(lease)), staged)
+        self.assertEqual((s.root, h.root, p.version), expected)
+        self.assertEqual(s.get_value(slot + "/parameters/0/StringValue"), "6 dB")
+
+    def test_fault_restores_both_views(self):
+        for phase in ("state_swapped", "both_swapped"):
+            slot, s, h, p, lease = self.model()
+            before = copy.deepcopy((s.root, h.root, p.version))
+
+            def fail(current):
+                if current == phase:
+                    raise RuntimeError("injected")
+
+            with self.assertRaises(RuntimeError):
+                p.commit_control(slot, self.readback(lease), fault=fail)
+            self.assertEqual(before, (s.root, h.root, p.version))
+            with self.assertRaises(PublicationError):
+                p.commit_control(slot, ControlReadback(lease, "Power", {"Power": 1}))

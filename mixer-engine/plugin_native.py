@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import importlib.util
 import re
 import sys
+import time
 import uuid
 import traceback
 
@@ -190,12 +191,9 @@ class NativePluginBackend:
         a few such words are learned for this instance instead of failing."""
         self._validate_observations(observations)
         dynamic = self._dynamic.setdefault(native.handle, set())
+        words = self._read_spans(native, observations)
         for row, offset, expected in observations:
-            try:
-                actual = self.driver.service(native, read=(row, offset, len(expected)))
-            except OSError:
-                self.invalidate()
-                raise
+            actual = tuple(words[row, offset + i] for i in range(len(expected)))
             if actual == expected:
                 continue
             diffs = [(offset + i, e, a) for i, (e, a) in enumerate(zip(expected, actual))
@@ -225,6 +223,28 @@ class NativePluginBackend:
             raise ValueError('native coefficient observation differs: row %d %s' % (
                 row, ', '.join(f'word {w} 0x{e:x}->0x{a:x}' for w, e, a in diffs[:4])))
         self._session()
+
+    def _read_spans(self, native, observations):
+        """{(row, word): value} for every observed word, read in as few SERVICE calls as fit.
+
+        Each SERVICE is a DSP round trip (tens of ms) and reads at most 64 words; codecs emit
+        16-word runs, so a control's 25 runs on one row are 8 reads, not 25."""
+        spans = []
+        for row, offset, expected in sorted(observations):
+            end = offset + len(expected)
+            if spans and spans[-1][0] == row and end - spans[-1][1] <= 64:
+                spans[-1][2] = max(spans[-1][2], end)
+            else:
+                spans.append([row, offset, end])
+        words = {}
+        for row, start, end in spans:
+            try:
+                values = self.driver.service(native, read=(row, start, end - start))
+            except OSError:
+                self.invalidate()
+                raise
+            words.update(((row, start + i), v) for i, v in enumerate(values))
+        return words
 
     def read(self, slot, handle, query):
         """Fresh reads from exact provider allowlists; no remote writes."""
@@ -407,6 +427,7 @@ class NativePluginBackend:
         return RetireOutcome(Outcome.CONFIRMED, handle, retired=True)
 
     def prepare_control(self, slot, handle, field, value):
+        started = time.monotonic()
         lease = self._owned(slot, handle)
         prior = lease.provider.snapshot(field)
         proposal = lease.provider.plan_control(field, value)
@@ -417,8 +438,10 @@ class NativePluginBackend:
             if type(plan) is not ControlPlan:
                 raise ValueError('typed control plan required')
             self._validate_observations(plan.observations)
-            self.publisher.stage_control(slot, ControlReadback(handle, field, plan.values))
+            self.publisher.check_control(slot, ControlReadback(handle, field, plan.values))
+        planned = time.monotonic()
         self._observe(lease.native, prior.observations, learn=True)
+        self._timing = [started, planned, time.monotonic()]
         return PrepareControlOutcome(Outcome.CONFIRMED, PreparedControl(
             (lease, prior, proposal, restoration), handle, field, copy.deepcopy(prior.values)))
 
@@ -442,8 +465,18 @@ class NativePluginBackend:
         return ControlReadback(prepared.handle, prepared.field, copy.deepcopy(plan.values))
 
     def apply_control(self, prepared):
+        applying = time.monotonic()
         readback = self._apply(prepared, False)
-        return ApplyControlOutcome(Outcome.CONFIRMED, readback, coupled=self._coupled(prepared))
+        applied = time.monotonic()
+        coupled = self._coupled(prepared)
+        done = time.monotonic()
+        timing = getattr(self, '_timing', None)
+        if timing and done - timing[0] > 0.25:
+            log.info('slow native control %s: %.0f ms (plan %.0f, prior readback %.0f, wait %.0f, '
+                     'apply %.0f, coupled %.0f)', prepared.field, (done - timing[0]) * 1e3,
+                     (timing[1] - timing[0]) * 1e3, (timing[2] - timing[1]) * 1e3,
+                     (applying - timing[2]) * 1e3, (applied - applying) * 1e3, (done - applied) * 1e3)
+        return ApplyControlOutcome(Outcome.CONFIRMED, readback, coupled=coupled)
 
     def _coupled(self, prepared):
         """Other parameters the original setter moved with this one (e.g. a Sync switch that
