@@ -35,6 +35,7 @@ import os
 import re as re_mod
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -1548,7 +1549,6 @@ class MixerDaemon:
 
         Every client waits while the loop is stuck (a get, the console's reconnect); the stack
         says what held it (a transaction, a copy, the GIL held by a busy thread)."""
-        import threading
         import traceback
         loop_thread = threading.get_ident()
         tick = [time.monotonic()]
@@ -4727,6 +4727,10 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                                     "bundles) tools/plugin-mapper builds on this machine (default DIR "
                                     "~/.local/share/open-apollo-plugin-maps), offering each plug-in as "
                                     "its maps land; requires --preserve-hardware. See NATIVE-HOSTING.md")
+    parser.add_argument("--emulator-workers", type=int, default=2, metavar="N",
+                        help="With native hosting: run the plug-ins' emulators in N worker "
+                             "processes (default 2; 0 runs them in the daemon, which then stalls "
+                             "for seconds while one starts)")
     parser.add_argument("--no-restore-plugins", action="store_true",
                         help="With native hosting: do not reload the saved inserts when "
                              "hosting comes on (a restart, a power cycle)")
@@ -4796,6 +4800,15 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
                         help="Read-only factory .fxp/.uadchannel directory")
     args = parser.parse_args()
     native_enabled = bool(args.native_plugin_provider or args.native_plugin_bundles)
+    if args.emulator_workers < 0:
+        parser.error("--emulator-workers must be 0 or more")
+    if args.native_plugin_bundles and args.emulator_workers:
+        import native_profiled_carrier_provider
+        from emulator_worker import EmulatorPool
+        emulators = EmulatorPool(args.emulator_workers)
+        native_profiled_carrier_provider.use_emulator_workers(emulators)
+        # Started beside the daemon's own start: a worker imports the emulator (about a second).
+        threading.Thread(target=emulators.start, name='emulator-start', daemon=True).start()
     if args.advertise_all_plugins and not args.native_plugin_bundles:
         parser.error("--advertise-all-plugins needs --native-plugin-bundles")
     if native_enabled and (
