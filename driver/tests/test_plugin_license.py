@@ -135,8 +135,8 @@ void ua_strips_teardown(struct ua_device *ua, const char *why) { (void)ua; (void
 void ua_strips_lost(struct ua_device *ua) { (void)ua; }
 void ua_strips_service(struct ua_device *ua) { (void)ua; }
 bool ua_strips_live(struct ua_device *ua) { (void)ua; return false; }
-int ua_strips_override_target(struct ua_device *ua, unsigned int dsp, u32 synch, u64 epoch, u32 *generation)
-{ (void)ua; (void)dsp; (void)synch; (void)epoch; (void)generation; return -ESTALE; }
+int ua_strips_override_target(struct ua_device *ua, unsigned int dsp, u32 synch, u64 epoch, u32 *generation, u32 carrier)
+{ (void)ua; (void)dsp; (void)synch; (void)epoch; (void)generation; (void)carrier; return -ESTALE; }
 int ua_strips_restore(struct ua_device *ua, struct ua_xact *x, u32 synch, u32 generation)
 { (void)ua; (void)x; (void)synch; (void)generation; return -ESTALE; }
 int ua_strips_delay(struct ua_device *ua, u64 *epoch, u32 *gen, unsigned int fields, u32 values[3][4])

@@ -30,6 +30,22 @@ MIC_STRIP = (
 )
 
 
+# The Console inputs a native chain may replace, by tree index (/devices/0/inputs/N): the x4's
+# analog inputs 1-4 (DSP inputs 0-3, Mic Input Strip) and Virtual 1-4 (tree 14-17, DSP inputs
+# 0x18-0x1b), where the driver runs a plain Input Strip (input_strips_virtual=0x0f, ua_strips.c).
+# shortcut: Virtual 1-4 only, the ones the driver builds strips for by default; Virtual 5-8 need
+# input_strips_virtual=0xff and their tree indices here.
+DSP_INPUTS = {0: 0, 1: 1, 2: 2, 3: 3, 14: 0x18, 15: 0x19, 16: 0x1a, 17: 0x1b}
+VIRTUAL_INPUTS = frozenset((14, 15, 16, 17))
+STEREO_FIRST = (0, 2, 14, 16)          # linked pairs: 1/2, 3/4, Virtual 1/2, Virtual 3/4
+MIC_CARRIER, INPUT_CARRIER = 0x846, 0x83e
+
+
+def input_pair(channels):
+    """The driver's in1/in2 for tree inputs `channels` (in2 0x20: mono)."""
+    return (DSP_INPUTS[channels[0]], DSP_INPUTS[channels[1]] if len(channels) == 2 else 32)
+
+
 def L(r, w):
     return (r << 24) | w
 
@@ -44,6 +60,25 @@ def head_rows():
         (3, 2048, L(1, 14), 2), (3, 2048, L(1, 15), 2),     # 6  c0, 7 c1
         (3, 2048, L(1, 6), 2), (3, 2048, L(1, 7), 2),       # 8  c2, 9 c3
     ]
+
+
+def input_strip_rows():
+    """The Input Strip sub-plug-in in a chain (rows 1-5): m0 and the four delay commons, linked as
+    driver/ua_strips.c ua_strip_input_rows links them, with the Mic chain's 2048-word commons so
+    the same compensation capacity fits."""
+    return [
+        (1, 0x1e, L(0, 6), 0),                              # 1  m0 -> head[6]
+        (3, 2048, L(1, 14), 2), (3, 2048, L(1, 15), 2),     # 2  c0, 3 c1 (record delay)
+        (3, 2048, L(1, 6), 2), (3, 2048, L(1, 7), 2),       # 4  c2, 5 c3 (monitor delay)
+    ]
+
+
+# The Input Strip's m0 startup WRITE in a chain: the plain strip's captured m0 (ua_strip_input_m0,
+# mask 0x00df7fe4) less words 4 (the record tap) and 16 (the record delay), which the composer
+# owns, as MIC_STRIP leaves them to it (0x0f1f7fe4 -> 0x0f1fffec).
+INPUT_STRIP = (
+    (0, 0x00, 0x00dfffec, (0x40000000, 1, 1, 0x100, 0x3a888889, 0x3b83126f)),
+)
 
 
 def write(row, values):
@@ -287,8 +322,8 @@ class GeneratedOrdinaryCarrier:
 
     def __init__(self, descriptor, startup, *, input_index=2, record_budget=200,
                  module_store=MODULES, overload_ok=False, shared_cells_ok=False, replay=None):
-        if type(input_index) is not int or not 0 <= input_index <= 3:
-            raise ValueError('physical mono input0..3 required')
+        if type(input_index) is not int or input_index not in DSP_INPUTS:
+            raise ValueError('a native chain input (analog 1-4, Virtual 1-4) required')
         # The bundle's own data, shared by every input it is offered on and never changed here:
         # kept, not copied (copying a large plug-in's startup costs seconds per provider).
         self.descriptor = descriptor
@@ -375,9 +410,10 @@ class GeneratedOrdinaryCarrier:
         if not 1 <= len(hashes) <= 64:
             raise ValueError('combined carrier resources exceed CREATE64')
         self.startup_chunks = chunks(blocks(commands))
+        # Always the Mic carrier: on a Virtual input only the composer's chain (Input Strip) can run.
         return dict(render_id=self.render_id, resources=tuple(bytes.fromhex(h) for h in hashes),
                     private_rows=tuple(rows), commands=tuple(commands), scratch=self.scratch,
-                    dsp=1, input_pair=(self.input_index, 32), chain=True)
+                    dsp=1, input_pair=input_pair((self.input_index,)), chain=True)
 
     def composition_arguments(self):
         """Return the complete checked recipe for an enclosing staged chain."""

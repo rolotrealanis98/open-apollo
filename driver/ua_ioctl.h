@@ -590,6 +590,8 @@ struct ua_dma_test {
 #define UA_FEAT2_PLUGIN_ANALOG_LEASE (1u << 7)
 /* UA_PLUGIN_INST_START: route an initialized STAGE instance with no anchor to swap from. */
 #define UA_FEAT2_PLUGIN_START_STAGED (1u << 8)
+/* CHAIN may begin with the Input Strip 0x83E and replace a Virtual input's strip. */
+#define UA_FEAT2_PLUGIN_VIRTUAL_INPUTS (1u << 9)
 
 struct ua_version {
 	__u32 abi_major;
@@ -1167,7 +1169,10 @@ struct ua_plugin_private {
  * CHAIN requires START or STAGE and UA_FEAT2_PLUGIN_CHAIN. Head row zero
  * must be pool1, size6+2*N, N2..5 in word5; word0=0x40000000; word7 is
  * the built-in Mic carrier0x846 and word7+2*i each effect render ID. Each
- * pointer word6+2*i has exactly one linked private row. Count and all IDs
+ * pointer word6+2*i has exactly one linked private row. With
+ * UA_FEAT2_PLUGIN_VIRTUAL_INPUTS word7 may be the Input Strip 0x83E instead:
+ * the chain then replaces a Virtual input's Input Strip, and CREATE refuses
+ * (-EINVAL) a carrier that differs from the strip its inputs run. Count and all IDs
  * must be explicitly initialized once. render_id matches the first effect.
  * Every effect is admitted from the same fresh board query before placement.
  * UNISON additionally requires CHAIN and UA_FEAT2_PLUGIN_UNISON: N1..5,

@@ -170,6 +170,7 @@ jobs:
       - name: Tool unit tests
         run: |
           python tools/test-apollo-wavcheck.py
+          python tools/test-virtual-loopback.py
           python tools/test-extract-ua-dsp-modules.py
 
   console-rs:
