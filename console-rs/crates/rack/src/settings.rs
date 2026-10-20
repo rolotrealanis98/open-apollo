@@ -502,6 +502,8 @@ impl Default for Prefs {
         m.insert("scenes_event".into(), PropValue::Str("PROGRAM CHANGE".into()));
         m.insert("network_interface".into(), PropValue::Str(String::new()));
         m.insert("short_names".into(), PropValue::Bool(false));
+        // open-apollo: OPTIONS › UI SCALE, the console's size on top of the display's scale.
+        m.insert("ui_scale".into(), PropValue::Str("100%".into()));
         Self(m)
     }
 }
@@ -522,9 +524,31 @@ impl Prefs {
             // MIDI event types (1.3.1 captures s27 / s28).
             "tap_tempo_event" => vec![s("NOTE"), s("CONTROLLER")],
             "scenes_event" => vec![s("PROGRAM CHANGE"), s("NOTE")],
+            "ui_scale" => UI_SCALES.iter().map(|(label, _)| s(label)).collect(),
             _ => Vec::new(),
         }
     }
+}
+
+/// OPTIONS › UI SCALE choices (open-apollo; Console has none): label and factor.
+const UI_SCALES: [(&str, f32); 8] = [
+    ("75%", 0.75),
+    ("90%", 0.9),
+    ("100%", 1.0),
+    ("110%", 1.1),
+    ("125%", 1.25),
+    ("150%", 1.5),
+    ("175%", 1.75),
+    ("200%", 2.0),
+];
+
+/// The console's UI scale from `pref:ui_scale` (1.0 when unset or unknown).
+pub fn ui_scale(src: &dyn PropertySource) -> f32 {
+    let cur = str_at(src, "pref:ui_scale");
+    UI_SCALES
+        .iter()
+        .find(|(label, _)| cur.as_deref() == Some(*label))
+        .map_or(1.0, |(_, k)| *k)
 }
 
 // ---- Reading helpers ----
@@ -989,6 +1013,7 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
             let suppressed = bool_at(src, "pref:dont_show_again").unwrap_or(false);
             f.push(SettingField::new("pref-reset:dont_show_again", "\"DON'T SHOW AGAIN\" DIALOGS", FieldKind::Action("RESET".into()), 0).disabled(!suppressed));
             f.push(pref_text(src, "modifiers_timeout", "MODIFIERS TIMEOUT", 1));
+            f.push(pref_choice(src, "ui_scale", "UI SCALE", 1));
         }
         SettingsGroup::Editing => {
             f.extend(engine_choice(src, "/ControlsMode", "CONTROLS MODE", 0));
@@ -1589,9 +1614,23 @@ mod tests {
         assert_eq!(w, vec![Write::Pref("modifiers_timeout".into(), PropValue::Str("10".into()))]);
         m.apply(&w[0]);
         let f = fields(&m, SettingsGroup::Display);
-        assert_eq!(labels(&f), ["METERING", "CLIP HOLD", "PEAK HOLD", "\"DON'T SHOW AGAIN\" DIALOGS", "MODIFIERS TIMEOUT"]);
+        assert_eq!(labels(&f), ["METERING", "CLIP HOLD", "PEAK HOLD", "\"DON'T SHOW AGAIN\" DIALOGS", "MODIFIERS TIMEOUT", "UI SCALE"]);
         assert_eq!(f[4].value_text(), "10");
         assert_eq!(f[0].value_text(), "PRE-FADER");
+    }
+
+    #[test]
+    fn ui_scale_is_a_client_preference() {
+        let mut m = MemoryProperties::demo_x4();
+        assert_eq!(ui_scale(&m), 1.0);
+        let f = fields(&m, SettingsGroup::Display);
+        assert_eq!(f[5].value_text(), "100%");
+        let w = resolve(&m, "pref:ui_scale", &SettingOp::Choose(4));
+        assert_eq!(w, vec![Write::Pref("ui_scale".into(), PropValue::Str("125%".into()))]);
+        m.apply(&w[0]);
+        assert_eq!(ui_scale(&m), 1.25);
+        m.apply(&Write::Pref("ui_scale".into(), PropValue::Str("nonsense".into())));
+        assert_eq!(ui_scale(&m), 1.0);
     }
 
     #[test]

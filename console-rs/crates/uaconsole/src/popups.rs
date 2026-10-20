@@ -35,6 +35,9 @@ pub struct PopupWin {
     /// Where it was put (physical pixels, screen).
     pub at: PhysicalPosition<i32>,
     pub size: (u32, u32),
+    /// Times the size was asked for again because the compositor gave another one (capped:
+    /// a compositor that never agrees must not get a resize loop).
+    pub repins: u8,
     /// Pointer position in the window (physical pixels).
     pub cursor: (f64, f64),
     pub focused: bool,
@@ -181,6 +184,7 @@ impl Popups {
                     eprintln!("window {} moved to {at:?} (mixer content at {inner:?})", w.id);
                 }
                 if resized {
+                    w.repins = 0;
                     w.surface.resize(gpu, size.0, size.1);
                     if debug {
                         eprintln!("window {} resized to {}x{} px", w.id, size.0, size.1);
@@ -298,6 +302,7 @@ fn open(
         rect: l.rect,
         at: at.unwrap_or_default(),
         size,
+        repins: 0,
         cursor: (0.0, 0.0),
         focused: false,
         title_h: l.title_h,

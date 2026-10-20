@@ -263,7 +263,9 @@ class GeneratedOrdinaryCarrier:
                  module_store=MODULES, overload_ok=False, shared_cells_ok=False, replay=None):
         if type(input_index) is not int or not 0 <= input_index <= 3:
             raise ValueError('physical mono input0..3 required')
-        self.descriptor = deepcopy(descriptor)
+        # The bundle's own data, shared by every input it is offered on and never changed here:
+        # kept, not copied (copying a large plug-in's startup costs seconds per provider).
+        self.descriptor = descriptor
         self.name = descriptor['plugin']
         if not isinstance(self.name, str) or not self.name:
             raise ValueError('original plugin name required')
@@ -308,7 +310,7 @@ class GeneratedOrdinaryCarrier:
         if len(self.pointers) != len(self.local_rows)-1 and not shared_cells_ok:
             raise ValueError('multiple allocations claim one pointer cell')
         self.codec = CacheWrites(self.local_rows, forbidden_refs=self.pointers)
-        self.startup = deepcopy(startup)
+        self.startup = startup
         self.words = shadow(startup['shadow'])
         for ref in self.words:
             self.codec.address(ref)

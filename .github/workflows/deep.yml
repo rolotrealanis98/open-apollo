@@ -1,0 +1,97 @@
+name: Deep checks
+
+# The slow cross-checks that ci.yml leaves out: the driver against every kernel
+# line it supports and the installer end to end in each distro's container.
+# Together they are 11 jobs, so they run weekly, by hand (workflow_dispatch)
+# and on a PR when someone adds the `full-ci` label (once per labelling; to
+# check a newer push, remove and re-add the label). .github/CI.md has the rest.
+
+on:
+  schedule:
+    - cron: '23 5 * * 1' # Mondays 05:23 UTC
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [labeled]
+
+concurrency:
+  # the label name keeps an unrelated label from cancelling a full-ci run
+  group: deep-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  driver-kernels:
+    # The module against every kernel line the driver supports (overlay
+    # review finding 8: the withdrawn plug-in overlay built only on >= 6.12).
+    # kernel.org sources, defconfig plus the sound/PCI options the driver
+    # needs, modules_prepare only; modpost has no Module.symvers, so missing
+    # exports are warnings (KBUILD_MODPOST_WARN).  Compile test, nothing is
+    # loaded.
+    name: driver (${{ matrix.kernel }})
+    if: github.event_name != 'pull_request' || github.event.label.name == 'full-ci'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: ['5.15', '6.1', '6.6', '6.8', '6.12', '7.2']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends bc bison flex libelf-dev libssl-dev
+      - name: Kernel source
+        run: |
+          major="${{ matrix.kernel }}"; major="${major%%.*}"
+          curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v${major}.x/linux-${{ matrix.kernel }}.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP"
+          KSRC="$RUNNER_TEMP/linux-${{ matrix.kernel }}"
+          make -C "$KSRC" -s defconfig
+          "$KSRC/scripts/config" --file "$KSRC/.config" \
+            -e SOUND -e SND -e SND_PCM -e SND_HWDEP -e PCI -e PCI_MSI \
+            -e CRYPTO_LIB_SHA256 -e FW_LOADER -e MODULES
+          make -C "$KSRC" -s olddefconfig
+          # 5.15's tools/lib/subcmd trips gcc 13's -Werror=use-after-free in its own
+          # host tools (fixed in later 5.15.y); this flag reaches only that build.
+          EXTRA_CFLAGS=-Wno-error=use-after-free make -C "$KSRC" -s -j"$(nproc)" modules_prepare
+          echo "KSRC=$KSRC" >> "$GITHUB_ENV"
+      - name: Build the module
+        run: make -C driver KDIR="$KSRC" KBUILD_MODPOST_WARN=1 W=1 2>&1 | tee build.log; test "${PIPESTATUS[0]}" -eq 0
+      - name: No new warnings from the plug-in host files
+        run: |
+          ! grep -E 'ua_(plugin|resource|dsp_xact|strips|compat)[a-z_]*\.[ch]:[0-9]+:[0-9]+: (warning|error)' build.log
+
+  install:
+    # The installer end to end in each distro's container (module build against
+    # that distro's kernel headers, WirePlumber and UCM2 configs).
+    name: install (${{ matrix.distro }})
+    if: github.event_name != 'pull_request' || github.event.label.name == 'full-ci'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu, fedora, debian, arch, opensuse]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build test image
+        run: docker build -t test-${{ matrix.distro }} -f tests/docker/Dockerfile.${{ matrix.distro }} .
+      - name: Install and verify
+        run: |
+          docker run --rm test-${{ matrix.distro }} bash -c "
+            TEST_BUILD=1 bash scripts/install.sh --skip-init --no-dkms 2>&1 || exit 1;
+            ls /etc/wireplumber/wireplumber.conf.d/51-ua-apollo.conf 2>/dev/null || \
+            ls /etc/wireplumber/main.lua.d/51-ua-apollo.lua 2>/dev/null || \
+            { echo 'FAIL: No WirePlumber config'; exit 1; };
+            ls /usr/share/alsa/ucm2/ua_apollo/ua_apollo.conf || \
+            { echo 'FAIL: No UCM2 config'; exit 1; };
+            echo 'All checks passed'
+          "

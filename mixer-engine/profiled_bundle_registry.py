@@ -13,6 +13,8 @@ BundleWatcher hands the daemon each plug-in as its maps land.
 import json
 import logging
 import os
+import threading
+from copy import deepcopy
 from pathlib import Path
 
 from native_carrier import MODULES
@@ -34,6 +36,74 @@ class ProfiledProviders(tuple):
 
 def known_good(path=KNOWN_GOOD):
     return {e['name']: e for e in json.loads(Path(path).read_text())['plugins']}
+
+
+class _Bundle:
+    """One runtime bundle on disk, parsed once (on first use) for every input it is offered on."""
+
+    def __init__(self, path, name, layout):
+        self.path, self.name, self.layout = Path(path), name, layout
+        self._data = None
+        self._lock = threading.Lock()
+
+    def data(self):
+        with self._lock:
+            if self._data is None:
+                data = json.loads(self.path.read_text())
+                if data.get('status') != 'pass':
+                    raise ValueError(f'{self.path.name}: passing runtime bundle required')
+                if (data.get('name'), data.get('layout')) != (self.name, self.layout):
+                    raise ValueError(f'{self.path.name}: bundle differs from its index entry')
+                if data.get('carrier_channels') != (2 if self.layout == 'stereo' else 1):
+                    raise ValueError(f'{self.path.name}: carrier_channels do not match its layout')
+                self._data = data
+            return self._data
+
+
+class LazyProvider:
+    """A provider the daemon can offer before its bundle is read.
+
+    Offering a plug-in needs only its name, slot, channels and sample rate, which the index
+    gives; building a provider parses its bundle (up to tens of MB) and its carrier recipe.
+    The daemon offers every map at startup, so that work waits for the first load of each
+    plug-in on each input, on the native worker thread. Every other attribute is the built
+    provider's; a deepcopy (a load's private copy) is a copy of the built provider."""
+
+    def __init__(self, bundle, kind, input_index, module_store):
+        self._bundle, self.kind, self.input_index = bundle, kind, input_index
+        self._module_store = module_store
+        self.name, self.bundle_path = bundle.name, bundle.path
+        self.slot = f'/devices/0/inputs/{input_index}/effects/0'
+        self.sample_rate = kind.sample_rate
+        if bundle.layout == 'stereo':
+            self.channels = (input_index, input_index + 1)
+        self._provider = None
+        self._lock = threading.Lock()
+
+    def built(self):
+        """The provider itself, built on first call."""
+        with self._lock:
+            if self._provider is None:
+                try:
+                    self._provider = self.kind(self._bundle.path, self.input_index, data=self._bundle.data(),
+                                               module_store=self._module_store)
+                except (OSError, ValueError) as error:
+                    # Offered from its index entry; the load that found it unusable fails.
+                    log.warning('native bundle %s unusable: %s', self._bundle.path.name, error)
+                    raise
+            return self._provider
+
+    def __getattr__(self, attribute):
+        # Only reached for attributes this proxy does not hold itself.
+        if attribute.startswith('__') or attribute in ('channels', '_provider', '_lock', '_bundle'):
+            raise AttributeError(attribute)
+        return getattr(self.built(), attribute)
+
+    def __deepcopy__(self, memo):
+        return deepcopy(self.built(), memo)
+
+    def __repr__(self):
+        return f'<LazyProvider {self.name} {self._bundle.layout} input {self.input_index}>'
 
 
 class BundleWatcher:
@@ -80,33 +150,26 @@ class BundleWatcher:
         store = Path(os.environ['OA_MODULE_STORE'])
         providers, landed = [], set()
         for entry in index.get('bundles', ()):
-            if (entry.get('name'), entry.get('layout')) in self.offered:
+            name, layout, file = entry.get('name'), entry.get('layout'), entry.get('file')
+            if (name, layout) in self.offered:
                 continue
-            path = self.directory / entry['file']
-            try:
-                data = json.loads(path.read_text())
-            except (OSError, ValueError) as error:
-                log.warning('native bundle %s not offered: %s', path.name, error)
-                continue
-            name, layout = data.get('name'), data.get('layout')
-            if data.get('status') != 'pass' or not isinstance(name, str) or layout not in ('mono', 'stereo'):
+            if not isinstance(name, str) or layout not in ('mono', 'stereo') or not isinstance(file, str):
                 continue
             if self.allowed is not None and layout not in self.allowed.get(name, {}).get('layouts', ()):
                 continue
-            if (name, layout) in self.offered | landed:
+            if (name, layout) in landed:
                 raise ValueError(f'duplicate profiled bundle: {name} ({layout})')
-            if data.get('carrier_channels') != (2 if layout == 'stereo' else 1):
-                log.warning('native bundle %s not offered: carrier_channels do not match its layout', path.name)
+            path = self.directory / file
+            if not path.is_file():
+                log.warning('native bundle %s not offered: missing', path.name)
                 continue
             # Each layout runs from its own bundle: the plug-in built a mono or a stereo state.
+            # The bundle is read and its recipe built when a load first needs it (LazyProvider).
+            bundle = _Bundle(path, name, layout)
             offers = ([(StereoProfiledCarrierProvider, i) for i in (0, 2) if i in self.inputs and i + 1 in self.inputs]
                       if layout == 'stereo' else [(ProfiledCarrierProvider, i) for i in self.inputs])
-            try:
-                providers += [kind(path, i, data=data, module_store=store) for kind, i in offers]
-                landed.add((name, layout))
-            except (OSError, ValueError) as error:
-                # One bad bundle must not take the others down; it is simply not offered.
-                log.warning('native bundle %s not offered: %s', path.name, error)
+            providers += [LazyProvider(bundle, kind, i, store) for kind, i in offers]
+            landed.add((name, layout))
         self.offered |= landed
         return providers
 

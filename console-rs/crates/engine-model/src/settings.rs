@@ -220,4 +220,19 @@ mod tests {
         m.apply_setting("pref:modifiers_timeout", &SettingOp::Text("10".into()));
         assert_eq!(m.properties().unwrap().prop("pref:modifiers_timeout").unwrap().as_str(), Some("10"));
     }
+
+    #[test]
+    fn ui_scale_is_saved_and_reloaded() {
+        let dir = std::env::temp_dir().join(format!("uaconsole-prefs-{}", std::process::id()));
+        let path = dir.join("console-prefs.json");
+        let mut m = mixer();
+        m.set_prefs_path(Some(path.clone()));
+        m.apply_setting("pref:ui_scale", &SettingOp::Choose(4));
+        assert_eq!(settings::ui_scale(m.properties().unwrap()), 1.25);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("125%"));
+        let mut again = mixer();
+        again.set_prefs_path(Some(path));
+        assert_eq!(settings::ui_scale(again.properties().unwrap()), 1.25);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
