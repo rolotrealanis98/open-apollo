@@ -945,7 +945,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/0/Stereo",
@@ -3109,7 +3109,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/1/Stereo",
@@ -5273,7 +5273,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/2/Stereo",
@@ -7429,7 +7429,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/3/Stereo",
@@ -9581,7 +9581,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/4/Stereo",
@@ -11541,7 +11541,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/5/Stereo",
@@ -13501,7 +13501,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/6/Stereo",
@@ -15461,7 +15461,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/7/Stereo",
@@ -17421,7 +17421,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/8/Stereo",
@@ -19381,7 +19381,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/9/Stereo",
@@ -21341,7 +21341,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/10/Stereo",
@@ -23301,7 +23301,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/11/Stereo",
@@ -25261,7 +25261,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/12/SRConvert",
@@ -27229,7 +27229,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/13/SRConvert",
@@ -29197,7 +29197,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/14/Stereo",
@@ -31101,7 +31101,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/15/Stereo",
@@ -33005,7 +33005,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/16/Stereo",
@@ -34909,7 +34909,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/17/Stereo",
@@ -36813,7 +36813,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/18/Stereo",
@@ -38717,7 +38717,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/19/Stereo",
@@ -40621,7 +40621,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/20/Stereo",
@@ -42525,7 +42525,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/21/Stereo",
@@ -44429,7 +44429,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/22/Stereo",
@@ -46389,7 +46389,7 @@
       "min": null,
       "max": null,
       "values": null,
-      "value": true
+      "value": false
     },
     {
       "path": "/devices/0/inputs/23/Stereo",
