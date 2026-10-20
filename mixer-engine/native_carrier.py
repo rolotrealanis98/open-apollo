@@ -78,6 +78,32 @@ def check(rows, cmd):
     return n
 
 
+class MeterReads:
+    """`remote_reads` of one effect: a meter variable (a panel spec's vendorSpecificFloat, or an
+    opcode 519 range from p0) is a packed original reference, row << 24 | word, in the effect's
+    own rows (row 0 untagged), as CacheWrites addresses. Every metered spec's ids fit their
+    bundle's rows; ids outside the rows have no mapping. Read-only, bounded by the descriptor."""
+    def __init__(self, sizes, base_row=10):
+        self.sizes, self.base_row = tuple(sizes), base_row
+
+    def get(self, key, default=None):
+        if type(key) is tuple and len(key) == 2 and key[0] in ('floats', 'ints'):
+            ident, count = key[1], 1
+        elif type(key) is tuple and len(key) == 5 and key[:2] == ('opcode', 519) and key[4] == 1:
+            ident, count = key[2], key[3]
+        else:
+            return default
+        if type(ident) is not int or type(count) is not int or not 0 <= ident <= 0xffffffff or count < 1:
+            return default
+        row, word = ident >> 24, ident & 0xffffff
+        if row >= len(self.sizes) or word + count > self.sizes[row]:
+            return default
+        return self.base_row + row, word
+
+    def rebased(self, base_row):
+        return MeterReads(self.sizes, base_row)
+
+
 def sha_file(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -304,6 +330,7 @@ class GeneratedOrdinaryCarrier:
             elif link == 0xffffffff or link >> 24 >= len(self.local_rows) or (link & 0xffffff) >= self.local_rows[link >> 24][1]:
                 raise ValueError('relocation target leaves descriptor')
         self.pointers = frozenset(row[2] for row in self.local_rows[1:])
+        self.remote_reads = MeterReads(r[1] for r in self.local_rows)
         # shared_cells_ok: the original descriptor table may list two allocations on one pointer cell (AKG BX 20
         # rows 0x966/0x967/0x968/0x969 twice). ua_memspec_compile stores each row address in row order, so the
         # later one is the one the cell holds, as in UAD2System _transmitMemSpecUpdates; rows stay as the original.

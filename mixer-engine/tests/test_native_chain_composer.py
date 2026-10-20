@@ -103,3 +103,28 @@ def test_live_plan_writes_the_composed_words_outside_the_directory(providers, pr
 def test_record_pre_effects_must_be_bool(providers):
     with pytest.raises(ValueError):
         ncc.compose(providers(1), channels=(0,), record_pre_effects=1)
+
+
+def test_meter_reads_follow_each_effect_into_its_composed_rows(providers):
+    effects = providers(2)
+    for p in effects:
+        p.remote_reads = p.carrier.remote_reads   # the descriptor's one 8-word row
+    chain = ncc.compose(effects, channels=(0,))
+    assert len({e.base_row for e in chain.effects}) == 2
+    for e in chain.effects:
+        reads = e.remote_reads
+        assert reads.get(('floats', 5)) == reads.get(('ints', 5)) == (e.base_row, 5)
+        assert reads.get(('opcode', 519, 6, 2, 1)) == (e.base_row, 6)
+        for outside in (('floats', 8), ('floats', 1 << 24 | 5), ('opcode', 519, 6, 3, 1),
+                        ('opcode', 519, 6, 0, 1), ('opcode', 519, 6, 1, 0), ('opcode', 518, 6, 1, 1),
+                        ('floats', -1), ('floats', '5')):
+            assert reads.get(outside) is None
+
+
+def test_tagged_meter_ids_address_their_row():
+    reads = native_carrier.MeterReads((95, 146, 32))
+    assert reads.get(('floats', 34)) == (10, 34)                  # untagged: row 0
+    assert reads.get(('floats', 0x01000008)) == (11, 8)           # row 1, word 8
+    assert reads.get(('opcode', 519, 0x0200001f, 1, 1)) == (12, 31)
+    assert reads.get(('floats', 0x03000000)) is None              # no row 3
+    assert reads.rebased(20).get(('floats', 0x01000008)) == (21, 8)

@@ -289,6 +289,31 @@ def test_real_remote_protocol_fresh_allowlisted_scalar_only():
     assert not backend.publisher.connected
 
 
+def test_meter_reads_answer_ids_inside_the_effect_rows_only():
+    from native_carrier import MeterReads
+    from plugin_remote_codec import decode_scalar_response
+    state, helper, driver, provider, backend, tx = model()
+    provider.remote_reads = MeterReads((16,), base_row=0)
+    assert tx.load(SLOT, provider.name).committed
+    daemon = MixerDaemon(state, None, helper_tree=helper,
+        plugin_transactions=tx, plugin_remote_backend=backend, plugin_hosting=True)
+    writer = MemoryWriter()
+    client = MixerClient(None, writer)
+    path = SLOT + '/VendorSpecific/value'
+    driver.word = 0x3F800000
+    for params in ({'floats': '9'}, {'opcode': '519', 'p0': '9', 'p1': '1', 'p2': '1'}):
+        daemon._handle_get(client, Command('get', path, raw_params=params))
+        assert 'error' not in json.loads(writer.frames[-1].rstrip(b'\0'))
+    message = json.loads(writer.frames[-2].rstrip(b'\0'))
+    assert decode_scalar_response(path, message['data'], message['parameters'],
+                                  expected_path=path).words == (0x3F800000,)
+    driver.calls.clear()
+    for params in ({'floats': '16'}, {'floats': str(1 << 24 | 9)}):
+        daemon._handle_get(client, Command('get', path, raw_params=params))
+        assert json.loads(writer.frames[-1].rstrip(b'\0'))['error']
+    assert driver.calls == []
+
+
 class Coupled(Provider):
     """Two parameters; writing parameter 0 also moves parameter 1 (a Sync-style switch)."""
 
