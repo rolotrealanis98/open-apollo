@@ -47,12 +47,12 @@ One row can cover a few closely related controls (MUTE / MONO, the CUE OUTPUTS r
 
 | Rows | Before | Now |
 |---|---|---|
-| Listed | 72 | 72 |
+| Listed | 74 | 74 |
 | `host` (no Apollo register) or `n/a` on the x4 | 11 | 11 |
-| Can reach the Apollo | 61 | 61 |
-| … `wired` | 28 | 56 |
+| Can reach the Apollo | 63 | 63 |
+| … `wired` | 28 | 58 |
 | … `partial` | 22 | 0 |
-| … `ignored` / `missing` / `UI-only` | 11 | 5 |
+| … `ignored` / `missing` / `UI-only` | 13 | 5 |
 
 The 5 still not wired, and why:
 - BUFFER SIZE: PipeWire owns the quantum.
@@ -142,6 +142,7 @@ The 5 still not wired, and why:
 | 50 | HP source MON / NONE / CUE 3/4 | as 49 (MON is the value `"default"`, which on the wire is also the reset literal) | as 49 | refused with hardware | partial: written as CUE 1 | missing: no known encoding; refused, and the console snaps back | same; `TestHeadphoneSource` |
 | 51 | CUE OUTPUTS MIX / MONO / MIRROR TO | `…/outputs/14-17/MixInSource`, `MixToMono`, `OutputDestination` | settings `map:cue_source`, `toggle:`, `""` | `(2, 0, 0x05/0x06, …)`, mirror 0x2e/0x2f/0x3b | wired | wired | `settings_reach_the_apollo` |
 | 52 | MONITOR / HEADPHONE CORRECTION (SoundID) | `…/SpeakerCorrectionPower` … | settings `toggle:` / `not:` | tree only | ignored | ignored: no SoundID correction DSP | — |
+| 73 | CUE OUTPUTS › PRE / POST FADER (open-apollo; no Console 1.3.1 control) | `/devices/0/HPnSendPostFader` for CUE n | settings `toggle:` (CueRoutes `SENDS`, a row under MIRROR TO) | `HPnSendPostFader` → every input send that follows CUE n (`PostFaderOverride` −1) is rewritten pre / post fader, `set_mixer_bus_param(bus, sub 1…4, …)` | missing | wired | `settings_reach_the_apollo`; rack `cue_sends_pre_post_follows_its_cue` |
 | 53 | Meters, Monitor Meters window | subscriptions | — | host meters (PipeWire / ALSA capture) | host | host | — |
 
 ## Settings › HARDWARE, device OPTIONS, OPTIONS
@@ -162,6 +163,7 @@ The 5 still not wired, and why:
 | 65 | OPTIONS › METERING pre / post | `set /PostFaderMetering/value` | settings `map:metering`, meter menu | host meters | host | host | — |
 | 66 | OPTIONS › CLIP HOLD | `set /ClipHold/value` | settings | `(2, 0, 0x13, idx)` | wired | wired | same |
 | 67 | OPTIONS › PEAK HOLD | `set /PeakHold/value` | settings | `(2, 0, 0x14, idx)` | wired | wired | same |
+| 74 | MONITOR CONTROLLER › SPEAKER UTILITIES › STEREO SUB (open-apollo; no Console 1.3.1 control) | `…/outputs/N/StereoSubOutputEnabled` (x4: ANALOG 4) | settings `toggle:` | `_handle_surround_output` → `(2, 0, 0x87, 0/1)` | missing | wired | `settings_reach_the_apollo`; rack `stereo_sub_is_a_speaker_utility` |
 | 68 | WRITES (open-apollo footer) | — | surface `WritesEnabled` → `set_engine_writes` | — | partial: did not open the connection | wired | `writes_switch_opens_the_engine_connection` |
 | 69 | HEADROOM (+24 dBu), FCN SWITCH, MONITOR MODE, BASS MANAGEMENT, USB SAFEGUARD, DANTE, MADI | various | settings | routes exist (0x49, 0x42, 0x4a …); the x4 driver refuses 0x49 and 0x42 | n/a | n/a | — |
 | 70 | Input jack sensing, Hi-Z override | `InputJackSensingDisabled`, `preamps/0/HiZ` | no Console 1.3.1 control on the x4 | routes exist | n/a | n/a | — |
@@ -258,5 +260,12 @@ None of this was run on hardware. Before you start:
     - OUTPUT REFERENCE LEVELS 1-2 −10 dBV, then +4 dBu.
     - DIGITAL MIRROR ON, then OFF.
     - CLIP HOLD and PEAK HOLD change how long the front-panel meters hold.
-11. **Read-only launch.** Start `uaconsole` (no `--writes`) and press MUTE: nothing
+11. **CUE OUTPUTS › PRE FADER / POST FADER** (CUE 1). With CUE 1 playing in HP 1 and an input
+    sent to CUE 1, press PRE FADER: it reads POST FADER, the log shows
+    `HP1SendPostFader = True → N input sends rewritten`, and pulling that input's fader down
+    now lowers it in HP 1. Set it back to PRE FADER.
+12. **STEREO SUB** (MONITOR CONTROLLER › SPEAKER UTILITIES). ON logs
+    `output[3].StereoSubOutputEnabled = True → 1 (param=0x87)`. What LINE OUT 4 then carries (sub
+    signal, crossover or not) has not been checked: report it. Set it back to OFF.
+13. **Read-only launch.** Start `uaconsole` (no `--writes`) and press MUTE: nothing
     happens on the Apollo. Turn on Settings › WRITES and press MUTE again: it mutes.

@@ -535,6 +535,17 @@ fn settings_reach_the_apollo() {
         (MONITOR, 0, 0x06, 1),
     );
     r.mixer("CUE 1 MIX → CUE", choose("map:cue_source:/devices/0/outputs/14/MixInSource", 1), (MONITOR, 0, 0x05, 0));
+    r.other(
+        "STEREO SUB ON",
+        |m| m.apply_setting("toggle:/devices/0/outputs/3/StereoSubOutputEnabled", &SettingOp::Press),
+        (MONITOR, 0x87, 1),
+    );
+    // CUE 1 SENDS POST FADER: the input sends that follow CUE 1 are rewritten (sub-param 1).
+    r.press(
+        "CUE 1 SENDS POST",
+        |m| m.apply_setting("toggle:/devices/0/HP1SendPostFader", &SettingOp::Press),
+        |n, a| bus_param(n, a).is_some_and(|(_, sub, _, side)| (sub, side) == (1, 0)),
+    );
 }
 
 /// Launched read-only (no `--writes`), nothing reaches the Apollo; Settings' WRITES switch opens
