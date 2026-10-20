@@ -3286,19 +3286,24 @@ post_handshake:
 					 * The daemon's 57-param monitor init sets
 					 * setting[2] correctly via ioctl later.
 					 *
-					 * Not on an inherited DSP: it kept the
-					 * last session's routing, and the low
+					 * SKIP the preamp settings too: the low
 					 * byte of S3 / S13 / S16-17 / S23 is
-					 * preamp 1-2 gain, HiZ impedance and
-					 * knob steps (a driver reload read
-					 * input 1 at 41 dB, Hi-Z input 2 at
-					 * GainC 0, omarchy 2026-10-20).
+					 * preamp 1-2 GainC, HiZ impedance,
+					 * GainB/GainA and knob steps (a connect
+					 * read input 1 at 41 dB and Hi-Z input 2
+					 * at GainC 0, omarchy 2026-10-20).
+					 *
+					 * Nothing at all on an inherited DSP:
+					 * it kept the last session's routing.
 					 */
 					if (!ua->dsp_inherited) {
+						const u64 keep = BIT_ULL(2) | BIT_ULL(3) |
+								 BIT_ULL(13) | BIT_ULL(16) |
+								 BIT_ULL(17) | BIT_ULL(23);
 						int s;
 						for (s = 1; s < UA_MIXER_BATCH_COUNT; s++) {
-							if (s == 2)
-								continue; /* skip monitor */
+							if (keep & BIT_ULL(s))
+								continue; /* monitor, preamps */
 							ua->mixer_val[s] = 0x20;
 							ua->mixer_mask[s] = 0xFF;
 						}
