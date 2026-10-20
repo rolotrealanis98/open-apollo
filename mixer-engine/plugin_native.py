@@ -15,7 +15,7 @@ import uuid
 import traceback
 
 from plugin_remote import RemoteReadback
-from plugin_driver import PluginDriver
+from plugin_driver import READ_REFUSALS, PluginDriver
 from plugin_publication import ControlReadback, LoadedPlugin, OwnedHandle, PublicationError, Publisher
 from plugin_transactions import (
     ActivateOutcome, ApplyControlOutcome, FinalizeOutcome, Outcome,
@@ -35,6 +35,12 @@ class ControlPlan:
 
 
 SERVICE_WORDS = 1016  # PluginDriver.service command bound
+
+
+class ReadRefused(ValueError):
+    """The driver refused a readback (PluginDriver READ_REFUSALS): nothing changed on the device
+    and the client session stays valid. A ValueError, so a load fails and retires its candidate
+    and a control is refused or restored, instead of stopping native hosting."""
 
 
 def _write_chunks(words, maximum=SERVICE_WORDS):
@@ -202,11 +208,8 @@ class NativePluginBackend:
                 continue
             # A word whose value moves between two reads is the running DSP code's (a ramp, a
             # pointer): a write that failed would read back the same wrong value both times.
-            try:
-                again = self.driver.service(native, read=(row, offset, len(expected)))
-            except OSError:
-                self.invalidate()
-                raise
+            reread = self._read_spans(native, ((row, offset, expected),))
+            again = tuple(reread[row, offset + i] for i in range(len(expected)))
             moving = {w for w, _, a in diffs if again[w - offset] != a}
             if moving:
                 dynamic.update((row, w) for w in moving)
@@ -240,6 +243,9 @@ class NativePluginBackend:
             except OSError as error:
                 log.error('native instance %s: read row %d words %d..%d failed: %s',
                           native.handle, row, start, end - 1, error)
+                if error.errno in READ_REFUSALS:
+                    raise ReadRefused(f'readback refused: row {row} words {start}..{end - 1}: '
+                                      f'{error.strerror or error}') from error
                 self.invalidate()
                 raise
             words.update(((row, start + i), v) for i, v in enumerate(values))
@@ -269,12 +275,10 @@ class NativePluginBackend:
             self._validate_observations(((row, offset, (0,) * count),))
             reads.append((row, offset, count))
         words = []
-        for address in reads:
-            try:
-                words.extend(self.driver.service(lease.native, read=address))
-            except OSError:
-                self.invalidate()
-                raise
+        found = self._read_spans(lease.native, tuple((row, offset, (0,) * count)
+                                                     for row, offset, count in reads))
+        for row, offset, count in reads:
+            words.extend(found[row, offset + i] for i in range(count))
         if self._owned(slot, handle) is not lease:
             raise ValueError('native lease changed during read')
         return RemoteReadback(handle, query, tuple(words))

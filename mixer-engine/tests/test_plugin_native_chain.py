@@ -820,3 +820,27 @@ def test_record_tap_rebuild_readback_failure_restores_the_previous_chain(failure
     assert outcome.status is Outcome.FAILED and outcome.detail == 'Previous record tap restored'
     assert backend._leases == old and driver.strips == strips and not backend._pending
     assert set(driver.memory) == driver.active == {old[slot(0)].native.handle}
+
+
+def test_refused_candidate_readback_fails_only_that_load():
+    # The driver refusing a readback of a load's candidate (EPROTO: a reply that does not
+    # match the read) fails that load and retires the candidate; hosting stays up.
+    state, helper, driver, backend, tx = delay_model()
+    assert tx.load(slot(0), 'first').committed
+    previous = backend._leases[slot(0)]
+    service = driver.service
+    refused = []
+
+    def refuse_reads(native, *, writes=(), read=None):
+        if read is not None and not writes and native.handle != previous.native.handle and not refused:
+            refused.append(read)
+            raise OSError(errno.EPROTO, 'synthetic reply mismatch')
+        return service(native, writes=writes, read=read)
+
+    driver.service = refuse_reads
+    result = tx.load(slot(1), 'second')
+    assert refused and result.error and not result.quarantined and not tx.quarantined
+    assert backend._leases[slot(0)] is previous
+    assert set(driver.memory) == driver.active == {previous.native.handle}
+    assert tx.load(slot(1), 'second').committed
+    assert tx.control(slot(1), FIELD, .4).committed

@@ -396,3 +396,38 @@ def test_observations_read_one_run_per_service():
     assert driver.reads == [(row, offset, len(values)) for row, offset, values in observations]
     assert all(words[row, offset + i] == v for row, offset, values in observations
                for i, v in enumerate(values))
+
+
+def test_saved_inserts_load_again_with_their_values():
+    # A restart (or a power cycle) leaves the slot empty while the saved state still names its
+    # plug-in and values: hosting coming on loads it again and replays the values, once.
+    state, helper, driver, provider, backend, tx = model()
+    daemon = MixerDaemon(state, None, helper_tree=helper, plugin_transactions=tx,
+                         plugin_remote_backend=backend, plugin_hosting=True)
+    state._deferred_saved.update({
+        SLOT + '/EffectName/value': provider.name,
+        SLOT + '/parameters/0/NormalizedValue/value': 0.75,
+        SLOT + '/Power/value': True,
+    })
+    daemon._native_restore_inserts()
+    assert state.get_value(SLOT + '/EffectName') == ''      # off unless main() turns it on
+    daemon.restore_native_inserts = True
+    daemon._native_restore_inserts()
+    assert state.get_value(SLOT + '/EffectName') == provider.name
+    assert state.get_value(SLOT + '/' + FIELD) == 0.75 and driver.word == 75
+    assert state._dirty[SLOT + '/parameters/0/NormalizedValue/value'] == 0.75
+    calls = list(driver.calls)
+    daemon._native_restore_inserts()                       # occupied: nothing to restore
+    assert driver.calls == calls
+
+
+def test_a_saved_insert_that_fails_to_load_keeps_its_intent():
+    state, helper, driver, provider, backend, tx = model()
+    daemon = MixerDaemon(state, None, helper_tree=helper, plugin_transactions=tx,
+                         plugin_remote_backend=backend, plugin_hosting=True)
+    daemon.restore_native_inserts = True
+    state._deferred_saved.update({SLOT + '/EffectName/value': 'gone',
+                                  SLOT + '/parameters/0/NormalizedValue/value': 0.75})
+    daemon._native_restore_inserts()
+    assert state.get_value(SLOT + '/EffectName') == '' and not tx.quarantined
+    assert state._deferred_saved[SLOT + '/EffectName/value'] == 'gone'
