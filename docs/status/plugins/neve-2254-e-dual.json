@@ -1,0 +1,33 @@
+{
+ "plugin": "Neve 2254 E Dual",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "30 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "30/30",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "30 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "30/30",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

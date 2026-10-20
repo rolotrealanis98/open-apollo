@@ -1,0 +1,99 @@
+{
+ "plugin": "ADA Flanger",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "18 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "18/18",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "load": {
+    "result": "pass",
+    "detail": "loads, reads back, unloads",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "controls": {
+    "result": "pass",
+    "detail": "18/18",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "text": {
+    "result": "pass",
+    "detail": "18/18",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "18 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "18/18",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "load": {
+    "result": "pass",
+    "detail": "loads, reads back, unloads",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "controls": {
+    "result": "pass",
+    "detail": "18/18",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "text": {
+    "result": "pass",
+    "detail": "18/18",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

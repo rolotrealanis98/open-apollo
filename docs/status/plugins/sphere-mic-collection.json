@@ -1,0 +1,33 @@
+{
+ "plugin": "Sphere Mic Collection",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "32 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "fail",
+    "detail": "31/32 parameters have a panel control; none for ordinals 25",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "32 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "fail",
+    "detail": "31/32 parameters have a panel control; none for ordinals 25",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

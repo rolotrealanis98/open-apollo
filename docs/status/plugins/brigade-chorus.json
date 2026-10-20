@@ -1,0 +1,105 @@
+{
+ "plugin": "Brigade Chorus",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "8 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "8/8",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "load": {
+    "result": "pass",
+    "detail": "loads, reads back, unloads",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "controls": {
+    "result": "pass",
+    "detail": "8/8",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "text": {
+    "result": "pass",
+    "detail": "8/8",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "meters": {
+    "result": "fail",
+    "detail": "meter read refused: plugin_remote_readback_unavailable ",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "8 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "8/8",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "load": {
+    "result": "pass",
+    "detail": "loads, reads back, unloads",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "controls": {
+    "result": "pass",
+    "detail": "8/8",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "text": {
+    "result": "pass",
+    "detail": "8/8",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   },
+   "meters": {
+    "result": "fail",
+    "detail": "meter read refused: plugin_remote_readback_unavailable ",
+    "date": "2026-10-20",
+    "device": "Apollo x4",
+    "by": "rolotrealanis98",
+    "how": "plugin-qualify/1",
+    "rate": 48000
+   }
+  }
+ }
+}

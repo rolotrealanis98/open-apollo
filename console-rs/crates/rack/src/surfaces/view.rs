@@ -698,6 +698,10 @@ impl ViewState {
         if !press {
             return vec![Effect::Model(action)];
         }
+        // The strip menu's Hide also opens Show/Hide Channels, the only way back for that strip.
+        if matches!(id.control, C::Menu(crate::menu::MenuCmd::Hide)) {
+            self.show_channels = true;
+        }
         // NETWORK's LAUNCH / MORE INFO open pages (Console: `Rack_NetworkSettings` 0x18085ca10,
         // 0x18085cc00); they send nothing to the engine.
         if let C::SettingPress(k) = &id.control {
@@ -1428,6 +1432,15 @@ mod tests {
         // SET DEFAULT does not apply to inserts: the tap is consumed (no open, no write).
         v.dispatch(Action::Toggle(cid("nav", Control::Modifier(Modifier::SetDefault))), &mut model);
         assert!(v.route(Action::Tap(cid("in0", Control::Insert(1))), &model).is_empty());
+    }
+
+    #[test]
+    fn strip_menu_hide_opens_show_hide_channels() {
+        let model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        let e = v.route(Action::Tap(cid("in0", Control::Menu(crate::menu::MenuCmd::Hide))), &model);
+        assert_eq!(e.len(), 1, "the hide still reaches the model");
+        assert!(v.show_channels);
     }
 
     #[test]

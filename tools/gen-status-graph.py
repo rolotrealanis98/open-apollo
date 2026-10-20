@@ -24,9 +24,13 @@ Inputs:
                            every UA-built UAD-2 plug-in in scope and the stage
                            its control->DSP mapping has reached, exported from
                            the library ledger with --library
+  docs/status/plugins/*.json
+                           measured checks per plug-in and layout, written by
+                           tools/plugin-qualify.py
 
-Outputs (docs/status/): progress-dark.svg, progress-light.svg, the three
-badge-*.svg and README.md (the numbers per area and the open tasks).
+Outputs (docs/status/): progress-dark.svg, progress-light.svg, the
+badge-*.svg, README.md (the numbers per area and the open tasks) and
+PLUGINS.md (every plug-in, every check, and what each one still needs).
 
 Usage:
   tools/gen-status-graph.py                 redraw from status.json
@@ -55,6 +59,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "docs", "status")
 STATUS_JSON = os.path.join(OUT, "status.json")
 LIBRARY_JSON = os.path.join(OUT, "plugin-library.json")
+CHECKS_DIR = os.path.join(OUT, "plugins")
 
 # Ledger tier -> (library stage, square colour)
 LIBRARY_TIERS = {
@@ -64,7 +69,7 @@ LIBRARY_TIERS = {
     "unison_track": ("blocked", "re"), "license_refused": ("unlicensed", "blocked"),
 }
 LIBRARY_STAGES = (
-    ("live", "verified", "Live on the Apollo: every control mapped, loaded and read back"),
+    ("live", "verified", "Live on the Apollo: passed the live gate (loads, controls read back, unloads)"),
     ("ready", "done", "Mapped offline, needs a licence to test live"),
     ("hold", "partial", "Mapped, live load on hold"),
     ("blocked", "re", "Blocked"),
@@ -284,12 +289,182 @@ def export_library(ledger_path):
 
 
 # --------------------------------------------------------------------------
+# Plug-in checks (docs/status/plugins/*.json -> PLUGINS.md)
+# --------------------------------------------------------------------------
+
+# Check name, column title, what it proves, what to do when it is missing
+CHECKS = (
+    ("map", "map", "the mapper built a runtime bundle for this layout",
+     "run the mapper (`--only NAME --retry-failures`) and report the "
+     "`index.json` reason; see docs/plugin-mapping.md, Improving the emulator side"),
+    ("panel", "panel", "every control and meter of the panel spec has a "
+     "daemon parameter or meter source behind it",
+     "bind the spec's unbound controls/meters to the bundle's parameters "
+     "(mixer-engine / plugin-ui)"),
+    ("load", "load", "the daemon loads it on the Apollo and the recipe reads back",
+     "load it with the daemon's journal open and report the refused words"),
+    ("controls", "controls", "every parameter at minimum, middle and maximum "
+     "is accepted and read back", "find why the listed parameters are refused "
+     "(journal: plan / readback lines)"),
+    ("text", "text", "each live value's text matches the text the plug-in's "
+     "own formatter gave at the same position", "compare the listed "
+     "parameters' formatting against the bundle's control sweep"),
+    ("meters", "meters", "every meter of the panel spec moves with a signal "
+     "on the input", "publish the plug-in's meter words (dynamic_refs) "
+     "through the daemon"),
+    ("latency", "latency", "the measured latency matches the known-good entry",
+     "measure with a loopback cable and report it"),
+    ("audio", "audio", "a listener heard the controls do what they say, and "
+     "bypass restore the dry signal", "listen and report with "
+     "`tools/plugin-qualify.py mark`"),
+)
+CHECK_NAMES = tuple(c[0] for c in CHECKS)
+RESULTS = ("pass", "fail", "n/a")
+SYMBOL = {"pass": "✅", "fail": "❌", "n/a": "–", None: "·"}
+
+
+def plugin_slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", re.sub(r"^UAD ", "", name).lower()).strip("-")
+
+
+def load_checks(path=None):
+    """{plug-in name: {layout: {check: result dict}}} from docs/status/plugins."""
+    out = {}
+    for f in sorted(glob.glob(os.path.join(path or CHECKS_DIR, "*.json"))):
+        with open(f, encoding="utf-8") as fh:
+            d = json.load(fh)
+        name = re.sub(r"^UAD ", "", d["plugin"])
+        if plugin_slug(name) + ".json" != os.path.basename(f):
+            raise SystemExit("%s: file name must be %s.json" % (f, plugin_slug(name)))
+        for layout, checks in d["layouts"].items():
+            for check, r in checks.items():
+                if check not in CHECK_NAMES or r.get("result") not in RESULTS:
+                    raise SystemExit("%s: %s %s: unknown check or result %r"
+                                     % (f, layout, check, r.get("result")))
+        out[name] = d["layouts"]
+    return out
+
+
+def layout_works(checks):
+    return all(checks.get(c, {}).get("result") in ("pass", "n/a")
+               for c in CHECK_NAMES)
+
+
+def plugin_works(layouts):
+    return bool(layouts) and all(layout_works(c) for c in layouts.values())
+
+
+def first_gap(checks):
+    """(check, result or None) of the first check not passed, or None."""
+    for c in CHECK_NAMES:
+        r = checks.get(c, {}).get("result")
+        if r not in ("pass", "n/a"):
+            return c, r
+    return None
+
+
+def cell(r):
+    """Symbol, plus the detail of a failure or a count like 44/44."""
+    if not r:
+        return SYMBOL[None]
+    detail = r.get("detail", "")
+    if r["result"] == "pass" and not re.fullmatch(r"\d+/\d+", detail):
+        detail = ""
+    return (SYMBOL[r["result"]] + " " + detail.replace("|", "\\|")).strip()
+
+
+def plugins_md(library_items, checks):
+    names = [n for n, s in library_items if s != "unlicensed"]
+    hidden = sum(1 for _, s in library_items if s == "unlicensed")
+    names += sorted(n for n in checks if n not in names)
+    names.sort(key=str.lower)
+    rows, untested = [], 0
+    fails = {c: [] for c in CHECK_NAMES}
+    unchecked = dict.fromkeys(CHECK_NAMES, 0)
+    working = 0
+    for name in names:
+        layouts = checks.get(name, {})
+        if plugin_works(layouts):
+            working += 1
+        if not layouts:
+            untested += 1
+            rows.append("| %s | – | %s | | not checked yet |"
+                        % (name, " | ".join(SYMBOL[None] for _ in CHECKS)))
+            continue
+        for layout in sorted(layouts):
+            c = layouts[layout]
+            for check in CHECK_NAMES:
+                r = c.get(check, {})
+                if r.get("result") == "fail":
+                    fails[check].append((name, layout, r.get("detail", "")))
+                elif not r:
+                    unchecked[check] += 1
+            gap = first_gap(c)
+            if gap:
+                check, r = gap
+                need = "%s: %s" % (check, c.get(check, {}).get("detail") or
+                                   ("failed" if r else "not checked"))
+            else:
+                need = ""
+            rows.append("| %s | %s | %s | %s | %s |" % (
+                name, layout, " | ".join(cell(c.get(k)) for k in CHECK_NAMES),
+                "**yes**" if not gap else "", need.replace("|", "\\|")))
+    total = len(names) + hidden
+    lines = [
+        "# Plug-in status",
+        "",
+        "Generated by `tools/gen-status-graph.py` from `plugins/*.json`, which "
+        "`tools/plugin-qualify.py` writes. Do not edit by hand: run the checks "
+        "and commit the JSON (docs/plugin-mapping.md, Report it).",
+        "",
+        "A plug-in **works** only when every check below passed (or does not "
+        "apply) for every layout that was tried. Nothing here is claimed by "
+        "hand: each mark is a measured result with its date, Apollo, UAD "
+        "version and who ran it in the JSON file.",
+        "",
+        "**%d of %d plug-ins work**; %d have not been checked yet%s." % (
+            working, total, untested,
+            ", %d more are not authorized on the test Apollo" % hidden
+            if hidden else ""),
+        "",
+        "| Check | Passes when | What to do when it does not |",
+        "|---|---|---|",
+    ]
+    lines += ["| %s | %s | %s |" % (t, what, todo) for _, t, what, todo in CHECKS]
+    lines += ["", "%s pass, %s fail, %s does not apply, %s not checked." % (
+        SYMBOL["pass"], SYMBOL["fail"], SYMBOL["n/a"], SYMBOL[None]), ""]
+    lines += ["## What fails, by check", "",
+              "The work queue: each list is what a contributor can pick up. "
+              "Checks nobody has run yet are counted, not listed.", ""]
+    for check, _, _, todo in CHECKS:
+        lines += ["### %s: %d fail, %d layouts not checked" % (
+            check, len(fails[check]), unchecked[check]), ""]
+        if fails[check]:
+            lines += [todo, ""]
+            lines += ["- %s (%s)%s" % (n, l, ": " + d if d else "")
+                      for n, l, d in fails[check]]
+            lines.append("")
+    lines += ["## Every plug-in", "",
+              "| Plug-in | Layout | %s | Works | Next |"
+              % " | ".join(t for _, t, _, _ in CHECKS),
+              "|---|---|%s---|---|" % ("---|" * len(CHECKS))]
+    lines += rows
+    lines.append("")
+    return "\n".join(lines), working, total
+
+
+# --------------------------------------------------------------------------
 # Drawing
 # --------------------------------------------------------------------------
 
 def library_date():
     with open(LIBRARY_JSON, encoding="utf-8") as f:
         return json.load(f)["exported"]
+
+
+def library_items():
+    with open(LIBRARY_JSON, encoding="utf-8") as f:
+        return json.load(f)["items"]
 
 
 def load_library():
@@ -525,8 +700,10 @@ def readme(data):
         "- **Plug-in mapping**: one square per UA-built UAD-2 plug-in in "
         "scope (`plugin-library.json`). Its control-to-DSP mapping is "
         "produced by running UA's own code offline, never written by hand; "
-        "**live** = loaded on the Apollo with every control set and read "
-        "back; **mapped** = the mapping passed offline and waits for a "
+        "**live** = passed the live gate on the Apollo (it loads, controls "
+        "read back, it unloads), which does not mean every control, meter "
+        "and text is right: [PLUGINS.md](PLUGINS.md) has the measured "
+        "checks per plug-in; **mapped** = the mapping passed offline and waits for a "
         "licence or a live load; **not authorized** = the test Apollo "
         "refuses that plug-in, so it cannot be checked here. Running "
         "plug-ins on the Apollo is still being built and is not in a "
@@ -573,6 +750,10 @@ def readme(data):
                       library_date()),
                   "", "| Stage | Plug-ins |", "|---|---|"]
         lines += ["| %s | %d |" % (g["name"], len(g["items"])) for g in library]
+        _, working, total = plugins_md(library_items(), load_checks())
+        lines += ["", "Measured checks (every control, text, meters, latency, "
+                  "audio): %d of %d plug-ins fully work; per plug-in and what "
+                  "each still needs in [PLUGINS.md](PLUGINS.md)." % (working, total)]
     lines += ["", "## Apollo models", "", "| Model | Status |", "|---|---|"]
     for g in models:
         for slug, name, st in g["items"]:
@@ -586,6 +767,7 @@ def readme(data):
         "```",
         "tools/gen-status-graph.py --notes <RE notes dir>   # re-export status.json, redraw",
         "tools/gen-status-graph.py --library LEDGER.json   # re-export plugin-library.json, redraw",
+        "tools/plugin-qualify.py ...                        # measure plug-ins (writes plugins/*.json)",
         "tools/gen-status-graph.py                          # redraw only",
         "tools/gen-status-graph.py --check                  # CI: exit 1 if stale",
         "```",
@@ -612,6 +794,11 @@ def outputs(data):
         "README.md": readme(data),
     }
     if sum(c_lib.values()):
+        md, working, total = plugins_md(library_items(), load_checks())
+        out["PLUGINS.md"] = md
+        out["badge-plugins-working.svg"] = badge(
+            "plug-ins fully working", "%d/%d" % (working, total),
+            badge_color(100.0 * working / total))
         out["badge-plugins.svg"] = badge(
             "plug-ins live on the Apollo",
             "%d/%d" % (c_lib["verified"], sum(c_lib.values())),
