@@ -8,6 +8,7 @@ there's a way for you to help.
 
 - **Tier 1: Test on Linux** — load the driver on your hardware and submit a report
 - **Tier 2: Capture device data** — help us build routing tables for untested models
+- **Tier 3: Map and verify DSP plug-ins** — load a UAD plug-in you own on the Apollo's DSP and check every control
 - **Code contributions** — fix bugs, add features, improve documentation
 
 ## Tier 1: Test on Linux
@@ -77,6 +78,15 @@ See the [Device Capture (Windows, USB) guide](https://github.com/rolotrealanis98
 
 > **Note:** Captures contain only hardware register values — no personal data,
 > no audio content, no account information.
+
+## Tier 3: Map and Verify DSP Plug-ins
+
+If you own UAD plug-ins and a Thunderbolt Apollo, you can help grow the list of plug-ins that run
+on its DSP from Linux: map a plug-in from your own UAD install, load it, turn every control, check
+the hardware readback and the audio, and report the result. The
+[plug-in mapping guide](docs/plugin-mapping.md) covers what you need, the tools for each stage,
+and how loading with the plug-in emulator differs from loading without it. The maps you build
+are made from UA's code and never go into a PR or an issue.
 
 ## Code Contributions
 

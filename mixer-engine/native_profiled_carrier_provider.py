@@ -18,6 +18,17 @@ from plugin_native import ControlPlan
 from plugin_publication import LoadedPlugin
 
 
+# An emulator_worker.EmulatorPool: emulators run in worker processes (the daemon sets it, see
+# use_emulator_workers); None runs them in this process (tests, the `learn` command).
+_WORKERS = None
+
+
+def use_emulator_workers(pool):
+    """Build every later emulator in `pool` (None: in this process again)."""
+    global _WORKERS
+    _WORKERS = pool
+
+
 def _emulator():
     """Imported on first use: a daemon without native bundles never needs unicorn."""
     from generic_capture import GenericCapture
@@ -234,6 +245,8 @@ class ProfiledCarrierProvider:
             building.set()
 
     def _capture(self, values=None):
+        if _WORKERS is not None:
+            return _WORKERS.capture(self.profile, values)
         cap = self.capture_type(self.profile, auto_start=False)
         cap.start()
         if values is not None:

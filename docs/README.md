@@ -19,6 +19,7 @@
 |---|---|
 | [Architecture](../ARCHITECTURE.md) | The repository's layout and how the driver, daemon, console and setup fit together |
 | [Contributing](../CONTRIBUTING.md) | Workflow, commit messages, code style, and the rule that no UA files or personal data are committed |
+| [Plug-in mapping](plugin-mapping.md) | Mapping, loading and verifying a DSP plug-in: what you need, the tools for each stage, the emulator's role, what to report |
 | [CI](../.github/CI.md) | What CI checks for each component |
 | [console-rs architecture](../console-rs/ARCHITECTURE.md) | The console's crates and frame pipeline |
 | [Plug-in panel runtime](../console-rs/crates/plugin-ui/RUNTIME-V2.md) | The schema-2 panel specs and the elements plugin-ui draws itself |
