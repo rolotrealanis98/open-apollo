@@ -1,0 +1,33 @@
+{
+ "plugin": "Oxford Dynamic EQ",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "103 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "fail",
+    "detail": "102/103 parameters have a panel control; none for ordinals 101",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "103 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "fail",
+    "detail": "102/103 parameters have a panel control; none for ordinals 101",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

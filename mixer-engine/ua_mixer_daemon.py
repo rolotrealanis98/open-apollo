@@ -75,9 +75,9 @@ from commands import (CommandEngine, ERR_FAILED, parse_cmdparams,
                       refused_set)
 from enabled_meta import install as install_enabled_meta
 from session_dirty import SessionDirty
-from native_carrier import INPUTS as NATIVE_INPUTS
 from plugin_lifecycle import PluginLifecycle, PluginResult, is_plugin_slot_path
 from plugin_remote import PluginRemote
+from native_carrier import DSP_INPUTS
 import plugin_license
 from ubjson_codec import encode_response as ubjson_encode_response
 from json_frame_codec import JsonFrameError, encode_frame as json_encode_frame
@@ -247,16 +247,15 @@ _NATIVE_MIXER_POSTS = frozenset({
 
 _LINK_PROPS = frozenset({'Stereo', 'StereoLink', 'Link'})
 # A link of an input native hosting never puts a chain on: everything but the
-# first unit's inputs 0-3 and Virtual 1-4 (14-17; NativePluginBackend.prepare
-# takes those only), so S/PDIF, ADAT and Virtual 5-8.  Linking those only
-# rewrites mixer coefficients (HardwareRouter._apply_link), which no native
-# chain depends on.
+# first unit's analog 1-4 and Virtual 1-4 (native_carrier.DSP_INPUTS), so S/PDIF,
+# ADAT and Virtual 5-8.  Linking those only rewrites mixer coefficients
+# (HardwareRouter._apply_link), which no native chain depends on.
 _INPUT_LINK = re_mod.compile(r'/devices/(\d+)/inputs/(\d+)/(?:Stereo|StereoLink|Link)')
 
 
 def _link_without_native_chain(canonical: str) -> bool:
     m = _INPUT_LINK.fullmatch(canonical)
-    return m is not None and (m.group(1) != '0' or int(m.group(2)) not in NATIVE_INPUTS)
+    return m is not None and (m.group(1) != '0' or int(m.group(2)) not in DSP_INPUTS)
 
 
 def native_refuses_set(canonical: str) -> bool:
@@ -277,9 +276,9 @@ def native_refusal_detail(canonical: str) -> str | None:
         return None
     if re_mod.fullmatch(r"/devices/0/inputs/(0|2|14|16)/Stereo", canonical):
         return ('Remove the plug-ins first: inputs cannot be linked or unlinked '
-                'while native plug-ins are loaded')
-    return ('Analog 1-2, 3-4 and Virtual 1-2, 3-4 are linked from their first input '
-            'while native plug-in hosting is on')
+                'while native plug-ins are loaded on them')
+    return ('Analog 1-2, Analog 3-4, Virtual 1-2 and Virtual 3-4 are linked from their '
+            'first input while native plug-in hosting is on')
 
 
 def native_allows_post(path: str) -> bool:

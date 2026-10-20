@@ -1,15 +1,14 @@
 """Insert-chain composition for profiled native plug-ins, no device I/O.
 
-One Mic Input Strip (an Input Strip on a Virtual input) and 1..4 native effects, shared
-head/resource ownership.
+One Mic Input Strip (analog input) or Input Strip (Virtual input) and 1..4 native effects,
+shared head/resource ownership.
 Runtime must authorize every render_ids entry, then verify physical activation.
 """
 from copy import deepcopy
 from dataclasses import dataclass
 from plugin_native import ControlPlan
-from native_carrier import (CHANNELS, INPUT_STRIP_MODULES, INPUT_STRIP_PLUGIN, INPUT_STRIP_WORDS, L, NONE,
-                            STRIP_MODULES, VIRTUAL_INPUTS, MeterReads, check, dsp_input, input_strip_rows,
-                            module_hashes, write as _write)
+from native_carrier import (INPUT_CARRIER, INPUT_STRIP, MIC_CARRIER, STEREO_FIRST, VIRTUAL_INPUTS, DSP_INPUTS,
+                            L, NONE, MeterReads, check, input_pair, input_strip_rows, write as _write)
 from native_profiled_carrier_provider import ProfiledCarrierProvider
 
 # Bit 0x4 of a block's word 4 is the record tap (HARDWARE-SESSIONS.md, "record tap flag"):
@@ -33,13 +32,18 @@ def _blocks(commands):
 
 
 def _writes(words):
+    # One sorted sweep: each group starts at the lowest remaining word and takes every word up to
+    # first+32 (native_carrier.compact's rule). Re-sorting what remains per group was quadratic:
+    # ENGL E765 RT's 530k startup words held the GIL for minutes and stalled the event loop.
     result = []
-    for row in sorted({r for r, _ in words}):
-        pending = {w: v for (r, w), v in words.items() if r == row}
-        while pending:
-            first = min(pending)
-            group = {w: pending.pop(w) for w in sorted(pending) if w <= first + 32}
-            result.extend(_write(row, group))
+    items = sorted(words.items())
+    i = 0
+    while i < len(items):
+        (row, first), j = items[i][0], i
+        while j < len(items) and items[j][0][0] == row and items[j][0][1] <= first + 32:
+            j += 1
+        result.extend(_write(row, {w: v for (_, w), v in items[i:j]}))
+        i = j
     return tuple(result)
 
 
@@ -194,8 +198,10 @@ def compose(providers, *, channels, record_delay_samples=200,
     """
     if type(providers) not in (tuple, list) or not 1 <= len(providers) <= 4:
         raise ValueError('one to four effects required')
-    if type(channels) is not tuple or channels not in CHANNELS:
-        raise ValueError('explicit analog or Virtual mono or stereo channels required')
+    if (type(channels) is not tuple or any(type(c) is not int or c not in DSP_INPUTS for c in channels)
+            or not (len(channels) == 1 or (len(channels) == 2 and channels[0] in STEREO_FIRST
+                                           and channels[1] == channels[0] + 1))):
+        raise ValueError('explicit native mono input or linked stereo pair required')
     if any(type(c) is not int for c in channels):
         raise ValueError('integer channel identity required')
     if type(record_delay_samples) is not int or not 0 <= record_delay_samples < 2048:
@@ -224,28 +230,29 @@ def compose(providers, *, channels, record_delay_samples=200,
     rows = list(args[0]['private_rows'][:10])
     if any(a['private_rows'][:10] != tuple(rows) for a in args):
         raise ValueError('all effects must share the same proven carrier')
-    # The providers' recipes carry the Mic strip; a Virtual input runs its own Input Strip instead.
-    virtual = channels[0] in VIRTUAL_INPUTS
-    if virtual:
-        rows[1:] = input_strip_rows()
     rows[0] = (1, 6 + 2*(1+len(providers)), NONE, 0)
     count = len(channels)
+    virtual = channels[0] in VIRTUAL_INPUTS
     head = {0: 0x40000000, 1: count, 2: count, 4: 0x22, 5: 1+len(providers),
-            7: INPUT_STRIP_PLUGIN if virtual else 0x846}
+            7: INPUT_CARRIER if virtual else MIC_CARRIER}
     commands = []
     if virtual:
-        commands.extend(_write(1, INPUT_STRIP_WORDS))
-    # Retain the captured carrier without its old two-entry head or effect data.
-    for block in () if virtual else _blocks(args[0]['commands']):
-        if 1 <= block[1] >> 24 < 10:
-            commands.extend(block)
+        # A Virtual input runs the plain Input Strip: it replaces the Mic carrier's rows 1-9, and
+        # every effect row moves down with it (each effect's base is len(rows) below).
+        rows = rows[:1] + input_strip_rows()
+        for row, word, mask, values in INPUT_STRIP:
+            commands += [0x00140000 | (len(values) + 3), L(1 + row, word), mask, *values]
+    else:
+        # Retain the captured carrier without its old two-entry head or effect data.
+        for block in _blocks(args[0]['commands']):
+            if 1 <= block[1] >> 24 < 10:
+                commands.extend(block)
     commands.extend(_write(1, {1: count, 2: count, 5: active_capacity,
                                8: monitor_delay_samples, 16: record_delay_samples}))
     if record_pre_effects:
         commands.extend(_write(MON_TAP[0], {MON_TAP[1]: RECORD_TAP}))
     effects = []
-    resources = module_hashes(INPUT_STRIP_MODULES) if virtual else []
-    mic_only = set(module_hashes(m for m in STRIP_MODULES if m not in INPUT_STRIP_MODULES)) if virtual else set()
+    resources = []
     render_ids = []
     taps = []
     for index, (provider, a, slot) in enumerate(zip(underlying, args, slots)):
@@ -273,7 +280,7 @@ def compose(providers, *, channels, record_delay_samples=200,
         head[9+2*index] = a['render_id']
         render_ids.append(a['render_id'])
         for resource in a['resources']:
-            if resource not in resources and resource not in mic_only:
+            if resource not in resources:
                 resources.append(resource)
     commands = list(_write(0, head)) + commands
     check(rows, commands)
@@ -288,7 +295,7 @@ def compose(providers, *, channels, record_delay_samples=200,
                              (effect.base_row, 4, (_shadow(commands)[effect.base_row, 4],)),
                              (0, 9+2*index, (render_ids[index],))))
     arguments = dict(render_id=render_ids[0], resources=tuple(resources), private_rows=tuple(rows),
-                     dsp=1, input_pair=(dsp_input(channels[0]), 32) if count == 1 else tuple(map(dsp_input, channels)),
+                     dsp=1, input_pair=input_pair(channels),
                      commands=tuple(commands), scratch=tuple(max(a['scratch'][p] for a in args) for p in range(3)))
     return ComposedChain(arguments, tuple(effects), tuple(render_ids), tuple(dict.fromkeys(observations)),
                          taps=tuple(taps))

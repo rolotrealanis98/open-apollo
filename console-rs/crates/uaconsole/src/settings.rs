@@ -18,6 +18,7 @@ pub struct MixerPrefs {
     pub insert_size: InsertSize,
     pub fixed_slots: bool,
     pub sends_overview: bool,
+    pub compact_sends: bool,
     pub show_browser: bool,
     pub tab: BrowserTab,
     pub show_aux: bool,
@@ -38,6 +39,7 @@ impl MixerPrefs {
             insert_size: v.insert_size,
             fixed_slots: v.fixed_slots,
             sends_overview: v.sends_overview,
+            compact_sends: v.compact_sends,
             show_browser: v.show_browser,
             tab: v.browser.tab,
             show_aux: v.show_aux,
@@ -51,6 +53,7 @@ impl MixerPrefs {
         v.insert_size = self.insert_size;
         v.fixed_slots = self.fixed_slots;
         v.sends_overview = self.sends_overview;
+        v.compact_sends = self.compact_sends;
         v.show_browser = self.show_browser;
         v.browser.tab = self.tab;
         v.show_aux = self.show_aux;
@@ -148,6 +151,7 @@ impl Settings {
                 },
                 ("fixed_slots", Some(Value::Bool(v))) => s.mixer.fixed_slots = v,
                 ("sends_overview", Some(Value::Bool(v))) => s.mixer.sends_overview = v,
+                ("compact_sends", Some(Value::Bool(v))) => s.mixer.compact_sends = v,
                 ("browser", Some(Value::Bool(v))) => s.mixer.show_browser = v,
                 ("browser_tab", Some(Value::Str(v))) => match v.as_str() {
                     "plugins" => s.mixer.tab = BrowserTab::Plugins,
@@ -177,7 +181,7 @@ impl Settings {
         let m = &self.mixer;
         out += &format!(
             "inputs = {}\ninserts = {}\nsends = {}\nfader = {}\ninsert_size = {}\nfixed_slots = {}\n\
-             sends_overview = {}\nbrowser = {}\nbrowser_tab = {}\naux = {}\nctrl_room = {}\n",
+             sends_overview = {}\ncompact_sends = {}\nbrowser = {}\nbrowser_tab = {}\naux = {}\nctrl_room = {}\n",
             m.sections.inputs,
             m.sections.inserts,
             m.sections.sends,
@@ -185,6 +189,7 @@ impl Settings {
             quote(if m.insert_size == InsertSize::Small { "small" } else { "large" }),
             m.fixed_slots,
             m.sends_overview,
+            m.compact_sends,
             m.show_browser,
             quote(if m.tab == BrowserTab::Presets { "presets" } else { "plugins" }),
             m.show_aux,
@@ -269,6 +274,7 @@ mod tests {
                 insert_size: InsertSize::Small,
                 fixed_slots: false,
                 sends_overview: true,
+                compact_sends: true,
                 show_browser: false,
                 tab: BrowserTab::Presets,
                 show_aux: false,

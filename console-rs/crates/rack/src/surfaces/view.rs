@@ -281,6 +281,8 @@ pub struct ViewState {
     pub insert_size: InsertSize,
     pub fixed_slots: bool,
     pub sends_overview: bool,
+    /// Input sends as mini sends (the SENDS row's view-type icon off) instead of full strips.
+    pub compact_sends: bool,
     pub modifier: Option<Modifier>,
     pub show_browser: bool,
     pub browser: BrowserView,
@@ -380,6 +382,7 @@ impl Default for ViewState {
             insert_size: InsertSize::Large,
             fixed_slots: true,
             sends_overview: false,
+            compact_sends: false,
             modifier: None,
             show_browser: true,
             browser: BrowserView::default(),
@@ -440,6 +443,7 @@ pub fn is_view_control(c: &Control) -> bool {
             | C::InsertSize(_)
             | C::FixedSlots
             | C::SendsOverview
+            | C::RowViewType(_)
             | C::Modifier(_)
             | C::ShowBrowser
             | C::ShowPluginScenes
@@ -568,6 +572,7 @@ impl ViewState {
     /// Applies a view spec: comma-separated `key=value` items (renders, `--view`, tests).
     ///
     /// `inputs|inserts|sends|fader=0|1`, `small` / `large`, `fixed=0|1`, `overview=0|1`,
+    /// `compact-sends=0|1`,
     /// `scroll=F`, `aux-scroll=F` (0…1), `browser=0|1`, `tab=plugins|presets`, `hint=0|1`,
     /// `aux=0|1`, `ctrl=0|1`, `scenes=0|1`, `scene-info=0|1`, `first=N`,
     /// `presets-open=Folder|Folder`, `presets-scroll=F`,
@@ -590,6 +595,7 @@ impl ViewState {
                 "large" => self.insert_size = InsertSize::Large,
                 "fixed" => self.fixed_slots = flag()?,
                 "overview" => self.sends_overview = flag()?,
+                "compact-sends" => self.compact_sends = flag()?,
                 "scroll" => self.cells_scroll = frac()?,
                 "aux-scroll" => self.aux_scroll = frac()?,
                 "browser" => self.show_browser = flag()?,
@@ -697,6 +703,10 @@ impl ViewState {
         }
         if !press {
             return vec![Effect::Model(action)];
+        }
+        // The strip menu's Hide also opens Show/Hide Channels, the only way back for that strip.
+        if matches!(id.control, C::Menu(crate::menu::MenuCmd::Hide)) {
+            self.show_channels = true;
         }
         // NETWORK's LAUNCH / MORE INFO open pages (Console: `Rack_NetworkSettings` 0x18085ca10,
         // 0x18085cc00); they send nothing to the engine.
@@ -833,6 +843,11 @@ impl ViewState {
             C::InsertSize(s) => self.insert_size = s,
             C::FixedSlots => self.fixed_slots ^= true,
             C::SendsOverview => self.sends_overview ^= true,
+            C::RowViewType(Section::Sends) => self.compact_sends ^= true,
+            C::RowViewType(_) => {
+                self.insert_size =
+                    if self.insert_size == InsertSize::Large { InsertSize::Small } else { InsertSize::Large };
+            }
             C::Modifier(m) => {
                 self.modifier = if self.modifier == Some(m) { None } else { Some(m) };
                 self.modifier_armed = self.modifier.map(|_| std::time::Instant::now());
@@ -1318,6 +1333,18 @@ mod tests {
     }
 
     #[test]
+    fn row_view_type_icons_switch_sends_and_size() {
+        let model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        assert!(v.route(Action::Tap(cid("nav", Control::RowViewType(Section::Sends))), &model).is_empty());
+        assert!(v.compact_sends && v.insert_size == InsertSize::Large);
+        v.route(Action::Tap(cid("nav", Control::RowViewType(Section::Inserts))), &model);
+        assert_eq!(v.insert_size, InsertSize::Small);
+        v.route(Action::Tap(cid("nav", Control::RowViewType(Section::Sends))), &model);
+        assert!(!v.compact_sends);
+    }
+
+    #[test]
     fn sections_and_navigator_are_view_only() {
         let model = PreviewMixer::default();
         let mut v = ViewState::default();
@@ -1428,6 +1455,15 @@ mod tests {
         // SET DEFAULT does not apply to inserts: the tap is consumed (no open, no write).
         v.dispatch(Action::Toggle(cid("nav", Control::Modifier(Modifier::SetDefault))), &mut model);
         assert!(v.route(Action::Tap(cid("in0", Control::Insert(1))), &model).is_empty());
+    }
+
+    #[test]
+    fn strip_menu_hide_opens_show_hide_channels() {
+        let model = PreviewMixer::default();
+        let mut v = ViewState::default();
+        let e = v.route(Action::Tap(cid("in0", Control::Menu(crate::menu::MenuCmd::Hide))), &model);
+        assert_eq!(e.len(), 1, "the hide still reaches the model");
+        assert!(v.show_channels);
     }
 
     #[test]

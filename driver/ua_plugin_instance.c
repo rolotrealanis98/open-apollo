@@ -469,19 +469,22 @@ static int ua_inst_check_cmds(const struct ua_memspec_row *rows,
 /* Recover the original head directory from checked initialization WRITEs.
  * No caller-provided license list can omit a directory member. Head word 5
  * is the sub count; each pointer/ID pair begins at word 6. The first sub is
- * the built-in Mic strip (0x846) or, on a Virtual input, the built-in Input
- * Strip (0x83E), followed by at most four licensed effects, or
- * (UNISON) a licensed integrated header followed by zero to four effects.
+ * the built-in Mic strip (an analog input) or Input Strip (a Virtual input),
+ * followed by at most four licensed effects, or (UNISON) a licensed
+ * integrated header followed by zero to four effects.  @carrier: the strip
+ * the instance replaces must run (0x846 Mic, also for UNISON and a plain
+ * START; 0x83E Input), checked against the inputs at CREATE.
  */
 static int ua_inst_chain_ids(const struct ua_memspec_row *rows, unsigned int nr,
 			     const u32 *cmd, unsigned int nw, bool chain, bool unison,
-			     u32 primary, u32 ids[5], unsigned int *nids)
+			     u32 primary, u32 ids[5], unsigned int *nids, u32 *carrier)
 {
 	u32 head[16] = {0};
 	u8 seen[16] = {0};
 	unsigned int i, k, pos, len, n, j, links, first = unison ? 0 : 1;
 
 	*nids = 0;
+	*carrier = 0x846;
 	for (i = 0; i < nw; i += len) {
 		len = cmd[i] & 0xffff;
 		if (cmd[i + 1] >> 24)
@@ -509,6 +512,8 @@ static int ua_inst_chain_ids(const struct ua_memspec_row *rows, unsigned int nr,
 	    rows[0].pool != 1 || rows[0].dwords != 6 + 2 * n ||
 	    !seen[7] || (!unison && head[7] != 0x846 && head[7] != 0x83e))
 		return -EINVAL;
+	if (!unison)
+		*carrier = head[7];
 	for (i = 0; i < n; i++) {
 		if (!seen[7 + 2 * i])
 			return -EINVAL;
@@ -757,7 +762,7 @@ static bool ua_inst_inputs_overlap(u32 a, u32 b)
 static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 			    struct ua_plugin_instance *req, const u8 (*sha)[32],
 			    const struct ua_memspec_row *rows, const u32 *cmd, const u32 *ids,
-			    unsigned int nids)
+			    unsigned int nids, u32 carrier)
 {
 	struct ua_plugin_host *h = ua->host;
 	struct ua_pool_request *rq = NULL;
@@ -838,7 +843,7 @@ static int ua_plugin_create(struct ua_device *ua, struct ua_file *uf,
 			struct ua_plugin_inst *other;
 
 			ret = ua_strips_override_target(ua, req->dsp, req->reserved[0], epoch,
-							&in->strip_generation);
+							&in->strip_generation, carrier);
 			/* Each input has exactly one routed owner, regardless of file. */
 			list_for_each_entry (other, &h->instances, node)
 				if ((req->flags & UA_PLUGIN_CREATE_F_START) &&
@@ -1188,7 +1193,7 @@ static int ua_plugin_swap(struct ua_device *ua, struct ua_file *uf,
 		ret = -EINVAL;
 		goto unlock;
 	}
-	ret = ua_strips_override_target(ua, from->dsp, from->synch, req->epoch, &generation);
+	ret = ua_strips_override_target(ua, from->dsp, from->synch, req->epoch, &generation, 0);
 	if (ret)
 		goto unlock;
 	if (generation != from->strip_generation || generation != to->strip_generation) {
@@ -1307,7 +1312,7 @@ static int ua_plugin_start_staged(struct ua_device *ua, struct ua_file *uf,
 			}
 	}
 	if (!ret)
-		ret = ua_strips_override_target(ua, in->dsp, in->synch, req->epoch, &generation);
+		ret = ua_strips_override_target(ua, in->dsp, in->synch, req->epoch, &generation, 0);
 	if (!ret && generation != in->strip_generation)
 		ret = -ESTALE;
 	if (ret)
@@ -1350,7 +1355,7 @@ static long ua_plugin_unison_lifecycle(struct ua_device *ua, struct ua_file *uf,
 		ret = -EPERM;
 	if (ret)
 		goto out;
-	ret = ua_strips_override_target(ua, in->dsp, in->synch, req->epoch, &generation);
+	ret = ua_strips_override_target(ua, in->dsp, in->synch, req->epoch, &generation, 0);
 	if (ret)
 		goto out;
 	if (generation != in->strip_generation) {
@@ -1524,7 +1529,7 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 	u32 *cmd = NULL;
 	u8 (*sha)[32] = NULL;
 	unsigned int i, nw = 0, nids = 0;
-	u32 ids[5];
+	u32 ids[5], carrier = 0x846;	/* the strip a START/STAGE replaces */
 	long ret;
 
 	if (!ua_plugin_host_enabled())
@@ -1645,13 +1650,15 @@ long ua_plugin_ioctl_instance(struct ua_device *ua, struct ua_file *uf,
 		if (nw) {
 			ret = ua_inst_chain_ids(rows, req.n_private, cmd, nw,
 				!!(req.flags & UA_PLUGIN_CREATE_F_CHAIN),
-				!!(req.flags & UA_PLUGIN_CREATE_F_UNISON), req.render_id, ids, &nids);
+				!!(req.flags & UA_PLUGIN_CREATE_F_UNISON), req.render_id, ids, &nids,
+				&carrier);
 			if (ret)
 				goto out;
 		}
 	}
 
-	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows, cmd, ids, nids);
+	ret = ua_plugin_create(ua, uf, &req, (const u8 (*)[32])sha, rows, cmd, ids, nids,
+			       carrier);
 	if ((!ret || ret == -EACCES) &&
 	    copy_to_user((void __user *)arg, &req, sizeof(req)))
 		ret = -EFAULT;

@@ -128,3 +128,66 @@ def test_tagged_meter_ids_address_their_row():
     assert reads.get(('opcode', 519, 0x0200001f, 1, 1)) == (12, 31)
     assert reads.get(('floats', 0x03000000)) is None              # no row 3
     assert reads.rebased(20).get(('floats', 0x01000008)) == (21, 8)
+
+
+@pytest.mark.parametrize('count,channels,pair', [(1, (14,), (0x18, 32)), (3, (17,), (0x1b, 32)),
+                                                 (2, (14, 15), (0x18, 0x19)), (1, (16, 17), (0x1a, 0x1b))])
+@pytest.mark.parametrize('pre', [False, True])
+def test_a_virtual_input_chain_carries_the_input_strip(providers, count, channels, pair, pre):
+    """Virtual 1-4: head word 7 is the Input Strip (0x83E), rows 1-5 its m0 and commons, the
+    effects follow at row 6, and the driver gets DSP inputs 0x18-0x1b."""
+    chain = ncc.compose(providers(count, channels[0]), channels=channels, record_pre_effects=pre)
+    analog = ncc.compose(providers(count, 0), channels=(0,) if len(channels) == 1 else (0, 1),
+                         record_pre_effects=pre)
+    rows, commands = chain.arguments['private_rows'], list(chain.arguments['commands'])
+    native_carrier.check(rows, commands)
+    assert chain.arguments['input_pair'] == pair
+    assert rows[1:6] == tuple(native_carrier.input_strip_rows())
+    assert len(rows) == len(analog.arguments['private_rows']) - 4
+    assert [e.base_row for e in chain.effects] == [e.base_row - 4 for e in analog.effects]
+    assert rows[6][2] == native_carrier.L(0, 8)                     # first effect root -> head[8]
+    w, a = words(chain), words(analog)
+    assert w[0, 7] == native_carrier.INPUT_CARRIER and a[0, 7] == native_carrier.MIC_CARRIER
+    assert {(r, k): v for (r, k), v in w.items() if r == 1} == {
+        (1, 0): 0x40000000, (1, 1): len(channels), (1, 2): len(channels), (1, 5): 256,
+        (1, 8): 0, (1, 16): 200, (1, 22): 0x3a888889, (1, 25): 0x3b83126f,
+        **({ncc.MON_TAP: ncc.RECORD_TAP} if pre else {})}
+    # each effect's words are the analog chain's, four rows down
+    assert {(r - 4, k): v for (r, k), v in a.items() if r >= 10} == {k: v for k, v in w.items() if k[0] >= 6}
+    assert [e.slot for e in chain.effects] == [f'/devices/0/inputs/{channels[0]}/effects/{i}' for i in range(count)]
+
+
+@pytest.mark.parametrize('channels', [(15, 16), (18,), (4,), (13, 14), (1, 2)])
+def test_inputs_without_a_native_strip_or_pair_are_refused(providers, channels):
+    with pytest.raises(ValueError):
+        ncc.compose(providers(1, 0), channels=channels)
+
+
+def _writes_reference(words):
+    """The original per-group re-sort: the output _writes must keep."""
+    result = []
+    for row in sorted({r for r, _ in words}):
+        pending = {w: v for (r, w), v in words.items() if r == row}
+        while pending:
+            first = min(pending)
+            group = {w: pending.pop(w) for w in sorted(pending) if w <= first + 32}
+            result.extend(native_carrier.write(row, group))
+    return tuple(result)
+
+
+@pytest.mark.parametrize('seed', range(20))
+def test_writes_groups_words_as_before(seed):
+    import random
+    rng = random.Random(seed)
+    words = {(rng.randrange(10, 14), rng.randrange(0, 400)): rng.randrange(1 << 32) for _ in range(rng.randrange(1, 300))}
+    assert ncc._writes(words) == _writes_reference(words)
+
+
+def test_a_large_startup_composes_in_linear_time():
+    """ENGL E765 RT has 530k startup words; the old per-group re-sort took minutes."""
+    import time
+    words = {(10 + r, w): w & 0xffff for r in range(3) for w in range(0, 530000 // 3 * 3, 3)}
+    start = time.monotonic()
+    commands = ncc._writes(words)
+    assert time.monotonic() - start < 5
+    assert len(ncc._shadow(commands)) == len(words)

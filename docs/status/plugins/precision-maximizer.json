@@ -1,0 +1,33 @@
+{
+ "plugin": "Precision Maximizer",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "7 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "7/7",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "7 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "7/7",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

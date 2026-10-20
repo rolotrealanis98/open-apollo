@@ -240,7 +240,7 @@ impl CellRows {
         // talkback strip has the UAD REC row, so the bus inserts row makes room for it.
         let size = if aux { InsertSize::Large } else { view.insert_size };
         let rec_row = !aux || strips.iter().any(|s| s.kind == StripKind::Talkback);
-        let style = cells::SendStyle::of(view.sends_overview, aux);
+        let style = cells::SendStyle::of(view.sends_overview, aux || view.compact_sends);
         Self {
             input: (!aux).then_some(if !open(Section::Inputs) {
                 HEADER_H
@@ -340,7 +340,7 @@ pub fn build_window_with(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState) 
     ui.fill(Rect::new(l.side_x(), W::COLUMN.0, l.aux_x() - l.side_x(), col_h), PANEL);
     // The navigator ends on the bus section's first whole point (p2 1181, s08 972).
     draw_session_navigator(ui, model, view.show_offline_devices, Rect::new(l.side_x(), W::CONTENT_TOP, l.aux_x().ceil() - l.side_x(), W::COLUMN.0 - W::CONTENT_TOP), first, visible);
-    side_section(ui, &rows, off, Rect::new(l.side_x(), W::COLUMN.0, W::SIDE_SECTION.1, col_h));
+    side_section(ui, &rows, view.compact_sends, off, Rect::new(l.side_x(), W::COLUMN.0, W::SIDE_SECTION.1, col_h));
 
     for (i, s) in inputs.iter().enumerate().skip(first).take(visible) {
         let x = l.strips_x() + (i - first) as f32 * STRIP_W;
@@ -608,7 +608,7 @@ fn scrollbar_column(ui: &mut Ui, x: f32, main_y: f32, status_y: f32, visible: f3
 /// rows, the yellow row icon at (15, 35); the main area's `fader_and_meters_bg` with
 /// S (clear solos) / OL (clear clips) at main + 63 / + 87, and the white label plate.
 /// Measured on Console 1.3.1 (p1 1920 × 1050, p2 1470 × 1105).
-fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
+fn side_section(ui: &mut Ui, rows: &CellRows, compact_sends: bool, off: f32, r: Rect) {
     const ROW_ICON: Rgba = Rgba::rgb8(246, 201, 91);
     const ROW_ICON_EDGE: Rgba = Rgba::rgb8(44, 46, 48);
     const ROW_ICON_SMALL: Rgba = Rgba::rgb8(144, 155, 161);
@@ -634,12 +634,19 @@ fn side_section(ui: &mut Ui, rows: &CellRows, off: f32, r: Rect) {
                     ui.image(img, Rect::new(17.0, y + 5.0, 12.0, 12.0), None, None, 1.0);
                 }
                 if open && h >= 50.0 {
-                    // Yellow in LARGE, blue-grey in SMALL (s47/s48: (144, 155, 161)).
-                    let c = if rows.size == InsertSize::Small { ROW_ICON_SMALL } else { ROW_ICON };
+                    // Yellow in LARGE, blue-grey in SMALL (s47/s48: (144, 155, 161)); the Sends
+                    // row's shows full vs. mini sends.
+                    let small = if sec == Section::Sends { compact_sends } else { rows.size == InsertSize::Small };
+                    let c = if small { ROW_ICON_SMALL } else { ROW_ICON };
                     let icon = Rect::new(15.0, y + 35.0, 16.0, 15.0);
                     ui.fill(icon, ROW_ICON_EDGE);
                     ui.fill(Rect::new(icon.x + 1.0, icon.y + 1.0, 14.0, 6.0), c);
                     ui.fill(Rect::new(icon.x + 1.0, icon.y + 8.0, 14.0, 6.0), c);
+                    ui.hit(
+                        icon.inset(-4.0, -4.0, -4.0, -4.0),
+                        ControlId { strip: navigator::NAV_ID.into(), control: Control::RowViewType(sec) },
+                        HitKind::Tap,
+                    );
                 }
                 ui.hit(Rect::new(0.0, y, r.w, HEADER_H), ControlId { strip: navigator::NAV_ID.into(), control: Control::Section(sec) }, HitKind::Toggle);
             }

@@ -1038,16 +1038,17 @@ bool ua_strips_live(struct ua_device *ua)
 }
 
 /*
- * Every actual input must have a complete retained mono strip on this DSP:
- * a Mic strip or a Virtual input's Input Strip (its chain carries the Input
- * Strip, mixer-engine native_carrier.py INPUT_STRIP).
+ * Every actual input must have a complete retained mono strip on this DSP.
+ * A Mic strip (analog input) or an Input Strip (Virtual input) can be
+ * replaced; @carrier, when not 0, is the pluginId the replacing chain starts
+ * with (0x846 Mic, 0x83E Input) and must be the one each input's strip runs.
  */
 int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
-			     u32 synch, u64 epoch, u32 *generation)
+			     u32 synch, u64 epoch, u32 *generation, u32 carrier)
 {
 	struct ua_strips *st = ua->host ? ua->host->strips : NULL;
 	u32 input[2] = { synch & 0xffff, synch >> 16 };
-	unsigned int k, j, n, ch;
+	unsigned int k, j, ch, np;
 
 	lockdep_assert_held(&ua->lock);
 	if (!st || input_strips_steps || dsp != ua_strips_dsp ||
@@ -1064,11 +1065,14 @@ int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 
 			if (s->synch != input[ch])
 				continue;
+			if (carrier && carrier != (s->kind == UA_STRIP_KIND_INPUT ?
+						   UA_STRIP_PLUGIN_INPUT : UA_STRIP_PLUGIN_MIC))
+				return -EINVAL;
 			if (s->state != UA_STRIP_LIVE || !s->header ||
 			    s->header != s->priv[0].base)
 				return -ESTALE;
-			ua_strip_kind_rows(s->kind, &n);
-			for (j = 0; j < n; j++)
+			ua_strip_kind_rows(s->kind, &np);
+			for (j = 0; j < np; j++)
 				if (!s->priv[j].cookie)
 					return -ESTALE;
 			break;
@@ -1089,7 +1093,7 @@ int ua_strips_restore(struct ua_device *ua, struct ua_xact *x,
 	unsigned int k, ch;
 	int ret;
 
-	ret = ua_strips_override_target(ua, x->dsp, synch, x->epoch, &live_generation);
+	ret = ua_strips_override_target(ua, x->dsp, synch, x->epoch, &live_generation, 0);
 	if (ret)
 		return ret;
 	if (generation != live_generation)

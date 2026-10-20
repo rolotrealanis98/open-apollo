@@ -166,9 +166,11 @@ jobs:
         run: |
           python tools/gen-status-graph.py --check
           python tools/test-gen-status-graph.py
+          python tools/test-plugin-qualify.py
       - name: Tool unit tests
         run: |
           python tools/test-apollo-wavcheck.py
+          python tools/test-virtual-loopback.py
           python tools/test-extract-ua-dsp-modules.py
           python tools/test-virtual-insert-roundtrip.py
 

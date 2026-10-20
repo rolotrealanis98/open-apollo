@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from native_carrier import input_pair
 from plugin_driver import NativeInstance
 from plugin_native import ControlPlan
 from plugin_native_chain import NativeChainBackend
@@ -75,8 +76,7 @@ class Composition:
         self.channels = channels
 
     def create_arguments(self):
-        return dict(render_id=0x806, dsp=1,
-            input_pair=(self.channels[0], self.channels[1] if len(self.channels) == 2 else 32),
+        return dict(render_id=0x806, dsp=1, input_pair=input_pair(self.channels),
             commands=tuple(w for view in self.effects for w in (0x00140004, view.base_row << 24, 0, view.provider.word))
                      + tuple(w for row, word, (value,) in self.taps for w in (0x00140004, row << 24 | word, 0, value)))
 
@@ -106,6 +106,7 @@ class Driver:
 
     def create(self, **arguments):
         self.check('create')
+        self.pairs = getattr(self, 'pairs', []) + [arguments['input_pair']]
         self.sequence += 1
         native = NativeInstance(self.sequence, 1, 23)
         self.calls.append(('create', native.handle, arguments.get('stage', False), arguments.get('chain', False)))
@@ -844,3 +845,65 @@ def test_refused_candidate_readback_fails_only_that_load():
     assert set(driver.memory) == driver.active == {previous.native.handle}
     assert tx.load(slot(1), 'second').committed
     assert tx.control(slot(1), FIELD, .4).committed
+
+
+def virtual_model(virtual_inputs=True, compensation=False):
+    """model() plus Virtual 1-4 (tree inputs 14-17) with mono and Virtual 1/2 stereo sources."""
+    state, helper, _, prototype, _ = model()
+    for first in (14, 15, 16, 17):
+        state.add_runtime_property(f'/devices/0/inputs/{first}/Stereo', {'type': 'bool', 'value': False})
+        for index in range(4):
+            for name, kind, value in [('EffectName', 'string', ''), ('EffectInstance', 'pointer', 0),
+                                      ('Power', 'bool', False), ('Latency', 'int', 0), ('Status', 'string', '')]:
+                state.add_runtime_property(slot(index, first)+'/'+name, {'type': kind, 'value': value})
+    sources = [Source(name, first) for first in (0, 14, 15) for name in ('first', 'second')]
+    sources += [Source('first', 14, (14, 15))]
+    for source in sources:
+        source.descriptor_latency_samples = 0
+    driver = DelayDriver() if compensation else Driver()
+    backend = NativeChainBackend(prototype.publisher, driver, sources, max_instances=4,
+                                 composer=delay_compose if compensation else compose,
+                                 compensation_supported=compensation,
+                                 stereo=True, replacement=True, virtual_inputs=virtual_inputs)
+    return state, driver, backend, PluginTransactions(backend.publisher, backend)
+
+
+def test_virtual_inputs_take_chains_on_their_own_dsp_inputs():
+    """Virtual 1 is tree input 14 and DSP input 0x18; its chain is independent of analog 1's."""
+    state, driver, backend, tx = virtual_model()
+    assert tx.load(slot(0, 14), 'first').committed
+    assert tx.load(slot(1, 14), 'second').committed
+    assert tx.load(slot(0, 0), 'first').committed
+    assert tx.load(slot(0, 15), 'first').committed
+    assert set(backend._chains) == {(14,), (0,), (15,)}
+    assert driver.pairs[0] == (0x18, 32) and (0, 32) in driver.pairs and (0x19, 32) in driver.pairs
+    assert tx.load(slot(2, 14), 'nothing').error
+    assert backend.prepare('/devices/0/inputs/14/preamps/0/effects/0', 'first').status is Outcome.FAILED
+    assert backend.prepare('/devices/0/inputs/18/effects/0', 'first').status is Outcome.FAILED
+    for path in list(backend._leases):
+        assert tx.unload(path).committed
+    for first in (14, 15):
+        state.set_value(f'/devices/0/inputs/{first}/Stereo', True)
+    assert tx.load(slot(0, 14), 'first').committed
+    assert backend._leases[slot(0, 14)].provider.channels == (14, 15) and driver.pairs[-1] == (0x18, 0x19)
+
+
+def test_an_old_driver_offers_no_virtual_slot():
+    _, driver, backend, tx = virtual_model(virtual_inputs=False)
+    assert {p.slot for p in backend.providers.values()} == {slot(0, 0)}
+    assert all('/inputs/0/' in s for c in backend.capabilities() for s in c['slots'])
+    assert tx.load(slot(0, 14), 'first').error and not driver.calls
+
+
+def test_a_virtual_chain_carries_its_own_delays_and_leaves_the_analog_strips():
+    """Only analog 1-4 have retained Mic strip delay lines (ua_strips_delay); a Virtual chain's
+    record and monitor delays are in its own m0, from the same compensation plan."""
+    _, driver, backend, tx = virtual_model(compensation=True)
+    assert backend.set_compensation('Medium').status is Outcome.CONFIRMED
+    strips = driver.strips
+    assert tx.load(slot(0, 14), 'first').committed
+    assert driver.strips.record == strips.record and len(driver.strips.record) == 4
+    assert driver.memory[backend._leases[slot(0, 14)].native.handle][1, 16] == 200
+    assert backend.set_compensation('Short').status is Outcome.CONFIRMED
+    assert driver.memory[backend._leases[slot(0, 14)].native.handle][1, 16] == 100
+    assert driver.strips.record == (100,)*4

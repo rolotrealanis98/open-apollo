@@ -1,0 +1,45 @@
+{
+ "plugin": "Precision Delay Mod L",
+ "layouts": {
+  "mono": {
+   "map": {
+    "result": "pass",
+    "detail": "20 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "20/20",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  },
+  "stereo": {
+   "map": {
+    "result": "pass",
+    "detail": "20 parameters",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "panel": {
+    "result": "pass",
+    "detail": "20/20",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   },
+   "meters": {
+    "result": "n/a",
+    "detail": "no meters on the panel",
+    "date": "2026-10-20",
+    "how": "plugin-qualify/1"
+   }
+  }
+ }
+}

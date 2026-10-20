@@ -72,9 +72,6 @@ feature bits select supported operations; an older driver never silently gains
 stereo, replacement, multiple chains or compensation support.
 
 - Independent analog input chains support mono and genuine stereo layouts.
-- Apollo x4 Virtual 1-4 (`/devices/0/inputs/14-17`, DSP inputs 0x18-0x1b) host the same
-  chains, mono and on the linked pairs 1/2 and 3/4, when the driver reports
-  `UA_FEAT2_PLUGIN_VIRTUAL` (see below).
 - With CHAIN and SWAP support, a private composer can host up to four logical
   inserts per input chain. Each retains a stable public identity and its own
   controls when neighboring inserts are added, replaced or removed.
@@ -101,25 +98,23 @@ stereo, replacement, multiple chains or compensation support.
   Slot Power needs its own provider contract; an effect's Power parameter does
   not implicitly implement slot Power.
 
-## Virtual strips
+## Virtual inputs
 
-A Virtual strip is the plain Input Strip (pluginId 0x83E, modules A5 and C2; six private rows)
-the driver builds with `input_strips_virtual`, not the Mic Input Strip. The bundles' recipes
-keep the Mic strip; `native_chain_composer.compose` swaps it for the Input Strip when the
-chain's input is a Virtual one: head word 7 = 0x83E, rows 1-5 the Input Strip (m0 0x1e words at
-head[6], four 2048-word commons), its m0 words, A5/C2 instead of the Mic strip's five modules,
-and `input_pair` the DSP input (`native_carrier.VIRTUAL_INPUTS`). The effect rows then start at
-row 6; controls, meters and observations follow through the composer's row mapping. The driver
-accepts that head and lets a chain replace, and on unload restore, the Virtual input's retained
-strip (`ua_strips_override_target`). Without `UA_FEAT2_PLUGIN_VIRTUAL` (an older driver) the
-daemon offers nothing on the Virtual inputs. Delay compensation plans them like any input, but
-the driver retunes only the Mic strips: a plain Virtual strip keeps its captured 200-sample
-record delay, so at Medium a zero-latency insert leaves the Virtual record timing as it was.
-Linking Virtual 1/2 or 3/4 is refused only while that pair has a chain. Use: a DAW plays to
-VIRTUAL n and records VIRTUAL n back, the Apollo as a hardware insert
-(`tools/virtual-insert-roundtrip.py` measures the round trip). The 0x83E chain recipe is
-inferred from the plain strip and the Mic chain (no capture of UA's own); hardware check:
-HARDWARE-SESSIONS.md, "Session: inserts on the Virtual strips".
+Native chains also go on Virtual 1-4 (tree inputs 14-17, DSP inputs 0x18-0x1b), where the
+driver runs the plain Input Strip (pluginId 0x83E) instead of the Mic Input Strip. The chain
+head then names 0x83E as its first member and carries that strip's m0 and four delay commons
+(rows 1-5), so every effect sits four rows lower than on an analog input
+(`native_chain_composer.compose`, `native_carrier.input_strip_rows`). The driver accepts it
+only with `UA_FEAT2_PLUGIN_VIRTUAL_INPUTS` and only on an input whose strip is that kind;
+the daemon offers the Virtual slots only then. A Virtual chain carries its own record and
+monitor delays from the same compensation plan; only analog 1-4 have retained strip delay
+lines. Unison stays analog. Virtual 1/2 and 3/4 link as stereo pairs; their link is refused
+only while a plug-in sits on that pair.
+
+Why: a Virtual input is a digital loopback (playback VIRTUAL n in, record VIRTUAL n out),
+so a plug-in's sound, bypass and latency can be measured with no cable
+(`tools/virtual-loopback.py`). The 0x83E head is inferred from the plain strip and the Mic
+chain, not captured from UA; HARDWARE-SESSIONS.md session 6 is its first hardware run.
 
 ## Input delay compensation
 

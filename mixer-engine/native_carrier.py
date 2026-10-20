@@ -1,5 +1,4 @@
 """Chain carrier for a profiled native plug-in: chain head + Mic Input Strip + the plug-in.
-On a Virtual input the chain composer swaps the Mic strip for the Input Strip (INPUT_STRIP).
 
 Builds the CREATE recipe (private rows, WRITE commands, resources, scratch) for one plug-in from
 its runtime bundle's original descriptor and startup words (tools/plugin-mapper builds the bundle
@@ -31,36 +30,20 @@ MIC_STRIP = (
 )
 
 
-# Apollo x4: Virtual 1-4 are /devices/0/inputs/14-17 and DSP inputs 0x18-0x1b, each with the plain
-# Input Strip (pluginId 0x83E) driver/ua_strips.c builds (input_strips_virtual). Inputs 0-3 are DSP inputs 0-3.
-VIRTUAL_INPUTS = {14: 0x18, 15: 0x19, 16: 0x1a, 17: 0x1b}
-INPUTS = (0, 1, 2, 3, *VIRTUAL_INPUTS)
-STEREO_FIRST = (0, 2, 14, 16)
-CHANNELS = tuple((i,) for i in INPUTS) + tuple((i, i + 1) for i in STEREO_FIRST)  # chain layouts
+# The Console inputs a native chain may replace, by tree index (/devices/0/inputs/N): the x4's
+# analog inputs 1-4 (DSP inputs 0-3, Mic Input Strip) and Virtual 1-4 (tree 14-17, DSP inputs
+# 0x18-0x1b), where the driver runs a plain Input Strip (input_strips_virtual=0x0f, ua_strips.c).
+# shortcut: Virtual 1-4 only, the ones the driver builds strips for by default; Virtual 5-8 need
+# input_strips_virtual=0xff and their tree indices here.
+DSP_INPUTS = {0: 0, 1: 1, 2: 2, 3: 3, 14: 0x18, 15: 0x19, 16: 0x1a, 17: 0x1b}
+VIRTUAL_INPUTS = frozenset((14, 15, 16, 17))
+STEREO_FIRST = (0, 2, 14, 16)          # linked pairs: 1/2, 3/4, Virtual 1/2, Virtual 3/4
+MIC_CARRIER, INPUT_CARRIER = 0x846, 0x83e
 
 
-def dsp_input(index):
-    """The DSP input (SYNCH channel) of /devices/0/inputs/<index>."""
-    return VIRTUAL_INPUTS.get(index, index)
-
-
-# The Input Strip in a chain, in place of the Mic strip's rows 1-9 (driver ua_strip_input_rows: m0
-# linked at head[6], commons at m0 0x0e/0x0f/0x06/0x07 sized as the Mic chain's) and its m0 words
-# (ua_strip_input_m0 without the record tap at word 4: the last effect holds it). Inferred from the plain
-# strip and the Mic chain; no capture of UA's own Virtual insert chain exists.
-INPUT_STRIP_PLUGIN = 0x83e
-INPUT_STRIP_MODULES = ('0a5', '0c2')
-INPUT_STRIP_WORDS = {0: 0x40000000, 1: 1, 2: 1, 5: 0x800, 22: 0x3a888889, 25: 0x3b83126f}
-
-
-def input_strip_rows():
-    return [(1, 30, L(0, 6), 0),
-            (3, 2048, L(1, 14), 2), (3, 2048, L(1, 15), 2), (3, 2048, L(1, 6), 2), (3, 2048, L(1, 7), 2)]
-
-
-def module_hashes(names):
-    """The content hashes CREATE names the Console strip modules by."""
-    return [bytes.fromhex(sha_file(f'{DSPDIR}/{name}.bill')) for name in names]
+def input_pair(channels):
+    """The driver's in1/in2 for tree inputs `channels` (in2 0x20: mono)."""
+    return (DSP_INPUTS[channels[0]], DSP_INPUTS[channels[1]] if len(channels) == 2 else 32)
 
 
 def L(r, w):
@@ -77,6 +60,25 @@ def head_rows():
         (3, 2048, L(1, 14), 2), (3, 2048, L(1, 15), 2),     # 6  c0, 7 c1
         (3, 2048, L(1, 6), 2), (3, 2048, L(1, 7), 2),       # 8  c2, 9 c3
     ]
+
+
+def input_strip_rows():
+    """The Input Strip sub-plug-in in a chain (rows 1-5): m0 and the four delay commons, linked as
+    driver/ua_strips.c ua_strip_input_rows links them, with the Mic chain's 2048-word commons so
+    the same compensation capacity fits."""
+    return [
+        (1, 0x1e, L(0, 6), 0),                              # 1  m0 -> head[6]
+        (3, 2048, L(1, 14), 2), (3, 2048, L(1, 15), 2),     # 2  c0, 3 c1 (record delay)
+        (3, 2048, L(1, 6), 2), (3, 2048, L(1, 7), 2),       # 4  c2, 5 c3 (monitor delay)
+    ]
+
+
+# The Input Strip's m0 startup WRITE in a chain: the plain strip's captured m0 (ua_strip_input_m0,
+# mask 0x00df7fe4) less words 4 (the record tap) and 16 (the record delay), which the composer
+# owns, as MIC_STRIP leaves them to it (0x0f1f7fe4 -> 0x0f1fffec).
+INPUT_STRIP = (
+    (0, 0x00, 0x00dfffec, (0x40000000, 1, 1, 0x100, 0x3a888889, 0x3b83126f)),
+)
 
 
 def write(row, values):
@@ -320,8 +322,8 @@ class GeneratedOrdinaryCarrier:
 
     def __init__(self, descriptor, startup, *, input_index=2, record_budget=200,
                  module_store=MODULES, overload_ok=False, shared_cells_ok=False, replay=None):
-        if type(input_index) is not int or input_index not in INPUTS:
-            raise ValueError('analog input 0..3 or Virtual input 14..17 required')
+        if type(input_index) is not int or input_index not in DSP_INPUTS:
+            raise ValueError('a native chain input (analog 1-4, Virtual 1-4) required')
         # The bundle's own data, shared by every input it is offered on and never changed here:
         # kept, not copied (copying a large plug-in's startup costs seconds per provider).
         self.descriptor = descriptor
@@ -408,17 +410,16 @@ class GeneratedOrdinaryCarrier:
         if not 1 <= len(hashes) <= 64:
             raise ValueError('combined carrier resources exceed CREATE64')
         self.startup_chunks = chunks(blocks(commands))
+        # Always the Mic carrier: on a Virtual input only the composer's chain (Input Strip) can run.
         return dict(render_id=self.render_id, resources=tuple(bytes.fromhex(h) for h in hashes),
                     private_rows=tuple(rows), commands=tuple(commands), scratch=self.scratch,
-                    dsp=1, input_pair=(self.input_index, 32), chain=True)
+                    dsp=1, input_pair=input_pair((self.input_index,)), chain=True)
 
     def composition_arguments(self):
         """Return the complete checked recipe for an enclosing staged chain."""
         return deepcopy(self._arguments)
 
     def create_arguments(self):
-        if self.input_index in VIRTUAL_INPUTS:
-            raise ValueError('a Virtual input is hosted only through the chain composer (Input Strip carrier)')
         if len(self._arguments['commands']) > MAX_COMMAND_WORDS:
             raise ValueError('startup requires inactive chunk initialization before ordinary activation')
         return self.composition_arguments()

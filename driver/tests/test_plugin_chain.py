@@ -12,6 +12,7 @@ static u32 chain_cmd[] = {
     0x00140004,9,0,0x806,
     0x00140004,11,0,0x816,
 };
+static u32 chain_synch=0x00200000;  /* in2 << 16 | in1 */
 static long chain(struct ua_plugin_instance *q, unsigned int nw, u32 flags)
 {
     uintptr_t p=(uintptr_t)chain_cmd;
@@ -21,7 +22,7 @@ static long chain(struct ua_plugin_instance *q, unsigned int nw, u32 flags)
     q->flags=flags; q->render_id=0x806; q->dsp=1;
     q->n_resources=2; q->n_private=4;
     q->resources=(uintptr_t)res; q->privates=(uintptr_t)chain_rows;
-    q->reserved[0]=0x00200000; q->reserved[1]=nw;
+    q->reserved[0]=chain_synch; q->reserved[1]=nw;
     q->reserved[2]=(u32)p; q->reserved[3]=(u64)p>>32;
     return ua_plugin_ioctl_instance(&dev,&file_a,(unsigned long)q);
 }
@@ -63,24 +64,6 @@ int main(void)
     queries=host.board_queries;
     assert(chain(&q,20,UA_PLUGIN_CREATE_F_STAGE|UA_PLUGIN_CREATE_F_CHAIN)==-EACCES);
     assert(host.board_queries==queries+1 && !host.n_instances);
-    cleanup_plain();
-    return 0;
-}
-''')
-
-
-def test_the_input_strip_may_carry_a_chain():
-    """A Virtual input's chain starts with the built-in Input Strip (0x83E), unlicensed as the Mic strip."""
-    run(r'''
-int main(void)
-{
-    struct ua_plugin_instance q;
-    setup_plain();
-    bq_table[0x16]=0x81000000;
-    chain_cmd[11]=0x83e;
-    assert(chain(&q,20,UA_PLUGIN_CREATE_F_START|UA_PLUGIN_CREATE_F_CHAIN)==0);
-    assert(host.n_instances==1);
-    assert(destroy(&file_a,q.handle)==0);
     cleanup_plain();
     return 0;
 }
@@ -159,6 +142,56 @@ int main(void)
     bq_table[6]=0;
     assert(chain(&q,20,UA_PLUGIN_CREATE_F_START|UA_PLUGIN_CREATE_F_CHAIN)==-EACCES);
     assert(q.license_state==UA_PLUGIN_LICENSE_EXPIRED && !host.n_instances);
+    cleanup_plain();
+    return 0;
+}
+''')
+
+
+def test_input_strip_carrier_replaces_and_restores_a_virtual_input():
+    run(r'''
+static void add_virtual(void)
+{
+    struct ua_strip *s = &plain->strip[2];
+    s->kind = UA_STRIP_KIND_INPUT;
+    s->input = 0;
+    s->synch = 0x18;
+    s->state = UA_STRIP_LIVE;
+    for (unsigned int j = 0; j < UA_STRIP_INPUT_PRIV; j++)
+        assert(ua_pool_reserve(host.dsp[1].pools, 1, 8, &s->priv[j],
+                               false, &s->priv[j]) == 0);
+    s->header = s->priv[0].base;
+    plain->n = 3;
+}
+int main(void)
+{
+    struct ua_plugin_instance q;
+    unsigned int c, k, restored = 0;
+    setup_plain();
+    add_virtual();
+    bq_table[0x16]=0x81000000;
+    /* Mic carrier on a Virtual input, Input carrier on an analog input: refused */
+    assert(chain(&q,20,UA_PLUGIN_CREATE_F_START|UA_PLUGIN_CREATE_F_CHAIN)==0);
+    assert(destroy(&file_a,q.handle)==0);
+    chain_synch=0x00200018;
+    assert(chain(&q,20,UA_PLUGIN_CREATE_F_START|UA_PLUGIN_CREATE_F_CHAIN)==-EINVAL);
+    chain_cmd[11]=0x83e;
+    chain_synch=0x00200000;
+    assert(chain(&q,20,UA_PLUGIN_CREATE_F_START|UA_PLUGIN_CREATE_F_CHAIN)==-EINVAL);
+    assert(!host.n_instances);
+    /* Input carrier on Virtual 1: started there, and its Input Strip back after */
+    chain_synch=0x00200018;
+    assert(chain(&q,20,UA_PLUGIN_CREATE_F_START|UA_PLUGIN_CREATE_F_CHAIN)==0);
+    assert(host.n_instances==1);
+    c = dev.dsp[1].cmd.write_ptr;
+    assert(destroy(&file_a,q.handle)==0);
+    for (k = 0; k < 8; k++, c = (c + 1) & 1023)
+        if (slots[2][c][0] == 0x001f0004 && slots[2][c][1] == 0x00200018 &&
+            slots[2][c][2] == plain->strip[2].header)
+            restored++;
+    assert(restored == 1 && !host.n_instances && !host.dsp[1].quarantined);
+    chain_cmd[11]=0x846;
+    chain_synch=0x00200000;
     cleanup_plain();
     return 0;
 }

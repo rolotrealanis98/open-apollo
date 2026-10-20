@@ -12,7 +12,7 @@ Each square is one item. Open `progress-light.svg` on its own to see each square
 - **UA driver behaviour**: one square per behaviour of UA's macOS kext, Mixer Engine and Windows drivers in the parity map, with the Linux status. Things Linux does not need (N/A) and UA's licensing (out of scope, never analysed) are not counted.
 - **Work plan**: one square per task of the master implementation plan. The plugin-hosting tasks are tracked separately and not shown.
 - **Apollo models**: one square per model in `devices/`; green ones have per-model support in the code but no owner has tested them yet.
-- **Plug-in mapping**: one square per UA-built UAD-2 plug-in in scope (`plugin-library.json`). Its control-to-DSP mapping is produced by running UA's own code offline, never written by hand; **live** = loaded on the Apollo with every control set and read back; **mapped** = the mapping passed offline and waits for a licence or a live load; **not authorized** = the test Apollo refuses that plug-in, so it cannot be checked here. Running plug-ins on the Apollo is still being built and is not in a release yet.
+- **Plug-in mapping**: one square per UA-built UAD-2 plug-in in scope (`plugin-library.json`). Its control-to-DSP mapping is produced by running UA's own code offline, never written by hand; **live** = passed the live gate on the Apollo (it loads, controls read back, it unloads), which does not mean every control, meter and text is right: [PLUGINS.md](PLUGINS.md) has the measured checks per plug-in; **mapped** = the mapping passed offline and waits for a licence or a live load; **not authorized** = the test Apollo refuses that plug-in, so it cannot be checked here. Running plug-ins on the Apollo is still being built and is not in a release yet.
 
 Colours: **verified** = done and seen working on real hardware (the note cites a hardware run); **done** = done in code; **partial** = partly done, done differently or in progress; **still to figure out** = needs reverse engineering; **understood, not done** = we know what UA's driver does, Linux does not do it yet; **plugin hosting** = part of hosting UA's DSP plugins and Console strips, which is being built; **needs hardware** = needs a test on an Apollo or hardware the project does not have (a second Apollo, other models, cables, USB units, an S3-capable host).
 
@@ -95,11 +95,13 @@ The parity map was triaged against the code on 2026-10-11: rows the code already
 
 | Stage | Plug-ins |
 |---|---|
-| Live on the Apollo: every control mapped, loaded and read back | 124 |
+| Live on the Apollo: passed the live gate (loads, controls read back, unloads) | 124 |
 | Mapped offline, needs a licence to test live | 49 |
 | Mapped, live load on hold | 13 |
 | Blocked | 2 |
 | Not authorized on the test Apollo | 18 |
+
+Measured checks (every control, text, meters, latency, audio): 0 of 206 plug-ins fully work; per plug-in and what each still needs in [PLUGINS.md](PLUGINS.md).
 
 ## Apollo models
 
@@ -136,6 +138,7 @@ The parity map was triaged against the code on 2026-10-11: rows the code already
 ```
 tools/gen-status-graph.py --notes <RE notes dir>   # re-export status.json, redraw
 tools/gen-status-graph.py --library LEDGER.json   # re-export plugin-library.json, redraw
+tools/plugin-qualify.py ...                        # measure plug-ins (writes plugins/*.json)
 tools/gen-status-graph.py                          # redraw only
 tools/gen-status-graph.py --check                  # CI: exit 1 if stale
 ```

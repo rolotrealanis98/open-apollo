@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `tools/virtual-insert-roundtrip.py`: the round trip through a Virtual strip as a PipeWire
+  client sees it (play to "Apollo Virtual Out 1+2", record "Apollo Virtual In 1+2", both
+  against the sink's monitor in one stream), with the insert's extra latency against a plain
+  Virtual lane. For the latency a DAW hardware-insert wrapper has to report.
 - `docs/asahi-linux.md`: open-apollo on Apple Silicon under Asahi Linux. The stock Asahi kernel
   cannot tunnel PCIe over Thunderbolt; the guide builds Ophuscado's out-of-tree `tbt/7.1` kernel
   (`docs/asahi/PKGBUILD`), boots it with its own device tree from m1n1, and installs open-apollo
@@ -17,18 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Virtual strips and the VIRTUAL record channels. Before, nothing built them and a tone played to
   VIRTUAL 1 never reached the mixer (meter at -77 dB, nothing in the monitor mix even unmuted).
   `input_strips_virtual` (default `0x0f`) picks the inputs; `dsp_state` lists them as
-  `Virtual n`. Verified on an x4 at 48 kHz: a
+  `Virtual n`. Inserts on Virtual strips are not mapped yet. Verified on an x4 at 48 kHz: a
   -30 dBFS tone on VIRTUAL 1 meters and records at -30.0, and fader, pan and mute act on it in
   the monitor mix. The strips need a cold start (an Apollo power cycle with the driver loaded).
-- Plug-in inserts on the x4's Virtual 1-4 strips (mono, and linked 1/2 and 3/4), so a DAW can
-  use the Apollo as a hardware insert: play to VIRTUAL n, record VIRTUAL n back. The chain
-  carries the Virtual strip's Input Strip (0x83E, A5 and C2) in place of the Mic strip; the
-  driver accepts it and replaces and restores the retained Virtual strip (feature bit
-  `UA_FEAT2_PLUGIN_VIRTUAL`; the daemon offers Virtual slots only with it). Linking a Virtual
-  pair is refused while that pair has a plug-in. `tools/virtual-insert-roundtrip.py` measures
-  the round trip and the insert's level change. Tested offline only (driver host tests,
-  daemon tests); the hardware check is HARDWARE-SESSIONS.md "Session: inserts on the Virtual
-  strips".
 - `setup-apollo-io.sh` creates the "Apollo Virtual Out n+m" sinks (playback VIRTUAL n, m) and
   "Apollo Virtual In n+m" sources (record VIRTUAL n, m) by default for each pair whose two
   inputs have a live Input Strip in `dsp_state`; `--virtual` still forces every pair,
@@ -37,8 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - With native plug-in hosting on, the Virtual, S/PDIF and ADAT inputs can be stereo linked and
-  unlinked (Virtual 1-4 while their pair has no plug-in). The daemon refused every link but
-  Analog 1-2 / 3-4, though a link without a chain only rewrites the mix. Verified on an x4: linked
+  unlinked. The daemon refused every link but Analog 1-2 / 3-4, though plug-in chains only
+  ever sit on inputs 1-4 and a link elsewhere only rewrites the mix. Verified on an x4: linked
   Virtual 1/2 plays L and R hard left and right, one fader and mute drive both.
 - Apollo Twin X (and every model without a verified input strip map): a warm move from another
   OS no longer skips the DSP ring connect, which kept no input strips there and left playback
