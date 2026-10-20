@@ -482,3 +482,13 @@ The two recipes differ in exactly two words: Mic strip `m0` word 4 (row 1) and t
 
 End state: daemon, PipeWire, WirePlumber and Pulse running; zero bench instances (fd
 closed after both destroys); Console reconnected.
+
+Monitor-side rerun attempt (20:10, not run): with input 1 unmuted and soloed through the
+daemon and PipeWire stopped, MON L/R carried a steady -50 dBFS signal that correlated with
+none of the 22 record channels (peak |r| ≤ 0.01), input 1 recorded -72 dBFS. Meanwhile other
+sessions' `pytest` runs held `/dev/ua_apollo0`, a native instance (plug-in 0x894) had been
+started at 20:02 by an unknown owner, the driver had rebuilt all strips at 19:57 (now with
+Virtual 1–4 strips) and input 1's preamp gain changed twice without the bench. The bench was
+not run; input 1 was put back (muted, solo off). The monitor half needs the rig to itself:
+no other device holders (`/proc/*/fd`), no native instances, MON correlating with input 1
+on the plain strip (`tools/rectap-bench.py` now reports `mon_vs_rec_corr`).

@@ -13,7 +13,7 @@ driver client, and records input 1 (ALSA ch 0) against MON L/R (ch 14/15) at eac
 
 Usage: ~/.local/share/open-apollo/plugin-venv/bin/python3 tools/rectap-bench.py mixer-engine OUT_DIR [--offline]
 OUT_DIR gets the WAVs and results.json; keep it outside the repository.
-The daemon and PipeWire must be stopped for a run (arecord needs hw:x4).
+PipeWire must be stopped (arecord needs hw:x4). The daemon may run (it keeps the mixer: solo\ninput 1 so MON L/R carries it alone). OA_BENCH_1176_INPUT sets the 1176 Input (default 0.8).
 """
 import copy, dataclasses, json, os, subprocess, sys, time
 from pathlib import Path
@@ -29,7 +29,7 @@ from native_chain_composer import compose, _write, _shadow
 from native_carrier import check
 
 NAME, INPUT = 'UAD UA 1176 Rev A', 0
-FIELD, VALUE = 'parameters/0/NormalizedValue', 0.8
+FIELD, VALUE = 'parameters/0/NormalizedValue', float(os.environ.get('OA_BENCH_1176_INPUT', '0.8'))
 log_lines = []
 
 
@@ -85,8 +85,21 @@ def record(tag, seconds=4):
         return 20 * np.log10(r) if r else float('-inf')
 
     rec, ml, mr = db(a[:, 0]), db(a[:, 14]), db(a[:, 15])
+    # Is MON L a scaled copy of what input 1 recorded? Normalized cross-correlation peak within
+    # +-512 samples, and the least-squares gain of MON L on the record channel at that lag.
+    x, y = a[:, 0] - a[:, 0].mean(), a[:, 14] - a[:, 14].mean()
+    n = 1 << (2 * len(x) - 1).bit_length()
+    xc = np.fft.irfft(np.fft.rfft(y, n) * np.conj(np.fft.rfft(x, n)), n)
+    lags = np.r_[np.arange(0, 513), np.arange(-512, 0)]
+    k = lags[np.argmax(np.abs(xc[lags]))]
+    xs, ys = (x[:len(x) - k], y[k:]) if k >= 0 else (x[-k:], y[:len(y) + k])
+    nx, ny = float(np.dot(xs, xs)), float(np.dot(ys, ys))
+    corr = float(np.dot(xs, ys) / np.sqrt(nx * ny)) if nx and ny else 0.0
+    gain = float(np.dot(xs, ys) / nx) if nx else 0.0
     result = dict(step=tag, rec_dbfs=round(rec, 2), mon_l_dbfs=round(ml, 2), mon_r_dbfs=round(mr, 2),
-                  mon_minus_rec_db=round((ml + mr) / 2 - rec, 2))
+                  mon_minus_rec_db=round((ml + mr) / 2 - rec, 2), mon_vs_rec_lag=int(k),
+                  mon_vs_rec_corr=round(corr, 4),
+                  mon_vs_rec_gain_db=round(20 * np.log10(abs(gain)), 2) if gain else None)
     log('MEASURE', json.dumps(result))
     return result
 
