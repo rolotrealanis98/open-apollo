@@ -82,6 +82,7 @@ class StateTree:
         self._deferred_saved: dict[str, Any] = {}
         self._base: dict[str, Any] = {}
         self._save_path: Path | None = None
+        self.restored = 0   # values the state file gave at start
         self._save_timer: threading.Timer | None = None
         self._save_delay = 2.0  # seconds
         # The debounced save runs on a Timer thread while save_now() (a
@@ -175,6 +176,7 @@ class StateTree:
                     resolved["value"] = value
                     self._dirty[path] = value
                     count += 1
+            self.restored = count
             log.info("Restored %d saved values from %s", count, self._save_path)
         except (json.JSONDecodeError, OSError) as e:
             log.warning("Failed to load saved state from %s: %s", self._save_path, e)

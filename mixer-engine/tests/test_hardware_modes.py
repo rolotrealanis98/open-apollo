@@ -98,11 +98,12 @@ def test_no_metering_opens_no_meter_source(args, meter, tmp_path):
 
 # ── --preserve-hardware ─────────────────────────────────────────────
 
-def preserved(readback=True):
+def preserved(readback=True, saved=False):
     tree = StateTree()
     tree.load_device_map(DEVICE_MAP_X4)
     apply_runtime_properties(tree)
     tree.set_value("/devices/0/inputs/0/Mute/value", True)
+    tree.restored = 10 if saved else 0      # values from a state file
     backend = RecordingBackend()
     if readback:
         backend.readback = (1, make_readback(
@@ -142,6 +143,15 @@ def test_preserve_without_readback_writes_only_the_mix():
     d, tree, backend = preserved(readback=False)
     d._fire_init_complete()
     assert backend.calls and mix_only(backend.calls) == []
+
+
+def test_preserve_pushes_a_saved_mix():
+    """With saved state the DSP may be running something else (a reboot or
+    power cycle while the daemon was down): the saved mix is pushed."""
+    d, tree, backend = preserved(saved=True)
+    assert not d._preserve_session and not d._hw_init_done
+    d._fire_init_complete()
+    assert mix_only(backend.calls), "the init sequence must be written"
 
 
 def test_preserve_ends_with_the_connection():

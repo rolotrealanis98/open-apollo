@@ -5032,7 +5032,7 @@ class HardwareRouter:
         the number of controls written.  Input faders, pans and mutes are
         pushed by the init path itself; this adds device-level settings,
         aux buses, input and aux sends (both of the CUE 3/4 sub-params too),
-        solo, the CUE/headphone-source/line-out/alt-monitor outputs and the
+        solo, the CUE/headphone-source-and-level/line-out/alt-monitor outputs and the
         talkback configuration.
         """
         if not self.state_tree:
@@ -5138,7 +5138,7 @@ class HardwareRouter:
             if role and role[0] == "cue":
                 wanted = ("MixToMono", "MixInSource", "OutputDestination")
             elif role and role[0] == "hp":
-                wanted = ("MixInSource",)
+                wanted = ("MixInSource", "CRMonitorLevel")
             elif role and role[0] == "monitor":
                 wanted = ("MixInSource", "Pad", "MirrorsToDigital",
                           "CRPGABypass", "DigitalOutputMode")
