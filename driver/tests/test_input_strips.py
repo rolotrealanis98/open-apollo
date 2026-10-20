@@ -154,6 +154,21 @@ def blob_arrays():
 
 STRIPS_STUBS = r'''
 void ua_preamp_phantom_resync(struct ua_device *ua, unsigned int mask) { (void)ua; (void)mask; }
+/* ua_dsp.c's bus hosting table: which DSP each input bus was given (-1 never) */
+static int bus_owner[32] = { [0 ... 31] = -1 };
+static unsigned int bus_moves;
+int ua_dsp_set_bus_owner(struct ua_device *ua, u32 bus, u32 dsp)
+{
+	(void)ua;
+	if (bus < 32)
+		bus_owner[bus] = (int)dsp;
+	return 0;
+}
+int ua_dsp_move_bus(struct ua_device *ua, u32 bus, u32 dsp)
+{
+	bus_moves++;
+	return ua_dsp_set_bus_owner(ua, bus, dsp);
+}
 #define UA_DEV_APOLLO_X4 0x1F
 #define ATOMIC_INIT(v) { v }
 #define atomic_inc(a) ((a)->counter++)
@@ -949,6 +964,13 @@ int main(void)
 	assert(st->state == UA_STRIPS_LIVE);
 	assert(HAS("DSP0 pools empty, creating 4 Mic Input Strip(s) at 48000 Hz"));
 	assert(replies_made == 5);
+	/* each live strip's DSP now hosts its input's mix bus (inputs 1-4 = buses 0-3) */
+	assert(bus_moves == 4);
+	for (int b = 0; b < 4; b++) {
+		assert(bus_owner[b] == 0);
+		bus_owner[b] = -1;
+	}
+	assert(bus_owner[4] == -1);
 	/* not plug-ins: the strips never ask for the authorization table */
 	assert(!host.board_queries && !bq_answered);
 	assert(host.dsp[0].uploads == 5 && host.dsp[0].replies_ok == 5);
@@ -985,6 +1007,9 @@ int main(void)
 		teardown("test");
 		assert(HAS("4 strip(s) stopped, modules released (test)"));
 		assert(st->state == UA_STRIPS_IDLE && host.fence[0]);
+		/* the buses go back to DSP 0 with the strips */
+		for (int b = 0; b < 4; b++)
+			assert(bus_owner[b] == 0);
 		assert(slots[0][c][0] == 0x001f0004 && slots[0][c][1] == 0x00200000 &&
 		       slots[0][c][2] == 0);
 		assert(slots[0][(c + 4) & 1023][0] == 0x00030002 &&

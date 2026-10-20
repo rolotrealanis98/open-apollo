@@ -329,12 +329,12 @@ fn retained_subscriptions_and_refresh() {
             .any(|c| c.starts_with("subscribe {") && c.contains("/parameters/0/NormalizedValue/value"))
     });
     store.release_subscriptions(&params);
-    wait_until("unsubscribe", T, || {
-        server.received_commands().iter().any(|c| c.starts_with("unsubscribe ") && c.contains("/parameters/"))
-    });
+    // Each unsubscribe is its own command: wait for all of them, not the first (on a slow
+    // runner the rest were still on their way when this counted them).
+    let unsubs = || server.received_commands().iter().filter(|c| c.starts_with("unsubscribe ")).count();
+    wait_until("unsubscribe", T, || unsubs() >= params.len() - 1);
     assert_eq!(store.retained_subscriptions().count(), 1); // counted
-    let unsubs = server.received_commands().iter().filter(|c| c.starts_with("unsubscribe ")).count();
-    assert_eq!(unsubs, params.len() - 1);
+    assert_eq!(unsubs(), params.len() - 1);
 
     // An IOType change re-reads the strip with a read-only recursive get.
     let node_rev = store.node_revision();

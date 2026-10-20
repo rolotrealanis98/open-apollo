@@ -88,7 +88,9 @@ See the [Device Capture (Windows, USB) guide](https://github.com/rolotrealanis98
 4. Submit a pull request against `main`
 
 CI (`.github/workflows/ci.yml`, described in [.github/CI.md](.github/CI.md)) runs the checks of
-every component your change touches. Run `python3 tools/check-clean-repo.py` before you push:
+every component your change touches. The slow checks (the driver against every supported
+kernel, the installer in each distro's container) run weekly; for a change that risks them, ask
+for the `full-ci` label on your PR. Run `python3 tools/check-clean-repo.py` before you push:
 the repository holds no Universal Audio files (DSP modules, firmware, art, screenshots) and no
 personal data (serial numbers, LAN addresses, home paths, e-mail addresses).
 

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use houston::Rgba;
 use rack::{Action, Assets, Control, ControlId, Effect, Interaction, MixerModel, ViewState};
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -119,6 +119,9 @@ pub struct App {
     meter_period: Duration,
     occluded: bool,
     scale_factor: f64,
+    /// OPTIONS › UI SCALE (`pref:ui_scale`): multiplies the display's scale factor, so the
+    /// layout reflows at the new size in fit and 1:1 alike.
+    ui_scale: f32,
     title: String,
     pub error: Option<String>,
     /// Requested placement of Console's separate windows.
@@ -244,6 +247,7 @@ impl App {
             meter_period: METER_PERIOD,
             occluded: false,
             scale_factor: 1.0,
+            ui_scale: 1.0,
             title: String::new(),
             error: None,
             windows: opts.windows,
@@ -274,7 +278,12 @@ impl App {
 
     fn transform(&self) -> Transform {
         self.view
-            .transform(self.logical_size(), self.surface_size(), self.scale_factor)
+            .transform(self.logical_size(), self.surface_size(), self.ui_factor())
+    }
+
+    /// Points to pixels before zoom: the display's scale factor times UI SCALE.
+    fn ui_factor(&self) -> f64 {
+        self.scale_factor * self.ui_scale as f64
     }
 
     fn cursor_pt(&self) -> (f32, f32) {
@@ -336,15 +345,18 @@ impl App {
     fn rebuild(&mut self) {
         let t = Instant::now();
         let surface = self.surface_size();
+        if let Some(src) = self.model.properties() {
+            self.ui_scale = rack::settings::ui_scale(src);
+        }
         // Console lays out to its window: the mixer follows the surface (in points; at 1:1
         // zoom divides them), down to the layout's minimum size.
         if self.gpu.is_some() {
             let z = if self.view.mode == ViewMode::OneToOne { self.view.zoom } else { 1.0 };
-            let k = (self.scale_factor as f32 * z).max(0.01);
+            let k = (self.ui_factor() as f32 * z).max(0.01);
             self.mixer.window = Some((surface.0 as f32 / k, surface.1 as f32 / k));
         }
         let logical = layout_for(&*self.model, &self.mixer).size();
-        let tf = self.view.transform(logical, surface, self.scale_factor);
+        let tf = self.view.transform(logical, surface, self.ui_factor());
         self.mixer.windowing = match (&self.gpu, self.separate) {
             (Some(g), true) if self.popups.placed => self.windowing(g, tf),
             // Native Wayland: nothing is placed on a screen, menus and callouts keep to the
@@ -772,7 +784,7 @@ impl App {
             dy,
             self.logical_size(),
             self.surface_size(),
-            self.scale_factor,
+            self.ui_factor(),
         );
         if self.transform() != before {
             self.changed();
@@ -783,7 +795,7 @@ impl App {
         let (w, h) = self.surface_size();
         let anchor = (w as f64 / 2.0, h as f64 / 2.0);
         self.view
-            .set_zoom(zoom, anchor, self.logical_size(), (w, h), self.scale_factor);
+            .set_zoom(zoom, anchor, self.logical_size(), (w, h), self.ui_factor());
         self.changed();
     }
 
@@ -965,7 +977,11 @@ impl App {
         } else {
             1.0
         };
-        let (mut w, mut h) = (lw as f64 * zoom as f64, lh as f64 * zoom as f64);
+        if let Some(src) = self.model.properties() {
+            self.ui_scale = rack::settings::ui_scale(src);
+        }
+        let k = zoom as f64 * self.ui_scale as f64;
+        let (mut w, mut h) = (lw as f64 * k, lh as f64 * k);
         if let Some(m) = event_loop
             .primary_monitor()
             .or_else(|| event_loop.available_monitors().next())
@@ -1094,9 +1110,25 @@ impl App {
                 self.active = None;
                 self.changed();
             }
+            // A new window learns its display's scale only after it was made at a pixel size
+            // (Wayland): keep the pixels the layer wants and pin min = max again at the new
+            // scale. Otherwise it keeps the size it got first, with the panel drawn short of
+            // its right edge until the next Resize Plug-In (Hyprland at 1.6, 2026-10-19).
+            WindowEvent::ScaleFactorChanged { mut inner_size_writer, .. } => {
+                if let Some(w) = self.popups.wins.get(i) {
+                    let _ = inner_size_writer.request_inner_size(PhysicalSize::new(w.size.0, w.size.1));
+                    crate::popups::Shell::fix_size(&*w.window, w.size);
+                }
+                self.request_redraw();
+            }
             WindowEvent::Resized(size) => {
                 if let (Some(g), Some(w)) = (&self.gpu, self.popups.wins.get_mut(i)) {
                     w.surface.resize(&g.surface, size.width, size.height);
+                    // Not the size the layer asked for: ask again (twice at most).
+                    if (size.width, size.height) != w.size && w.repins < 2 {
+                        w.repins += 1;
+                        crate::popups::Shell::fix_size(&*w.window, w.size);
+                    }
                 }
                 self.request_redraw();
             }

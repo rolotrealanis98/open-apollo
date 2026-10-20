@@ -102,6 +102,7 @@ def preserved(readback=True):
     tree = StateTree()
     tree.load_device_map(DEVICE_MAP_X4)
     apply_runtime_properties(tree)
+    tree.set_value("/devices/0/inputs/0/Mute/value", True)
     backend = RecordingBackend()
     if readback:
         backend.readback = (1, make_readback(
@@ -112,8 +113,18 @@ def preserved(readback=True):
     return d, tree, backend
 
 
-def test_preserve_publishes_the_readback_and_writes_nothing():
+def mix_only(calls):
+    """Preserve mode writes the inputs' mix bus coefficients and nothing else."""
+    return [c for c in calls if c[0] != "bus"]
+
+
+def test_preserve_publishes_the_readback_and_writes_only_the_mix():
     d, tree, backend = preserved()
+    # The tree's mix reached the buses: input 1 muted, as Console shows it
+    assert tree.get_value("/devices/0/inputs/0/Mute/value") is True
+    assert ["bus", 0, 0, 0.0] in [c[:4] for c in backend.calls]
+    assert mix_only(backend.calls) == []
+    backend.calls.clear()
     get = tree.get_value
     assert get("/devices/0/outputs/18/Mute/value") is True
     assert get("/devices/0/outputs/18/CRMonitorLevel/value") == -21.0
@@ -127,10 +138,10 @@ def test_preserve_publishes_the_readback_and_writes_nothing():
     assert tree.get_value("/initialized/value") is True
 
 
-def test_preserve_without_readback_still_writes_nothing():
+def test_preserve_without_readback_writes_only_the_mix():
     d, tree, backend = preserved(readback=False)
     d._fire_init_complete()
-    assert backend.calls == []
+    assert backend.calls and mix_only(backend.calls) == []
 
 
 def test_preserve_ends_with_the_connection():
