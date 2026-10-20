@@ -24,7 +24,7 @@ def lab():
     daemon._send_unresolved_set = Mock()
     daemon._send_engine_error = Mock()
     client = SimpleNamespace(id='console', helper=False, ubjson=False, sleep=False, send=Mock())
-    return SimpleNamespace(daemon=daemon, client=client)
+    return SimpleNamespace(daemon=daemon, client=client, backend=backend)
 
 
 def refused(lab):
@@ -78,7 +78,8 @@ def test_posts(lab, path, allowed):
 
 def test_link_refusals_say_why():
     assert 'Remove the plug-ins first' in native_refusal_detail('/devices/0/inputs/0/Stereo')
-    assert 'from Analog 1 and Analog 3' in native_refusal_detail('/devices/0/inputs/1/Stereo')
+    assert 'linked from their first input' in native_refusal_detail('/devices/0/inputs/1/Stereo')
+    assert 'loaded on them' in native_refusal_detail('/devices/0/inputs/14/Stereo')
     assert 'Remove the plug-ins first' in native_refusal_detail('/SampleRate')
     assert native_refusal_detail('/BufferSize') is None
 
@@ -91,8 +92,6 @@ def test_a_refused_link_carries_its_reason(lab):
 
 
 @pytest.mark.parametrize('path', [
-    '/devices/0/inputs/14/Stereo',      # Virtual 1-2 (x4)
-    '/devices/0/inputs/15/Stereo',      # its right leg: forwarded to the leader
     '/devices/0/inputs/20/Stereo',      # Virtual 7-8
     '/devices/0/inputs/12/Stereo',      # S/PDIF
     '/devices/0/inputs/4/Stereo',       # ADAT 1-2
@@ -106,8 +105,25 @@ def test_links_without_a_native_chain_pass(lab, path):
     assert not refused(lab)
 
 
+@pytest.mark.parametrize('path', [
+    '/devices/0/inputs/14/Stereo',      # Virtual 1-2 (x4)
+    '/devices/0/inputs/15/Stereo',      # its right leg: forwarded to the leader
+])
+def test_a_virtual_pair_links_unless_a_plug_in_sits_on_it(lab, path):
+    """Virtual 1-4 can carry chains: their link is refused only while one of the pair has one;
+    a plug-in on an analog input or on Virtual 3 does not hold it."""
+    lab.backend._leases = {'/devices/0/inputs/0/effects/0': object(),
+                           '/devices/0/inputs/16/effects/0': object()}
+    lab.daemon._handle_set(lab.client, Command('set', path + '/value', True, raw_params={'func_id': 1}))
+    assert not refused(lab)
+    lab.backend._leases['/devices/0/inputs/15/effects/1'] = object()
+    lab.daemon._handle_set(lab.client, Command('set', path + '/value', False, raw_params={'func_id': 2}))
+    assert refused(lab)
+
+
 def test_native_chains_stay_on_inputs_0_to_3():
-    """The link exemption above relies on prepare taking inputs 0-3 only."""
+    """Without the driver's Virtual support (UA_FEAT2_PLUGIN_VIRTUAL_INPUTS) prepare takes
+    inputs 0-3 only, and never ADAT."""
     _, _, _, _, backend, _ = model()
     for slot in ('/devices/0/inputs/4/effects/0', '/devices/0/inputs/14/effects/0'):
         outcome = backend.prepare(slot, 'anything')

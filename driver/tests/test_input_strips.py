@@ -1089,10 +1089,23 @@ int main(void)
 		       u[3].used_words == 4 * 0x2010 + 4 * 0x400);
 	}
 	mutex_lock(&dev.lock);
+	/* A Virtual input's Input Strip is a target for an Input carrier
+	 * (0x83E) only, a Mic strip for a Mic carrier (0x846) only; 0 = any. */
 	assert(ua_strips_override_target(&dev, 0, 0x18 | 0x20 << 16, host.epoch,
-					 &gen) == -ENOENT);
+					 &gen, 0x83e) == 0);
+	assert(ua_strips_override_target(&dev, 0, 0x18 | 0x20 << 16, host.epoch,
+					 &gen, 0x846) == -EINVAL);
+	assert(ua_strips_override_target(&dev, 0, 0x18 | 0x20 << 16, host.epoch,
+					 &gen, 0) == 0);
 	assert(ua_strips_override_target(&dev, 0, 0x00 | 0x20 << 16, host.epoch,
-					 &gen) == 0);
+					 &gen, 0x846) == 0);
+	assert(ua_strips_override_target(&dev, 0, 0x00 | 0x20 << 16, host.epoch,
+					 &gen, 0x83e) == -EINVAL);
+	/* a pair takes both inputs' kind; no strip on Virtual 5 */
+	assert(ua_strips_override_target(&dev, 0, 0x18 | 0x19 << 16, host.epoch,
+					 &gen, 0x83e) == 0);
+	assert(ua_strips_override_target(&dev, 0, 0x1c | 0x20 << 16, host.epoch,
+					 &gen, 0x83e) == -ENOENT);
 	mutex_unlock(&dev.lock);
 
 	teardown("test");

@@ -10,6 +10,7 @@ import logging
 import re
 
 from plugin_driver import START_REFUSALS, SWAP_REFUSALS
+from native_carrier import DSP_INPUTS, VIRTUAL_INPUTS, input_pair
 from plugin_native import NativePluginBackend, _Lease
 from plugin_delay import InputLatency, plan_compensation
 from plugin_publication import LoadedPlugin, OwnedHandle
@@ -223,6 +224,8 @@ class NativeChainBackend(NativePluginBackend):
             record, monitor, capacity = [0]*4, [0]*4, [0]*4
             for item in inputs:
                 for channel in item.channels:
+                    if channel in VIRTUAL_INPUTS:
+                        continue    # a Virtual chain carries its own delays; no retained strip line
                     record[channel], monitor[channel], capacity[channel] = item.record, item.monitor, item.capacity
             expected = tuple(record), tuple(monitor), tuple(capacity)
             strips_after = self._compensation_io(self.driver.strip_delays, strips_before, record=expected[0],
@@ -350,6 +353,8 @@ class NativeChainBackend(NativePluginBackend):
             record, monitor, capacity = [0]*4, [0]*4, [0]*4
             for item in change.inputs:
                 for channel in item.channels:
+                    if channel in VIRTUAL_INPUTS:
+                        continue    # a Virtual chain carries its own delays; no retained strip line
                     record[channel], monitor[channel], capacity[channel] = self._delay_values(item)
             expected = tuple(record), tuple(monitor), tuple(capacity)
             change.strips_after = self._compensation_io(self.driver.strip_delays,
@@ -568,8 +573,7 @@ class NativeChainBackend(NativePluginBackend):
         self._validate_observations(composed.observations)
         arguments = (composed.stage_bundle()['create_arguments'] if composed.needs_staging
                      else composed.create_arguments())
-        expected = (channels[0], channels[1] if len(channels) == 2 else 32)
-        if (tuple(arguments.get('input_pair', ())) != expected
+        if (tuple(arguments.get('input_pair', ())) != input_pair(channels)
                 or type(arguments.get('dsp')) is not int or not 0 <= arguments['dsp'] < 8):
             raise ValueError('composer physical layout differs')
         arguments['chain'] = True
@@ -636,8 +640,10 @@ class NativeChainBackend(NativePluginBackend):
             self._leases.update(candidate.leases)
 
     def prepare(self, slot, name):
-        match = re.fullmatch(r'/devices/0/inputs/([0-3])/(preamps/0/)?effects/([0-3])', slot)
-        if (not match or (match[2] and (not self.unison or match[3] != '0'))
+        match = re.fullmatch(r'/devices/0/inputs/(\d+)/(preamps/0/)?effects/([0-3])', slot)
+        if (not match or int(match[1]) not in DSP_INPUTS
+                or (int(match[1]) in VIRTUAL_INPUTS and (not self.virtual_inputs or match[2]))
+                or (match[2] and (not self.unison or match[3] != '0'))
                 or (not match[2] and int(match[3]) >= self.max_inserts)):
             return PrepareOutcome(Outcome.FAILED, detail='No native chain recipe for this slot')
         channels = self._channels(slot)

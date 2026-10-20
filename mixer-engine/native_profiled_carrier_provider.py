@@ -13,7 +13,8 @@ import hashlib, json, math, os, re, sys, threading, time
 EXECUTOR = Path(__file__).resolve().parents[1] / 'tools/plugin-mapper/plugin_mapper/executor'
 if str(EXECUTOR) not in sys.path:
     sys.path.append(str(EXECUTOR))
-from native_carrier import GeneratedOrdinaryCarrier, MODULES, check, write as _write
+from native_carrier import (DSP_INPUTS, STEREO_FIRST, GeneratedOrdinaryCarrier, MODULES, check, input_pair,
+                            write as _write)
 from plugin_native import ControlPlan
 from plugin_publication import LoadedPlugin
 
@@ -122,8 +123,8 @@ class ProfiledCarrierProvider:
 
     def __init__(self, bundle_path, input_index=0, *, data=None, module_store=MODULES):
         """data: the already parsed bundle (the registry shares one parse across inputs)."""
-        if type(input_index) is not int or not 0 <= input_index < 4:
-            raise ValueError('mono input 0..3 required')
+        if type(input_index) is not int or input_index not in DSP_INPUTS:
+            raise ValueError('a native chain input (analog 1-4, Virtual 1-4) required')
         if data is None:
             raw = Path(bundle_path).read_bytes()
             data = json.loads(raw)
@@ -573,21 +574,21 @@ class ProfiledCarrierProvider:
 class StereoProfiledCarrierProvider(ProfiledCarrierProvider):
     """Paired-input wrapper for bundles proven with an original 2/2 descriptor."""
     def __init__(self, bundle_path, input_index=0, **kwargs):
-        if input_index not in (0,2):
-            raise ValueError('stereo provider requires input pair 1/2 or 3/4')
+        if input_index not in STEREO_FIRST:
+            raise ValueError('stereo provider requires input pair 1/2, 3/4, Virtual 1/2 or Virtual 3/4')
         super().__init__(bundle_path,input_index,**kwargs)
         if tuple(self.data['descriptor'].get('io',())) != (2,2):
             raise ValueError('original 2/2 descriptor required for stereo wrapper')
         self.channels=(input_index,input_index+1)
 
     def _stereo_arguments(self, result):
-        if result['input_pair'] != (self.input_index,32):
+        if result['input_pair'] != input_pair((self.input_index,)):
             raise ValueError('mono carrier layout changed')
         commands=list(result['commands'])
         for row in (0,1,10):
             commands.extend(_write(row,{1:2,2:2}))
         check(result['private_rows'],commands)
-        result.update(input_pair=self.channels,commands=tuple(commands))
+        result.update(input_pair=input_pair(self.channels),commands=tuple(commands))
         return result
 
     def composition_arguments(self):

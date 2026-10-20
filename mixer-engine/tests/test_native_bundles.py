@@ -77,9 +77,10 @@ def test_registry_offers_each_verified_layout_from_its_own_bundle(tmp_path, monk
     bundles(tmp_path, ("UAD Both", "mono"), ("UAD Both", "stereo"), ("UAD Mono Only", "mono"),
             ("UAD Mono Only", "stereo"), ("UAD Not Yet Live", "mono"))
     offered = registry.create_profiled_providers(tmp_path)
+    inputs = (0, 1, 2, 3, 14, 15, 16, 17)       # analog 1-4, Virtual 1-4
     assert sorted((p.name, p.kind.__name__, p.input_index) for p in offered) == [
-        ("UAD Both", "StereoStub", 0), ("UAD Both", "StereoStub", 2),
-        *[("UAD Both", "Stub", i) for i in range(4)], *[("UAD Mono Only", "Stub", i) for i in range(4)]]
+        *[("UAD Both", "StereoStub", i) for i in (0, 2, 14, 16)],
+        *[("UAD Both", "Stub", i) for i in inputs], *[("UAD Mono Only", "Stub", i) for i in inputs]]
     assert callable(offered.composer)
     everything = registry.create_profiled_providers(tmp_path, advertise_all=True)
     assert {(p.name, p.kind.__name__) for p in everything} >= {("UAD Mono Only", "StereoStub"), ("UAD Not Yet Live", "Stub")}
@@ -107,8 +108,8 @@ def test_offering_reads_no_bundle_and_the_first_use_builds_once(tmp_path, monkey
     assert reads == ["index.json"] and built == []
     mono = sorted((p for p in offered if p.kind is Counting), key=lambda p: p.input_index)
     stereo = [p for p in offered if p.kind is not Counting]
-    assert [p.slot for p in mono] == [f"/devices/0/inputs/{i}/effects/0" for i in range(4)]
-    assert not hasattr(mono[1], "channels") and [p.channels for p in stereo] == [(0, 1), (2, 3)]
+    assert [p.slot for p in mono] == [f"/devices/0/inputs/{i}/effects/0" for i in (0, 1, 2, 3, 14, 15, 16, 17)]
+    assert not hasattr(mono[1], "channels") and [p.channels for p in stereo] == [(0, 1), (2, 3), (14, 15), (16, 17)]
     assert all(p.sample_rate == 48000 for p in offered) and built == []   # all the backend asks to offer
     assert mono[1].recipe == "built" and mono[1].recipe == "built" and built == [1]
     assert mono[2].built().input_index == 2 and built == [1, 2]

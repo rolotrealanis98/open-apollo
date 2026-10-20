@@ -17,11 +17,14 @@ import threading
 from copy import deepcopy
 from pathlib import Path
 
-from native_carrier import MODULES
+from native_carrier import DSP_INPUTS, MODULES, STEREO_FIRST
 from native_profiled_carrier_provider import ProfiledCarrierProvider, StereoProfiledCarrierProvider
 from native_chain_composer import compose
 
 log = logging.getLogger(__name__)
+# Every input a chain can go on (analog 1-4, Virtual 1-4); the backend drops the Virtual ones
+# when the driver cannot replace a Virtual strip.
+NATIVE_INPUTS = tuple(DSP_INPUTS)
 # Where tools/plugin-mapper puts the maps (kept by `uninstall.sh --purge`).
 DEFAULT_DIR = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'open-apollo-plugin-maps'
 KNOWN_GOOD = Path(__file__).resolve().parent / 'device_maps/native_known_good.json'
@@ -112,7 +115,7 @@ class BundleWatcher:
     The mapper rewrites index.json after every plug-in it maps; poll() reads it again when it
     changed and returns providers for the (name, layout) pairs not offered yet."""
 
-    def __init__(self, directory=DEFAULT_DIR, *, advertise_all=False, inputs=(0, 1, 2, 3)):
+    def __init__(self, directory=DEFAULT_DIR, *, advertise_all=False, inputs=NATIVE_INPUTS):
         self.directory = Path(directory)
         self.advertise_all, self.inputs = advertise_all, tuple(inputs)
         self.allowed = None if advertise_all else known_good()
@@ -166,7 +169,7 @@ class BundleWatcher:
             # Each layout runs from its own bundle: the plug-in built a mono or a stereo state.
             # The bundle is read and its recipe built when a load first needs it (LazyProvider).
             bundle = _Bundle(path, name, layout)
-            offers = ([(StereoProfiledCarrierProvider, i) for i in (0, 2) if i in self.inputs and i + 1 in self.inputs]
+            offers = ([(StereoProfiledCarrierProvider, i) for i in STEREO_FIRST if i in self.inputs and i + 1 in self.inputs]
                       if layout == 'stereo' else [(ProfiledCarrierProvider, i) for i in self.inputs])
             providers += [LazyProvider(bundle, kind, i, store) for kind, i in offers]
             landed.add((name, layout))
@@ -180,7 +183,7 @@ class BundleWatcher:
                 f'({"all built bundles" if self.advertise_all else "known-good list"})')
 
 
-def create_profiled_providers(directory=DEFAULT_DIR, *, advertise_all=False, inputs=(0, 1, 2, 3), watcher=None):
+def create_profiled_providers(directory=DEFAULT_DIR, *, advertise_all=False, inputs=NATIVE_INPUTS, watcher=None):
     """The providers for the maps there now (possibly none yet: the mapper may still be running)."""
     watcher = watcher or BundleWatcher(directory, advertise_all=advertise_all, inputs=inputs)
     providers = ProfiledProviders(watcher.poll())

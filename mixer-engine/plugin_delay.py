@@ -7,6 +7,7 @@ uses that group's maximum. These are separate delay lines.
 """
 from dataclasses import dataclass
 from model_features import MAX_DELAY_COMP_SAMPLES
+from native_carrier import DSP_INPUTS, STEREO_FIRST
 
 @dataclass(frozen=True)
 class InputLatency:
@@ -39,8 +40,11 @@ def plan_compensation(setting, inputs, *, quantum=32):
         raise ValueError('supported compensation setting and quantum required')
     inputs=tuple(inputs);occupied=set();groups={}
     for item in inputs:
-        if type(item) is not InputLatency or item.channels not in ((0,),(1,),(2,),(3,),(0,1),(2,3)):
-            raise ValueError('explicit analog channel layout required')
+        if type(item) is not InputLatency or type(item.channels) is not tuple or not (
+                (len(item.channels) == 1 and item.channels[0] in DSP_INPUTS)
+                or (len(item.channels) == 2 and item.channels[0] in STEREO_FIRST
+                    and item.channels[1] == item.channels[0]+1)):
+            raise ValueError('explicit native channel layout required')
         if any(type(c) is not int for c in item.channels) or occupied.intersection(item.channels):
             raise ValueError('disjoint input chains required')
         occupied.update(item.channels)

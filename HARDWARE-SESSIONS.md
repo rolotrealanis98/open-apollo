@@ -516,3 +516,88 @@ PipeWire stopped. On the plain strip MON L was an exact copy of input 1 (r = 1.0
   chain adds 55 samples, while `native_known_good.json` lists its latency as 0.
 - Mixer restored to the snapshot taken before (inputs 1–4 mute, solo, fader, gain
   identical); PipeWire, WirePlumber, daemon running; zero bench instances; no kernel faults.
+
+## Session 6: plug-ins on Virtual inputs (Mac Studio, `omarchy`, owner-attended, 30 min)
+
+Branch `feat/virtual-input-inserts`, worktree `~/Developer/open-apollo-virtual-inserts`.
+What it tests: a native chain on Virtual 1 (tree input 14, DSP input 0x18) that starts with
+the plain Input Strip (pluginId 0x83E) instead of the Mic Input Strip, its rows the plain
+strip's (`ua_strip_input_rows`, commons at the Mic chain's 2048 words). That head is
+inferred, not captured from UA: no Mac or Windows trace of a plug-in on a Virtual channel
+exists. Possible outcomes: it plays (the point), a load fails with a readback error (clean,
+nothing to undo), or the DSP stops answering (quarantine: the rollback's power cycle).
+Prepared with the host tests only (`driver/tests`, `mixer-engine/tests`, 2026-10-20);
+nothing here has run on the Apollo.
+
+Monitors down first: every lane also reaches the monitor mix. Close `uaconsole`.
+
+1. Baseline, on the installed driver (proves the lane before anything changes):
+
+   ```sh
+   systemctl --user stop pipewire.socket pipewire wireplumber
+   python3 ~/Developer/open-apollo-virtual-inserts/tools/virtual-loopback.py --lanes 1 --ref 2
+   ```
+
+   Expect both present at about -21 dBFS, Virtual 1 delay +0 and difference -inf (two
+   identical plain strips). SILENT here means the Virtual strips do not carry playback to
+   their record channel: stop, the rest cannot work.
+
+2. The test driver, loaded by hand (the DKMS one stays installed):
+
+   ```sh
+   systemctl --user stop ua-mixer-daemon
+   make -C /lib/modules/$(uname -r)/build M=$HOME/Developer/open-apollo-virtual-inserts/driver modules
+   sudo rmmod ua_apollo
+   sudo insmod ~/Developer/open-apollo-virtual-inserts/driver/ua_apollo.ko plugin_host=1 input_strips=1
+   journalctl -k -b | grep ua_apollo | tail -20
+   ```
+
+   Expect "input strips: enabled for 4 analog input(s) (mask 0xf) and 4 Virtual input(s)"
+   and the strips live. Then the branch's daemon in a terminal of its own:
+
+   ```sh
+   cd ~/Developer/open-apollo-virtual-inserts/mixer-engine
+   ~/.local/share/open-apollo/plugin-venv/bin/python3 ua_mixer_daemon.py \
+       --native-plugin-bundles ~/.local/share/open-apollo-plugin-maps --preserve-hardware
+   ```
+
+   In another: `python3 tools/oa-daemon-client.py --port 4710 get /plugins/0/NativeMonoSlots/value`
+   lists `/devices/0/inputs/14/effects/0` to `.../17/...` after the analog slots.
+
+3. A plug-in on Virtual 1, one that obviously changes a tone (the Ampeg SVTVR):
+
+   ```sh
+   cd ~/Developer/open-apollo-virtual-inserts
+   python3 tools/oa-daemon-client.py --port 4710 set /devices/0/inputs/14/effects/0/EffectName/value '"UAD Ampeg SVTVR"'
+   python3 tools/oa-daemon-client.py --port 4710 get /devices/0/inputs/14/effects/0/EffectInstance/value
+   python3 tools/virtual-loopback.py --lanes 1 --ref 2 --json ~/virtual1-ampeg.json
+   ```
+
+   Expect a non-zero instance, Virtual 1 present with a large difference (well above
+   -20 dB) and a delay of the amp's true latency minus what its descriptor declares (0 if
+   they agree). Record the daemon's journal lines for the load.
+
+4. Bypass and unload restore the dry lane:
+
+   ```sh
+   python3 tools/oa-daemon-client.py --port 4710 set /devices/0/inputs/14/effects/0/Power/value false
+   python3 tools/virtual-loopback.py --lanes 1 --ref 2
+   python3 tools/oa-daemon-client.py --port 4710 set /devices/0/inputs/14/effects/0/EffectName/value '""'
+   python3 tools/virtual-loopback.py --lanes 1 --ref 2
+   ```
+
+   Both should read like step 1 (delay +0, difference -inf).
+
+5. Optional, stereo: link Virtual 1/2 (`set /devices/0/inputs/14/Stereo/value true`), load a
+   stereo plug-in on input 14, and measure with `--lanes 1,2 --ref 3`.
+
+Rollback (at any point): Ctrl-C the branch daemon, then
+
+```sh
+sudo rmmod ua_apollo
+sudo modprobe ua_apollo
+systemctl --user start ua-mixer-daemon pipewire.socket pipewire wireplumber
+```
+
+If the DSP stopped answering (the daemon says quarantined, or `rmmod` hangs): reboot,
+power-cycle the Apollo, and the tbt kernel loads the DKMS driver as usual.

@@ -93,6 +93,24 @@ stereo, replacement, multiple chains or compensation support.
   Slot Power needs its own provider contract; an effect's Power parameter does
   not implicitly implement slot Power.
 
+## Virtual inputs
+
+Native chains also go on Virtual 1-4 (tree inputs 14-17, DSP inputs 0x18-0x1b), where the
+driver runs the plain Input Strip (pluginId 0x83E) instead of the Mic Input Strip. The chain
+head then names 0x83E as its first member and carries that strip's m0 and four delay commons
+(rows 1-5), so every effect sits four rows lower than on an analog input
+(`native_chain_composer.compose`, `native_carrier.input_strip_rows`). The driver accepts it
+only with `UA_FEAT2_PLUGIN_VIRTUAL_INPUTS` and only on an input whose strip is that kind;
+the daemon offers the Virtual slots only then. A Virtual chain carries its own record and
+monitor delays from the same compensation plan; only analog 1-4 have retained strip delay
+lines. Unison stays analog. Virtual 1/2 and 3/4 link as stereo pairs; their link is refused
+only while a plug-in sits on that pair.
+
+Why: a Virtual input is a digital loopback (playback VIRTUAL n in, record VIRTUAL n out),
+so a plug-in's sound, bypass and latency can be measured with no cable
+(`tools/virtual-loopback.py`). The 0x83E head is inferred from the plain strip and the Mic
+chain, not captured from UA; HARDWARE-SESSIONS.md session 6 is its first hardware run.
+
 ## Input delay compensation
 
 The recovered settings are Off, Short, Medium, Medium-Long and Long, with budgets
