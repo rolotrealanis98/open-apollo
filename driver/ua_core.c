@@ -999,7 +999,7 @@ static long ua_ioctl_get_version(struct ua_device *ua, unsigned long arg)
 				 UA_FEAT2_PLUGIN_STEREO | UA_FEAT2_PLUGIN_SWAP |
 				 UA_FEAT2_PLUGIN_CHAIN | UA_FEAT2_PLUGIN_DELAY |
 				 UA_FEAT2_PLUGIN_UNISON | UA_FEAT2_PLUGIN_ANALOG_LEASE |
-				 UA_FEAT2_PLUGIN_START_STAGED;
+				 UA_FEAT2_PLUGIN_START_STAGED | UA_FEAT2_PLUGIN_VIRTUAL;
 	if (v.reserved[0])
 		v.features |= UA_FEAT_FEATURES2;
 

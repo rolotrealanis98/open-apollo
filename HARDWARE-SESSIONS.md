@@ -516,3 +516,94 @@ PipeWire stopped. On the plain strip MON L was an exact copy of input 1 (r = 1.0
   chain adds 55 samples, while `native_known_good.json` lists its latency as 0.
 - Mixer restored to the snapshot taken before (inputs 1–4 mute, solo, fader, gain
   identical); PipeWire, WirePlumber, daemon running; zero bench instances; no kernel faults.
+
+## Session: inserts on the Virtual strips (Mac Studio, cold, 30 min)
+
+What it checks: a plug-in on Virtual 1 processes what a DAW plays to VIRTUAL 1 and the result
+comes back on the VIRTUAL 1 record channel (the Apollo as a hardware insert), and how long the
+round trip is. Mac Studio (Asahi, `7.1.13-1-tbt`), Apollo x4 at 48 kHz, plug-in maps in
+`~/.local/share/open-apollo-plugin-maps`. `W` is the branch's checkout (a worktree here):
+
+```sh
+W=~/Developer/open-apollo/.claude/worktrees/silly-wu-082299
+make -C $W/driver                                   # as rolo; the tbt kernel's build tree
+modinfo -F srcversion $W/driver/ua_apollo.ko        # write it down
+cat /sys/module/ua_apollo/srcversion                # the installed DKMS one (rollback target)
+```
+
+1. Stop everything that holds the Apollo (close uaconsole first). The runtime mask keeps udev
+   from starting the installed daemon when the node comes back:
+
+   ```sh
+   systemctl --user mask --runtime ua-mixer-daemon.service
+   systemctl --user stop ua-mixer-daemon.service wireplumber.service \
+       pipewire-pulse.service pipewire.service pipewire-pulse.socket pipewire.socket
+   ```
+
+2. Load the branch's driver on a cold Apollo (hosting needs DSPs this driver cold-started):
+
+   ```sh
+   sudo rmmod ua_apollo
+   # Apollo off, 10 s, on; wait until it is back (hot-plug is untested on the tbt kernel:
+   # if it does not come back, reboot with the Apollo on)
+   lspci -nn -d 1a00:
+   sudo insmod $W/driver/ua_apollo.ko plugin_host=1 input_strips=1
+   grep -A12 '^input strips' /proc/asound/x4/dsp_state   # state live, strips 4-7 = Virtual 1-4
+   ```
+
+3. PipeWire with the Virtual nodes, then the branch's daemon in a terminal (same flags as the
+   unit's drop-in):
+
+   ```sh
+   systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service
+   bash $W/configs/pipewire/setup-apollo-io.sh          # adds Apollo Virtual Out/In 1+2, 3+4
+   ~/.local/share/open-apollo/plugin-venv/bin/python3 $W/mixer-engine/ua_mixer_daemon.py \
+       --native-plugin-bundles ~/.local/share/open-apollo-plugin-maps --preserve-hardware
+   ```
+
+   In another terminal: `python3 $W/tools/oa-daemon-client.py --port 4710 get
+   /NativePluginHosting/value` is true, and a known-good plug-in's `NativeMonoSlots` lists
+   `/devices/0/inputs/14/effects/0` (find it with `get /plugins/N/Name/value`).
+
+4. Reference run, nothing on Virtual 1 or 2 (both strips plain). Turn the monitor down: the
+   clicks also reach the monitor mix.
+
+   ```sh
+   python3 $W/tools/virtual-insert-roundtrip.py ~/oa-test/virtual-insert/plain
+   ```
+
+   Expect both Virtual inputs back at the same offset (`insert ... +0 samples`), tone `+0.00 dB`.
+
+5. Load `UAD Pultec EQP-1A Legacy` (known good, mono, latency 0 in the list, about 31 samples
+   measured on input 3) on Virtual 1: drop it in uaconsole's Virtual 1 insert, or
+   `python3 $W/tools/oa-daemon-client.py --port 4710 --timeout 20 set /devices/0/inputs/14/effects/0/EffectName/value '"UAD Pultec EQP-1A Legacy"'`.
+   The daemon log shows the load; `/proc/asound/x4/plugin_host` shows the chain placed. Then:
+
+   ```sh
+   python3 $W/tools/virtual-insert-roundtrip.py ~/oa-test/virtual-insert/pultec
+   ```
+
+   Pass: Virtual 1 comes back (no "no click came back"), Virtual 2 unchanged from step 4, and
+   `insert on Virtual 1` reports the plug-in's own latency (about +31 samples expected). Turn a
+   control (e.g. the Pultec's high boost) and run again: Virtual 1's tone change moves, Virtual
+   2's does not.
+
+6. Unload (clear the slot, or `--timeout 20 set .../effects/0/EffectName/value '""'`) and run step 4 again:
+   Virtual 1 matches Virtual 2 again (the plain strip is back). Optional: link Virtual 1/2 and
+   load a stereo bundle on Virtual 1; `--pair 34` checks Virtual 3/4.
+
+7. Rollback: stop the branch's daemon (Ctrl-C), then
+
+   ```sh
+   systemctl --user stop wireplumber.service pipewire-pulse.service pipewire.service \
+       pipewire-pulse.socket pipewire.socket
+   sudo rmmod ua_apollo
+   # Apollo off, 10 s, on (wait for lspci as above)
+   sudo modprobe ua_apollo
+   systemctl --user unmask --runtime ua-mixer-daemon.service
+   systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service \
+       ua-mixer-daemon.service
+   ```
+
+Report: both `results.json`, the round trip (step 4: what a PipeWire client sees for a plain
+Virtual strip; step 5: plus the insert), and anything in `journalctl -k | grep ua_apollo`.

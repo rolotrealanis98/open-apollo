@@ -69,6 +69,24 @@ int main(void)
 ''')
 
 
+def test_the_input_strip_may_carry_a_chain():
+    """A Virtual input's chain starts with the built-in Input Strip (0x83E), unlicensed as the Mic strip."""
+    run(r'''
+int main(void)
+{
+    struct ua_plugin_instance q;
+    setup_plain();
+    bq_table[0x16]=0x81000000;
+    chain_cmd[11]=0x83e;
+    assert(chain(&q,20,UA_PLUGIN_CREATE_F_START|UA_PLUGIN_CREATE_F_CHAIN)==0);
+    assert(host.n_instances==1);
+    assert(destroy(&file_a,q.handle)==0);
+    cleanup_plain();
+    return 0;
+}
+''')
+
+
 def test_incomplete_ambiguous_unbound_and_unflagged_directory_refused_before_query():
     run(r'''
 int main(void)

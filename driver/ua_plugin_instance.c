@@ -469,7 +469,8 @@ static int ua_inst_check_cmds(const struct ua_memspec_row *rows,
 /* Recover the original head directory from checked initialization WRITEs.
  * No caller-provided license list can omit a directory member. Head word 5
  * is the sub count; each pointer/ID pair begins at word 6. The first sub is
- * the built-in Mic strip, followed by at most four licensed effects, or
+ * the built-in Mic strip (0x846) or, on a Virtual input, the built-in Input
+ * Strip (0x83E), followed by at most four licensed effects, or
  * (UNISON) a licensed integrated header followed by zero to four effects.
  */
 static int ua_inst_chain_ids(const struct ua_memspec_row *rows, unsigned int nr,
@@ -506,7 +507,7 @@ static int ua_inst_chain_ids(const struct ua_memspec_row *rows, unsigned int nr,
 	if (!seen[0] || head[0] != 0x40000000 || !seen[5] ||
 	    n < (unison ? 1 : 2) || n > 5 ||
 	    rows[0].pool != 1 || rows[0].dwords != 6 + 2 * n ||
-	    !seen[7] || (!unison && head[7] != 0x846))
+	    !seen[7] || (!unison && head[7] != 0x846 && head[7] != 0x83e))
 		return -EINVAL;
 	for (i = 0; i < n; i++) {
 		if (!seen[7 + 2 * i])

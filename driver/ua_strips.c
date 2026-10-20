@@ -1038,16 +1038,16 @@ bool ua_strips_live(struct ua_device *ua)
 }
 
 /*
- * Every actual input must have a complete retained mono strip on this DSP.
- * Only Mic strips are override targets: an insert on a Virtual input's
- * Input Strip is not mapped yet, so it stays -ENOENT as before they existed.
+ * Every actual input must have a complete retained mono strip on this DSP:
+ * a Mic strip or a Virtual input's Input Strip (its chain carries the Input
+ * Strip, mixer-engine native_carrier.py INPUT_STRIP).
  */
 int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 			     u32 synch, u64 epoch, u32 *generation)
 {
 	struct ua_strips *st = ua->host ? ua->host->strips : NULL;
 	u32 input[2] = { synch & 0xffff, synch >> 16 };
-	unsigned int k, j, ch;
+	unsigned int k, j, n, ch;
 
 	lockdep_assert_held(&ua->lock);
 	if (!st || input_strips_steps || dsp != ua_strips_dsp ||
@@ -1059,7 +1059,7 @@ int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 	for (ch = 0; ch < 2; ch++) {
 		if (input[ch] == UA_STRIP_SYNCH_MONO)
 			continue;
-		for (k = 0; k < st->n_mic; k++) {
+		for (k = 0; k < st->n; k++) {
 			struct ua_strip *s = &st->strip[k];
 
 			if (s->synch != input[ch])
@@ -1067,12 +1067,13 @@ int ua_strips_override_target(struct ua_device *ua, unsigned int dsp,
 			if (s->state != UA_STRIP_LIVE || !s->header ||
 			    s->header != s->priv[0].base)
 				return -ESTALE;
-			for (j = 0; j < UA_STRIP_PRIV; j++)
+			ua_strip_kind_rows(s->kind, &n);
+			for (j = 0; j < n; j++)
 				if (!s->priv[j].cookie)
 					return -ESTALE;
 			break;
 		}
-		if (k == st->n_mic)
+		if (k == st->n)
 			return -ENOENT;
 	}
 	*generation = st->gen;
@@ -1096,7 +1097,7 @@ int ua_strips_restore(struct ua_device *ua, struct ua_xact *x,
 	for (ch = 0; ch < 2; ch++) {
 		if (input[ch] == UA_STRIP_SYNCH_MONO)
 			continue;
-		for (k = 0; k < st->n_mic; k++)
+		for (k = 0; k < st->n; k++)
 			if (st->strip[k].synch == input[ch]) {
 				ua_xact_inline(x, UA_STRIP_CMD_SYNCH,
 					       UA_STRIP_SYNCH_MONO << 16 | input[ch],

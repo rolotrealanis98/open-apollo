@@ -14,6 +14,7 @@ import time
 import uuid
 import traceback
 
+from native_carrier import STEREO_FIRST
 from plugin_remote import RemoteReadback
 from plugin_driver import READ_REFUSALS, PluginDriver
 from plugin_publication import ControlReadback, LoadedPlugin, OwnedHandle, PublicationError, Publisher
@@ -78,7 +79,7 @@ class NativePluginBackend:
     native_single_insert = True
 
     def __init__(self, publisher, driver, provider, *, session_valid=lambda: True,
-                 max_instances=1, stereo=False, replacement=False, unison=False):
+                 max_instances=1, stereo=False, replacement=False, unison=False, virtual=False):
         self.publisher, self.driver = publisher, driver
         self.session_valid = session_valid
         if type(max_instances) is not int or not 1 <= max_instances <= 4:
@@ -90,6 +91,9 @@ class NativePluginBackend:
         if unison and not getattr(self, 'chain_supported', False):
             raise ValueError('Unison requires input-header composition')
         self.unison = unison
+        # Recipes on the Virtual inputs need a driver that starts chains on their Input Strips
+        # (UA_FEAT2_PLUGIN_VIRTUAL) and the chain composer, which builds that carrier.
+        self.virtual = bool(virtual) and getattr(self, 'chain_supported', False)
         providers = provider if isinstance(provider, (tuple, list)) else (provider,)
         # A growable set (maps still being built on this machine) may start empty.
         if not providers and not getattr(provider, 'growable', False):
@@ -105,16 +109,18 @@ class NativePluginBackend:
         added; existing recipes and live leases are untouched. Call between transactions."""
         added = {}
         for item in providers:
-            match = re.fullmatch(r'/devices/0/inputs/([0-3])/(preamps/0/)?effects/0', item.slot)
+            match = re.fullmatch(r'/devices/0/inputs/([0-3]|1[4-7])/(preamps/0/)?effects/0', item.slot)
+            if match and int(match[1]) > 3 and not self.virtual:
+                continue  # this driver cannot host on the Virtual inputs: not offered
             if (not match or not isinstance(item.name, str) or not item.name
-                    or (match[2] and not self.unison)
+                    or (match[2] and (not self.unison or int(match[1]) > 3))
                     or type(item.sample_rate) is not int or item.sample_rate <= 0):
                 raise ValueError('named supported input effect-zero provider required')
             first = int(match[1])
             channels = getattr(item, 'channels', (first,))
             if (type(channels) is not tuple or any(type(c) is not int for c in channels)
                     or channels not in ((first,), (first, first + 1))
-                    or (len(channels) == 2 and first not in (0, 2))):
+                    or (len(channels) == 2 and first not in STEREO_FIRST)):
                 raise ValueError('explicit mono input or adjacent stereo pair required')
             key = (item.slot, item.name, channels)
             if key in self.providers or key in added:
@@ -127,7 +133,7 @@ class NativePluginBackend:
         first = int(slot.split('/')[4])
         linked = self.publisher.state.get_value(f'/devices/0/inputs/{first}/Stereo')
         if linked is True:
-            return (first, first + 1) if first in (0, 2) else ()
+            return (first, first + 1) if first in STEREO_FIRST else ()
         return (first,)
 
     def _layout_refusal(self, slot, name, channels):
@@ -284,9 +290,16 @@ class NativePluginBackend:
         return RemoteReadback(handle, query, tuple(words))
 
     def allows_idle_mixer_link_change(self, canonical):
-        """Allow changing a physical mono/stereo pair only before native ownership."""
-        return (bool(re.fullmatch(r'/devices/0/inputs/[02]/Stereo', canonical))
-                and not self._leases and not self._pending)
+        """Allow changing a physical mono/stereo pair only before native ownership (a Virtual
+        pair: before its own, nothing else depends on its link)."""
+        match = re.fullmatch(r'/devices/0/inputs/(0|2|14|16)/Stereo', canonical)
+        if not match or self._pending:
+            return False
+        first = int(match[1])
+        if first < 4:
+            return not self._leases
+        return not any({first, first + 1} & set(self._provider_channels(lease.provider))
+                       for lease in self._leases.values())
 
     def prepare(self, slot, name):
         if not re.fullmatch(r'/devices/0/inputs/[0-3]/effects/0', slot):
@@ -524,7 +537,7 @@ def register_native(state, helper, hardware, provider):
                           UA_FEAT2_PLUGIN_STEREO, UA_FEAT2_PLUGIN_SWAP,
                           UA_FEAT2_PLUGIN_CHAIN, UA_FEAT2_PLUGIN_DELAY_COMP,
                           UA_FEAT2_PLUGIN_UNISON, UA_FEAT2_PLUGIN_ANALOG_LEASE,
-                          UA_FEAT2_PLUGIN_START_STAGED)
+                          UA_FEAT2_PLUGIN_START_STAGED, UA_FEAT2_PLUGIN_VIRTUAL)
 
     if helper is None or not hardware.connected or hardware.fd < 0:
         raise ValueError('native hosting needs live PCIe hardware and helper tree')
@@ -555,7 +568,8 @@ def register_native(state, helper, hardware, provider):
         and hardware.get_driver_param(DRIVER_PARAM_SAMPLE_RATE) == rate,
         max_instances=4 if features & UA_FEAT2_PLUGIN_MULTI_INPUT else 1,
         stereo=bool(features & UA_FEAT2_PLUGIN_STEREO),
-        replacement=bool(features & UA_FEAT2_PLUGIN_SWAP))
+        replacement=bool(features & UA_FEAT2_PLUGIN_SWAP),
+        virtual=bool(features & UA_FEAT2_PLUGIN_VIRTUAL))
     if getattr(backend, 'compensation_supported', False):
         setting = state.get_value('/MaxDelayComp')
         result = backend.set_compensation(setting)

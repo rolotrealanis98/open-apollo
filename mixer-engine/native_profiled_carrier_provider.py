@@ -13,7 +13,7 @@ import hashlib, json, math, os, re, sys, threading, time
 EXECUTOR = Path(__file__).resolve().parents[1] / 'tools/plugin-mapper/plugin_mapper/executor'
 if str(EXECUTOR) not in sys.path:
     sys.path.append(str(EXECUTOR))
-from native_carrier import GeneratedOrdinaryCarrier, MODULES, check, write as _write
+from native_carrier import GeneratedOrdinaryCarrier, INPUTS, MODULES, STEREO_FIRST, check, write as _write
 from plugin_native import ControlPlan
 from plugin_publication import LoadedPlugin
 
@@ -122,8 +122,8 @@ class ProfiledCarrierProvider:
 
     def __init__(self, bundle_path, input_index=0, *, data=None, module_store=MODULES):
         """data: the already parsed bundle (the registry shares one parse across inputs)."""
-        if type(input_index) is not int or not 0 <= input_index < 4:
-            raise ValueError('mono input 0..3 required')
+        if type(input_index) is not int or input_index not in INPUTS:
+            raise ValueError('mono input 0..3 or Virtual 14..17 required')
         if data is None:
             raw = Path(bundle_path).read_bytes()
             data = json.loads(raw)
@@ -574,8 +574,8 @@ class ProfiledCarrierProvider:
 class StereoProfiledCarrierProvider(ProfiledCarrierProvider):
     """Paired-input wrapper for bundles proven with an original 2/2 descriptor."""
     def __init__(self, bundle_path, input_index=0, **kwargs):
-        if input_index not in (0,2):
-            raise ValueError('stereo provider requires input pair 1/2 or 3/4')
+        if input_index not in STEREO_FIRST:
+            raise ValueError('stereo provider requires input pair 1/2, 3/4 or Virtual 1/2, 3/4')
         super().__init__(bundle_path,input_index,**kwargs)
         if tuple(self.data['descriptor'].get('io',())) != (2,2):
             raise ValueError('original 2/2 descriptor required for stereo wrapper')

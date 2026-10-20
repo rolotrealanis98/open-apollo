@@ -1089,8 +1089,13 @@ int main(void)
 		       u[3].used_words == 4 * 0x2010 + 4 * 0x400);
 	}
 	mutex_lock(&dev.lock);
+	/* a Virtual input's Input Strip is a chain's target too (UA_FEAT2_PLUGIN_VIRTUAL) */
 	assert(ua_strips_override_target(&dev, 0, 0x18 | 0x20 << 16, host.epoch,
-					 &gen) == -ENOENT);
+					 &gen) == 0);
+	assert(ua_strips_override_target(&dev, 0, 0x18 | 0x19 << 16, host.epoch,
+					 &gen) == 0);
+	assert(ua_strips_override_target(&dev, 0, 0x1c | 0x20 << 16, host.epoch,
+					 &gen) == -ENOENT);	/* Virtual 5: no strip */
 	assert(ua_strips_override_target(&dev, 0, 0x00 | 0x20 << 16, host.epoch,
 					 &gen) == 0);
 	mutex_unlock(&dev.lock);
