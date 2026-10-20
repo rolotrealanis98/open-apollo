@@ -7,10 +7,31 @@ creates handles, changes UA's plugin state, calls hardware or dispatches notific
 
 from dataclasses import dataclass
 import copy
+import gc
 import math
+import pickle
 import re
 from plugin_lifecycle import is_plugin_slot_path
 from state_tree import StateTree
+
+
+def _clone(value):
+    """copy.deepcopy of the plain (JSON-like) state and helper trees, faster.
+
+    A publication copies both trees several times; each copy makes ~500k objects. On the
+    daemon, whose heap holds the plug-in emulators, the collector passes those allocations
+    trigger cost several times the copy itself (a control change took 0.5-1 s). A pickle round
+    trip gives the same tree in a third of the time, with the collector paused meanwhile."""
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        try:
+            return pickle.loads(pickle.dumps(value, pickle.HIGHEST_PROTOCOL))
+        except (pickle.PicklingError, TypeError, AttributeError):
+            return copy.deepcopy(value)
+    finally:
+        if enabled:
+            gc.enable()
 
 
 class PublicationError(ValueError):
@@ -191,7 +212,7 @@ class Publisher:
         if result is not None:
             self.validate(result)
         state = StateTree()
-        state.root = copy.deepcopy(self.state.root)
+        state.root = _clone(self.state.root)
         # Existing flat index is cached metadata, rebuilt to avoid detached dicts.
         state._props = {}
         node, _ = state._resolve_path(slot)
@@ -217,7 +238,7 @@ class Publisher:
                         f"{slot}/parameters/{parameter['id']}/{name}",
                         copy.deepcopy(meta),
                     )
-        helper = copy.deepcopy(self.helper.root)
+        helper = _clone(self.helper.root)
         target = helper
         for part in slot.strip("/").split("/"):
             children = target.setdefault("children", [])
@@ -271,8 +292,8 @@ class Publisher:
             state.root,
             helper,
             events,
-            copy.deepcopy(self.state.root),
-            copy.deepcopy(self.helper.root),
+            _clone(self.state.root),
+            _clone(self.helper.root),
         )
 
     def _control_target(self, slot, handle, field):
@@ -421,6 +442,15 @@ class Publisher:
 
     def stage_control(self, slot, readback):
         """Stage only backend-observed runtime values, retaining all metadata."""
+        slot, node, keys, values = self.check_control(slot, readback)
+        state_root, helper_root = _clone((self.state.root, self.helper.root))
+        return self._stage_control(slot, node, keys, values, readback, state_root, helper_root)
+
+    def check_control(self, slot, readback):
+        """What stage_control validates, without staging: no copy of either tree.
+
+        Staging copies the whole state and helper trees several times (hundreds of ms on a
+        live daemon); a control is checked four times before the one staging it commits."""
         if not isinstance(readback, ControlReadback):
             raise PublicationError("typed control readback required")
         slot, node, helper, keys = self._control_target(
@@ -455,9 +485,29 @@ class Publisher:
                     or value not in meta["values"]
                 ):
                     raise PublicationError("enumerated step readback required")
-        state_root, helper_root = copy.deepcopy(
-            (self.state.root, self.helper.root)
+        return slot, node, keys, values
+
+    def _stage_control(self, slot, node, keys, values, readback, state_root, helper_root):
+        events = []
+        for state_props, helper_props, key, value, event in self._control_edits(
+                slot, node, keys, values, readback, state_root, helper_root):
+            state_props["value"] = value
+            helper_props["value"] = copy.deepcopy(value)
+            events.append(event)
+        return Transaction(
+            self,
+            self.version,
+            self.generation,
+            state_root,
+            helper_root,
+            events,
+            _clone(self.state.root),
+            _clone(self.helper.root),
         )
+
+    @staticmethod
+    def _control_edits(slot, node, keys, values, readback, state_root, helper_root):
+        """(state property, helper property, key, value, event) of each value that changes."""
         state_target = state_root
         helper_target = helper_root
         target_path = (
@@ -472,30 +522,48 @@ class Publisher:
                 for child in helper_target["children"]
                 if child.get("path") == part
             )
-        events = []
+        edits = []
         for key in keys:
             old = node["properties"][key]["value"]
             if type(old) is not type(values[key]) or old != values[key]:
-                state_target["properties"][key]["value"] = values[key]
-                helper_target["properties"][key]["value"] = copy.deepcopy(
-                    values[key]
-                )
-                events.append(
-                    (
-                        target_path + "/" + key + "/value",
-                        copy.deepcopy(values[key]),
-                    )
-                )
-        return Transaction(
-            self,
-            self.version,
-            self.generation,
-            state_root,
-            helper_root,
-            events,
-            copy.deepcopy(self.state.root),
-            copy.deepcopy(self.helper.root),
-        )
+                edits.append((
+                    state_target["properties"][key],
+                    helper_target["properties"][key],
+                    key,
+                    values[key],
+                    (target_path + "/" + key + "/value", copy.deepcopy(values[key])),
+                ))
+        return edits
+
+    def commit_control(self, slot, readback, *, fault=None):
+        """stage_control(slot, readback).commit(fault=fault), edited in place.
+
+        For a caller that stages and commits in one step on the thread that owns the trees:
+        nothing can change between the two, so the whole-tree copies and comparisons a staged
+        Transaction needs (most of a control change's time on a live daemon) prove nothing
+        here. Only this control's values change; a fault restores them in both views."""
+        if not self.connected:
+            raise PublicationError("stale/disconnected transaction")
+        slot, node, keys, values = self.check_control(slot, readback)
+        edits = self._control_edits(slot, node, keys, values, readback,
+                                    self.state.root, self.helper.root)
+        before = [(s, h, copy.deepcopy(s["value"]), copy.deepcopy(h["value"]))
+                  for s, h, _, _, _ in edits]
+        try:
+            for state_props, _, _, value, _ in edits:
+                state_props["value"] = value
+            if fault:
+                fault("state_swapped")
+            for _, helper_props, _, value, _ in edits:
+                helper_props["value"] = copy.deepcopy(value)
+            if fault:
+                fault("both_swapped")
+        except Exception:
+            for state_props, helper_props, old_state, old_helper in before:
+                state_props["value"], helper_props["value"] = old_state, old_helper
+            raise
+        self.version += 1
+        return [event for _, _, _, _, event in edits]
 
 
 @dataclass
@@ -513,7 +581,7 @@ class Transaction:
     def __post_init__(self):
         # Public dataclass fields aid inspection but cannot change the validated
         # staged payload or its optimistic concurrency preconditions.
-        self._sealed = copy.deepcopy(
+        self._sealed = _clone(
             (
                 self.version,
                 self.generation,
@@ -559,10 +627,10 @@ class Transaction:
             p.state._props,
         )
         try:
-            p.state.root = copy.deepcopy(self.state_root)
+            p.state.root = _clone(self.state_root)
             if fault:
                 fault("state_swapped")
-            p.helper.root = copy.deepcopy(self.helper_root)
+            p.helper.root = _clone(self.helper_root)
             p.state._props = {}
 
             # _props is not used for traversal but callers use it for inspection.

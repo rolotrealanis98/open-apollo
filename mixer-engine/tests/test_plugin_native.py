@@ -346,3 +346,51 @@ def test_provider_without_current_values_publishes_no_coupled_change():
     assert tx.load(SLOT, provider.name).committed
     assert tx.control(SLOT, FIELD, 0.7).committed
     assert state.get_value(SLOT + '/parameters/1/NormalizedValue') == 0.1
+
+
+def test_queued_parameter_sets_keep_only_the_newest_value():
+    # A drag arriving while a native transaction runs: the DSP gets the latest value, not
+    # every intermediate one; other paths keep their order and a superseded SET with func_id
+    # (Console tags every write) is answered at once.
+    state, helper, driver, provider, backend, tx = model()
+    daemon = MixerDaemon(state, None, helper_tree=helper,
+                         plugin_transactions=tx, plugin_hosting=True)
+    writer = MemoryWriter()
+    client = MixerClient(None, writer)
+    daemon._native_busy = True
+    other = SLOT + '/parameters/1/NormalizedValue/value'
+    for command in (Command('set', '/UndoRecording/value', True),
+                    Command('set', SLOT + '/' + FIELD + '/value', 0.1),
+                    Command('set', SLOT + '/' + FIELD, 0.2, raw_params={'func_id': '9'}),
+                    Command('set', other, 0.5),
+                    Command('set', SLOT + '/' + FIELD + '/value', 0.3),
+                    Command('set', SLOT + '/' + FIELD, 0.4)):
+        daemon._handle_set(client, command)
+    assert [(c.path, c.value) for _, c in daemon._native_waiting] == [
+        ('/UndoRecording/value', True), (other, 0.5), (SLOT + '/' + FIELD, 0.4)]
+    answers = [json.loads(f.rstrip(b'\0')) for f in writer.frames]
+    assert [a.get('parameters', {}).get('func_id') for a in answers] == [9]
+
+
+def test_observations_read_in_merged_spans():
+    class Spans:
+        def __init__(self):
+            self.reads = []
+
+        def service(self, native, *, read):
+            self.reads.append(read)
+            row, offset, count = read
+            return tuple(row << 16 | offset + i for i in range(count))
+
+    driver = Spans()
+    backend = Mock(driver=driver)
+    # 25 runs on three rows as a codec emits them (16-word runs, gaps, a lone word).
+    observations = tuple((14, 21 + 16 * i, tuple(14 << 16 | 21 + 16 * i + k for k in range(16)))
+                         for i in range(12)) + ((14, 216, (14 << 16 | 216,)),
+                                                (15, 38, (15 << 16 | 38, 15 << 16 | 39)),
+                                                (17, 7, tuple(17 << 16 | 7 + k for k in range(16))))
+    words = NativePluginBackend._read_spans(backend, None, observations)
+    assert driver.reads == [(14, 21, 64), (14, 85, 64), (14, 149, 64), (14, 216, 1),
+                            (15, 38, 2), (17, 7, 16)]
+    assert all(words[row, offset + i] == v for row, offset, values in observations
+               for i, v in enumerate(values))

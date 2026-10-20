@@ -766,7 +766,7 @@ class PluginTransactions:
                 raise PublicationError(
                     "Prepared prior values disagree with published state"
                 )
-            p.stage_control(
+            p.check_control(
                 slot, prior
             )  # Validate prior schema and both views before any write.
             sealed = copy.deepcopy(
@@ -798,7 +798,7 @@ class PluginTransactions:
                     raise PublicationError(
                         "Exact prior restoration unconfirmed"
                     )
-                p.stage_control(slot, restored.readback)
+                p.check_control(slot, restored.readback)
                 if before != slot_views(p, slot):
                     raise PublicationError(
                         "Publication changed during control/restore"
@@ -869,14 +869,15 @@ class PluginTransactions:
                     raise PublicationError("Coupled readback identity mismatch")
 
             def publish():
+                # Staged and committed in one step on the owning thread: in place.
                 events = list(
-                    p.stage_control(slot, applied.readback).commit(
-                        fault=self.publication_fault
+                    p.commit_control(
+                        slot, applied.readback, fault=self.publication_fault
                     )
                 )
                 for coupled in applied.coupled:
-                    events += p.stage_control(slot, coupled).commit(
-                        fault=self.publication_fault
+                    events += p.commit_control(
+                        slot, coupled, fault=self.publication_fault
                     )
                 return events
 
