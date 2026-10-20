@@ -3285,8 +3285,16 @@ post_handshake:
 					 * corrupts monitor standalone operation.
 					 * The daemon's 57-param monitor init sets
 					 * setting[2] correctly via ioctl later.
+					 *
+					 * Not on an inherited DSP: it kept the
+					 * last session's routing, and the low
+					 * byte of S3 / S13 / S16-17 / S23 is
+					 * preamp 1-2 gain, HiZ impedance and
+					 * knob steps (a driver reload read
+					 * input 1 at 41 dB, Hi-Z input 2 at
+					 * GainC 0, omarchy 2026-10-20).
 					 */
-					{
+					if (!ua->dsp_inherited) {
 						int s;
 						for (s = 1; s < UA_MIXER_BATCH_COUNT; s++) {
 							if (s == 2)
