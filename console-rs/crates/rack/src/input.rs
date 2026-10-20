@@ -51,6 +51,10 @@ pub enum Control {
     FixedSlots,
     /// [view] Navigator SENDS OVERVIEW (compact 35-pt sends).
     SendsOverview,
+    /// [view] A row's view-type icon in the side section (`Send-View-Type-Toggle`): SENDS
+    /// switches the input sends between full send strips and mini sends (knob, PRE, M);
+    /// INPUTS / INSERTS switch LARGE / SMALL.
+    RowViewType(Section),
     /// [model] Navigator INSERT EFFECTS: every input's `RecordPreEffects` (false = UAD REC, true = UAD MON).
     AllRecordPreEffects(bool),
     /// [view] Navigator MODIFIERS (exclusive; tapping the active one clears it).

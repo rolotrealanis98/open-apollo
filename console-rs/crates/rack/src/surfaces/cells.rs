@@ -188,7 +188,7 @@ pub fn send_list(ui: &mut Ui, s: &StripInfo, sends: &[SendState], pre: &dyn Fn(u
         ui.text("NO SENDS", TextStyle { color: style.color.with_alpha(0.35), ..style }, Rect::new(0.0, y + 4.0, STRIP_W, 40.0), Align::Center);
         return;
     }
-    let style = SendStyle::of(view.sends_overview, s.kind.is_bus());
+    let style = SendStyle::of(view.sends_overview, s.kind.is_bus() || view.compact_sends);
     if style != SendStyle::Overview {
         ui.fill(Rect::new(4.0, y, STRIP_W - 8.0, well_h), SENDS_WELL);
     }
