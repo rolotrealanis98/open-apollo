@@ -1136,7 +1136,7 @@ mod tests {
         for host in ["localhost", "::1", "127.0.0.2"] {
             assert!(Endpoint::new(host, DEFAULT_PORT).is_local(), "{host}");
         }
-        let remote = Endpoint::new("192.168.1.4", DEFAULT_PORT);
+        let remote = Endpoint::new("192.0.2.4", DEFAULT_PORT);
         assert!(!remote.is_local());
         assert_eq!(options.retry_delay(&remote, 6), Duration::from_secs(10));
         assert_eq!(options.retry_delay(&remote, 2), Duration::from_secs(1));
