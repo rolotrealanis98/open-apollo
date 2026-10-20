@@ -59,7 +59,7 @@ from model_info import ModelInfo, monitor_param_allowed
 from hardware import (CLOCK_CONTROL_PATHS, CUE_34_OFF_RATE, effective_cue_count, CLOCK_SOURCE_MAP,
                       DRIVER_PARAM_CLOCK_SOURCE,
                       DRIVER_PARAM_SAMPLE_RATE, DRIVER_PARAM_TRANSPORT_RUNNING,
-                      HardwareBackend, HardwareRouter, clock_source_names,
+                      HardwareBackend, HardwareRouter, clock_source_names, encode_monitor_level,
                       device_clock_menu,
                       fader_db_to_tapered, normalize_global,
                       pcie_link_below_minimum,
@@ -869,9 +869,12 @@ class MixerDaemon:
         # to it.  This device session publishes what the readback shows
         # and sends no init sequence (and no ADC delay comp); a later
         # connection (hot-plug, resume) re-inits as always, since the
-        # device lost its state then.
+        # device lost its state then.  Only without saved state: with it, the
+        # saved mix is what the Console shows, so it is pushed as usual (a
+        # reboot or power cycle while the daemon was down left the DSP
+        # running something else).
         self._preserve_session = False
-        if preserve_hardware and self._hw_online:
+        if preserve_hardware and self._hw_online and not getattr(state, "restored", 0):
             self._preserve_session = True
             self._hw_init_done = True
             rb = hw_router.poll_hw_readback()
@@ -1533,9 +1536,11 @@ class MixerDaemon:
 
             # Poll hardware readback and push changes to console
             # (monitor knob, mute, dim, preamp gains — NOT meters)
-            # Skip during startup grace period (2s) to let init push
-            # state tree defaults to hardware first.
-            if self.hw_router and time.monotonic() - self._readback_start_time > 2.0:
+            # Skip until the init push has run for this connection (and 2 s
+            # after it): a power-on readback taken before it would overwrite
+            # the saved preamp and monitor settings the push restores.
+            if self.hw_router and self._hw_init_done and self._hw_online and \
+                    time.monotonic() - self._readback_start_time > 2.0:
                 self.hw_router.flush_pending_gains()
                 rb = self.hw_router.poll_hw_readback()
                 if rb:
@@ -2972,13 +2977,45 @@ class MixerDaemon:
         self.state.set_value("/initialized", True)
         self._session_ready = True
 
+    def _saved_over_readback(self, rb: dict) -> dict:
+        """The readback with the saved preamp and monitor settings over it.
+
+        After a power cycle the Apollo reports its own power-on settings,
+        not the ones the Console last set; the saved state wins, as it does
+        for everything the hardware cannot report back."""
+        saved = self.state._dirty
+        rb = dict(rb)
+        for ch in self.hw_router.preamp_inputs():
+            base = f"/devices/0/inputs/{ch}"
+            for key, path in (("gain", "preamps/0/Gain"), ("48v", "preamps/0/48V"),
+                              ("pad", "preamps/0/Pad"), ("lowcut", "preamps/0/LowCut"),
+                              ("phase", "preamps/0/Phase"), ("link", "Stereo")):
+                value = saved.get(f"{base}/{path}/value")
+                if value is not None:
+                    rb[f"preamp_{ch}_{key}"] = (int(round(value)) if key == "gain"
+                                                else bool(value))
+            iotype = saved.get(f"{base}/IOType/value")
+            if iotype is not None:
+                rb[f"preamp_{ch}_micline"] = iotype == "Line"
+        mon_out = self.hw_router.monitor_output_index()
+        if mon_out is not None:
+            base = f"/devices/0/outputs/{mon_out}"
+            level = saved.get(f"{base}/CRMonitorLevel/value")
+            if level is not None:
+                rb["monitor_level_raw"] = encode_monitor_level(float(level))
+            for key, ctl in (("monitor_mute", "Mute"), ("monitor_mono", "MixToMono"),
+                             ("monitor_dim", "DimOn")):
+                value = saved.get(f"{base}/{ctl}/value")
+                if value is not None:
+                    rb[key] = bool(value)
+        return rb
+
     def _push_defaults_to_hardware(self):
         """Push the init sequence (macOS order) to hardware.
 
-        Preamp and monitor values come from the hardware readback when it
-        is valid, so a daemon start keeps what the Apollo is doing,
-        front-panel changes included (the readback level is the level the
-        Apollo is already playing at).  Without a valid readback, safe
+        Preamp and monitor values are the saved ones (_saved_over_readback),
+        else the hardware readback when it is valid (the level the Apollo
+        is already playing at).  Without either, safe
         defaults are used: monitor volume at minimum to protect speakers,
         preamps at 10 dB with every switch off.
 
@@ -3005,10 +3042,12 @@ class MixerDaemon:
         rb = rb or {}
         if rb:
             log.info("Init keeps the hardware's preamp and monitor settings "
-                     "(monitor %.1f dB)", rb["monitor_level_db"])
+                     "(monitor %.1f dB) where none are saved",
+                     rb["monitor_level_db"])
         else:
-            log.info("No hardware readback: init uses safe defaults "
-                     "(monitor at minimum)")
+            log.info("No hardware readback: init uses the saved or safe "
+                     "defaults (monitor at minimum)")
+        rb = self._saved_over_readback(rb)
         mon_raw = rb.get("monitor_level_raw", 0)
         mon_mute = rb.get("monitor_mute", False)
         mon_mono = rb.get("monitor_mono", False)
@@ -3308,8 +3347,8 @@ class MixerDaemon:
 
         # A6: what the hardware cannot report back (sends, aux, CUE, mirror,
         # alt monitors, talkback configuration, solo) comes from the saved
-        # state, after the defaults so the saved value wins.  Preamp and
-        # monitor values stay the readback's.
+        # state, after the defaults so the saved value wins (preamp and
+        # monitor values were taken from it above).
         if self.hw_router and self.hw_router.backend:
             if self.state.get_value("/TalkbackOn/value"):
                 # init turned the talkback off; the tree must say so

@@ -317,9 +317,10 @@ class TestOutputsAndConfig:
         assert len(hits) == 1
 
 
-# ── Readback-derived values stay the hardware's ─────────────────────
+# ── Saved preamp and monitor values win over the readback ──────────
+# (after a power cycle the Apollo reports its own power-on settings)
 
-class TestReadbackWins:
+class TestSavedWins:
     def readback(self):
         return (1, make_readback(
             mon_raw=150, mute=False, mono=True, dim=False,
@@ -336,27 +337,34 @@ class TestReadbackWins:
                 f"{OUT}/18/DimOn/value": True,
                 f"{OUT}/18/MixToMono/value": False}
 
-    def test_preamps_keep_the_readback(self, tmp_path):
+    def test_preamps_take_the_saved_values(self, tmp_path):
         d, be, tree = build(tmp_path, self.saved_preamp_and_monitor(),
                             readback=self.readback())
         gainc = {}
         for e in be.seq:
             if e[0] == "param" and e[1] == 1 and e[3] == 0x06:
                 gainc[e[2]] = e[4]
-        assert gainc == {0: 21, 1: 31, 2: 41, 3: 51}
-        assert last_param(be, 1, 0x03, 0) == 1              # 48V from readback
-        assert last_param(be, 1, 0x01, 1) == 0              # pad not saved's
+        assert gainc == {0: 46, 1: 31, 2: 41, 3: 51}       # 55 dB saved, rest readback
+        assert last_param(be, 1, 0x03, 0) == 0              # saved 48V off
+        assert last_param(be, 1, 0x01, 1) == 1              # saved pad on
         assert last_param(be, 1, 0x02, 0) == 0
-        assert last_param(be, 1, 0x02, 2) == 1              # link from readback
+        assert last_param(be, 1, 0x02, 2) == 0              # saved link off
 
-    def test_monitor_keeps_the_readback(self, tmp_path):
+    def test_monitor_takes_the_saved_values(self, tmp_path):
         d, be, tree = build(tmp_path, self.saved_preamp_and_monitor(),
                             readback=self.readback())
         levels = {e[4] for e in be.seq
                   if e[0] == "param" and e[1] == 2 and e[3] == 0x01}
+        assert levels == {172}                              # -10 dB
+        assert last_param(be, 2, 0x03) == 2                 # muted, not mono
+        assert last_param(be, 2, 0x44, 1) == 1              # dim on
+
+    def test_unsaved_values_keep_the_readback(self, tmp_path):
+        d, be, tree = build(tmp_path, {}, readback=self.readback())
+        levels = {e[4] for e in be.seq
+                  if e[0] == "param" and e[1] == 2 and e[3] == 0x01}
         assert levels == {150}
-        assert last_param(be, 2, 0x03) == 1                 # mono, unmuted
-        assert last_param(be, 2, 0x44, 1) == 0              # dim off
+        assert last_param(be, 1, 0x03, 0) == 1              # 48V from readback
 
     def test_rate_and_clock_source_are_left_to_the_driver(self, tmp_path):
         saved = {"/SampleRate/value": 96000, "/ClockSource/value": "ADAT"}
