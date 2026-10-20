@@ -367,6 +367,15 @@ def check_meters(d, slot, spec, signal, rec, name, layout):
                "%d/%d move with a signal" % (moving, len(qs)))
 
 
+def done(out, name, layout):
+    """This layout already has a live result (resuming an interrupted run)."""
+    try:
+        with open(os.path.join(out, slug(name) + ".json"), encoding="utf-8") as f:
+            return "load" in json.load(f)["layouts"].get(layout, {})
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def live(args, rec):
     with open(os.path.join(args.maps, "index.json"), encoding="utf-8") as f:
         bundles = {(e["name"], e["layout"]): e for e in json.load(f)["bundles"]}
@@ -384,6 +393,8 @@ def live(args, rec):
             if args.layout and layout != args.layout:
                 continue
             entry = bundles.get((name, layout))
+            if args.skip_done and done(args.out, name, layout):
+                continue
             slot = free_slot(d, slots)
             if entry is None or slot is None:
                 print("%s %s: skipped (%s)" % (name, layout,
@@ -434,6 +445,8 @@ def main(argv=None):
     p.add_argument("--layout", choices=("mono", "stereo"))
     p.add_argument("--signal", action="store_true",
                    help="a signal is on the input: check that meters move")
+    p.add_argument("--skip-done", action="store_true",
+                   help="skip layouts that already have a live result (resume a run)")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=4710)
     p = sub.add_parser("mark", help="record a check measured by hand")
@@ -446,7 +459,13 @@ def main(argv=None):
     p.add_argument("--rate", type=int, default=48000)
     args = ap.parse_args(argv)
     rec = Recorder(args)
-    {"offline": offline, "live": live, "mark": mark}[args.cmd](args, rec)
+    try:
+        {"offline": offline, "live": live, "mark": mark}[args.cmd](args, rec)
+    except (ConnectionError, TimeoutError) as e:
+        # The daemon restarted or hung mid-load: what was measured so far is kept.
+        print("\nstopped: %s; resume with the same command plus --skip-done" % e, file=sys.stderr)
+        rec.written and print("%d file(s) written so far" % len(rec.written))
+        sys.exit(2)
     if rec.written:
         print("\n%d file(s) in %s; now run tools/gen-status-graph.py"
               % (len(rec.written), os.path.relpath(args.out, ROOT)))

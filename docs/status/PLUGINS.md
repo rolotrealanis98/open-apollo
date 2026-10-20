@@ -48,13 +48,59 @@ bind the spec's unbound controls/meters to the bundle's parameters (mixer-engine
 - UA 610-B (mono): 10/11 parameters have a panel control; none for ordinals 10
 - UA 610-B (stereo): 10/11 parameters have a panel control; none for ordinals 10
 
-### load: 0 fail, 238 layouts not checked
+### load: 0 fail, 184 layouts not checked
 
-### controls: 0 fail, 238 layouts not checked
+### controls: 0 fail, 184 layouts not checked
 
-### text: 0 fail, 238 layouts not checked
+### text: 4 fail, 184 layouts not checked
 
-### meters: 0 fail, 162 layouts not checked
+compare the listed parameters' formatting against the bundle's control sweep
+
+- Ampex ATR-102 (mono): 36/40; differs at ordinals 11, 15, 17, 19
+- Ampex ATR-102 (stereo): 34/40; differs at ordinals 11, 15, 17, 19, 34, 36
+- Capitol Chambers (stereo): 12/13; differs at ordinals 11
+- Cooper Time Cube (stereo): 16/18; differs at ordinals 12, 13
+
+### meters: 36 fail, 126 layouts not checked
+
+publish the plug-in's meter words (dynamic_refs) through the daemon
+
+- Ampeg B15N (mono): meter read refused: plugin_remote_readback_unavailable 
+- Ampeg B15N (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Ampeg SVT3Pro (mono): meter read refused: plugin_remote_readback_unavailable 
+- Ampeg SVT3Pro (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Ampeg SVTVR (mono): meter read refused: plugin_remote_readback_unavailable 
+- Ampeg SVTVR (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Ampex ATR-102 (mono): meter read refused: plugin_remote_readback_unavailable 
+- Ampex ATR-102 (stereo): meter read refused: plugin_remote_readback_unavailable 
+- AMS DMX 15-80 S (mono): meter read refused: plugin_remote_readback_unavailable 
+- AMS DMX 15-80 S (stereo): meter read refused: plugin_remote_readback_unavailable 
+- API 2500 (mono): meter read refused: plugin_remote_readback_unavailable 
+- API 2500 (stereo): meter read refused: plugin_remote_readback_unavailable 
+- API Preamp (mono): meter read refused: plugin_remote_readback_unavailable 
+- API Preamp (stereo): meter read refused: plugin_remote_readback_unavailable 
+- API Vision Channel Strip Legacy (mono): meter read refused: plugin_remote_readback_unavailable 
+- API Vision Channel Strip Legacy (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Auto-Tune Realtime Access (mono): meter read refused: plugin_remote_readback_unavailable 
+- Auto-Tune Realtime Access (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Auto-Tune Realtime Advanced (mono): meter read refused: plugin_remote_readback_unavailable 
+- Auto-Tune Realtime Advanced (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Auto-Tune Realtime X (mono): meter read refused: plugin_remote_readback_unavailable 
+- Auto-Tune Realtime X (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Avalon VT-737sp (mono): meter read refused: plugin_remote_readback_unavailable 
+- Avalon VT-737sp (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Brigade Chorus (mono): meter read refused: plugin_remote_readback_unavailable 
+- Brigade Chorus (stereo): meter read refused: plugin_remote_readback_unavailable 
+- C-Suite C-Vox (mono): meter read refused: plugin_remote_readback_unavailable 
+- C-Suite C-Vox (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Century Tube Channel Strip (mono): meter read refused: plugin_remote_readback_unavailable 
+- Century Tube Channel Strip (stereo): meter read refused: plugin_remote_readback_unavailable 
+- Cooper Time Cube (mono): meter read refused: plugin_remote_readback_unavailable 
+- Cooper Time Cube (stereo): meter read refused: plugin_remote_readback_unavailable 
+- DreamVerb (mono): meter read refused: plugin_remote_readback_unavailable 
+- DreamVerb (stereo): meter read refused: plugin_remote_readback_unavailable 
+- EMT 140 (mono): meter read refused: plugin_remote_readback_unavailable 
+- EMT 140 (stereo): meter read refused: plugin_remote_readback_unavailable 
 
 ### latency: 0 fail, 238 layouts not checked
 
@@ -67,49 +113,49 @@ bind the spec's unbound controls/meters to the bundle's parameters (mixer-engine
 | 4K Buss Compressor | – | · | · | · | · | · | · | · | · | | not checked yet |
 | 4K Channel Strip | – | · | · | · | · | · | · | · | · | | not checked yet |
 | A-Type Multiband Enhancer | – | · | · | · | · | · | · | · | · | | not checked yet |
-| ADA Flanger | mono | ✅ | ✅ 18/18 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| ADA Flanger | stereo | ✅ | ✅ 18/18 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
+| ADA Flanger | mono | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ✅ 18/18 | – no meters on the panel | · | · |  | latency: not checked |
+| ADA Flanger | stereo | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ✅ 18/18 | – no meters on the panel | · | · |  | latency: not checked |
 | ADA STD-1 Stereo Tapped Delay | – | · | · | · | · | · | · | · | · | | not checked yet |
 | AKG BX 20 | – | · | · | · | · | · | · | · | · | | not checked yet |
-| Ampeg B15N | mono | ✅ | ✅ 22/22 | · | · | · | · | · | · |  | load: not checked |
-| Ampeg B15N | stereo | ✅ | ✅ 22/22 | · | · | · | · | · | · |  | load: not checked |
-| Ampeg SVT3Pro | mono | ✅ | ✅ 36/36 | · | · | · | · | · | · |  | load: not checked |
-| Ampeg SVT3Pro | stereo | ✅ | ✅ 36/36 | · | · | · | · | · | · |  | load: not checked |
-| Ampeg SVTVR | mono | ✅ | ✅ 27/27 | · | · | · | · | · | · |  | load: not checked |
-| Ampeg SVTVR | stereo | ✅ | ✅ 27/27 | · | · | · | · | · | · |  | load: not checked |
-| Ampeg SVTVR Classic | mono | ✅ | ✅ 11/11 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Ampeg SVTVR Classic | stereo | ✅ | ✅ 11/11 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Ampex ATR-102 | mono | ✅ | ✅ 40/40 | · | · | · | · | · | · |  | load: not checked |
-| Ampex ATR-102 | stereo | ✅ | ✅ 40/40 | · | · | · | · | · | · |  | load: not checked |
-| AMS DMX 15-80 S | mono | ✅ | ✅ 27/27 | · | · | · | · | · | · |  | load: not checked |
-| AMS DMX 15-80 S | stereo | ✅ | ✅ 27/27 | · | · | · | · | · | · |  | load: not checked |
-| AMS RMX16 | mono | ✅ | ✅ 14/14 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| AMS RMX16 | stereo | ✅ | ✅ 14/14 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| AMS RMX16 Expanded | mono | ✅ | ✅ 14/14 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| AMS RMX16 Expanded | stereo | ✅ | ✅ 14/14 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| API 2500 | mono | ✅ | ✅ 18/18 | · | · | · | · | · | · |  | load: not checked |
-| API 2500 | stereo | ✅ | ✅ 18/18 | · | · | · | · | · | · |  | load: not checked |
-| API 550A | mono | ✅ | ✅ 12/12 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| API 550A | stereo | ✅ | ✅ 12/12 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| API 560 | mono | ✅ | ✅ 13/13 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| API 560 | stereo | ✅ | ✅ 13/13 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| API Preamp | mono | ✅ | ✅ 8/8 | · | · | · | · | · | · |  | load: not checked |
-| API Preamp | stereo | ✅ | ✅ 8/8 | · | · | · | · | · | · |  | load: not checked |
+| Ampeg B15N | mono | ✅ | ✅ 22/22 | ✅ | ✅ 22/22 | ✅ 22/22 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Ampeg B15N | stereo | ✅ | ✅ 22/22 | ✅ | ✅ 22/22 | ✅ 22/22 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Ampeg SVT3Pro | mono | ✅ | ✅ 36/36 | ✅ | ✅ 36/36 | ✅ 36/36 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Ampeg SVT3Pro | stereo | ✅ | ✅ 36/36 | ✅ | ✅ 36/36 | ✅ 36/36 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Ampeg SVTVR | mono | ✅ | ✅ 27/27 | ✅ | ✅ 27/27 | ✅ 27/27 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Ampeg SVTVR | stereo | ✅ | ✅ 27/27 | ✅ | ✅ 27/27 | ✅ 27/27 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Ampeg SVTVR Classic | mono | ✅ | ✅ 11/11 | ✅ | ✅ 11/11 | ✅ 11/11 | – no meters on the panel | · | · |  | latency: not checked |
+| Ampeg SVTVR Classic | stereo | ✅ | ✅ 11/11 | ✅ | ✅ 11/11 | ✅ 11/11 | – no meters on the panel | · | · |  | latency: not checked |
+| Ampex ATR-102 | mono | ✅ | ✅ 40/40 | ✅ | ✅ 40/40 | ❌ 36/40; differs at ordinals 11, 15, 17, 19 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | text: 36/40; differs at ordinals 11, 15, 17, 19 |
+| Ampex ATR-102 | stereo | ✅ | ✅ 40/40 | ✅ | ✅ 40/40 | ❌ 34/40; differs at ordinals 11, 15, 17, 19, 34, 36 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | text: 34/40; differs at ordinals 11, 15, 17, 19, 34, 36 |
+| AMS DMX 15-80 S | mono | ✅ | ✅ 27/27 | ✅ | ✅ 27/27 | ✅ 27/27 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| AMS DMX 15-80 S | stereo | ✅ | ✅ 27/27 | ✅ | ✅ 27/27 | ✅ 27/27 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| AMS RMX16 | mono | ✅ | ✅ 14/14 | ✅ | ✅ 14/14 | ✅ 14/14 | – no meters on the panel | · | · |  | latency: not checked |
+| AMS RMX16 | stereo | ✅ | ✅ 14/14 | ✅ | ✅ 14/14 | ✅ 14/14 | – no meters on the panel | · | · |  | latency: not checked |
+| AMS RMX16 Expanded | mono | ✅ | ✅ 14/14 | ✅ | ✅ 14/14 | ✅ 14/14 | – no meters on the panel | · | · |  | latency: not checked |
+| AMS RMX16 Expanded | stereo | ✅ | ✅ 14/14 | ✅ | ✅ 14/14 | ✅ 14/14 | – no meters on the panel | · | · |  | latency: not checked |
+| API 2500 | mono | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ✅ 18/18 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| API 2500 | stereo | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ✅ 18/18 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| API 550A | mono | ✅ | ✅ 12/12 | ✅ | ✅ 12/12 | ✅ 12/12 | – no meters on the panel | · | · |  | latency: not checked |
+| API 550A | stereo | ✅ | ✅ 12/12 | ✅ | ✅ 12/12 | ✅ 12/12 | – no meters on the panel | · | · |  | latency: not checked |
+| API 560 | mono | ✅ | ✅ 13/13 | ✅ | ✅ 13/13 | ✅ 13/13 | – no meters on the panel | · | · |  | latency: not checked |
+| API 560 | stereo | ✅ | ✅ 13/13 | ✅ | ✅ 13/13 | ✅ 13/13 | – no meters on the panel | · | · |  | latency: not checked |
+| API Preamp | mono | ✅ | ✅ 8/8 | ✅ | ✅ 8/8 | ✅ 8/8 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| API Preamp | stereo | ✅ | ✅ 8/8 | ✅ | ✅ 8/8 | ✅ 8/8 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
 | API Vision Channel Strip | – | · | · | · | · | · | · | · | · | | not checked yet |
-| API Vision Channel Strip Legacy | mono | ✅ | ✅ 37/37 | · | · | · | · | · | · |  | load: not checked |
-| API Vision Channel Strip Legacy | stereo | ✅ | ✅ 37/37 | · | · | · | · | · | · |  | load: not checked |
-| Auto-Tune Realtime Access | mono | ✅ | ✅ 17/17 | · | · | · | · | · | · |  | load: not checked |
-| Auto-Tune Realtime Access | stereo | ✅ | ✅ 17/17 | · | · | · | · | · | · |  | load: not checked |
-| Auto-Tune Realtime Advanced | mono | ✅ | ✅ 20/20 | · | · | · | · | · | · |  | load: not checked |
-| Auto-Tune Realtime Advanced | stereo | ✅ | ✅ 20/20 | · | · | · | · | · | · |  | load: not checked |
-| Auto-Tune Realtime X | mono | ✅ | ❌ 28/29 parameters have a panel control; none for ordinals 20 | · | · | · | · | · | · |  | panel: 28/29 parameters have a panel control; none for ordinals 20 |
-| Auto-Tune Realtime X | stereo | ✅ | ❌ 28/29 parameters have a panel control; none for ordinals 20 | · | · | · | · | · | · |  | panel: 28/29 parameters have a panel control; none for ordinals 20 |
-| Avalon VT-737sp | mono | ✅ | ✅ 32/32 | · | · | · | · | · | · |  | load: not checked |
-| Avalon VT-737sp | stereo | ✅ | ✅ 32/32 | · | · | · | · | · | · |  | load: not checked |
-| Bermuda Triangle | mono | ✅ | ✅ 5/5 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Bermuda Triangle | stereo | ✅ | ✅ 5/5 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Brigade Chorus | mono | ✅ | ✅ 8/8 | · | · | · | · | · | · |  | load: not checked |
-| Brigade Chorus | stereo | ✅ | ✅ 8/8 | · | · | · | · | · | · |  | load: not checked |
+| API Vision Channel Strip Legacy | mono | ✅ | ✅ 37/37 | ✅ | ✅ 37/37 | ✅ 37/37 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| API Vision Channel Strip Legacy | stereo | ✅ | ✅ 37/37 | ✅ | ✅ 37/37 | ✅ 37/37 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Auto-Tune Realtime Access | mono | ✅ | ✅ 17/17 | ✅ | ✅ 17/17 | ✅ 17/17 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Auto-Tune Realtime Access | stereo | ✅ | ✅ 17/17 | ✅ | ✅ 17/17 | ✅ 17/17 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Auto-Tune Realtime Advanced | mono | ✅ | ✅ 20/20 | ✅ | ✅ 20/20 | ✅ 20/20 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Auto-Tune Realtime Advanced | stereo | ✅ | ✅ 20/20 | ✅ | ✅ 20/20 | ✅ 20/20 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Auto-Tune Realtime X | mono | ✅ | ❌ 28/29 parameters have a panel control; none for ordinals 20 | ✅ | ✅ 29/29 | ✅ 29/29 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | panel: 28/29 parameters have a panel control; none for ordinals 20 |
+| Auto-Tune Realtime X | stereo | ✅ | ❌ 28/29 parameters have a panel control; none for ordinals 20 | ✅ | ✅ 29/29 | ✅ 29/29 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | panel: 28/29 parameters have a panel control; none for ordinals 20 |
+| Avalon VT-737sp | mono | ✅ | ✅ 32/32 | ✅ | ✅ 32/32 | ✅ 32/32 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Avalon VT-737sp | stereo | ✅ | ✅ 32/32 | ✅ | ✅ 32/32 | ✅ 32/32 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Bermuda Triangle | mono | ✅ | ✅ 5/5 | ✅ | ✅ 5/5 | ✅ 5/5 | – no meters on the panel | · | · |  | latency: not checked |
+| Bermuda Triangle | stereo | ✅ | ✅ 5/5 | ✅ | ✅ 5/5 | ✅ 5/5 | – no meters on the panel | · | · |  | latency: not checked |
+| Brigade Chorus | mono | ✅ | ✅ 8/8 | ✅ | ✅ 8/8 | ✅ 8/8 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Brigade Chorus | stereo | ✅ | ✅ 8/8 | ✅ | ✅ 8/8 | ✅ 8/8 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
 | bx_digital V2 | – | · | · | · | · | · | · | · | · | | not checked yet |
 | bx_digital V2 Mono | – | · | · | · | · | · | · | · | · | | not checked yet |
 | bx_digital V3 | – | · | · | · | · | · | · | · | · | | not checked yet |
@@ -121,17 +167,17 @@ bind the spec's unbound controls/meters to the bundle's parameters (mixer-engine
 | bx_subsynth | – | · | · | · | · | · | · | · | · | | not checked yet |
 | bx_tuner | mono | ✅ | ✅ 4/4 | · | · | · | · | · | · |  | load: not checked |
 | bx_tuner | stereo | ✅ | ✅ 4/4 | · | · | · | · | · | · |  | load: not checked |
-| C-Suite C-Vox | mono | ✅ | ✅ 4/4 | · | · | · | · | · | · |  | load: not checked |
-| C-Suite C-Vox | stereo | ✅ | ✅ 4/4 | · | · | · | · | · | · |  | load: not checked |
-| Cambridge | mono | ✅ | ✅ 40/40 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Cambridge | stereo | ✅ | ✅ 40/40 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Capitol Chambers | mono | ✅ | ✅ 13/13 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Capitol Chambers | stereo | ✅ | ✅ 13/13 | · | · | · | – no meters on the panel | · | · |  | load: not checked |
-| Century Tube Channel Strip | mono | ✅ | ✅ 15/15 | · | · | · | · | · | · |  | load: not checked |
-| Century Tube Channel Strip | stereo | ✅ | ✅ 15/15 | · | · | · | · | · | · |  | load: not checked |
+| C-Suite C-Vox | mono | ✅ | ✅ 4/4 | ✅ | ✅ 4/4 | ✅ 4/4 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| C-Suite C-Vox | stereo | ✅ | ✅ 4/4 | ✅ | ✅ 4/4 | ✅ 4/4 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Cambridge | mono | ✅ | ✅ 40/40 | ✅ | ✅ 40/40 | ✅ 40/40 | – no meters on the panel | · | · |  | latency: not checked |
+| Cambridge | stereo | ✅ | ✅ 40/40 | ✅ | ✅ 40/40 | ✅ 40/40 | – no meters on the panel | · | · |  | latency: not checked |
+| Capitol Chambers | mono | ✅ | ✅ 13/13 | ✅ | ✅ 13/13 | ✅ 13/13 | – no meters on the panel | · | · |  | latency: not checked |
+| Capitol Chambers | stereo | ✅ | ✅ 13/13 | ✅ | ✅ 13/13 | ❌ 12/13; differs at ordinals 11 | – no meters on the panel | · | · |  | text: 12/13; differs at ordinals 11 |
+| Century Tube Channel Strip | mono | ✅ | ✅ 15/15 | ✅ | ✅ 15/15 | ✅ 15/15 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Century Tube Channel Strip | stereo | ✅ | ✅ 15/15 | ✅ | ✅ 15/15 | ✅ 15/15 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
 | Chandler GAV19T | – | · | · | · | · | · | · | · | · | | not checked yet |
-| Cooper Time Cube | mono | ✅ | ✅ 18/18 | · | · | · | · | · | · |  | load: not checked |
-| Cooper Time Cube | stereo | ✅ | ✅ 18/18 | · | · | · | · | · | · |  | load: not checked |
+| Cooper Time Cube | mono | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ✅ 18/18 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| Cooper Time Cube | stereo | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ❌ 16/18; differs at ordinals 12, 13 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | text: 16/18; differs at ordinals 12, 13 |
 | CS-1 | – | · | · | · | · | · | · | · | · | | not checked yet |
 | Dangerous BAX EQ Master | – | · | · | · | · | · | · | · | · | | not checked yet |
 | Dangerous BAX EQ Mix | – | · | · | · | · | · | · | · | · | | not checked yet |
@@ -139,8 +185,8 @@ bind the spec's unbound controls/meters to the bundle's parameters (mixer-engine
 | dbx 160 | stereo | ✅ | ✅ 7/7 | · | · | · | · | · | · |  | load: not checked |
 | Diezel Herbert | – | · | · | · | · | · | · | · | · | | not checked yet |
 | Diezel VH4 | – | · | · | · | · | · | · | · | · | | not checked yet |
-| DreamVerb | mono | ✅ | ✅ 43/43 | · | · | · | · | · | · |  | load: not checked |
-| DreamVerb | stereo | ✅ | ✅ 43/43 | · | · | · | · | · | · |  | load: not checked |
+| DreamVerb | mono | ✅ | ✅ 43/43 | ✅ | ✅ 43/43 | ✅ 43/43 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| DreamVerb | stereo | ✅ | ✅ 43/43 | ✅ | ✅ 43/43 | ✅ 43/43 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
 | Dytronics Cyclosonic Panner | – | · | · | · | · | · | · | · | · | | not checked yet |
 | Dytronics Tri-Stereo Chorus | – | · | · | · | · | · | · | · | · | | not checked yet |
 | Eden WT800 | – | · | · | · | · | · | · | · | · | | not checked yet |
@@ -154,8 +200,8 @@ bind the spec's unbound controls/meters to the bundle's parameters (mixer-engine
 | Empirical Labs FATSO Jr | stereo | ✅ | ✅ 13/13 | · | · | · | · | · | · |  | load: not checked |
 | Empirical Labs FATSO Sr | mono | ✅ | ✅ 23/23 | · | · | · | · | · | · |  | load: not checked |
 | Empirical Labs FATSO Sr | stereo | ✅ | ✅ 23/23 | · | · | · | · | · | · |  | load: not checked |
-| EMT 140 | mono | ✅ | ✅ 18/18 | · | · | · | · | · | · |  | load: not checked |
-| EMT 140 | stereo | ✅ | ✅ 18/18 | · | · | · | · | · | · |  | load: not checked |
+| EMT 140 | mono | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ✅ 18/18 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
+| EMT 140 | stereo | ✅ | ✅ 18/18 | ✅ | ✅ 18/18 | ✅ 18/18 | ❌ meter read refused: plugin_remote_readback_unavailable | · | · |  | meters: meter read refused: plugin_remote_readback_unavailable  |
 | EMT 250 | – | · | · | · | · | · | · | · | · | | not checked yet |
 | ENGL E646 VS | – | · | · | · | · | · | · | · | · | | not checked yet |
 | ENGL E765 RT | mono | ✅ | ✅ 34/34 | · | · | · | · | · | · |  | load: not checked |

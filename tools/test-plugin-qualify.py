@@ -130,7 +130,7 @@ def main():
         common = SimpleNamespace(out=str(out), maps=str(maps), specs=str(specs),
                                  uad=None, by="tester", how=q.HOW)
         q.offline(SimpleNamespace(**vars(common), only=None), q.Recorder(common))
-        args = SimpleNamespace(**vars(common), device="Apollo x4", only=None, layout=None,
+        args = SimpleNamespace(**vars(common), device="Apollo x4", only=None, layout=None, skip_done=False,
                                signal=False, host="127.0.0.1", port=fake.port)
         q.live(args, q.Recorder(args))
         q.mark(SimpleNamespace(plugin="Test Comp", layout="mono", check="audio",
@@ -152,6 +152,7 @@ def main():
         assert d["layouts"]["mono"]["load"]["rate"] == 48000
         assert d["layouts"]["mono"]["audio"]["how"] == "by hand"
         assert fake.tree[SLOT + "/EffectName/value"] == ""             # unloaded
+        assert q.done(str(out), NAME, "mono") and not q.done(str(out), NAME, "stereo")
         assert fake.tree[SLOT + "/parameters/1/NormalizedValue/value"] == 0.0   # restored
         broken = json.loads((out / "broken.json").read_text())["layouts"]
         assert broken["stereo"]["map"]["result"] == "fail" and "mono" not in broken
