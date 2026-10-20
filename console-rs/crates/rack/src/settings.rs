@@ -1080,13 +1080,16 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
         }
         SettingsGroup::CueRoutes(d) => {
             let p = dev(d);
-            for (k, o) in outputs_of(src, &p, "Cue").into_iter().filter(|o| bool_at(src, &format!("{o}/Active")).unwrap_or(true)).enumerate() {
+            // CUE n is the n-th cue output; its sends' pre/post default is `HPnSendPostFader`.
+            let cues = outputs_of(src, &p, "Cue").into_iter().enumerate().filter(|(_, o)| bool_at(src, &format!("{o}/Active")).unwrap_or(true));
+            for (k, (n, o)) in cues.enumerate() {
                 let row = k as u8;
                 let name = str_at(src, &format!("{o}/Name")).unwrap_or_default();
                 f.push(SettingField::new(format!("{o}/Name"), name, FieldKind::Readout(String::new()), row));
                 f.extend(mapped(src, "cue_source", &format!("{o}/MixInSource"), "SOURCE", row));
                 f.extend(toggle(src, &format!("{o}/MixToMono"), "MONO", false, row));
                 f.extend(engine_choice(src, &format!("{o}/OutputDestination"), "MIRROR TO", row));
+                f.extend(toggle(src, &format!("{p}/HP{}SendPostFader", n + 1), "SENDS", false, row));
             }
         }
         SettingsGroup::MonitorKnob(d) => {
@@ -1141,6 +1144,11 @@ pub fn fields(src: &dyn PropertySource, group: SettingsGroup) -> Vec<SettingFiel
                 let row = f.len() as u8 / 2;
                 f.extend(toggle(src, &format!("{o}/SurroundSolo"), &format!("SOLO {name}"), false, row));
                 f.extend(toggle(src, &format!("{o}/SurroundMute"), &format!("MUTE {name}"), false, row));
+            }
+            // STEREO SUB: the output that carries the sub in stereo monitoring (x4: ANALOG 4).
+            for n in src.indices(&format!("{p}/outputs")) {
+                let o = format!("{p}/outputs/{n}");
+                f.extend(toggle(src, &format!("{o}/StereoSubOutputEnabled"), "STEREO SUB", false, f.len() as u8 / 2));
             }
             let row = f.len() as u8 / 2 + 1;
             f.push(pref_choice(src, "monitor_level_display", "MONITOR LEVEL DISPLAY", row));
@@ -1465,7 +1473,9 @@ impl MemoryProperties {
             m.insert(&format!("{o}/MixInSource"), S("mon".into()), vec![s("mon"), s("cue")]);
             m.insert(&format!("{o}/MixToMono"), B(false), Vec::new());
             m.insert(&format!("{o}/OutputDestination"), S("None".into()), dests.clone());
+            m.insert(&format!("/devices/0/HP{}SendPostFader", k + 1), B(false), Vec::new());
         }
+        m.insert("/devices/0/outputs/3/StereoSubOutputEnabled", B(false), Vec::new());
         let mon = "/devices/0/outputs/18";
         for (p, v) in [
             ("Name", S("MONITOR".into())),
@@ -1634,11 +1644,32 @@ mod tests {
     }
 
     #[test]
+    fn cue_sends_pre_post_follows_its_cue() {
+        let mut m = MemoryProperties::demo_x4();
+        let cues = fields(&m, SettingsGroup::CueRoutes(0));
+        let sends: Vec<&SettingField> = cues.iter().filter(|f| f.label == "SENDS").collect();
+        assert_eq!(sends.iter().map(|f| (&*f.key, f.row)).collect::<Vec<_>>(), [("toggle:/devices/0/HP1SendPostFader", 0), ("toggle:/devices/0/HP2SendPostFader", 1)]);
+        let w = resolve(&m, &sends[1].key, &SettingOp::Press);
+        assert_eq!(w, vec![Write::Set("/devices/0/HP2SendPostFader".into(), PropValue::Bool(true))]);
+        m.apply(&w[0]);
+        assert!(matches!(find_field(&m, "toggle:/devices/0/HP2SendPostFader").unwrap().kind, FieldKind::Toggle { on: true }));
+    }
+
+    #[test]
+    fn stereo_sub_is_a_speaker_utility() {
+        let m = MemoryProperties::demo_x4();
+        let f = fields(&m, SettingsGroup::SpeakerUtilities(0));
+        let sub = f.iter().find(|f| f.label == "STEREO SUB").expect("stereo sub");
+        assert_eq!(resolve(&m, &sub.key, &SettingOp::Press), vec![Write::Set("/devices/0/outputs/3/StereoSubOutputEnabled".into(), PropValue::Bool(true))]);
+        assert_eq!(f.last().unwrap().label, "MONITOR LEVEL DISPLAY");
+    }
+
+    #[test]
     fn cue_routes_and_devices() {
         let m = MemoryProperties::demo_x4();
         let cues = fields(&m, SettingsGroup::CueRoutes(0));
-        // Two active cues × (name, SOURCE, MONO, MIRROR TO).
-        assert_eq!(cues.len(), 8);
+        // Two active cues × (name, SOURCE, MONO, MIRROR TO, SENDS).
+        assert_eq!(cues.len(), 10);
         assert_eq!(cues[0].label, "CUE 1");
         assert_eq!(cues[1].value_text(), "MIX");
         assert_eq!(resolve(&m, &cues[1].key, &SettingOp::Choose(1)), vec![Write::Set("/devices/0/outputs/14/MixInSource".into(), PropValue::Str("cue".into()))]);

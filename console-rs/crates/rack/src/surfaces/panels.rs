@@ -149,7 +149,9 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
     let hp = model.headphone_outputs();
     let rows = hp.len().max(2) as f32;
     let col_w = 90.0;
-    let size = (164.0 + n as f32 * col_w + 4.0, 149.0 + rows * 44.0 + 1.0);
+    // open-apollo: a PRE/POST row under MIRROR TO when the engine has `HPnSendPostFader`.
+    let extra = if cues.iter().any(|f| f.label == "SENDS") { 26.0 } else { 0.0 };
+    let size = (164.0 + n as f32 * col_w + 4.0, 149.0 + extra + rows * 44.0 + 1.0);
     // Opens beside its button; Console's window may leave the main window, ours stays inside.
     let anchor = ui.hit_rect(&ControlId { strip: "monitor".into(), control: Control::CueOutputs });
     let r = match anchor {
@@ -162,8 +164,8 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
     // The body (`Device-Settings-Background`) under the slots; the device list: the empty top
     // slot, then the device's row (blue bar, icons, name, HPs).
     ui.background("Device-Settings-Background", Rect::new(x0 + 3.0, y0 + 59.0, size.0 - 6.0, size.1 - 62.0));
-    ui.background("No-Device-Background", Rect::new(x0 + 3.0, y0 + 59.0, 161.0, 90.0));
-    let row = Rect::new(x0 + 3.0, y0 + 149.0, 161.0, rows * 44.0);
+    ui.background("No-Device-Background", Rect::new(x0 + 3.0, y0 + 59.0, 161.0, 90.0 + extra));
+    let row = Rect::new(x0 + 3.0, y0 + 149.0 + extra, 161.0, rows * 44.0);
     ui.background(&format!("Device-{}-Background", dev.letter()), row);
     let letter = Ui::plain_style("Helvetica", 11.0, true, Rgba::WHITE.with_alpha(0.85));
     ui.text(&dev.letter().to_string(), letter, Rect::new(row.x + 6.0, row.y, 10.0, row.h), Align::Center);
@@ -186,12 +188,17 @@ fn cue_outputs(ui: &mut Ui, model: &dyn MixerModel, bounds: Rect, drawn: &mut Ve
         let cx = x0 + 164.0 + k as f32 * col_w;
         let fields: Vec<&SettingField> = cues.iter().filter(|f| f.row as usize == k).collect();
         let name = fields.first().map(|f| f.label.clone()).unwrap_or_default();
-        ui.background("No-Device-Settings-Background", Rect::new(cx + 1.0, y0 + 59.0, col_w - 1.0, 89.0));
+        ui.background("No-Device-Settings-Background", Rect::new(cx + 1.0, y0 + 59.0, col_w - 1.0, 89.0 + extra));
         ui.background(&format!("Device-{}-Settings-Background", dev.letter()), Rect::new(cx + 1.0, row.y + 1.0, col_w - 1.0, row.h - 1.0));
         ui.background("Vertical-Divider", Rect::new(cx, y0 + 27.0, 2.0, 31.0));
         section_header_text(ui, &name, Rect::new(cx, y0 + 27.0, col_w, 32.0));
         for f in &fields {
             match (&f.kind, f.label.as_str()) {
+                (FieldKind::Toggle { on }, "SENDS") => {
+                    let b = Rect::new(cx + 3.0, y0 + 146.0, 86.0, 20.0);
+                    ui.toggle("Switch-Large-Stretch", Some(if *on { "POST FADER" } else { "PRE FADER" }), *on, true, b, None, None);
+                    ui.hit(b, sid(Control::SettingPress(f.key.clone())), HitKind::Toggle);
+                }
                 (FieldKind::Toggle { on }, _) => switch(ui, "MONO", *on, &f.key, Rect::new(cx + 7.0, y0 + 65.0, 36.0, 36.0)),
                 (FieldKind::Choice { selected, .. }, "SOURCE") => {
                     // MIX lit while the cue plays its own mix; tapping flips the source.
@@ -343,7 +350,9 @@ fn monitor_controller(ui: &mut Ui, model: &dyn MixerModel, view: &ViewState, bou
     }
     // The speaker display (`Monitor-Surround-Speakers-Background`, 254 × 270) with the L / R
     // speaker icons and their N/A trims.
-    let disp = Rect::new(area.x + 5.0, area.y + 85.0, 254.0, 270.0);
+    let grid_rows = if tab == 1 { f.len().div_ceil(3) as f32 } else { 0.0 };
+    let top = (13.0 + grid_rows * 36.0).max(85.0);
+    let disp = Rect::new(area.x + 5.0, area.y + top, 254.0, 355.0 - top);
     ui.background("Monitor-Surround-Speakers-Background", disp);
     let spk = Ui::plain_style("Helvetica", 9.0, false, Rgba::WHITE.with_alpha(0.7));
     for (k, (key, x)) in [("Monitor-Selected-Left", 17.0), ("Monitor-Selected-Right", 215.0)].into_iter().enumerate() {
