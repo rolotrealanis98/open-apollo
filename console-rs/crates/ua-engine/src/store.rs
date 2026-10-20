@@ -106,9 +106,33 @@ const MIDI_INPUT_DEVICE: &str = "/MidiInputDevice";
 const MIDI_POLL: Duration = Duration::from_secs(1);
 /// How long after a gesture the undo list is re-read (Console: 30–90 ms).
 const UNDO_VALUES_DELAY: Duration = Duration::from_millis(40);
+/// A plug-in parameter on the open-apollo daemon's native host takes a few hundred ms per
+/// change (it runs the plug-in's own setter and reads the DSP back), so its echoes trail a
+/// drag by more than the echo hold. Its hold lasts until the engine echoes our last write, at
+/// most this long after it.
+const SLOW_ECHO_CAP: Duration = Duration::from_secs(4);
+/// The engine quantizes a plug-in's normalized value (0.70423 echoes as 0.7042).
+const SLOW_ECHO_TOLERANCE: f64 = 1e-3;
+
+/// A plug-in insert parameter (`…/effects/<n>/parameters/<k>/…`).
+fn slow_echo(path: &str) -> bool {
+    path.contains("/effects/") && path.contains("/parameters/")
+}
+
+/// Whether `value` is the engine's echo of our write `local` (on a slow path, within the
+/// engine's quantization).
+fn is_echo(path: &str, value: &Value, local: &Value) -> bool {
+    value == local
+        || (slow_echo(path)
+            && matches!((value.as_f64(), local.as_f64()), (Some(a), Some(b)) if (a - b).abs() <= SLOW_ECHO_TOLERANCE))
+}
 
 struct Hold {
     until: Instant,
+    /// When we wrote `local` (a slow path's hold ends at most [`SLOW_ECHO_CAP`] after).
+    written: Instant,
+    /// The engine has echoed `local`.
+    echoed: bool,
     /// The newest engine push seen while held that is not the engine's echo of `local`: applied
     /// at release. None once the engine has echoed `local` (everything held before was older
     /// than our write).
@@ -194,7 +218,9 @@ impl LocalModel for Model {
         let pp = path::property_path(path).to_owned();
         self.set_value(&pp, value.clone());
         let latest = self.holds.remove(&pp).and_then(|h| h.latest);
-        self.holds.insert(pp, Hold { until: Instant::now() + self.echo_hold, latest, local: value });
+        let now = Instant::now();
+        self.holds
+            .insert(pp, Hold { until: now + self.echo_hold, written: now, echoed: false, latest, local: value });
     }
 
     fn is_integral(&self, path: &str) -> bool {
@@ -760,7 +786,17 @@ impl Store {
         {
             // The engine's echo of our own write: the engine has caught up, so a push held
             // before it was older than the write and must not come back at release.
-            h.latest = (value != h.local).then_some(value);
+            if is_echo(pp, &value, &h.local) {
+                h.latest = None;
+                h.echoed = true;
+                if slow_echo(pp) {
+                    // Show the engine's (quantized) value and stop holding: nothing older follows.
+                    self.model.holds.remove(pp);
+                    self.model.set_value(pp, value);
+                }
+            } else {
+                h.latest = Some(value);
+            }
             return;
         }
         self.model.set_value(pp, value);
@@ -770,6 +806,16 @@ impl Store {
         let expired: Vec<String> =
             self.model.holds.iter().filter(|(_, h)| h.until <= now).map(|(k, _)| k.clone()).collect();
         for p in expired {
+            // A slow path whose engine has not caught up yet: its pushes are still older values
+            // of the drag. Keep the user's position until the echo (or the cap).
+            if let Some(h) = self.model.holds.get_mut(&p)
+                && slow_echo(&p)
+                && !h.echoed
+                && now < h.written + SLOW_ECHO_CAP
+            {
+                h.until = h.written + SLOW_ECHO_CAP;
+                continue;
+            }
             if let Some(Hold { latest: Some(v), .. }) = self.model.holds.remove(&p) {
                 // A push came in while held: show it, then ask the engine what it holds now
                 // (`reread`: a newer write or push still wins), so a slow or missing echo of
@@ -1272,6 +1318,8 @@ mod error_notice_tests {
             property.clone(),
             Hold {
                 until: Instant::now() + Duration::from_secs(30),
+                written: Instant::now(),
+                echoed: false,
                 latest: Some("Rejected plug-in".into()),
                 local: "Rejected plug-in".into(),
             },
