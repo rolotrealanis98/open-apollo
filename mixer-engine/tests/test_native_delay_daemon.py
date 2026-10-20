@@ -301,3 +301,85 @@ def test_sleep_hint_is_per_client_in_native_mode(delay_daemon, path):
     lab.daemon._send_local_plugin_error.assert_not_called()
     lab.state.on_set.assert_not_called()
     assert lab.driver.calls == []
+
+
+# UAD REC / MON (RecordPreEffects) on native insert chains.
+
+@pytest.fixture
+def tap_daemon(delay_daemon):
+    lab = delay_daemon
+    for channel in range(4):
+        lab.state.add_runtime_property(f'/devices/0/inputs/{channel}/RecordPreEffects',
+                                       {'type': 'bool', 'value': False})
+    seen = []
+
+    def flip(channel, pre):
+        # The device changes before the tree: the published value is still the old one here.
+        seen.append(lab.state.get_value(f'/devices/0/inputs/{channel}/RecordPreEffects'))
+        return CompensationOutcome(Outcome.CONFIRMED, 'Medium')
+    lab.backend.set_record_tap = Mock(side_effect=flip)
+    lab.seen = seen
+    lab.client.helper, lab.client.ubjson = False, False
+    return lab
+
+
+def tap_path(channel):
+    return f'/devices/0/inputs/{channel}/RecordPreEffects/value'
+
+
+def test_record_tap_publishes_only_after_the_backend_confirms(tap_daemon):
+    lab = tap_daemon
+    lab.send(True, tap_path(2))
+    lab.backend.set_record_tap.assert_called_once_with(2, True)
+    assert lab.seen == [False]
+    assert lab.state.get_value(tap_path(2)) is True
+    lab.daemon._send_response.assert_called_once_with(lab.client, tap_path(2), True, {'func_id': 'delay-1'})
+    assert not lab.tx.quarantined
+
+
+def test_insert_effects_on_every_input_is_one_transaction_each(tap_daemon):
+    lab = tap_daemon
+    for channel in range(4):
+        lab.send(True, tap_path(channel))
+    assert [c.args for c in lab.backend.set_record_tap.call_args_list] == [(c, True) for c in range(4)]
+    assert all(lab.state.get_value(tap_path(c)) is True for c in range(4))
+
+
+@pytest.mark.parametrize('status', [Outcome.FAILED, Outcome.INDETERMINATE])
+def test_unconfirmed_record_tap_keeps_and_republishes_the_old_value(tap_daemon, status):
+    lab = tap_daemon
+    lab.backend.set_record_tap.side_effect = None
+    lab.backend.set_record_tap.return_value = CompensationOutcome(status, 'Medium', detail='synthetic')
+    lab.send(True, tap_path(2))
+    assert lab.state.get_value(tap_path(2)) is False
+    code = lab.daemon._send_local_plugin_error.call_args.args[2]
+    assert code == ('openapollo.plugin_transaction_failed' if status is Outcome.FAILED
+                    else 'openapollo.plugin_transaction_indeterminate')
+    lab.daemon._send_response.assert_called_once_with(lab.client, tap_path(2), False)
+    assert lab.tx.quarantined is (status is Outcome.INDETERMINATE)
+    if status is Outcome.INDETERMINATE:
+        lab.send(True, tap_path(0))
+        lab.backend.set_record_tap.assert_called_once()
+
+
+def test_record_tap_backend_exception_quarantines_and_invalidates(tap_daemon):
+    lab = tap_daemon
+    lab.backend.set_record_tap.side_effect = RuntimeError('synthetic')
+    lab.send(True, tap_path(2))
+    assert lab.tx.quarantined and lab.state.get_value(tap_path(2)) is False
+    lab.backend.invalidate.assert_called()
+
+
+@pytest.mark.parametrize('value', ['true', 1, None])
+def test_record_tap_value_must_be_bool(tap_daemon, value):
+    lab = tap_daemon
+    lab.send(value, tap_path(2))
+    lab.backend.set_record_tap.assert_not_called()
+    assert lab.daemon._send_local_plugin_error.call_args.args[2] == 'openapollo.invalid_plugin_value'
+
+
+def test_record_tap_is_stored_only_without_a_chain_backend(tap_daemon):
+    lab = tap_daemon
+    del lab.backend.set_record_tap
+    lab.send(True, tap_path(2))
+    assert lab.state.get_value(tap_path(2)) is True

@@ -184,6 +184,7 @@ def apply_runtime_properties(state: StateTree):
 _RE_RECALL_SET = re_mod.compile(
     r"^/(?:Snapshot|PrimedSnapshot|IOMapPreset)/value$|/Preset/value$")
 
+_RE_RECORD_PRE = re_mod.compile(r"/devices/0/inputs/(\d+)/RecordPreEffects")
 _RE_PREAMP_GAIN = re_mod.compile(
     r"^(/devices/0/inputs/\d+/preamps/0)/(GainTapered|Gain)(?:/value)?$")
 
@@ -1195,6 +1196,42 @@ class MixerDaemon:
             self._plugin_publication_active = False
         if 'func_id' in params:
             self._send_response(client, path, value, params)
+
+    def _native_record_tap(self, client, path, channel, value, params) -> bool:
+        """UAD REC / MON on a native insert chain, before the ordinary SET stores it.
+
+        True: the device holds `value` (or no chain uses it), so the SET goes on and publishes.
+        False: refused and answered here; the published value is unchanged."""
+        from plugin_transactions import Outcome
+        native = self._native_plugin_backend
+        transactions = self.plugin_lifecycle.transactions
+        if type(value) is not bool or self._plugin_publication_active or transactions.quarantined:
+            self._send_local_plugin_error(client, path, 'openapollo.invalid_plugin_value', params)
+            return False
+        self._plugin_publication_active = True
+        try:
+            result = native.set_record_tap(channel, value)
+            status, detail = result.status, result.detail
+        except Exception as exc:
+            log.exception('Record tap on input %d raised', channel)
+            status, detail = Outcome.INDETERMINATE, f'Record tap transaction failed: {exc}'
+            try:
+                native.invalidate()
+            except Exception:
+                log.exception('Could not invalidate native record tap backend')
+        finally:
+            self._plugin_publication_active = False
+        if status is Outcome.CONFIRMED:
+            return True
+        code = 'openapollo.plugin_transaction_failed'
+        if status is not Outcome.FAILED:
+            transactions.quarantined = True
+            transactions.quarantine_reason = detail
+            code = 'openapollo.plugin_transaction_indeterminate'
+        self._send_local_plugin_error(client, path, code, params, detail)
+        # The client shows its own value at once: put the published one back.
+        self._send_response(client, path, self.state.get_value(path))
+        return False
 
     async def start(self):
         """Start TCP servers on both ports (runs forever)."""
@@ -3551,6 +3588,10 @@ class MixerDaemon:
             return
         if native and canonical == '/MaxDelayComp':
             self._handle_native_delay_set(client, path, cmd.value, resp_params)
+            return
+        record_pre = _RE_RECORD_PRE.fullmatch(canonical)
+        if (record_pre and hasattr(native, 'set_record_tap')
+                and not self._native_record_tap(client, path, int(record_pre[1]), cmd.value, resp_params)):
             return
         native_allows_idle_link = (native and hasattr(native, 'allows_idle_mixer_link_change')
                                    and native.allows_idle_mixer_link_change(canonical))

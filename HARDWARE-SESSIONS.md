@@ -446,3 +446,73 @@ private artifacts and were corrected before the passing runs above.
 End state: normal daemon/PipeWire/WirePlumber/Pulse/AES67 services restored,
 all tones and lab daemons stopped, all four DSPs owned, zero instances, zero held,
 awaiting, or leaked transactions. Tested module remains loaded; DKMS unchanged.
+
+## Results, 2026-10-19: record tap flag (UAD REC / MON bench)
+
+Mac Studio (Asahi, `7.1.13-1-tbt`), Apollo x4 over Thunderbolt, 48 kHz, DKMS `ua_apollo`
+as installed; owner present. Script: `tools/rectap-bench.py` (the daemon's own composer,
+driver client and the user-built `UAD UA 1176 Rev A` mono bundle). Daemon and PipeWire
+stopped for the run; recorded with `arecord` (22 ch), RMS from 1 s on. Input 1 carried a
+steady room/mic signal at about -40.9 dBFS. Question and background:
+`mixer-engine/RECORD-PRE-EFFECTS.md`.
+
+The two recipes differ in exactly two words: Mic strip `m0` word 4 (row 1) and the
+1176's word 4 (row 10), i.e. where bit `0x4` sits.
+
+| Step | Bit `0x4` on | Input 1 record (ch 0) |
+|---|---|---:|
+| B0 plain strip | Mic `m0` (plain recipe) | -40.85 |
+| C chain as composed today, 1176 Input 0.8 | 1176 | **-17.44** (wet) |
+| L same chain, flag moved live by SERVICE | Mic `m0` | **-40.91** (dry) |
+| L2 flag moved back live | 1176 | **-17.47** (wet) |
+| B1 chain destroyed | plain | -40.88 |
+| F fresh chain built with the flag on `m0`, Input 0.8 | Mic `m0` | **-40.82** (dry) |
+| B2 chain destroyed | plain | -40.86 |
+
+- **Proven:** the block holding bit `0x4` of word 4 is the record tap. On the Mic strip the
+  record channel is dry to within 0.1 dB of the plain strip; on the last effect it is wet.
+  The flag works at CREATE and live through SERVICE, both directions, with readback
+  matching, no fault, no quarantine, no kernel message beyond the two placements.
+- **Not measured:** the monitor side. MON L/R did not correlate with input 1 in any step
+  (it followed input 2's source), so this run cannot tell "record dry, monitor wet" (the
+  REC/MON switch) from "the whole chain output dry". Rerun with input 1 alone in the
+  monitor mix (unmuted, soloed) and nobody else driving the mixer.
+- Side effect to know: restarting the daemon afterwards restored its saved state file
+  (input 1 muted, preamp gain 65 dB), not the live state it had before the stop.
+
+End state: daemon, PipeWire, WirePlumber and Pulse running; zero bench instances (fd
+closed after both destroys); Console reconnected.
+
+Monitor-side rerun attempt (20:10, not run): with input 1 unmuted and soloed through the
+daemon and PipeWire stopped, MON L/R carried a steady -50 dBFS signal that correlated with
+none of the 22 record channels (peak |r| ≤ 0.01), input 1 recorded -72 dBFS. Meanwhile other
+sessions' `pytest` runs held `/dev/ua_apollo0`, a native instance (plug-in 0x894) had been
+started at 20:02 by an unknown owner, the driver had rebuilt all strips at 19:57 (now with
+Virtual 1–4 strips) and input 1's preamp gain changed twice without the bench. The bench was
+not run; input 1 was put back (muted, solo off). The monitor half needs the rig to itself:
+no other device holders (`/proc/*/fd`), no native instances, MON correlating with input 1
+on the plain strip (`tools/rectap-bench.py` now reports `mon_vs_rec_corr`).
+
+Monitor side, rerun 20:15 (rig to itself: only the daemon held the device, no tests). The
+daemon kept running; input 1 unmuted and soloed, input 2 (the Console's Ampeg SVTVR) muted;
+PipeWire stopped. On the plain strip MON L was an exact copy of input 1 (r = 1.000,
+-17.73 dB: fader -14.8 plus pan law). Same `tools/rectap-bench.py` steps, input 1 at about
+-66 dBFS:
+
+| Step | Bit `0x4` on | Record | MON L | MON vs record |
+|---|---|---:|---:|---|
+| B0 plain | Mic `m0` | -66.26 | -83.99 | r 1.000, -17.73 dB, lag -194 |
+| C chain, 1176 Input 0.8 | 1176 | **-28.51** | **-46.26** | r 1.000, -17.73 dB, lag -194 |
+| L live flip | Mic `m0` | **-66.24** | **-46.24** | r 0.984, +19.86 dB, lag -139 |
+| L2 live flip back | 1176 | -28.43 | -46.15 | r 1.000, -17.73 dB, lag -194 |
+| B1 destroyed | plain | -66.31 | -84.02 | r 1.000, -17.73 dB |
+| F fresh chain, flag on `m0` | Mic `m0` | **-66.25** | **-46.26** | r 0.984, +19.86 dB, lag -139 |
+| B2 destroyed | plain | -66.20 | -83.93 | r 1.000, -17.73 dB |
+
+- **Proven: the flag is UAD REC / MON.** On the 1176 the record and the monitor are both
+  wet (REC). On the Mic strip the record is dry, identical to the plain strip, while the
+  monitor stays wet at the same level (MON). Live through SERVICE, or at CREATE, both ways.
+- The dry tap is 55 samples earlier than the wet path (lag -194 → -139): the 1176 Rev A
+  chain adds 55 samples, while `native_known_good.json` lists its latency as 0.
+- Mixer restored to the snapshot taken before (inputs 1–4 mute, solo, fader, gain
+  identical); PipeWire, WirePlumber, daemon running; zero bench instances; no kernel faults.

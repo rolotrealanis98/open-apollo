@@ -3623,7 +3623,9 @@ class HardwareRouter:
                 self._handle_solo_recalc()
             return
 
-        # Software-only controls (RecordPreEffects, Active)
+        # Software-only controls (RecordPreEffects, Active).  On a native insert
+        # chain the daemon moves the record tap before this store
+        # (MixerDaemon._native_record_tap); without one there is nothing to move.
         log.debug("SET %s = %r (software-only)", path, value)
 
     def _write_hiz_impedance(self, path: str, ch: int, value: Any):

@@ -50,13 +50,12 @@ One row can cover a few closely related controls (MUTE / MONO, the CUE OUTPUTS r
 | Listed | 72 | 72 |
 | `host` (no Apollo register) or `n/a` on the x4 | 11 | 11 |
 | Can reach the Apollo | 61 | 61 |
-| … `wired` | 28 | 54 |
+| … `wired` | 28 | 56 |
 | … `partial` | 22 | 0 |
-| … `ignored` / `missing` / `UI-only` | 11 | 7 |
+| … `ignored` / `missing` / `UI-only` | 11 | 5 |
 
-The 7 still not wired, and why:
+The 5 still not wired, and why:
 - BUFFER SIZE: PipeWire owns the quantum.
-- UAD REC/MON, inserts and Unison: they need the plug-in DSP backend.
 - CHANNEL DSP PAIRING's DSP side (spanning, 69 samples latency): it needs the DSP backend too.
 - Monitor and headphone correction: there is no SoundID DSP.
 - SOURCE CUE 3/4, and HP source MON or NONE: no hardware encoding is known. The daemon refuses
@@ -94,7 +93,7 @@ The 7 still not wired, and why:
 | 21 | Solo Safe, Isolate | `…/SoloSafe`, `…/Isolate` | menu / surface | recalc when a solo is on | partial: the recalc used stale `FaderLevel` | wired | daemon tests |
 | 22 | S side section, Clear Solos | `post /ClearSolos {}` | surface `ClearSolos` | `commands._clear_solos` → `Solo` false → recalc | partial: as 21 | wired | same as 8 |
 | 23 | OL, meter CLEAR | `post /ClearClips {path?}` | surface / menu | host meter clip holds | host | host | — |
-| 24 | UAD REC / MON | `set …/RecordPreEffects/value?func_id=n` | apply `RecMon` | tree only (no insert DSP yet) | ignored | ignored: needs the plug-in DSP backend | — |
+| 24 | UAD REC / MON | `set …/RecordPreEffects/value?func_id=n` | apply `RecMon` | with a native insert chain on the input: `_native_record_tap` → `set_record_tap` moves the record tap (bit `0x4` of word 4) between the last insert and the Mic strip in one SERVICE with readback, or rebuilds the chain (stage/swap) when delay compensation moves the record delay; published only once confirmed, a refusal republishes the old value. No chain: stored, and a chain loaded later is composed with it. A pair follows its first input. `mixer-engine/RECORD-PRE-EFFECTS.md` | ignored | wired (native inserts). Words proven on the x4 bench, the daemon path not yet run there | `mixer-engine/tests/test_native_delay_daemon.py`, `test_plugin_native_chain.py`, `test_native_chain_composer.py` |
 | 25 | Inserts, Unison (assign, power, remove, move, presets) | `set …/effects/K/EffectName`, `Power`; `post /MoveInsert` … | surface / menus | native hosting (`--native-plugin-bundles`): load, remove, swap and chains of up to 4 on inputs 1-4, on DSP 1 in place of the input strip; slot Power fails closed | missing | wired on the x4 at 48 kHz (HARDWARE-SESSIONS.md, NATIVE-HOSTING.md) | `test_plugin_native_chain.py` |
 | 26 | COPY MIX TO | `post /CopyToSends {"send": i}` (global: every input but talkback) | menu `CopyMixTo` | `commands._copy_to_sends` root form → each input's send `Gain` (+ `GainTapered`, mono `Pan`) → `_handle_send` | ignored: the daemon knew only the per-channel form and answered an error | wired | `input_sends_reach_the_mixer`; `TestCopyMixToSend` |
 | 27 | Name, Hide, Channel presets, scenes, sessions | `set …/Name`, `ChannelHidden`; `post /SceneOperation`, sessions… | various | host; a recall writes the hardware through the router | host | host | — |

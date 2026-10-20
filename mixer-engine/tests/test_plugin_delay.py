@@ -1,4 +1,5 @@
 import pytest
+from model_features import MAX_DELAY_COMP_SAMPLES
 from plugin_delay import InputLatency,plan_compensation
 
 def test_group_max_is_shared_but_record_and_monitor_are_distinct():
@@ -27,3 +28,15 @@ def test_all_five_settings_capacity_off_reset_and_span_overload():
 @pytest.mark.parametrize('items',[(InputLatency((2,),0,1),),(InputLatency((2,),0,0,group=32),),(InputLatency((2,3),0,0),InputLatency((3,),0,0)),(InputLatency((2,),True,0),)])
 def test_invalid_topology_or_descriptor_values_are_refused(items):
     with pytest.raises(ValueError):plan_compensation('Medium',items)
+
+@pytest.mark.parametrize('setting',['Off','Short','Medium','Medium-Long','Long'])
+@pytest.mark.parametrize('channels',[(2,),(0,1)])
+def test_mon_records_ahead_of_the_inserts_and_keeps_monitor_and_overload(setting,channels):
+    # UAD MON (record=0): the record line waits the whole budget; the monitor still carries the latency.
+    other=InputLatency((3,),40,40)
+    rec=plan_compensation(setting,(InputLatency(channels,150,150),other))
+    mon=plan_compensation(setting,(InputLatency(channels,150,0),other))
+    assert mon[0].record==MAX_DELAY_COMP_SAMPLES[setting]
+    assert (mon[0].monitor,mon[0].capacity,mon[0].overloaded,mon[0].required,mon[0].suggested)==(
+        rec[0].monitor,rec[0].capacity,rec[0].overloaded,rec[0].required,rec[0].suggested)
+    assert mon[1]==rec[1]

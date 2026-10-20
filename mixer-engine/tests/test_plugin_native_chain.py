@@ -67,20 +67,29 @@ class View:
 class Composition:
     needs_staging = False  # fake startups stay under the single-CREATE command bound
 
-    def __init__(self, providers, channels, slots):
+    def __init__(self, providers, channels, slots, record_pre_effects=False):
         self.effects = tuple(View(p, index, 10+position, channels)
                              for position, (p, index) in enumerate(zip(providers, slots)))
-        self.observations = tuple(o for view in self.effects for o in view.observations())
+        self.taps = self.record_tap_plan(record_pre_effects).observations if record_pre_effects else ()
+        self.observations = tuple(o for view in self.effects for o in view.observations()) + self.taps
         self.channels = channels
 
     def create_arguments(self):
         return dict(render_id=0x806, dsp=1,
             input_pair=(self.channels[0], self.channels[1] if len(self.channels) == 2 else 32),
-            commands=tuple(w for view in self.effects for w in (0x00140004, view.base_row << 24, 0, view.provider.word)))
+            commands=tuple(w for view in self.effects for w in (0x00140004, view.base_row << 24, 0, view.provider.word))
+                     + tuple(w for row, word, (value,) in self.taps for w in (0x00140004, row << 24 | word, 0, value)))
+
+    def record_tap_plan(self, pre):
+        words = {(1, 4): 4 if pre else 0, (self.effects[-1].base_row, 4): 0 if pre else 4}
+        observations = tuple((row, word, (value,)) for (row, word), value in words.items())
+        return ControlPlan(tuple(w for row, word, (value,) in observations
+                                 for w in (0x00140004, row << 24 | word, 0, value)),
+                           observations, {'RecordPreEffects': pre}, None)
 
 
-def compose(providers, *, channels, slots, record_delay_samples):
-    return Composition(providers, channels, slots)
+def compose(providers, *, channels, slots, record_delay_samples, record_pre_effects=False):
+    return Composition(providers, channels, slots, record_pre_effects)
 
 
 class Driver:
@@ -406,9 +415,9 @@ class DelayDriver(Driver):
 
 
 def delay_compose(providers, *, channels, slots, record_delay_samples,
-                  monitor_delay_samples=0, active_capacity=256):
+                  monitor_delay_samples=0, active_capacity=256, record_pre_effects=False):
     result = compose(providers, channels=channels, slots=slots,
-                     record_delay_samples=record_delay_samples)
+                     record_delay_samples=record_delay_samples, record_pre_effects=record_pre_effects)
     observations = ((1, 16, (record_delay_samples,)),
                     (1, 8, (monitor_delay_samples,)), (1, 5, (active_capacity,)))
     result.observations += observations
@@ -697,3 +706,117 @@ def test_a_swap_the_driver_refuses_rolls_back_without_quarantine():
     assert driver.valid and backend._leases[slot(0)].native == kept and kept.handle in driver.active
     driver.refuse_swap = None
     assert tx.load(slot(2), 'second').committed
+
+
+# UAD REC / MON (RecordPreEffects): the record tap moves between the last insert and the Mic strip.
+
+def publish_record_pre(state, channel, pre):
+    state.add_runtime_property(f'/devices/0/inputs/{channel}/RecordPreEffects', {'type': 'bool', 'value': pre})
+
+
+def test_record_tap_without_a_chain_does_no_device_io():
+    state, helper, driver, backend, tx = model()
+    assert backend.set_record_tap(2, True).status is Outcome.CONFIRMED
+    state.add_runtime_property('/devices/0/inputs/0/Stereo', {'type': 'bool', 'value': True})
+    assert tx.load(slot(0, 0), 'first').committed
+    calls = list(driver.calls)
+    # The second input of a pair follows the first: nothing to move for it.
+    assert backend.set_record_tap(1, True).status is Outcome.CONFIRMED
+    assert backend.set_record_tap(9, False).status is Outcome.CONFIRMED
+    assert driver.calls == calls
+
+
+def test_record_tap_flips_live_with_one_service_and_readback():
+    state, helper, driver, backend, tx = model()
+    assert tx.load(slot(0), 'first').committed
+    native = backend._leases[slot(0)].native
+    memory = driver.memory[native.handle]
+    assert memory.get((1, 4), 0) == 0
+    for pre, mic, effect in [(True, 4, 0), (False, 0, 4)]:
+        calls = len(driver.calls)
+        outcome = backend.set_record_tap(2, pre)
+        assert outcome.status is Outcome.CONFIRMED
+        new = driver.calls[calls:]
+        assert [call[0] for call in new] == ['write', 'read', 'read']
+        assert (memory[1, 4], memory[10, 4]) == (mic, effect)
+        assert backend._leases[slot(0)].native is native
+        publish_record_pre(state, 2, pre)
+
+
+def test_record_tap_write_that_does_not_land_restores_the_previous_tap():
+    state, helper, driver, backend, tx = model()
+    assert tx.load(slot(0), 'first').committed
+    assert backend.set_record_tap(2, False).status is Outcome.CONFIRMED
+    service, dropped = driver.service, []
+
+    def drop_first_write(native, *, writes=(), read=None):
+        if writes and not dropped:
+            dropped.append(writes)
+            return ()
+        return service(native, writes=writes, read=read)
+    driver.service = drop_first_write
+    outcome = backend.set_record_tap(2, True)
+    assert outcome.status is Outcome.FAILED and outcome.detail == 'Previous record tap restored'
+    memory = driver.memory[backend._leases[slot(0)].native.handle]
+    assert (memory[1, 4], memory[10, 4]) == (0, 4) and driver.valid
+
+
+def test_record_tap_device_error_is_indeterminate():
+    state, helper, driver, backend, tx = model()
+    assert tx.load(slot(0), 'first').committed
+    driver.fail = 'service'
+    assert backend.set_record_tap(2, True).status is Outcome.INDETERMINATE
+    assert not driver.valid
+
+
+@pytest.mark.parametrize('first,channels', [(2, (2,)), (0, (0, 1))])
+def test_chain_composed_in_mon_starts_with_the_mic_strip_tap(first, channels):
+    state, helper, driver, backend, tx = model()
+    state.add_runtime_property(f'/devices/0/inputs/{first}/Stereo', {'type': 'bool', 'value': len(channels) == 2})
+    publish_record_pre(state, first, True)
+    assert tx.load(slot(0, first), 'first').committed
+    memory = driver.memory[backend._leases[slot(0, first)].native.handle]
+    assert memory[1, 4] == 4 and memory.get((10, 4), 0) == 0
+
+
+def test_record_tap_with_compensation_rebuilds_when_the_record_delay_moves():
+    state, helper, driver, backend, tx = delay_model()
+    backend.providers[(slot(0), 'first', (2,))].descriptor_latency_samples = 31
+    assert tx.load(slot(0), 'first').committed
+    assert tx.control(slot(0), FIELD, .71).committed
+    old = backend._leases[slot(0)]
+    assert driver.memory[old.native.handle][1, 16] == 169 and driver.strips.record[2] == 169
+    outcome = backend.set_record_tap(2, True)
+    assert outcome.status is Outcome.CONFIRMED
+    new = backend._leases[slot(0)]
+    assert new.native != old.native and new.loaded.handle == old.loaded.handle
+    assert new.loaded.parameters[0]['properties']['NormalizedValue']['value'] == .71
+    memory = driver.memory[new.native.handle]
+    assert memory[1, 16] == 200 and memory[1, 4] == 4 and driver.strips.record[2] == 200
+    assert {item.channels: item.record for item in backend.compensation_inputs}[(2,)] == 200
+    assert len(driver.memory) == len(driver.active) == 1 and not backend._pending
+    publish_record_pre(state, 2, True)
+    assert backend.set_record_tap(2, False).status is Outcome.CONFIRMED
+    assert driver.memory[backend._leases[slot(0)].native.handle][1, 16] == 169
+
+
+def test_record_tap_with_compensation_flips_live_when_the_delay_stays():
+    state, helper, driver, backend, tx = delay_model()
+    assert tx.load(slot(0), 'first').committed
+    calls = len(driver.calls)
+    assert backend.set_record_tap(2, True).status is Outcome.CONFIRMED
+    assert [call[0] for call in driver.calls[calls:]] == ['write', 'read', 'read']
+
+
+@pytest.mark.parametrize('failure', ['candidate_read', 'strip_read'])
+def test_record_tap_rebuild_readback_failure_restores_the_previous_chain(failure):
+    state, helper, driver, backend, tx = delay_model()
+    backend.providers[(slot(0), 'first', (2,))].descriptor_latency_samples = 31
+    assert tx.load(slot(0), 'first').committed
+    old, strips = dict(backend._leases), driver.strips
+    driver.mismatch = failure == 'candidate_read'
+    driver.strip_mismatch = failure == 'strip_read'
+    outcome = backend.set_record_tap(2, True)
+    assert outcome.status is Outcome.FAILED and outcome.detail == 'Previous record tap restored'
+    assert backend._leases == old and driver.strips == strips and not backend._pending
+    assert set(driver.memory) == driver.active == {old[slot(0)].native.handle}
