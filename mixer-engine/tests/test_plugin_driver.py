@@ -181,3 +181,23 @@ int main(void) {
     output = subprocess.check_output([str(binary)], text=True)
     assert list(map(int, output.split())) == [
         INSTANCE.size, PLUGIN_INSTANCE, 32, 48, 64, 1, 2, 3]
+
+
+def test_refused_read_keeps_the_session_and_write_failures_do_not():
+    # A SERVICE that only reads changes nothing: a refused one (a reply that does not match
+    # the read, EPROTO) leaves the session usable, e.g. to retire the candidate it read.
+    ioctl = Ioctl()
+    client = PluginDriver(19, ioctl=ioctl)
+    instance = create(client)
+    ioctl.fail = OSError(errno.EPROTO, 'synthetic reply mismatch')
+    with pytest.raises(OSError):
+        client.service(instance, read=(0, 0, 1))
+    ioctl.fail = None
+    assert client.service(instance, read=(0, 0, 2)) == (0x12340000, 0x12340001)
+    ioctl.fail = OSError(errno.EPROTO, 'synthetic reply mismatch')
+    with pytest.raises(OSError):
+        client.service(instance, writes=(0x00140004, 0, 0, 42), read=(0, 0, 1))
+    ioctl.fail = None
+    with pytest.raises(OSError) as caught:
+        client.service(instance, read=(0, 0, 1))
+    assert caught.value.errno == errno.ESTALE

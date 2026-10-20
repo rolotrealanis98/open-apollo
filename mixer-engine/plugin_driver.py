@@ -57,6 +57,10 @@ def _words(values):
 
 
 SWAP_REFUSALS = (errno.EINVAL, errno.ENOENT)
+# driver/ua_plugin_instance.c ua_plugin_instance_service for a SERVICE that only reads: refused
+# before anything is sent (EINVAL bounds/state, EBUSY/EAGAIN a busy ring, E2BIG), or sent and
+# answered with a reply that does not match the read (EPROTO). A read changes nothing either way.
+READ_REFUSALS = (errno.EINVAL, errno.EBUSY, errno.EAGAIN, errno.E2BIG, errno.EPROTO)
 # driver/ua_plugin_instance.c ua_plugin_start_staged: all returned before anything is sent.
 START_REFUSALS = (errno.EINVAL, errno.ENOENT, errno.EPERM, errno.EBUSY)
 
@@ -308,7 +312,7 @@ class PluginDriver:
         with self._lock:
             self._check(instance)
             fields[3], fields[10] = instance.handle, instance.epoch
-            self._call(fields)
+            self._call(fields, READ_REFUSALS if not len(words) else ())
             return tuple(values)
 
     def destroy(self, instance):
