@@ -219,8 +219,6 @@ _NATIVE_REFUSED_PATHS = frozenset({'/UndoRedo', '/Session', '/ModifiedSessions'}
 # The rate and clock change while nothing is loaded: hosting pauses and comes back
 # by itself at 48 kHz (MixerDaemon._native_pause).
 _NATIVE_RATE_PROPS = frozenset({'SampleRate', 'ClockSource'})
-_NATIVE_PARAMETER_SET = re_mod.compile(
-    r'/devices/\d+/inputs/\d+/(?:preamps/\d+/)?effects/\d+/parameters/\d+/(?:NormalizedValue|StepValue)')
 # Posts that change only the mixer, never an insert.
 _NATIVE_MIXER_POSTS = frozenset({
     'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
@@ -2360,7 +2358,11 @@ class MixerDaemon:
         if self._native_plugin_backend and (
                 code in (UA_EVT_RATE_CHANGED, UA_EVT_CONNECTED, UA_EVT_EVENTS_LOST)
                 or (code == UA_EVT_PAUSED and arg & UA_PAUSE_DEVICE)):
-            self._native_pause(EVENT_NAMES.get(code, f"event 0x{code:x}"))
+            # The driver drops loaded plug-ins here; a new session would not own their slots.
+            if self._native_idle():
+                self._native_pause(EVENT_NAMES.get(code, f"event 0x{code:x}"))
+            else:
+                self._native_plugin_backend.invalidate()
         name = EVENT_NAMES.get(code, f"0x{code:x}")
         log.debug("driver event %s arg=0x%x", name, arg)
         if code == UA_EVT_RATE_CHANGED:
@@ -3534,13 +3536,6 @@ class MixerDaemon:
         if self._native_busy:
             # A native plug-in transaction is running on the worker thread (_native_run):
             # nothing may change the state tree until it commits. Applied afterwards, in order.
-            # A knob drag sends ~60 values a second and each native control is several DSP
-            # round trips: keep only the newest queued value of a plug-in parameter (a SET
-            # without func_id expects no answer), or the DSP replays the whole drag for seconds.
-            if _NATIVE_PARAMETER_SET.fullmatch(path.removesuffix('/value')) and not resp_params:
-                self._native_waiting = [
-                    (c, w) for c, w in self._native_waiting
-                    if w.path.removesuffix('/value') != path.removesuffix('/value') or w.raw_params]
             self._native_waiting.append((client, cmd))
             return
 

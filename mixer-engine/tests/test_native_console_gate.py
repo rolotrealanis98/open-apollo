@@ -150,3 +150,19 @@ def test_rate_and_clock_are_refused_with_plugins_loaded(lab, path, value):
     assert refused(lab)
     assert 'Remove the plug-ins first' in lab.daemon._send_local_plugin_error.call_args.kwargs['detail']
     assert lab.daemon._native_plugin_backend is native
+
+
+@pytest.mark.parametrize('loaded', [False, True])
+def test_a_rate_event_pauses_hosting_only_when_idle(lab, loaded):
+    """The driver drops loaded plug-ins on a rate change: a new session could not remove them."""
+    import ua_mixer_daemon
+    native = lab.daemon._native_plugin_backend
+    if loaded:
+        native._leases['/devices/0/inputs/0/effects/0'] = object()
+    lab.daemon._native_attach_fn = Mock()
+    lab.daemon._publish_license = Mock()
+    for name in ('_poll_driver_rate', '_mute_until_settle', '_license_epoch_changed'):
+        setattr(lab.daemon, name, Mock())
+    lab.daemon._on_driver_event(ua_mixer_daemon.UA_EVT_RATE_CHANGED, 4)
+    assert not native.publisher.connected
+    assert (lab.daemon._native_plugin_backend is native) == loaded
