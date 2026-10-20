@@ -492,3 +492,27 @@ Virtual 1–4 strips) and input 1's preamp gain changed twice without the bench.
 not run; input 1 was put back (muted, solo off). The monitor half needs the rig to itself:
 no other device holders (`/proc/*/fd`), no native instances, MON correlating with input 1
 on the plain strip (`tools/rectap-bench.py` now reports `mon_vs_rec_corr`).
+
+Monitor side, rerun 20:15 (rig to itself: only the daemon held the device, no tests). The
+daemon kept running; input 1 unmuted and soloed, input 2 (the Console's Ampeg SVTVR) muted;
+PipeWire stopped. On the plain strip MON L was an exact copy of input 1 (r = 1.000,
+-17.73 dB: fader -14.8 plus pan law). Same `tools/rectap-bench.py` steps, input 1 at about
+-66 dBFS:
+
+| Step | Bit `0x4` on | Record | MON L | MON vs record |
+|---|---|---:|---:|---|
+| B0 plain | Mic `m0` | -66.26 | -83.99 | r 1.000, -17.73 dB, lag -194 |
+| C chain, 1176 Input 0.8 | 1176 | **-28.51** | **-46.26** | r 1.000, -17.73 dB, lag -194 |
+| L live flip | Mic `m0` | **-66.24** | **-46.24** | r 0.984, +19.86 dB, lag -139 |
+| L2 live flip back | 1176 | -28.43 | -46.15 | r 1.000, -17.73 dB, lag -194 |
+| B1 destroyed | plain | -66.31 | -84.02 | r 1.000, -17.73 dB |
+| F fresh chain, flag on `m0` | Mic `m0` | **-66.25** | **-46.26** | r 0.984, +19.86 dB, lag -139 |
+| B2 destroyed | plain | -66.20 | -83.93 | r 1.000, -17.73 dB |
+
+- **Proven: the flag is UAD REC / MON.** On the 1176 the record and the monitor are both
+  wet (REC). On the Mic strip the record is dry, identical to the plain strip, while the
+  monitor stays wet at the same level (MON). Live through SERVICE, or at CREATE, both ways.
+- The dry tap is 55 samples earlier than the wet path (lag -194 → -139): the 1176 Rev A
+  chain adds 55 samples, while `native_known_good.json` lists its latency as 0.
+- Mixer restored to the snapshot taken before (inputs 1–4 mute, solo, fader, gain
+  identical); PipeWire, WirePlumber, daemon running; zero bench instances; no kernel faults.

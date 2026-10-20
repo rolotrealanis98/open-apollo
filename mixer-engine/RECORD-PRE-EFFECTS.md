@@ -1,11 +1,12 @@
 # UAD REC / MON (`RecordPreEffects`) on native insert chains
 
-Status, 2026-10-19: **record half proven, monitor half open.** UA's Mixer Engine was not
-traced; instead a bench run on the x4 (HARDWARE-SESSIONS.md, "record tap flag") showed that
-bit `0x4` of a block's word 4 picks the record tap: on the Mic strip the record channel is
-dry, on the last effect it is wet, set at CREATE or flipped live through SERVICE. Whether the
-monitor mix stays wet when the flag moves (candidate A below) was not measured: input 1 was
-not in the monitor mix during the run. No driver or daemon code changes yet.
+Status, 2026-10-19: **proven on the x4 (bench, not a UA trace).** Bit `0x4` of a block's
+word 4 is the record tap, and moving it is UAD REC / MON: on the last effect the record and
+monitor are both wet (REC, today's recipe); on the Mic strip `m0` (row 1 word 4) the record is
+dry and the monitor stays wet (MON). It works at CREATE and live through SERVICE, both ways,
+with no fault (HARDWARE-SESSIONS.md, "record tap flag"). Not yet checked: the Unison case
+(sub 0 is the Unison header), more than one insert, stereo, other rates. No driver or daemon
+code changes yet.
 
 ## What the switch means (proven)
 
@@ -72,10 +73,9 @@ INSTANCE SERVICE ABI**; only a topology change needs a new CREATE and swap.
 | D | **`{0x001E0004, input, sub, value}`** with a new sub. | It is the existing per-input DSP parameter command. | Known subs are 5 (scale), 7 (route), 8 (span), all strip I/O, not chain internals (`driver/ua_apollo.h:620`). Weakest. |
 | E | **UA rebuilds the chain** (new CREATE with A/B/C baked in, then swap). | Always possible; UA's engine already rebuilds on delay-comp changes. | Would glitch; nothing says Console glitches on REC/MON. |
 
-Bench result, 2026-10-19: moving the flag to `m0` makes the record channel dry (live or at
-CREATE), so the flag is the record tap, and A explains the record side with no other word.
-What is left for A is the monitor side: if the monitor mix also went dry, the flag is "last sub
-output" and REC/MON needs another mechanism (B–E) on top. A capture still settles everything.
+Bench result, 2026-10-19: **A is proven** for one mono insert: with the flag on `m0` the
+record is dry and the monitor wet. B–E are not needed. A UA capture would still confirm that
+UA does the same for Unison and for multiple inserts (steps 4 and 6 of the plan below).
 
 ## Capture plan (Titan's Windows VM, or a Mac with UA Console)
 
@@ -113,25 +113,24 @@ between runs), then diff the REC→MON burst against the MON→REC burst. Expect
 
 ### Bench test of A without UA
 
-Run 2026-10-19 with `tools/rectap-bench.py` (HARDWARE-SESSIONS.md, "record tap flag"):
-record side proven, monitor side not measured. To finish it, rerun with input 1 the only
-thing in the monitor mix (unmuted and soloed through the daemon, PipeWire stopped, nobody
-else driving the mixer) and compare MON L/R with input 1 at each step. MON stays a scaled
-copy of the wet signal when the flag is on `m0` → **A proven**; MON turns into a scaled
-copy of the dry signal → the flag is "last sub output" and A alone is not REC/MON.
+Done 2026-10-19 with `tools/rectap-bench.py` (HARDWARE-SESSIONS.md, "record tap flag").
+The monitor mix kept the 1176's level and shape with the flag on `m0` while the record matched
+the plain strip. The dry record also arrives 55 samples before the wet monitor: the 1176 Rev A
+chain adds 55 samples that `native_known_good.json` lists as 0, so delay compensation
+undercounts it today.
 
 ## Implementation, once the word is known
 
-1. **Evidence.** Capture (or bench test) result into HARDWARE-SESSIONS.md, with the exact
-   `(row, word, REC value, MON value)` table.
+1. **Evidence.** Done for one mono insert: REC = `0x4` on the last effect's word 4 and 0 on
+   `m0` word 4; MON = `0x4` on `m0` word 4 and cleared on every effect. Still to check on the
+   bench: two or more inserts (expect every effect cleared), stereo, a Unison header as sub 0.
 2. **Composer.** `compose(..., record_pre_effects=False)` in `native_chain_composer.py`.
-   False must stay byte-identical to today's recipe. True writes the MON words (for A: `0x4`
-   on `(1, 4)`, cleared on every effect) and lists them in `observations`. Add
+   False must stay byte-identical to today's recipe. True writes the MON words (`0x4` on
+   `(1, 4)`, cleared on every effect) and lists them in `observations`. Add
    `ComposedChain.record_tap_plan(pre)`: a `ControlPlan` of the live writes and their
    expected readback, for a flip without rebuild.
-3. **Driver op.** For A/B/C none: the words are private, non-directory, and SERVICE already
-   writes and reads them. For D: add the sub to `ua_dsp_set_input_param`'s allowlist behind a
-   new feature bit, so an older driver refuses rather than ignores. For E: none (stage/swap).
+3. **Driver op.** None: the words are private, non-directory, and SERVICE already writes and
+   reads them (proven live on the x4).
 4. **Delay compensation.** `InputLatency(channels, total=latency, record=0 if pre else
    latency, ...)` at `plugin_native_chain.py:169` and `:278`; `plan_compensation` already
    handles it. A stereo pair takes the value of its first input (both are written by Console).
