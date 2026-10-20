@@ -226,13 +226,26 @@ _NATIVE_MIXER_POSTS = frozenset({
     'ClearSolos', 'ClearClips', 'CopyToSends', 'Identify', 'SetTouch'})
 
 
+_LINK_PROPS = frozenset({'Stereo', 'StereoLink', 'Link'})
+# A link of an input native hosting never puts a chain on: everything but the
+# first unit's inputs 0-3 (NativePluginBackend.prepare takes
+# /devices/0/inputs/[0-3]/effects/0 only), so Virtual, S/PDIF and ADAT.  Linking
+# those only rewrites mixer coefficients (HardwareRouter._apply_link), which no
+# native chain depends on.
+_INPUT_LINK = re_mod.compile(r'/devices/(\d+)/inputs/(\d+)/(?:Stereo|StereoLink|Link)')
+
+
+def _link_without_native_chain(canonical: str) -> bool:
+    m = _INPUT_LINK.fullmatch(canonical)
+    return m is not None and (m.group(1) != '0' or int(m.group(2)) > 3)
+
+
 def native_refuses_set(canonical: str) -> bool:
     """Whether native hosting refuses a non-slot SET (path without /value)."""
+    if _link_without_native_chain(canonical):
+        return False
     return (canonical in _NATIVE_REFUSED_PATHS
             or canonical.rsplit('/', 1)[-1] in _NATIVE_REFUSED_PROPS)
-
-
-_LINK_PROPS = frozenset({'Stereo', 'StereoLink', 'Link'})
 
 
 def native_refusal_detail(canonical: str) -> str | None:
@@ -246,7 +259,7 @@ def native_refusal_detail(canonical: str) -> str | None:
     if re_mod.fullmatch(r"/devices/0/inputs/[02]/Stereo", canonical):
         return ('Remove the plug-ins first: inputs cannot be linked or unlinked '
                 'while native plug-ins are loaded')
-    return ('Only Analog 1-2 and Analog 3-4 can be linked or unlinked '
+    return ('Analog 1-2 and Analog 3-4 are linked from Analog 1 and Analog 3 '
             'while native plug-in hosting is on')
 
 

@@ -232,6 +232,12 @@ After running `apollo-setup-io`, these devices are available in PipeWire:
 | Apollo Monitor L/R | Sink (playback) | Stereo |
 | Apollo Line Out 1+2 | Sink (playback) | Stereo |
 | Apollo Line Out 3+4 | Sink (playback) | Stereo |
+| Apollo Virtual Out 1+2, 3+4 | Sink (playback into the Console's Virtual strips) | Stereo |
+| Apollo Virtual In 1+2, 3+4 | Source (the Virtual strips' record channels) | Stereo |
+
+The Virtual devices appear only for the pairs whose Virtual inputs have a DSP Input Strip
+(`input_strips=1`; the driver lists them in `/proc/asound/cardN/dsp_state`), since without one a
+Virtual channel mixes and records nothing (verified on an x4 at 48 kHz).
 
 The Apollo Solo USB gets Mic 1, Mic 2, Mic 1+2, Monitor and Headphone devices.
 
