@@ -1543,6 +1543,46 @@ class MixerDaemon:
                     if isinstance(self._metering, ReadbackMeter):
                         self._metering.feed(rb["words"])
 
+    async def _loop_watch(self, threshold: float = 1.0):
+        """Log every event-loop stall longer than `threshold` with where the loop thread was.
+
+        Every client waits while the loop is stuck (a get, the console's reconnect); the stack
+        says what held it (a transaction, a copy, the GIL held by a busy thread)."""
+        import threading
+        import traceback
+        loop_thread = threading.get_ident()
+        tick = [time.monotonic()]
+
+        def watch():
+            stall = None  # (when the loop last ticked, where it was once it stalled)
+            while True:
+                time.sleep(0.1)
+                last = tick[0]
+                if time.monotonic() - last < threshold:
+                    if stall is not None:
+                        log.warning("Event loop stalled %.1f s; it was in:\n%s",
+                                    last - stall[0], stall[1])
+                        stall = None
+                    continue
+                if stall is None:
+                    # Innermost frames: the loop thread's, then each other thread's (one holding
+                    # the GIL starves the loop although the loop's own frame looks idle).
+                    frames = sys._current_frames()
+                    names = {t.ident: t.name for t in threading.enumerate()}
+                    where = []
+                    for ident, frame in frames.items():
+                        if ident == threading.get_ident():
+                            continue
+                        label = 'event loop' if ident == loop_thread else names.get(ident, ident)
+                        stack = traceback.extract_stack(frame)[-(8 if ident == loop_thread else 4):]
+                        where.append(f'[{label}]\n' + ''.join(traceback.format_list(stack)))
+                    stall = (last, ''.join(where))
+
+        threading.Thread(target=watch, name='loop-watch', daemon=True).start()
+        while True:
+            tick[0] = time.monotonic()
+            await asyncio.sleep(0.05)
+
     async def _meter_pulse_heartbeat(self):
         """The Mixer Engine's meter tick, every 30.71 ms (about 32.6 Hz, the
         Console 1.3.1 capture's median): /MeterPulse goes up by one and the
@@ -5015,6 +5055,7 @@ helper 4820 (and WS 4821 with --ws) with its own state file; pass
             asyncio.create_task(daemon.start()),
             asyncio.create_task(daemon._meter_pump()),
             asyncio.create_task(daemon._meter_pulse_heartbeat()),
+            asyncio.create_task(daemon._loop_watch()),
             asyncio.create_task(daemon._device_watchdog()),
             asyncio.create_task(daemon.autogain.run()),
         ]
