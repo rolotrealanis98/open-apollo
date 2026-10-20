@@ -80,12 +80,37 @@ def test_posts(lab, path, allowed):
 
 def test_link_refusals_say_why():
     assert 'Remove the plug-ins first' in native_refusal_detail('/devices/0/inputs/0/Stereo')
-    assert 'Analog 1-2 and Analog 3-4' in native_refusal_detail('/devices/0/inputs/4/Stereo')
+    assert 'from Analog 1 and Analog 3' in native_refusal_detail('/devices/0/inputs/1/Stereo')
     assert native_refusal_detail('/SampleRate') is None
 
 
 def test_a_refused_link_carries_its_reason(lab):
-    lab.daemon._handle_set(lab.client, Command('set', '/devices/0/inputs/4/Stereo/value', True,
+    lab.daemon._handle_set(lab.client, Command('set', '/devices/0/inputs/3/Stereo/value', True,
                                                raw_params={'func_id': 1}))
     assert refused(lab)
-    assert 'Analog 1-2' in lab.daemon._send_local_plugin_error.call_args.kwargs['detail']
+    assert 'Analog 3' in lab.daemon._send_local_plugin_error.call_args.kwargs['detail']
+
+
+@pytest.mark.parametrize('path', [
+    '/devices/0/inputs/14/Stereo',      # Virtual 1-2 (x4)
+    '/devices/0/inputs/15/Stereo',      # its right leg: forwarded to the leader
+    '/devices/0/inputs/20/Stereo',      # Virtual 7-8
+    '/devices/0/inputs/12/Stereo',      # S/PDIF
+    '/devices/0/inputs/4/Stereo',       # ADAT 1-2
+    '/devices/1/inputs/0/Stereo',       # a second unit: native hosting is unit 0's
+])
+def test_links_without_a_native_chain_pass(lab, path):
+    """Inputs native hosting never puts a chain on link like any mixer control."""
+    assert not native_refuses_set(path)
+    lab.daemon._handle_set(lab.client, Command('set', path + '/value', True,
+                                               raw_params={'func_id': 1}))
+    assert not refused(lab)
+
+
+def test_native_chains_stay_on_inputs_0_to_3():
+    """The link exemption above relies on prepare taking inputs 0-3 only."""
+    _, _, _, _, backend, _ = model()
+    for slot in ('/devices/0/inputs/4/effects/0', '/devices/0/inputs/14/effects/0'):
+        outcome = backend.prepare(slot, 'anything')
+        assert outcome.status.name == 'FAILED'
+        assert 'no native recipe' in outcome.detail

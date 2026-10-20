@@ -15,9 +15,16 @@
 #   --io-map FILE    read the channel map from FILE instead of /proc
 #                    (a saved copy of /proc/asound/cardN/io_map)
 #   --card N         use ALSA card N (default: the card driven by ua_apollo)
-#   --virtual        also create Virtual In/Out loopbacks (off by default:
-#                    Virtual channels need the DSP strip engine, not there yet)
-#   --no-virtual     do not create them (the default)
+#   --virtual        create Virtual In/Out loopbacks for every Virtual pair
+#                    of the io_map, strips or not
+#   --no-virtual     do not create them
+#                    (default: a pair 1+2, 3+4, ... gets its loopbacks when the
+#                    driver has an Input Strip live on both of its Virtual
+#                    inputs, as /proc/asound/cardN/dsp_state lists them;
+#                    without a strip a Virtual channel mixes and records
+#                    nothing.  With --io-map and no --dsp-state: none)
+#   --dsp-state FILE read the live strips from FILE instead of /proc
+#                    (a saved copy of /proc/asound/cardN/dsp_state)
 #   --extra          also create the monitoring channels: CUE (headphone)
 #                    outputs, AUX / MON / Talkback captures (off by default)
 #   --output-delay NAME=FRAMES
@@ -44,9 +51,10 @@ MAX_WAIT=10  # seconds to wait for PipeWire
 
 DRY_RUN=0
 VERBOSE=0
-WITH_VIRTUAL=0
+WITH_VIRTUAL=auto
 WITH_EXTRA=0
 IO_MAP_FILE=""
+DSP_STATE_FILE=""
 CARD=""
 RATE=48000
 DELAY_NAMES=()
@@ -105,6 +113,7 @@ while [ $# -gt 0 ]; do
         --card)    [ $# -ge 2 ] || die "--card needs a number"; CARD="$2"; shift ;;
         --virtual) WITH_VIRTUAL=1 ;;
         --no-virtual) WITH_VIRTUAL=0 ;;
+        --dsp-state) [ $# -ge 2 ] || die "--dsp-state needs a file"; DSP_STATE_FILE="$2"; shift ;;
         --extra)   WITH_EXTRA=1 ;;
         --output-delay) [ $# -ge 2 ] || die "--output-delay needs NAME=FRAMES"; add_delay "$2"; shift ;;
         --output-delay-file) [ $# -ge 2 ] || die "--output-delay-file needs a file"; load_delay_file "$2"; shift ;;
@@ -394,6 +403,50 @@ add_bus_pairs() {   # kind dir type node_fmt desc_fmt  (%d = pair number)
     done
 }
 
+# Virtual inputs with a live Input Strip: VIRTUAL_LIVE[n] = 1 for Virtual n.
+# The driver's dsp_state lists them as
+#   strip 4: Virtual 1 (DSP input 24), instance 0x9d060, live
+VIRTUAL_LIVE=()
+VIRTUAL_WHY=""
+
+load_virtual_strips() {
+    local file="$DSP_STATE_FILE" n
+    VIRTUAL_LIVE=()
+    [ "$WITH_VIRTUAL" = auto ] || return 0
+    if [ -z "$file" ]; then
+        if [ -n "$IO_MAP_FILE" ] || [ -z "$APOLLO_CARD" ]; then
+            VIRTUAL_WHY="no dsp_state to read (pass --dsp-state FILE or --virtual)"
+            return 0
+        fi
+        file="/proc/asound/card$APOLLO_CARD/dsp_state"
+    fi
+    if [ ! -r "$file" ]; then
+        VIRTUAL_WHY="cannot read $file"
+        return 0
+    fi
+    while read -r n; do
+        VIRTUAL_LIVE[n]=1
+    done < <(awk '$1 == "strip" && $3 == "Virtual" && / live( |$)/ { print $4 + 0 }' "$file")
+    VIRTUAL_WHY="Input Strips live on Virtual ${!VIRTUAL_LIVE[*]}"
+    [ ${#VIRTUAL_LIVE[@]} -gt 0 ] || VIRTUAL_WHY="no Input Strip live on a Virtual input ($file)"
+}
+
+# Virtual pairs 1+2, 3+4, ... of one direction: every pair with --virtual,
+# by default the pairs whose two inputs both have a live strip
+add_virtual_pairs() {   # kind dir node_prefix desc_prefix
+    local kind=$1 dir=$2 np=$3 dp=$4 n m
+    [ "$WITH_VIRTUAL" = 0 ] && return 0
+    m=$(max_num "$dir" 7)
+    for ((n = 1; n < m; n += 2)); do
+        if [ "$WITH_VIRTUAL" = auto ] &&
+           { [ -z "${VIRTUAL_LIVE[n]:-}" ] || [ -z "${VIRTUAL_LIVE[n + 1]:-}" ]; }; then
+            continue
+        fi
+        add_pair "$kind" "$dir" "${np}_$n$((n + 1))" "$dp $n+$((n + 1))" \
+            $((0x0700 + n)) $((0x0700 + n + 1))
+    done
+}
+
 # Types: 0x00 MIC/LINE/HIZ, 0x01 MIC/LINE, 0x03 LINE, 0x04 ADAT, 0x05 S/PDIF,
 # 0x06 AES/EBU, 0x07 VIRTUAL, 0x08 MADI, 0x09 MON, 0x0a CUE, 0x0d DANTE
 build_items() {
@@ -433,9 +486,7 @@ build_items() {
     add_pair src rec apollo_aes_in "Apollo AES/EBU In" $((0x0601)) $((0x0602))
     add_typed_pairs src rec 8 apollo_madi_in "Apollo MADI In"
     add_typed_pairs src rec 13 apollo_dante_in "Apollo Dante In"
-    if [ "$WITH_VIRTUAL" -eq 1 ]; then
-        add_typed_pairs src rec 7 apollo_virtual_in "Apollo Virtual In"
-    fi
+    add_virtual_pairs src rec apollo_virtual_in "Apollo Virtual In"
     if [ "$WITH_EXTRA" -eq 1 ]; then
         add_bus_pairs src rec 2 "apollo_aux%d_in" "Apollo AUX %d In"
         add_pair src rec apollo_monitor_in "Apollo Monitor In" $((0x0901)) $((0x0902))
@@ -450,9 +501,7 @@ build_items() {
     add_pair snk play apollo_aes_out "Apollo AES/EBU Out" $((0x0601)) $((0x0602))
     add_typed_pairs snk play 8 apollo_madi_out "Apollo MADI Out"
     add_typed_pairs snk play 13 apollo_dante_out "Apollo Dante Out"
-    if [ "$WITH_VIRTUAL" -eq 1 ]; then
-        add_typed_pairs snk play 7 apollo_virtual_out "Apollo Virtual Out"
-    fi
+    add_virtual_pairs snk play apollo_virtual_out "Apollo Virtual Out"
     if [ "$WITH_EXTRA" -eq 1 ]; then
         add_bus_pairs snk play 10 "apollo_cue%d" "Apollo CUE %d"
     fi
@@ -611,8 +660,10 @@ summary_line() {   # kind
 }
 
 load_io_map
+load_virtual_strips
 build_items
 check_delays
+[ "$WITH_VIRTUAL" = auto ] && log "Virtual loopbacks: $VIRTUAL_WHY"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     print_items

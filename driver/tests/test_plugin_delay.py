@@ -35,7 +35,7 @@ static void setup_delay(void)
     plain=kzalloc(sizeof(*plain),GFP_KERNEL); assert(plain);
     host.strips=plain; ua_strips_dsp=1; input_strips_steps=0;
     plain->state=UA_STRIPS_LIVE; plain->epoch=host.epoch; plain->gen=9;
-    plain->n=4; plain->rate.rate=48000;
+    plain->n=plain->n_mic=4; plain->rate.rate=48000;
     plain->rebuild_seen=atomic_read(&ua_strips_rebuilds);
     delay_writes=delay_reads=0; corrupt_delay_reply=false;
     memset(delay_words,0,sizeof(delay_words));
