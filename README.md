@@ -130,7 +130,7 @@ Talkback audio routing, virtual/monitor loopback, parts of the console (see [con
 | Apollo x8p Gen 2 | Needs Testing |
 | Apollo x16 / Gen 2 | Needs Testing |
 | Apollo x16D | Needs Testing |
-| Apollo Twin X / Gen 2 | Needs Testing |
+| Apollo Twin X / Gen 2 | **Gen 2 Duo partially verified** — playback, Mic 1 capture and direct monitoring at 48 kHz with `input_strips=1` (after a power cycle with the driver loaded). Gen 1, other rates and digital I/O untested. |
 | Apollo Solo (Thunderbolt) | Needs Testing |
 | Apollo 8P (original) | Needs Testing |
 | Arrow | Needs Testing |

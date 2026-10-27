@@ -112,7 +112,8 @@ void ua_plugin_dsp_start(struct ua_device *ua, bool cold)
 			d->quarantined = false;
 			d->boot_word = ua_read(ua, ua_plugin_dsp_window(i) +
 					       UA_DSP_WIN_BOOT);
-			d->owned = d->boot_word == UA_DSP_BOOT_POWERUP;
+			d->owned = (d->boot_word & ~UA_DSP_BOOT_MODEL_MASK) ==
+				   UA_DSP_BOOT_POWERUP;
 			if (d->owned)
 				ua_plugin_why(d, "cold-started by this driver, no host since power-up");
 			else

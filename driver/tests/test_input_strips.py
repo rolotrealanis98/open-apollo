@@ -170,6 +170,10 @@ int ua_dsp_move_bus(struct ua_device *ua, u32 bus, u32 dsp)
 	return ua_dsp_set_bus_owner(ua, bus, dsp);
 }
 #define UA_DEV_APOLLO_X4 0x1F
+#define UA_DEV_APOLLO_TWIN_X_GEN2 0x3B
+#define UA_DEV_APOLLO_TWIN_X_GEN2_B 0x3C
+#define UA_DEV_APOLLO_TWIN_X_GEN2_TB4 0x40
+#define UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B 0x41
 #define ATOMIC_INIT(v) { v }
 #define atomic_inc(a) ((a)->counter++)
 struct kernel_param { int unused; };

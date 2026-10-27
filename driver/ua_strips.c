@@ -80,7 +80,7 @@
 static bool input_strips;
 module_param(input_strips, bool, 0444);
 MODULE_PARM_DESC(input_strips,
-		 "EXPERIMENTAL: create the Console's Mic Input Strip on DSP 0 for every analog preamp input after a connect (and rebuild them after each rate change), as the macOS driver does, so the analog inputs reach the record channels, the monitor mix and the meters after a Linux cold start. Needs the strip modules in /lib/firmware/universal-audio/dsp/ (oa-assets firmware, from your own UA install) and an Apollo power-cycled with this driver loaded; strips another OS left are never touched. Apollo x4 only (default: off)");
+		 "EXPERIMENTAL: create the Console's Mic Input Strip on DSP 0 for every analog preamp input after a connect (and rebuild them after each rate change), as the macOS driver does, so the analog inputs reach the record channels, the monitor mix and the meters after a Linux cold start. Needs the strip modules in /lib/firmware/universal-audio/dsp/ (oa-assets firmware, from your own UA install) and an Apollo power-cycled with this driver loaded; strips another OS left are never touched. Apollo x4 and Twin X Gen 2 (default: off)");
 
 /*
  * Bring-up aid: send only the first N steps of each strip (1 code pages,
@@ -773,6 +773,19 @@ static const struct {
 	u8 first_virtual;
 } ua_strips_models[] = {
 	{ UA_DEV_APOLLO_X4, 0, 0x18 },
+	/*
+	 * Twin X Gen 2: devices/apollo-twin-x-gen-2.json has ANALOG 1/2 on
+	 * synch_in 0/1 and VIRTUAL 1-8 on 24-31, the x4's layout, and both
+	 * DSPs' pools read the recipe's geometry on a Duo (the strips go to
+	 * input_strips_dsp, DSP 1 by default; code 0xe0000, tops
+	 * 0x9d1b8 / 0xc6ffe / 0x08ffe000).  Verified on a Duo (serial 2090) at
+	 * 48 kHz: six strips live after a cold start, Mic 1 records and
+	 * reaches the monitor mix.
+	 */
+	{ UA_DEV_APOLLO_TWIN_X_GEN2, 0, 0x18 },
+	{ UA_DEV_APOLLO_TWIN_X_GEN2_B, 0, 0x18 },
+	{ UA_DEV_APOLLO_TWIN_X_GEN2_TB4, 0, 0x18 },
+	{ UA_DEV_APOLLO_TWIN_X_GEN2_TB4_B, 0, 0x18 },
 };
 
 /* True when this driver can build the input strips for @device_type */
