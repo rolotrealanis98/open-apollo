@@ -273,6 +273,12 @@ void ua_catalog_free_all(struct ua_device *ua);			/* exclusive */
  */
 #define UA_DSP_WIN_BOOT		0x1a4	/* boot/ready word */
 #define UA_DSP_BOOT_POWERUP	0x00000003
+/*
+ * Bits 15:8 are the model's, not the state's: a Twin X Gen 2 (Duo) reads
+ * 0x00002703 after power-up and 0x0008270b after a Linux connect, the
+ * x4's 0x3 and 0x0b + connect count with 0x27 in between
+ */
+#define UA_DSP_BOOT_MODEL_MASK	0x0000ff00
 #define UA_DSP_WIN_SIZE		0x010	/* pool n capacity: +0x10 + 4n */
 #define UA_DSP_WIN_BASE		0x184	/* pool n base: +0x184 + 4n */
 #define UA_DSP_WIN_SCRATCH	0x190	/* pool n scratch: +0x190 + 4n, n >= 1 */

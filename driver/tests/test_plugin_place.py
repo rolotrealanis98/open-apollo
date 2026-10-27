@@ -195,6 +195,14 @@ int main(void)
 	       !host.dsp[3].owned);
 	assert(strstr(host.dsp[1].why, "boot word 0x0018000b"));
 
+	/* a Twin X Gen 2: the model's 0x27 in bits 15:8, fresh and connected */
+	setup(true);
+	regs[0][0x1a4 / 4] = 0x00002703;
+	regs[1][0x1a4 / 4] = 0x0008270b;
+	start(true);
+	assert(host.dsp[0].owned && !host.dsp[1].owned);
+	assert(strstr(host.dsp[1].why, "boot word 0x0008270b"));
+
 	/* found running at probe: never the host's */
 	setup(true);
 	start(false);
