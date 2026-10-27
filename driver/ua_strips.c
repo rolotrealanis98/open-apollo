@@ -775,8 +775,9 @@ static const struct {
 	{ UA_DEV_APOLLO_X4, 0, 0x18 },
 	/*
 	 * Twin X Gen 2: devices/apollo-twin-x-gen-2.json has ANALOG 1/2 on
-	 * synch_in 0/1 and VIRTUAL 1-8 on 24-31, the x4's layout, and DSP 0's
-	 * pools read the recipe's geometry on a Duo (code 0xe0000, tops
+	 * synch_in 0/1 and VIRTUAL 1-8 on 24-31, the x4's layout, and both
+	 * DSPs' pools read the recipe's geometry on a Duo (the strips go to
+	 * input_strips_dsp, DSP 1 by default; code 0xe0000, tops
 	 * 0x9d1b8 / 0xc6ffe / 0x08ffe000).  Verified on a Duo (serial 2090) at
 	 * 48 kHz: six strips live after a cold start, Mic 1 records and
 	 * reaches the monitor mix.
