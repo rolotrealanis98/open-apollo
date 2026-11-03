@@ -9,6 +9,9 @@ class FakeCapture:
         if profile.get('fail_start'):
             raise ValueError('synthetic constructor failure')
 
+    def describe(self):
+        pass  # GenericCapture runs the plug-in's descriptor function here
+
     def start(self):
         self.defaults_values = tuple(self.values)
         self.events.append(['started', len(self.values)])

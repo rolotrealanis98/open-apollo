@@ -1028,6 +1028,18 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
         if tuple(expected)!=actual:raise ValueError('captured vector original-normalizer/getter mismatch '+repr([(i,e,a) for i,(e,a) in enumerate(zip(expected,actual)) if e!=a]))
         self.captured_integer_values=tuple(expected)
 
+    def describe(self):
+        """Call the plug-in's descriptor function, output discarded, as UA's host does when it creates
+        an instance and as the mapper records a bundle (run_profile.execute: before start-up and after).
+        Some plug-ins keep state from it: the UA 175-B and 176 store their oversampled sample rate there,
+        and without it their setters compute NaN and infinite coefficients."""
+        spec=self.profile.get('descriptor',{})
+        if 'getter_va' not in spec or 'receiver_from_parameter_block' not in spec:return
+        receiver=self.this+integer(spec['receiver_from_parameter_block'])
+        if receiver!=self.parent+integer(spec['secondary_object_offset']):
+            raise ValueError('descriptor receiver is not the initialized shared parent')
+        self.call(integer(spec['getter_va']),receiver,self.reserve(0x1000))
+
     def start(self):
         self.load_program()
         self.phase='original_resume';self.vcall(0x38)
