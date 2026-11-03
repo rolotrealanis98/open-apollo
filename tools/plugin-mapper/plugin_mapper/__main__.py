@@ -50,7 +50,11 @@ DLL_DIR = ('Program Files', 'Universal Audio', 'Powered Plugins', 'UAD-2 Powered
 SDK = ('Windows', 'System32', 'UAD2SDK.dll')
 # Data files a plug-in's own code opens (relative to ROOT); staged with the DLLs.
 DATA_FILES = (('Program Files (x86)', 'Universal Audio', 'Powered Plugins', 'Data', 'Ocean Way Studios',
-               'OceanWayStudios.irz'),)
+               'OceanWayStudios.irz'),
+              ('Program Files (x86)', 'Universal Audio', 'Powered Plugins', 'Data', 'Capitol Chambers',
+               'CapitolChambers.irz'),
+              ('Program Files (x86)', 'Universal Audio', 'Powered Plugins', 'Data', 'Hitsville Chambers',
+               'HitsvilleChambers.irz'))
 INDEX = 'index.json'
 INDEX_SCHEMA = 'open-apollo-plugin-bundles/2'
 

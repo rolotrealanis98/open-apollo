@@ -61,7 +61,7 @@ class ThreadRuntime:
         if not self.heap_obtained or self.cap.arg(0)!=self.heap:raise ValueError('original CRT heap initializer required')
     def HeapAlloc(self):
         self._heap();flags=self.cap.arg(1)&0xffffffff;size=self.cap.arg(2)
-        if flags not in (0,8) or not 0<size<=0x100000:raise ValueError('bounded HeapAlloc flags/size required')
+        if flags not in (0,8) or not 0<size<=getattr(self.cap,'heap_block_max',0x100000):raise ValueError('bounded HeapAlloc flags/size required')
         ptr=self.cap.reserve(size);self.blocks[ptr]=size
         self.events.append(('HeapAlloc',flags,size,ptr));return ptr
     def HeapFree(self):
@@ -70,7 +70,7 @@ class ThreadRuntime:
         del self.blocks[ptr];self.events.append(('HeapFree',ptr));return 1
     def HeapReAlloc(self):
         self._heap();flags=self.cap.arg(1)&0xffffffff;ptr=self.cap.arg(2);size=self.cap.arg(3)
-        if flags not in (0,8) or ptr not in self.blocks or not 0<size<=0x100000:raise ValueError('owned bounded HeapReAlloc required')
+        if flags not in (0,8) or ptr not in self.blocks or not 0<size<=getattr(self.cap,'heap_block_max',0x100000):raise ValueError('owned bounded HeapReAlloc required')
         new=self.cap.reserve(size);self.cap.uc.mem_write(new,bytes(self.cap.uc.mem_read(ptr,min(size,self.blocks[ptr]))))
         del self.blocks[ptr];self.blocks[new]=size;self.events.append(('HeapReAlloc',ptr,new,size));return new
 
@@ -91,6 +91,10 @@ class ThreadRuntime:
     def LoadLibraryExW(self):
         name=self._string(self.cap.arg(0),True).lower()
         if self.cap.arg(1)!=0 or self.cap.arg(2)not in(0,0x800):raise ValueError('unexpected virtual module flags')
+        if name=='api-ms-win-core-sysinfo-l1-2-1' and getattr(self.cap,'vfs',None) is not None:
+            # The CRT asks for GetSystemTimePreciseAsFileTime while a data file is read: absent (ERROR_MOD_NOT_FOUND),
+            # so it falls back to GetSystemTimeAsFileTime, which this runtime answers from its emulated clock.
+            self.cap.last_error=126;self.events.append(('LoadLibraryExW',name,0));return 0
         if name not in ('kernel32','kernel32.dll','api-ms-win-core-synch-l1-2-0','api-ms-win-core-localization-l1-2-1'):
             raise ValueError('unmodeled virtual Win32 module '+name)
         handle=next((h for h,n in self.modules.items()if n==name),None)
