@@ -243,9 +243,20 @@ static inline bool ua_public_output_mute(u32 pt)
  * 11.15.51635.  UA_REG_DEV_INFO is UAD2DeviceInfo+0x80, read only for the
  * public types in UA_DEVINFO_TYPES (else 0xFFFFFFFF); its [19:16] is the
  * revision the Mixer Engine's per-device firmware checks test.
+ *
+ * UA_REG_FW_RELEASE is a release, not an identity: 0x0b0fc9b3 (11.15.51635)
+ * is shared by the x4 and the Twin X built from the same drop.  The
+ * FirmwareUpdate*.bin header carries the same words, so a file can be
+ * compared with the unit without decoding its payload:
+ *   +0x0C board_info  product selector + board version == BAR0 0x2218
+ *   +0x10 fw_release  == UA_REG_FW_RELEASE
+ *   +0x14 boot        == UA_REG_FW_BOOT
+ *   +0x1C dev_info    == UA_REG_DEV_INFO (per-model)
+ * mixer-engine/firmware_header.py parses and compares them.
  */
 #define UA_REG_FW_VERSION       0x0000  /* DSP 0 status word (not a version) */
 #define UA_REG_ID_WORD          0x0004  /* identity word, UAD2DeviceInfo+0x28 */
+#define UA_REG_FW_BOOT          0x0004  /* bootloader release (FirmwareUpdate +0x14) */
 #define UA_REG_FW_RELEASE       0x0008  /* firmware version, UAD2DeviceInfo+0x24 */
 #define UA_REG_DEV_INFO         0x01AC  /* device info word, UAD2DeviceInfo+0x80 */
 #define UA_DEVINFO_TYPES        0x3ff16fcf9a0ULL  /* public types, <= 0x29 */

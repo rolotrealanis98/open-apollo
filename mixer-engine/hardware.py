@@ -225,9 +225,13 @@ _SYSTEM_INFO_EXT_OFF = 64 + 4 * len(_SYSTEM_INFO_TAIL)
 # reserved[2]; the size stays 148.
 #   fw_release  BAR0 0x0008, the firmware version word UA's driver reports
 #               (major [31:24], minor [23:16], build [15:0]; x4 0x0b0fc9b3
-#               = 11.15.51635).  fw_version is DSP 0's status word.
+#               = 11.15.51635).  fw_version is DSP 0's status word.  This is
+#               a release: the same word is shared by models built from one
+#               drop, so it does not identify a model.
 #   dev_info    BAR0 0x01AC for the types UA's driver reads it for, else
-#               0xFFFFFFFF; [19:16] feed the per-device firmware checks
+#               0xFFFFFFFF; [19:16] feed the per-device firmware checks.
+#               Together with the FirmwareUpdate*.bin board_info selector
+#               it is the per-model word (firmware_header.py).
 UA_FEAT_FW_RELEASE = 1 << 14
 # ABI 1.6: the load words of struct ua_dsp_info (see get_dsp_info)
 UA_FEAT_DSP_LOAD = 1 << 16
