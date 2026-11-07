@@ -17,6 +17,14 @@ from unicorn import UcError,UC_HOOK_BLOCK,UC_HOOK_CODE,UC_HOOK_MEM_READ
 from unicorn.x86_const import *
 
 
+CALL_BUDGET=20000000
+DATA_FILE_BUDGET=4000000000     # the original .irz inflate (vstmain_capture.BUDGET)
+# Private heap of a profile with data files: the original reads and inflates the whole .irz set
+DATA_HEAP=0x100000000
+DATA_HEAP_SIZE=0x40000000
+DATA_HEAP_BLOCK=0x10000000
+
+
 def integer(value):
     return int(value,0) if isinstance(value,str) else int(value)
 
@@ -162,7 +170,7 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
         self.uc.mem_map(HEAP+0x10000,0x7f0000)
         from collections import deque
         self.last_blocks=deque(maxlen=32)
-        self.uc.hook_add(UC_HOOK_BLOCK,lambda u,a,size,data:self.last_blocks.append(a))
+        self.block_hook=self.uc.hook_add(UC_HOOK_BLOCK,lambda u,a,size,data:self.last_blocks.append(a))
         self.this=HEAP;self.parent=HEAP+0x200000
         constructor=profile['parameter_block']['constructor']
         ctor=constructor.get('parent_constructor_va',constructor.get('va'))
@@ -344,6 +352,10 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
         dynamic=profile.get('host_context',{}).get('crt_dynamic_initializers')
         if dynamic is not None:self.run_crt_dynamic_initializers(dynamic)
         self.run_domain_initializers(profile)
+        # The install's data files the original constructor reads (the Hyp convolution reverbs, Capitol and
+        # Hitsville Chambers, find their .irz under Program Files (x86) and load it), read-only at their
+        # Windows paths as vstmain_capture serves Ocean Way's; every other path stays absent.
+        if profile.get('data_files'):self.bind_data_files(profile['data_files'])
         constructor=self.parameter_block['constructor']
         if constructor.get('kind')!='inline_span' and constructor.get('receiver','parameter_block')!='parameter_block':
             raise ValueError('constructor receiver requires unresolved whole-parent ABI')
@@ -376,6 +388,10 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
                 self.public_receiver=self.parent_bound;self.public_slots=dict(public['public_slots'])
             elif public.get('block')!='profile':raise ValueError('source-derived public parameter block required for two-PB parent')
         elif constructor.get('kind')=='inline_span':self.constructor_span(constructor)
+        elif getattr(self,'vfs',None) is not None:
+            self.uc.hook_del(self.block_hook)     # the inflate has no set_int sites: no Python call per block
+            try:self.call(integer(constructor['va']),self.this)
+            finally:self.block_hook=self.uc.hook_add(UC_HOOK_BLOCK,lambda u,a,size,data:self.last_blocks.append(a))
         else:self.call(integer(constructor['va']),self.this)
         actual=self.rq(self.this);expected=integer(self.parameter_block['vtable'])
         if actual!=expected:raise ValueError('original constructor vtable identity differs '+hex(actual))
@@ -643,6 +659,12 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
         self._check_completed_call()
 
     def reserve(self,size):
+        if self.alloc_next>=DATA_HEAP:  # bind_data_files moved every later allocation here
+            if type(size)is not int or not 0<size<=DATA_HEAP_BLOCK or self.alloc_next+size>DATA_HEAP+DATA_HEAP_SIZE:
+                raise ValueError('bounded data-file heap allocation required')
+            ptr=self.alloc_next;self.alloc_next=(ptr+size+15)&~15
+            self.allocations[ptr]=size
+            return ptr
         if type(size)is not int or not 0<size<=0x100000:
             raise ValueError('bounded private object allocation required')
         if HEAP+0x400000<=self.alloc_next<=HEAP+0x800000 and self.alloc_next+size>HEAP+0x800000:
@@ -676,10 +698,11 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
             if i<4:self.uc.reg_write(_ARGUMENTS[i],value)
             else:self.wq(rsp+0x28+(i-4)*8,value)
         self.uc.reg_write(UC_X86_REG_RSP,rsp)
-        try:self.uc.emu_start(fn,STOP,count=20000000)
+        budget=getattr(self,'call_budget',CALL_BUDGET)
+        try:self.uc.emu_start(fn,STOP,count=budget)
         except UcError as exc:raise RuntimeError('emulator at '+hex(self.uc.reg_read(UC_X86_REG_RIP))+': '+str(exc))from exc
         if self.failure:raise RuntimeError(str(self.failure))from self.failure
-        if self.uc.reg_read(UC_X86_REG_RIP)!=STOP:raise RuntimeError('20M instruction budget exceeded')
+        if self.uc.reg_read(UC_X86_REG_RIP)!=STOP:raise RuntimeError(f'{budget//1000000}M instruction budget exceeded')
         self._check_completed_call();return self.uc.reg_read(UC_X86_REG_RAX)
 
     def parent_span(self):
@@ -1043,6 +1066,7 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
     def start(self):
         self.load_program()
         self.phase='original_resume';self.vcall(0x38)
+        if getattr(self,'vfs',None) is not None:self.handler_startup()
         from base_init import settle_commit_state
         settle_commit_state(self)
         self.phase='startup_readback';self.defaults_values=self.read_values()
@@ -1139,6 +1163,56 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
         if not self.arg(0) or not self.arg(1):raise ValueError('FindFirstFileW requires pattern and data pointers')
         self.last_error=2
         return 0xffffffffffffffff
+
+    # Program Files folders, answered only to a profile with data files under them
+    DATA_FILE_FOLDERS={0x26:'C:\\Program Files',0x2a:'C:\\Program Files (x86)'}
+
+    def handler_startup(self):
+        """UA's SDK starts an instance through its CUADPlugCallbackHandler slot 17 (0x88, the startup slot the
+        other families call). Hitsville Reverb Chambers selects its impulse response there: its constructor
+        leaves the load pending until that startup runs."""
+        d=self.profile.get('descriptor',{})
+        if d.get('status')!='original_secondary_virtual_dispatch_discovered':return
+        handler=self.parent+integer(d['secondary_object_offset'])
+        va=self.rq(integer(d['secondary_vtable'])+0x88)
+        if not BASE<=va<BASE+0x4000000 or self.rq(handler)!=integer(d['secondary_vtable']):
+            raise ValueError('source-derived callback handler startup slot required')
+        self.phase='original_handler_startup';self.handler_startup_va=hex(va);self.call(va,handler)
+
+    def bind_data_files(self,specs):
+        import dspap_capture  # noqa: F401  (first: its tail loads vstmain_capture in the order the family modules expect)
+        from vstmain_capture import VirtualFiles
+        cap=self
+        class Files(VirtualFiles):
+            def fail(self,error,result=0):
+                cap.last_error=error;return result
+        self.vfs=Files(self,specs)
+        stubs={n.decode():stub for n,label,stub in self.imports if n}
+        def prior(name):
+            fn=self.handlers.get(stubs.get(name),('',None))[1]
+            return fn if fn is not None else (lambda:self.vfs.fail(6,0))
+        table=self.vfs.table({'GetFileType':prior('GetFileType'),'CloseHandle':prior('CloseHandle')})
+        table['SHGetSpecialFolderPathW']=self.data_file_folder
+        # The CRT's _tzset asks for the time zone while the .irz is read
+        if self.handlers.get(stubs.get('GetTimeZoneInformation'),('',None))[1] is None:
+            table['GetTimeZoneInformation']=self.time_zone_absent
+        self.data_file_bindings=sorted(name for name in table if name in stubs)
+        self.uc.mem_map(DATA_HEAP,DATA_HEAP_SIZE);self.alloc_next=DATA_HEAP;self.heap_block_max=DATA_HEAP_BLOCK
+        self.call_budget=DATA_FILE_BUDGET       # setup and controls process the loaded impulse response too
+        for name in self.data_file_bindings:self.handlers[stubs[name]]=('data file '+name,table[name])
+
+    def time_zone_absent(self):
+        """GetTimeZoneInformation: TIME_ZONE_ID_INVALID, so the CRT's _tzset keeps bias 0 (UTC) and skips its
+        zone-name setup."""
+        self.last_error=2
+        return 0xffffffff
+
+    def data_file_folder(self):
+        """SHGetSpecialFolderPathW(NULL, path, csidl, FALSE): the Program Files folders, else absent."""
+        folder=self.DATA_FILE_FOLDERS.get(self.arg(2)&0xffff)
+        if folder is None or self.arg(0)!=0 or self.arg(3)&0xffffffff:return self.shell_folder_absent()
+        self.uc.mem_write(self.arg(1),(folder+'\0').encode('utf-16-le'))
+        return 1
 
     def shell_folder_absent(self):
         """Headless SHGetSpecialFolderPathW: no shell folders; returns FALSE and leaves

@@ -7,6 +7,17 @@ from capstone.x86 import X86_OP_REG,X86_OP_MEM,X86_OP_IMM
 HERE=Path(__file__).resolve().parent
 from discover_abi import discover,ROOT
 SDK_CTOR='??0CHypParamBlock@@QEAA@XZ'
+# Data files the original parameter-block constructor reads: the Hyp convolution reverbs look for *.irz under
+# Program Files (x86)/Universal Audio/Powered Plugins/Data/<folder> and load the first one (executor/generic_capture.py
+# bind_data_files serves it read-only). Without it they load no impulse response and the DSP plays silence.
+DATA_FILES={'UAD Capitol Chambers':('Capitol Chambers','CapitolChambers.irz'),
+            'UAD Hitsville Reverb Chambers':('Hitsville Chambers','HitsvilleChambers.irz')}
+def data_files(folder,name):
+ import os
+ host=Path(os.environ.get('OA_UAD_ROOT','/'))/'Program Files (x86)'/'Universal Audio'/'Powered Plugins'/'Data'/folder/name
+ if not host.is_file():raise ValueError('data file the plug-in loads is missing: '+str(host))
+ return [dict(guest='C:\\Program Files (x86)\\Universal Audio\\Powered Plugins\\Data\\'+folder+'\\'+name,host=str(host),
+              sha256=hashlib.sha256(host.read_bytes()).hexdigest())]
 NONVOL=('rbx','rbp','rsi','rdi','r12','r13','r14','r15')
 def add(a,b):
  if isinstance(a,int):return a+b
@@ -440,6 +451,7 @@ def generate(record,rtti):
  result=dict(schema='openapollo-discovered-control-profile/1',status='discovered',name=record['name'],dll=dict(path=str(path),sha256=record['dll_sha256']),captured_metadata=record['captured_metadata'],parameter_block=dict(type=block['type'],vtable=block['vtable'],constructor=constructor,slots=block['slots']),parameters=dict(count=count,raw_maxima=raw,effective_maxima=[n or 32768 for n in raw],table_va=hex(table),parent_callsite=hex(bc['ins'].address),count_stack_offset=0x60,table_stack_offset=0x88,source_member_store=source348),parent=dict(vtable=parent['vtable'],constructor_base=hex(bc['target']),normalizer=normalizers[0],set_parameter=parent['slots'].get('0x50'),slots=parent['slots']),descriptor=descriptor,startup=dict(program_load_status='not_yet_discovered',crt_initializers='unknown_until_original_calls_observed'),source_files=sources,manual_plugin_overrides=0)
  result['crt_dynamic_initializers'],why=crt_dynamic_initializers(im,result)
  if why:result['crt_dynamic_initializers']=dict(status='unresolved',reason=why)
+ if record['name'] in DATA_FILES:result['data_files']=data_files(*DATA_FILES[record['name']])
  return result
 def main():
  started=time.monotonic();cohort=json.loads((HERE/'cohort.json').read_text());rtti={x['name']:x for x in json.loads((HERE/'rtti.json').read_text())};profiles=[]
