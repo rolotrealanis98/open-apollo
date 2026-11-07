@@ -341,3 +341,17 @@ def test_part_option_sends_a_phase_subset(full_init, fw):
     assert dev.bulk_in == []                # every load acked and read
     with pytest.raises(SystemExit):
         full_init.main(["--part", "bogus", "--dry-run"] + fw.args)
+
+
+def test_clock_held_by_snd_usb_audio_is_not_a_failure(full_init, fw, capsys):
+    # The udev path: snd-usb-audio has bound interface 1 before the init
+    # runs, so claiming it for the clock request fails with EBUSY after
+    # every frame went out (issue #128).  The init has still succeeded.
+    dev = FakeApollo()
+    dev.fail_requests.add((0x01, 0x0100))
+    rc, usb, _ = run(full_init, dev, ["--replay"] + fw.args)
+    assert rc == 0
+    assert dev.bulk_out == fw.urbs
+    assert usb.released == [0]
+    out = capsys.readouterr().out
+    assert "Clock: not set here" in out and "snd-usb-audio sets it" in out
