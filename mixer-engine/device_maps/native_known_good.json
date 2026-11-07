@@ -48,7 +48,7 @@
    "name": "UAD API 2500",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 55,
    "dynamic_refs": [
     [
      17,
@@ -544,7 +544,7 @@
    "name": "UAD Fairchild 670",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 55,
    "dynamic_refs": [
     [
      10,
@@ -793,7 +793,7 @@
    "name": "UAD Manley Variable Mu",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 55,
    "dynamic_refs": [
     [
      10,
@@ -941,7 +941,7 @@
    "name": "UAD Neve 2254 E Dual",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 55,
    "layouts": [
     "mono",
     "stereo"
@@ -951,7 +951,7 @@
    "name": "UAD Neve 33609 C",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 55,
    "dynamic_refs": [
     [
      10,
@@ -1696,7 +1696,7 @@
    "name": "UAD Teletronix LA-2",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 56,
    "dynamic_refs": [
     [
      10,
@@ -1728,7 +1728,7 @@
    "name": "UAD Teletronix LA-2A Gray",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 56,
    "dynamic_refs": [
     [
      10,
@@ -1760,7 +1760,7 @@
    "name": "UAD Teletronix LA-2A Silver",
    "stage": "live",
    "family": "generic",
-   "latency_samples": 0,
+   "latency_samples": 56,
    "dynamic_refs": [
     [
      10,
