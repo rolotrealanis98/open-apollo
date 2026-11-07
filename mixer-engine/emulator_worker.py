@@ -97,7 +97,9 @@ def _serve(read_fd, write_fd):
                 if GenericCapture is None:
                     GenericCapture = _capture_class()
                 cap = GenericCapture(profile, auto_start=False)
+                cap.describe()  # as UA's host and the mapper: the descriptor call before start-up and after
                 cap.start()
+                cap.describe()
                 if values is not None:
                     if len(values) != len(cap.defaults_values):
                         raise ValueError('complete original parameter vector required')

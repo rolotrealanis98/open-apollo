@@ -501,7 +501,9 @@ def learn_bundle(bundle_path, *, changes=3000, seed=0, log=None, extra=None):
 
     def new():
         cap = GenericCapture(data['profile'], auto_start=False)
+        cap.describe()  # as the mapper recorded the bundle: before start-up and after
         cap.start()
+        cap.describe()
         return cap
     started = time.monotonic()
     record = dict(bundle_sha256=sha)
