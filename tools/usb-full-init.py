@@ -350,10 +350,22 @@ def _wait_acks(dev, usb, modules, log):
     return got
 
 
-def set_clock(dev, rate):
-    dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
-                      struct.pack("<I", rate), timeout=2000)
-    data = dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001, 4, timeout=1000)
+def set_clock(dev, usb, rate):
+    """UAC2 SET_CUR/GET_CUR on the clock source; None when it can't be sent.
+
+    The request goes to interface 1 (wIndex 0x8001), which pyusb claims
+    for it.  When snd-usb-audio already holds that interface (the udev
+    path: the driver probes before this script runs) the claim fails with
+    EBUSY.  The init itself is complete by then, and snd-usb-audio sets
+    the clock when it opens a stream, so that is not a failure."""
+    try:
+        dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
+                          struct.pack("<I", rate), timeout=2000)
+        data = dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001, 4, timeout=1000)
+    except usb.core.USBError as e:
+        print(f"Clock: not set here ({e}); snd-usb-audio sets it when "
+              f"it opens a stream")
+        return None
     return struct.unpack("<I", bytes(data))[0]
 
 
@@ -579,8 +591,9 @@ def main(argv=None, usb=None, sleep=time.sleep):
         print(f"  Sent all {len(plan.frames) - skip} frames")
 
     # Step 2: Set clock
-    freq = set_clock(dev, rate)
-    print(f"Clock: {freq} Hz")
+    freq = set_clock(dev, usb, rate)
+    if freq is not None:
+        print(f"Clock: {freq} Hz")
 
     usb.util.release_interface(dev, 0)
 
