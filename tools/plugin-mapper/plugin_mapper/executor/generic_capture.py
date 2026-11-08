@@ -1065,7 +1065,11 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
 
     def start(self):
         self.load_program()
-        self.phase='original_resume';self.vcall(0x38)
+        self.phase='original_resume'
+        # The host resumes every parameter block. A two-PB parent built its parent-bound PB first; its own
+        # Resume can set up DSP state the profile PB never writes (DimensionD: ramps, coefficients, delay lines).
+        if self.parent_bound is not None:self.call(self.rq(self.rq(self.parent_bound)+0x38),self.parent_bound)
+        self.vcall(0x38)
         if getattr(self,'vfs',None) is not None:self.handler_startup()
         from base_init import settle_commit_state
         settle_commit_state(self)
