@@ -86,7 +86,7 @@ binaries, lunacomponent code or screenshots were added to git.
 
 - Claude owns popup/alignment merges and subsequent ConsoleLink rebuild.
 - The plugin runtime still lacks some newer Swift interaction features;
-  see PLUGIN-STATUS.md and the reproducible runtime-gap inventory tool.
+  see `crates/plugin-ui/README.md` (Spec runtime) and `tools/ledger/plugin_runtime_gaps.py`.
 - DSP upload/create/completion and plugin meter pushes require the native
   backend work; UI metadata and mock success do not demonstrate processing.
 - Vendor `.uadmix` round trips require independent real-file acceptance;

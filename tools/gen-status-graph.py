@@ -27,6 +27,10 @@ Inputs:
   docs/status/plugins/*.json
                            measured checks per plug-in and layout, written by
                            tools/plugin-qualify.py
+  mixer-engine/device_maps/native_known_good.json
+                           the plug-ins the Console offers (passed the live
+                           gate), the ones held back, and the ones not
+                           buildable from a user's install
 
 Outputs (docs/status/): progress-dark.svg, progress-light.svg, the
 badge-*.svg, README.md (the numbers per area and the open tasks) and
@@ -60,6 +64,8 @@ OUT = os.path.join(ROOT, "docs", "status")
 STATUS_JSON = os.path.join(OUT, "status.json")
 LIBRARY_JSON = os.path.join(OUT, "plugin-library.json")
 CHECKS_DIR = os.path.join(OUT, "plugins")
+KNOWN_GOOD_JSON = os.path.join(ROOT, "mixer-engine", "device_maps",
+                               "native_known_good.json")
 
 # Ledger tier -> (library stage, square colour)
 LIBRARY_TIERS = {
@@ -354,6 +360,118 @@ def plugin_works(layouts):
     return bool(layouts) and all(layout_works(c) for c in layouts.values())
 
 
+# Support tiers: one per plug-in, from the known-good list (what the Console
+# offers), the library stage and the measured checks. Key, title, meaning,
+# how a plug-in moves up.
+CORE_CHECKS = ("map", "panel", "load", "controls", "text")
+TIERS = (
+    ("verified", "Controls verified",
+     "offered in the Console, and map, panel, load, controls and text passed "
+     "in every layout tried (meters, latency and audio may still be open)",
+     "run the meters, latency and audio checks (docs/plugin-mapping.md, steps 4 and 5)"),
+    ("offered", "Offered in the Console",
+     "passed the live gate on the test Apollo (`native_known_good.json`); its "
+     "measured checks are not all run yet, or one failed",
+     "run `tools/plugin-qualify.py live`, or fix what *What fails, by check* lists for it"),
+    ("held", "Held back",
+     "on the known-good list but offered in no layout: it failed to load or "
+     "to take a control on the Apollo",
+     "fix the cause named below, then run the live gate again"),
+    ("ready", "Mapped, waiting for a live run",
+     "mapped offline; nobody who owns it has loaded it on an Apollo yet",
+     "a tester who owns it: Tier 3 of CONTRIBUTING.md"),
+    ("hold", "Mapped, live load on hold",
+     "mapped offline; the live load is on hold", "see docs/plugin-mapping.md"),
+    ("blocked", "Blocked",
+     "the mapper cannot build it yet",
+     "see *Improving the emulator side* in docs/plugin-mapping.md"),
+    ("excluded", "Not buildable from a user's install",
+     "passed the gate with hand-built maps or a Mac trace, so the Console "
+     "does not offer it", ""),
+    ("unlicensed", "Not authorized on the test Apollo",
+     "cannot be checked here; names are not listed", "a tester who owns it"),
+)
+
+
+def load_known_good():
+    """From the daemon's known-good list, names without the `UAD ` prefix:
+    {name: layouts offered} (an empty list = held back), {name: why held},
+    {name: why excluded}."""
+    with open(KNOWN_GOOD_JSON, encoding="utf-8") as f:
+        d = json.load(f)
+
+    def ua(n):
+        return re.sub(r"^UAD ", "", n)
+    offered = {ua(p["name"]): list(p.get("layouts", [])) for p in d["plugins"]}
+    held = {ua(n): why for n, why in d.get("not_yet_supported", {}).items()}
+    excluded = {ua(n): why for n, why in d.get("excluded", {}).items()}
+    return offered, held, excluded
+
+
+def layout_controls_verified(checks):
+    return all(checks.get(c, {}).get("result") in ("pass", "n/a") for c in CORE_CHECKS)
+
+
+def support_tiers(library_items, checks, offered, excluded):
+    """{tier key: sorted names}: every plug-in of the library, plus any the
+    known-good list offers that the library does not list yet."""
+    tiers = {t[0]: [] for t in TIERS}
+    seen = set()
+    for name, stage in list(library_items) + [(n, "live") for n in sorted(offered)]:
+        if name in seen:
+            continue
+        seen.add(name)
+        if name in offered:
+            if not offered[name]:
+                tiers["held"].append(name)
+            elif checks.get(name) and all(layout_controls_verified(c)
+                                          for c in checks[name].values()):
+                tiers["verified"].append(name)
+            else:
+                tiers["offered"].append(name)
+        elif name in excluded:
+            tiers["excluded"].append(name)
+        elif stage == "live":
+            tiers["ready"].append(name)   # live per the ledger, not yet on the known-good list
+        else:
+            tiers[stage if stage in tiers else "blocked"].append(name)
+    for names in tiers.values():
+        names.sort(key=str.lower)
+    return tiers
+
+
+def tier_table(tiers):
+    lines = ["| Tier | Plug-ins | Means | To move up |", "|---|---|---|---|"]
+    lines += ["| **%s** | %d | %s | %s |" % (title, len(tiers[key]), means, up)
+              for key, title, means, up in TIERS]
+    return lines
+
+
+def tiers_md(tiers, held, excluded):
+    """The Support tiers section of PLUGINS.md."""
+    lines = ["## Support tiers", "",
+             "One tier per plug-in, from `native_known_good.json` (what the Console "
+             "offers), the library stage and the measured checks below. A plug-in "
+             "is **supported** from *Controls verified* up; *Offered* means it "
+             "loads and its three gate controls read back, nothing more is "
+             "proven yet.", ""]
+    lines += tier_table(tiers)
+    lines.append("")
+    for key, title, _, _ in TIERS:
+        names = tiers[key]
+        if not names or key in ("offered", "unlicensed"):
+            continue
+        why = held if key == "held" else excluded if key == "excluded" else {}
+        items = ["%s: %s" % (n, re.sub(r"^skipped: ", "", why[n])) if why.get(n) else n
+                 for n in names]
+        lines += ["**%s (%d):** %s." % (title, len(names), "; ".join(items)), ""]
+    partial = {n: w for n, w in held.items() if n not in tiers["held"]}
+    if partial:
+        lines += ["**Offered in one layout only:** %s." % "; ".join(
+            "%s: %s" % (n, w) for n, w in sorted(partial.items())), ""]
+    return lines
+
+
 def first_gap(checks):
     """(check, result or None) of the first check not passed, or None."""
     for c in CHECK_NAMES:
@@ -410,6 +528,8 @@ def plugins_md(library_items, checks):
                 name, layout, " | ".join(cell(c.get(k)) for k in CHECK_NAMES),
                 "**yes**" if not gap else "", need.replace("|", "\\|")))
     total = len(names) + hidden
+    offered, held, excluded = load_known_good()
+    tiers = support_tiers(library_items, checks, offered, excluded)
     lines = [
         "# Plug-in status",
         "",
@@ -433,6 +553,7 @@ def plugins_md(library_items, checks):
     lines += ["| %s | %s | %s |" % (t, what, todo) for _, t, what, todo in CHECKS]
     lines += ["", "%s pass, %s fail, %s does not apply, %s not checked." % (
         SYMBOL["pass"], SYMBOL["fail"], SYMBOL["n/a"], SYMBOL[None]), ""]
+    lines += tiers_md(tiers, held, excluded)
     lines += ["## What fails, by check", "",
               "The work queue: each list is what a contributor can pick up. "
               "Checks nobody has run yet are counted, not listed.", ""]
@@ -748,12 +869,15 @@ def readme(data):
                   "more are mapped (as of %s)." % (
                       c["verified"], sum(c.values()), c["done"] + c["partial"],
                       library_date()),
-                  "", "| Stage | Plug-ins |", "|---|---|"]
-        lines += ["| %s | %d |" % (g["name"], len(g["items"])) for g in library]
-        _, working, total = plugins_md(library_items(), load_checks())
-        lines += ["", "Measured checks (every control, text, meters, latency, "
-                  "audio): %d of %d plug-ins fully work; per plug-in and what "
-                  "each still needs in [PLUGINS.md](PLUGINS.md)." % (working, total)]
+                  ""]
+        checks = load_checks()
+        offered, _, excluded = load_known_good()
+        lines += tier_table(support_tiers(library_items(), checks, offered, excluded))
+        _, working, total = plugins_md(library_items(), checks)
+        lines += ["", "A plug-in is supported from *Controls verified* up. Measured "
+                  "checks (every control, text, meters, latency, audio): %d of %d "
+                  "plug-ins fully work; the names per tier, and what each plug-in "
+                  "still needs, are in [PLUGINS.md](PLUGINS.md)." % (working, total)]
     lines += ["", "## Apollo models", "", "| Model | Status |", "|---|---|"]
     for g in models:
         for slug, name, st in g["items"]:

@@ -11,6 +11,37 @@ there's a way for you to help.
 - **Tier 3: Map and verify DSP plug-ins** — load a UAD plug-in you own on the Apollo's DSP and check every control
 - **Code contributions** — fix bugs, add features, improve documentation
 
+## What We Need Right Now
+
+The [status map](docs/status/) is the full picture. These are the gaps a contributor can close
+today, most valuable first:
+
+1. **Device reports from models nobody has run.** 22 of the 25 Apollo models in `devices/` have
+   per-model support in the code and no owner has tested it ([the list](docs/status/#apollo-models)).
+   Every Gen 2, the x6, x8, x16 and x16D, the Arrow, the Solo and the Twin X USB are all open.
+   Follow [Testing your Apollo](tools/TESTING.md) and file a
+   [device report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml).
+   Negative results count.
+2. **Apollo Twin USB owners.** The USB bring-up sends the Solo USB's start-up stream, which stalls
+   a Twin's DSP ([#128](https://github.com/rolotrealanis98/open-apollo/issues/128)). A USBPcap
+   capture of the Windows driver bringing up a Twin USB is what unblocks it (Tier 2).
+3. **Plug-in testers who own the plug-ins.** Dozens of plug-ins are mapped and wait for someone
+   with a licence to run the live gate, and most of the plug-ins the Console offers still need
+   their measured checks run (controls, text, meters). The tiers, with every name, are in
+   [docs/status/PLUGINS.md](docs/status/PLUGINS.md); the steps are in Tier 3 below.
+4. **Plug-in mapper work.** Discovery families for the partner frameworks
+   ([#127](https://github.com/rolotrealanis98/open-apollo/issues/127)), latency taken from the
+   plug-in itself ([#133](https://github.com/rolotrealanis98/open-apollo/issues/133)), and every
+   failure listed under *What fails, by check* in PLUGINS.md.
+5. **Plug-in meters through the daemon.** Every meter check that fails today fails the same way
+   (`plugin_remote_readback_unavailable`): the daemon does not yet publish a plug-in's meter words.
+   One feature unblocks them all (`mixer-engine/NATIVE-HOSTING.md`).
+6. **Hardware the project does not have.** A second Apollo for multi-unit, S/PDIF, ADAT and
+   external clock, suspend/resume: the *Needs hardware* list in [docs/status/](docs/status/).
+   If you have the gear, open an issue and we will say what to run.
+7. **Docs.** Install reports from distributions other than Ubuntu, and anything in these pages
+   that did not match what you saw.
+
 ## Tier 1: Test on Linux
 
 This is the most valuable contribution right now. Every device report helps
@@ -88,21 +119,53 @@ the hardware readback and the audio, and report the result. The
 and how loading with the plug-in emulator differs from loading without it. The maps you build
 are made from UA's code and never go into a PR or an issue.
 
+Where every plug-in stands, and what each one still needs, is
+[docs/status/PLUGINS.md](docs/status/PLUGINS.md). The best report is a PR with the JSON that
+`tools/plugin-qualify.py` writes; if you cannot run it, use the
+[plug-in report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=plugin_report.yml)
+issue form.
+
 ## Code Contributions
 
 ### Workflow
 
 1. Fork the repository
 2. Create a feature branch from `main`: `git checkout -b feat/my-feature`
-3. Make your changes
+3. Make your changes, one change per PR
 4. Submit a pull request against `main`
 
 CI (`.github/workflows/ci.yml`, described in [.github/CI.md](.github/CI.md)) runs the checks of
 every component your change touches. The slow checks (the driver against every supported
 kernel, the installer in each distro's container) run weekly; for a change that risks them, ask
-for the `full-ci` label on your PR. Run `python3 tools/check-clean-repo.py` before you push:
-the repository holds no Universal Audio files (DSP modules, firmware, art, screenshots) and no
-personal data (serial numbers, LAN addresses, home paths, e-mail addresses).
+for the `full-ci` label on your PR.
+
+### Before You Open a PR
+
+- **Run the checks for what you touched.** They are the same ones CI runs:
+
+  | You changed | Run |
+  |---|---|
+  | anything | `python3 tools/check-clean-repo.py` |
+  | `driver/` | `make -C driver KDIR=/lib/modules/$(uname -r)/build`, `python3 -m pytest driver/tests -q` |
+  | `devices/` | the driver tests, then `python3 tools/gen-driver-models.py --check`, `python3 tools/check-models.py`, `python3 tools/gen-status-graph.py` (commit what it redraws) |
+  | `mixer-engine/`, `tools/` | `ruff check --select E9,F63,F7,F82 mixer-engine tools`, `python3 -m pytest mixer-engine/tests -q`, `python3 -m pytest mixer-engine/test_console_*.py -q` |
+  | `console-rs/` | `cargo build --workspace --all-targets --locked`, `cargo test --workspace --locked`, `cargo fmt --check -p oa-assets` |
+  | `scripts/`, `configs/`, `tests/` | `shellcheck --severity=error` on the scripts you changed, and the `tests/test-*.sh` that covers them |
+  | `docs/status/` inputs | `python3 tools/gen-status-graph.py`, then commit the regenerated files |
+
+- **No UA bytes, no personal data.** The repository holds no Universal Audio files (DSP modules,
+  firmware, art, screenshots, plug-in bundles) and no personal data (serial numbers, LAN
+  addresses, home paths, e-mail addresses). `tools/check-clean-repo.py` refuses them in CI.
+- **Fill in the PR template.** Say what the change does and why, tick the type, and under
+  *Testing* say which Apollo model, sample rate and UAD version you ran it on. If you could not
+  run it on hardware, say so: a maintainer will.
+- **Driver changes** come with the register or DSP trace they follow (the driver never guesses:
+  see [ARCHITECTURE.md](ARCHITECTURE.md)); **installer changes** come with a test in `tests/`;
+  **daemon and tool changes** come with tests that use synthetic I/O, never a UA file.
+- **User-visible changes** get a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md).
+
+A maintainer reviews every PR; CI has to be green before it merges. Small PRs with one change
+each merge fastest.
 
 ### Commit Messages
 
@@ -125,7 +188,7 @@ docs: update supported devices table
 
 ## Code Style
 
-- **C (driver):** Linux kernel coding style (`scripts/checkpatch.pl` compatible)
+- **C (driver):** Linux kernel coding style (clean under the kernel tree's `scripts/checkpatch.pl`)
 - **Python (mixer daemon, tools):** PEP 8; CI runs `ruff check --select E9,F63,F7,F82`
 - **Rust (console-rs):** `rustfmt` with `console-rs/rustfmt.toml`; `cargo test --workspace` must pass
 - **Shell (installers):** `bash`; `shellcheck --severity=error` must pass, and installer changes come with a test in `tests/`

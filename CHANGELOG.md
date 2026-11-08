@@ -30,6 +30,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--no-virtual` none, `--dsp-state FILE` reads a saved copy. On the x4 both pairs pass audio
   at unity, left and right apart.
 
+### Changed
+- `docs/status/PLUGINS.md` groups every plug-in by support tier (controls verified on the Apollo,
+  offered in the Console, mapped and waiting for a licence, held back, not buildable), computed by
+  `tools/gen-status-graph.py` from `native_known_good.json`, the plug-in library and the measured
+  checks. `CONTRIBUTING.md` lists what the project needs right now and the checks to run before a
+  PR. The Apollo Twin X Gen 2 is marked verified in `devices/`, as the README has said since the
+  owner's report.
+
+### Removed
+- `console-rs/PLUGIN-STATUS.md`, a dated hand-off note with placeholder paths, superseded by
+  `docs/status/PLUGINS.md` and the plug-in UI README.
+
 ### Fixed
 - With native plug-in hosting on, the Virtual, S/PDIF and ADAT inputs can be stereo linked and
   unlinked. The daemon refused every link but Analog 1-2 / 3-4, though plug-in chains only
