@@ -23,7 +23,7 @@
 | [CI](../.github/CI.md) | What CI checks for each component |
 | [console-rs architecture](../console-rs/ARCHITECTURE.md) | The console's crates and frame pipeline |
 | [Plug-in panel runtime](../console-rs/crates/plugin-ui/RUNTIME-V2.md) | The schema-2 panel specs and the elements plugin-ui draws itself |
-| [Status map](status/) | Every behaviour of UA's drivers, every task of the work plan and every model, by status |
+| [Status map](status/) | Every behaviour of UA's drivers, every task of the work plan and every model, by status; [every plug-in by support tier](status/PLUGINS.md) |
 | [Changelog](../CHANGELOG.md) | What changed |
 
 Plug-in panel specs are kept in their own repository,

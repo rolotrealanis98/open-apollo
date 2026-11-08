@@ -19,6 +19,35 @@ A plug-in **works** only when every check below passed (or does not apply) for e
 
 ✅ pass, ❌ fail, – does not apply, · not checked.
 
+## Support tiers
+
+One tier per plug-in, from `native_known_good.json` (what the Console offers), the library stage and the measured checks below. A plug-in is **supported** from *Controls verified* up; *Offered* means it loads and its three gate controls read back, nothing more is proven yet.
+
+| Tier | Plug-ins | Means | To move up |
+|---|---|---|---|
+| **Controls verified** | 23 | offered in the Console, and map, panel, load, controls and text passed in every layout tried (meters, latency and audio may still be open) | run the meters, latency and audio checks (docs/plugin-mapping.md, steps 4 and 5) |
+| **Offered in the Console** | 89 | passed the live gate on the test Apollo (`native_known_good.json`); its measured checks are not all run yet, or one failed | run `tools/plugin-qualify.py live`, or fix what *What fails, by check* lists for it |
+| **Held back** | 7 | on the known-good list but offered in no layout: it failed to load or to take a control on the Apollo | fix the cause named below, then run the live gate again |
+| **Mapped, waiting for a live run** | 49 | mapped offline; nobody who owns it has loaded it on an Apollo yet | a tester who owns it: Tier 3 of CONTRIBUTING.md |
+| **Mapped, live load on hold** | 13 | mapped offline; the live load is on hold | see docs/plugin-mapping.md |
+| **Blocked** | 2 | the mapper cannot build it yet | see *Improving the emulator side* in docs/plugin-mapping.md |
+| **Not buildable from a user's install** | 5 | passed the gate with hand-built maps or a Mac trace, so the Console does not offer it |  |
+| **Not authorized on the test Apollo** | 18 | cannot be checked here; names are not listed | a tester who owns it |
+
+**Controls verified (23):** ADA Flanger; Ampeg B15N; Ampeg SVT3Pro; Ampeg SVTVR; Ampeg SVTVR Classic; AMS DMX 15-80 S; AMS RMX16; AMS RMX16 Expanded; API 2500; API 550A; API 560; API Preamp; API Vision Channel Strip Legacy; Auto-Tune Realtime Access; Auto-Tune Realtime Advanced; Avalon VT-737sp; Bermuda Triangle; Brigade Chorus; C-Suite C-Vox; Cambridge; Century Tube Channel Strip; DreamVerb; EMT 140.
+
+**Held back (7):** Hitsville EQ Mastering: stereo indeterminate on its first control; Precision K-Stereo: load refused by the chain allocation readback in both layouts; Studio D Chorus: mono load hung DSP 1 (-110, quarantined until a cold start); Teletronix LA-3A: load refused in both layouts: native coefficient observation differs; UA 1176LN Rev E: load refused in both layouts: native coefficient observation differs; UA 175-B: load refused in both layouts: native coefficient observation differs; UA 176: load refused in both layouts: native coefficient observation differs.
+
+**Mapped, waiting for a live run (49):** 4K Buss Compressor; 4K Channel Strip; ADA STD-1 Stereo Tapped Delay; bx_digital V2; bx_digital V2 Mono; bx_digital V3; bx_digital V3 mix; bx_masterdesk; bx_masterdesk Classic; bx_refinement; bx_saturator V2; bx_subsynth; Chandler GAV19T; Dangerous BAX EQ Master; Dangerous BAX EQ Mix; Diezel Herbert; Diezel VH4; elysia alpha compressor V2; elysia alpha master; elysia alpha mix; elysia mpressor; ENGL E646 VS; ENGL Savage 120; Friedman BE100; Friedman Buxom Betty; Friedman DS40; Fuchs Overdrive Supreme 50; Gallien Krueger 800RB; Ibanez Tube Screamer TS808; Maag EQ4; Maag EQ4 MS; Millennia NSEQ-2; Neve 1081; Neve 1081SE; Neve 31102; Neve 31102SE; Roland CE-1; Roland Dimension D; Roland RE-201; Shadow Hills Class A Mastering Comp; Shadow Hills Mastering Compressor; SPL Transient Designer; SPL TwinTube; SPL Vitalizer MK2-T; SPL Vitalizer MK3-T; Suhr PT100; Suhr SE100; Vertigo VSC-2; Vertigo VSM-3.
+
+**Mapped, live load on hold (13):** A-Type Multiband Enhancer; CS-1; Dytronics Cyclosonic Panner; Dytronics Tri-Stereo Chorus; Eden WT800; EMT 250; Lexicon 224; Marshall Plexi Classic; Marshall Plexi Super Lead 1959; Ocean Way Studios; Softube Bass Amp Room 8x10; Tube-Tech CL 1B; Tube-Tech CL 1B mk II.
+
+**Blocked (2):** API Vision Channel Strip; Moog Multimode Filter XL.
+
+**Not buildable from a user's install (5):** AKG BX 20: startup words recorded from a Mac trace; Pultec-Pro Legacy: hand-built legacy provider (UA-derived tables), not user-buildable; Teletronix LA-2A Legacy: hand-built legacy provider (UA-derived tables), not user-buildable; UA 1176LN Legacy: hand-built legacy provider (UA-derived tables), not user-buildable; UA 1176SE Legacy: hand-built legacy provider (UA-derived tables), not user-buildable.
+
+**Offered in one layout only:** Sound Machine Wood Works (mono): mono bundle not built: the offline restore check fails (stereo passed the gate).
+
 ## What fails, by check
 
 The work queue: each list is what a contributor can pick up. Checks nobody has run yet are counted, not listed.

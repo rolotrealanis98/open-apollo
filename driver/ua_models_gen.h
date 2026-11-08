@@ -503,7 +503,7 @@ static const struct ua_model_desc ua_gen_model_apollo_twin_mkii = {
 	},
 };
 
-/* devices/apollo-twin-x-gen-2.json (unverified) */
+/* devices/apollo-twin-x-gen-2.json (verified) */
 static const struct ua_model_desc ua_gen_model_apollo_twin_x_gen_2 = {
 	.name = "Apollo Twin X Gen 2",
 	.preamps = 2,

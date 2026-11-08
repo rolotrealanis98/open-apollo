@@ -93,15 +93,18 @@ The parity map was triaged against the code on 2026-10-11: rows the code already
 
 124 of 206 UA-built UAD-2 plug-ins are live on the Apollo; 62 more are mapped (as of 2026-10-18).
 
-| Stage | Plug-ins |
-|---|---|
-| Live on the Apollo: passed the live gate (loads, controls read back, unloads) | 124 |
-| Mapped offline, needs a licence to test live | 49 |
-| Mapped, live load on hold | 13 |
-| Blocked | 2 |
-| Not authorized on the test Apollo | 18 |
+| Tier | Plug-ins | Means | To move up |
+|---|---|---|---|
+| **Controls verified** | 23 | offered in the Console, and map, panel, load, controls and text passed in every layout tried (meters, latency and audio may still be open) | run the meters, latency and audio checks (docs/plugin-mapping.md, steps 4 and 5) |
+| **Offered in the Console** | 89 | passed the live gate on the test Apollo (`native_known_good.json`); its measured checks are not all run yet, or one failed | run `tools/plugin-qualify.py live`, or fix what *What fails, by check* lists for it |
+| **Held back** | 7 | on the known-good list but offered in no layout: it failed to load or to take a control on the Apollo | fix the cause named below, then run the live gate again |
+| **Mapped, waiting for a live run** | 49 | mapped offline; nobody who owns it has loaded it on an Apollo yet | a tester who owns it: Tier 3 of CONTRIBUTING.md |
+| **Mapped, live load on hold** | 13 | mapped offline; the live load is on hold | see docs/plugin-mapping.md |
+| **Blocked** | 2 | the mapper cannot build it yet | see *Improving the emulator side* in docs/plugin-mapping.md |
+| **Not buildable from a user's install** | 5 | passed the gate with hand-built maps or a Mac trace, so the Console does not offer it |  |
+| **Not authorized on the test Apollo** | 18 | cannot be checked here; names are not listed | a tester who owns it |
 
-Measured checks (every control, text, meters, latency, audio): 0 of 206 plug-ins fully work; per plug-in and what each still needs in [PLUGINS.md](PLUGINS.md).
+A plug-in is supported from *Controls verified* up. Measured checks (every control, text, meters, latency, audio): 0 of 206 plug-ins fully work; the names per tier, and what each plug-in still needs, are in [PLUGINS.md](PLUGINS.md).
 
 ## Apollo models
 
@@ -114,7 +117,7 @@ Measured checks (every control, text, meters, latency, audio): 0 of 206 plug-ins
 | Apollo (FireWire/Thunderbolt, silver) | supported in code, untested |
 | Apollo Solo | supported in code, untested |
 | Apollo Twin MkII | supported in code, untested |
-| Apollo Twin X Gen 2 | supported in code, untested |
+| Apollo Twin X Gen 2 | verified on hardware |
 | Apollo Twin X | supported in code, untested |
 | Apollo Twin | supported in code, untested |
 | Apollo x16 Gen 2 | supported in code, untested |

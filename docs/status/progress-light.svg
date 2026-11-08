@@ -1219,17 +1219,17 @@
 <rect class="done" x="1167.2" y="328.3" width="49.9" height="15.7"><title>Digital I/O: I1 TOSLink input type, converter and multi-unit bits of the device-mode wo… (done in code)</title></rect>
 <rect class="blocked" x="1218.1" y="328.3" width="49.9" height="15.7"><title>Digital I/O: I2 S/PDIF / ADAT / external clock end to end (needs hardware)</title></rect>
 <text class="lbl" x="1170.2" y="340.3">Digital I/O</text>
-<text class="h" x="722" y="376">Apollo models: 2 of 25 verified on hardware</text>
-<rect class="verified" x="721" y="387" width="41" height="30"><title>Thunderbolt: apollo-x4 Apollo x4 (verified on hardware)</title></rect>
-<rect class="verified" x="763" y="387" width="41" height="30"><title>Thunderbolt: apollo-x8p Apollo x8p (verified on hardware)</title></rect>
-<rect class="done" x="805" y="387" width="41" height="30"><title>Thunderbolt: apollo-16-mkii Apollo 16 MkII (done in code)</title></rect>
-<rect class="done" x="847" y="387" width="41" height="30"><title>Thunderbolt: apollo-16 Apollo 16 (done in code)</title></rect>
-<rect class="done" x="889" y="387" width="41" height="30"><title>Thunderbolt: apollo-8 Apollo 8 (done in code)</title></rect>
-<rect class="done" x="931" y="387" width="41" height="30"><title>Thunderbolt: apollo-8p Apollo 8p (done in code)</title></rect>
-<rect class="done" x="973" y="387" width="41" height="30"><title>Thunderbolt: apollo-firewire-thunderbolt-silver Apollo (FireWire/Thunderbolt, silver) (done in code)</title></rect>
-<rect class="done" x="1015" y="387" width="41" height="30"><title>Thunderbolt: apollo-solo Apollo Solo (done in code)</title></rect>
-<rect class="done" x="1057" y="387" width="41" height="30"><title>Thunderbolt: apollo-twin-mkii Apollo Twin MkII (done in code)</title></rect>
-<rect class="done" x="1099" y="387" width="41" height="30"><title>Thunderbolt: apollo-twin-x-gen-2 Apollo Twin X Gen 2 (done in code)</title></rect>
+<text class="h" x="722" y="376">Apollo models: 3 of 25 verified on hardware</text>
+<rect class="verified" x="721" y="387" width="41" height="30"><title>Thunderbolt: apollo-twin-x-gen-2 Apollo Twin X Gen 2 (verified on hardware)</title></rect>
+<rect class="verified" x="763" y="387" width="41" height="30"><title>Thunderbolt: apollo-x4 Apollo x4 (verified on hardware)</title></rect>
+<rect class="verified" x="805" y="387" width="41" height="30"><title>Thunderbolt: apollo-x8p Apollo x8p (verified on hardware)</title></rect>
+<rect class="done" x="847" y="387" width="41" height="30"><title>Thunderbolt: apollo-16-mkii Apollo 16 MkII (done in code)</title></rect>
+<rect class="done" x="889" y="387" width="41" height="30"><title>Thunderbolt: apollo-16 Apollo 16 (done in code)</title></rect>
+<rect class="done" x="931" y="387" width="41" height="30"><title>Thunderbolt: apollo-8 Apollo 8 (done in code)</title></rect>
+<rect class="done" x="973" y="387" width="41" height="30"><title>Thunderbolt: apollo-8p Apollo 8p (done in code)</title></rect>
+<rect class="done" x="1015" y="387" width="41" height="30"><title>Thunderbolt: apollo-firewire-thunderbolt-silver Apollo (FireWire/Thunderbolt, silver) (done in code)</title></rect>
+<rect class="done" x="1057" y="387" width="41" height="30"><title>Thunderbolt: apollo-solo Apollo Solo (done in code)</title></rect>
+<rect class="done" x="1099" y="387" width="41" height="30"><title>Thunderbolt: apollo-twin-mkii Apollo Twin MkII (done in code)</title></rect>
 <rect class="done" x="1141" y="387" width="41" height="30"><title>Thunderbolt: apollo-twin-x Apollo Twin X (done in code)</title></rect>
 <rect class="done" x="1183" y="387" width="41" height="30"><title>Thunderbolt: apollo-twin Apollo Twin (done in code)</title></rect>
 <rect class="done" x="721" y="418" width="41" height="30"><title>Thunderbolt: apollo-x16-gen-2 Apollo x16 Gen 2 (done in code)</title></rect>
