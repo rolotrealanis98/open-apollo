@@ -539,7 +539,8 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
 
     def run_crt_dynamic_initializers(self,dynamic):
         """Source-attested C++ dynamic initializers (__xc table), original table order, after CRT startup.
-        Each runs only if the original table bytes and its slot still name it; nothing else in the table runs.
+        Each runs only if the original table bytes and its slot still name it. The table's other entries run
+        afterwards, each only if it reaches no import or host stub (run_import_free_initializers).
         Destructor (atexit) registration is recorded by discovery but not executed."""
         start,end=integer(dynamic['table_start']),integer(dynamic['table_end'])
         if not BASE<=start<end<=BASE+0x4000000 or (end-start)%8:raise ValueError('bounded original C++ initializer table required')
@@ -557,6 +558,36 @@ class GenericCapture(OriginalSdkConstructor,CapturePultec):
             self.call(integer(entry['constructor']),*args)
             self.crt_dynamic_initialization.append(dict(ordinal=entry['ordinal'],va=entry['va'],constructs=entry['constructs'],
                 value=hex(self.rq(integer(entry['constructs'])))))
+        self.run_import_free_initializers(dynamic)
+
+    def run_import_free_initializers(self,dynamic):
+        """The table's other entries, in original table order. Windows runs every entry at load; an entry that runs to
+        completion here without reaching any import or host stub has only computed the image's own data (filter
+        tables, circuit matrices: an initializer takes no arguments), so its result is the original's. An entry that
+        reaches a stub is stopped there, its writes to the image's data are undone, and it is skipped."""
+        start,end=integer(dynamic['table_start']),integer(dynamic['table_end'])
+        listed={integer(e['va'])for e in dynamic['entries']}
+        pe=pefile.PE(self.profile['dll']['path'],fast_load=True)
+        writable=[(BASE+s.VirtualAddress,(max(s.Misc_VirtualSize,s.SizeOfRawData)+4095)&~4095)for s in pe.sections
+                  if s.Characteristics&0x80000000 and not s.Characteristics&0x20000000]
+        trapped=[]
+        def trap(u,addr,size,data):
+            if not trapped:trapped.append(addr);self.failure=RuntimeError('initializer reached a stub');u.emu_stop()
+        self.import_free_initialization=[];skipped=0
+        for slot in range(start,end,8):
+            va=self.rq(slot)
+            if not va or va in listed or not BASE<=va<BASE+0x4000000:continue
+            saved=[(a,bytes(self.uc.mem_read(a,n)))for a,n in writable]
+            trapped.clear();hook=self.uc.hook_add(UC_HOOK_CODE,trap,begin=STUBS,end=STUBS+0xffff)
+            self.phase='original_cxx_import_free_initializer_'+str((slot-start)//8)
+            try:self.call(va);ok=not trapped
+            except RuntimeError:ok=False
+            finally:self.uc.hook_del(hook)
+            if ok:self.import_free_initialization.append(hex(va))
+            else:
+                for a,data in saved:self.uc.mem_write(a,data)
+                skipped+=1
+        self.import_free_skipped=skipped
 
     def run_stdio_initializer(self):
         """Original CRT stdio startup (.CRT$XIC): the std streams own CRITICAL_SECTIONs the original printf locks."""

@@ -119,7 +119,8 @@ def main():
   if pair is not None:p['host_context']['parent_bound_parameter_block']=pair;p['parameter_block']['public_block']=public_block(p,im,pair,b['field_offset'])
   # seal_host_context rebuilds host_context; carry generate_profiles' source-attested dynamic initializers into it.
   dyn=p.pop('crt_dynamic_initializers',None)
-  if isinstance(dyn,dict)and dyn.get('entries'):p['host_context']['crt_dynamic_initializers']=dyn
+  # Keep a resolved table even with no constructor-thunk entries: the executor also runs its import-free entries.
+  if isinstance(dyn,dict)and dyn.get('table_start'):p['host_context']['crt_dynamic_initializers']=dyn
   out.append(dict(name=p['name'],binding=b,parent_bound_parameter_block=pair));print(p['name'],b['field_offset'],b['caller_stack_argument'],b['points_to'],flush=True)
  path=HERE/'profiles.json';before=HERE/'profiles-before-parent-binding.json'
  if not before.exists():before.write_bytes(path.read_bytes())
