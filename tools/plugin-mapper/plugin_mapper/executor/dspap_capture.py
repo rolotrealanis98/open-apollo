@@ -89,7 +89,8 @@ class DspApCapture(GenericCapture):
         self.host_channels = 2 if profile.get('stereo_channel_request') is True else 1
         params = spec['parameters']
         self.maxima = tuple(int(p['maximum']) for p in params)
-        if not self.maxima or len(self.maxima) > 256 or any(not 0 < m <= 32768 for m in self.maxima):
+        # The plug-in's own int32 domains: the AMS Neve DFC's frequencies span 52792 steps.
+        if not self.maxima or len(self.maxima) > 256 or any(not 0 < m <= 1 << 20 for m in self.maxima):
             raise ValueError('bounded integer parameter domains required')
         self.phase = 'map_original_image'
         OfflineHost.__init__(self, profile['dll']['path'], profile['dll']['sha256'])
@@ -189,6 +190,9 @@ class DspApCapture(GenericCapture):
             self.bind(integer(slot), 'iface_flush', lambda: 0)
         # Wrapper (AudioEffectX) services the original handler calls: int2string(value, text, maxLen).
         self.handlers[STUBS + 0x2000 + (0x140 // 8) * 16] = ('wrapper_int2string', self.int2string)
+        # AudioEffectX::isInputConnected / isOutputConnected(index): the configured channels are connected.
+        self.handlers[STUBS + 0x2000 + (0x180 // 8) * 16] = ('wrapper_isInputConnected', lambda: int((self.arg(1) & 0xffffffff) < self.host_channels))
+        self.handlers[STUBS + 0x2000 + (0x188 // 8) * 16] = ('wrapper_isOutputConnected', lambda: int((self.arg(1) & 0xffffffff) < self.host_channels))
         self.wq(WRAPPER, WRAPPER_VT)
         self.bind_imports()
         self.build_processor()
@@ -351,6 +355,17 @@ class DspApCapture(GenericCapture):
         for off, value in ((integer(s['iface_offset']), self.iface), (integer(s['wrapper_offset']), WRAPPER)):
             self.wq(PROC + off, value)               # what the VST wrapper does after UAD_CreateIUADPlug
             self.mark(PROC + off, 8)
+        ws = s.get('wrapper_steps')
+        if ws:      # the rest of the VST wrapper constructor: the stereo flag from its own channel query,
+            # then the state block's re-initialisation and its ready flag (JuceVSTWrapper ctor, AMS Neve DFC 0x180110413..0x180110432)
+            mono = self.call(integer(ws['mono_query']), PROC) & 0xff
+            flag = self.state_ptr + integer(ws['stereo_flag_offset'])
+            self.uc.mem_write(flag, bytes([0 if mono else 1]))
+            self.mark(flag, 1)
+            self.call(integer(ws['state_init']), self.state_ptr)
+            ready = self.state_ptr + integer(ws['ready_offset'])
+            self.uc.mem_write(ready, b'\x01')
+            self.mark(ready, 1)
         self.values = self.read_stored_values()
 
     def read_state_int(self, i):
@@ -526,17 +541,25 @@ class DspApCapture(GenericCapture):
             t[n + 'f'] = binary32(f)
         t['roundf'] = unary32(lambda x: rnd(x))
         t['sprintf_s'] = self.sprintf_s
+        t['sprintf'] = self.sprintf
         return t
 
     FORMAT = re.compile(r'%([-+ #0]*)(\d+)?(?:\.(\d+))?(?:hh|h|ll|l|I64|I32|I)?([diuxXcsfeEgG%])')
 
-    def sprintf_s(self):
+    def sprintf(self):
+        """Statically linked CRT sprintf(buf, fmt, ...), formatted as sprintf_s does."""
+        return self.sprintf_s(plain=True)
+
+    def sprintf_s(self, plain=False):
         """Statically linked CRT sprintf_s(buf, size, fmt, ...): the original code's formatting call (its CRT needs per-thread
         data this host does not model). Windows x64 varargs: arg 3 in r9, the rest on the stack; doubles travel as raw bits."""
-        buf, size, fmt = self.arg(0), self.arg(1), self.arg(2)
+        if plain:
+            buf, size, fmt = self.arg(0), 1 << 16, self.arg(1)
+        else:
+            buf, size, fmt = self.arg(0), self.arg(1), self.arg(2)
         raw = bytes(self.uc.mem_read(fmt, 64))
         text = raw[:raw.index(b'\0')].decode('ascii')
-        index = [3]
+        index = [2 if plain else 3]
 
         def vararg():
             value = self.arg(index[0])

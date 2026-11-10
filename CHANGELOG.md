@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Plug-in mapper: the AMS Neve DFC Channel Strip maps (JUCE, setter flavor): its facts in
+  `dspaudioprocessor_profiles.KNOWN`, and in `dspap_capture.py` the wrapper's channel queries,
+  a plain `sprintf`, wider integer domains and the wrapper constructor's stereo steps (#127).
 - `tools/virtual-insert-roundtrip.py`: the round trip through a Virtual strip as a PipeWire
   client sees it (play to "Apollo Virtual Out 1+2", record "Apollo Virtual In 1+2", both
   against the sink's monitor in one stream), with the insert's extra latency against a plain
