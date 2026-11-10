@@ -43,6 +43,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/status/PLUGINS.md` and the plug-in UI README.
 
 ### Fixed
+- Plug-in mapper: a plug-in with no known-good entry takes its discovery family from its own
+  structure (`classify_vst2_iuadplug.py`): the Brainworx-framework plug-ins (`vst2_bx`) map
+  with `--all` instead of failing the generic family's RTTI check, and a JUCE one goes to
+  `dspaudioprocessor`, which asks for its facts by name (#127).
 - With native plug-in hosting on, the Virtual, S/PDIF and ADAT inputs can be stereo linked and
   unlinked. The daemon refused every link but Analog 1-2 / 3-4, though plug-in chains only
   ever sit on inputs 1-4 and a link elsewhere only rewrites the mix. Verified on an x4: linked
