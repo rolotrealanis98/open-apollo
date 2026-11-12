@@ -14,9 +14,20 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def build(execution, profile, metadata, latency, layout='mono'):
+def choose_latency(reported, listed):
+    """(latency, source): the figure the plug-in reports at mapping time over the known-good
+    list's, which was measured on an Apollo; None and 'unknown' when there is neither."""
+    if reported is not None:
+        return reported, 'plugin'
+    if listed is not None:
+        return listed, 'known_good'
+    return None, 'unknown'
+
+
+def build(execution, profile, metadata, latency, layout='mono', latency_source=None):
     """execution: run_profile.py result (offline_pass); profile: the executed profile;
-    metadata: the parameter metadata document the run used; latency: samples at 48 kHz or None;
+    metadata: the parameter metadata document the run used; latency: samples at 48 kHz or None
+    (latency_source says whose: 'plugin', 'known_good' or 'unknown');
     layout: 'mono' or 'stereo', the host layout the execution answered the plug-in with."""
     name = execution['name']
     if execution.get('status') != 'offline_pass':
@@ -62,7 +73,7 @@ def build(execution, profile, metadata, latency, layout='mono'):
         'name': name,
         'layout': layout,
         'carrier_channels': channels,
-        'latency_source': 'known_good' if latency is not None else 'unknown',
+        'latency_source': latency_source or ('known_good' if latency is not None else 'unknown'),
         'dll': {'path': profile['dll']['path'], 'sha256': descriptor['plugin_sha256']},
         'descriptor': descriptor,
         'startup': execution['startup'],

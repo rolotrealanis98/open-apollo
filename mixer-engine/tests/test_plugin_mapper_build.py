@@ -17,6 +17,13 @@ def key(dll='a' * 64, sdk='s' * 64, entry=None):
     return mapper.cache_key(dll, sdk, entry or {'family': 'generic', 'latency_samples': 12})
 
 
+def test_the_plugin_s_own_latency_comes_before_the_listed_one():
+    assert mapper.choose_latency(55, 0) == (55, 'plugin')
+    assert mapper.choose_latency(0, 55) == (0, 'plugin')
+    assert mapper.choose_latency(None, 110) == (110, 'known_good')
+    assert mapper.choose_latency(None, None) == (None, 'unknown')
+
+
 def test_a_map_is_current_until_one_of_its_inputs_changes(tmp_path):
     k = key()
     (tmp_path / 'x-mono-runtime-bundle.json').write_text('{}')

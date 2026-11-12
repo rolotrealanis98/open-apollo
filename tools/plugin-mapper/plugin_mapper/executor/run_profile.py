@@ -107,6 +107,31 @@ def program_select(cap,refs,first,loader_calls):
     return dict(loader=hex(cap._watched_loader),loader_calls=cap.loader_calls-loader_calls,
                 refs=[hex(k)for k in sorted(refs)])
 
+# The latency a plug-in reports to UA's host.  UA's framework plug-ins are VST 2.4 effects: the
+# host calls AudioEffect::setInitialDelay(0) and reads AEffect.initialDelay back after the plug-in
+# has set its own (each adds its figure in its override).  An IUADPlug plug-in answers through the
+# callback handler it gave UAD_CreateIUADPlug.
+SET_INITIAL_DELAY=0xe0;GET_AEFFECT=0xf0          # AudioEffect vtable slots
+PLUGIN_AEFFECT=0x30;AEFFECT_INITIAL_DELAY=0x50   # AudioEffect::cEffect; AEffect.initialDelay
+HANDLER_LATENCY=0x20                            # CUADPlugCallbackHandler vtable slot
+
+
+def reported_latency(cap,profile):
+    """The latency the plug-in reports at its start-up state, in samples, or None when this
+    framework is not asked (JUCE, Sonnox, Softube) or the call faults."""
+    framework=profile.get('framework')
+    try:
+        if framework=='VST2IUADPlug':
+            handler=cap.handler
+            return cap.call(cap.rq(cap.rq(handler)+HANDLER_LATENCY),handler)&0xffffffff
+        if framework:return None
+        plugin=cap.parent;vtable=cap.rq(plugin)
+        cap.call(cap.rq(vtable+SET_INITIAL_DELAY),plugin,0)
+        if cap.call(cap.rq(vtable+GET_AEFFECT),plugin)!=plugin+PLUGIN_AEFFECT:return None
+        return cap.rd(plugin+PLUGIN_AEFFECT+AEFFECT_INITIAL_DELAY)
+    except Exception:return None
+
+
 def execute(profile,descriptor_extractor=None):
     start=time.monotonic();cap=GenericCapture.__new__(GenericCapture,profile)
     seen,unwatch=watch_load_units(descriptor_extractor)if descriptor_extractor is not None else ([],lambda:None)
@@ -133,6 +158,7 @@ def execute(profile,descriptor_extractor=None):
                     words=len(cap.defaults),initialization_policy='original_constructor_setup_captured_program_loader_resume',metadata_comparisons=dict(original_integer_values=len(cap.maxima),formatted_strings=len(cap.maxima)))
         if descriptor_extractor is not None:
             cap.phase='post_resume_descriptor';result['post_resume_descriptor']=descriptor_extractor(cap,profile)
+        cap.phase='reported_latency';result['reported_latency']=reported_latency(cap,profile)
         write_refs=set();atomic_refs=set(cap.atomic_refs);fresh_cache={};last_writer={}
         for index,maximum in enumerate(cap.maxima):
             original=cap.defaults_values[index]

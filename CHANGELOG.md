@@ -34,6 +34,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   at unity, left and right apart.
 
 ### Changed
+- Plug-in mapper: a map's latency is what the plug-in reports at mapping time (UA's host asks
+  each VST 2.4 effect for its `initialDelay`; an IUADPlug one answers through its handler), over
+  the known-good list's figure, which was measured on an Apollo. The mapper says where the two
+  disagree, and `index.json` records it per layout (#133).
 - `docs/status/PLUGINS.md` groups every plug-in by support tier (controls verified on the Apollo,
   offered in the Console, mapped and waiting for a licence, held back, not buildable), computed by
   `tools/gen-status-graph.py` from `native_known_good.json`, the plug-in library and the measured

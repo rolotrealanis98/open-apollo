@@ -28,7 +28,7 @@ from pathlib import Path
 
 PKG = Path(__file__).resolve().parent
 sys.path[:0] = [str(PKG), str(PKG / 'carrier')]
-from build_bundle import build  # noqa: E402
+from build_bundle import build, choose_latency  # noqa: E402
 
 REPO = PKG.parents[2]
 # Bumped whenever a change here, in discovery, execution or the carrier changes what a map holds.
@@ -196,6 +196,10 @@ def merge(index, result):
         index['failures'][name] = dict(key=result['key'], reasons=result['failures'])
     index['mono_only'] = sorted((set(index['mono_only']) - {name}) | ({name} if result['mono_only'] else set()))
     index['waiting_for_licence'] = sorted(set(index['waiting_for_licence']) - {name})
+    disagreements = index.setdefault('latency_disagreements', {})
+    disagreements.pop(name, None)
+    if result.get('latency_disagreements'):
+        disagreements[name] = result['latency_disagreements']
     return index
 
 
@@ -360,8 +364,13 @@ class Mapper:
                 result['mono_only'] = True  # the original descriptor is not 2-in/2-out: no stereo insert
                 continue
             metadata = json.loads(Path(profile['captured_metadata']['path']).read_text())
+            reported, listed = execution.get('reported_latency'), entry.get('latency_samples')
+            latency, source = choose_latency(reported, listed)
+            if reported is not None and listed is not None and reported != listed:
+                # The known-good list's figure was measured on an Apollo; the plug-in's own is what UA's host uses.
+                result.setdefault('latency_disagreements', {})[layout] = dict(plugin=reported, known_good=listed)
             try:
-                bundle = build(execution, profile, metadata, entry.get('latency_samples'), layout)
+                bundle = build(execution, profile, metadata, latency, layout, source)
             except ValueError as error:
                 result['failures'][layout] = str(error)
                 continue
@@ -370,6 +379,7 @@ class Mapper:
             file = f'{slug(name)}-{layout}-runtime-bundle.json'
             save(args.out / file, bundle)
             result['built'].append(dict(name=name, layout=layout, file=file, known_good=layout in entry.get('layouts', ()),
+                                        latency_samples=bundle['descriptor']['latency_samples'],
                                         latency_source=bundle['latency_source'], key=key))
         shutil.rmtree(work, ignore_errors=True)  # keep the logs of failures only
         return result
@@ -655,6 +665,9 @@ def main(argv=None):
         layouts = ', '.join(b['layout'] for b in result['built'])
         if result['built']:
             progress.finish(name, 'mapped')
+            for layout, d in result.get('latency_disagreements', {}).items():
+                print(f"  {name} ({layout}): reports a latency of {d['plugin']} samples; the known-good list "
+                      f"says {d['known_good']}. The map takes the plug-in's.", flush=True)
             if result['failures']:
                 print(f'  {name}: {layouts} only ({"; ".join(f"{k}: {v}" for k, v in result["failures"].items())})', flush=True)
         else:
