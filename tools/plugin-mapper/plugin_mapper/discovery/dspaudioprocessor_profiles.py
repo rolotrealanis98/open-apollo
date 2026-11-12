@@ -98,6 +98,34 @@ KNOWN = {
         plain_fields={},
         quiet_iface_slots=[],
     ),
+    # The DMX's sibling, read the same way.
+    'UAD AMS Neve DFC Channel Strip': dict(
+        flavor=SETTER_FLAVOR,
+        sha256='1b855a5a5ad610a1c9576c6f28b15bdb2b85fb4a0a9b1f610dd9531d5647948b',
+        sample_rate_offset=0x30,
+        channel_fields=[0x3c, 0x40],
+        num_parameters_slot=14,                   # processor vtable slot `mov eax, 71; ret`
+        setter_slot=18,                           # setParameter(this, int, float) 0x180027620: state block +0xd8, int32 index*4
+        formatter_slot=0x78,
+        startup=[dict(slot=0x88, arguments=['handler'])],
+        # Parameter store: the heap block at +0xd8, 80 int32 values from +0 (71 Console parameters + editor-only);
+        # the constructor sets each to min + (max - min) * default (min/max int32[80], default float[80]).
+        state_block=dict(pointer_offset=0xd8, values_offset=0, count=80,
+                         tables=dict(min=0x1803dece0, max=0x1803dee20, default=0x18035da80)),
+        constructor_stop=0x1800274d2,             # the call that loads Presets/.../user_default.fxb from disk (FUN_1800230a0)
+        # plain sprintf: the DSP update functions format debug text (doEQ 0x18000d460) and discard it. expf 0x18045c6f0 (overflow at
+        # x*64/ln2 >= 8192, underflow below -9600): the frequency mapping underflows by design, and its errno path needs per-thread CRT data.
+        crt_extra=dict(sprintf=0x180113b54, expf=0x18045c6f0),
+        static_initializers=True,                 # doEQ scales by .data constants (0x180444740, 0x18043ecd0) the C++ initializers compute
+        # The JUCE VST wrapper constructor (0x1801101f0) sets the state block's stereo flag +0x4c9 = !isMono() (0x180026e00: the wrapper's
+        # isInput/OutputConnected over two channels), re-initialises the block (0x180001220) and sets +0x4c8 = 1. Without it the
+        # input matrix (0x18000edd0) is mono and the right channel is silent.
+        wrapper_steps=dict(mono_query=0x180026e00, stereo_flag_offset=0x4c9, state_init=0x180001220, ready_offset=0x4c8),
+        # +0x3f0: a dB gain the push function 0x180028a40 sends as 10^(x/20) to 0x1000009 while Channel Strip Bypass is off. No code in
+        # the image writes it (no store to +0x3f0 in the processor or its base constructor); a fresh heap object holds 0 = unity.
+        plain_fields={'wet_gain_db': dict(offset=0x3f0, size=4, value=0)},
+        quiet_iface_slots=[],
+    ),
     'UAD Sound Machine Wood Works': dict(
         flavor=SETTER_FLAVOR,
         sha256='89c2edd69a9aa3400ef95cebbb0ff85b0cff2c7a46653760491380755b3a16eb',
@@ -689,6 +717,8 @@ def build_setter(name, known, item):
         if len(strlens) != 1:
             raise ValueError('static strlen not identified: %r' % [hex(x) for x in strlens])
         crt['strlen'] = hex(strlens[0])
+    for k, v in known.get('crt_extra', {}).items():     # further statically linked CRT entry points the host answers
+        crt[k] = hex(v)
     printf = find_printf(img, slots[known['formatter_slot'] // 8])
     if printf:
         crt['sprintf_s'] = hex(printf)
@@ -712,6 +742,7 @@ def build_setter(name, known, item):
             crt=crt,
             **({'static_initializers': static_initializers(img, known['static_initializers'])} if known.get('static_initializers') else {}),
             state_block=state,
+            **({'wrapper_steps': {k: hex(v) for k, v in known['wrapper_steps'].items()}} if known.get('wrapper_steps') else {}),
             formatter=dict(slot=hex(known['formatter_slot']), va=hex(slots[known['formatter_slot'] // 8])),
             startup=[dict(slot=hex(x['slot']), va=hex(slots[x['slot'] // 8]), arguments=x['arguments']) for x in known['startup']],
             **({'uninitialised_ok': [dict(pc=hex(x['pc']), reason=x['reason']) for x in known['uninitialised_ok']]} if known.get('uninitialised_ok') else {}),

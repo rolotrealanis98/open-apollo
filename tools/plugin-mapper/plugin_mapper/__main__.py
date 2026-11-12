@@ -132,6 +132,25 @@ def run(command, env, cwd=None, log=None):
 
 # ── Cache ──────────────────────────────────────────────────────────────
 
+def structural_family(dll):
+    """The discovery family a plug-in's own structure names, for a plug-in with no known-good
+    entry, as classify_vst2_iuadplug.py tells from its RTTI: 'vst2_bx' when it is built on
+    Brainworx's adapter (UADAdapter with a BXEffect), 'dspaudioprocessor' on JUCE (whose
+    generator then wants the plug-in's hand-written facts in dspaudioprocessor_profiles.KNOWN,
+    and says so).  None for the rest, which stay 'generic' (UA's own framework); a Relab or
+    plain VST plug-in still needs an entry."""
+    try:
+        if str(PKG / 'discovery') not in sys.path:
+            sys.path.append(str(PKG / 'discovery'))
+        from classify_vst2_iuadplug import classify, cols, vtables
+        from dspaudioprocessor_profiles import Image as DiscoveryImage
+        img = DiscoveryImage(Path(dll))
+        sub_family, _evidence = classify(img, vtables(img, cols(img)))
+    except Exception:       # noqa: BLE001 - not an IUADPlug plug-in, or no RTTI: generic it is
+        return None
+    return {'B': 'vst2_bx', 'DSPAP': 'dspaudioprocessor'}.get(sub_family)
+
+
 def cache_key(dll_sha256, sdk_sha256, known_entry):
     """What a plug-in's maps depend on besides the mapper's own code: its DLL, UAD2SDK.dll and the
     known-good facts built into the bundle (family, latency, DSP-owned word positions)."""
@@ -280,7 +299,7 @@ class Mapper:
         shutil.rmtree(work, ignore_errors=True)
         env = dict(self.env, OA_MAPPER_WORK=str(work))
         item = self.inventory[name]
-        family = self.known.get(name, {}).get('family', 'generic')
+        family = item['family']
         # Whole-set generators check every member of their set against the inventory.
         members = [i for i in self.inventory.values() if i['family'] == family] if family in WHOLE_SET else [item]
         save(work / 'families/inventory.json', dict(schema='openapollo-local-inventory/1',
@@ -573,8 +592,6 @@ def main(argv=None):
             skipped[name] = 'no panel spec'
             continue
         digest = sha(dll)
-        key = keys[name] = cache_key(digest, sdk_sha256, known.get(name, {}))
-        state = None if args.force else cached(index, args.out, name, key, args.retry_failures)
         stem, spec = specs[name]
         try:
             metadata = metadata_from_spec(spec, args.texts)
@@ -585,7 +602,10 @@ def main(argv=None):
         meta_path = args.out / 'metadata' / (stem + '.json')
         if not meta_path.is_file() or json.loads(meta_path.read_text()) != metadata:
             save(meta_path, metadata)
-        family = known.get(name, {}).get('family', 'generic')
+        entry = known.get(name, {})
+        family = entry.get('family') or structural_family(dll) or 'generic'
+        key = keys[name] = cache_key(digest, sdk_sha256, dict(entry, family=family))
+        state = None if args.force else cached(index, args.out, name, key, args.retry_failures)
         if state is None or family in WHOLE_SET:
             # Whole-set families need every member's facts even when only one is mapped.
             record = dict(name=name, dll=dll.name, dll_sha256=digest, render_id_manifest=render_ids.get(name),
