@@ -38,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   each VST 2.4 effect for its `initialDelay`; an IUADPlug one answers through its handler), over
   the known-good list's figure, which was measured on an Apollo. The mapper says where the two
   disagree, and `index.json` records it per layout (#133).
+- Plug-in mapper: JUCE and Sonnox plug-ins (the DSPAudioProcessor family) report their latency at
+  mapping time too, through the same callback-handler query as UA's framework plug-ins; the
+  older 0x66 interface (Ocean Way Studios) is not asked.
 - `docs/status/PLUGINS.md` groups every plug-in by support tier (controls verified on the Apollo,
   offered in the Console, mapped and waiting for a licence, held back, not buildable), computed by
   `tools/gen-status-graph.py` from `native_known_good.json`, the plug-in library and the measured

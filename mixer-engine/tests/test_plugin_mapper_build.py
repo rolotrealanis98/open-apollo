@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 PKG = ROOT / 'tools/plugin-mapper/plugin_mapper'
 spec = importlib.util.spec_from_file_location('plugin_mapper_main', PKG / '__main__.py')
@@ -22,6 +24,31 @@ def test_the_plugin_s_own_latency_comes_before_the_listed_one():
     assert mapper.choose_latency(0, 55) == (0, 'plugin')
     assert mapper.choose_latency(None, 110) == (110, 'known_good')
     assert mapper.choose_latency(None, None) == (None, 'unknown')
+
+
+def test_juce_and_sonnox_plugins_answer_the_latency_query_too():
+    pytest.importorskip('unicorn')      # run_profile imports the emulator (tools/plugin-mapper/requirements.txt)
+    sys.path.insert(0, str(PKG / 'executor'))
+    import run_profile
+
+    class Handler:                      # a CUADPlugCallbackHandler whose slot 4 answers 22
+        handler = 0x1000
+        calls = []
+
+        def rq(self, address):
+            return {0x1000: 0x2000, 0x2000 + run_profile.HANDLER_LATENCY: 0x3000}[address]
+
+        def call(self, function, *args):
+            self.calls.append((function, args))
+            return 22
+
+    juce = dict(framework='DSPAudioProcessor', dspap=dict(vstmain=dict(interface_version=0x67)))
+    assert run_profile.reported_latency(Handler(), juce) == 22
+    assert run_profile.reported_latency(Handler(), dict(framework='DSPAudioProcessor', dspap={})) == 22
+    assert run_profile.reported_latency(Handler(), dict(framework='VST2IUADPlug')) == 22
+    older = dict(framework='DSPAudioProcessor', dspap=dict(vstmain=dict(interface_version=0x66)))
+    assert run_profile.reported_latency(Handler(), older) is None          # slot 4 is its start-up there
+    assert run_profile.reported_latency(Handler(), dict(framework='Softube')) is None
 
 
 def test_a_map_is_current_until_one_of_its_inputs_changes(tmp_path):
