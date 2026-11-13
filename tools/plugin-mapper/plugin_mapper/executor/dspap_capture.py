@@ -74,6 +74,11 @@ class DspApCapture(GenericCapture):
             from paramobj_capture import ParamObjectsCapture
             self.__class__ = ParamObjectsCapture
             return ParamObjectsCapture.__init__(self, profile, auto_start)
+        if type(self) is DspApCapture and ((profile.get('dspap') or {}).get('vstmain') or {}).get('runtime') == 'msvc90':
+            # the same route on the Visual C++ 2008 dynamic runtime (msvc90_capture.py: Eventide H910)
+            from msvc90_capture import Msvc90Capture
+            self.__class__ = Msvc90Capture
+            return Msvc90Capture.__init__(self, profile, auto_start)
         if type(self) is DspApCapture and 'vstmain' in (profile.get('dspap') or {}):
             # the original VSTPluginMain builds the whole object graph (vstmain_capture.py: Sphere family)
             from vstmain_capture import VstMainCapture
@@ -735,3 +740,4 @@ def extract_descriptor(cap, profile, decode_descriptor):
 
 import vstmain_capture  # noqa: E402,F401  (loads the VstMain host so the runtime manifest hashes it; this module is imported first)
 import paramobj_capture  # noqa: E402,F401  (so the runtime manifest hashes it; vstmain_capture above is loaded first)
+import msvc90_capture  # noqa: E402,F401  (so the runtime manifest hashes it; paramobj_capture above is loaded first)
