@@ -151,6 +151,19 @@ def structural_family(dll):
     return {'B': 'vst2_bx', 'DSPAP': 'dspaudioprocessor'}.get(sub_family)
 
 
+def facts_family(name):
+    """'vstmain' for a plug-in vstmain_profiles.KNOWN describes: its original VSTPluginMain builds the
+    effect, which its JUCE structure alone would not say (structural_family names those
+    'dspaudioprocessor').  Ocean Way Studios has facts there and no known-good entry."""
+    try:
+        if str(PKG / 'discovery') not in sys.path:
+            sys.path.append(str(PKG / 'discovery'))
+        from vstmain_profiles import KNOWN
+    except Exception:       # noqa: BLE001 - the generator's own requirements are missing: the family stays undecided here
+        return None
+    return 'vstmain' if name in KNOWN else None
+
+
 def cache_key(dll_sha256, sdk_sha256, known_entry):
     """What a plug-in's maps depend on besides the mapper's own code: its DLL, UAD2SDK.dll and the
     known-good facts built into the bundle (family, latency, DSP-owned word positions)."""
@@ -613,7 +626,7 @@ def main(argv=None):
         if not meta_path.is_file() or json.loads(meta_path.read_text()) != metadata:
             save(meta_path, metadata)
         entry = known.get(name, {})
-        family = entry.get('family') or structural_family(dll) or 'generic'
+        family = entry.get('family') or facts_family(name) or structural_family(dll) or 'generic'
         key = keys[name] = cache_key(digest, sdk_sha256, dict(entry, family=family))
         state = None if args.force else cached(index, args.out, name, key, args.retry_failures)
         if state is None or family in WHOLE_SET:

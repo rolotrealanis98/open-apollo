@@ -50,6 +50,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/status/PLUGINS.md` and the plug-in UI README.
 
 ### Fixed
+- Plug-in mapper: a plug-in that `vstmain_profiles.KNOWN` describes is mapped by that generator
+  when it has no known-good entry; its JUCE structure sent it to the `dspaudioprocessor` one,
+  so `--all` could not map Ocean Way Studios.
 - Plug-in mapper: a plug-in with no known-good entry takes its discovery family from its own
   structure (`classify_vst2_iuadplug.py`): the Brainworx-framework plug-ins (`vst2_bx`) map
   with `--all` instead of failing the generic family's RTTI check, and a JUCE one goes to
