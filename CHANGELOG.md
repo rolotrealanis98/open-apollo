@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Plug-in mapper: the Eventide H910 Harmonizer maps, on the VSTPluginMain route with a host for the
+  Visual C++ 2008 dynamic runtime it is built against (`executor/msvc90_capture.py`: the MSVCR90
+  start-up and C calls and the MSVCP90 strings and string streams its own code reaches). Its
+  pitch-control mode controls are swept with their mode selected (#127).
 - Plug-in mapper: the AMS Neve DFC Channel Strip maps (JUCE, setter flavor): its facts in
   `dspaudioprocessor_profiles.KNOWN`, and in `dspap_capture.py` the wrapper's channel queries,
   a plain `sprintf`, wider integer domains and the wrapper constructor's stereo steps (#127).

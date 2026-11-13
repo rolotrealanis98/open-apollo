@@ -95,6 +95,14 @@ KNOWN = {
                                   native_routines=NATIVE_OCEAN,
                                   data_files=[dict(guest='C:\\Program Files (x86)\\Universal Audio\\Powered Plugins\\Data\\Ocean Way Studios\\OceanWayStudios.irz',
                                                    host=str(Path(os.environ.get('OA_UAD_ROOT', '/')) / 'Program Files (x86)/Universal Audio/Powered Plugins/Data/Ocean Way Studios/OceanWayStudios.irz'))]),
+    # Eventide's tide::ExtendedAudioProcessor on JUCE, built against the Visual C++ 2008 dynamic runtime (MSVCR90 / MSVCP90): the
+    # handler is the H910AudioProcessor sub-object at +0x130 the wrapper casts to; executor/msvc90_capture.py hosts the runtime. The
+    # original setters ignore a pitch-control mode's controls unless Pitch Control Select (7: MAN, A-F, KYBD, ENV) is that mode.
+    'UAD Eventide H910 Harmonizer': dict(sha256='6715b1ba9dfd2f63344bacbf555cda3514f4abd72263e4488555db03e66a44a1', render_id=2195,
+                                         handler=dict(kind='class', cls='H910AudioProcessor', offset=0x130), latency=None,
+                                         runtime='msvc90',
+                                         control_requires={'3': [(7, 1)], '14': [(7, 2)], '15': [(7, 2)], '16': [(7, 2)],
+                                                           '11': [(7, 3)], '12': [(7, 3)], '13': [(7, 3)]}),
 }
 SLOTS = dict(descriptor=3, formatter=15, startup=17)      # CUADPlugCallbackHandler slot numbers (same ABI as the other families)
 HOST = dict(sample_rate=48000, block_size=32)
@@ -213,6 +221,7 @@ def build(name, inventory):
             vstmain=dict(interface_version=known.get('interface_version', 0x67), host=HOST, instruction_budget=BUDGET, latency_samples=latency[0] if latency else known['latency'],
                         **({'data_files': [dict(f, sha256=sha(f['host'])) for f in known['data_files']]} if known.get('data_files') else {}),
                         **({'control_requires': known['control_requires']} if known.get('control_requires') else {}),
+                        **({'runtime': known['runtime']} if known.get('runtime') else {}),
                         **({'native_routines': known['native_routines']} if known.get('native_routines') else {}),
                         **({'latency_check': dict(handler_field=hex(8), offset=hex(0x3c), expect=known['latency'])} if known.get('latency_check') else {}),
                         evidence='RTTI complete-object locators of the handler class; families-dspaudioprocessor.md section 6a'),
