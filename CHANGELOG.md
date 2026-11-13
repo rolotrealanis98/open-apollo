@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Plug-in mapper: the Oxford Envolution maps, on the VSTPluginMain route like the other Sonnox JUCE
+  plug-ins (`vstmain_profiles.KNOWN`); its processor's latency, 22 samples, is checked at mapping
+  time (#127).
 - Plug-in mapper: the AMS Neve DFC Channel Strip maps (JUCE, setter flavor): its facts in
   `dspaudioprocessor_profiles.KNOWN`, and in `dspap_capture.py` the wrapper's channel queries,
   a plain `sprintf`, wider integer domains and the wrapper constructor's stereo steps (#127).
@@ -50,6 +53,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/status/PLUGINS.md` and the plug-in UI README.
 
 ### Fixed
+- Plug-in mapper: a plug-in that `vstmain_profiles.KNOWN` describes is mapped by that generator
+  when it has no known-good entry; its JUCE structure sent it to the `dspaudioprocessor` one,
+  so `--all` could not map Ocean Way Studios.
 - Plug-in mapper: a plug-in with no known-good entry takes its discovery family from its own
   structure (`classify_vst2_iuadplug.py`): the Brainworx-framework plug-ins (`vst2_bx`) map
   with `--all` instead of failing the generic family's RTTI check, and a JUCE one goes to
