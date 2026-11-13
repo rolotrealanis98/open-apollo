@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Plug-in mapper: the Oxford Envolution maps, on the VSTPluginMain route like the other Sonnox JUCE
+  plug-ins (`vstmain_profiles.KNOWN`); its processor's latency, 22 samples, is checked at mapping
+  time (#127).
 - Plug-in mapper: the AMS Neve DFC Channel Strip maps (JUCE, setter flavor): its facts in
   `dspaudioprocessor_profiles.KNOWN`, and in `dspap_capture.py` the wrapper's channel queries,
   a plain `sprintf`, wider integer domains and the wrapper constructor's stereo steps (#127).

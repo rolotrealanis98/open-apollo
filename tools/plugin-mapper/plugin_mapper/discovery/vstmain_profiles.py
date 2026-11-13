@@ -81,6 +81,9 @@ KNOWN = {
                                   latency=50, latency_check=True),
     'UAD Oxford SuprEsser DS': dict(sha256='a639d0dce2f251147d46d83e9b2dccc16d90d5fd0a6b95681e0292a9053dfcb5', render_id=2267, handler=dict(kind='class', cls='JuceVSTWrapper', offset=0x128),
                                     latency=178, latency_check=True),
+    # The Soup processors' sibling (JUCE 7 JuceVSTWrapper, same handler): its processor's latencySamples is 22.
+    'UAD Oxford Envolution': dict(sha256='8c3373eec3704c56cd05a141b9d7f73e41af3f0929d4f303893cf380e8510095', render_id=0x89c,
+                                  handler=dict(kind='class', cls='JuceVSTWrapper', offset=0x128), latency=22, latency_check=True),
     'UAD Sphere Mic Collection': dict(sha256='bf25d61785fe0d985564468408521eef55d9fe5c6f93ca190c3227b79510443b', render_id=0x87a,
                                       handler=dict(kind='sphere', offset=0x1da8), latency=24),
     'UAD Sphere Mic Collection 180': dict(sha256='c7f451272a46fdc582af689efecb628b9089e65eaf0a764fa61f5f8ef35656d0', render_id=0x87b,
