@@ -290,6 +290,11 @@ def compact(words, base=10):
 
 
 def resource(record, store=MODULES):
+    if record.get('host_overwrite'):
+        # A data module the plug-in fills in memory (Softube engine): the host uploads it with a filler pool and then writes
+        # the plug-in's words over it (carrier/descriptor.py host_filled); this carrier sends records as stored.
+        raise ValueError('resource %s needs the host-filled upload and pool overwrite, which this carrier does not send'
+                         % hex(uint(record['id'])))
     digest = record['sha256']
     if type(digest) is not str or len(digest) != 64:
         raise ValueError('resource content hash required')

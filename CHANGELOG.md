@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Plug-in mapper: Softube-engine plug-ins map (`discovery/softube_profiles.py`, the family
+  `softube` from their structure, every fact found in the DLL): 24 of UA 11.8.3's 25, among them
+  the amp rooms, Marshalls, Tube-Techs and Chandlers. Their data modules, which the plug-in fills
+  for the session's rate, are uploaded with a filler pool and then overwritten
+  (`carrier/descriptor.py`, `host_filled`); the native carrier refuses them until it does that (#127).
 - Plug-in mapper: the AMS Neve DFC Channel Strip maps (JUCE, setter flavor): its facts in
   `dspaudioprocessor_profiles.KNOWN`, and in `dspap_capture.py` the wrapper's channel queries,
   a plain `sprintf`, wider integer domains and the wrapper constructor's stereo steps (#127).

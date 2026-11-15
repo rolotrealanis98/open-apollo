@@ -240,9 +240,14 @@ to add plug-ins:
   (`crt_init.py`, `cxx_domain_init.py`, `thread_safe_statics.py`), or a restore that does not put
   the words back.
 - **Add a family.** Each family has a discovery profile (`discovery/*_profiles.py`) and an executor
-  (`executor/*_capture.py`, `*_host.py`); `generic_capture.py` covers most plug-ins. Softube and
-  other third-party families, Unison preamps and UADx-only plug-ins have none yet
-  (`softube_capture.py` already runs the Softube engine's VST2 startup; its plug-ins do not map yet).
+  (`executor/*_capture.py`, `*_host.py`); `generic_capture.py` covers most plug-ins. Unison
+  preamps, UADx-only plug-ins and the third-party families other than Softube's have none yet.
+- **Live load of Softube-engine plug-ins.** They map (`discovery/softube_profiles.py`, every fact
+  found in the DLL), but their data modules carry tables the plug-in writes for the session's
+  rate. The host uploads such a module with a filler pool and then writes the plug-in's words
+  over it (`carrier/descriptor.py`, `host_filled`; the bundle marks the module with a
+  `host_overwrite`). `mixer-engine/native_carrier.py` sends records as stored, so it refuses these
+  until it sends that upload and overwrite.
 - **Other UAD versions.** The DSPAudioProcessor, VST-main, ParamObj and Sonnox profiles pin
   addresses in UAD 11.8.3 and refuse other versions; finding those addresses from the DLL itself,
   as the other families do, lets more installs map them.

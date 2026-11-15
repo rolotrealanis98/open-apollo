@@ -51,7 +51,7 @@ stays on that machine; `tools/check-clean-repo.py` refuses it in the repository.
 |---|---|---|
 | inventory | `inventory.py` | RTTI and descriptor-producer candidates per DLL (static) |
 | discovery | `discovery/run_catalog.py`, `discovery/stages/` | CHyp/JUCE plug-ins: parameter block, program loader, CRT/host context, parent binding, formatter ABI (one worker process per plug-in, static) |
-| discovery | `discovery/*_profiles.py` | the hand-profiled families (DSPAudioProcessor, VST2 IUADPlug, BX, relab, VST-main, ParamObj, Sonnox) |
+| discovery | `discovery/*_profiles.py` | the hand-profiled families (DSPAudioProcessor, VST2 IUADPlug, BX, relab, VST-main, ParamObj, Sonnox) and Softube's engine, found from the DLL |
 | execution | `execution/run_catalog.py`, `executor/` | constructs each plug-in, loads its Console defaults, reads the DSP descriptor, sweeps every control and checks each restore |
 | bundle | `carrier/build_bundle.py` | descriptor, startup words, control sweep, parameter metadata and the executed profile |
 
@@ -69,5 +69,7 @@ runtime reads.
 - The DSPAudioProcessor, VST-main, ParamObj and Sonnox profiles pin addresses in the DLLs of
   UAD 11.8.3 and refuse other versions. The others are found from the DLL itself; a different
   `UAD2SDK.dll` is used but recorded (`index.json`, `uad_sdk_sha256`).
-- Softube and other third-party families, Unison preamps and UADx-only plug-ins are not mapped.
+- Unison preamps, UADx-only plug-ins and the third-party families other than Softube's are not
+  mapped. Softube-engine maps carry data modules the host uploads with a filler pool and then
+  overwrites (`carrier/descriptor.py`, `host_filled`), which the native carrier does not send yet.
 - 48 kHz only.
