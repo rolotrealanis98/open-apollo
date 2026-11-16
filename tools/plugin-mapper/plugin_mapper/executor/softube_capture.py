@@ -509,7 +509,8 @@ class SoftubeCapture(DspApCapture):
         """Integer on the profile grid for the plug-in float, or ValueError when it is off the grid."""
         top = self.maxima[index]
         value = round(norm * top)
-        tolerance = 1e-6 if self.soft['parameters'][index].get('exact', True) else 0.5 / top  # off-grid captured default: nearest step
+        # off-grid captured default: the nearest step; one exactly halfway is half a step from both, which float32 puts a hair over
+        tolerance = 1e-6 if self.soft['parameters'][index].get('exact', True) else 0.5 / top + 1e-6
         if abs(F32(value / top) - norm) > tolerance:
             raise ValueError('plug-in parameter %d value %r is off the profile grid 1/%d' % (index, norm, top))
         return value
