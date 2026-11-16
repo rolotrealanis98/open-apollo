@@ -75,6 +75,7 @@ def test_the_native_carrier_refuses_a_module_it_would_upload_as_stored():
 
 
 def test_softube_plug_ins_take_the_softube_family(monkeypatch):
+    monkeypatch.setattr(sys, 'path', sys.path[:])                       # structural_family adds the discovery directory
     spec = importlib.util.spec_from_file_location('softube_test_mapper', PKG / '__main__.py')
     mapper = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, 'softube_test_mapper', mapper)
@@ -99,14 +100,21 @@ class Code:
         self.cs.detail = True
 
 
-def test_the_descriptor_getter_and_its_channel_fields_are_found_from_the_code():
+VA = 0x180001000
+
+
+@pytest.fixture(scope='module')
+def softube():
     pytest.importorskip('capstone')
     pytest.importorskip('pefile')
     sys.path.insert(0, str(PKG / 'discovery'))
     try:
-        softube = load('softube_test_profiles', PKG / 'discovery/softube_profiles.py')
+        return load('softube_test_profiles', PKG / 'discovery/softube_profiles.py')
     finally:
         sys.path.remove(str(PKG / 'discovery'))
+
+
+def test_the_descriptor_getter_and_its_channel_fields_are_found_from_the_code(softube):
     getter = Code(bytes.fromhex(
         '4c8bf1'                # mov r14, rcx
         '4439a930feffff'        # cmp [rcx - 0x1d0], r13d      inputs
@@ -115,9 +123,56 @@ def test_the_descriptor_getter_and_its_channel_fields_are_found_from_the_code():
         'ff9088010000'          # call [rax + 0x188]            isOutputConnected
         '41b8e80a0000'          # mov r8d, 0xae8                the AllocInfo's size
         'c3'))
-    va = 0x180001000
-    assert softube.getter_fields(getter, va) == dict(num_inputs_disp=-0x1d0, num_outputs_disp=-0x1cc)
-    assert softube.fills_alloc_info(getter, va)
-    assert not softube.fills_alloc_info(Code(bytes.fromhex('c341b8e80a0000')), va)    # returns first
+    assert softube.getter_fields(getter, VA) == dict(num_inputs_disp=-0x1d0, num_outputs_disp=-0x1cc)
+    assert softube.fills_alloc_info(getter, VA)
     with pytest.raises(ValueError, match='channel loops'):
-        softube.getter_fields(Code(bytes.fromhex('4439a930feffffc3')), va)
+        softube.getter_fields(Code(bytes.fromhex('4439a930feffffc3')), VA)
+
+
+def test_only_the_handlers_fields_and_the_effects_calls_count(softube):
+    getter = Code(bytes.fromhex(
+        '4c8bf1'                # mov r14, rcx
+        '395df0'                # cmp [rbp - 0x10], ebx         a local
+        'ff1500100000'          # call [rip + 0x1000]           an import
+        '4539ae30feffff'        # cmp [r14 - 0x1d0], r13d      inputs
+        'ff5030'                # call [rax + 0x30]             another slot
+        'ff9080010000'          # call [rax + 0x180]            isInputConnected
+        '4539ae34feffff'        # cmp [r14 - 0x1cc], r13d      outputs
+        'ff9088010000'          # call [rax + 0x188]            isOutputConnected
+        'c3'))
+    assert softube.getter_fields(getter, VA) == dict(num_inputs_disp=-0x1d0, num_outputs_disp=-0x1cc)
+    lost = Code(bytes.fromhex(
+        'ff9080010000'          # call [rax + 0x180]            rcx is no longer the handler
+        '399130feffff'          # cmp [rcx - 0x1d0], edx
+        '399134feffff'          # cmp [rcx - 0x1cc], edx
+        'ff9088010000'          # call [rax + 0x188]
+        'c3'))
+    with pytest.raises(ValueError, match='channel loops'):
+        softube.getter_fields(lost, VA)
+
+
+def test_a_getter_that_returns_early_still_fills_the_alloc_info(softube):
+    assert softube.fills_alloc_info(Code(bytes.fromhex(
+        '4885d2'                # test rdx, rdx
+        '7501'                  # jne +1
+        'c3'                    # ret                           no AllocInfo
+        '41b8e80a0000'          # mov r8d, 0xae8
+        'c3cc')), VA)
+    assert not softube.fills_alloc_info(Code(bytes.fromhex('c3cc41b8e80a0000')), VA)    # past the padding: another's
+
+
+def test_a_parameters_domain_and_default(softube):
+    def prop(norm, steps=None):
+        p = dict(Name=dict(value='Mode'), NormalizedValue=dict(value=norm), StringValue=dict(value=' On '))
+        if steps is not None:
+            p['StepValue'] = dict(values=steps)
+        return p
+    assert softube.parameter(prop(0.5, ['A', 'B', 'C'])) == dict(name='Mode', maximum=2, default=1, steps=3, exact=True,
+                                                                captured_text='On')
+    assert softube.parameter(prop(0.25)) == dict(name='Mode', maximum=32768, default=8192, steps=0, exact=True,
+                                                 captured_text='On')
+    assert softube.parameter(prop(0.1))['default'] == 3277 and not softube.parameter(prop(0.1))['exact']
+    with pytest.raises(ValueError, match='one step'):
+        softube.parameter(prop(0.0, ['Only']))
+    with pytest.raises(ValueError, match='outside 0..1'):
+        softube.parameter(prop(1.5, ['A', 'B']))

@@ -27,7 +27,7 @@ Usage: python3 softube_profiles.py [--plugin NAME ...] [--output profiles.json]
 """
 from pathlib import Path
 import argparse, json
-from capstone.x86 import X86_OP_IMM, X86_OP_MEM
+from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
 from dspaudioprocessor_profiles import Image, sha, DLL_ROOT, CAPTURES, PATTERNS, captured_parameters, console_text, text_or_none
 from vstmain_profiles import class_vtables
 
@@ -46,15 +46,16 @@ BUDGET = 1_000_000_000                # per emulated call (executor/softube_capt
 
 
 def fills_alloc_info(img, va):
-    """The function at va sets a size of 0xae8 before its first return (linear scan: the getters' unwind data is chained,
-    so the first PE function record covers only their prologue)."""
+    """The function at va sets a size of 0xae8 (linear scan, as the getters' unwind data is chained and their first PE
+    function record covers only the prologue). The scan runs to the int3 padding after the function, or 0x400 bytes: a
+    return before the body, as after a null check, does not end it."""
     o = va - img.base
     if not 0x1000 <= o < len(img.im):
         return False
     for i in img.cs.disasm(img.im[o:o + 0x400], va):
         if i.mnemonic == 'mov' and len(i.operands) == 2 and i.operands[1].type == X86_OP_IMM and i.operands[1].imm == ALLOC_INFO_SIZE:
             return True
-        if i.mnemonic in ('ret', 'int3'):
+        if i.mnemonic == 'int3':
             return False
     return False
 
@@ -75,24 +76,70 @@ def handler_of(img):
     return vts[0][0], found[0]
 
 
+VOLATILE = ('rax', 'rcx', 'rdx', 'r8', 'r9', 'r10', 'r11')    # Win64: a call may change these
+
+
+def register64(name):
+    """The 64-bit register a register name is part of ('r14d' -> 'r14', 'ecx' -> 'rcx', 'cl' -> 'rcx')."""
+    legacy = dict(al='rax', ah='rax', ax='rax', eax='rax', bl='rbx', bh='rbx', bx='rbx', ebx='rbx', cl='rcx', ch='rcx',
+                  cx='rcx', ecx='rcx', dl='rdx', dh='rdx', dx='rdx', edx='rdx', sil='rsi', si='rsi', esi='rsi', dil='rdi',
+                  di='rdi', edi='rdi', bpl='rbp', bp='rbp', ebp='rbp', spl='rsp', sp='rsp', esp='rsp')
+    if name in legacy:
+        return legacy[name]
+    if name.startswith('r') and name[-1:] in ('d', 'w', 'b') and name[1:-1].isdigit():
+        return name[:-1]
+    return name
+
+
+def connected_calls(calls):
+    """Whether the calls through registers include the effect's +0x180, and +0x188 after it."""
+    return CONNECTED[0] in calls and CONNECTED[1] in calls[calls.index(CONNECTED[0]) + 1:]
+
+
 def getter_fields(img, getter):
     """The two handler-relative fields the getter loops over (inputs, then outputs), each loop calling the effect's
-    vtable at +0x180 / +0x188."""
+    vtable at +0x180 / +0x188. Only compares on the handler count: rcx at entry, and the registers it is copied to while
+    they hold it. Only calls through a register count (not the import table's [rip + ...]), and +0x180 and +0x188 may
+    come after others."""
     o = getter - img.base
-    disps, calls = [], []
+    holders, disps, calls = {'rcx'}, [], []
     for i in img.cs.disasm(img.im[o:o + 0x200], getter):
+        ops = i.operands
         if i.mnemonic == 'cmp':
-            for op in i.operands:
-                if op.type == X86_OP_MEM and op.size == 4 and op.mem.disp < 0 and op.mem.index == 0:
-                    if op.mem.disp not in disps:
-                        disps.append(op.mem.disp)
-        elif i.mnemonic == 'call' and i.operands[0].type == X86_OP_MEM:
-            calls.append(i.operands[0].mem.disp)
-        if len(disps) >= 2 and len(calls) >= 2:
+            for op in ops:
+                if (op.type == X86_OP_MEM and op.size == 4 and op.mem.disp < 0 and op.mem.index == 0
+                        and op.mem.base and register64(i.reg_name(op.mem.base)) in holders and op.mem.disp not in disps):
+                    disps.append(op.mem.disp)
+        if i.mnemonic == 'call':
+            if ops and ops[0].type == X86_OP_MEM and ops[0].mem.base and i.reg_name(ops[0].mem.base) != 'rip':
+                calls.append(ops[0].mem.disp)
+            holders -= set(VOLATILE)
+        elif (i.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == X86_OP_REG and ops[1].type == X86_OP_REG
+              and ops[0].size == 8 and i.reg_name(ops[1].reg) in holders):
+            holders.add(i.reg_name(ops[0].reg))                     # a copy of the handler
+        else:
+            holders -= {register64(i.reg_name(r)) for r in i.regs_access()[1]}
+        if len(disps) >= 2 and connected_calls(calls):
             break
-    if len(disps) < 2 or tuple(calls[:2]) != CONNECTED or disps[1] != disps[0] + 4:
+    if len(disps) < 2 or not connected_calls(calls) or disps[1] != disps[0] + 4:
         raise ValueError('getter channel loops not recognized: ' + repr((disps, calls)))
     return dict(num_inputs_disp=disps[0], num_outputs_disp=disps[1])
+
+
+def parameter(p):
+    """The Console schema of a captured parameter: a stepped one has its step count - 1 as integer domain, a continuous one
+    CONTINUOUS_DOMAIN; the default is the nearest point of that grid (within half a step by construction), inexact if
+    off it."""
+    steps = p.get('StepValue', {}).get('values')
+    if steps and len(steps) < 2:
+        raise ValueError('a stepped control of one step, which has no domain: ' + p['Name']['value'])
+    maximum = len(steps) - 1 if steps else CONTINUOUS_DOMAIN
+    norm = p['NormalizedValue']['value']
+    if not 0.0 <= norm <= 1.0:
+        raise ValueError('captured default outside 0..1 for ' + p['Name']['value'])
+    default = round(norm * maximum)
+    return dict(name=p['Name']['value'], maximum=maximum, default=default, steps=len(steps) if steps else 0,
+                exact=abs(default / maximum - norm) <= 1e-6, captured_text=console_text(p))
 
 
 def build(name, inventory):
@@ -109,20 +156,8 @@ def build(name, inventory):
     count = item['parameter_count']
     if sorted(props) != list(range(count)):
         raise ValueError('captured parameter schema differs')
-    params, text = [], []
-    for i in range(count):
-        p = props[i]
-        steps = p.get('StepValue', {}).get('values')
-        maximum = len(steps) - 1 if steps else CONTINUOUS_DOMAIN
-        norm = p['NormalizedValue']['value']
-        default = round(norm * maximum)
-        if not 0 <= default <= maximum or abs(default / maximum - norm) > 0.5 / maximum:
-            raise ValueError('captured default is off the integer grid for ' + p['Name']['value'])
-        exact = abs(default / maximum - norm) <= 1e-6
-        label = console_text(p)
-        params.append(dict(name=p['Name']['value'], maximum=maximum, default=default, steps=len(steps) if steps else 0,
-                           exact=exact, captured_text=label))
-        text.append(label)
+    params = [parameter(props[i]) for i in range(count)]
+    text = [p['captured_text'] for p in params]
     return dict(
         schema=SCHEMA, status='discovered', name=name, framework=FRAMEWORK,
         dll=dict(path=str(dll), sha256=item['dll_sha256']),

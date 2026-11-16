@@ -153,11 +153,13 @@ class DspApCapture(GenericCapture):
         tls_pe = pe_cache.parsed(profile['dll']['path'], [9])
         self.image_size = tls_pe.OPTIONAL_HEADER.SizeOfImage
         tls = getattr(tls_pe, 'DIRECTORY_ENTRY_TLS', None)
+        # The slot's place is set for a DLL without static TLS too: it bounds the host fixtures (interface .. slot 0 +
+        # 0x1000) for run_profile.host_pointer.
+        self.tls_vector, self.tls_slot0 = HEAP + 0x380000, HEAP + 0x381000
         if tls is not None:
             template = bytes(tls_pe.get_memory_mapped_image()[tls.struct.StartAddressOfRawData - BASE:tls.struct.EndAddressOfRawData - BASE])
             if len(template) + tls.struct.SizeOfZeroFill > 0x1000:
                 raise ValueError('bounded TLS template required')
-            self.tls_vector, self.tls_slot0 = HEAP + 0x380000, HEAP + 0x381000
             self.wq(HEAP + 0x370058, self.tls_vector)
             self.wq(self.tls_vector, self.tls_slot0)
             self.uc.mem_write(self.tls_slot0, template)

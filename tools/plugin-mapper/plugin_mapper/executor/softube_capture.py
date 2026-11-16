@@ -7,8 +7,8 @@ the Win32 ABI (single emulated thread), the VST2 audioMaster callback and the IU
 (shared with GenericCapture/DspApCapture). Unknown imports reject.
 """
 import struct
-from dspap_capture import DspApCapture, PROC, F32, F32BITS
-from generic_capture import integer, HEAP, STUBS, BASE
+from dspap_capture import DspApCapture, F32, F32BITS
+from generic_capture import integer, STUBS, BASE
 from thread_runtime import ThreadRuntime
 import dspap_capture as dc
 
@@ -333,11 +333,8 @@ class SoftubeCapture(DspApCapture):
         DspApCapture.__init__(self, dict(profile, schema=dc.SCHEMA, dspap=dummy), auto_start=False)
         self.profile = profile
         self.phase = 'crt_startup'
-        # The profile's per-call instruction budget (the amp rooms' and Marshalls' construction runs past the default 20M),
-        # and the top of the host fixtures (interface .. HEAP + 0x382000), which run_profile.host_pointer takes from the TLS
-        # slot as GenericCapture lays it out: these DLLs have no static TLS.
+        # The profile's per-call instruction budget (the amp rooms' and Marshalls' construction runs past the default 20M).
         self.call_budget = int(spec.get('instruction_budget', 20000000))
-        self.tls_vector, self.tls_slot0 = HEAP + 0x380000, HEAP + 0x381000
         import pefile
         pe = pefile.PE(profile['dll']['path'], fast_load=True)
         pe.parse_data_directories(directories=[0])

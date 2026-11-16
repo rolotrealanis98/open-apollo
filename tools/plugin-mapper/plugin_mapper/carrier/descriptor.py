@@ -57,20 +57,40 @@ def host_filled(record):
     return record[:8] + struct.pack('<I', word2 & 0xffff) + record[12:start] + bytes(pool)
 
 
+RATE_BITS = 0x00ff0000                  # word 2: the rate in kHz, which the plug-in writes and the store's records leave 0
+_STORE_HEADS = {}                       # module store -> {record name: its 20-byte head}
+
+
+def store_heads(store):
+    """(path, head) of each record in the module store. The store is listed on every call, so a record added since
+    counts, but each head is read once: records are named by their SHA-256, so a name's head does not change."""
+    known = _STORE_HEADS.setdefault(str(Path(store).resolve()), {})
+    heads = []
+    for candidate in sorted(Path(store).glob('*.bill')):
+        if candidate.name not in known:
+            with open(candidate, 'rb') as f:
+                known[candidate.name] = f.read(20)
+        heads.append((candidate, known[candidate.name]))
+    return heads
+
+
 def pool_patched_resource(store, blob):
     """The resource for a data module the plug-in filled in memory before handing it over (the Softube engine writes its
     table for the session's rate into the pool, the last `functional` words, and the rate in kHz into bits 16-23 of word
     2), so that the module store holds no record with its bytes. The store's module of the same ID, size and words
-    before the pool, with that word 2 less the rate, is the upload; the plug-in's pool words are the host overwrite."""
+    before the pool, with the same word 2 apart from the rate bits, is the upload; the plug-in's pool words are the host
+    overwrite."""
     magic, ident, word2, size, functional = struct.unpack_from('<5I', blob)
     start = 20 + size - 4 * functional
     if not word2 & 0xff or not 0 < functional <= size // 4:
         raise ValueError('original descriptor resource absent or changed in module store')
     matches = []
-    for candidate in sorted(Path(store).glob('*.bill')):
-        with open(candidate, 'rb') as f:
-            head = f.read(20)
-        if len(head) < 20 or struct.unpack('<5I', head) != (magic, ident, word2 & 0xff00ffff, size, functional):
+    for candidate, head in store_heads(store):
+        if len(head) < 20:
+            continue
+        h_magic, h_ident, h_word2, h_size, h_functional = struct.unpack('<5I', head)
+        if (h_magic, h_ident, h_word2 & ~RATE_BITS, h_size, h_functional) != (magic, ident, word2 & ~RATE_BITS, size,
+                                                                              functional):
             continue
         record = candidate.read_bytes()
         if record[20:start] == blob[20:start] and hashlib.sha256(record).hexdigest() == candidate.stem:
