@@ -132,6 +132,12 @@ def run(command, env, cwd=None, log=None):
 
 # ── Cache ──────────────────────────────────────────────────────────────
 
+def discovery_path():
+    """The discovery generators' directory on sys.path, for the family checks that import them here."""
+    if str(PKG / 'discovery') not in sys.path:
+        sys.path.append(str(PKG / 'discovery'))
+
+
 def structural_family(dll):
     """The discovery family a plug-in's own structure names, for a plug-in with no known-good
     entry, as classify_vst2_iuadplug.py tells from its RTTI: 'vst2_bx' when it is built on
@@ -140,8 +146,7 @@ def structural_family(dll):
     and says so), 'softube' on Softube's engine (CSoftubeEffectUAD).  None for the rest, which
     stay 'generic' (UA's own framework); a Relab or plain VST plug-in still needs an entry."""
     try:
-        if str(PKG / 'discovery') not in sys.path:
-            sys.path.append(str(PKG / 'discovery'))
+        discovery_path()
         from classify_vst2_iuadplug import classify, cols, vtables
         from dspaudioprocessor_profiles import Image as DiscoveryImage
         img = DiscoveryImage(Path(dll))
@@ -154,12 +159,13 @@ def structural_family(dll):
 def facts_family(name):
     """'vstmain' for a plug-in vstmain_profiles.KNOWN describes: its original VSTPluginMain builds the
     effect, which its JUCE structure alone would not say (structural_family names those
-    'dspaudioprocessor').  Ocean Way Studios has facts there and no known-good entry."""
+    'dspaudioprocessor').  Ocean Way Studios has facts there and no known-good entry.  Only a
+    missing requirement of the generator (capstone, pefile) leaves the family undecided here; any
+    other fault in vstmain_profiles stops the run where it happens."""
+    discovery_path()
     try:
-        if str(PKG / 'discovery') not in sys.path:
-            sys.path.append(str(PKG / 'discovery'))
         from vstmain_profiles import KNOWN
-    except Exception:       # noqa: BLE001 - the generator's own requirements are missing: the family stays undecided here
+    except ImportError:
         return None
     return 'vstmain' if name in KNOWN else None
 

@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   plug-ins (`vstmain_profiles.KNOWN`); its processor's latency, 22 samples, is checked at mapping
   time (#127).
 - Plug-in mapper: Softube-engine plug-ins map (`discovery/softube_profiles.py`, the family
-  `softube` from their structure, every fact found in the DLL): 24 of UA 11.8.3's 25, among them
+  `softube` from their structure, every fact found in the DLL): all 25 of UA 11.8.3's, among them
   the amp rooms, Marshalls, Tube-Techs and Chandlers. Their data modules, which the plug-in fills
   for the session's rate, are uploaded with a filler pool and then overwritten
   (`carrier/descriptor.py`, `host_filled`); the native carrier refuses them until it does that (#127).
@@ -60,7 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Plug-in mapper: a plug-in that `vstmain_profiles.KNOWN` describes is mapped by that generator
   when it has no known-good entry; its JUCE structure sent it to the `dspaudioprocessor` one,
-  so `--all` could not map Ocean Way Studios.
+  so `--all` could not map Ocean Way Studios. Only a missing requirement of that generator
+  (capstone, pefile) leaves the check undecided; any other fault in `vstmain_profiles` stops the run.
 - Plug-in mapper: a plug-in with no known-good entry takes its discovery family from its own
   structure (`classify_vst2_iuadplug.py`): the Brainworx-framework plug-ins (`vst2_bx`) map
   with `--all` instead of failing the generic family's RTTI check, and a JUCE one goes to

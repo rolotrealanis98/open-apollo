@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -26,12 +27,31 @@ def test_the_plugin_s_own_latency_comes_before_the_listed_one():
     assert mapper.choose_latency(None, None) == (None, 'unknown')
 
 
-def test_a_plugin_the_vstmain_facts_name_goes_to_that_generator():
+def test_a_plugin_the_vstmain_facts_name_goes_to_that_generator(monkeypatch):
     pytest.importorskip('pefile')       # the discovery modules' own requirements (tools/plugin-mapper/requirements.txt)
     pytest.importorskip('capstone')
+    monkeypatch.setattr(sys, 'path', sys.path[:])                        # facts_family adds the discovery directory
     assert mapper.facts_family('UAD Ocean Way Studios') == 'vstmain'
     assert mapper.facts_family('UAD Oxford SuprEsser DS') == 'vstmain'
     assert mapper.facts_family('UAD AMS Neve DFC Channel Strip') is None     # hand-written JUCE facts: its structure decides
+
+
+def test_only_a_missing_requirement_leaves_the_facts_family_undecided(monkeypatch):
+    monkeypatch.setattr(sys, 'path', sys.path[:])
+    monkeypatch.setitem(sys.modules, 'vstmain_profiles', None)          # cannot be imported: capstone or pefile missing
+    assert mapper.facts_family('UAD Ocean Way Studios') is None
+
+    def fault(name):
+        raise ValueError('a fault in vstmain_profiles')
+    broken = types.ModuleType('vstmain_profiles')
+    broken.__getattr__ = fault
+    monkeypatch.setitem(sys.modules, 'vstmain_profiles', broken)
+    with pytest.raises(ValueError, match='a fault'):                    # not swallowed: the run stops where it is
+        mapper.facts_family('UAD Ocean Way Studios')
+    known = types.ModuleType('vstmain_profiles')
+    known.KNOWN = {'UAD Ocean Way Studios': {}}
+    monkeypatch.setitem(sys.modules, 'vstmain_profiles', known)
+    assert mapper.facts_family('UAD Ocean Way Studios') == 'vstmain' and mapper.facts_family('UAD X') is None
 
 
 def test_a_map_is_current_until_one_of_its_inputs_changes(tmp_path):
