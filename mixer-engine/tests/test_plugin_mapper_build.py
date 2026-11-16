@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 PKG = ROOT / 'tools/plugin-mapper/plugin_mapper'
 spec = importlib.util.spec_from_file_location('plugin_mapper_main', PKG / '__main__.py')
@@ -22,6 +24,14 @@ def test_the_plugin_s_own_latency_comes_before_the_listed_one():
     assert mapper.choose_latency(0, 55) == (0, 'plugin')
     assert mapper.choose_latency(None, 110) == (110, 'known_good')
     assert mapper.choose_latency(None, None) == (None, 'unknown')
+
+
+def test_a_plugin_the_vstmain_facts_name_goes_to_that_generator():
+    pytest.importorskip('pefile')       # the discovery modules' own requirements (tools/plugin-mapper/requirements.txt)
+    pytest.importorskip('capstone')
+    assert mapper.facts_family('UAD Ocean Way Studios') == 'vstmain'
+    assert mapper.facts_family('UAD Oxford SuprEsser DS') == 'vstmain'
+    assert mapper.facts_family('UAD AMS Neve DFC Channel Strip') is None     # hand-written JUCE facts: its structure decides
 
 
 def test_a_map_is_current_until_one_of_its_inputs_changes(tmp_path):
