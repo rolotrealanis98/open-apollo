@@ -115,16 +115,18 @@ def program_select(cap,refs,first,loader_calls):
 SET_INITIAL_DELAY=0xe0;GET_AEFFECT=0xf0          # AudioEffect vtable slots
 PLUGIN_AEFFECT=0x30;AEFFECT_INITIAL_DELAY=0x50   # AudioEffect::cEffect; AEffect.initialDelay
 HANDLER_LATENCY=0x20                            # CUADPlugCallbackHandler vtable slot
-OLDER_INTERFACE=0x66                            # its handler slot 4 is the start-up call (Ocean Way Studios)
+LATENCY_INTERFACE=0x67                          # handler slot 4 is the latency query from this interface on;
+                                                # in 0x66 (Ocean Way Studios) it is the start-up call
 
 
 def handler_answers_latency(profile):
     """Whether the plug-in's CUADPlugCallbackHandler slot 4 is the latency query: an IUADPlug
-    plug-in, or a DSPAudioProcessor-family one created with the current interface (0x67)."""
+    plug-in, or a DSPAudioProcessor-family one created with interface 0x67 or later. An older one
+    is not asked, as its slot 4 may be another call."""
     if profile.get('framework')=='VST2IUADPlug':return True
     if profile.get('framework')!='DSPAudioProcessor':return False
     vstmain=(profile.get('dspap')or{}).get('vstmain')or{}
-    return vstmain.get('interface_version',0x67)!=OLDER_INTERFACE
+    return vstmain.get('interface_version',LATENCY_INTERFACE)>=LATENCY_INTERFACE
 
 
 def reported_latency(cap,profile):
