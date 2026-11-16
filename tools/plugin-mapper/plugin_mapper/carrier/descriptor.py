@@ -22,6 +22,9 @@ def decode_descriptor(cap, address, *, plugin, dll_sha256):
         blob = bytes(cap.uc.mem_read(pointer, size+20))
         digest = hashlib.sha256(blob).hexdigest()
         path = Path(os.environ.get('OA_MODULE_STORE', '/lib/firmware/universal-audio/plugins/modules'))/(digest+'.bill')
+        if getattr(cap, 'pool_patched_modules', False) and not path.exists():
+            resources.append(pool_patched_resource(path.parent, blob))
+            continue
         if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError('original descriptor resource absent or changed in module store')
         resources.append(dict(id=ident, architecture=flags >> 24, kind=flags & 255,
@@ -33,6 +36,75 @@ def decode_descriptor(cap, address, *, plugin, dll_sha256):
                 io=[word(0xa90),word(0xa94)], render_id=word(0xaa4), flags=word(0xaac),
                 descriptor_latency_initial=word(0xab4),
                 descriptor_sha256=hashlib.sha256(raw).hexdigest(), hardware_executed=False)
+
+
+def host_filled(record):
+    """A data module record as the host uploads one whose pool it overwrites afterwards (`host_overwrite`): the header
+    and the words before the pool as they are, word 2's upper half (rate and architecture) cleared, and a filler pool,
+    the last `functional` words: a minstd_rand sequence (x * 48271 mod 2^31 - 1) from the module ID's complement, each
+    word big-endian. The host then writes the plug-in's pool words at the module's destination, where the DSP decoded
+    the module. Observed on a UAD-2 Satellite USB: Windows uploads the Tube-Tech CL 1B's data modules 0x27a (1522 pool
+    words) and 0x27b (2) and the C-Suite C-Max's 0x1d1 (188) exactly so, and the DSP refuses 0x27a with another pool
+    (the module as stored, or the plug-in's words) with load status 0xF001000D."""
+    magic, ident, word2, size, functional = struct.unpack_from('<5I', record)
+    start = 20 + size - 4 * functional
+    if magic != 0x6c6c6942 or size != len(record) - 20 or not 0 < functional <= size // 4 or not word2 & 0xff:
+        raise ValueError('a data module record required')
+    pool, x = bytearray(), ~ident & 0xffffffff
+    for _ in range(functional):
+        pool += struct.pack('>I', x)
+        x = x * 48271 % 0x7fffffff
+    return record[:8] + struct.pack('<I', word2 & 0xffff) + record[12:start] + bytes(pool)
+
+
+RATE_BITS = 0x00ff0000                  # word 2: the rate in kHz, which the plug-in writes and the store's records leave 0
+_STORE_HEADS = {}                       # module store -> {record name: its 20-byte head}
+
+
+def store_heads(store):
+    """(path, head) of each record in the module store. The store is listed on every call, so a record added since
+    counts, but each head is read once: records are named by their SHA-256, so a name's head does not change."""
+    known = _STORE_HEADS.setdefault(str(Path(store).resolve()), {})
+    heads = []
+    for candidate in sorted(Path(store).glob('*.bill')):
+        if candidate.name not in known:
+            with open(candidate, 'rb') as f:
+                known[candidate.name] = f.read(20)
+        heads.append((candidate, known[candidate.name]))
+    return heads
+
+
+def pool_patched_resource(store, blob):
+    """The resource for a data module the plug-in filled in memory before handing it over (the Softube engine writes its
+    table for the session's rate into the pool, the last `functional` words, and the rate in kHz into bits 16-23 of word
+    2), so that the module store holds no record with its bytes. The store's module of the same ID, size and words
+    before the pool, with the same word 2 apart from the rate bits, is the upload; the plug-in's pool words are the host
+    overwrite."""
+    magic, ident, word2, size, functional = struct.unpack_from('<5I', blob)
+    start = 20 + size - 4 * functional
+    if not word2 & 0xff or not 0 < functional <= size // 4:
+        raise ValueError('original descriptor resource absent or changed in module store')
+    matches = []
+    for candidate, head in store_heads(store):
+        if len(head) < 20:
+            continue
+        h_magic, h_ident, h_word2, h_size, h_functional = struct.unpack('<5I', head)
+        if (h_magic, h_ident, h_word2 & ~RATE_BITS, h_size, h_functional) != (magic, ident, word2 & ~RATE_BITS, size,
+                                                                              functional):
+            continue
+        record = candidate.read_bytes()
+        if record[20:start] == blob[20:start] and hashlib.sha256(record).hexdigest() == candidate.stem:
+            matches.append((candidate.stem, record))
+    if len(matches) != 1:
+        raise ValueError('original descriptor resource absent or changed in module store (%d store modules of its layout)'
+                         % len(matches))
+    digest, record = matches[0]
+    stored = struct.unpack_from('<I', record, 8)[0]
+    return dict(id=ident, architecture=stored >> 24, kind=stored & 255, flags=(stored >> 8) & 65535, words=functional,
+                sha256=digest, length=len(record), module_store_verified=True,
+                pool_patched=dict(in_memory_sha256=hashlib.sha256(blob).hexdigest(), in_memory_word2=hex(word2)),
+                host_overwrite=dict(words=list(struct.unpack_from('<%dI' % functional, blob, start)),
+                                    upload='host_filled', source="the plug-in's module after the descriptor call"))
 
 
 def extract_descriptor(cap, profile):
@@ -54,6 +126,7 @@ def extract_descriptor(cap, profile):
         return vst2_extract(cap, profile, decode_descriptor)
     if profile.get('framework') == 'Softube':
         from softube_capture import extract_descriptor as softube_extract
+        cap.pool_patched_modules = True     # its data modules carry the table the plug-in wrote for the session's rate
         return softube_extract(cap, profile, decode_descriptor)
     spec = profile['descriptor']
     integer = lambda value: int(value, 0) if isinstance(value, str) else int(value)

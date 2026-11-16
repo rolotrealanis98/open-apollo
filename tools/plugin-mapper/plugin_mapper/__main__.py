@@ -43,7 +43,7 @@ DEFAULT_SPECS = next((p for p in (Path('/usr/share/open-apollo/plugin-specs'),
 DEFAULT_STORE = Path('/lib/firmware/universal-audio/plugins')
 DEFAULT_TEXTS = Path(os.environ.get('OA_PLUGIN_ART') or Path.home() / '.local/share/open-apollo/generated') / 'Text'
 KNOWN_GOOD = REPO / 'mixer-engine/device_maps/native_known_good.json'
-GENERATORS = ('dspaudioprocessor', 'vst2', 'vst2_bx', 'vst2_relab', 'vstmain', 'paramobj', 'sonnox')
+GENERATORS = ('dspaudioprocessor', 'vst2', 'vst2_bx', 'vst2_relab', 'vstmain', 'paramobj', 'sonnox', 'softube')
 WHOLE_SET = ('paramobj', 'vst2_relab')  # these generators take no --plugin and build their pinned set
 SLOT = '/devices/0/inputs/0/effects/0'
 DLL_DIR = ('Program Files', 'Universal Audio', 'Powered Plugins', 'UAD-2 Powered Plugins')
@@ -137,8 +137,8 @@ def structural_family(dll):
     entry, as classify_vst2_iuadplug.py tells from its RTTI: 'vst2_bx' when it is built on
     Brainworx's adapter (UADAdapter with a BXEffect), 'dspaudioprocessor' on JUCE (whose
     generator then wants the plug-in's hand-written facts in dspaudioprocessor_profiles.KNOWN,
-    and says so).  None for the rest, which stay 'generic' (UA's own framework); a Relab or
-    plain VST plug-in still needs an entry."""
+    and says so), 'softube' on Softube's engine (CSoftubeEffectUAD).  None for the rest, which
+    stay 'generic' (UA's own framework); a Relab or plain VST plug-in still needs an entry."""
     try:
         if str(PKG / 'discovery') not in sys.path:
             sys.path.append(str(PKG / 'discovery'))
@@ -148,7 +148,7 @@ def structural_family(dll):
         sub_family, _evidence = classify(img, vtables(img, cols(img)))
     except Exception:       # noqa: BLE001 - not an IUADPlug plug-in, or no RTTI: generic it is
         return None
-    return {'B': 'vst2_bx', 'DSPAP': 'dspaudioprocessor'}.get(sub_family)
+    return {'B': 'vst2_bx', 'DSPAP': 'dspaudioprocessor', 'Softube': 'softube'}.get(sub_family)
 
 
 def cache_key(dll_sha256, sdk_sha256, known_entry):

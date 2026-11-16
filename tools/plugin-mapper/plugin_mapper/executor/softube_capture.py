@@ -7,8 +7,8 @@ the Win32 ABI (single emulated thread), the VST2 audioMaster callback and the IU
 (shared with GenericCapture/DspApCapture). Unknown imports reject.
 """
 import struct
-from dspap_capture import DspApCapture, PROC, F32, F32BITS
-from generic_capture import integer, HEAP, STUBS, BASE
+from dspap_capture import DspApCapture, F32, F32BITS
+from generic_capture import integer, STUBS, BASE
 from thread_runtime import ThreadRuntime
 import dspap_capture as dc
 
@@ -333,6 +333,8 @@ class SoftubeCapture(DspApCapture):
         DspApCapture.__init__(self, dict(profile, schema=dc.SCHEMA, dspap=dummy), auto_start=False)
         self.profile = profile
         self.phase = 'crt_startup'
+        # The profile's per-call instruction budget (the amp rooms' and Marshalls' construction runs past the default 20M).
+        self.call_budget = int(spec.get('instruction_budget', 20000000))
         import pefile
         pe = pefile.PE(profile['dll']['path'], fast_load=True)
         pe.parse_data_directories(directories=[0])
@@ -504,7 +506,8 @@ class SoftubeCapture(DspApCapture):
         """Integer on the profile grid for the plug-in float, or ValueError when it is off the grid."""
         top = self.maxima[index]
         value = round(norm * top)
-        tolerance = 1e-6 if self.soft['parameters'][index].get('exact', True) else 0.5 / top  # off-grid captured default: nearest step
+        # off-grid captured default: the nearest step; one exactly halfway is half a step from both, which float32 puts a hair over
+        tolerance = 1e-6 if self.soft['parameters'][index].get('exact', True) else 0.5 / top + 1e-6
         if abs(F32(value / top) - norm) > tolerance:
             raise ValueError('plug-in parameter %d value %r is off the profile grid 1/%d' % (index, norm, top))
         return value
