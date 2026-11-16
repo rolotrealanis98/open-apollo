@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Plug-in mapper: the Oxford Envolution maps, on the VSTPluginMain route like the other Sonnox JUCE
+  plug-ins (`vstmain_profiles.KNOWN`); its processor's latency, 22 samples, is checked at mapping
+  time (#127).
 - Plug-in mapper: Softube-engine plug-ins map (`discovery/softube_profiles.py`, the family
   `softube` from their structure, every fact found in the DLL): 24 of UA 11.8.3's 25, among them
   the amp rooms, Marshalls, Tube-Techs and Chandlers. Their data modules, which the plug-in fills
