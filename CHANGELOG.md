@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Plug-in mapper: the Eventide H910 Harmonizer maps, on the VSTPluginMain route with a host for the
+  Visual C++ 2008 dynamic runtime it is built against (`executor/msvc90_capture.py`: the MSVCR90
+  start-up and C calls and the MSVCP90 strings and string streams its own code reaches). Its
+  pitch-control mode controls are swept with their mode selected (#127).
 - Plug-in mapper: the Oxford Envolution maps, on the VSTPluginMain route like the other Sonnox JUCE
   plug-ins (`vstmain_profiles.KNOWN`); its processor's latency, 22 samples, is checked at mapping
   time (#127).
