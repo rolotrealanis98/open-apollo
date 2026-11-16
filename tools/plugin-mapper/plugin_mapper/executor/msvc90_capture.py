@@ -135,12 +135,20 @@ class Msvc90Capture(ParamObjectsCapture):
         self.__dict__.setdefault('streams', {})[obj + self.IOS] = dict(inp=bytes(text), pos=0, out=bytearray(), state=0)
         return obj
 
+    def ios_of(self, p):
+        return p + struct.unpack('<i', bytes(self.uc.mem_read(self.rq(p) + 4, 4)))[0]
+
     def stream(self, p, is_ios=False):
-        ios = p if is_ios else p + struct.unpack('<i', bytes(self.uc.mem_read(self.rq(p) + 4, 4)))[0]
-        st = getattr(self, 'streams', {}).get(ios)
+        st = getattr(self, 'streams', {}).get(p if is_ios else self.ios_of(p))
         if st is None:
             raise ValueError('stream operation on an object the host did not construct: %#x' % p)
         return st
+
+    def drop_stream(self, obj):
+        """A stream's destructor: its state goes, so an operation on the address without a new constructor is refused."""
+        self.stream(obj)
+        del self.streams[self.ios_of(obj)]
+        return 0
 
     def msvcp90(self):
         a, u = self.arg, self.uc
@@ -181,8 +189,15 @@ class Msvc90Capture(ParamObjectsCapture):
                 st['pos'] += m.end()
                 if st['pos'] >= len(st['inp']):
                     st['state'] |= self.EOF
-                text = m.group(0)
-                u.mem_write(a(1), struct.pack(pack, int(text) if pack == '<i' else float(text)))
+                value = int(m.group(0)) if pack == '<i' else float(m.group(0))
+                try:
+                    data = struct.pack(pack, value)
+                except (struct.error, OverflowError):
+                    data = None
+                if data is None or value in (float('inf'), float('-inf')):
+                    st['state'] |= self.FAIL    # outside int / float: VC9's operator>> sets failbit and leaves the variable as it was
+                    return a(0)
+                u.mem_write(a(1), data)
                 return a(0)
             return run
 
@@ -233,8 +248,8 @@ class Msvc90Capture(ParamObjectsCapture):
             '?min@?$numeric_limits@H@std@@SAHXZ': lambda: 0x80000000,
             '??0' + ISS + 'QEAA@AEBV' + SA + '1@H@Z': lambda: self.make_stream(a(0), self.s_get(a(1))),
             '??0' + OSS + 'QEAA@H@Z': lambda: self.make_stream(a(0)),
-            '??_D' + ISS + 'QEAAXXZ': lambda: 0,
-            '??_D' + OSS + 'QEAAXXZ': lambda: 0,
+            '??_D' + ISS + 'QEAAXXZ': lambda: self.drop_stream(a(0)),
+            '??_D' + OSS + 'QEAAXXZ': lambda: self.drop_stream(a(0)),
             '?str@' + OSS + 'QEBA?AV' + SA + '2@XZ': lambda: self.s_put(a(1), bytes(self.stream(a(0))['out']), fresh=True),
             '??$getline@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@YAAEAV' + ISTREAM + '0@AEAV10@AEAV' + SA + '0@D@Z': getline,
             '??5' + ISTREAM + 'std@@QEAAAEAV01@AEAH@Z': read_number(rb'[+-]?\d+', '<i'),
