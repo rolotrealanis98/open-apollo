@@ -110,18 +110,31 @@ def program_select(cap,refs,first,loader_calls):
 # The latency a plug-in reports to UA's host.  UA's framework plug-ins are VST 2.4 effects: the
 # host calls AudioEffect::setInitialDelay(0) and reads AEffect.initialDelay back after the plug-in
 # has set its own (each adds its figure in its override).  An IUADPlug plug-in answers through the
-# callback handler it gave UAD_CreateIUADPlug.
+# callback handler it gave UAD_CreateIUADPlug, and so does a DSPAudioProcessor-family plug-in
+# (JUCE, Sonnox), whose handler is the same interface.
 SET_INITIAL_DELAY=0xe0;GET_AEFFECT=0xf0          # AudioEffect vtable slots
 PLUGIN_AEFFECT=0x30;AEFFECT_INITIAL_DELAY=0x50   # AudioEffect::cEffect; AEffect.initialDelay
 HANDLER_LATENCY=0x20                            # CUADPlugCallbackHandler vtable slot
+LATENCY_INTERFACE=0x67                          # handler slot 4 is the latency query from this interface on;
+                                                # in 0x66 (Ocean Way Studios) it is the start-up call
+
+
+def handler_answers_latency(profile):
+    """Whether the plug-in's CUADPlugCallbackHandler slot 4 is the latency query: an IUADPlug
+    plug-in, or a DSPAudioProcessor-family one created with interface 0x67 or later. An older one
+    is not asked, as its slot 4 may be another call."""
+    if profile.get('framework')=='VST2IUADPlug':return True
+    if profile.get('framework')!='DSPAudioProcessor':return False
+    vstmain=(profile.get('dspap')or{}).get('vstmain')or{}
+    return vstmain.get('interface_version',LATENCY_INTERFACE)>=LATENCY_INTERFACE
 
 
 def reported_latency(cap,profile):
     """The latency the plug-in reports at its start-up state, in samples, or None when this
-    framework is not asked (JUCE, Sonnox, Softube) or the call faults."""
+    framework is not asked (Softube) or the call faults."""
     framework=profile.get('framework')
     try:
-        if framework=='VST2IUADPlug':
+        if handler_answers_latency(profile):
             handler=cap.handler
             return cap.call(cap.rq(cap.rq(handler)+HANDLER_LATENCY),handler)&0xffffffff
         if framework:return None

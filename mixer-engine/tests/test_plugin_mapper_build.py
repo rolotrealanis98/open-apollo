@@ -34,6 +34,33 @@ def test_a_plugin_the_vstmain_facts_name_goes_to_that_generator():
     assert mapper.facts_family('UAD AMS Neve DFC Channel Strip') is None     # hand-written JUCE facts: its structure decides
 
 
+def test_juce_and_sonnox_plugins_answer_the_latency_query_too(monkeypatch):
+    pytest.importorskip('unicorn')      # run_profile imports the emulator (tools/plugin-mapper/requirements.txt)
+    monkeypatch.syspath_prepend(str(PKG / 'executor'))
+    import run_profile
+
+    class Handler:                      # a CUADPlugCallbackHandler whose slot 4 answers 22
+        handler = 0x1000
+        calls = []
+
+        def rq(self, address):
+            return {0x1000: 0x2000, 0x2000 + run_profile.HANDLER_LATENCY: 0x3000}[address]
+
+        def call(self, function, *args):
+            self.calls.append((function, args))
+            return 22
+
+    juce = dict(framework='DSPAudioProcessor', dspap=dict(vstmain=dict(interface_version=0x67)))
+    assert run_profile.reported_latency(Handler(), juce) == 22
+    assert run_profile.reported_latency(Handler(), dict(framework='DSPAudioProcessor', dspap={})) == 22
+    assert run_profile.reported_latency(Handler(), dict(framework='VST2IUADPlug')) == 22
+    older = dict(framework='DSPAudioProcessor', dspap=dict(vstmain=dict(interface_version=0x66)))
+    assert run_profile.reported_latency(Handler(), older) is None          # slot 4 is its start-up there
+    oldest = dict(framework='DSPAudioProcessor', dspap=dict(vstmain=dict(interface_version=0x65)))
+    assert run_profile.reported_latency(Handler(), oldest) is None         # older still: not asked
+    assert run_profile.reported_latency(Handler(), dict(framework='Softube')) is None
+
+
 def test_a_map_is_current_until_one_of_its_inputs_changes(tmp_path):
     k = key()
     (tmp_path / 'x-mono-runtime-bundle.json').write_text('{}')
